@@ -4,21 +4,21 @@
 // so a drawing copied to another machine loses its pictures. An OLE2FRAME
 // instead carries the encoded raster inside an OLE compound file embedded in
 // the entity data, so
-// the .dwg is self-contained. cadcodec both builds the compound storage and
+// the .dwg is self-contained. opencadcodec both builds the compound storage and
 // reads it back, and the renderer already paints OLE2FRAMEs via
 // ImageModel::from_ole2frame, so this module only packs and unpacks.
 
 use std::io::Write as _;
 use std::path::Path;
 
-use acadrust::compound_file::{
+use codec::compound_file::{
     BinaryRecord, CompoundEntry, CompoundFile, CompoundStorage, CompoundStream,
     CompoundStreamContent, StructuredStoragePayload,
 };
-use acadrust::entities::{Ole2Frame, OleFrameEnvelope, OleObjectType};
-use acadrust::types::Vector3;
+use codec::entities::{Ole2Frame, OleFrameEnvelope, OleObjectType};
+use codec::types::Vector3;
 
-/// OLE compound-file stream holding OLE 1.0 native data. cadcodec's
+/// OLE compound-file stream holding OLE 1.0 native data. opencadcodec's
 /// presentation extractor looks here first; the body is the encoded raster
 /// behind a 4-byte little-endian length.
 const OLE10NATIVE: &str = "\u{1}Ole10Native";
@@ -109,7 +109,7 @@ pub fn corners_from_placement(origin: Vector3, width: f64, aspect: f64) -> (Vect
 
 /// Pack `image` into an OLE2FRAME spanning `upper_left` → `lower_right` in
 /// world space. The picture rides in an `\x01Ole10Native` stream as OLE 1.0
-/// native data behind the geometry envelope cadcodec writes around it.
+/// native data behind the geometry envelope opencadcodec writes around it.
 pub fn build_embedded_ole(
     image: &EmbeddedImage,
     upper_left: Vector3,
@@ -161,14 +161,14 @@ pub fn build_embedded_ole(
 /// Non-interactive embed used by the control API: add the entity to `doc` and
 /// return its handle. The undo snapshot is the caller's responsibility.
 pub fn add_embedded_image(
-    doc: &mut acadrust::CadDocument,
+    doc: &mut codec::CadDocument,
     image: &EmbeddedImage,
     origin: Vector3,
     width: f64,
-) -> Result<acadrust::Handle, String> {
+) -> Result<codec::Handle, String> {
     let (upper_left, lower_right) = corners_from_placement(origin, width, image.aspect());
     let ole = build_embedded_ole(image, upper_left, lower_right);
-    doc.add_entity(acadrust::EntityType::Ole2Frame(ole))
+    doc.add_entity(codec::EntityType::Ole2Frame(ole))
         .map_err(|e| e.to_string())
 }
 
@@ -218,8 +218,8 @@ mod tests {
             Vector3::new(4.0, 0.0, 0.0),
         );
         let payload = ole.encoded_payload();
-        match acadrust::entities::extract_presentation(&payload) {
-            Some(acadrust::entities::OlePresentation::Raster(bytes)) => assert_eq!(bytes, png),
+        match codec::entities::extract_presentation(&payload) {
+            Some(codec::entities::OlePresentation::Raster(bytes)) => assert_eq!(bytes, png),
             other => panic!("expected the embedded raster back, got {other:?}"),
         }
     }
@@ -233,28 +233,28 @@ mod tests {
             pixel_height: 3,
             name: "t.png".into(),
         };
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let handle =
             add_embedded_image(&mut doc, &image, Vector3::new(10.0, 10.0, 0.0), 20.0).unwrap();
 
         let dir = std::env::temp_dir().join("ocs_ole_embed_tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("embedded_roundtrip.dwg");
-        acadrust::DwgWriter::write_to_file(&path, &doc).unwrap();
+        codec::DwgWriter::write_to_file(&path, &doc).unwrap();
 
-        let mut reader = acadrust::io::dwg::DwgReader::from_file(&path).unwrap();
+        let mut reader = codec::io::dwg::DwgReader::from_file(&path).unwrap();
         let reopened = reader.read().unwrap();
         std::fs::remove_file(&path).ok();
 
         let ole = match reopened.get_entity(handle) {
-            Some(acadrust::EntityType::Ole2Frame(ole)) => ole,
+            Some(codec::EntityType::Ole2Frame(ole)) => ole,
             other => panic!("expected the Ole2Frame back, got {other:?}"),
         };
         // Corners survive: 20 wide at aspect 4:3 → 15 tall, base at (10,10).
         assert_eq!(ole.lower_right_corner, Vector3::new(30.0, 10.0, 0.0));
         assert_eq!(ole.upper_left_corner, Vector3::new(10.0, 25.0, 0.0));
-        match acadrust::entities::extract_presentation(&ole.encoded_payload()) {
-            Some(acadrust::entities::OlePresentation::Raster(bytes)) => assert_eq!(bytes, png),
+        match codec::entities::extract_presentation(&ole.encoded_payload()) {
+            Some(codec::entities::OlePresentation::Raster(bytes)) => assert_eq!(bytes, png),
             other => panic!("expected the embedded raster back, got {other:?}"),
         }
     }

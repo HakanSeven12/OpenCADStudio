@@ -1,6 +1,6 @@
-use acadrust::entities::acis::{SabReader, SatBody, SatDocument};
-use acadrust::entities::{Body, Region, Solid3D, Surface};
-use cadkernel::brep::{self, Body as KernelBody};
+use codec::entities::acis::{SabReader, SatBody, SatDocument};
+use codec::entities::{Body, Region, Solid3D, Surface};
+use kernel::brep::Body as KernelBody;
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 
@@ -81,7 +81,7 @@ pub(crate) fn finalize_mesh(
     verts: Vec<[f64; 3]>,
     normals: Vec<[f32; 3]>,
     indices: Vec<u32>,
-    triangle_material_handles: Vec<Option<acadrust::Handle>>,
+    triangle_material_handles: Vec<Option<codec::Handle>>,
     triangle_colors: Vec<Option<[f32; 4]>>,
     color: [f32; 4],
     xform: Option<([f64; 9], [f64; 3], f64)>,
@@ -169,36 +169,23 @@ pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
     kernel_acis_body(&surface.acis_data)
 }
 
-pub(crate) fn kernel_acis_body(acis: &acadrust::entities::AcisData) -> Option<KernelBody> {
+pub(crate) fn kernel_acis_body(acis: &codec::entities::AcisData) -> Option<KernelBody> {
     let sat = parse_acis(
         || acis.parse(),
         acis.is_binary,
         &acis.sab_data,
     )?;
-    let (mut bodies, loss) = cadkernel::acis::lift(&sat);
+    let (mut bodies, loss) = kernel::acis::lift(&sat);
     if !loss.is_empty() || bodies.len() != 1 {
         return None;
     }
-    let body = bodies.pop()?;
-    let source = body.provenance.source()?;
-    let Some((matrix, translation, scale)) = body_transform(&sat, source.index() as usize).ok()?
-    else {
-        return Some(body);
-    };
-    brep::transform(
-        &body,
-        &brep::Placement {
-            x_axis: [scale * matrix[0], scale * matrix[1], scale * matrix[2]],
-            y_axis: [scale * matrix[3], scale * matrix[4], scale * matrix[5]],
-            z_axis: [scale * matrix[6], scale * matrix[7], scale * matrix[8]],
-            origin: translation,
-        },
-    )
+    // The kernel's lift already applies the body's transform record.
+    bodies.pop()
 }
 
 fn remap_acis_material_bindings(
     set: &mut MeshLodSet,
-    acis: &acadrust::entities::AcisData,
+    acis: &codec::entities::AcisData,
 ) {
     for lod in &mut set.lods {
         for handle in lod.triangle_material_handles.iter_mut().flatten() {
@@ -222,7 +209,7 @@ fn finish(
     chordal_deflection: Option<f64>,
     isolines: [usize; 2],
     planar_isolines: bool,
-    acis: &acadrust::entities::AcisData,
+    acis: &codec::entities::AcisData,
 ) -> Option<MeshLodSet> {
     let mut set = tessellate_acis(
         &sat,
@@ -286,7 +273,7 @@ pub fn tessellate_body(
 }
 
 pub fn tessellate_surface(
-    surface: &acadrust::entities::Surface,
+    surface: &codec::entities::Surface,
     color: [f32; 4],
     facet_res: f64,
     chordal_deflection: Option<f64>,

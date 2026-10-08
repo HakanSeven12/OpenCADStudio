@@ -1,7 +1,7 @@
-use acadrust::objects::{
+use codec::objects::{
     ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue,
 };
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::{CadDocument, EntityType, Handle};
 
 #[derive(Clone, Debug)]
 pub struct MeshVisualStyle {
@@ -102,7 +102,7 @@ fn property_color(style: &VisualStyle, index: usize) -> Option<[f32; 4]> {
     };
     if matches!(
         color,
-        acadrust::types::Color::ByLayer | acadrust::types::Color::ByBlock
+        codec::types::Color::ByLayer | codec::types::Color::ByBlock
     ) {
         return None;
     }

@@ -97,6 +97,13 @@ impl CadCommand for ZoomWindowCommand {
                 self.scale_prompt = true;
                 return Some(CmdResult::NeedPoint);
             }
+            // A scale factor straight at the first prompt: n, nX or nXP.
+            upper if upper.ends_with('X')
+                || upper.ends_with("XP")
+                || crate::app::expr_eval::eval_number(&upper).is_some() =>
+            {
+                return Some(CmdResult::Dispatch(format!("ZOOM SCALE {text}")));
+            }
             _ => return None,
         };
         Some(CmdResult::Dispatch(command.to_string()))
@@ -143,6 +150,7 @@ impl CadCommand for ZoomWindowCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -174,6 +182,8 @@ impl CadCommand for ZoomWindowCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }

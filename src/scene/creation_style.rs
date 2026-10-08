@@ -1,6 +1,6 @@
-use acadrust::objects::ObjectType;
-use acadrust::tables::{DimStyle, TextStyle};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::ObjectType;
+use codec::tables::{DimStyle, TextStyle};
+use codec::{CadDocument, EntityType, Handle};
 
 #[derive(Debug, Clone)]
 pub struct TextCreationDefaults {
@@ -33,6 +33,60 @@ fn named_text_style(doc: &CadDocument, name: &str) -> Option<TextStyle> {
                 .find(|style| style.name.eq_ignore_ascii_case("Standard"))
         })
         .cloned()
+}
+
+/// Adds the reference's ISO-25 dimension style (the current style of its
+/// metric template) when the drawing has none of that name, and hands back its
+/// handle: the header records the current dimension style by handle as well as
+/// by name, and a DWG carries only the handle.
+pub fn ensure_iso_dim_style(doc: &mut CadDocument) -> Handle {
+    if let Some(style) = doc
+        .dim_styles
+        .iter()
+        .find(|style| style.name.eq_ignore_ascii_case("ISO-25"))
+    {
+        return style.handle;
+    }
+    let mut style = DimStyle::new("ISO-25");
+    style.handle = doc.allocate_handle();
+    style.dimtxt = 2.5;
+    style.dimasz = 2.5;
+    style.dimcen = 2.5;
+    style.dimexe = 1.25;
+    style.dimexo = 0.625;
+    style.dimgap = 0.625;
+    style.dimdli = 3.75;
+    style.dimtad = 1;
+    style.dimtih = false;
+    style.dimtoh = false;
+    style.dimtofl = true;
+    style.dimtix = false;
+    style.dimsoxd = false;
+    style.dimdsep = i16::from(b',');
+    style.dimlunit = 2;
+    style.dimdec = 2;
+    style.dimtdec = 2;
+    style.dimaunit = 0;
+    style.dimadec = 0;
+    style.dimazin = 0;
+    style.dimzin = 8;
+    style.dimtzin = 8;
+    style.dimatfit = 3;
+    style.dimtmove = 0;
+    style.dimscale = 1.0;
+    style.dimlfac = 1.0;
+    style.dimtfac = 1.0;
+    style.dimaltf = 0.03937007874016;
+    style.dimaltd = 3;
+    style.dimalttd = 3;
+    style.dimaltu = 2;
+    style.dimfxl = 1.0;
+    style.dimjogang = std::f64::consts::FRAC_PI_2;
+    style.dimmzf = 100.0;
+    style.dimaltmzf = 100.0;
+    let handle = style.handle;
+    let _ = doc.dim_styles.add(style);
+    handle
 }
 
 fn named_dim_style(doc: &CadDocument, name: &str) -> Option<DimStyle> {
@@ -258,8 +312,8 @@ pub fn apply_current_creation_styles(doc: &CadDocument, entity: &mut EntityType)
     apply_object_defaults(doc, entity);
 }
 
-pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types::Transparency> {
-    use acadrust::types::Transparency;
+pub(crate) fn parse_current_transparency(value: &str) -> Option<codec::types::Transparency> {
+    use codec::types::Transparency;
     match value.trim().to_ascii_uppercase().as_str() {
         "BYLAYER" | "-1" => Some(Transparency::ByLayer),
         "BYBLOCK" | "-2" => Some(Transparency::ByBlock),
@@ -268,8 +322,8 @@ pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types:
     }
 }
 
-pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -> String {
-    use acadrust::types::Transparency;
+pub(crate) fn current_transparency_label(value: codec::types::Transparency) -> String {
+    use codec::types::Transparency;
     match value {
         Transparency::ByLayer => "ByLayer".into(),
         Transparency::ByBlock => "ByBlock".into(),
@@ -280,7 +334,7 @@ pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -
 #[cfg(test)]
 mod transparency_tests {
     use super::*;
-    use acadrust::types::Transparency;
+    use codec::types::Transparency;
 
     #[test]
     fn parses_supported_current_transparency_values() {

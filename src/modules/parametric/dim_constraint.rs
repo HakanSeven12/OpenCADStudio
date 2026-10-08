@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, CoincidentPick};
@@ -14,6 +14,12 @@ pub enum DimConstraintAxis {
     Horizontal,
     Vertical,
     Aligned,
+    /// The angle between two lines, or at a vertex between two points.
+    Angular,
+    /// A circle's or arc's radius.
+    Radius,
+    /// A circle's or arc's diameter.
+    Diameter,
 }
 
 /// A picked line (a line entity or one polyline segment) an Aligned
@@ -64,7 +70,11 @@ enum Step {
     /// Aligned's 2Lines: `Select first line:`
     TwoLinesFirst,
     /// `Select second line to make parallel:`
-    TwoLinesSecond { line: LineTarget },
+    TwoLinesSecond {
+        line: LineTarget,
+        /// Where the first line was picked.
+        pick: DVec3,
+    },
     /// The host is making the second line parallel; `accept_parallel_line`
     /// brings its solved ends.
     TwoLinesParallel {
@@ -82,6 +92,38 @@ enum Step {
         /// The line the distance is measured perpendicular to.
         direction: Option<LineTarget>,
     },
+    /// Angular: `Select first line or arc or [3Point] <3Point>:`
+    AngularFirst,
+    /// `Select second line:`
+    AngularSecond { first: LineTarget },
+    /// 3Point: `Specify angle vertex:`
+    AngularVertex,
+    /// `Specify first angle constraint point:`
+    AngularPoint1 { vertex: (ParametricRef, DVec3) },
+    /// `Specify second angle constraint point:`
+    AngularPoint2 {
+        vertex: (ParametricRef, DVec3),
+        first: (ParametricRef, DVec3),
+    },
+    /// `Specify dimension line location:` of an angle.
+    AngularLocation { data: AngularData },
+    /// `Enter value or name and value <ang1=27>:`
+    AngularValue {
+        data: AngularData,
+        location: DVec3,
+        sector: u8,
+        measured: f64,
+    },
+    /// Radius/Diameter: `Select arc or circle:`
+    RadialObject,
+    /// `Specify dimension line location:` of a radius or diameter.
+    RadialLocation { target: RadialTarget },
+    /// `Enter value or name and value <dia1=50>:`
+    RadialValue {
+        target: RadialTarget,
+        location: DVec3,
+        measured: f64,
+    },
     /// `Enter value or name and value <d1=100>:`
     Value {
         first: ParametricRef,
@@ -96,6 +138,29 @@ enum Step {
     },
 }
 
+/// Angular's picks: two lines, or a vertex and two points (an arc gives
+/// its center and its ends).
+#[derive(Clone, Copy)]
+enum AngularData {
+    Lines {
+        first: LineTarget,
+        second: LineTarget,
+    },
+    Points {
+        vertex: (ParametricRef, DVec3),
+        first: (ParametricRef, DVec3),
+        second: (ParametricRef, DVec3),
+    },
+}
+
+/// The circle or arc a Radius/Diameter constraint measures.
+#[derive(Clone, Copy)]
+struct RadialTarget {
+    circle: ParametricRef,
+    center: DVec3,
+    radius: f64,
+}
+
 /// The reference's Linear/Horizontal/Vertical/Aligned dimensional constraint:
 /// two constraint points (or one object's ends), a dimension line location,
 /// then the parameter name and expression the dynamic dimension carries.
@@ -105,6 +170,8 @@ pub struct DimConstraintCommand {
     picked_entity: Option<EntityType>,
     /// The next free `dN` the host reserved for this constraint.
     default_name: String,
+    /// Angular precision (DIMADEC) for `Dimension text = 27`.
+    angle_decimals: usize,
 }
 
 impl DimConstraintCommand {
@@ -113,14 +180,154 @@ impl DimConstraintCommand {
     pub const SAME_POINT: &'static str =
         "The object or point is already selected.  Select a different object or constraint point.";
     pub const INVALID_LINE: &'static str = "Invalid selection for Aligned. Select a line segment, polyline segment, text, MText, major or minor axis of ellipse or elliptical arc.";
+    pub const PARALLEL_LINES: &'static str = "Lines are parallel.";
 
     pub fn new(axis: DimConstraintAxis, default_name: String) -> Self {
         Self {
             axis,
-            step: Step::First,
+            step: match axis {
+                DimConstraintAxis::Angular => Step::AngularFirst,
+                DimConstraintAxis::Radius | DimConstraintAxis::Diameter => Step::RadialObject,
+                _ => Step::First,
+            },
             picked_entity: None,
             default_name,
+            angle_decimals: 0,
         }
+    }
+
+    /// The angular precision the measured angle is reported with.
+    pub fn with_angle_decimals(mut self, decimals: usize) -> Self {
+        self.angle_decimals = decimals;
+        self
+    }
+
+    fn angle_display(&self, degrees: f64) -> String {
+        let decimals = self.angle_decimals;
+        format!(
+            "{:.decimals$}",
+            crate::scene::parametric_constraints::normalize_angle_display(degrees)
+        )
+    }
+
+    /// An Angular pick: a line or a polyline segment (text baselines and
+    /// ellipse axes are not angle sides).
+    fn angular_line(entity: &EntityType, handle: Handle, point: DVec3) -> Option<LineTarget> {
+        matches!(
+            entity,
+            EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_)
+        )
+        .then(|| Self::line_target(entity, handle, point))
+        .flatten()
+    }
+
+    /// The angle (degrees) the dimension line location picks between the
+    /// directed sides `p1a→p1b` and `p2a→p2b`, and which of the four
+    /// sectors it is in the solver's terms (which signed sides bound it).
+    fn angle_frame(
+        p1a: DVec3,
+        p1b: DVec3,
+        p2a: DVec3,
+        p2b: DVec3,
+        location: DVec3,
+    ) -> Option<(f64, u8)> {
+        use crate::scene::parametric_constraints::angle_sector;
+        let tau = std::f64::consts::TAU;
+        let (_, start, end) =
+            crate::modules::annotate::angular_dim::two_line_frame(p1a, p1b, p2a, p2b, location)?;
+        let sweep = (end - start).rem_euclid(tau);
+        let same = |a: f64, b: f64| {
+            let d = (a - b).rem_euclid(tau);
+            d < 1.0e-6 || d > tau - 1.0e-6
+        };
+        let d1 = p1b - p1a;
+        let d2 = p2b - p2a;
+        let a1 = d1.y.atan2(d1.x);
+        let a2 = d2.y.atan2(d2.x);
+        let pi = std::f64::consts::PI;
+        let sector = if same(start, a1) || same(start, a1 + pi) {
+            // Swept from a side of the first line to a side of the second.
+            if same(start, a1) == same(end, a2) {
+                angle_sector::PARALLEL_COUNTERCLOCKWISE
+            } else {
+                angle_sector::ANTIPARALLEL_COUNTERCLOCKWISE
+            }
+        } else if same(start, a2) == same(end, a1) {
+            angle_sector::PARALLEL_CLOCKWISE
+        } else {
+            angle_sector::ANTIPARALLEL_CLOCKWISE
+        };
+        Some((sweep.to_degrees(), sector))
+    }
+
+    /// The angle (degrees) the dimension line location picks at `vertex`
+    /// between the rays to `first` and `second`: the counterclockwise sweep
+    /// from the first ray when the location lies in it, else the other way
+    /// round (a semicircle measures 180, a reflex angle is allowed).
+    fn ray_frame(vertex: DVec3, first: DVec3, second: DVec3, location: DVec3) -> Option<(f64, u8)> {
+        use crate::scene::parametric_constraints::angle_sector;
+        let tau = std::f64::consts::TAU;
+        let r1 = first - vertex;
+        let r2 = second - vertex;
+        let at = location - vertex;
+        if r1.length_squared() < 1.0e-18 || r2.length_squared() < 1.0e-18 || at.length_squared() < 1.0e-18 {
+            return None;
+        }
+        let a1 = r1.y.atan2(r1.x);
+        let a2 = r2.y.atan2(r2.x);
+        let t = at.y.atan2(at.x);
+        let sweep = (a2 - a1).rem_euclid(tau);
+        if sweep < 1.0e-9 {
+            return None;
+        }
+        if (t - a1).rem_euclid(tau) <= sweep + 1.0e-9 {
+            Some((sweep.to_degrees(), angle_sector::PARALLEL_COUNTERCLOCKWISE))
+        } else {
+            Some(((tau - sweep).to_degrees(), angle_sector::PARALLEL_CLOCKWISE))
+        }
+    }
+
+    fn build_angular(&self, name: String, expression: String) -> Option<CmdResult> {
+        let Step::AngularValue {
+            data,
+            location,
+            sector,
+            ..
+        } = self.step
+        else {
+            return None;
+        };
+        if expression.trim().is_empty() {
+            return None;
+        }
+        let (refs, points) = match data {
+            AngularData::Lines { first, second } => (
+                vec![first.line, second.line],
+                vec![
+                    first.ends[0].1,
+                    first.ends[1].1,
+                    second.ends[0].1,
+                    second.ends[1].1,
+                ],
+            ),
+            AngularData::Points {
+                vertex,
+                first,
+                second,
+            } => (
+                vec![first.0, vertex.0, second.0],
+                vec![vertex.1, first.1, second.1],
+            ),
+        };
+        Some(CmdResult::AddAngularConstraint {
+            refs,
+            points,
+            location,
+            sector,
+            renamed: name != self.default_name,
+            name,
+            expression,
+        })
     }
 
     fn command_name(&self) -> &'static str {
@@ -129,6 +336,9 @@ impl DimConstraintCommand {
             DimConstraintAxis::Horizontal => "DCHORIZONTAL",
             DimConstraintAxis::Vertical => "DCVERTICAL",
             DimConstraintAxis::Aligned => "DCALIGNED",
+            DimConstraintAxis::Angular => "DCANGULAR",
+            DimConstraintAxis::Radius => "DCRADIUS",
+            DimConstraintAxis::Diameter => "DCDIAMETER",
         }
     }
 
@@ -138,7 +348,46 @@ impl DimConstraintCommand {
             DimConstraintAxis::Horizontal => "Horizontal",
             DimConstraintAxis::Vertical => "Vertical",
             DimConstraintAxis::Aligned => "Aligned",
+            DimConstraintAxis::Angular => "Angular",
+            DimConstraintAxis::Radius => "Radius",
+            DimConstraintAxis::Diameter => "Diameter",
         }
+    }
+
+    /// The circle or arc a radial pick landed on, with its centre and radius.
+    fn radial_target(entity: &EntityType, handle: Handle) -> Option<RadialTarget> {
+        let (center, radius) = match entity {
+            EntityType::Circle(circle) => (circle.center, circle.radius),
+            EntityType::Arc(arc) => (arc.center, arc.radius),
+            _ => return None,
+        };
+        (radius > 1.0e-12).then_some(RadialTarget {
+            circle: ParametricRef::whole(handle),
+            center: DVec3::new(center.x, center.y, center.z),
+            radius,
+        })
+    }
+
+    fn build_radial(&self, name: String, expression: String) -> Option<CmdResult> {
+        let Step::RadialValue {
+            target, location, ..
+        } = self.step
+        else {
+            return None;
+        };
+        if expression.trim().is_empty() {
+            return None;
+        }
+        Some(CmdResult::AddRadialConstraint {
+            circle: target.circle,
+            center: target.center,
+            radius: target.radius,
+            location,
+            diameter: self.axis == DimConstraintAxis::Diameter,
+            renamed: name != self.default_name,
+            name,
+            expression,
+        })
     }
 
     fn report(message: &str) -> CmdResult {
@@ -291,7 +540,11 @@ impl DimConstraintCommand {
             }
             DimConstraintAxis::Horizontal => (ConstraintKind::DistanceX, DVec3::X),
             DimConstraintAxis::Vertical => (ConstraintKind::DistanceY, DVec3::Y),
-            DimConstraintAxis::Aligned => (
+            // Angular never measures here; its own steps decide the sector.
+            DimConstraintAxis::Aligned
+            | DimConstraintAxis::Angular
+            | DimConstraintAxis::Radius
+            | DimConstraintAxis::Diameter => (
                 ConstraintKind::Distance,
                 (second - first).normalize_or(DVec3::X),
             ),
@@ -334,13 +587,17 @@ impl DimConstraintCommand {
             location,
             axis,
             direction: direction.map(|line| line.line),
+            renamed: name != self.default_name,
             name,
             expression,
             label: match self.axis {
                 DimConstraintAxis::Linear => "Linear constraint",
                 DimConstraintAxis::Horizontal => "Horizontal distance constraint",
                 DimConstraintAxis::Vertical => "Vertical distance constraint",
-                DimConstraintAxis::Aligned => "Aligned constraint",
+                DimConstraintAxis::Aligned
+                | DimConstraintAxis::Angular
+                | DimConstraintAxis::Radius
+                | DimConstraintAxis::Diameter => "Aligned constraint",
             },
         })
     }
@@ -371,7 +628,33 @@ impl CadCommand for DimConstraintCommand {
             Step::TwoLinesSecond { .. } | Step::TwoLinesParallel { .. } => {
                 format!("{name}  Select second line to make parallel:")
             }
-            Step::Location { .. } => format!("{name}  Specify dimension line location:"),
+            Step::AngularFirst => {
+                format!("{name}  Select first line or arc or [3Point] <3Point>:")
+            }
+            Step::AngularSecond { .. } => format!("{name}  Select second line:"),
+            Step::AngularVertex => format!("{name}  Specify angle vertex:"),
+            Step::AngularPoint1 { .. } => {
+                format!("{name}  Specify first angle constraint point:")
+            }
+            Step::AngularPoint2 { .. } => {
+                format!("{name}  Specify second angle constraint point:")
+            }
+            Step::RadialObject => format!("{name}  Select arc or circle:"),
+            Step::AngularLocation { .. }
+            | Step::Location { .. }
+            | Step::RadialLocation { .. } => {
+                format!("{name}  Specify dimension line location:")
+            }
+            Step::RadialValue { measured, .. } => format!(
+                "{name}  Enter value or name and value <{}={}>:",
+                self.default_name,
+                measured_expression(measured)
+            ),
+            Step::AngularValue { measured, .. } => format!(
+                "{name}  Enter value or name and value <{}={}>:",
+                self.default_name,
+                measured_expression(measured)
+            ),
             Step::Value { measured, .. } => format!(
                 "{name}  Enter value or name and value <{}={}>:",
                 self.default_name,
@@ -388,6 +671,7 @@ impl CadCommand for DimConstraintCommand {
                 CmdOption::new("2Lines", "2L"),
             ],
             Step::First => vec![CmdOption::new("Object", "O")],
+            Step::AngularFirst => vec![CmdOption::new("3Point", "3P")],
             Step::PointLinePoint => vec![CmdOption::new("Line", "L")],
             _ => Vec::new(),
         }
@@ -400,7 +684,12 @@ impl CadCommand for DimConstraintCommand {
     fn point_step_accepts_keywords(&self) -> bool {
         matches!(
             self.step,
-            Step::First | Step::PointLinePoint | Step::Value { .. }
+            Step::First
+                | Step::PointLinePoint
+                | Step::Value { .. }
+                | Step::AngularFirst
+                | Step::AngularValue { .. }
+                | Step::RadialValue { .. }
         )
     }
 
@@ -427,13 +716,25 @@ impl CadCommand for DimConstraintCommand {
                 }
                 None
             }
-            Step::Value { .. } => {
+            Step::AngularFirst => {
+                let keyword = text.trim().trim_start_matches('_').to_ascii_uppercase();
+                if matches!(keyword.as_str(), "3P" | "3POINT") {
+                    self.step = Step::AngularVertex;
+                    return Some(CmdResult::NeedPoint);
+                }
+                None
+            }
+            Step::Value { .. } | Step::AngularValue { .. } | Step::RadialValue { .. } => {
                 let text = text.trim();
                 let (name, expression) = match text.split_once('=') {
                     Some((name, expression)) => (name.trim().to_string(), expression.trim().to_string()),
                     None => (self.default_name.clone(), text.to_string()),
                 };
-                self.build(name, expression)
+                match self.step {
+                    Step::AngularValue { .. } => self.build_angular(name, expression),
+                    Step::RadialValue { .. } => self.build_radial(name, expression),
+                    _ => self.build(name, expression),
+                }
             }
             _ => None,
         }
@@ -451,6 +752,12 @@ impl CadCommand for DimConstraintCommand {
                 | Step::LinePoint { .. }
                 | Step::TwoLinesFirst
                 | Step::TwoLinesSecond { .. }
+                | Step::AngularFirst
+                | Step::AngularSecond { .. }
+                | Step::AngularVertex
+                | Step::AngularPoint1 { .. }
+                | Step::AngularPoint2 { .. }
+                | Step::RadialObject
         )
     }
 
@@ -515,13 +822,16 @@ impl CadCommand for DimConstraintCommand {
             },
             Step::TwoLinesFirst => match self.pick_line(handle, point) {
                 Ok(line) => {
-                    self.step = Step::TwoLinesSecond { line };
+                    self.step = Step::TwoLinesSecond { line, pick: point };
                     CmdResult::NeedPoint
                 }
                 Err("") => CmdResult::NeedPoint,
                 Err(message) => Self::report(message),
             },
-            Step::TwoLinesSecond { line: first_line } => match self.pick_line(handle, point) {
+            Step::TwoLinesSecond {
+                line: first_line,
+                pick: first_pick,
+            } => match self.pick_line(handle, point) {
                 Ok(second_line) => {
                     if second_line.line == first_line.line {
                         return Self::report(Self::SAME_POINT);
@@ -536,6 +846,7 @@ impl CadCommand for DimConstraintCommand {
                     CmdResult::MakeParallel {
                         first_line: first_line.line,
                         first_ends: [first_line.ends[0].0, first_line.ends[1].0],
+                        first_pick,
                         second_line: second_line.line,
                         second_ends: [second_line.ends[0].0, second_line.ends[1].0],
                     }
@@ -571,7 +882,109 @@ impl CadCommand for DimConstraintCommand {
                 };
                 CmdResult::NeedPoint
             }
-            Step::Location { .. } | Step::Value { .. } => self.on_point(point),
+            Step::AngularFirst => {
+                if handle.is_null() {
+                    return Self::report(Self::NO_OBJECT);
+                }
+                let Some(entity) = self.picked_entity.take() else {
+                    return CmdResult::NeedPoint;
+                };
+                if matches!(entity, EntityType::Arc(_)) {
+                    // An arc's included angle: its center and its ends.
+                    let center = ParametricRef::center(handle);
+                    let start = ParametricRef::point(handle, 0);
+                    let end = ParametricRef::point(handle, 1);
+                    let (Some(c), Some(s), Some(e)) = (
+                        Self::world(&entity, center),
+                        Self::world(&entity, start),
+                        Self::world(&entity, end),
+                    ) else {
+                        return Self::report(Self::NO_POINT);
+                    };
+                    self.step = Step::AngularLocation {
+                        data: AngularData::Points {
+                            vertex: (center, c),
+                            first: (start, s),
+                            second: (end, e),
+                        },
+                    };
+                    return CmdResult::NeedPoint;
+                }
+                match Self::angular_line(&entity, handle, point) {
+                    Some(line) => {
+                        self.step = Step::AngularSecond { first: line };
+                        CmdResult::NeedPoint
+                    }
+                    None => Self::report(&format!(
+                        "Invalid selection for {}. Select a line, polyline segment or arc.",
+                        self.noun()
+                    )),
+                }
+            }
+            Step::AngularSecond { first } => {
+                if handle.is_null() {
+                    return Self::report(Self::NO_OBJECT);
+                }
+                let Some(entity) = self.picked_entity.take() else {
+                    return CmdResult::NeedPoint;
+                };
+                let Some(second) = Self::angular_line(&entity, handle, point) else {
+                    return Self::report(&format!(
+                        "Invalid selection for {}. Select a line, polyline segment or arc.",
+                        self.noun()
+                    ));
+                };
+                if second.line == first.line {
+                    return Self::report(Self::SAME_POINT);
+                }
+                let cross = first.dir.x * second.dir.y - first.dir.y * second.dir.x;
+                if cross.abs() < 1.0e-9 {
+                    return CmdResult::CancelWithMessage(Self::PARALLEL_LINES.to_string());
+                }
+                self.step = Step::AngularLocation {
+                    data: AngularData::Lines { first, second },
+                };
+                CmdResult::NeedPoint
+            }
+            Step::AngularVertex | Step::AngularPoint1 { .. } | Step::AngularPoint2 { .. } => {
+                CmdResult::CheckConstraintPoint(CoincidentPick {
+                    handle: (!handle.is_null()).then_some(handle),
+                    point,
+                    whole_curve: false,
+                })
+            }
+            Step::RadialObject => {
+                if handle.is_null() {
+                    return Self::report(Self::NO_OBJECT);
+                }
+                let Some(entity) = self.picked_entity.take() else {
+                    return CmdResult::NeedPoint;
+                };
+                let Some(target) = Self::radial_target(&entity, handle) else {
+                    return Self::report(&format!(
+                        "Invalid selection for {}. Select a circle or arc.",
+                        self.noun()
+                    ));
+                };
+                let measured = if self.axis == DimConstraintAxis::Diameter {
+                    target.radius * 2.0
+                } else {
+                    target.radius
+                };
+                self.step = Step::RadialLocation { target };
+                // The measured size is reported before the location, as the
+                // reference prints it, with trailing zeros suppressed.
+                CmdResult::ReportMeasurement(format!(
+                    "Dimension text = {}",
+                    measured_expression(measured)
+                ))
+            }
+            Step::Location { .. }
+            | Step::Value { .. }
+            | Step::AngularLocation { .. }
+            | Step::AngularValue { .. }
+            | Step::RadialLocation { .. }
+            | Step::RadialValue { .. } => self.on_point(point),
         }
     }
 
@@ -644,6 +1057,35 @@ impl CadCommand for DimConstraintCommand {
                 };
                 CmdResult::NeedPoint
             }
+            Step::AngularVertex => {
+                self.step = Step::AngularPoint1 {
+                    vertex: (reference, point),
+                };
+                CmdResult::NeedPoint
+            }
+            Step::AngularPoint1 { vertex } => {
+                if reference == vertex.0 {
+                    return Self::report(Self::SAME_POINT);
+                }
+                self.step = Step::AngularPoint2 {
+                    vertex,
+                    first: (reference, point),
+                };
+                CmdResult::NeedPoint
+            }
+            Step::AngularPoint2 { vertex, first } => {
+                if reference == vertex.0 || reference == first.0 {
+                    return Self::report(Self::SAME_POINT);
+                }
+                self.step = Step::AngularLocation {
+                    data: AngularData::Points {
+                        vertex,
+                        first,
+                        second: (reference, point),
+                    },
+                };
+                CmdResult::NeedPoint
+            }
             _ => CmdResult::NeedPoint,
         }
     }
@@ -657,11 +1099,49 @@ impl CadCommand for DimConstraintCommand {
                     whole_curve: false,
                 })
             }
+            Step::AngularVertex | Step::AngularPoint1 { .. } | Step::AngularPoint2 { .. } => {
+                CmdResult::CheckConstraintPoint(CoincidentPick {
+                    handle: None,
+                    point,
+                    whole_curve: false,
+                })
+            }
             Step::Object
             | Step::PointLineLine { .. }
             | Step::LineFirst
             | Step::TwoLinesFirst
-            | Step::TwoLinesSecond { .. } => Self::report(Self::NO_OBJECT),
+            | Step::TwoLinesSecond { .. }
+            | Step::AngularFirst
+            | Step::AngularSecond { .. } => Self::report(Self::NO_OBJECT),
+            Step::AngularLocation { data } => {
+                let frame = match data {
+                    AngularData::Lines { first, second } => Self::angle_frame(
+                        first.ends[0].1,
+                        first.ends[1].1,
+                        second.ends[0].1,
+                        second.ends[1].1,
+                        point,
+                    ),
+                    AngularData::Points {
+                        vertex,
+                        first,
+                        second,
+                    } => Self::ray_frame(vertex.1, first.1, second.1, point),
+                };
+                let Some((measured, sector)) = frame else {
+                    return Self::report(Self::NO_POINT);
+                };
+                self.step = Step::AngularValue {
+                    data,
+                    location: point,
+                    sector,
+                    measured,
+                };
+                CmdResult::ReportMeasurement(format!(
+                    "Dimension text = {}",
+                    self.angle_display(measured)
+                ))
+            }
             Step::Location {
                 first,
                 second,
@@ -684,7 +1164,24 @@ impl CadCommand for DimConstraintCommand {
                 };
                 CmdResult::ReportMeasurement(format!("Dimension text = {measured:.4}"))
             }
-            Step::TwoLinesParallel { .. } | Step::Value { .. } => CmdResult::NeedPoint,
+            Step::RadialObject => Self::report(Self::NO_OBJECT),
+            Step::RadialLocation { target } => {
+                let measured = if self.axis == DimConstraintAxis::Diameter {
+                    target.radius * 2.0
+                } else {
+                    target.radius
+                };
+                self.step = Step::RadialValue {
+                    target,
+                    location: point,
+                    measured,
+                };
+                CmdResult::NeedPoint
+            }
+            Step::TwoLinesParallel { .. }
+            | Step::Value { .. }
+            | Step::AngularValue { .. }
+            | Step::RadialValue { .. } => CmdResult::NeedPoint,
         }
     }
 
@@ -694,12 +1191,23 @@ impl CadCommand for DimConstraintCommand {
                 self.step = Step::Object;
                 CmdResult::NeedPoint
             }
+            // Enter takes the 3Point default.
+            Step::AngularFirst => {
+                self.step = Step::AngularVertex;
+                CmdResult::NeedPoint
+            }
+            Step::AngularValue { measured, .. } => self
+                .build_angular(self.default_name.clone(), measured_expression(measured))
+                .unwrap_or(CmdResult::Cancel),
             Step::PointLinePoint => {
                 self.step = Step::LineFirst;
                 CmdResult::NeedPoint
             }
             Step::Value { measured, .. } => self
                 .build(self.default_name.clone(), measured_expression(measured))
+                .unwrap_or(CmdResult::Cancel),
+            Step::RadialValue { measured, .. } => self
+                .build_radial(self.default_name.clone(), measured_expression(measured))
                 .unwrap_or(CmdResult::Cancel),
             _ => CmdResult::Cancel,
         }
@@ -924,8 +1432,8 @@ impl CadCommand for DimensionValueCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::types::Vector3;
+    use codec::entities::Line;
+    use codec::types::Vector3;
 
     #[test]
     fn object_pick_takes_the_line_ends_then_asks_for_the_location() {

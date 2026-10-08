@@ -44,6 +44,18 @@ impl DraftingSettingsState {
 }
 
 impl OpenCADStudio {
+    /// Turn Dynamic Input on or off with DYNMODE in step: off keeps the mode
+    /// negative (temporarily off), on restores it, or 3 when there was none.
+    pub(in crate::app) fn set_dyn_input(&mut self, on: bool) {
+        self.dyn_input = on;
+        let mode = self.dyn_mode.abs();
+        self.dyn_mode = match (on, mode) {
+            (true, 0) => 3,
+            (true, mode) => mode,
+            (false, mode) => -mode,
+        };
+    }
+
     pub(super) fn drafting_settings_dirty(&self) -> bool {
         match (&self.drafting_settings_state, &self.drafting_settings_saved) {
             (Some(curr), Some(saved)) => curr.is_dirty(saved),
@@ -100,7 +112,7 @@ impl OpenCADStudio {
         self.snapper.enabled = state.snap_modes.clone();
         self.snapper.snap3d_enabled = state.osnap3d_on;
         self.snapper.enabled3d = state.snap3d_modes.clone();
-        self.dyn_input = state.dyn_input_on;
+        self.set_dyn_input(state.dyn_input_on);
         self.quick_properties = state.quick_props_on;
         self.selection_cycling = state.selection_cycling_on;
         self.sync_vport_display(self.active_tab);

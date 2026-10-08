@@ -53,7 +53,7 @@ fn vc_btn<'a>(content: Element<'a, Message>, size: f32, msg: Message) -> Element
 /// Overlay of home / roll / nudge controls sized to the whole nav region, so
 /// the caller can position it exactly like the cube hit area.
 pub(super) fn viewcube_nav_controls<'a>(
-    viewport: Option<acadrust::Handle>,
+    viewport: Option<codec::Handle>,
 ) -> Element<'a, Message> {
     use crate::scene::NudgeDir;
     use crate::ui::icons;
@@ -150,10 +150,15 @@ pub(super) fn viewcube_nav_controls<'a>(
 /// Fixed width of the UCS picker, so it can be centred under the cube.
 pub(super) const UCS_PICKER_W: f32 = 84.0;
 
-/// The WCS / named-UCS selector shown under the cube.
-pub(super) fn viewcube_ucs_picker<'a>(current: String, names: Vec<String>) -> Element<'a, Message> {
+/// The WCS / named-UCS selector shown under the cube. `names` is the
+/// epoch-memoised `Scene::cached_ucs_names` Arc (#34) — a refcount bump per
+/// frame instead of N String clones.
+pub(super) fn viewcube_ucs_picker<'a>(
+    current: String,
+    names: std::sync::Arc<[String]>,
+) -> Element<'a, Message> {
     let mut options = vec!["WCS".to_string()];
-    options.extend(names);
+    options.extend(names.iter().cloned());
     let selected = if current.is_empty() {
         "WCS".to_string()
     } else {

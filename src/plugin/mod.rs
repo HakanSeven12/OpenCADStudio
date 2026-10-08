@@ -1,6 +1,6 @@
-// Open CAD Studio plugin runtime. Plugins are external cdylibs loaded from the
-// user plugins folder (see `external`) and installed via the marketplace; the
-// host ships no built-in add-ons. See `docs/plugin-architecture.md`.
+// Open CAD Studio plugin runtime. Plugins are out-of-process cdylibs loaded
+// from the application bundle or user plugins folder (see `external`).
+// See `docs/plugin-architecture.md`.
 
 pub mod external;
 pub mod host;

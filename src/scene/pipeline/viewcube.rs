@@ -1508,6 +1508,41 @@ impl ViewCubePipeline {
         }
     }
 
+    /// Check whether the ViewCube can be cleanly displayed inside `surface_clip`.
+    ///
+    /// The ViewCube anchors to the top-right corner of the viewport. It should
+    /// render whenever:
+    /// 1. Its top-right corner is on-canvas (not scrolled or clipped off the top
+    ///    or right of the canvas / parent clip).
+    /// 2. The visible surface area (`surface_clip`) has sufficient width and
+    ///    height to display the cube without distorted scaling.
+    pub fn should_render(
+        &self,
+        surface_dest: Rectangle<u32>,
+        surface_clip: Rectangle<u32>,
+        clip: &Rectangle<u32>,
+    ) -> bool {
+        let min_size = self.depth_texture_size.width.min(self.depth_texture_size.height).max(1);
+        viewcube_should_render(surface_dest, surface_clip, clip, min_size)
+    }
+}
+
+/// Check whether the ViewCube can be cleanly displayed inside `surface_clip`.
+pub fn viewcube_should_render(
+    surface_dest: Rectangle<u32>,
+    surface_clip: Rectangle<u32>,
+    clip: &Rectangle<u32>,
+    min_size: u32,
+) -> bool {
+    let clip_right = clip.x + clip.width;
+    // Allow 1px subpixel tolerance between float ceil/floor and integer clip rounding.
+    let top_right_visible = surface_dest.y >= clip.y.saturating_sub(1)
+        && surface_dest.x + surface_dest.width <= clip_right + 1;
+    top_right_visible && surface_clip.width >= min_size && surface_clip.height >= min_size
+}
+
+impl ViewCubePipeline {
+
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,

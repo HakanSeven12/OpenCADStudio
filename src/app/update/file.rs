@@ -14,12 +14,33 @@ use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
 use crate::ui::PropertiesPanel;
-use acadrust::types::Color as AcadColor;
-use acadrust::{EntityType as AcadEntityType, Handle};
+use codec::types::Color as AcadColor;
+use codec::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
-pub(super) fn background_task<T, F, M>(work: F, map: M) -> Task<Message>
+/// Write an exported file: to disk on the desktop, as a browser download on
+/// the web, where there is no filesystem behind the dialog's path. (#761)
+fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let name = path.file_name().map_or_else(|| "export".into(), |n| n.to_string_lossy());
+        crate::sys::download_bytes(&name, bytes);
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::fs::write(path, bytes).map_err(|e| e.to_string())
+    }
+}
+
+/// Run `work` on a worker thread and map its result into a `Message`.
+///
+/// `context` names the operation for error reporting. A worker panic never
+/// reaches the UI thread: it is caught on the worker and re-surfaced as
+/// [`Message::BackgroundTaskFailed`] so a crashing export or import reports
+/// on the command line instead of killing the application.
+pub(in crate::app) fn background_task<T, F, M>(context: impl Into<String>, work: F, map: M) -> Task<Message>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
@@ -27,18 +48,46 @@ where
 {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let context = context.into();
         let (tx, rx) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(work());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+            let _ = tx.send(result);
         });
         Task::perform(
-            async move { rx.await.expect("background export worker dropped") },
-            map,
+            async move {
+                match rx.await {
+                    Ok(Ok(value)) => map(value),
+                    Ok(Err(payload)) => Message::BackgroundTaskFailed {
+                        context,
+                        detail: panic_detail(payload),
+                    },
+                    Err(_) => Message::BackgroundTaskFailed {
+                        context,
+                        detail: "worker stopped without reporting a result".to_string(),
+                    },
+                }
+            },
+            |message| message,
         )
     }
     #[cfg(target_arch = "wasm32")]
     {
+        let _ = context;
         Task::perform(async move { work() }, map)
+    }
+}
+
+/// Render a panic payload the way `std` reports it: `&'static str` messages,
+/// `String` messages, or a fallback for foreign payloads.
+#[cfg(not(target_arch = "wasm32"))]
+fn panic_detail(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = payload.downcast_ref::<&'static str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "worker panicked".to_string()
     }
 }
 
@@ -64,8 +113,8 @@ fn scale_name_for_factor(scales: &[(String, f64)], factor: f64) -> Option<String
 
 fn plot_render_mode_override(
     d: &crate::ui::window::plot::PlotDialogState,
-) -> Option<acadrust::entities::ViewportRenderMode> {
-    use acadrust::entities::ViewportRenderMode as Mode;
+) -> Option<codec::entities::ViewportRenderMode> {
+    use codec::entities::ViewportRenderMode as Mode;
     match d.shade.as_str() {
         "2D Wireframe" => Some(Mode::Wireframe2D),
         "3D Wireframe" => Some(Mode::Wireframe3D),
@@ -123,7 +172,7 @@ fn plot_dialog_sheet_mm(d: &crate::ui::window::plot::PlotDialogState) -> (f64, f
 /// Whether the dialog still names the sheet the stored settings carry.
 fn paper_unchanged(
     d: &crate::ui::window::plot::PlotDialogState,
-    stored: &acadrust::objects::PlotSettings,
+    stored: &codec::objects::PlotSettings,
 ) -> bool {
     !stored.paper_size.is_empty()
         && crate::io::paper_catalog::from_drawing(
@@ -143,7 +192,7 @@ fn paper_unchanged(
 /// selection writes the canonical name.
 fn paper_name_for_settings(
     d: &crate::ui::window::plot::PlotDialogState,
-    stored: &acadrust::objects::PlotSettings,
+    stored: &codec::objects::PlotSettings,
 ) -> String {
     if paper_unchanged(d, stored) {
         stored.paper_size.clone()
@@ -161,8 +210,8 @@ fn paper_name_for_settings(
 fn plot_dialog_rotation(
     d: &crate::ui::window::plot::PlotDialogState,
     natural: crate::io::paper_catalog::Orientation,
-) -> acadrust::objects::PlotRotation {
-    use acadrust::objects::PlotRotation;
+) -> codec::objects::PlotRotation {
+    use codec::objects::PlotRotation;
     match (plot_dialog_orientation(d) != natural, d.upside_down) {
         (false, false) => PlotRotation::None,
         (true, false) => PlotRotation::Degrees90,
@@ -172,9 +221,9 @@ fn plot_dialog_rotation(
 }
 
 /// Millimetres in the paper unit a page setup counts in.
-fn plot_paper_unit_mm(units: acadrust::objects::PlotPaperUnits) -> f64 {
+fn plot_paper_unit_mm(units: codec::objects::PlotPaperUnits) -> f64 {
     match units {
-        acadrust::objects::PlotPaperUnits::Inches => 25.4,
+        codec::objects::PlotPaperUnits::Inches => 25.4,
         _ => 1.0,
     }
 }
@@ -183,16 +232,16 @@ fn plot_paper_unit_mm(units: acadrust::objects::PlotPaperUnits) -> f64 {
 /// is the `paper : drawing` ratio times 25.4 on millimetre page setups and
 /// the plain ratio on inch ones — observed in its files, whatever the
 /// published description says. Both directions of that convention live here.
-fn stored_scale_factor(ratio: f64, units: acadrust::objects::PlotPaperUnits) -> f64 {
+fn stored_scale_factor(ratio: f64, units: codec::objects::PlotPaperUnits) -> f64 {
     match units {
-        acadrust::objects::PlotPaperUnits::Millimeters => ratio * 25.4,
+        codec::objects::PlotPaperUnits::Millimeters => ratio * 25.4,
         _ => ratio,
     }
 }
 
-fn ratio_from_stored_scale_factor(factor: f64, units: acadrust::objects::PlotPaperUnits) -> f64 {
+fn ratio_from_stored_scale_factor(factor: f64, units: codec::objects::PlotPaperUnits) -> f64 {
     match units {
-        acadrust::objects::PlotPaperUnits::Millimeters => factor / 25.4,
+        codec::objects::PlotPaperUnits::Millimeters => factor / 25.4,
         _ => factor,
     }
 }
@@ -200,8 +249,8 @@ fn ratio_from_stored_scale_factor(factor: f64, units: acadrust::objects::PlotPap
 /// The file format's standard scale for a `paper : drawing` ratio, when it
 /// has one. Only the metric ratios exist as standard codes here; an
 /// architectural scale is stored as a custom ratio with the same value.
-fn standard_scale_for_ratio(paper: f64, drawing: f64) -> Option<acadrust::objects::ScaledType> {
-    use acadrust::objects::ScaledType as S;
+fn standard_scale_for_ratio(paper: f64, drawing: f64) -> Option<codec::objects::ScaledType> {
+    use codec::objects::ScaledType as S;
     const STANDARD: &[(f64, f64, S)] = &[
         (1.0, 1.0, S::OneToOne),
         (1.0, 2.0, S::OneToTwo),
@@ -267,7 +316,7 @@ fn plot_dialog_device(d: &crate::ui::window::plot::PlotDialogState) -> crate::io
 /// device, or one of our own legacy labels, is written in the source application's spelling.
 fn device_name_for_settings(
     d: &crate::ui::window::plot::PlotDialogState,
-    stored: &acadrust::objects::PlotSettings,
+    stored: &codec::objects::PlotSettings,
 ) -> String {
     use crate::io::plot_device::PlotDevice;
     let device = plot_dialog_device(d);
@@ -285,8 +334,8 @@ fn device_name_for_settings(
 /// the equivalent of the source application's `PAPERUPDATE`.
 fn margins_for_settings(
     d: &crate::ui::window::plot::PlotDialogState,
-    stored: &acadrust::objects::PlotSettings,
-) -> acadrust::objects::PaperMargin {
+    stored: &codec::objects::PlotSettings,
+) -> codec::objects::PaperMargin {
     use crate::io::plot_device::PlotDevice;
     let device = plot_dialog_device(d);
     let (stored_device, _) = PlotDevice::from_stored_name(&stored.printer_name);
@@ -294,7 +343,7 @@ fn margins_for_settings(
         return stored.margins;
     }
     let margins = device.margins_mm(&plot_dialog_paper(d), &d.custom_papers);
-    acadrust::objects::PaperMargin::new(margins.left, margins.bottom, margins.right, margins.top)
+    codec::objects::PaperMargin::new(margins.left, margins.bottom, margins.right, margins.top)
 }
 
 fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
@@ -358,10 +407,38 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
         .then_some(bounds)
 }
 
+/// Stamp the owning entity's effective color index onto a plot wire so CTB
+/// plot-style lookups (`wire.aci > 0`) apply: an entity's own ACI 1-255 is
+/// used as-is, ByLayer resolves through the layer table, and true-color
+/// objects keep `aci = 0` ("0 means true-color" — no CTB mapping). Wires
+/// whose owner cannot be resolved keep the index they carry.
+fn plot_owner_aci(scene: &crate::scene::Scene, wire: &mut crate::scene::WireModel) {
+    let Some(handle) = crate::scene::Scene::handle_from_wire_name(&wire.name) else {
+        return;
+    };
+    let Some(entity) = scene.document.get_entity(handle) else {
+        return;
+    };
+    let common = entity.common();
+    wire.aci = match &common.color {
+        codec::types::Color::Index(index) => *index,
+        codec::types::Color::ByLayer => scene
+            .document
+            .layers
+            .get(&common.layer)
+            .map(|layer| match &layer.color {
+                codec::types::Color::Index(index) => *index,
+                _ => 0,
+            })
+            .unwrap_or(7),
+        _ => 0,
+    };
+}
+
 fn plot_scene_content(
     scene: &crate::scene::Scene,
     paper_space_last: bool,
-    render_mode_override: Option<acadrust::entities::ViewportRenderMode>,
+    render_mode_override: Option<codec::entities::ViewportRenderMode>,
 ) -> PlotContent {
     let (mut paper_wires, mut model_wires) = scene.plot_wire_groups(render_mode_override);
     let plot_viewport_borders = scene
@@ -375,7 +452,7 @@ fn plot_scene_content(
                     .is_some_and(|entity| {
                         matches!(
                             entity,
-                            acadrust::EntityType::Viewport(viewport)
+                            codec::EntityType::Viewport(viewport)
                                 if !crate::scene::Scene::is_sheet_viewport(
                                     &scene.document,
                                     viewport,
@@ -384,12 +461,27 @@ fn plot_scene_content(
                     }))
     });
     model_wires.retain(|wire| wire.plot_visible);
+    // A text / leader background mask is filled with the canvas colour so it
+    // hides what is behind it; on paper that colour is the sheet's, not the
+    // dark screen's. Mark such fills so the export paints them paper-white
+    // instead of plotting the canvas colour (or turning it black). (#1072)
+    let canvas = scene.current_bg();
     let with_depth = |wires: Vec<crate::scene::WireModel>| {
         let depths = scene.plot_wire_depths(&wires);
         wires
             .into_iter()
             .zip(depths)
-            .map(|(wire, draw_depth)| crate::io::pdf_export::PlotWire { wire, draw_depth })
+            .map(|(mut wire, draw_depth)| {
+                if !wire.fill_tris.is_empty() && wire.color[..3] == canvas[..3] {
+                    wire.bg_adapt = Some(Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                        raw_color: wire.color,
+                        canvas_color: true,
+                        ..Default::default()
+                    }));
+                }
+                plot_owner_aci(scene, &mut wire);
+                crate::io::pdf_export::PlotWire { wire, draw_depth }
+            })
             .collect::<Vec<_>>()
     };
     let paper_wires = with_depth(paper_wires);
@@ -417,7 +509,10 @@ fn plot_scene_content(
     model_pattern_wires.retain(|(wire, _)| wire.plot_visible);
     let model_pattern_wires = model_pattern_wires
         .into_iter()
-        .map(|(wire, draw_depth)| crate::io::pdf_export::PlotWire { wire, draw_depth })
+        .map(|(mut wire, draw_depth)| {
+            plot_owner_aci(scene, &mut wire);
+            crate::io::pdf_export::PlotWire { wire, draw_depth }
+        })
         .collect::<Vec<_>>();
 
     let (wires, hatches, wipeouts, images, splits) = if paper_space_last {
@@ -459,11 +554,14 @@ fn plot_scene_content(
 }
 
 impl OpenCADStudio {
-    /// Persist exact ACIS bodies and kernel-derived edge caches before saving.
+    /// Persist exact ACIS bodies, and an edge cache with them, for solids that
+    /// have no ACIS data before saving. A solid that has ACIS data keeps its
+    /// own wireframe cache: display edges are not written into a solid OCS
+    /// did not create or edit (those get their wires when they are built).
     fn sync_solid_models_for_save(&mut self, i: usize) {
-        use acadrust::EntityType;
+        use codec::EntityType;
         let scene = &mut self.tabs[i].scene;
-        let targets: Vec<(acadrust::Handle, bool, bool)> = scene
+        let targets: Vec<(codec::Handle, bool)> = scene
             .document
             .entities()
             .filter_map(|entity| {
@@ -471,16 +569,12 @@ impl OpenCADStudio {
                     return None;
                 };
                 let h = solid.common.handle;
-                let needs_acis = !solid.acis_data.has_data();
-                let needs_wires = solid.wires.is_empty();
-                (needs_acis || needs_wires).then_some((h, needs_acis, needs_wires))
+                (!solid.acis_data.has_data()).then_some((h, solid.wires.is_empty()))
             })
             .collect();
-        for (h, needs_acis, needs_wires) in targets {
+        for (h, needs_wires) in targets {
             let body = scene.solid_models.get(&h);
-            let sat = needs_acis
-                .then(|| body.and_then(crate::scene::convert::acis_export::solid_to_sat))
-                .flatten();
+            let sat = body.and_then(crate::scene::convert::acis_export::solid_to_sat);
             let wires = needs_wires.then(|| {
                 if let Some(body) = body {
                     return crate::scene::model::solid_model::edge_wires(body);
@@ -502,13 +596,13 @@ impl OpenCADStudio {
                             .get(index * 2 + 1)
                             .copied()
                             .unwrap_or([0.0; 3]);
-                        acadrust::entities::Wire::from_points(vec![
-                            acadrust::types::Vector3::new(
+                        codec::entities::Wire::from_points(vec![
+                            codec::types::Vector3::new(
                                 points[0][0] as f64 + first_low[0] as f64,
                                 points[0][1] as f64 + first_low[1] as f64,
                                 points[0][2] as f64 + first_low[2] as f64,
                             ),
-                            acadrust::types::Vector3::new(
+                            codec::types::Vector3::new(
                                 points[1][0] as f64 + second_low[0] as f64,
                                 points[1][1] as f64 + second_low[1] as f64,
                                 points[1][2] as f64 + second_low[2] as f64,
@@ -531,7 +625,7 @@ impl OpenCADStudio {
     /// Write a header variable on the active drawing and mark it modified.
     pub(in crate::app) fn set_drawing_var(
         &mut self,
-        write: impl FnOnce(&mut acadrust::document::HeaderVariables),
+        write: impl FnOnce(&mut codec::document::HeaderVariables),
     ) {
         let i = self.active_tab;
         if let Some(tab) = self.tabs.get_mut(i) {
@@ -564,6 +658,7 @@ impl OpenCADStudio {
         crate::app::settings::UserSettings {
             spacemouse: self.spacemouse_preferences,
             dyn_input: self.dyn_input,
+            dyn_mode: self.dyn_mode,
             polar: self.polar_mode,
             polar_increment_deg: self.polar_increment_deg,
             zoom_wheel_reversed: self.zoom_wheel_reversed,
@@ -580,9 +675,14 @@ impl OpenCADStudio {
             right_click_mode: self.right_click_mode,
             right_click_hold_ms: self.right_click_hold_ms,
             grip_object_limit: self.grip_object_limit,
+            image_frame: crate::scene::frame::profile_image_mode(),
+            attdef_on_screen: crate::modules::draw::draw::attdef::session().on_screen,
+            field_display: crate::entities::field::display(),
             ncopy_bind: self.ncopy_bind,
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
+            snap_marker_color: self.snap_marker_color,
+            command_text_color: self.command_text_color,
             lineweight_display_scale: self.lineweight_display_scale,
             isometric_drafting: self.isometric_drafting,
             iso_plane: self.iso_plane,
@@ -591,6 +691,7 @@ impl OpenCADStudio {
             default_assoc_prompted: self.default_assoc_prompted,
             check_missing_fonts: self.check_missing_fonts,
             font_source_url: self.font_source_url.clone(),
+            qnew_template: self.qnew_template.clone(),
             donation_prompt_version: self.donation_prompt_version.clone(),
             gpu_warning_silenced: self.gpu_warning_silenced.clone(),
             disabled_plugins: {
@@ -619,6 +720,7 @@ impl OpenCADStudio {
             constraint_bar_display: self.constraint_bar_display,
             constraint_bar_mode: self.constraint_bar_mode,
             savetime_min: self.savetime_min,
+            script_commands: self.script_commands,
             default_save_format: self.default_save_format.clone(),
             pick_add: self.pick_add,
             pick_drag_rect: self.pick_drag_rect,
@@ -637,16 +739,35 @@ impl OpenCADStudio {
             grid_beyond_limits: self.grid_beyond_limits,
             block_mru: self.block_mru.clone(),
             block_freq: self.block_freq.clone(),
+            block_recent: self.block_palette.recent.clone(),
+            block_favorites: self.block_palette.favorites.clone(),
+            block_libraries: self.block_palette.libraries.clone(),
+            block_palette_view: self.block_palette.view as u8,
+            block_insert: self.block_palette.options.clone(),
+            block_mru_list: self.block_mru_list,
+            block_redefine_mode: self.block_redefine_mode,
+            block_navigate: self.block_navigate.clone(),
+            count_color: self.count_palette.color,
+            count_error_color: self.count_palette.error_color,
+            count_service: self.count_palette.service,
+            count_invalid_area: self.count_palette.invalid_choice,
+            sheet_set: self.sheet_set.settings,
         }
     }
 
     /// Apply restored preferences to live state.
     pub(in crate::app) fn apply_settings(&mut self, s: &crate::app::settings::UserSettings) {
-        self.dyn_input = s.dyn_input;
+        self.dyn_mode = s.dyn_mode;
+        self.set_dyn_input(s.dyn_input);
         self.polar_mode = s.polar;
         self.polar_increment_deg = s.polar_increment_deg;
         self.zoom_wheel_reversed = s.zoom_wheel_reversed;
-        self.zoom_factor = s.zoom_factor.clamp(3, 100);
+        self.zoom_factor = crate::app::settings::clamp_zoom_factor(s.zoom_factor);
+        // Like the drafting-rotation field below, the Options field edits a
+        // buffer rather than the value, so it is reseeded whenever the value
+        // is restored from behind it — a start-up, or the Options window's
+        // own Close putting a change back.
+        self.zoom_factor_input = self.zoom_factor.to_string();
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
         self.options_tab = s.options_tab;
@@ -663,6 +784,9 @@ impl OpenCADStudio {
         self.right_click_mode = s.right_click_mode;
         self.right_click_hold_ms = super::super::settings::clamp_right_click_hold_ms(s.right_click_hold_ms);
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
+        crate::scene::frame::set_profile_image_mode(s.image_frame);
+        crate::modules::draw::draw::attdef::session().on_screen = s.attdef_on_screen;
+        crate::entities::field::set_display(s.field_display);
         self.ncopy_bind = s.ncopy_bind;
         self.cursor_type = s.cursor_type;
         self.crosshair_color = s.crosshair_color;
@@ -670,6 +794,17 @@ impl OpenCADStudio {
             .crosshair_color
             .map(crate::app::config::rgb_to_hex)
             .unwrap_or_default();
+        self.snap_marker_color = s.snap_marker_color;
+        self.snap_marker_color_input = s
+            .snap_marker_color
+            .map(crate::app::config::rgb_to_hex)
+            .unwrap_or_default();
+        self.command_text_color = s.command_text_color;
+        self.command_text_color_input = s
+            .command_text_color
+            .map(crate::app::config::rgb_to_hex)
+            .unwrap_or_default();
+        crate::ui::command_line::set_text_color(s.command_text_color);
         self.lineweight_display_scale = s.lineweight_display_scale.clamp(25, 200);
         self.isometric_drafting = s.isometric_drafting;
         self.iso_plane = s.iso_plane;
@@ -687,6 +822,7 @@ impl OpenCADStudio {
         self.default_assoc_prompted = s.default_assoc_prompted;
         self.check_missing_fonts = s.check_missing_fonts;
         self.font_source_url = s.font_source_url.clone();
+        self.qnew_template = s.qnew_template.clone();
         self.font_source_input = s.font_source_url.clone();
         self.donation_prompt_version = s.donation_prompt_version.clone();
         self.gpu_warning_silenced = s.gpu_warning_silenced.clone();
@@ -723,6 +859,7 @@ impl OpenCADStudio {
         self.constraint_bar_display = s.constraint_bar_display.clamp(0, 3);
         self.constraint_bar_mode = s.constraint_bar_mode.clamp(0, 4095);
         self.savetime_min = s.savetime_min;
+        self.script_commands = s.script_commands;
         self.default_save_format =
             crate::io::canonical_save_format(&s.default_save_format).to_string();
         self.pick_add = s.pick_add;
@@ -755,6 +892,20 @@ impl OpenCADStudio {
             .take(200)
             .map(|(k, v)| (k.clone(), *v))
             .collect();
+        self.block_mru_list = s.block_mru_list.min(100);
+        self.block_redefine_mode = s.block_redefine_mode.min(2);
+        self.block_navigate = s.block_navigate.clone();
+        self.count_palette.color = s.count_color;
+        self.count_palette.error_color = s.count_error_color;
+        self.count_palette.service = s.count_service;
+        self.count_palette.invalid_choice = s.count_invalid_area.min(2);
+        self.sheet_set.settings = s.sheet_set;
+        self.block_palette.recent = s.block_recent.clone();
+        self.block_palette.favorites = s.block_favorites.clone();
+        self.block_palette.libraries = s.block_libraries.clone();
+        self.block_palette.view = crate::ui::window::block_palette::ViewMode::from_u8(s.block_palette_view);
+        self.block_palette.set_options(s.block_insert.clone());
+        self.trim_recent_blocks();
         // Push restored display defaults onto every drawing tab that exists now.
         // Tabs created later pick them up at their construction site.
         for idx in 0..self.tabs.len() {
@@ -764,6 +915,8 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn record_block_insert(&mut self, name: &str) {
+        self.insname = name.to_string();
+        self.note_recent_block(name);
         let key = name.to_ascii_uppercase();
         *self.block_freq.entry(key).or_insert(0) += 1;
         self.block_mru.retain(|n| !n.eq_ignore_ascii_case(name));
@@ -1411,6 +1564,21 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
         set_current_path: bool,
     ) -> Result<(), crate::io::SaveFailure> {
+        let version = self.tabs[i].scene.document.version;
+        self.save_tab_synchronously_protected_as(i, path, version, set_current_path)
+    }
+
+    /// Synchronous protected save with an explicit output version. Automation
+    /// uses this path so format conversion never depends on an implicit source
+    /// version or silently upgrades to the newest DWG.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn save_tab_synchronously_protected_as(
+        &mut self,
+        i: usize,
+        path: std::path::PathBuf,
+        version: codec::DxfVersion,
+        set_current_path: bool,
+    ) -> Result<(), crate::io::SaveFailure> {
         let previous_autosave = self.autosave_target(i);
         if self.tabs[i].recovery_save_as_required
             && self.tabs[i]
@@ -1463,7 +1631,6 @@ impl OpenCADStudio {
             Self::native_save_verification(&path, lease, expected_fingerprint)?;
 
         self.prepare_native_save(i);
-        let version = self.tabs[i].scene.document.version;
         let snapshot = self.tabs[i].scene.document_for_save();
         crate::io::save_owned_as_version_atomic(
             snapshot,
@@ -1476,6 +1643,7 @@ impl OpenCADStudio {
 
         if set_current_path {
             self.tabs[i].current_path = Some(path.clone());
+            self.tabs[i].scene.document.version = version;
         }
         self.refresh_native_edit_guard_after_save(i, &path, path_changed, destination_lease);
         self.tabs[i].dirty = false;
@@ -1540,7 +1708,7 @@ impl OpenCADStudio {
         &mut self,
         name: String,
         path: std::path::PathBuf,
-        doc: acadrust::CadDocument,
+        doc: codec::CadDocument,
         mut caches: crate::scene::DerivedCaches,
     ) -> Task<Message> {
         // If the user clicked Cancel while the parser was running, the
@@ -1561,7 +1729,7 @@ impl OpenCADStudio {
         }) || doc
             .notifications
             .iter()
-            .any(|item| item.notification_type == acadrust::notification::NotificationType::Error);
+            .any(|item| item.notification_type == codec::notification::NotificationType::Error);
         let reference_recovered = caches
             .xrefs
             .iter()
@@ -1697,6 +1865,9 @@ impl OpenCADStudio {
         self.install_native_edit_guard(i, &path, opened_fingerprint);
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
+        self.tabs[i].scene.bump_layout_epoch();
+        self.tabs[i].scene.bump_scale_epoch();
+        self.tabs[i].scene.bump_ucs_epoch();
         // Load parameters first so imported dimensional constraints
         // can resolve their named driving values.
         self.tabs[i].scene.load_named_parameters_from_document();
@@ -1850,7 +2021,7 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         let interaction_task = {
             let wires = self.tabs[i].scene.hit_test_wires();
-            let screen_height = self.tabs[i].scene.selection.borrow().vp_size.1;
+            let screen_height = self.tabs[i].scene.selection.borrow().view.vp_size.1;
             self.prepare_interaction_index_task(i, wires, screen_height)
                 .unwrap_or_else(Task::none)
         };
@@ -1873,18 +2044,35 @@ impl OpenCADStudio {
                 // fetch them from the community repository before the user
                 // studies garbled substitute text (unless recovery already
                 // owns the modal slot).
-                let missing = crate::io::font_repo::missing_shx_fonts(
+                let mut missing = crate::io::font_repo::missing_shx_fonts(
                     &self.tabs[i].scene.document,
                 );
-                if !missing.is_empty() && self.check_missing_fonts {
+                missing.retain(|name| {
+                    !self
+                        .suppressed_missing_fonts
+                        .contains(&crate::io::font_repo::font_key(name))
+                });
+                // Read-only/MCP evaluation sessions must remain non-blocking:
+                // report missing fonts through control state, but never offer
+                // a network/download mutation from a read-only launch.
+                if !missing.is_empty() && self.check_missing_fonts && !self.read_only {
                     self.font_source_input = self.font_source_url.clone();
                     self.missing_fonts = Some(missing);
+                    self.missing_fonts_path = self.tabs[i].current_path.clone();
+                    self.missing_fonts_downloading = false;
                     self.active_modal = Some(crate::app::ModalKind::MissingFonts);
                 }
             }
             self.drain_pending_open()
         };
-        Task::batch([thumbs_task, pending_open_task, interaction_task])
+        let startup_script_task = if !self.pending_startup_script_lines.is_empty() {
+            let lines = std::mem::take(&mut self.pending_startup_script_lines);
+            Task::batch(lines.into_iter().map(|l| Task::done(Message::ScriptLine(l))))
+        } else {
+            Task::none()
+        };
+        let sheet_set_task = self.sheet_set_after_open(i);
+        Task::batch([thumbs_task, pending_open_task, interaction_task, startup_script_task, sheet_set_task])
     }
 
     pub(super) fn on_wblock_save_result_some(
@@ -1898,6 +2086,7 @@ impl OpenCADStudio {
         let worker_name = block_name.clone();
         let worker_path = path.clone();
         background_task(
+            crate::t!("WBLOCK save"),
             move || {
                 let document = if worker_name == "*" {
                     crate::modules::insert::wblock::extract_entities_to_doc(&document, &handles)
@@ -1925,11 +2114,12 @@ impl OpenCADStudio {
             .collect();
         let worker_path = path.clone();
         background_task(
+            crate::t!("STL export"),
             move || {
                 let mesh_refs: Vec<_> = meshes.iter().collect();
                 let bytes = crate::io::stl::build_stl(&mesh_refs)
                     .ok_or_else(|| "no mesh data to export".to_string())?;
-                std::fs::write(&worker_path, bytes).map_err(|e| e.to_string())
+                write_export(&worker_path, &bytes)
             },
             move |result| Message::StlExportFinished(path, result),
         )
@@ -1946,11 +2136,12 @@ impl OpenCADStudio {
             .collect();
         let worker_path = path.clone();
         background_task(
+            crate::t!("STEP export"),
             move || {
                 let mesh_refs: Vec<_> = meshes.iter().collect();
                 let text = crate::io::step::build_step(&mesh_refs)
                     .ok_or_else(|| "no mesh data to export".to_string())?;
-                std::fs::write(&worker_path, text.as_bytes()).map_err(|e| e.to_string())
+                write_export(&worker_path, text.as_bytes())
             },
             move |result| Message::StepExportFinished(path, result),
         )
@@ -1960,6 +2151,7 @@ impl OpenCADStudio {
         let tab_id = self.tabs[self.active_tab].id;
         let worker_path = path.clone();
         background_task(
+            crate::t!("OBJ import"),
             move || {
                 let src = std::fs::read_to_string(&worker_path).map_err(|e| e.to_string())?;
                 crate::io::obj::parse_obj(&src, [0.7, 0.7, 0.85, 1.0])
@@ -1979,12 +2171,22 @@ impl OpenCADStudio {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn prepare_native_save(&mut self, i: usize) {
+        // A save is a field evaluation event (FIELDEVAL bit 2).
+        self.tabs[i].scene.update_fields(2, None);
+        self.prepare_snapshot_save(i);
+    }
+
+    /// Bring the drawing state the file stores up to date, without the save
+    /// event an autosave does not raise.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn prepare_snapshot_save(&mut self, i: usize) {
         self.sync_view_state_for_save(i);
         sync_annotation_scale_header(&mut self.tabs[i].scene);
         self.stamp_header_sysvars(i);
         self.tabs[i].scene.document.header.user_real1 = self.tabs[i].scene.annotation_scale as f64;
         self.sync_solid_models_for_save(i);
         self.tabs[i].scene.sync_native_parametric_graph();
+        self.stamp_sheet_set_data(i);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2079,7 +2281,7 @@ impl OpenCADStudio {
         tab_id: u64,
         filename: String,
         ext: String,
-        version: acadrust::DxfVersion,
+        version: codec::DxfVersion,
         bounds: Option<iced::Rectangle>,
         screenshot: Option<iced::window::Screenshot>,
     ) -> Task<Message> {
@@ -2092,7 +2294,7 @@ impl OpenCADStudio {
                 crate::io::thumbnail::from_screenshot(
                     screenshot,
                     bounds,
-                    version >= acadrust::DxfVersion::AC1027,
+                    version >= codec::DxfVersion::AC1027,
                 )
             })
         });
@@ -2101,7 +2303,8 @@ impl OpenCADStudio {
         }
 
         let mut recent_task = Task::none();
-        let saved = match crate::io::save_to_bytes(&self.tabs[i].scene.document, &ext, version) {
+        let document = self.tabs[i].scene.document_for_save();
+        let saved = match crate::io::save_to_bytes(&document, &ext, version) {
             Ok(bytes) => {
                 crate::sys::download_bytes(&filename, &bytes);
                 let cache_name = std::path::Path::new(&filename)
@@ -2133,8 +2336,8 @@ impl OpenCADStudio {
         };
         if self.save_dialog_for_unsaved {
             if saved {
-                if let Some(crate::app::PendingClose::Tab(index)) = self.pending_close.take() {
-                    let continuation = self.update(Message::TabClose(index));
+                if let Some(crate::app::PendingClose::Tab(tab_id)) = self.pending_close.take() {
+                    let continuation = self.update(Message::TabClose(tab_id));
                     let rest = self.continue_tab_close_queue();
                     return Task::batch([recent_task, continuation, rest]);
                 }
@@ -2151,7 +2354,7 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         path: std::path::PathBuf,
-        version: acadrust::DxfVersion,
+        version: codec::DxfVersion,
         purpose: crate::app::SavePurpose,
         continuation: crate::app::SaveContinuation,
         set_current_path: bool,
@@ -2293,12 +2496,21 @@ impl OpenCADStudio {
         let revision = self.tabs[i].edit_revision;
         let camera_generation = self.tabs[i].scene.camera_generation;
         let thumbnail = (purpose != crate::app::SavePurpose::Autosave && i == self.active_tab)
-            .then_some(version >= acadrust::DxfVersion::AC1027);
+            .then_some(version >= codec::DxfVersion::AC1027);
         let capture_bounds = thumbnail.and_then(|_| {
             crate::ui::wrap_bar::dropdown_bounds(crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID)
         });
         let clone_started = iced::time::Instant::now();
         let mut snapshot = self.tabs[i].scene.document_for_save();
+        // First save: references attached with a relative path type while
+        // the drawing had no file become relative to it.
+        if self.tabs[i].current_path.is_none() && purpose != crate::app::SavePurpose::Autosave {
+            crate::io::xref::make_relative(
+                &mut snapshot,
+                &self.tabs[i].xref_relative_on_save,
+                &path,
+            );
+        }
         // Save-As across folders: rebase relative reference paths onto the
         // new base dir inside the snapshot only (live strings are untouched).
         if purpose == crate::app::SavePurpose::SaveAs {
@@ -2547,7 +2759,8 @@ impl OpenCADStudio {
                 });
                 match outcome.continuation {
                     crate::app::SaveContinuation::CloseTab => {
-                        self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                        self.pending_close =
+                            Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                     }
                     crate::app::SaveContinuation::Quit => {
                         self.pending_close = Some(crate::app::PendingClose::Quit);
@@ -2561,7 +2774,7 @@ impl OpenCADStudio {
                 .push_error(crate::tf!("Save failed: {error}").as_ref());
             return match outcome.continuation {
                 crate::app::SaveContinuation::CloseTab => {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                    self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                     self.open_unsaved_dialog_window()
                 }
                 crate::app::SaveContinuation::Quit => {
@@ -2601,6 +2814,14 @@ impl OpenCADStudio {
                 }
                 if outcome.set_current_path {
                     let old_path = self.tabs[i].current_path.clone();
+                    if old_path.is_none() {
+                        let pending = std::mem::take(&mut self.tabs[i].xref_relative_on_save);
+                        crate::io::xref::make_relative(
+                            &mut self.tabs[i].scene.document,
+                            &pending,
+                            &outcome.path,
+                        );
+                    }
                     self.tabs[i].current_path = Some(outcome.path.clone());
                     self.tabs[i].scene.document.version = outcome.version;
                     if outcome.purpose == crate::app::SavePurpose::SaveAs {
@@ -2644,7 +2865,7 @@ impl OpenCADStudio {
             crate::app::SaveContinuation::CloseTab if snapshot_is_current => {
                 self.pending_close = None;
                 tasks.push(self.close_unsaved_dialog_window());
-                tasks.push(self.update(Message::TabClose(i)));
+                tasks.push(self.update(Message::TabClose(self.tabs[i].id)));
                 tasks.push(self.continue_tab_close_queue());
             }
             crate::app::SaveContinuation::Quit if snapshot_is_current => {
@@ -2658,7 +2879,7 @@ impl OpenCADStudio {
                 }
             }
             crate::app::SaveContinuation::CloseTab => {
-                self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                 tasks.push(self.open_unsaved_dialog_window());
             }
             crate::app::SaveContinuation::Quit => {
@@ -2677,7 +2898,10 @@ impl OpenCADStudio {
     ) {
         self.pending_close = match continuation {
             crate::app::SaveContinuation::None => None,
-            crate::app::SaveContinuation::CloseTab => Some(crate::app::PendingClose::Tab(tab_idx)),
+            crate::app::SaveContinuation::CloseTab => self
+                .tabs
+                .get(tab_idx)
+                .map(|tab| crate::app::PendingClose::Tab(tab.id)),
             crate::app::SaveContinuation::Quit => Some(crate::app::PendingClose::Quit),
         };
     }
@@ -2930,6 +3154,8 @@ impl OpenCADStudio {
             let default_name = filename;
             let (filter_label, filter_ext): (&str, &str) = if ext.eq_ignore_ascii_case("dxf") {
                 ("DXF Files", "dxf")
+            } else if ext.eq_ignore_ascii_case("dwt") {
+                ("Drawing Template (*.dwt)", "dwt")
             } else {
                 ("DWG Files", "dwg")
             };
@@ -3088,7 +3314,7 @@ impl OpenCADStudio {
             if !self.tabs[i].dirty || self.active_save_jobs.contains_key(&self.tabs[i].id) {
                 continue;
             }
-            self.prepare_native_save(i);
+            self.prepare_snapshot_save(i);
             let version = self.tabs[i].scene.document.version;
             let target = self.autosave_target(i);
             tasks.push(self.queue_native_save(
@@ -3116,6 +3342,10 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             let _ = std::fs::remove_file(self.autosave_target(i));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        for path in &self.sheet_set.locks {
+            crate::app::commands::sheet_set::release_lock(path);
+        }
     }
 
     /// Remove the autosave recovery files, then quit the application.
@@ -3135,7 +3365,7 @@ impl OpenCADStudio {
     /// paper-unit conversion, the way the commercial application writes
     /// "1:1" on an inch page setup over a millimetre paper space as
     /// `1 in = 25.4 units`.
-    fn dialog_plot_scale_ratio(&self) -> ((f64, f64), Option<acadrust::objects::ScaledType>) {
+    fn dialog_plot_scale_ratio(&self) -> ((f64, f64), Option<codec::objects::ScaledType>) {
         let d = &self.plot_dialog;
         let scene = &self.tabs[self.active_tab].scene;
         let factor = plot_dialog_scale_factor(d);
@@ -3266,8 +3496,8 @@ impl OpenCADStudio {
     /// Everything the dialog has no control for (viewport-border and
     /// paper-update flags, the plot view handle, the paper unit that fixes
     /// the layout's coordinate system) is carried over from here untouched.
-    fn dialog_base_settings(&self) -> acadrust::objects::PlotSettings {
-        use acadrust::objects::{PlotPaperUnits, PlotSettings};
+    fn dialog_base_settings(&self) -> codec::objects::PlotSettings {
+        use codec::objects::{PlotPaperUnits, PlotSettings};
         let scene = &self.tabs[self.active_tab].scene;
         self.plot_setup_template
             .clone()
@@ -3286,10 +3516,10 @@ impl OpenCADStudio {
     /// settings both come from here so the two can never drift apart.
     fn plot_settings_from_dialog(
         &self,
-        mut ps: acadrust::objects::PlotSettings,
-    ) -> acadrust::objects::PlotSettings {
+        mut ps: codec::objects::PlotSettings,
+    ) -> codec::objects::PlotSettings {
         use crate::io::paper_catalog::Orientation;
-        use acadrust::objects::{
+        use codec::objects::{
             PlotPaperUnits, PlotType, ScaledType, ShadePlotMode, ShadePlotResolutionLevel,
         };
         let d = &self.plot_dialog;
@@ -3400,10 +3630,13 @@ impl OpenCADStudio {
     pub(super) fn apply_plot_page_settings(&mut self) {
         let i = self.active_tab;
         let layout_name = self.tabs[i].scene.current_layout.clone();
+        let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
         if layout_name == "Model" {
+            // Model keeps its page setup too (#1620); it has no sheet limits.
+            self.tabs[i].scene.set_layout_plot_settings(&layout_name, &ps);
+            self.tabs[i].dirty = true;
             return;
         }
-        let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
         let (w, h) = plot_dialog_sheet_mm(&self.plot_dialog);
         let plot_area = self.plot_dialog.area.clone();
         let center = ps.flags.plot_centered;
@@ -3424,7 +3657,7 @@ impl OpenCADStudio {
         let (x0, y0) = (-left * units_per_mm, -bottom * units_per_mm);
         let (lw, lh) = (w * units_per_mm, h * units_per_mm);
         for obj in self.tabs[i].scene.document.objects.values_mut() {
-            if let acadrust::objects::ObjectType::Layout(layout) = obj {
+            if let codec::objects::ObjectType::Layout(layout) = obj {
                 if layout.name == layout_name {
                     layout.min_limits = (x0, y0);
                     layout.max_limits = (x0 + lw, y0 + lh);
@@ -3578,7 +3811,19 @@ impl OpenCADStudio {
         task
     }
 
+    /// A plot gives its fields (PlotDate) the plot time, as the reference
+    /// stores it; the hosts are redrawn before the plot reads the scene.
+    pub(in crate::app) fn stamp_plot_fields(&mut self) {
+        let i = self.active_tab;
+        let hosts = crate::entities::field::stamp_plot_fields(&mut self.tabs[i].scene.document);
+        if !hosts.is_empty() {
+            self.tabs[i].scene.bump_text_hosts(&hosts);
+            self.tabs[i].dirty = true;
+        }
+    }
+
     fn print_all_pages(&mut self) -> Result<Vec<crate::io::pdf_export::PdfPageInput>, String> {
+        self.stamp_plot_fields();
         let available = self.tabs[self.active_tab].scene.layout_names();
         let selected: Vec<String> = self
             .print_all_layouts
@@ -3699,10 +3944,11 @@ impl OpenCADStudio {
             }
         };
         let worker_path = path.clone();
+        let fallback_style = self.dialog_plot_style(&dialog);
         self.save_config();
         self.close_active_modal();
         let work = move || {
-            crate::io::pdf_export::export_pdf_pages(&pages, &worker_path, None)
+            crate::io::pdf_export::export_pdf_pages(&pages, &worker_path, fallback_style.as_ref())
                 .map(|_| {
                     crate::tf!(
                         "Exported {} layouts to {}",
@@ -3741,13 +3987,14 @@ impl OpenCADStudio {
                 }
             };
             let options = self.plot_print_options(&dialog);
+            let fallback_style = self.dialog_plot_style(&dialog);
             let temp_path = crate::io::print_to_printer::temp_pdf_path("print_all");
             self.save_config();
             self.close_active_modal();
             self.command_line
                 .push_info(crate::t!("Sending selected layouts to the system printer…").as_ref());
             let work = move || {
-                crate::io::pdf_export::export_pdf_pages(&pages, &temp_path, None)
+                crate::io::pdf_export::export_pdf_pages(&pages, &temp_path, fallback_style.as_ref())
                     .and_then(|_| {
                         crate::io::print_to_printer::print_existing_pdf(&temp_path, &options)
                     })
@@ -3766,7 +4013,7 @@ impl OpenCADStudio {
         F: FnOnce() -> Result<String, String> + Send + 'static,
     {
         if background {
-            background_task(work, Message::PrintAllFinished)
+            background_task(crate::t!("Print all"), work, Message::PrintAllFinished)
         } else {
             Task::done(Message::PrintAllFinished(work()))
         }
@@ -3777,7 +4024,7 @@ impl OpenCADStudio {
         F: FnOnce() -> Result<String, String> + Send + 'static,
     {
         if background {
-            background_task(work, move |result| {
+            background_task(crate::t!("Plot"), work, move |result| {
                 Message::BackgroundIoFinished(result, reopen_plot)
             })
         } else {
@@ -3792,7 +4039,7 @@ impl OpenCADStudio {
         self.layout_plot_page_for(&self.plot_dialog.area)
     }
 
-    fn layout_plot_page_for(&self, plot_area: &str) -> PdfPageInput {
+    pub(in crate::app) fn layout_plot_page_for(&self, plot_area: &str) -> PdfPageInput {
         let i = self.active_tab;
         let scene = &self.tabs[i].scene;
         let paper_space = scene.current_layout != "Model";
@@ -3987,6 +4234,7 @@ impl OpenCADStudio {
         self.command_line
             .push_info(crate::t!("Sending to system printer…").as_ref());
         background_task(
+            crate::t!("Print to printer"),
             move || {
                 iced::futures::executor::block_on(
                     crate::io::print_to_printer::print_wires_with(page, options),
@@ -4001,7 +4249,7 @@ impl OpenCADStudio {
     /// active page setup, no dialog. Model space only. (#325)
     pub(crate) fn on_quick_print_handles(
         &mut self,
-        handles: Vec<acadrust::Handle>,
+        handles: Vec<codec::Handle>,
     ) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].scene.current_layout != "Model" {
@@ -4009,7 +4257,7 @@ impl OpenCADStudio {
                 .push_error(crate::t!("Quick print works in model space.").as_ref());
             return Task::none();
         }
-        let set: std::collections::HashSet<acadrust::Handle> = handles.into_iter().collect();
+        let set: std::collections::HashSet<codec::Handle> = handles.into_iter().collect();
         // Union the AABBs of the picked entities' wires (world XY), matched by
         // each wire's handle.
         let (x0, y0, x1, y1, any) = {
@@ -4242,6 +4490,7 @@ impl OpenCADStudio {
         d.printer_media = None;
         let name = printer.clone();
         background_task(
+            crate::t!("Printer capabilities"),
             move || crate::io::plot_device::printer_capabilities(&printer),
             move |caps| Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::PrinterMedia(name, caps)),
         )
@@ -4331,9 +4580,9 @@ impl OpenCADStudio {
     ///
     /// On CUPS platforms (Linux, macOS) the driver's options are listed in an
     /// in-line editor and applied to every job for that printer through
-    /// `lp -o`. On Windows the driver's own document-properties sheet is
-    /// shown and its result stored as the printer's preferences, which the
-    /// print job honours. Without a named printer, or where the options
+    /// `lp -o`. On Windows the system opens the driver's own printing
+    /// preferences in its own process, and the print job honours what the
+    /// user saves there. Without a named printer, or where the options
     /// cannot be listed, the platform's printer settings open instead.
     fn on_printer_properties(&mut self) -> Task<Message> {
         // "Default" is a real printer: its preferences sheet is the one to
@@ -4344,12 +4593,18 @@ impl OpenCADStudio {
             .clone()
             .or_else(|| self.plot_dialog.default_printer.clone());
         let Some(printer) = chosen.filter(|_| !self.plot_dialog.to_file) else {
-            self.open_printer_settings_fallback();
+            self.open_printer_settings(None);
             return Task::none();
         };
         #[cfg(target_os = "windows")]
         {
-            return self.edit_windows_printer_preferences(printer);
+            // The driver's sheet is modal: it pumps messages itself until the
+            // user closes it. Hosted on our event-loop thread it starves the
+            // loop it is sharing, so the window stops painting and a core
+            // spins. The system's own preferences process pumps its own
+            // messages instead, which leaves ours free.
+            self.open_printer_settings(Some(&printer));
+            return Task::none();
         }
         #[allow(unreachable_code)]
         {
@@ -4361,6 +4616,7 @@ impl OpenCADStudio {
             });
             let name = printer.clone();
             background_task(
+                crate::t!("Printer options"),
                 move || crate::io::print_to_printer::printer_options(&printer),
                 move |result| {
                     Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::PrinterOptionsLoaded(
@@ -4371,40 +4627,11 @@ impl OpenCADStudio {
         }
     }
 
-    /// The driver's document-properties sheet, owned by the main window so
-    /// it sits on top of the plot dialog.
-    #[cfg(target_os = "windows")]
-    fn edit_windows_printer_preferences(&mut self, printer: String) -> Task<Message> {
-        let Some(window) = self.main_window else {
-            self.open_printer_settings_fallback();
-            return Task::none();
-        };
-        iced::window::run(window, move |w| {
-            use iced::window::raw_window_handle::RawWindowHandle;
-            let owner = match w.window_handle().ok().map(|h| h.as_raw()) {
-                Some(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
-                _ => 0,
-            };
-            match crate::io::print_to_printer::edit_printer_preferences(&printer, owner) {
-                Ok(true) => Ok(crate::tf!("Printing preferences saved for {printer}.").into_owned()),
-                Ok(false) => Ok(crate::t!("Printing preferences unchanged.").into_owned()),
-                Err(error) => Err(error),
-            }
-        })
-        .then(|result| {
-            Task::done(Message::BackgroundIoFinished(
-                result.map(|message| message),
-                false,
-            ))
-        })
-    }
-
-    /// The platform's printer settings surface: a settings panel on Linux,
-    /// the printers control panel on Windows, System Settings on macOS.
-    fn open_printer_settings_fallback(&mut self) {
-        match crate::io::print_to_printer::open_printer_properties(
-            self.plot_dialog.printer.as_deref(),
-        ) {
+    /// The platform's printer settings surface: the driver's printing
+    /// preferences for `printer`, or — without one — a settings panel on
+    /// Linux, the printers control panel on Windows, System Settings on macOS.
+    fn open_printer_settings(&mut self, printer: Option<&str>) {
+        match crate::io::print_to_printer::open_printer_properties(printer) {
             Ok(()) => self
                 .command_line
                 .push_info(crate::t!("Opened printer properties.").as_ref()),
@@ -4936,14 +5163,14 @@ impl OpenCADStudio {
     /// Build a `PlotSettings` from the current dialog fields (for saving a named
     /// page setup).
     /// The dialog's values as a named page setup.
-    fn dialog_to_plotsettings(&self) -> acadrust::objects::PlotSettings {
+    fn dialog_to_plotsettings(&self) -> codec::objects::PlotSettings {
         self.plot_settings_from_dialog(self.dialog_base_settings())
     }
 
     /// Load a `PlotSettings` into the dialog editor fields.
-    fn load_plotsettings_into_dialog(&mut self, ps: &acadrust::objects::PlotSettings) {
+    pub(in crate::app) fn load_plotsettings_into_dialog(&mut self, ps: &codec::objects::PlotSettings) {
         use crate::io::paper_catalog::PaperUnits;
-        use acadrust::objects::{PlotType, ShadePlotMode, ShadePlotResolutionLevel};
+        use codec::objects::{PlotType, ShadePlotMode, ShadePlotResolutionLevel};
         self.plot_setup_template = Some(ps.clone());
         if matches!(ps.plot_type, PlotType::Window) && !ps.plot_window.is_empty() {
             self.plot_window = Some((
@@ -5026,7 +5253,7 @@ impl OpenCADStudio {
         }
         d.center = ps.flags.plot_centered;
         d.paper_units = match ps.paper_units {
-            acadrust::objects::PlotPaperUnits::Inches => PaperUnits::Inches,
+            codec::objects::PlotPaperUnits::Inches => PaperUnits::Inches,
             _ => PaperUnits::Millimeters,
         };
         d.offset_x = trim_decimals(&format!("{:.4}", d.paper_units.from_mm(ps.origin_x)));
@@ -5162,13 +5389,16 @@ impl OpenCADStudio {
         // into it when "Save changes to layout" is on, so the page setup
         // remembers the last plot the way other applications expect. The
         // runtime paper/scale choices drive this one plot operation either way.
-        if !preview && d.save_to_layout && d.paper_space {
+        if !preview && d.save_to_layout {
             self.apply_dialog_to_layout();
         } else {
             self.sync_dialog_plot_runtime();
         }
         self.active_modal = None;
         self.reset_modal_geometry();
+        if !preview {
+            self.stamp_plot_fields();
+        }
 
         // Extents, Window and Display use one plot path in both spaces. Only
         // Paper-space Layout is special: it uses the physical sheet bounds.
@@ -5299,15 +5529,15 @@ impl OpenCADStudio {
             .cloned()
     }
 
-    fn window_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn window_plot_job(&self) -> Option<PdfPageInput> {
         self.area_plot_job(self.plot_window?)
     }
 
-    fn display_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn display_plot_job(&self) -> Option<PdfPageInput> {
         self.area_plot_job(self.display_plot_window()?)
     }
 
-    fn limits_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn limits_plot_job(&self) -> Option<PdfPageInput> {
         let (min, max) = self.tabs[self.active_tab].scene.current_drawing_limits()?;
         self.area_plot_job((min.x, min.y, max.x, max.y))
     }
@@ -5326,15 +5556,12 @@ impl OpenCADStudio {
         let half_w = view.width.abs() * 0.5;
         let half_h = view.height.abs() * 0.5;
         (half_w > 1e-9 && half_h > 1e-9).then_some(())?;
-        self.area_plot_job((
-            view.center.x - half_w,
-            view.center.y - half_h,
-            view.center.x + half_w,
-            view.center.y + half_h,
-        ))
+        let center = crate::scene::named_view_center(view);
+        let (cx, cy) = (center.x, center.y);
+        self.area_plot_job((cx - half_w, cy - half_h, cx + half_w, cy + half_h))
     }
 
-    fn extents_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn extents_plot_job(&self) -> Option<PdfPageInput> {
         let scene = &self.tabs[self.active_tab].scene;
         if scene.current_layout == "Model" {
             let (min, max) = scene.model_space_extents()?;
@@ -5354,7 +5581,7 @@ impl OpenCADStudio {
     /// canvas outside the sheet, matching Model-space plotting.
     fn display_plot_window(&self) -> Option<(f64, f64, f64, f64)> {
         let scene = &self.tabs[self.active_tab].scene;
-        let (canvas_w, canvas_h) = scene.selection.borrow().vp_size;
+        let (canvas_w, canvas_h) = scene.selection.borrow().view.vp_size;
         let viewport = if scene.current_layout == "Model" {
             scene.active_model_tile_bounds(canvas_w, canvas_h)
         } else {
@@ -5577,6 +5804,9 @@ mod plot_paper_tests {
         app.automation_op(r#"{"op":"new"}"#);
         let _ = app.update(Message::LayoutSwitch("Layout1".into()));
         let i = app.active_tab;
+        // Millimetre drawing units, so a ratio plots as written; the metre
+        // case has its own test.
+        app.tabs[i].scene.document.header.insertion_units = 4;
         let mut ps = app.tabs[i]
             .scene
             .plot_settings_for("Layout1")
@@ -5585,7 +5815,7 @@ mod plot_paper_tests {
         ps.paper_width = 297.0;
         ps.paper_height = 210.0;
         // Such drivers spell the orientation in the dimensions, not the rotation.
-        ps.rotation = acadrust::objects::PlotRotation::None;
+        ps.rotation = codec::objects::PlotRotation::None;
         assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
         app
     }
@@ -5595,21 +5825,21 @@ mod plot_paper_tests {
         (ps.paper_size, ps.paper_width, ps.paper_height)
     }
 
-    fn layout_settings(app: &OpenCADStudio) -> acadrust::objects::PlotSettings {
+    fn layout_settings(app: &OpenCADStudio) -> codec::objects::PlotSettings {
         app.tabs[app.active_tab]
             .scene
             .plot_settings_for("Layout1")
             .unwrap()
     }
 
-    fn layout_rotation(app: &OpenCADStudio) -> acadrust::objects::PlotRotation {
+    fn layout_rotation(app: &OpenCADStudio) -> codec::objects::PlotRotation {
         layout_settings(app).rotation
     }
 
     /// Store the drawing's plot settings for `Layout1` after `edit` touched them.
     fn edit_layout_settings(
         app: &mut OpenCADStudio,
-        edit: impl FnOnce(&mut acadrust::objects::PlotSettings),
+        edit: impl FnOnce(&mut codec::objects::PlotSettings),
     ) {
         let i = app.active_tab;
         let mut ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
@@ -5619,7 +5849,7 @@ mod plot_paper_tests {
 
     #[test]
     fn a_new_drawing_starts_with_a_compatible_default_layout() {
-        use acadrust::objects::{PlotRotation, PlotType, ScaledType};
+        use codec::objects::{PlotRotation, PlotType, ScaledType};
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let _ = app.update(Message::LayoutSwitch("Layout1".into()));
@@ -5643,7 +5873,7 @@ mod plot_paper_tests {
 
     #[test]
     fn orientation_is_stored_as_a_rotation_of_the_medium() {
-        use acadrust::objects::PlotRotation as R;
+        use codec::objects::PlotRotation as R;
         use crate::ui::window::plot::PlotFlag;
         // A newly picked sheet is the catalogue's portrait medium…
         let portrait_medium = [
@@ -5691,7 +5921,7 @@ mod plot_paper_tests {
 
     #[test]
     fn standard_scales_are_written_by_code_and_others_as_ratios() {
-        use acadrust::objects::ScaledType;
+        use codec::objects::ScaledType;
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
@@ -5739,7 +5969,7 @@ mod plot_paper_tests {
 
     #[test]
     fn a_metre_drawing_stores_the_millimetres_it_really_plots_per_unit() {
-        use acadrust::objects::ScaledType;
+        use codec::objects::ScaledType;
         let mut app = app_with_printer_named_sheet();
         // Insertion units: metres. "1:100" then plots 10 mm per drawing unit.
         app.tabs[app.active_tab].scene.document.header.insertion_units = 6;
@@ -5759,7 +5989,7 @@ mod plot_paper_tests {
 
     #[test]
     fn an_inch_layout_keeps_its_unit_and_converts_the_scale() {
-        use acadrust::objects::{PlotPaperUnits, ScaledType};
+        use codec::objects::{PlotPaperUnits, ScaledType};
         let mut app = app_with_printer_named_sheet();
         edit_layout_settings(&mut app, |ps| ps.paper_units = PlotPaperUnits::Inches);
         let _ = app.on_plot_dialog_open();
@@ -5822,8 +6052,8 @@ mod plot_paper_tests {
         assert_eq!(layout.flags, named.flags);
         assert_eq!(layout.shade_plot_mode, named.shade_plot_mode);
         assert_eq!(layout.shade_plot_resolution, named.shade_plot_resolution);
-        assert_eq!(named.rotation, acadrust::objects::PlotRotation::Degrees270);
-        assert_eq!(named.scale_type, acadrust::objects::ScaledType::OneToFifty);
+        assert_eq!(named.rotation, codec::objects::PlotRotation::Degrees270);
+        assert_eq!(named.scale_type, codec::objects::ScaledType::OneToFifty);
     }
 
     #[test]
@@ -5866,7 +6096,7 @@ mod plot_paper_tests {
     }
 
     /// The page-setup fields the file format stores, minus handles.
-    fn stored_fields(ps: &acadrust::objects::PlotSettings) -> String {
+    fn stored_fields(ps: &codec::objects::PlotSettings) -> String {
         format!(
             "{} | {} | {:?} | {:.6} {:.6} | {:.6} {:.6} {:.6} {:.6} | {:.6} {:.6} | {} {} \
              | {:.6} / {:.6} | {:.9} | {:?} | {:?} | {:?} {:?} {}",
@@ -5900,7 +6130,7 @@ mod plot_paper_tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn fixture_page_setups_round_trip_through_the_dialog_unchanged() {
-        use acadrust::objects::{PlotRotation, ScaledType};
+        use codec::objects::{PlotRotation, ScaledType};
         let mut app = app_with_fixture();
         let a3_medium = (297.0106506347656, 419.9889831542968);
         let arch_d_medium = (914.4000244140626, 609.5999755859375);
@@ -5945,7 +6175,7 @@ mod plot_paper_tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn fixture_pdf_layout_takes_a_new_sheet_in_canonical_form() {
-        use acadrust::objects::{PaperMargin, PlotRotation};
+        use codec::objects::{PaperMargin, PlotRotation};
         let mut app = app_with_fixture();
         let _ = app.update(Message::LayoutSwitch("A4 1-100".into()));
         let _ = app.on_plot_dialog_open();
@@ -5982,7 +6212,7 @@ mod plot_paper_tests {
 
     #[test]
     fn switching_the_page_setup_unit_respells_offsets_and_keeps_the_output() {
-        use acadrust::objects::{PlotPaperUnits, ScaledType};
+        use codec::objects::{PlotPaperUnits, ScaledType};
         use crate::ui::window::plot::PlotFlag;
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
@@ -6021,7 +6251,7 @@ mod plot_paper_tests {
 
     #[test]
     fn custom_scale_fields_follow_and_drive_the_picker() {
-        use acadrust::objects::ScaledType;
+        use codec::objects::ScaledType;
         use crate::ui::window::plot::PlotFlag;
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
@@ -6149,7 +6379,7 @@ mod plot_paper_tests {
         assert_eq!(name, "A4", "the driver's own spelling must survive the dialog");
         // …and so must the driver's landscape medium: unrotated, as stored.
         assert_eq!((w, h), (297.0, 210.0));
-        assert_eq!(layout_rotation(&app), acadrust::objects::PlotRotation::None);
+        assert_eq!(layout_rotation(&app), codec::objects::PlotRotation::None);
     }
 
     #[test]
@@ -6162,7 +6392,7 @@ mod plot_paper_tests {
         let (name, w, h) = layout_paper(&app);
         assert_eq!(name, "ISO_A3_(297.00_x_420.00_MM)");
         assert_eq!((w, h), (297.0, 420.0));
-        assert_eq!(layout_rotation(&app), acadrust::objects::PlotRotation::Degrees90);
+        assert_eq!(layout_rotation(&app), codec::objects::PlotRotation::Degrees90);
         // The next dialog remembers the sheet the user chose.
         assert_eq!(app.plot_paper.canonical, "ISO_A3_(297.00_x_420.00_MM)");
     }
@@ -6176,7 +6406,7 @@ mod plot_paper_tests {
         let ps = app.tabs[app.active_tab].scene.plot_settings_for("Layout1").unwrap();
         assert_eq!(ps.printer_name, "DWG To PDF.pc3");
         // A changed device takes the PDF driver's printable area for the sheet.
-        assert_eq!(ps.margins, acadrust::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0));
+        assert_eq!(ps.margins, codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0));
     }
 
     #[test]
@@ -6200,7 +6430,7 @@ mod plot_paper_tests {
         let mut ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
         ps.printer_name = "DWF6 ePlot.pc3".into();
         ps.paper_size = "ISO_A4_(210.00_x_297.00_MM)".into();
-        ps.margins = acadrust::objects::PaperMargin::new(5.793749, 17.793753, 5.793744, 17.793747);
+        ps.margins = codec::objects::PaperMargin::new(5.793749, 17.793753, 5.793744, 17.793747);
         assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
         let _ = app.on_plot_dialog_open();
         assert!(app.plot_dialog.to_file, "an unknown plotter plots to PDF here");
@@ -6217,18 +6447,18 @@ mod plot_paper_tests {
         let mut ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
         ps.printer_name = "DWG To PDF.pc3".into();
         ps.paper_size = "ISO_A4_(210.00_x_297.00_MM)".into();
-        ps.margins = acadrust::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0);
+        ps.margins = codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0);
         assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_full_bleed_A4_(210.00_x_297.00_MM)".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
         assert_eq!(ps.paper_size, "ISO_full_bleed_A4_(210.00_x_297.00_MM)");
-        assert_eq!(ps.margins, acadrust::objects::PaperMargin::new(0.0, 1.0, 0.0, 1.0));
+        assert_eq!(ps.margins, codec::objects::PaperMargin::new(0.0, 1.0, 0.0, 1.0));
         let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
-        assert_eq!(ps.margins, acadrust::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0));
+        assert_eq!(ps.margins, codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0));
         assert_eq!((ps.paper_width, ps.paper_height), (297.0, 420.0));
     }
 
@@ -6278,8 +6508,8 @@ mod plot_paper_tests {
         let ps = app.tabs[app.active_tab].scene.plot_settings_for("Layout1").unwrap();
         assert_eq!(ps.paper_size, "Roll_24_(609.60_x_1500.00_MM)");
         assert_eq!((ps.paper_width, ps.paper_height), (609.6, 1500.0));
-        assert_eq!(ps.rotation, acadrust::objects::PlotRotation::Degrees90);
-        assert_eq!(ps.margins, acadrust::objects::PaperMargin::new(3.0, 17.0, 6.0, 4.0));
+        assert_eq!(ps.rotation, codec::objects::PlotRotation::Degrees90);
+        assert_eq!(ps.margins, codec::objects::PaperMargin::new(3.0, 17.0, 6.0, 4.0));
         // Re-adding the same size replaces the definition instead of duplicating it.
         let _ = app.on_plot_dlg(custom(C::Open));
         assert_eq!(app.plot_dialog.custom_editor.as_ref().map(|d| d.name.as_str()), Some("Roll 24"));
@@ -6399,7 +6629,7 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert_eq!(name, "Roll_24_(609.60_x_1500.00_MM)");
         // The drawing's own landscape medium stays as it was stored.
         assert_eq!((w, h), (1500.0, 609.6));
-        assert_eq!(layout_rotation(&app), acadrust::objects::PlotRotation::None);
+        assert_eq!(layout_rotation(&app), codec::objects::PlotRotation::None);
     }
 }
 
@@ -6416,7 +6646,7 @@ mod plot_device_persistence_tests {
         let mut app = OpenCADStudio::new_for_test();
         // A real drawing's layout carries plot settings with no device; the
         // auto-applied setup used to reset the choice to the default.
-        let mut ps = acadrust::objects::PlotSettings::default();
+        let mut ps = codec::objects::PlotSettings::default();
         ps.printer_name = String::new();
         let layout = app.tabs[app.active_tab].scene.current_layout.clone();
         assert!(
@@ -6442,7 +6672,7 @@ mod plot_device_persistence_tests {
     fn layout_device_overrides_the_saved_preference() {
         let mut app = OpenCADStudio::new_for_test();
         app.plot_dialog.printer = Some("Brother DCP-L2520D series".into());
-        let mut ps = acadrust::objects::PlotSettings::default();
+        let mut ps = codec::objects::PlotSettings::default();
         ps.printer_name = "Godex G500".into();
         app.load_plotsettings_into_dialog(&ps);
         assert_eq!(app.plot_dialog.printer.as_deref(), Some("Godex G500"));
@@ -6467,8 +6697,8 @@ mod plot_device_persistence_tests {
     #[test]
     fn layout_window_is_mirrored_into_the_dialog() {
         let mut app = OpenCADStudio::new_for_test();
-        let mut ps = acadrust::objects::PlotSettings::default();
-        ps.plot_type = acadrust::objects::PlotType::Window;
+        let mut ps = codec::objects::PlotSettings::default();
+        ps.plot_type = codec::objects::PlotType::Window;
         ps.set_plot_window(1.0, 2.0, 3.0, 4.0);
         app.load_plotsettings_into_dialog(&ps);
         assert_eq!(app.plot_window, Some((1.0, 2.0, 3.0, 4.0)));
@@ -6480,10 +6710,61 @@ mod plot_device_persistence_tests {
     fn pdf_device_switches_to_file_output() {
         let mut app = OpenCADStudio::new_for_test();
         app.plot_dialog.printer = Some("Brother DCP-L2520D series".into());
-        let mut ps = acadrust::objects::PlotSettings::default();
+        let mut ps = codec::objects::PlotSettings::default();
         ps.printer_name = "Microsoft Print to PDF".into();
         app.load_plotsettings_into_dialog(&ps);
         assert!(app.plot_dialog.to_file);
         assert!(app.plot_dialog.printer.is_none());
+    }
+}
+
+#[cfg(test)]
+mod background_task_tests {
+    use super::background_task;
+    use crate::app::{Message, OpenCADStudio};
+    use iced::futures::StreamExt;
+    use iced::Task;
+
+    /// Pull the single message a finished background task produces, the same
+    /// way the headless automation driver consumes task streams.
+    fn next_message(task: Task<Message>) -> Message {
+        let mut stream =
+            iced_runtime::task::into_stream(task).expect("background_task yields a stream");
+        match iced::futures::executor::block_on(stream.next()) {
+            Some(iced_runtime::Action::Output(message)) => message,
+            other => panic!("expected task output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn worker_panic_becomes_a_failure_message() {
+        let task =
+            background_task("STL export", || panic!("worker exploded"), |()| Message::Noop);
+        match next_message(task) {
+            Message::BackgroundTaskFailed { context, detail } => {
+                assert_eq!(context, "STL export");
+                assert!(
+                    detail.contains("worker exploded"),
+                    "detail should carry the panic message, got: {detail}"
+                );
+            }
+            other => panic!("expected BackgroundTaskFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn worker_panic_is_reported_on_the_command_line() {
+        let mut app = OpenCADStudio::new_for_test();
+        let task =
+            background_task("STL export", || panic!("worker exploded"), |()| Message::Noop);
+        app.drive_headless_task(task)
+            .expect("failed worker task drives headlessly");
+        let error = app
+            .command_line
+            .last_error
+            .as_deref()
+            .expect("worker panic reported as an error");
+        assert!(error.contains("STL export"), "error = {error}");
+        assert!(error.contains("worker exploded"), "error = {error}");
     }
 }

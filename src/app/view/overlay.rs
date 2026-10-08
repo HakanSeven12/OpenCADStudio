@@ -489,7 +489,7 @@ fn mtext_editor_content<'a>(
     // Same colour picker as the Properties panel (named swatches + "More…" full
     // palette), applied to the selection or the whole text.
     let color_pl = iced::widget::container(crate::ui::color_select::color_selector(
-        acadrust::types::Color::from_index(ed.color_aci as i16),
+        codec::types::Color::from_index(ed.color_aci as i16),
         ed.color_picker_open,
         crate::ui::color_select::ColorExtras {
             by_layer: true,
@@ -500,7 +500,7 @@ fn mtext_editor_content<'a>(
         Message::MTextColorPickerToggle,
         Message::OpenColorWindow(
             crate::app::ColorPickTarget::MText,
-            acadrust::types::Color::from_index(ed.color_aci as i16),
+            codec::types::Color::from_index(ed.color_aci as i16),
         ),
     ))
     .width(iced::Length::Fixed(150.0));
@@ -1124,20 +1124,27 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
 /// panel's border, when the menu opens.
 const MENU_CURSOR_INSET_X: f32 = 24.0;
 /// Width of the icon gutter every row reserves so labels line up whether or
-/// not the row carries a glyph (object snaps, Pan / Zoom).
+/// not the row carries a glyph (object snaps, command icons).
 const MENU_GUTTER_W: f32 = 18.0;
 const MENU_ICON_SIZE: f32 = 14.0;
 
-/// The gutter cell: the row's glyph, or empty space of the same width.
-fn context_menu_gutter(icon: Option<MenuIcon>) -> Element<'static, Message> {
-    let bytes = icon.map(|icon| match icon {
-        MenuIcon::Snap(t) => crate::ui::icons::osnap(t),
-        MenuIcon::Mtp => crate::ui::icons::mtp_icon(),
-        MenuIcon::Pan => crate::ui::icons::pan_icon(),
-        MenuIcon::Zoom => crate::ui::icons::zoom_icon(),
-    });
-    let cell: Element<'static, Message> = match bytes {
-        Some(bytes) => crate::ui::icons::themed::<Message>(bytes, MENU_ICON_SIZE),
+/// The gutter cell: the row's glyph, faded with a disabled row, or empty
+/// space of the same width.
+fn context_menu_gutter(icon: Option<MenuIcon>, enabled: bool) -> Element<'static, Message> {
+    use crate::ui::icons;
+    let chrome = |bytes| {
+        if enabled {
+            icons::themed::<Message>(bytes, MENU_ICON_SIZE)
+        } else {
+            icons::themed_disabled::<Message>(bytes, MENU_ICON_SIZE)
+        }
+    };
+    let cell: Element<'static, Message> = match icon {
+        Some(MenuIcon::Snap(t)) => chrome(icons::osnap(t)),
+        Some(MenuIcon::Mtp) => chrome(icons::mtp_icon()),
+        Some(MenuIcon::Chrome(bytes)) => chrome(bytes),
+        Some(MenuIcon::Tool(bytes)) if enabled => icons::semantic(bytes, MENU_ICON_SIZE),
+        Some(MenuIcon::Tool(bytes)) => icons::semantic_disabled(bytes, MENU_ICON_SIZE),
         None => iced::widget::Space::new().width(MENU_ICON_SIZE).height(MENU_ICON_SIZE).into(),
     };
     container(cell)
@@ -1188,24 +1195,27 @@ pub(super) fn viewport_context_menu_overlay(
             MenuRow::Submenu {
                 id,
                 label,
+                icon,
                 items: children,
                 open,
             } => {
                 let is_hl = highlighted == Some(sel_idx);
-                let caret = if *open {
+                let enabled = !children.is_empty();
+                let caret = if !enabled {
+                    crate::ui::icons::themed_disabled_arrow_right(9.0)
+                } else if *open {
                     crate::ui::icons::themed_arrow_down(9.0)
                 } else {
                     crate::ui::icons::themed_arrow_right(9.0)
                 };
                 let content = row![
-                    context_menu_gutter(None),
+                    context_menu_gutter(*icon, enabled),
                     text(label.clone()).size(12),
                     iced::widget::Space::new().width(Fill),
                     caret,
                 ]
                 .spacing(4)
                 .align_y(iced::Center);
-                let enabled = !children.is_empty();
                 let mut btn = button(content)
                     .padding(iced::Padding {
                         top: 3.0,
@@ -1271,7 +1281,7 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
         });
     }
     let enabled = item.enabled;
-    let mut content = row![context_menu_gutter(item.icon), label_text]
+    let mut content = row![context_menu_gutter(item.icon, enabled), label_text]
         .spacing(4)
         .align_y(iced::Center);
     if let Some(hint) = item.hint.as_ref() {
@@ -1498,7 +1508,8 @@ fn qselect_content<'a>(
     candidate_count: usize,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    use iced::widget::{checkbox, radio, rule};
+    use iced::widget::{checkbox, rule};
+    use crate::ui::style::form::{dialog_button, dialog_button_styled_opt, form_radio};
     let mut type_options: Vec<String> = vec![QSELECT_ANY_TYPE.to_string()];
     type_options.extend(types.iter().cloned());
 
@@ -1627,18 +1638,12 @@ fn qselect_content<'a>(
         append = append.on_toggle(Message::QSelectSetAppend);
     }
 
-    let cancel = button(text(t!("Cancel")).size(12))
-        .on_press(Message::QSelectClose)
-        .style(button::subtle)
-        .padding([5, 16]);
-    let apply = button(text(t!("Apply")).size(12))
-        .style(button::primary)
-        .padding([5, 18]);
-    let apply = if error.is_none() {
-        apply.on_press(Message::QSelectApply)
-    } else {
-        apply
-    };
+    let cancel = dialog_button(t!("Cancel"), Message::QSelectClose, false);
+    let apply = dialog_button_styled_opt(
+        t!("Apply"),
+        error.is_none().then_some(Message::QSelectApply),
+        button::primary,
+    );
 
     let panel_body = column![
         section_label(t!("Scope")),
@@ -1722,22 +1727,18 @@ fn qselect_content<'a>(
         section_label(t!("Result")),
         Space::new().height(5),
         column![
-            radio(
+            form_radio(
                 t!("Include matching objects"),
                 crate::app::QSelectMode::Include,
                 Some(state.mode),
                 Message::QSelectSetMode,
-            )
-            .size(14)
-            .text_size(12),
-            radio(
+            ),
+            form_radio(
                 t!("Exclude matching objects"),
                 crate::app::QSelectMode::Exclude,
                 Some(state.mode),
                 Message::QSelectSetMode,
-            )
-            .size(14)
-            .text_size(12),
+            ),
         ]
         .spacing(5),
         Space::new().height(8),

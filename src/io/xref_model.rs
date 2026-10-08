@@ -247,6 +247,11 @@ pub fn to_pathtype_result(
             if parts.is_empty() {
                 return Ok(file_name_only(path));
             }
+            // A path at or below the host folder starts "./" ("./plan.dwg",
+            // "./refs/plan.dwg"), as the reference writes it; one above starts "../".
+            if parts[0] != ".." {
+                parts.insert(0, ".".to_string());
+            }
             Ok(parts.join("/"))
         }
     }
@@ -298,7 +303,10 @@ pub fn wildcard_match(name: &str, pattern: &str) -> bool {
 pub enum RefKind {
     DwgXref,
     Image,
-    Pdf,
+    /// A PDF, DWF or DGN underlay.
+    Underlay,
+    /// A point cloud scan (.rcs) or project (.rcp).
+    PointCloud,
 }
 
 /// Lifecycle state of a [`ReferenceEntry`].
@@ -745,9 +753,9 @@ mod tests {
     // every SPIKE1 cell survived the round trip.
     #[cfg(not(target_arch = "wasm32"))]
     fn roundtrip_probe(ext: &str) {
-        use acadrust::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
-        use acadrust::tables::BlockRecord;
-        use acadrust::CadDocument;
+        use codec::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
+        use codec::tables::BlockRecord;
+        use codec::CadDocument;
 
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_probe_{}_{}",
@@ -846,7 +854,7 @@ mod tests {
         let full = to_pathtype("C:/Drawings/refs/plan.dwg", host, Pathtype::Full);
         assert_eq!(full, "C:/Drawings/refs/plan.dwg");
         let rel = to_pathtype("C:/Drawings/refs/plan.dwg", host, Pathtype::Relative);
-        assert_eq!(rel, "refs/plan.dwg");
+        assert_eq!(rel, "./refs/plan.dwg");
         let none = to_pathtype("C:/Drawings/refs/plan.dwg", host, Pathtype::None);
         assert_eq!(none, "plan.dwg");
     }

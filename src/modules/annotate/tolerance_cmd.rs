@@ -2,9 +2,9 @@
 //
 // The structured editor prepares the frame; this command places it.
 
-use acadrust::entities::Tolerance;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::Tolerance;
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
@@ -88,6 +88,7 @@ impl CadCommand for ToleranceCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -113,7 +114,9 @@ impl CadCommand for ToleranceCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }
 

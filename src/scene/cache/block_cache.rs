@@ -18,9 +18,9 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::Arc;
 
-use acadrust::types::{Color as AcadColor, LineWeight, Transform, Vector3};
-use acadrust::{CadDocument, EntityType, Handle};
-use cadkernel::space::{Plane as KernelPlane, Vec3 as KernelVec3};
+use codec::types::{Color as AcadColor, LineWeight, Transform, Vector3};
+use codec::{CadDocument, EntityType, Handle};
+use kernel::space::{Plane as KernelPlane, Vec3 as KernelVec3};
 
 use crate::scene::convert::tessellate;
 use crate::scene::model::wire_model::{
@@ -54,6 +54,7 @@ pub struct LocalWire {
     /// expand-time transform (`emit_wire`) maps each vertex to world exactly
     /// like `points`, so block-instance text lands at the right place/scale.
     pub text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
+    pub searchable_text: Vec<crate::scene::model::wire_model::SearchableTextRun>,
     pub key_vertices: Vec<[f64; 3]>,
     pub snap_pts: Vec<(glam::DVec3, SnapHint)>,
     pub tangent_geoms: Vec<TangentGeom>,
@@ -350,7 +351,12 @@ impl BlockCache {
         block_name: &str,
         visited: &mut Vec<String>,
     ) -> Option<usize> {
-        if visited.iter().any(|name| name == block_name) {
+        // `visited` is the current path, so it bounds cycles but not depth:
+        // a legal acyclic chain B1 → … → Bn recursed n frames deep and
+        // overflowed rayon's 2 MiB worker stacks (hard abort). Expansion
+        // already truncates at `MAX_NESTING_DEPTH` (`depth > 32`); stopping
+        // at the same boundary keeps cost/bounds in sync with what renders.
+        if visited.len() > MAX_NESTING_DEPTH || visited.iter().any(|name| name == block_name) {
             return None;
         }
         let defn = self.defns.get(block_name)?;
@@ -384,7 +390,9 @@ impl BlockCache {
         block_name: &str,
         visited: &mut Vec<String>,
     ) -> BlockMetrics {
-        if visited.iter().any(|name| name == block_name) {
+        // Same depth guard as `defn_inline_point_cost_recursive`: cycle-only
+        // guarding let acyclic chains recurse until the stack overflowed.
+        if visited.len() > MAX_NESTING_DEPTH || visited.iter().any(|name| name == block_name) {
             return BlockMetrics::default();
         }
         let Some(defn) = self.defns.get(block_name) else {
@@ -610,6 +618,18 @@ fn build_defn(
                 continue
             }
             _ => {
+                // A standalone definition draws its tag; as block content a
+                // constant one draws its value.
+                let shown;
+                let entity = match entity {
+                    EntityType::AttributeDefinition(ad) => {
+                        let mut value = ad.clone();
+                        value.tag = ad.default_value.clone();
+                        shown = EntityType::AttributeDefinition(value);
+                        &shown
+                    }
+                    other => other,
+                };
                 // A wide polyline inside a block carries its `world_width` on
                 // the LocalWire; `emit_wire` scales it by the insert transform
                 // so the shader band matches the scaled geometry (same band the
@@ -653,7 +673,7 @@ fn inline_wire_point_cost(wire: &LocalWire) -> Option<usize> {
 }
 
 fn build_nested_ref(
-    nested_ins: &acadrust::entities::Insert,
+    nested_ins: &codec::entities::Insert,
     scale_policy: crate::scene::BlockScalePolicy,
     doc: &CadDocument,
     anno_scale: f32,
@@ -874,6 +894,7 @@ fn tessellate_sub_local(
             is_point: matches!(sub, EntityType::Point(_)),
             point_marker: wire.point_marker,
             text_verts: wire.text_verts,
+            searchable_text: wire.searchable_text,
             key_vertices: wire.key_vertices,
             snap_pts: wire.snap_pts,
             tangent_geoms: wire.tangent_geoms,
@@ -1001,7 +1022,7 @@ pub fn aabb_disjoint_xy(a: [f32; 4], b: [f32; 4]) -> bool {
 pub fn expand_insert(
     doc: &CadDocument,
     cache: &BlockCache,
-    ins: &acadrust::entities::Insert,
+    ins: &codec::entities::Insert,
     ins_handle: Handle,
     ins_resolved_color: [f32; 4],
     ins_aci: u8,
@@ -1238,7 +1259,7 @@ fn transform_translation(transform: &Transform) -> [f64; 3] {
 
 #[allow(clippy::too_many_arguments)]
 fn expansion_prototype_key(
-    ins: &acadrust::entities::Insert,
+    ins: &codec::entities::Insert,
     transform: &Transform,
     ins_color: [f32; 4],
     ins_pat_len: f32,
@@ -1339,12 +1360,11 @@ fn translated_prototype_wire(
             }
         }
     }
-    if !wire.text_verts.is_empty() {
-        wire.text_verts =
-            crate::scene::model::wire_model::map_text_verts(&wire.text_verts, |x, y, z| {
-                (x + delta[0], y + delta[1], z + delta[2])
-            });
-    }
+    wire.map_text_layout(
+        &|p| [p[0] + delta[0], p[1] + delta[1], p[2] + delta[2]],
+        1.0,
+        0.0,
+    );
     if wire.aabb != WireModel::UNBOUNDED_AABB {
         wire.aabb[0] += delta_f32[0];
         wire.aabb[1] += delta_f32[1];
@@ -1467,6 +1487,29 @@ pub(crate) fn fade_toward_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     ]
 }
 
+/// XDWGFADECTL: how far referenced drawings fade toward the background, in
+/// percent (0–90); zero or negative shows them unfaded.
+static XREF_FADE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(50);
+
+pub fn xref_fade_ctl() -> i32 {
+    XREF_FADE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_xref_fade_ctl(value: i32) {
+    XREF_FADE.store(value.clamp(-90, 90), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A referenced drawing's colour faded by XDWGFADECTL.
+pub(crate) fn xref_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+    let t = xref_fade_ctl().clamp(0, 90) as f32 / 100.0;
+    [
+        color[0] * (1.0 - t) + bg[0] * t,
+        color[1] * (1.0 - t) + bg[1] * t,
+        color[2] * (1.0 - t) + bg[2] * t,
+        color[3],
+    ]
+}
+
 /// Style fingerprint used to group local wires into a single GPU buffer.
 /// f32 fields are bit-cast to u32 to make the key Hash + Eq.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1553,6 +1596,7 @@ struct BatchEntry {
     pick_tris_low: Vec<[f32; 3]>,
     /// Accumulated SDF glyph quads (world space) for block-instance text.
     text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
+    searchable_text: Vec<crate::scene::model::wire_model::SearchableTextRun>,
     min_x: f32,
     min_y: f32,
     max_x: f32,
@@ -1727,6 +1771,7 @@ impl Batches {
                     world_width: b.world_width,
                     depth_override: b.local_depth,
                     display_visible: !b.hide_unselected || selected,
+                    snap_only: false,
                     plot_visible: b.plot_visible,
                     fill_is_3d: b.fill_is_3d,
                     fill_is_2d_solid: b.fill_is_2d_solid,
@@ -1736,6 +1781,7 @@ impl Batches {
                     dash_from_start: false,
                     dash_align_end: None,
                     text_verts: b.text_verts,
+                    searchable_text: b.searchable_text,
                     name: name.to_string(),
                     points: b.points,
                     points_low: b.points_low,
@@ -2135,7 +2181,7 @@ fn resolve_wire_color(lw: &LocalWire, ctx: &ExpandCtx) -> [f32; 4] {
         };
     }
     if ctx.is_xref && !ctx.selected {
-        fade_toward_bg(color, ctx.bg_color)
+        xref_fade(color, ctx.bg_color)
     } else {
         color
     }
@@ -2493,6 +2539,7 @@ fn emit_wire(
                     world_width: 0.0,
                     depth_override: local_depth,
                     display_visible: !lw.hide_unselected || ctx.selected,
+                    snap_only: false,
                     plot_visible: lw.plot_visible,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
@@ -2518,7 +2565,9 @@ fn emit_wire(
                     plinegen: lw.plinegen,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
-                };
+                
+                    ..Default::default()
+};
                 out.extra_wires.push(wire);
                 return;
             }
@@ -2588,13 +2637,25 @@ fn emit_wire(
     // composed rank the text sits at the bare insert level, an exact tie with
     // every sibling fill, and the later wipeout pass erases it (unselected
     // block text vanished under its wipeout; selecting won only because the
-    // xray pass ignores depth).
-    let local_depth = (lw.world_width > 0.0 || !lw.text_verts.is_empty())
+    // xray pass ignores depth). Fill-only wires take the rank as well: an
+    // MTEXT background (a dimension's DIMTFILL box) left at the bare insert
+    // level sat in front of its own text whenever that text's rank was
+    // below zero.
+    let local_depth = (lw.world_width > 0.0 || lw.is_fill_only || !lw.text_verts.is_empty())
         .then(|| d_range.0 + lw.local_rank * d_range.1);
     let plot_visible = ctx.plot_visible
         && lw.plot_visible
         && (!lw.plot_l0 || ctx.l0_plottable);
 
+    // Batched wires share one dash distance, which runs on across the NaN
+    // joins only for plinegen wires. PLINEGEN is about a wire's own breaks;
+    // a member without any (every LINE) must not carry its pattern into the
+    // next member, or each line in a block starts mid-dash where the last
+    // one stopped (#898). A member with stations keeps its own flag.
+    let plinegen = lw.plinegen
+        && (has_stations
+            || transformed_stations.is_some()
+            || lw.points.iter().any(|point| point[0].is_nan()));
     let key = style_key(
         final_color,
         lw.contrast_bg,
@@ -2607,7 +2668,7 @@ fn emit_wire(
         final_world_width,
         point_marker,
         final_aci,
-        lw.plinegen,
+        plinegen,
         lw.is_fill_only,
         lw.fill_is_2d_solid,
         lw.fill_is_3d,
@@ -2644,7 +2705,7 @@ fn emit_wire(
             final_world_width,
             point_marker,
             final_aci,
-            lw.plinegen,
+            plinegen,
             lw.is_fill_only,
             lw.fill_is_2d_solid,
             lw.fill_is_3d,
@@ -2862,6 +2923,41 @@ fn emit_wire(
             draw_depth: tv.draw_depth,
         });
     }
+    // Searchable runs follow the same insert transform: origin via the full
+    // matrix, cap height by the mean XY scale, rotation by the transformed
+    // X-axis angle — so block-instance text plots searchable at its placed
+    // size and angle, not its block-local one.
+    //
+    // Notes (review V2): `sx`/`sy` are axis *lengths* (always ≥ 0), so a
+    // mirrored insert (`sx = -1`) yields length 1, not a zero mean — there is
+    // no 0.1 pt collapse. Mirroring folds into `rotation += π` (readable
+    // invisible text) rather than a reflected `Tm`: the visible outlines
+    // carry the true mirror. Non-uniform scale, width factor, oblique and
+    // tracking are approximated by the mean scale here; exact reproduction
+    // needs `Tz`/`Tc`/skewed `Tm` (follow-up — selection-only mismatch on the
+    // invisible layer, never a visual defect).
+    if !lw.searchable_text.is_empty() {
+        let x_axis = accum_xform.apply_rotation(Vector3::new(1.0, 0.0, 0.0));
+        let y_axis = accum_xform.apply_rotation(Vector3::new(0.0, 1.0, 0.0));
+        let sx = (x_axis.x * x_axis.x + x_axis.y * x_axis.y + x_axis.z * x_axis.z).sqrt();
+        let sy = (y_axis.x * y_axis.x + y_axis.y * y_axis.y + y_axis.z * y_axis.z).sqrt();
+        let mean_scale = ((sx + sy) * 0.5).max(1e-6);
+        let rot_delta = (x_axis.y).atan2(x_axis.x);
+        let base_len = entry.searchable_text.len();
+        entry.searchable_text.extend(lw.searchable_text.iter().cloned());
+        crate::scene::model::wire_model::map_searchable_runs(
+            &mut entry.searchable_text[base_len..],
+            &|p| {
+                let v = accum_xform.apply(Vector3::new(p[0], p[1], p[2]));
+                [v.x, v.y, v.z]
+            },
+            mean_scale,
+            rot_delta as f32,
+        );
+        for run in &mut entry.searchable_text[base_len..] {
+            run.color = final_color;
+        }
+    }
 }
 
 fn transform_tangent(
@@ -2972,21 +3068,22 @@ fn transform_tangent(
             start_param,
             end_param,
         } => {
-            let c = t.apply(Vector3::new(center[0], center[1], center[2]));
-            let m = t.apply_rotation(Vector3::new(major_axis[0], major_axis[1], major_axis[2]));
-            let n = t.apply_rotation(Vector3::new(normal[0], normal[1], normal[2]));
-            let n_len = n.length();
-            if n_len <= 1.0e-12 {
-                return None;
-            }
-            let n = n / n_len;
+            let (c, m, n, ratio, s, e) = crate::scene::view::transform::transform_ellipse_geometry(
+                Vector3::new(center[0], center[1], center[2]),
+                Vector3::new(major_axis[0], major_axis[1], major_axis[2]),
+                Vector3::new(normal[0], normal[1], normal[2]),
+                *minor_axis_ratio,
+                *start_param,
+                *end_param,
+                t,
+            )?;
             Some(TangentGeom::PlanarEllipse {
                 center: [c.x, c.y, c.z],
                 major_axis: [m.x, m.y, m.z],
                 normal: [n.x, n.y, n.z],
-                minor_axis_ratio: *minor_axis_ratio,
-                start_param: *start_param,
-                end_param: *end_param,
+                minor_axis_ratio: ratio,
+                start_param: s,
+                end_param: e,
             })
         }
     }
@@ -3111,19 +3208,22 @@ mod bg_resolution_tests {
         assert_eq!(colors(&once), colors(&twice));
     }
 
-    /// Why the raw colour is stored instead of re-adapting the resolved one.
-    /// If this ever starts passing, `raw_color` could be dropped — and if it
-    /// is removed while this still fails, near-white geometry loses its tint
-    /// on the first layout switch.
+    /// Only colour 7's exact white / black swap with the background; a colour
+    /// drawn as authored — near-white, or a true-colour white mask — keeps its
+    /// value on any background. (#1500)
     #[test]
-    fn adapt_to_bg_cannot_be_reapplied() {
-        let once = adapt_to_bg(NEAR_WHITE, LIGHT);
-        assert_eq!(once, [0.0, 0.0, 0.0, 1.0], "near-white snaps to pure black");
-        assert_ne!(
-            adapt_to_bg(once, DARK),
-            adapt_to_bg(NEAR_WHITE, DARK),
-            "re-adapting the resolved colour must not equal adapting the raw one",
-        );
+    fn only_colour_seven_swaps_with_the_background() {
+        assert_eq!(adapt_to_bg([1.0, 1.0, 1.0, 1.0], LIGHT), [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(adapt_to_bg([0.0, 0.0, 0.0, 1.0], DARK), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(adapt_to_bg(NEAR_WHITE, LIGHT), NEAR_WHITE);
+        let mask = crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        });
+        assert_eq!(adapt_to_bg(mask, LIGHT), mask);
+        let seven = crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::Index(7));
+        assert_eq!(adapt_to_bg(seven, LIGHT), [0.0, 0.0, 0.0, 1.0]);
     }
 }
 
@@ -3131,8 +3231,8 @@ mod bg_resolution_tests {
 mod compact_nested_tests {
     use super::*;
     use crate::scene::view::render::InheritStyle;
-    use acadrust::entities::{Insert, Line};
-    use acadrust::tables::BlockRecord;
+    use codec::entities::{Insert, Line};
+    use codec::tables::BlockRecord;
 
     fn add_block(document: &mut CadDocument, name: &str) -> Handle {
         let mut block = BlockRecord::new(name);
@@ -3237,5 +3337,167 @@ mod compact_nested_tests {
         assert_eq!(finite_points, 6_000);
         assert_eq!(wires.len(), 1);
         assert!(wires[0].render_instance.is_none());
+    }
+
+    #[test]
+    fn test_transform_tangent_ellipse_arc_negative_scale_and_rotation() {
+        let ellipse_geom = TangentGeom::PlanarEllipse {
+            center: [10.0, 20.0, 0.0],
+            major_axis: [100.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.5,
+            start_param: std::f64::consts::FRAC_PI_4,
+            end_param: 3.0 * std::f64::consts::FRAC_PI_4,
+        };
+
+        // Negative scale (-1, -1, 1), negative rotation -45 deg, distant translation (7000, 5000, 0)
+        let t = Transform::from_scaling(Vector3::new(-1.0, -1.0, 1.0))
+            .then(&Transform::from_rotation(Vector3::UNIT_Z, -std::f64::consts::FRAC_PI_4))
+            .then(&Transform::from_translation(Vector3::new(7000.0, 5000.0, 0.0)));
+
+        let transformed = transform_tangent(&ellipse_geom, &t).expect("transform_tangent should succeed");
+        let TangentGeom::PlanarEllipse {
+            center: c,
+            major_axis: m,
+            normal: n,
+            minor_axis_ratio: ratio,
+            start_param: s,
+            end_param: _e,
+        } = transformed else {
+            panic!("Expected PlanarEllipse");
+        };
+
+        // Center must be transformed
+        let expected_c = t.apply(Vector3::new(10.0, 20.0, 0.0));
+        assert!((c[0] - expected_c.x).abs() < 1e-9);
+        assert!((c[1] - expected_c.y).abs() < 1e-9);
+
+        // Major axis length must be 100, ratio 0.5
+        let m_vec = Vector3::new(m[0], m[1], m[2]);
+        assert!((m_vec.length() - 100.0).abs() < 1e-9);
+        assert!((ratio - 0.5).abs() < 1e-9);
+        assert!((n[2] - 1.0).abs() < 1e-9);
+
+        // Start and end points on the curve must match mathematical transformation of original start/end
+        let orig_start_pt = Vector3::new(10.0, 20.0, 0.0)
+            + Vector3::new(100.0, 0.0, 0.0) * (std::f64::consts::FRAC_PI_4).cos()
+            + Vector3::new(0.0, 50.0, 0.0) * (std::f64::consts::FRAC_PI_4).sin();
+        let expected_start_pt = t.apply(orig_start_pt);
+
+        let new_v = Vector3::new(n[0], n[1], n[2]).cross(&m_vec) * ratio;
+        let actual_start_pt = Vector3::new(c[0], c[1], c[2])
+            + m_vec * s.cos()
+            + new_v * s.sin();
+
+        assert!(
+            (actual_start_pt - expected_start_pt).length() < 1e-9,
+            "Start point mismatch: expected {expected_start_pt:?}, got {actual_start_pt:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod metrics_depth_tests {
+    use super::*;
+    use codec::entities::{Insert, Line};
+    use codec::tables::BlockRecord;
+
+    fn add_block(document: &mut CadDocument, name: &str) -> Handle {
+        let mut block = BlockRecord::new(name);
+        block.handle = document.allocate_handle();
+        let handle = block.handle;
+        document.block_records.add(block).unwrap();
+        handle
+    }
+
+    fn add_owned(document: &mut CadDocument, owner: Handle, mut entity: EntityType) {
+        entity.common_mut().owner_handle = owner;
+        document.add_entity(entity).unwrap();
+    }
+
+    /// Chain B0 → B1 → … → Bn (each block holds one INSERT of the next, the
+    /// last a line). Both metrics recursions guard *cycles* only, so depth n
+    /// reaches rayon's default 2 MiB stacks: `thread has overflowed its
+    /// stack` — a hard abort, not a panic. Expansion already stops at
+    /// `MAX_NESTING_DEPTH`; metrics must too.
+    #[test]
+    fn a_deep_insert_chain_computes_metrics_without_overflowing_the_stack() {
+        const DEPTH: usize = 20_000;
+        let mut document = CadDocument::new();
+        let mut prev = add_block(&mut document, "B0");
+        for i in 1..=DEPTH {
+            let cur = add_block(&mut document, &format!("B{i}"));
+            add_owned(
+                &mut document,
+                prev,
+                EntityType::Insert(Insert::new(&format!("B{i}"), Vector3::ZERO)),
+            );
+            prev = cur;
+        }
+        add_owned(
+            &mut document,
+            prev,
+            EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0))),
+        );
+        document
+            .add_entity(EntityType::Insert(Insert::new("B0", Vector3::ZERO)))
+            .unwrap();
+
+        let cache = BlockCache::build(
+            &document,
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
+        );
+        assert_eq!(cache.defns.len(), DEPTH + 1);
+        // The tail still carries the line's bounds through the depth cap.
+        let tail = cache
+            .defns
+            .get(&format!("B{}", DEPTH - 1))
+            .expect("tail block built");
+        assert_ne!(tail.metrics.aabb_local, [0.0; 4]);
+    }
+
+    /// A chain well below the depth cap is aggregated end to end: the root
+    /// block's bounds include the deepest line, identical to the tail's.
+    #[test]
+    fn metrics_below_the_depth_cap_are_still_fully_aggregated() {
+        const DEPTH: usize = 10;
+        let mut document = CadDocument::new();
+        let mut prev = add_block(&mut document, "B0");
+        for i in 1..=DEPTH {
+            let cur = add_block(&mut document, &format!("B{i}"));
+            add_owned(
+                &mut document,
+                prev,
+                EntityType::Insert(Insert::new(&format!("B{i}"), Vector3::ZERO)),
+            );
+            prev = cur;
+        }
+        add_owned(
+            &mut document,
+            prev,
+            EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0))),
+        );
+        document
+            .add_entity(EntityType::Insert(Insert::new("B0", Vector3::ZERO)))
+            .unwrap();
+
+        let cache = BlockCache::build(
+            &document,
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
+        );
+        let root = cache.defns.get("B0").expect("root block built");
+        let tail = cache.defns.get(&format!("B{DEPTH}")).expect("tail block built");
+        assert_ne!(root.metrics.aabb_local, [0.0; 4]);
+        assert_eq!(root.metrics.aabb_local, tail.metrics.aabb_local);
     }
 }

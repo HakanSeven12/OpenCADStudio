@@ -32,6 +32,8 @@ static REDO: &[u8] = include_bytes!("../../assets/icons/ui/redo.svg");
 static OSNAP_ENDPOINT: &[u8] = include_bytes!("../../assets/icons/osnap/endpoint.svg");
 static OSNAP_MIDPOINT: &[u8] = include_bytes!("../../assets/icons/osnap/midpoint.svg");
 static OSNAP_CENTER: &[u8] = include_bytes!("../../assets/icons/osnap/center.svg");
+static OSNAP_GEOMETRIC_CENTER: &[u8] =
+    include_bytes!("../../assets/icons/osnap/geometric_center.svg");
 static OSNAP_NODE: &[u8] = include_bytes!("../../assets/icons/osnap/node.svg");
 static OSNAP_QUADRANT: &[u8] = include_bytes!("../../assets/icons/osnap/quadrant.svg");
 static OSNAP_INTERSECTION: &[u8] = include_bytes!("../../assets/icons/osnap/intersection.svg");
@@ -51,6 +53,8 @@ static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/layon.svg");
 static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/layoff.svg");
 static LAY_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layfrz.svg");
 static LAY_THW: &[u8] = include_bytes!("../../assets/icons/layers/laythw.svg");
+static LAY_VP_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layvpfrz.svg");
+static LAY_VP_THW: &[u8] = include_bytes!("../../assets/icons/layers/layvpthw.svg");
 static LAY_LCK: &[u8] = include_bytes!("../../assets/icons/layers/laylck.svg");
 static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/layulk.svg");
 
@@ -59,8 +63,11 @@ static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/layulk.svg");
 pub static CHECK: &[u8] = include_bytes!("../../assets/icons/ui/check.svg");
 pub static CLOSE: &[u8] = include_bytes!("../../assets/icons/ui/close.svg");
 pub static PLUS: &[u8] = include_bytes!("../../assets/icons/ui/plus.svg");
+pub static REFRESH: &[u8] = include_bytes!("../../assets/icons/ui/refresh.svg");
+pub static SWAP: &[u8] = include_bytes!("../../assets/icons/ui/swap.svg");
 pub static MINUS: &[u8] = include_bytes!("../../assets/icons/ui/minus.svg");
 pub static TRASH: &[u8] = include_bytes!("../../assets/icons/ui/trash.svg");
+pub static NODE_GRAPH: &[u8] = include_bytes!("../../assets/icons/ui/node_graph.svg");
 pub static COPY: &[u8] = include_bytes!("../../assets/icons/ui/copy.svg");
 pub static MENU: &[u8] = include_bytes!("../../assets/icons/ui/menu.svg");
 pub static MOVE: &[u8] = include_bytes!("../../assets/icons/ui/move.svg");
@@ -82,6 +89,8 @@ pub static GEAR: &[u8] = include_bytes!("../../assets/icons/ui/gear.svg");
 pub static DOT: &[u8] = include_bytes!("../../assets/icons/ui/dot.svg");
 pub static DIRTY_DOT: &[u8] = include_bytes!("../../assets/icons/ui/dirty_dot.svg");
 pub static ARROW_LONG_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/arrow_long_right.svg");
+pub static MORE: &[u8] = include_bytes!("../../assets/icons/ui/more.svg");
+pub static INFO: &[u8] = include_bytes!("../../assets/icons/ui/info.svg");
 
 // ── Status-bar toggle icons (issue #216) ──────────────────────────────────
 pub static ST_ORTHO: &[u8] = include_bytes!("../../assets/icons/status/ortho.svg");
@@ -311,6 +320,15 @@ pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
         bytes,
         size,
         opacity: 1.0,
+    })
+}
+
+/// [`semantic`] faded like disabled menu text.
+pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 0.42,
     })
 }
 
@@ -616,6 +634,7 @@ pub fn osnap(snap: crate::snap::SnapType) -> &'static [u8] {
         S::Endpoint => OSNAP_ENDPOINT,
         S::Midpoint => OSNAP_MIDPOINT,
         S::Center => OSNAP_CENTER,
+        S::GeometricCenter => OSNAP_GEOMETRIC_CENTER,
         S::Node => OSNAP_NODE,
         S::Quadrant => OSNAP_QUADRANT,
         S::Intersection => OSNAP_INTERSECTION,
@@ -654,6 +673,14 @@ pub fn zoom_icon() -> &'static [u8] {
     NAV_ZOOM
 }
 
+pub fn undo_icon() -> &'static [u8] {
+    UNDO
+}
+
+pub fn redo_icon() -> &'static [u8] {
+    REDO
+}
+
 /// Layer visibility icon bytes (on / off).
 pub fn layer_visible(visible: bool) -> &'static [u8] {
     if visible {
@@ -669,6 +696,15 @@ pub fn layer_freeze(frozen: bool) -> &'static [u8] {
         LAY_FRZ
     } else {
         LAY_THW
+    }
+}
+
+/// Freeze-in-current-viewport icon bytes (frozen / thawed).
+pub fn layer_vp_freeze(frozen: bool) -> &'static [u8] {
+    if frozen {
+        LAY_VP_FRZ
+    } else {
+        LAY_VP_THW
     }
 }
 
@@ -707,6 +743,10 @@ pub fn themed_secondary_arrow_down<'a, M: 'a>(size: f32) -> Element<'a, M> {
 
 pub fn themed_disabled_arrow_down<'a, M: 'a>(size: f32) -> Element<'a, M> {
     themed_disabled(TRI_DOWN, size)
+}
+
+pub fn themed_disabled_arrow_right<'a, M: 'a>(size: f32) -> Element<'a, M> {
+    themed_disabled(TRI_RIGHT, size)
 }
 
 pub fn themed_home<'a, M: 'a>(size: f32) -> Element<'a, M> {
@@ -1008,8 +1048,13 @@ mod themed_cache_tests {
     /// on a different static.
     ///
     /// Run with `--nocapture` to see the numbers:
-    /// `cargo test --lib themed_cache_speedup_over_uncached_handle_creation -- --nocapture`.
+    /// `cargo test --lib themed_cache_speedup_over_uncached_handle_creation -- --ignored --nocapture`.
+    ///
+    /// Ignored by default: it compares wall-clock times, and under the
+    /// parallel suite's load the uncached loop can finish first. The cache's
+    /// behaviour is pinned by the entry-count tests above.
     #[test]
+    #[ignore = "wall-clock benchmark; run with --ignored"]
     fn themed_cache_speedup_over_uncached_handle_creation() {
         use std::time::Instant;
 

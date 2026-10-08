@@ -1,25 +1,25 @@
-//! Export a kernel [`Body`] to an exact ACIS `SatDocument`.
+﻿//! Export a kernel [`Body`] to an exact ACIS `SatDocument`.
 //!
 //! Analytic surfaces remain analytic instead of becoming facets.
 
-use cadkernel::acis::append;
-use acadrust::entities::acis::{SabReader, SabWriter, SatDocument, SatToken};
-use cadkernel::brep::Body;
+use kernel::acis::append;
+use codec::entities::acis::{SabReader, SabWriter, SatDocument, SatToken};
+use kernel::brep::Body;
 
-/// Repair cadkernel's vertex records to the authored ASM genus.
+/// Repair kernel's vertex records to the authored ASM genus.
 ///
-/// cadkernel appends the classic three-token vertex (`$attr $edge $point`).
-/// Every authored vertex — the §20 G-A census across the measured corpus —
+/// kernel appends the classic three-token vertex (`$attr $edge $point`).
+/// Every authored vertex â€” the Â§20 G-A census across the measured corpus â€”
 /// carries the four-token form `vertex $attr $-1 $edge <role> $point`, where
 /// the role token marks the vertex's stance in its own edge (0 start, 1 end,
-/// 2 both endpoints of a closed edge; acadrust's primitive builders ship the
+/// 2 both endpoints of a closed edge; codec's primitive builders ship the
 /// 0 placeholder). The ASM modeler reads the record positionally: without
 /// the role token it consumes the point pointer as the role, the record
 /// parse desyncs, and the solid arrives as "Modeling operation error:
 /// Data stream is empty" (BricsCAD AUDIT on a constructed cylinder).
 ///
-/// `cadkernel::acis::lift` reads the point by pointer ordinal, so the
-/// repaired document still round-trips through cadkernel unchanged.
+/// `kernel::acis::lift` reads the point by pointer ordinal, so the
+/// repaired document still round-trips through kernel unchanged.
 fn repair_vertex_roles(document: &mut SatDocument) {
     for record in &mut document.records {
         if record.entity_type == "vertex"
@@ -38,7 +38,7 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
     let mut document = SatDocument::parse(&document.to_sat_string()).ok()?;
     repair_vertex_roles(&mut document);
     let valid = |candidate: &SatDocument| {
-        let (restored, loss) = cadkernel::acis::lift(candidate);
+        let (restored, loss) = kernel::acis::lift(candidate);
         loss.is_empty() && restored.len() == 1 && restored[0].validate().is_empty()
     };
     if !valid(&document) {
@@ -51,8 +51,8 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadkernel::geom2d::{Arc, Curve};
-    use cadkernel::space::Plane;
+    use kernel::geom2d::{Arc, Curve};
+    use kernel::space::Plane;
 
     fn circle_section(z: f64, radius: f64) -> (Plane, Vec<Curve>) {
         let curves = (0..4)
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn a_curved_loft_round_trips_through_text_and_binary_acis() {
-        let body = cadkernel::brep::loft(&[
+        let body = kernel::brep::loft(&[
             circle_section(0.0, 5.0),
             circle_section(10.0, 2.0),
         ])
@@ -82,17 +82,17 @@ mod tests {
         assert!(body.validate().is_empty());
 
         let mut document = SatDocument::new();
-        cadkernel::acis::append(&body, &mut document).unwrap();
+        kernel::acis::append(&body, &mut document).unwrap();
         let text = document.to_sat_string();
         let parsed = SatDocument::parse(&text).unwrap();
-        let (restored, text_loss) = cadkernel::acis::lift(&parsed);
+        let (restored, text_loss) = kernel::acis::lift(&parsed);
         assert!(text_loss.is_empty(), "{text_loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());
 
         let binary = SabWriter::write(&parsed);
         let parsed_binary = SabReader::read(&binary).unwrap();
-        let (restored, binary_loss) = cadkernel::acis::lift(&parsed_binary);
+        let (restored, binary_loss) = kernel::acis::lift(&parsed_binary);
         assert!(binary_loss.is_empty(), "{binary_loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());
@@ -104,7 +104,7 @@ mod tests {
         // seamed brep whose SAT previously reached the DWG AcDs stream
         // without the vertex role token and failed BricsCAD's AUDIT
         // with "Data stream is empty".
-        let body = cadkernel::brep::make::elliptical_cylinder(
+        let body = kernel::brep::make::elliptical_cylinder(
             [0.0, 0.0, 0.0],
             1.0,
             1.0,
@@ -131,8 +131,8 @@ mod tests {
             assert!(matches!(vertex.tokens[3], SatToken::Pointer(_)));
         }
 
-        // The SAB round trip — the exact conversion the DWG writer's
-        // queue_sab_entry performs — must preserve the four-token form.
+        // The SAB round trip â€” the exact conversion the DWG writer's
+        // queue_sab_entry performs â€” must preserve the four-token form.
         let binary = SabWriter::write(&sat);
         let reread = SabReader::read(&binary).unwrap();
         for vertex in reread
@@ -148,8 +148,8 @@ mod tests {
             );
         }
 
-        // The repaired document still lifts losslessly through cadkernel.
-        let (restored, loss) = cadkernel::acis::lift(&sat);
+        // The repaired document still lifts losslessly through kernel.
+        let (restored, loss) = kernel::acis::lift(&sat);
         assert!(loss.is_empty(), "{loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());
@@ -176,7 +176,7 @@ mod tests {
             ),
             (
                 // A true ellipse is a cone-surface record with a section
-                // ratio — the authored elliptical-cylinder wire form
+                // ratio â€” the authored elliptical-cylinder wire form
                 // (CylinderElliptical_2018 in the gold corpus: major
                 // basis, ratio 0.6, sine 0 / cosine 1), not a spline.
                 "elliptical-cylinder",

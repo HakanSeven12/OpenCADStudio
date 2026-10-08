@@ -18,15 +18,15 @@
 //! style added without a handle (dropped on DWG save, issue #67).
 
 use super::OpenCADStudio;
-use acadrust::objects::{
+use codec::objects::{
     Dictionary, MLineStyle, MultiLeaderStyle, ObjectType, TableStyle,
 };
-use acadrust::tables::{DimStyle, TextStyle};
-use acadrust::types::Handle;
+use codec::tables::{DimStyle, TextStyle};
+use codec::types::Handle;
 
 const MLEADERSTYLE_DICT_NAME: &str = "ACAD_MLEADERSTYLE";
 
-fn mleaderstyle_dict_handle(doc: &acadrust::CadDocument) -> Option<Handle> {
+fn mleaderstyle_dict_handle(doc: &codec::CadDocument) -> Option<Handle> {
     let root_h = doc.header.named_objects_dict_handle;
 
     let root = match doc.objects.get(&root_h) {
@@ -46,7 +46,7 @@ fn mleaderstyle_dict_handle(doc: &acadrust::CadDocument) -> Option<Handle> {
         })
 }
 
-fn import_mleaderstyle_names_from_dictionary(doc: &mut acadrust::CadDocument) {
+fn import_mleaderstyle_names_from_dictionary(doc: &mut codec::CadDocument) {
     let Some(dict_h) = mleaderstyle_dict_handle(doc) else {
         return;
     };
@@ -66,7 +66,7 @@ fn import_mleaderstyle_names_from_dictionary(doc: &mut acadrust::CadDocument) {
     }
 }
 
-fn sync_mleaderstyle_dictionary(doc: &mut acadrust::CadDocument) {
+fn sync_mleaderstyle_dictionary(doc: &mut codec::CadDocument) {
     let root_h = crate::scene::annotative::root_named_dict_handle(doc);
 
     let existing = match doc.objects.get(&root_h) {
@@ -144,7 +144,7 @@ fn sync_mleaderstyle_dictionary(doc: &mut acadrust::CadDocument) {
 /// broken with no way to recover, and new text/dimensions have nothing to
 /// reference (#366). Missing entries are re-seeded with the app defaults.
 /// Called on every file open; a no-op for healthy documents.
-pub(crate) fn ensure_standard_styles(doc: &mut acadrust::CadDocument) {
+pub(crate) fn ensure_standard_styles(doc: &mut codec::CadDocument) {
     import_mleaderstyle_names_from_dictionary(doc);
     if !doc
         .text_styles
@@ -164,7 +164,7 @@ pub(crate) fn ensure_standard_styles(doc: &mut acadrust::CadDocument) {
         s.handle = doc.allocate_handle();
         let _ = doc.dim_styles.add(s);
     }
-    let has = |doc: &acadrust::CadDocument, pred: fn(&ObjectType) -> Option<&str>| {
+    let has = |doc: &codec::CadDocument, pred: fn(&ObjectType) -> Option<&str>| {
         doc.objects
             .values()
             .filter_map(pred)
@@ -234,7 +234,14 @@ impl OpenCADStudio {
             v
         };
         match kind {
-            StyleKind::Text => doc.text_styles.iter().map(|s| s.name.clone()).collect(),
+            // Shape-file entries (complex linetype glyphs) are not text styles to
+            // pick or edit; they have no name (#1634).
+            StyleKind::Text => doc
+                .text_styles
+                .iter()
+                .filter(|s| !s.is_shape_file)
+                .map(|s| s.name.clone())
+                .collect(),
             StyleKind::Dim => doc.dim_styles.iter().map(|s| s.name.clone()).collect(),
             StyleKind::Table => from_objects(|o| match o {
                 ObjectType::TableStyle(s) => Some(s.name.as_str()),
@@ -271,7 +278,7 @@ impl OpenCADStudio {
         }
     }
 
-    fn style_exists(&self, kind: StyleKind, name: &str) -> bool {
+    pub(super) fn style_exists(&self, kind: StyleKind, name: &str) -> bool {
         self.style_names(kind)
             .iter()
             .any(|n| n.eq_ignore_ascii_case(name))
@@ -308,7 +315,7 @@ impl OpenCADStudio {
 
     /// Refresh anything that mirrors the style list / current style after a
     /// mutation (ribbon dropdowns, geometry that depends on the style).
-    fn after_style_change(&mut self, kind: StyleKind) {
+    pub(super) fn after_style_change(&mut self, kind: StyleKind) {
         if kind.in_ribbon() {
             self.sync_ribbon_styles();
         }
@@ -405,7 +412,7 @@ impl OpenCADStudio {
         false
     }
 
-    fn remove_style_storage(&mut self, kind: StyleKind, name: &str) -> bool {
+    pub(super) fn remove_style_storage(&mut self, kind: StyleKind, name: &str) -> bool {
         let doc = &mut self.tabs[self.active_tab].scene.document;
         match kind {
             StyleKind::Text => doc.text_styles.remove(name).is_some(),
@@ -422,7 +429,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn style_in_use(&self, kind: StyleKind, name: &str) -> bool {
-        use acadrust::entities::EntityType;
+        use codec::entities::EntityType;
 
         let i = self.active_tab;
         let doc = &self.tabs[i].scene.document;
@@ -541,7 +548,7 @@ impl OpenCADStudio {
 
     /// Rename `old`→`new` in the backing store, re-keying table entries and
     /// rewriting name-based references + current-style pointers.
-    fn rename_style_storage(&mut self, kind: StyleKind, old: &str, new: &str) {
+    pub(super) fn rename_style_storage(&mut self, kind: StyleKind, old: &str, new: &str) {
         let i = self.active_tab;
         match kind {
             StyleKind::Text => {
@@ -559,27 +566,27 @@ impl OpenCADStudio {
                 }
                 for e in doc.entities_mut() {
                     match e {
-                        acadrust::entities::EntityType::Text(t)
+                        codec::entities::EntityType::Text(t)
                             if t.style.eq_ignore_ascii_case(old) =>
                         {
                             t.style = new.to_string();
                         }
-                        acadrust::entities::EntityType::MText(t)
+                        codec::entities::EntityType::MText(t)
                             if t.style.eq_ignore_ascii_case(old) =>
                         {
                             t.style = new.to_string();
                         }
-                        acadrust::entities::EntityType::AttributeEntity(a)
+                        codec::entities::EntityType::AttributeEntity(a)
                             if a.text_style.eq_ignore_ascii_case(old) =>
                         {
                             a.text_style = new.to_string();
                         }
-                        acadrust::entities::EntityType::AttributeDefinition(a)
+                        codec::entities::EntityType::AttributeDefinition(a)
                             if a.text_style.eq_ignore_ascii_case(old) =>
                         {
                             a.text_style = new.to_string();
                         }
-                        acadrust::entities::EntityType::Insert(insert) => {
+                        codec::entities::EntityType::Insert(insert) => {
                             for attribute in &mut insert.attributes {
                                 if attribute.text_style.eq_ignore_ascii_case(old) {
                                     attribute.text_style = new.to_string();
@@ -619,17 +626,17 @@ impl OpenCADStudio {
                 }
                 for e in doc.entities_mut() {
                     match e {
-                        acadrust::entities::EntityType::Dimension(d)
+                        codec::entities::EntityType::Dimension(d)
                             if d.base().style_name.eq_ignore_ascii_case(old) =>
                         {
                             d.base_mut().style_name = new.to_string();
                         }
-                        acadrust::entities::EntityType::Leader(l)
+                        codec::entities::EntityType::Leader(l)
                             if l.dimension_style.eq_ignore_ascii_case(old) =>
                         {
                             l.dimension_style = new.to_string();
                         }
-                        acadrust::entities::EntityType::Tolerance(t)
+                        codec::entities::EntityType::Tolerance(t)
                             if t.dimension_style_name.eq_ignore_ascii_case(old) =>
                         {
                             t.dimension_style_name = new.to_string();
@@ -686,7 +693,7 @@ impl OpenCADStudio {
                     doc.header.multiline_style = new.to_string();
                 }
                 for entity in doc.entities_mut() {
-                    if let acadrust::entities::EntityType::MLine(line) = entity {
+                    if let codec::entities::EntityType::MLine(line) = entity {
                         if line.style_name.eq_ignore_ascii_case(old) {
                             line.style_name = new.to_string();
                         }
@@ -903,7 +910,7 @@ impl OpenCADStudio {
             self.tabs[i].dirty = true;
             let (text_names, dim_names, object_handles) = edited.changed_keys(&stage.baseline);
             let changed_mleader_styles:
-                Vec<acadrust::objects::MultiLeaderStyle> =
+                Vec<codec::objects::MultiLeaderStyle> =
                 object_handles
                     .iter()
                     .filter_map(|handle| {
@@ -914,7 +921,7 @@ impl OpenCADStudio {
                             .get(handle)
                         {
                             Some(
-                                acadrust::objects::ObjectType::
+                                codec::objects::ObjectType::
                                     MultiLeaderStyle(style),
                             ) => Some(style.clone()),
                             _ => None,
@@ -925,13 +932,13 @@ impl OpenCADStudio {
             let mut changed_mleaders = Vec::new();
 
             for style in changed_mleader_styles {
-                let entity_handles: Vec<acadrust::Handle> = {
+                let entity_handles: Vec<codec::Handle> = {
                     let doc = &self.tabs[i].scene.document;
 
                     doc.entities()
                         .filter_map(|entity| {
                             match entity {
-                                acadrust::EntityType::MultiLeader(ml)
+                                codec::EntityType::MultiLeader(ml)
                                     if ml.style_handle
                                         == Some(style.handle) =>
                                 {
@@ -998,8 +1005,8 @@ impl OpenCADStudio {
 /// Snapshot of every document field a style manager can touch.
 #[derive(Clone, PartialEq)]
 pub(super) struct StyleStateSnapshot {
-    text_styles: acadrust::tables::Table<TextStyle>,
-    dim_styles: acadrust::tables::Table<DimStyle>,
+    text_styles: codec::tables::Table<TextStyle>,
+    dim_styles: codec::tables::Table<DimStyle>,
     style_objects: Vec<(Handle, ObjectType)>,
     current_text: String,
     current_dim: String,
@@ -1080,7 +1087,7 @@ pub(super) struct StyleStage {
 /// Find the object-backed style named `name` and return a clone. `pick` maps a
 /// matching variant to `(its name, a clone of the inner style)`.
 fn find_object_style<T>(
-    doc: &acadrust::CadDocument,
+    doc: &codec::CadDocument,
     name: &str,
     pick: impl Fn(&ObjectType) -> Option<(&str, T)>,
 ) -> Option<T> {
@@ -1090,7 +1097,7 @@ fn find_object_style<T>(
     })
 }
 
-fn object_handle(doc: &acadrust::CadDocument, name: &str, kind: StyleKind) -> Option<Handle> {
+fn object_handle(doc: &codec::CadDocument, name: &str, kind: StyleKind) -> Option<Handle> {
     doc.objects.iter().find_map(|(&h, o)| {
         let matches = match (kind, o) {
             (StyleKind::Table, ObjectType::TableStyle(s)) => s.name.eq_ignore_ascii_case(name),

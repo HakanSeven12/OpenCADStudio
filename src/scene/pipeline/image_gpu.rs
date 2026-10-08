@@ -2,7 +2,7 @@
 //
 // Group 1 bindings per image:
 //   binding 0 — texture_2d<f32>   (RGBA image texture)
-//   binding 1 — sampler           (bilinear filtering)
+//   binding 1 — sampler           (bilinear; nearest magnification for raster images)
 //   binding 2 — ImageParams       (opacity uniform, 16 bytes)
 
 use crate::scene::model::image_model::ImageModel;
@@ -79,7 +79,9 @@ struct ImageParams {
     /// Signed draw-order depth (-1,1); applied as a clip-z bias in the shader
     /// so the raster orders against other entity types. 0.0 = neutral.
     draw_depth: f32,
-    _pad: [f32; 2],
+    /// 1.0 when pixel alpha applies, 0.0 when pixels draw opaque.
+    use_alpha: f32,
+    _pad: f32,
 } // 16 bytes
 
 // ── Per-image GPU handle ──────────────────────────────────────────────────
@@ -118,19 +120,27 @@ impl ImageGpu {
             });
             groups[slot].push(model);
         }
-        let sampler = Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("image.sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        }));
+        let sampler = |mag_filter| {
+            Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("image.sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                ..Default::default()
+            }))
+        };
+        // Raster images show square pixels when magnified.
+        let smooth = sampler(wgpu::FilterMode::Linear);
+        let pixelated = sampler(wgpu::FilterMode::Nearest);
         groups
             .into_iter()
-            .flat_map(|group| Self::new(device, queue, &group, bgl1, &sampler))
+            .flat_map(|group| {
+                let sampler = if group.first().is_some_and(|m| m.pixelated) { &pixelated } else { &smooth };
+                Self::new(device, queue, &group, bgl1, sampler)
+            })
             .collect()
     }
 
@@ -188,7 +198,8 @@ impl ImageGpu {
         let params = ImageParams {
             opacity: model.opacity.clamp(0.0, 1.0),
             draw_depth: 0.0,
-            _pad: [0.0; 2],
+            use_alpha: if model.use_alpha { 1.0 } else { 0.0 },
+            _pad: 0.0,
         };
         let params_buf = Arc::new(super::gpu_upload::upload_buffer(
             device,
@@ -212,6 +223,7 @@ impl ImageGpu {
                     "image.texture:{}:{}:{}",
                     model.file_path, x.content_start, y.content_start
                 );
+                let levels = mip_chain(&model.pixels, model.width, x.data_start, y.data_start, width, height);
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some(&tex_label),
                     size: wgpu::Extent3d {
@@ -219,7 +231,7 @@ impl ImageGpu {
                         height,
                         depth_or_array_layers: 1,
                     },
-                    mip_level_count: 1,
+                    mip_level_count: levels.len() as u32,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Rgba8Unorm,
@@ -227,22 +239,27 @@ impl ImageGpu {
                         | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 });
-                queue.write_texture(
-                    texture.as_image_copy(),
-                    &model.pixels[((y.data_start as usize * model.width as usize
-                        + x.data_start as usize)
-                        * 4)..],
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(4 * model.width),
-                        rows_per_image: Some(model.height),
-                    },
-                    wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                );
+                for (level, (w, h, data)) in levels.iter().enumerate() {
+                    queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: &texture,
+                            mip_level: level as u32,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        data,
+                        wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(4 * w),
+                            rows_per_image: Some(*h),
+                        },
+                        wgpu::Extent3d {
+                            width: *w,
+                            height: *h,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
                 let tex_view =
                     texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -292,6 +309,52 @@ struct TileRange {
     content_end: u32,
     data_start: u32,
     data_end: u32,
+}
+
+/// A tile's pixels and its smaller levels down to 1×1, so a far view
+/// samples a level near its own size. A level keeps the most opaque of each
+/// 2×2 block unless all four are equally opaque (then their average): thin
+/// lines on a transparent page (PDF, DWF, DGN underlays) stay visible when
+/// zoomed out instead of falling between samples, and opaque images are
+/// averaged as usual.
+fn mip_chain(pixels: &[u8], stride: u32, x0: u32, y0: u32, w: u32, h: u32) -> Vec<(u32, u32, Vec<u8>)> {
+    let (stride, x0, y0) = (stride as usize, x0 as usize, y0 as usize);
+    let mut base = Vec::with_capacity(w as usize * h as usize * 4);
+    for row in 0..h as usize {
+        let start = ((y0 + row) * stride + x0) * 4;
+        base.extend_from_slice(&pixels[start..start + w as usize * 4]);
+    }
+    let mut levels = vec![(w, h, base)];
+    loop {
+        let (pw, ph, prev) = levels.last().expect("base level");
+        if *pw == 1 && *ph == 1 {
+            break;
+        }
+        let (pw, ph) = (*pw as usize, *ph as usize);
+        let (nw, nh) = ((pw / 2).max(1), (ph / 2).max(1));
+        let mut next = Vec::with_capacity(nw * nh * 4);
+        for y in 0..nh {
+            for x in 0..nw {
+                let block = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dy)| {
+                    let at = (((2 * y + dy).min(ph - 1)) * pw + (2 * x + dx).min(pw - 1)) * 4;
+                    [prev[at], prev[at + 1], prev[at + 2], prev[at + 3]]
+                });
+                if block.iter().all(|p| p[3] == block[0][3]) {
+                    let mut sum = [0u32; 4];
+                    for p in &block {
+                        for c in 0..4 {
+                            sum[c] += p[c] as u32;
+                        }
+                    }
+                    next.extend(sum.map(|v| ((v + 2) / 4) as u8));
+                } else {
+                    next.extend(*block.iter().max_by_key(|p| p[3]).expect("four pixels"));
+                }
+            }
+        }
+        levels.push((nw as u32, nh as u32, next));
+    }
+    levels
 }
 
 fn tile_ranges(size: u32, limit: u32) -> Vec<TileRange> {

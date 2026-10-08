@@ -4,7 +4,11 @@ use crate::scene::Scene;
 use iced::Task;
 use std::path::PathBuf;
 
+mod attdef;
+mod field;
+mod count;
 mod blocks;
+mod xref_attach;
 mod dim;
 pub(crate) mod display;
 mod draw;
@@ -12,6 +16,15 @@ mod fileops;
 mod inquiry;
 mod layerprops;
 mod layers;
+pub(crate) mod pdf_import;
+mod point_cloud;
+mod pc_colormap;
+mod pc_extract;
+mod pdf_underlay;
+mod pdf_dialogs;
+pub(crate) mod sheet_set;
+mod xclip;
+mod blockvars;
 mod plotvars;
 mod styleprops;
 mod view;
@@ -42,8 +55,65 @@ impl OpenCADStudio {
         }
     }
 
+    /// Per-command start state every new command begins from — also used by
+    /// entry points that install a command without going through dispatch
+    /// (the block palette), so they don't inherit the previous command's last
+    /// point, snaps or dynamic-input values. (#1525)
+    pub(in crate::app) fn reset_command_start_state(&mut self, i: usize) {
+        // A command parked behind a transparent zoom / MTP goes with it.
+        self.tabs[i].suspended_cmd = None;
+        self.tabs[i].transparent_resume = false;
+        // Starting any command leaves interactive navigation modes (their own
+        // command arms below re-enable the selected one).
+        self.tabs[i].pan_mode = false;
+        self.tabs[i].orbit_mode = false;
+        self.tabs[i].zoom_dynamic_mode = false;
+        // Reset the last committed point so the first click of the new command
+        // is not constrained by ortho/polar relative to a previous command's endpoint.
+        self.last_point = None;
+        // A new command collects its own points, so the previous command's
+        // accepted snaps must not leak into it.
+        self.clear_accepted_snaps();
+        // Starting a command restarts the right-click cycle, so its first
+        // right-click acts as Enter rather than opening the context menu.
+        self.tabs[i]
+            .scene
+            .selection
+            .borrow_mut()
+            .input.right_click_entered = false;
+        // A fresh command starts at the polar/cartesian default — clear
+        // any `,`-driven reshape and locked dynamic-input values from a
+        // previous command. Otherwise a bare Enter on the first point prompt
+        // can commit that stale coordinate instead of accepting the command's
+        // default (LIMITS then compares an unintended lower-left point with
+        // the displayed default upper-right).
+        self.dyn_user_reshaped = false;
+        self.dyn_coord_absolute = false;
+        self.tabs[i].dyn_fields.clear();
+        self.tabs[i].dyn_active = 0;
+    }
+
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
-        self.dispatch_command_inner(cmd, false)
+        let task = self.dispatch_command_inner(cmd, false);
+        self.clear_idle_tool_highlight();
+        task
+    }
+
+    /// Turn the ribbon highlight off when the command just dispatched left
+    /// nothing running: no interactive command, dialog or navigation mode.
+    /// One-shot commands (view changes, clipboard, toggles, audits…) would
+    /// otherwise leave it lit forever; interactive commands and dialog owners
+    /// keep theirs until the command end / modal close clears it. (#355)
+    pub(in crate::app) fn clear_idle_tool_highlight(&mut self) {
+        let i = self.active_tab;
+        if self.tabs[i].active_cmd.is_none()
+            && self.active_modal.is_none()
+            && !self.tabs[i].pan_mode
+            && !self.tabs[i].orbit_mode
+            && !self.tabs[i].zoom_dynamic_mode
+        {
+            self.ribbon.deactivate_tool();
+        }
     }
 
     /// Dispatch a verb typed at the interactive command line, falling back to
@@ -55,7 +125,9 @@ impl OpenCADStudio {
     /// callers (ribbon, plugins, headless automation) use `dispatch_command`
     /// and never get silent substitution.
     pub(super) fn dispatch_command_or_suggest(&mut self, cmd: &str) -> Task<Message> {
-        self.dispatch_command_inner(cmd, true)
+        let task = self.dispatch_command_inner(cmd, true);
+        self.clear_idle_tool_highlight();
+        task
     }
 
     fn dispatch_command_inner(&mut self, cmd: &str, allow_suggest: bool) -> Task<Message> {
@@ -112,18 +184,7 @@ impl OpenCADStudio {
         {
             let mut selection = self.tabs[i].scene.selection.borrow_mut();
             // Cancel the active selection gesture before the new command starts.
-            selection.left_down = false;
-            selection.left_press_pos = None;
-            selection.left_press_time = None;
-            selection.left_dragging = false;
-            selection.box_anchor = None;
-            selection.box_anchor_world = None;
-            selection.box_current = None;
-            selection.box_crossing = false;
-            selection.box_crossing_locked = false;
-            selection.poly_active = false;
-            selection.poly_points.clear();
-            selection.poly_crossing = false;
+            selection.clear_left_selection_gesture();
         }
         // Cancel any running command before starting a new one.
         if self.tabs[i].active_cmd.is_some() {
@@ -133,37 +194,7 @@ impl OpenCADStudio {
             // template-property override too (#239).
             self.restore_add_selected_defaults();
         }
-        // A command parked behind a transparent zoom / MTP goes with it.
-        self.tabs[i].suspended_cmd = None;
-        self.tabs[i].transparent_resume = false;
-        // Starting any command leaves interactive navigation modes (their own
-        // command arms below re-enable the selected one).
-        self.tabs[i].pan_mode = false;
-        self.tabs[i].orbit_mode = false;
-        self.tabs[i].zoom_dynamic_mode = false;
-        // Reset the last committed point so the first click of the new command
-        // is not constrained by ortho/polar relative to a previous command's endpoint.
-        self.last_point = None;
-        // A new command collects its own points, so the previous command's
-        // accepted snaps must not leak into it.
-        self.clear_accepted_snaps();
-        // Starting a command restarts the right-click cycle, so its first
-        // right-click acts as Enter rather than opening the context menu.
-        self.tabs[i]
-            .scene
-            .selection
-            .borrow_mut()
-            .right_click_entered = false;
-        // A fresh command starts at the polar/cartesian default — clear
-        // any `,`-driven reshape and locked dynamic-input values from a
-        // previous command. Otherwise a bare Enter on the first point prompt
-        // can commit that stale coordinate instead of accepting the command's
-        // default (LIMITS then compares an unintended lower-left point with
-        // the displayed default upper-right).
-        self.dyn_user_reshaped = false;
-        self.dyn_coord_absolute = false;
-        self.tabs[i].dyn_fields.clear();
-        self.tabs[i].dyn_active = 0;
+        self.reset_command_start_state(i);
 
         if let Some(path_str) = cmd.strip_prefix("OPEN_RECENT:") {
             let path = PathBuf::from(path_str);
@@ -180,23 +211,31 @@ impl OpenCADStudio {
         // editors (shortcuts, aliases) — none of them read the scene. This is
         // the single place that decides; `on_ribbon_tool_click` defers to it
         // rather than keeping a second, blunter copy (#388, #389).
-        if self.tabs[i].is_start && !start_allowed(cmd) {
+        if self.tabs[i].is_start && !start_allowed(strip_command_prefixes(cmd).unwrap_or(cmd)) {
             self.command_line
                 .push_info(crate::t!("No drawing open. Use NEW or OPEN to start a drawing.").as_ref());
             return Task::none();
         }
 
-        if crate::plugin::try_dispatch(self, i, cmd) {
+        // Light the ribbon button of the command now starting, however it was
+        // started (typed, alias, shortcut, Repeat), so the user sees where it
+        // lives. A transparent command returned above and leaves the running
+        // command's highlight alone.
+        self.ribbon
+            .show_command(strip_command_prefixes(cmd).unwrap_or(cmd));
+
+        if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             // try_dispatch returns true for both finished commands and interactive
             // commands that it just installed. If no command is now active, the
             // tool was a one-shot and we must turn the ribbon highlight off here —
             // normally apply_cmd_result does that, but plugin dispatch can return
             // without producing a CmdResult.
+            self.tabs[i].last_cmd = Some(cmd.to_string());
             self.command_line.record_recent(cmd);
             if self.tabs[i].active_cmd.is_none() {
                 self.ribbon.deactivate_tool();
             }
-            return Task::none();
+            return self.finish_dispatch(cmd);
         }
 
         // Command families are dispatched in source order (see
@@ -209,6 +248,15 @@ impl OpenCADStudio {
             // fallback (`BAC`) stores the real command (`BACKGROUND`).
             self.command_line.record_recent(cmd);
             return t;
+        }
+
+        // Scripts and typed input may carry the international (`_`) and
+        // built-in (`.`) name prefixes (`_LINE`, `._LINE`). Ribbon tools
+        // dispatch internal names that start with `_` themselves
+        // (`_PCCROPPOLY`), so a name is tried as written first and loses its
+        // prefixes only when nothing handles it.
+        if let Some(bare) = strip_command_prefixes(cmd) {
+            return self.dispatch_command_inner(bare, allow_suggest);
         }
 
         // No family matched. From the interactive command line, run the
@@ -246,7 +294,31 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_layers(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_xref_attach(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_blocks(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_pdf_underlay(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_pc_colormap(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_pc_extract(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_attdef(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_sheet_set(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_field(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_count(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_draw(cmd, i) {
@@ -265,6 +337,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_plotvars(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_blockvars(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_styleprops(cmd, i) {
@@ -444,6 +519,14 @@ inventory::submit!(crate::command::CommandRegistration {
         // Block list + block-attribute list (command-line forms).
         "BLOCKPALETTE",
         "BLOCKSPALETTE",
+        "BLOCKSPALETTECLOSE",
+        "-INSERT",
+        "BLOCKMRULIST",
+        "BLOCKREDEFINEMODE",
+        "BLOCKNAVIGATE",
+        "BLOCKSTATE",
+        "EXPLMODE",
+        "INSNAME",
         "ATTMAN",
         "BATTMAN",
         // Drawing-content overview.
@@ -540,6 +623,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "FITSPLINE",
         // System variables (typeable directly).
         "MIRRTEXT",
+        "PERSPECTIVE",
+        "GRIDMODE",
+        "GRIDUNIT",
         "ZOOMWHEEL",
         "ZOOMFACTOR",
         "SHORTCUTMENU",
@@ -606,12 +692,44 @@ inventory::submit!(crate::command::CommandRegistration {
         "FRAME",
         "IMAGEFRAME",
         "PDFFRAME",
+        "DWFFRAME",
+        "DGNFRAME",
+        "PDFOSNAP",
+        "UOSNAP",
+        "FIELDDISPLAY",
+        "FIELDEVAL",
+        "PDFIMPORTMODE",
+        "PDFIMPORTFILTER",
+        "PDFIMPORTLAYERS",
+        "PDFIMPORTIMAGEPATH",
+        "XDWGFADECTL",
         "POINTCLOUDCLIPFRAME",
+        "POINTCLOUDDENSITY",
+        "POINTCLOUDPOINTSIZE",
+        "POINTCLOUDLOCK",
+        "POINTCLOUDAUTOUPDATE",
+        "POINTCLOUDBOUNDARY",
+        "POINTCLOUDRTDENSITY",
+        "POINTCLOUDLOD",
+        "POINTCLOUDPOINTMAX",
+        "POINTCLOUDVISRETAIN",
+        "POINTCLOUDSHADING",
+        "POINTCLOUDCACHESIZE",
+        "POINTCLOUD2DVSDISPLAY",
+        "POINTCLOUDLIGHTING",
+        "POINTCLOUDLIGHTSOURCE",
+        "POINTCLOUDPOINTMAXLEGACY",
         "XCLIPFRAME",
         "WIPEOUTFRAME",
+        "ATTMODE0",
+        "ATTMODE1",
+        "ATTMODE2",
         "FRAMES0",
         "FRAMES1",
+        "FRAMES3",
         "FRAMES2",
+        "UOSNAP0",
+        "UOSNAP1",
         "HALOGAP",
         "TRACEWID",
         "SKETCHINC",
@@ -652,6 +770,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "3DORBIT",
         "3O",
         "ABOUT",
+        "ATTACH",
         "ATTDISP",
         "ATTEXT",
         "BACKGROUND",
@@ -683,6 +802,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "EXPORTSTEP",
         "EXPORTSTL",
         "EXTERNALREFERENCES",
+        "POINTCLOUDMANAGER",
+        "POINTCLOUDMANAGERCLOSE",
         "EXTRIM",
         "FILETAB",
         "FIND",
@@ -692,6 +813,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "IM",
         "IMAGE",
         "IMAGEATTACH",
+        "TRANSPARENCY",
         "IMAGEEMBED",
         "IMPORTOBJ",
         "ISOLATEOBJECTS",
@@ -715,8 +837,10 @@ inventory::submit!(crate::command::CommandRegistration {
         "MLSTYLE",
         "MS",
         "MSPACE",
+        "CHSPACE",
         "NAVVCUBE",
         "NEW",
+        "QNEW",
         "OBJIMPORT",
         "OPEN",
         "ORTHO",
@@ -761,6 +885,15 @@ inventory::submit!(crate::command::CommandRegistration {
         "CREATESKETCH",
         "FINISHSKETCH",
         "SHEETSET",
+        "SHEETSETHIDE",
+        "NEWSHEETSET",
+        "OPENSHEETSET",
+        "SSMAUTOOPEN",
+        "SSLOCATE",
+        "SSMPOLLTIME",
+        "SSMSHEETSTATUS",
+        "SSMSTATE",
+        "SSFOUND",
         "SHORTCUTS",
         "SSM",
         "STEPOUT",
@@ -801,10 +934,10 @@ inventory::submit!(crate::command::CommandRegistration {
 
 #[cfg(test)]
 mod marquee_cancel_tests {
-    use crate::app::{GripPendingValue, OpenCADStudio};
+    use crate::app::{GripPendingValue, Message, OpenCADStudio};
     use crate::scene::model::object::GripMenuAction;
     use crate::scene::pick::grip::GripEdit;
-    use acadrust::Handle;
+    use codec::Handle;
     use iced::time::Instant;
 
     fn fresh() -> OpenCADStudio {
@@ -817,31 +950,31 @@ mod marquee_cancel_tests {
     fn arm_marquee(app: &mut OpenCADStudio) {
         let i = app.active_tab;
         let mut sel = app.tabs[i].scene.selection.borrow_mut();
-        sel.left_down = true;
-        sel.left_press_pos = Some(iced::Point::new(10.0, 10.0));
-        sel.left_press_time = Some(Instant::now());
-        sel.left_dragging = true;
-        sel.box_anchor = Some(iced::Point::new(10.0, 10.0));
-        sel.box_anchor_world = Some(glam::DVec3::new(1.0, 2.0, 0.0));
-        sel.box_current = Some(iced::Point::new(40.0, 40.0));
-        sel.box_crossing = true;
-        sel.box_crossing_locked = true;
+        sel.input.left_down = true;
+        sel.input.left_press_pos = Some(iced::Point::new(10.0, 10.0));
+        sel.input.left_press_time = Some(Instant::now());
+        sel.input.left_dragging = true;
+        sel.gesture.box_anchor = Some(iced::Point::new(10.0, 10.0));
+        sel.gesture.box_anchor_world = Some(glam::DVec3::new(1.0, 2.0, 0.0));
+        sel.gesture.box_current = Some(iced::Point::new(40.0, 40.0));
+        sel.gesture.box_crossing = true;
+        sel.gesture.box_crossing_locked = true;
     }
 
     /// Arm a held lasso drag.
     fn arm_lasso(app: &mut OpenCADStudio) {
         let i = app.active_tab;
         let mut sel = app.tabs[i].scene.selection.borrow_mut();
-        sel.left_down = true;
-        sel.left_press_pos = Some(iced::Point::new(10.0, 10.0));
-        sel.left_press_time = Some(Instant::now());
-        sel.left_dragging = true;
-        sel.poly_active = true;
-        sel.poly_points = vec![
+        sel.input.left_down = true;
+        sel.input.left_press_pos = Some(iced::Point::new(10.0, 10.0));
+        sel.input.left_press_time = Some(Instant::now());
+        sel.input.left_dragging = true;
+        sel.gesture.poly_active = true;
+        sel.gesture.poly_points = vec![
             iced::Point::new(10.0, 10.0),
             iced::Point::new(20.0, 30.0),
         ];
-        sel.poly_crossing = true;
+        sel.gesture.poly_crossing = true;
     }
 
     #[test]
@@ -853,15 +986,15 @@ mod marquee_cancel_tests {
         let _ = app.dispatch_command("LINE");
 
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(!sel.left_down);
-        assert!(sel.left_press_pos.is_none());
-        assert!(sel.left_press_time.is_none());
-        assert!(!sel.left_dragging);
-        assert!(sel.box_anchor.is_none());
-        assert!(sel.box_anchor_world.is_none());
-        assert!(sel.box_current.is_none());
-        assert!(!sel.box_crossing);
-        assert!(!sel.box_crossing_locked);
+        assert!(!sel.input.left_down);
+        assert!(sel.input.left_press_pos.is_none());
+        assert!(sel.input.left_press_time.is_none());
+        assert!(!sel.input.left_dragging);
+        assert!(sel.gesture.box_anchor.is_none());
+        assert!(sel.gesture.box_anchor_world.is_none());
+        assert!(sel.gesture.box_current.is_none());
+        assert!(!sel.gesture.box_crossing);
+        assert!(!sel.gesture.box_crossing_locked);
     }
 
     #[test]
@@ -873,13 +1006,13 @@ mod marquee_cancel_tests {
         let _ = app.dispatch_command("LINE");
 
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(!sel.left_down);
-        assert!(sel.left_press_pos.is_none());
-        assert!(sel.left_press_time.is_none());
-        assert!(!sel.left_dragging);
-        assert!(!sel.poly_active);
-        assert!(sel.poly_points.is_empty());
-        assert!(!sel.poly_crossing);
+        assert!(!sel.input.left_down);
+        assert!(sel.input.left_press_pos.is_none());
+        assert!(sel.input.left_press_time.is_none());
+        assert!(!sel.input.left_dragging);
+        assert!(!sel.gesture.poly_active);
+        assert!(sel.gesture.poly_points.is_empty());
+        assert!(!sel.gesture.poly_crossing);
     }
 
     #[test]
@@ -895,8 +1028,8 @@ mod marquee_cancel_tests {
             Some("LINE")
         );
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(sel.box_anchor.is_none());
-        assert!(sel.box_anchor_world.is_none());
+        assert!(sel.gesture.box_anchor.is_none());
+        assert!(sel.gesture.box_anchor_world.is_none());
     }
 
     #[test]
@@ -908,15 +1041,15 @@ mod marquee_cancel_tests {
         let _ = app.dispatch_command("ORTHO");
 
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(sel.left_down);
-        assert!(sel.left_press_pos.is_some());
-        assert!(sel.left_press_time.is_some());
-        assert!(sel.left_dragging);
-        assert!(sel.box_anchor.is_some());
-        assert!(sel.box_anchor_world.is_some());
-        assert!(sel.box_current.is_some());
-        assert!(sel.box_crossing);
-        assert!(sel.box_crossing_locked);
+        assert!(sel.input.left_down);
+        assert!(sel.input.left_press_pos.is_some());
+        assert!(sel.input.left_press_time.is_some());
+        assert!(sel.input.left_dragging);
+        assert!(sel.gesture.box_anchor.is_some());
+        assert!(sel.gesture.box_anchor_world.is_some());
+        assert!(sel.gesture.box_current.is_some());
+        assert!(sel.gesture.box_crossing);
+        assert!(sel.gesture.box_crossing_locked);
     }
 
     #[test]
@@ -946,5 +1079,76 @@ mod marquee_cancel_tests {
             app.tabs[i].active_cmd.as_deref().map(|cmd| cmd.name()),
             Some("LINE")
         );
+    }
+
+    #[test]
+    fn command_finalize_repeats_last_cmd() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        assert_eq!(app.tabs[i].last_cmd, None);
+
+        // Run LINE command
+        let _ = app.dispatch_command("LINE");
+        assert_eq!(app.tabs[i].last_cmd.as_deref(), Some("LINE"));
+
+        // Cancel LINE with Escape
+        let _ = app.update(Message::CommandEscape);
+        assert!(app.tabs[i].active_cmd.is_none());
+        assert_eq!(app.tabs[i].last_cmd.as_deref(), Some("LINE"));
+
+        // Press Enter (CommandFinalize) on empty command line repeats LINE
+        let _ = app.update(Message::CommandFinalize);
+        assert_eq!(
+            app.tabs[i].active_cmd.as_deref().map(|cmd| cmd.name()),
+            Some("LINE")
+        );
+    }
+}
+
+/// `cmd` without its leading `_` / `.` name prefixes (`_LINE`, `.LINE`,
+/// `._LINE`), or `None` when it carries none.
+fn strip_command_prefixes(cmd: &str) -> Option<&str> {
+    let bare = cmd.trim_start_matches(['_', '.']);
+    (bare.len() != cmd.len() && !bare.is_empty()).then_some(bare)
+}
+
+#[cfg(test)]
+mod ribbon_highlight_tests {
+    use crate::app::OpenCADStudio;
+
+    fn fresh() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn a_typed_alias_lights_the_button_of_the_command_it_starts() {
+        let mut app = fresh();
+        let _ = app.dispatch_command_or_suggest("O");
+        assert!(app.tabs[app.active_tab].active_cmd.is_some());
+        assert_eq!(app.ribbon.active_tool(), Some("OFFSET"));
+        let _ = app.dispatch_command_or_suggest("L");
+        assert_eq!(app.ribbon.active_tool(), Some("LINE"));
+    }
+
+    #[test]
+    fn a_transparent_command_keeps_the_running_command_lit() {
+        let mut app = fresh();
+        let _ = app.dispatch_command_or_suggest("LINE");
+        let _ = app.dispatch_command_or_suggest("'ZOOM E");
+        assert!(app.tabs[app.active_tab].active_cmd.is_some());
+        assert_eq!(app.ribbon.active_tool(), Some("LINE"));
+    }
+
+    #[test]
+    fn a_one_shot_command_leaves_nothing_lit() {
+        // REGEN cancels the running LINE and finishes at once, so neither
+        // its own button nor LINE's may stay lit.
+        let mut app = fresh();
+        let _ = app.dispatch_command_or_suggest("LINE");
+        let _ = app.dispatch_command_or_suggest("REGEN");
+        assert!(app.tabs[app.active_tab].active_cmd.is_none());
+        assert_eq!(app.ribbon.active_tool(), None);
     }
 }

@@ -480,14 +480,16 @@ fn test_block_palette_contrast() {
         // a hardcoded foreground, these equality checks fail on every theme
         // whose surface text is not pure white.
         let (normal_bg, normal_fg) = block_card_colors(theme, false, BtnStatus::Active);
+        // Cards sit on the dock's base surface, so they take the weak pair
+        // to read as cards.
         assert_eq!(
-            normal_bg, p.background.base.color,
-            "Theme {:?} block card normal background drifted from base pair",
+            normal_bg, p.background.weak.color,
+            "Theme {:?} block card normal background drifted from weak pair",
             theme
         );
         assert_eq!(
-            normal_fg, p.background.base.text,
-            "Theme {:?} block card normal label must use base text (was hardcoded WHITE)",
+            normal_fg, p.background.weak.text,
+            "Theme {:?} block card normal label must use weak text (was hardcoded WHITE)",
             theme
         );
 
@@ -505,11 +507,11 @@ fn test_block_palette_contrast() {
             theme
         );
 
-        // Default-branch statuses (Active/Disabled/Focused/...) share the base pair.
+        // Default-branch statuses (Active/Disabled/Focused/...) share the weak pair.
         let (_, disabled_fg) = block_card_colors(theme, false, BtnStatus::Disabled);
         assert_eq!(
-            disabled_fg, p.background.base.text,
-            "Theme {:?} block card default-state label must use base text",
+            disabled_fg, p.background.weak.text,
+            "Theme {:?} block card default-state label must use weak text",
             theme
         );
 

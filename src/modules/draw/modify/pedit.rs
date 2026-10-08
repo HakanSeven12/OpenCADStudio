@@ -1,18 +1,19 @@
 // PEDIT edits polylines and polygon meshes.
 
-use acadrust::entities::LwVertex;
-use acadrust::types::{Vector2, Vector3};
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::nurbs::clamped_uniform_knots;
-use cadkernel::geom2d::NurbsCurve;
+use codec::entities::LwVertex;
+use codec::types::{Vector2, Vector3};
+use codec::{EntityType, Handle};
+use kernel::geom2d::nurbs::clamped_uniform_knots;
+use kernel::geom2d::NurbsCurve;
 use glam::DVec3;
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
 const TAU: f64 = std::f64::consts::TAU;
-pub use cadkernel::space::endpoint_join::JoinType;
+pub use kernel::space::endpoint_join::JoinType;
 static JOIN_TYPE: std::sync::Mutex<JoinType> = std::sync::Mutex::new(JoinType::Extend);
 static JOIN_FUZZ: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 
@@ -70,7 +71,7 @@ pub struct PeditCommand {
     vertex_tangents: HashMap<usize, f64>,
     pending_tangents: Option<HashMap<usize, f64>>,
     tangent_history: Vec<HashMap<usize, f64>>,
-    mesh_smooth_type: acadrust::entities::polygon_mesh::SurfaceSmoothType,
+    mesh_smooth_type: codec::entities::polygon_mesh::SurfaceSmoothType,
     mesh_smooth_density: (i16, i16),
     mesh_vertex_default: isize,
     pending_mesh_closed: Option<(bool, bool)>,
@@ -84,7 +85,7 @@ impl PeditCommand {
         surface_u_density: i16,
         surface_v_density: i16,
     ) -> Self {
-        use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+        use codec::entities::polygon_mesh::SurfaceSmoothType;
 
         let mesh_smooth_type = match surface_type {
             5 => SurfaceSmoothType::Quadratic,
@@ -188,6 +189,24 @@ impl PeditCommand {
         }
     }
 
+    /// WCS location of a vertex of the polyline being edited.
+    fn vertex_world(&self, index: usize) -> Option<DVec3> {
+        let entity = self.target.and_then(|handle| self.entities.get(&handle.value()))?;
+        let (ocs, n) = match entity {
+            EntityType::LwPolyline(p) => {
+                let v = p.vertices.get(index)?;
+                ((v.location.x, v.location.y, p.elevation), &p.normal)
+            }
+            EntityType::Polyline2D(p) => {
+                let v = p.vertices.get(index)?;
+                ((v.location.x, v.location.y, p.elevation), &p.normal)
+            }
+            _ => return None,
+        };
+        let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs(ocs, (n.x, n.y, n.z));
+        Some(DVec3::new(x, y, z))
+    }
+
     fn vertex_count(&self) -> usize {
         self.target.and_then(|handle| self.entities.get(&handle.value())).map_or(0, |entity| match entity {
             EntityType::LwPolyline(polyline) => polyline.vertices.len(),
@@ -235,6 +254,40 @@ impl PeditCommand {
 impl CadCommand for PeditCommand {
     fn name(&self) -> &'static str {
         "PEDIT"
+    }
+
+    /// Edit-vertex steps mark the current vertex with a screen-sized X (#1628).
+    fn on_mouse_move(&mut self, _pt: DVec3) -> Option<WireModel> {
+        let index = match self.mode {
+            Mode::PolyVertex(i)
+            | Mode::PolyTangent(i)
+            | Mode::PolyMove(i)
+            | Mode::PolyInsert(i)
+            | Mode::PolyWidthStart(i, _)
+            | Mode::PolyWidthEnd(i, _) => i,
+            Mode::PolyRange { end, .. } => end,
+            _ => return None,
+        };
+        let origin = self.vertex_world(index)?;
+        let at = |dx: f64, dy: f64| {
+            let p = origin + DVec3::new(dx, dy, 0.0);
+            [p.x, p.y, p.z]
+        };
+        let h = 0.5;
+        let mut wire = WireModel::solid_f64(
+            "pedit_vertex_marker".into(),
+            vec![at(-h, -h), at(h, h), [f64::NAN; 3], at(-h, h), at(h, -h)],
+            WireModel::CYAN,
+            false,
+        );
+        wire.point_marker = Some(crate::scene::model::wire_model::PointMarker {
+            origin,
+            normal: DVec3::Z,
+            axis_x: DVec3::X,
+            axis_y: DVec3::Y,
+            viewport_percent: 3.0,
+        });
+        Some(wire)
     }
 
     fn prompt(&self) -> String {
@@ -622,7 +675,7 @@ impl CadCommand for PeditCommand {
                             handle,
                             op: PeditOp::SetMeshSmooth {
                                 smooth:
-                                    acadrust::entities::polygon_mesh::SurfaceSmoothType::NoSmooth,
+                                    codec::entities::polygon_mesh::SurfaceSmoothType::NoSmooth,
                                 m_density: self.mesh_smooth_density.0,
                                 n_density: self.mesh_smooth_density.1,
                             },
@@ -741,7 +794,7 @@ impl CadCommand for PeditCommand {
                 _ => return CmdResult::NeedPoint,
             };
             let Some(local) = crate::entities::curve::ocs_plane(normal, elevation).project([point.x, point.y, point.z]) else { return CmdResult::NeedPoint; };
-            let delta = cadkernel::geom2d::Vec2::new(local[0] - location[0], local[1] - location[1]);
+            let delta = kernel::geom2d::Vec2::new(local[0] - location[0], local[1] - location[1]);
             if !delta.length_squared().is_finite() || delta.length_squared() <= 1e-24 { return CmdResult::NeedPoint; }
             self.vertex_tangents.insert(index, delta.angle().rem_euclid(TAU));
             self.mode = Mode::PolyVertex(index);
@@ -838,7 +891,7 @@ pub enum PeditOp {
     SetMeshClosedM(bool),
     SetMeshClosedN(bool),
     SetMeshSmooth {
-        smooth: acadrust::entities::polygon_mesh::SurfaceSmoothType,
+        smooth: codec::entities::polygon_mesh::SurfaceSmoothType,
         m_density: i16,
         n_density: i16,
     },
@@ -878,9 +931,9 @@ pub fn edit_vertex_range(entity: &EntityType, first: usize, last: usize, split: 
     }
     match entity {
         EntityType::LwPolyline(polyline) => edit!(polyline, polyline.is_closed, LwPolyline,
-            |value: &mut acadrust::entities::LwPolyline| { value.is_closed = false; }),
+            |value: &mut codec::entities::LwPolyline| { value.is_closed = false; }),
         EntityType::Polyline2D(polyline) => edit!(polyline, polyline.flags.is_closed(), Polyline2D,
-            |value: &mut acadrust::entities::Polyline2D| { value.flags.set_closed(false); }),
+            |value: &mut codec::entities::Polyline2D| { value.flags.set_closed(false); }),
         _ => None,
     }
 }
@@ -929,7 +982,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                     if *index >= polyline.vertices.len() { return false; }
                     let location = Vector3::new(local[0], local[1], polyline.elevation);
                     if *insert {
-                        polyline.vertices.insert(index + 1, acadrust::entities::polyline::Vertex2D::new(location));
+                        polyline.vertices.insert(index + 1, codec::entities::polyline::Vertex2D::new(location));
                     } else { polyline.vertices[*index].location = location; }
                     true
                 }
@@ -948,10 +1001,10 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                 true
             }
             EntityType::Polyline2D(polyline) => {
-                let flag = acadrust::entities::polyline::PolylineFlags::LINETYPE_CONTINUOUS;
+                let flag = codec::entities::polyline::PolylineFlags::LINETYPE_CONTINUOUS;
                 let bits = polyline.flags.bits();
                 if (bits & flag.bits() != 0) == *enabled { return false; }
-                polyline.flags = acadrust::entities::polyline::PolylineFlags::from_bits(
+                polyline.flags = codec::entities::polyline::PolylineFlags::from_bits(
                     if *enabled { bits | flag.bits() } else { bits & !flag.bits() }
                 );
                 true
@@ -1014,7 +1067,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                     return false;
                 }
                 mesh.flags.set(
-                    acadrust::entities::polygon_mesh::PolygonMeshFlags::CLOSED_M,
+                    codec::entities::polygon_mesh::PolygonMeshFlags::CLOSED_M,
                     *closed,
                 );
                 true
@@ -1027,7 +1080,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                     return false;
                 }
                 mesh.flags.set(
-                    acadrust::entities::polygon_mesh::PolygonMeshFlags::CLOSED_N,
+                    codec::entities::polygon_mesh::PolygonMeshFlags::CLOSED_N,
                     *closed,
                 );
                 true
@@ -1043,7 +1096,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                 let mut changed = mesh.smooth_type != *smooth;
                 mesh.smooth_type = *smooth;
                 if mesh.smooth_type
-                    != acadrust::entities::polygon_mesh::SurfaceSmoothType::NoSmooth
+                    != codec::entities::polygon_mesh::SurfaceSmoothType::NoSmooth
                 {
                     let m_density = (*m_density).clamp(2, 200);
                     let n_density = (*n_density).clamp(2, 200);
@@ -1074,7 +1127,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                 {
                     return false;
                 }
-                vertex.location = acadrust::types::Vector3::new(point.x, point.y, point.z);
+                vertex.location = codec::types::Vector3::new(point.x, point.y, point.z);
                 true
             }
             _ => false,
@@ -1087,7 +1140,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
 /// A Line or Arc as an equivalent 2-vertex LwPolyline (common carried over,
 /// handle NULL for the replace flow). `None` for anything else.
 pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
-    let mut pl = acadrust::LwPolyline::new();
+    let mut pl = codec::LwPolyline::new();
     match entity {
         EntityType::Line(l) => {
             let normal = DVec3::new(l.normal.x, l.normal.y, l.normal.z).try_normalize()?;
@@ -1098,7 +1151,7 @@ pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
                 normal.x, normal.y, normal.z,
             ));
             let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
-            let tolerance = cadkernel::space::coplanarity_tolerance(&[start, end]);
+            let tolerance = kernel::space::coplanarity_tolerance(&[start, end]);
             if !plane.contains(end, tolerance) {
                 return None;
             }
@@ -1154,10 +1207,10 @@ mod convert_tests {
     // onto the new entity instead of resetting to 0 (#916).
     #[test]
     fn convert_keeps_line_thickness() {
-        let mut l = acadrust::entities::Line::new();
-        l.start = acadrust::types::Vector3::new(2.0, 3.0, 4.0);
-        l.end = acadrust::types::Vector3::new(2.0, 5.0, 6.0);
-        l.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        let mut l = codec::entities::Line::new();
+        l.start = codec::types::Vector3::new(2.0, 3.0, 4.0);
+        l.end = codec::types::Vector3::new(2.0, 5.0, 6.0);
+        l.normal = codec::types::Vector3::new(1.0, 0.0, 0.0);
         l.thickness = 3.5;
         let Some(EntityType::LwPolyline(pl)) = convert_to_polyline(&EntityType::Line(l)) else {
             panic!("line must convert");
@@ -1167,15 +1220,15 @@ mod convert_tests {
             "converted polyline must keep source thickness, got {}",
             pl.thickness
         );
-        assert_eq!(pl.normal, acadrust::types::Vector3::new(1.0, 0.0, 0.0));
+        assert_eq!(pl.normal, codec::types::Vector3::new(1.0, 0.0, 0.0));
         assert!((pl.elevation - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn convert_keeps_arc_thickness() {
-        let mut a = acadrust::entities::Arc::new();
-        a.center = acadrust::types::Vector3::new(0.0, 0.0, 4.0);
-        a.normal = acadrust::types::Vector3::new(0.0, 1.0, 0.0);
+        let mut a = codec::entities::Arc::new();
+        a.center = codec::types::Vector3::new(0.0, 0.0, 4.0);
+        a.normal = codec::types::Vector3::new(0.0, 1.0, 0.0);
         a.radius = 5.0;
         a.start_angle = 0.0;
         a.end_angle = std::f64::consts::FRAC_PI_2;
@@ -1188,7 +1241,7 @@ mod convert_tests {
             "converted polyline must keep negative thickness, got {}",
             pl.thickness
         );
-        assert_eq!(pl.normal, acadrust::types::Vector3::new(0.0, 1.0, 0.0));
+        assert_eq!(pl.normal, codec::types::Vector3::new(0.0, 1.0, 0.0));
         assert!((pl.elevation - 4.0).abs() < 1e-12);
     }
 }
@@ -1196,7 +1249,7 @@ mod convert_tests {
 // ── Curve fitting ─────────────────────────────────────────────────────────
 
 fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityType> {
-    use acadrust::entities::{Polyline2D, PolylineFlags, Vertex2D, VertexFlags};
+    use codec::entities::{Polyline2D, PolylineFlags, Vertex2D, VertexFlags};
     let mut polyline = match entity {
         EntityType::Polyline2D(p) => p.clone(),
         EntityType::LwPolyline(p) => {
@@ -1231,7 +1284,7 @@ fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityT
     }
     let points: Vec<_> = originals.iter().map(|v| [v.location.x, v.location.y]).collect();
     let directions: Vec<_> = originals.iter().map(|v| (v.flags.bits() & 2 != 0).then(|| [v.curve_tangent.cos(), v.curve_tangent.sin()])).collect();
-    let fitted = cadkernel::geom2d::fit_arc_chain(&points, polyline.flags.is_closed(), &directions)?;
+    let fitted = kernel::geom2d::fit_arc_chain(&points, polyline.flags.is_closed(), &directions)?;
     let mut vertices = Vec::with_capacity(fitted.len());
     for (i, fitted_vertex) in fitted.iter().enumerate() {
         let original = &originals[fitted_vertex.source];
@@ -1251,7 +1304,7 @@ fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityT
     Some(EntityType::Polyline2D(polyline))
 }
 
-fn defining_vertices(polyline: &acadrust::entities::Polyline2D) -> Vec<acadrust::entities::Vertex2D> {
+fn defining_vertices(polyline: &codec::entities::Polyline2D) -> Vec<codec::entities::Vertex2D> {
     polyline.vertices.iter().enumerate().filter(|(_, vertex)| vertex.flags.bits() & 1 == 0).map(|(index, vertex)| {
         let mut original = vertex.clone();
         if let Some(knee) = polyline.vertices[index + 1..].iter().take_while(|next| next.flags.bits() & 1 != 0).last() {
@@ -1265,7 +1318,7 @@ fn decurve_entity(entity: &EntityType) -> Option<EntityType> {
     let mut result = match entity {
         EntityType::LwPolyline(p) => p.clone(),
         EntityType::Polyline2D(p) => {
-            let mut result = acadrust::LwPolyline::new();
+            let mut result = codec::LwPolyline::new();
             result.common = p.common.clone(); result.normal = p.normal;
             result.elevation = p.elevation; result.thickness = p.thickness;
             result.is_closed = p.flags.is_closed(); result.plinegen = p.flags.bits() & 128 != 0;
@@ -1299,7 +1352,7 @@ fn decurve_entity(entity: &EntityType) -> Option<EntityType> {
 /// out, with the open case clamped by repeating end points and then the two
 /// ends pinned back afterwards to undo the drift that leaves — all of which
 /// a clamped knot vector expresses directly and exactly.
-fn spline_smooth(p: &mut acadrust::LwPolyline) -> bool {
+fn spline_smooth(p: &mut codec::LwPolyline) -> bool {
     const DEGREE: usize = 3;
     const PER_SPAN: usize = 8;
 
@@ -1350,10 +1403,10 @@ fn spline_smooth(p: &mut acadrust::LwPolyline) -> bool {
 #[cfg(test)]
 mod editing_tests {
     use super::*;
-    use acadrust::entities::{Polyline2D, Vertex2D};
+    use codec::entities::{Polyline2D, Vertex2D};
 
     fn lightweight(handle: u64, points: &[[f64; 2]]) -> EntityType {
-        let mut polyline = acadrust::LwPolyline::new();
+        let mut polyline = codec::LwPolyline::new();
         polyline.common.handle = Handle::new(handle);
         polyline.vertices = points
             .iter()
@@ -1488,9 +1541,9 @@ mod editing_tests {
     #[test]
     fn multiple_decline_and_fuzz_join_keep_the_command_active() {
         *JOIN_TYPE.lock().unwrap_or_else(|error| error.into_inner()) = JoinType::Extend;
-        let mut line = acadrust::entities::Line::new();
+        let mut line = codec::entities::Line::new();
         line.common.handle = Handle::new(11);
-        let mut arc = acadrust::entities::Arc::new();
+        let mut arc = codec::entities::Arc::new();
         arc.common.handle = Handle::new(12);
         let mut declined = command(
             vec![EntityType::Line(line), EntityType::Arc(arc)],
@@ -1663,14 +1716,14 @@ pub fn join_selection_extend(source: &EntityType, candidates: &[(Handle, &Entity
                 let b_ends = [true,false].into_iter().filter_map(|start| endpoint(candidate,start).map(|points|(start,points))).collect::<Vec<_>>();
                 let a_points = a_ends.iter().map(|(_,points)|*points).collect::<Vec<_>>();
                 let b_points = b_ends.iter().map(|(_,points)|*points).collect::<Vec<_>>();
-                if let Some((a_index,b_index,joint)) = cadkernel::space::endpoint_join::closest_line_end_join(&a_points,&b_points,fuzz,connector_distance.unwrap_or(0.0),kind) {
+                if let Some((a_index,b_index,joint)) = kernel::space::endpoint_join::closest_line_end_join(&a_points,&b_points,fuzz,connector_distance.unwrap_or(0.0),kind) {
                     let (a_start,a_points) = a_ends[a_index]; let (b_start,b_points) = b_ends[b_index];
                     let mut a = result.clone(); let mut b = (*candidate).clone();
                     let joined_pair = if let Some(point) = joint {
                         if move_endpoint(&mut a,a_start,point).is_none() || move_endpoint(&mut b,b_start,point).is_none() {continue;}
                         super::join::join_to_source(&a,&[(*handle,&b)])
                     } else {
-                        let mut line = acadrust::entities::Line::new();
+                        let mut line = codec::entities::Line::new();
                         line.start = Vector3::new(a_points[1][0],a_points[1][1],a_points[1][2]);
                         line.end = Vector3::new(b_points[1][0],b_points[1][1],b_points[1][2]);
                         match &a {
@@ -1710,7 +1763,7 @@ pub fn selection_connector_distance(entities: &[(Handle, EntityType)], fuzz: f64
         };
         if !z.is_finite() { return None; }
         let plane = crate::entities::curve::ocs_plane(*normal, z);
-        let normal = cadkernel::space::Vec3::from(plane.normal()?);
+        let normal = kernel::space::Vec3::from(plane.normal()?);
         let points = vertices.into_iter().map(|point| plane.point_at(point)).collect::<Vec<_>>();
         curves.push((normal, points));
     }
@@ -1719,10 +1772,10 @@ pub fn selection_connector_distance(entities: &[(Handle, EntityType)], fuzz: f64
         return None;
     }
     let world = curves.iter().flat_map(|(_, points)| points.iter().copied()).collect::<Vec<_>>();
-    let tolerance = cadkernel::space::coplanarity_tolerance(&world);
+    let tolerance = kernel::space::coplanarity_tolerance(&world);
     let shared = crate::entities::curve::ocs_plane(Vector3::new(normal.x, normal.y, normal.z),
-        cadkernel::space::Vec3::from(world[0]).dot(*normal));
+        kernel::space::Vec3::from(world[0]).dot(*normal));
     if world.iter().any(|point| !shared.contains(*point, tolerance)) { return None; }
     let points = world.into_iter().map(|point| shared.project(point)).collect::<Option<Vec<_>>>()?;
-    cadkernel::space::endpoint_join::planar_connector_distance(&points, fuzz)
+    kernel::space::endpoint_join::planar_connector_distance(&points, fuzz)
 }

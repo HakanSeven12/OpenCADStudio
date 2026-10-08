@@ -14,7 +14,7 @@
 // All arithmetic is kept in f64 (picked points stay full precision; downcasting
 // to f32 loses several hundredths of a unit at survey-scale coordinates).
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use crate::t;
 
@@ -77,6 +77,7 @@ impl MeasureGeomCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -102,7 +103,9 @@ impl MeasureGeomCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        }
+        
+            ..Default::default()
+}
     }
 
     /// Extract (radius) from a Circle or Arc; `None` for anything else.
@@ -124,11 +127,12 @@ impl MeasureGeomCommand {
         let dy = delta.y;
         let dz = delta.z;
         let angle_xy = dy.atan2(dx).to_degrees();
-        let dist_s = format!("{dist:.4}");
-        let angle_xy_s = format!("{angle_xy:.4}");
-        let dx_s = format!("{dx:.4}");
-        let dy_s = format!("{dy:.4}");
-        let dz_s = format!("{dz:.4}");
+        let aprec = crate::entities::common::unit_context().auprec.max(0) as usize;
+        let dist_s = crate::entities::common::format_length(dist);
+        let angle_xy_s = crate::entities::common::without_negative_zero(format!("{angle_xy:.aprec$}"));
+        let dx_s = crate::entities::common::format_length(dx);
+        let dy_s = crate::entities::common::format_length(dy);
+        let dz_s = crate::entities::common::format_length(dz);
         t!(
             "Distance = %{dist},  Angle in XY Plane = %{angle_xy}°\n  Delta X = %{dx},  Delta Y = %{dy},  Delta Z = %{dz}",
             dist = dist_s,
@@ -154,8 +158,8 @@ impl MeasureGeomCommand {
             perimeter += (points[(idx + 1) % n] - points[idx]).length();
         }
         let area = (area_sum * 0.5).abs();
-        let area_s = format!("{area:.4}");
-        let perimeter_s = format!("{perimeter:.4}");
+        let area_s = crate::entities::common::format_area(area);
+        let perimeter_s = crate::entities::common::format_length(perimeter);
         t!(
             "Area = %{area},  Perimeter = %{perimeter}",
             area = area_s,
@@ -170,12 +174,14 @@ impl MeasureGeomCommand {
         let vb = b - vertex;
         let la = va.length();
         let lb = vb.length();
+        let aprec = crate::entities::common::unit_context().auprec.max(0) as usize;
         if la == 0.0 || lb == 0.0 {
-            return t!("Angle = 0.0000° (degenerate rays)").into_owned();
+            let zero = crate::entities::common::without_negative_zero(format!("{:.aprec$}", 0.0));
+            return t!("Angle = %{angle}° (degenerate rays)", angle = zero).into_owned();
         }
         let cos = (va.dot(vb) / (la * lb)).clamp(-1.0, 1.0);
         let angle = cos.acos().to_degrees();
-        let angle_s = format!("{angle:.4}");
+        let angle_s = crate::entities::common::without_negative_zero(format!("{angle:.aprec$}"));
         t!("Angle = %{angle}°", angle = angle_s).into_owned()
     }
 }
@@ -274,8 +280,8 @@ impl CadCommand for MeasureGeomCommand {
         match self.picked.as_ref().and_then(Self::radius_of) {
             Some(radius) => {
                 let diameter = radius * 2.0;
-                let radius_s = format!("{radius:.4}");
-                let diameter_s = format!("{diameter:.4}");
+                let radius_s = crate::entities::common::format_length(radius);
+                let diameter_s = crate::entities::common::format_length(diameter);
                 CmdResult::Measurement(
                     t!(
                         "Radius = %{radius},  Diameter = %{diameter}",

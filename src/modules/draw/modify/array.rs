@@ -13,7 +13,7 @@
 //   Polar array: copies rotated around a center point by a total angle.
 //   1. Center point → 2. Item count (text) → 3. Total angle in degrees (text)
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::t;
 
@@ -456,7 +456,7 @@ impl CadCommand for ArrayPolarCommand {
 //   2. Enter item count (total, including the original at the path start)
 //   → Returns BatchCopy with Translate transforms derived from path samples.
 
-use acadrust::EntityType;
+use codec::EntityType;
 use crate::entities::curve::entity_curve;
 use std::f64::consts::PI as FPI;
 use std::f64::consts::TAU as FTAU;

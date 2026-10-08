@@ -252,24 +252,71 @@ pub fn extract_ellipse_instances(
     wire: &crate::scene::WireModel,
     draw_depth: f32,
 ) -> Option<Vec<EllipseInstance>> {
+    let mut instances = Vec::new();
+    if extract_ellipse_instances_into(wire, draw_depth, &mut instances) {
+        Some(instances)
+    } else {
+        None
+    }
+}
+
+/// Allocation-free check whether this wire consists entirely of analytical ellipse instances.
+pub fn can_extract_ellipse_instances(wire: &crate::scene::WireModel) -> bool {
     if wire.tangent_geoms.is_empty()
         || !wire.fill_tris.is_empty()
         || wire.fill_is_3d
         || !wire.text_verts.is_empty()
         || wire.render_instance.is_some()
     {
-        return None;
+        return false;
+    }
+    wire.tangent_geoms.iter().all(|geom| match *geom {
+        crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+            major_axis,
+            normal,
+            minor_axis_ratio,
+            start_param,
+            end_param,
+            ..
+        } => {
+            let major_len_sq = major_axis[0] * major_axis[0] + major_axis[1] * major_axis[1] + major_axis[2] * major_axis[2];
+            let norm_len_sq = normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
+            major_len_sq > 1e-12 && major_len_sq.is_finite() && major_len_sq <= 1e12
+                && norm_len_sq > 1e-12 && norm_len_sq.is_finite()
+                && minor_axis_ratio > 1e-6 && minor_axis_ratio.is_finite()
+                && start_param.is_finite() && end_param.is_finite()
+        }
+        _ => false,
+    })
+}
+
+/// Appends all analytical ellipse instances from `wire` directly into `out`.
+/// If extraction fails midway, `out` is restored to its original length and `false` is returned.
+pub fn extract_ellipse_instances_into(
+    wire: &crate::scene::WireModel,
+    draw_depth: f32,
+    out: &mut Vec<EllipseInstance>,
+) -> bool {
+    if wire.tangent_geoms.is_empty()
+        || !wire.fill_tris.is_empty()
+        || wire.fill_is_3d
+        || !wire.text_verts.is_empty()
+        || wire.render_instance.is_some()
+    {
+        return false;
     }
 
-    let mut instances = Vec::with_capacity(wire.tangent_geoms.len());
+    let initial_len = out.len();
+    out.reserve(wire.tangent_geoms.len());
     for geom in &wire.tangent_geoms {
         if let Some(inst) = extract_ellipse_instance_from_geom(geom, wire, draw_depth) {
-            instances.push(inst);
+            out.push(inst);
         } else {
-            return None;
+            out.truncate(initial_len);
+            return false;
         }
     }
-    Some(instances)
+    true
 }
 
 /// Helper to extract a single analytical ellipse instance from a `WireModel`.

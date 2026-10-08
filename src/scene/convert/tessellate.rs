@@ -1,4 +1,4 @@
-// Tessellation — convert acadrust EntityType to GPU-ready WireModel or MeshModel.
+// Tessellation — convert opencadcodec EntityType to GPU-ready WireModel or MeshModel.
 //
 // Flow:
 //   EntityType
@@ -14,8 +14,8 @@
 // are tessellated by the FallbackTess fallback_geometry() path.
 
 use crate::entities::leader::LeaderTess;
-use acadrust::types::Color as AcadColor;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::types::Color as AcadColor;
+use codec::{CadDocument, EntityType, Handle};
 use glam::Vec3;
 
 use crate::scene::convert::acad_to_render::{convert, RenderObject};
@@ -78,9 +78,142 @@ fn oriented_text_corners(
     ]
 }
 
+use crate::entities::field::{BOX_ABOVE as FIELD_BOX_ABOVE, BOX_BELOW as FIELD_BOX_BELOW};
+
+/// FIELDDISPLAY boxes: each field's shown text, one box per line it spans,
+/// placed from the text layout itself, in the text's own (rotated) frame —
+/// MTEXT and multi-line attributes from the layout's character cells, TEXT
+/// and single-line attributes from each line's character cells (the
+/// shaper's glyph cells for TrueType fonts and shaped scripts, else the
+/// stroke font's advances) — so formatting codes, missing glyphs, shaped or
+/// right-to-left scripts before a field do not shift it. A box spans the
+/// field's character cells along the line and FIELD_BOX_BELOW /
+/// FIELD_BOX_ABOVE across it. `None` when the host's fields cannot be
+/// located in its text (the whole text is boxed then).
+fn field_run_corner_groups(
+    document: &codec::CadDocument,
+    entity: &EntityType,
+    stroke_groups: &[crate::scene::convert::acad_to_render::TextStroke],
+    anno: f64,
+    ref_origin: [f64; 2],
+) -> Option<Vec<[[f64; 2]; 4]>> {
+    use crate::entities::text_support::{
+        mtext_visible_count, resolve_dxf_special_chars, resolve_text_style, text_char_cells, GlyphBox,
+    };
+    let handle = entity.common().handle;
+    // Field lines as (origin, rotation, [left, baseline, right, height]) in
+    // the origin's frame.
+    let mut lines: Vec<([f64; 2], f64, [f64; 4])> = Vec::new();
+    // Group a field's layout cells by line (a shared baseline).
+    let from_cells = |lines: &mut Vec<([f64; 2], f64, [f64; 4])>,
+                      cells: &[GlyphBox],
+                      text: &str,
+                      spans: &[std::ops::Range<usize>],
+                      origin: [f64; 2],
+                      rotation: f64|
+     -> Option<()> {
+        for span in spans {
+            let first = mtext_visible_count(text.get(..span.start)?);
+            let last = mtext_visible_count(text.get(..span.end)?);
+            let mut line: Option<[f64; 4]> = None;
+            for b in cells.iter().filter(|b| (first..last).contains(&b.vis)) {
+                let [l, base, r, top] = b.local.map(|v| v as f64 * anno);
+                let h = top - base;
+                line = Some(match line {
+                    Some(c) if (c[1] - base).abs() <= 1e-3 * h.max(c[3]) => {
+                        [c[0].min(l), c[1], c[2].max(r), c[3].max(h)]
+                    }
+                    Some(c) => {
+                        lines.push((origin, rotation, c));
+                        [l, base, r, h]
+                    }
+                    None => [l, base, r, h],
+                });
+            }
+            lines.extend(line.map(|c| (origin, rotation, c)));
+        }
+        Some(())
+    };
+    let multiline_attribute = match entity {
+        EntityType::AttributeEntity(a) => crate::entities::attribute::attribute_cells(a, document),
+        _ => None,
+    };
+    match entity {
+        EntityType::MText(m) => {
+            let spans = codec::fields::field_spans(document, handle, &m.value)?;
+            let cells = crate::entities::mtext::glyph_boxes(m, document);
+            let flip = if resolve_text_style(&m.style, document).is_upside_down { std::f64::consts::PI } else { 0.0 };
+            from_cells(
+                &mut lines,
+                &cells,
+                &m.value,
+                &spans,
+                [m.insertion_point.x, m.insertion_point.y],
+                m.rotation + flip,
+            )?;
+        }
+        // A multi-line attribute is laid out like MTEXT.
+        EntityType::AttributeEntity(a) if multiline_attribute.is_some() => {
+            let spans = codec::fields::field_spans(document, handle, &a.value)?;
+            let (cells, origin, rotation) = multiline_attribute?;
+            from_cells(&mut lines, &cells, &a.value, &spans, origin, rotation as f64)?;
+        }
+        EntityType::Text(_) | EntityType::AttributeEntity(_) => {
+            let text = match entity {
+                EntityType::Text(t) => &t.value,
+                EntityType::AttributeEntity(a) => &a.value,
+                _ => return None,
+            };
+            let spans = codec::fields::field_spans(document, handle, text)?;
+            // One laid-out line per `\P`-separated line, in order.
+            let mut start = 0;
+            for (line_text, group) in text.split("\\P").zip(stroke_groups) {
+                let range = start..start + line_text.len();
+                start = range.end + 2;
+                let run = group.run.as_ref()?;
+                let resolved = resolve_dxf_special_chars(line_text);
+                let cells = text_char_cells(&run.font, &resolved, run.height, run.width_factor);
+                let char_at = |byte: usize| {
+                    line_text.get(..byte).map_or(0, |head| resolve_dxf_special_chars(head).chars().count())
+                };
+                for span in &spans {
+                    let (a, b) = (span.start.max(range.start), span.end.min(range.end));
+                    if a >= b {
+                        continue;
+                    }
+                    let picked = cells.get(char_at(a - range.start)..char_at(b - range.start)).unwrap_or_default();
+                    let l = picked.iter().map(|c| c.0).fold(f32::INFINITY, f32::min) as f64;
+                    let r = picked.iter().map(|c| c.1).fold(f32::NEG_INFINITY, f32::max) as f64;
+                    if l.is_finite() && r.is_finite() {
+                        // Glyphs scale about the reference origin.
+                        let origin = [
+                            (group.origin[0] - ref_origin[0]) * anno + ref_origin[0],
+                            (group.origin[1] - ref_origin[1]) * anno + ref_origin[1],
+                        ];
+                        lines.push((origin, run.rotation as f64, [l * anno, 0.0, r * anno, run.height as f64 * anno]));
+                    }
+                }
+            }
+        }
+        _ => return None,
+    }
+    Some(
+        lines
+            .into_iter()
+            .filter(|(_, _, [l, _, r, _])| r > l)
+            .map(|(origin, rotation, [l, base, r, h])| {
+                let (sin_r, cos_r) = rotation.sin_cos();
+                let to_world = |x: f64, y: f64| [origin[0] + x * cos_r - y * sin_r, origin[1] + x * sin_r + y * cos_r];
+                let (b, t) = (base - FIELD_BOX_BELOW * h, base + FIELD_BOX_ABOVE * h);
+                [to_world(l, b), to_world(r, b), to_world(r, t), to_world(l, t)]
+            })
+            .collect(),
+    )
+}
+
 fn oriented_mtext_corner_groups(
     verts: &[crate::scene::pipeline::text_gpu::TextVertex],
-    text: &acadrust::MText,
+    text: &codec::MText,
     rotation: f64,
     pad: f64,
     annotation_scale: f64,
@@ -101,12 +234,12 @@ fn oriented_mtext_corner_groups(
     let gutter = columns.gutter.max(0.0) * annotation_scale;
     let total_width = width * count as f64 + gutter * count.saturating_sub(1) as f64;
     let anchor = match text.attachment_point {
-        acadrust::entities::mtext::AttachmentPoint::TopCenter
-        | acadrust::entities::mtext::AttachmentPoint::MiddleCenter
-        | acadrust::entities::mtext::AttachmentPoint::BottomCenter => 0.5,
-        acadrust::entities::mtext::AttachmentPoint::TopRight
-        | acadrust::entities::mtext::AttachmentPoint::MiddleRight
-        | acadrust::entities::mtext::AttachmentPoint::BottomRight => 1.0,
+        codec::entities::mtext::AttachmentPoint::TopCenter
+        | codec::entities::mtext::AttachmentPoint::MiddleCenter
+        | codec::entities::mtext::AttachmentPoint::BottomCenter => 0.5,
+        codec::entities::mtext::AttachmentPoint::TopRight
+        | codec::entities::mtext::AttachmentPoint::MiddleRight
+        | codec::entities::mtext::AttachmentPoint::BottomRight => 1.0,
         _ => 0.0,
     };
     let block_left = -anchor * total_width;
@@ -180,12 +313,30 @@ pub(crate) fn text_contrast_background(
 /// Split each absolute f64 source point into double-single (high, low) f32
 /// buffers in one pass — the relative-to-eye residual the GPU/CPU reconstruct
 /// to f64 precision at UTM-scale coordinates.
+/// Area centroid of a closed polyline, for the Geometric Center snap.
+fn geometric_center(entity: &EntityType) -> Option<glam::DVec3> {
+    let closed = match entity {
+        EntityType::LwPolyline(p) => p.is_closed && p.vertices.len() >= 3,
+        EntityType::Polyline2D(p) => p.is_closed() && p.vertices.len() >= 3,
+        _ => false,
+    };
+    if !closed {
+        return None;
+    }
+    let planar = crate::entities::curve::entity_curve(entity)?;
+    let center = planar.curve.enclosed_centroid()?;
+    Some(glam::DVec3::from_array(planar.plane.point_at(center)))
+}
+
 pub(crate) fn points_to_ds(
     src: impl IntoIterator<Item = [f64; 3]>,
 ) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
     let it = src.into_iter();
     let (lo, hi) = it.size_hint();
     let cap = hi.unwrap_or(lo);
+    if cap == 0 {
+        return (Vec::new(), Vec::new());
+    }
     let mut high = Vec::with_capacity(cap);
     let mut low = Vec::with_capacity(cap);
     for [x, y, z] in it {
@@ -226,7 +377,7 @@ fn polyline_segment_widths(entity: &EntityType) -> Vec<(f32, f32)> {
         }
         EntityType::Polyline2D(p) => {
             let filtered = crate::entities::polyline::drawn_vertices2d(p);
-            let verts: &[acadrust::entities::Vertex2D] =
+            let verts: &[codec::entities::Vertex2D] =
                 filtered.as_deref().unwrap_or(&p.vertices);
             let count = verts.len();
             let seg_count = if p.is_closed() {
@@ -327,9 +478,10 @@ fn split_mixed_polyline(
                 (sw, ew)
             };
 
-            let mut arc_pts = Vec::with_capacity(17);
-            let mut arc_widths = Vec::with_capacity(17);
             let n = 16;
+            let mut points = Vec::with_capacity(n + 1);
+            let mut points_low = Vec::with_capacity(n + 1);
+            let mut arc_widths = Vec::with_capacity(n + 1);
             let sweep = if end_angle >= start_angle {
                 end_angle - start_angle
             } else {
@@ -338,15 +490,15 @@ fn split_mixed_polyline(
             for s in 0..=n {
                 let frac = s as f64 / n as f64;
                 let ang = start_angle + frac * sweep;
-                let p = [
-                    center[0] + radius * (ang.cos() * axis_x[0] + ang.sin() * axis_y[0]),
-                    center[1] + radius * (ang.cos() * axis_x[1] + ang.sin() * axis_y[1]),
-                    center[2] + radius * (ang.cos() * axis_x[2] + ang.sin() * axis_y[2]),
-                ];
-                arc_pts.push(p);
+                let (sin_a, cos_a) = ang.sin_cos();
+                let x = center[0] + radius * (cos_a * axis_x[0] + sin_a * axis_y[0]);
+                let y = center[1] + radius * (cos_a * axis_x[1] + sin_a * axis_y[1]);
+                let z = center[2] + radius * (cos_a * axis_x[2] + sin_a * axis_y[2]);
+                let (h, l) = split_ds_xyz(x, y, z);
+                points.push(h);
+                points_low.push(l);
                 arc_widths.push(w_at_sa + (w_at_ea - w_at_sa) * frac as f32);
             }
-            let (points, points_low) = points_to_ds(arc_pts);
 
             let taper_widths = if (w_at_sa - w_at_ea).abs() > 1e-6 {
                 arc_widths
@@ -369,6 +521,7 @@ fn split_mixed_polyline(
                 world_width,
                 depth_override: None,
                 display_visible: true,
+                snap_only: false,
                 plot_visible: true,
                 fill_is_3d: false,
                 fill_is_2d_solid: false,
@@ -394,7 +547,9 @@ fn split_mixed_polyline(
                 plinegen: true,
                 fill_tris: vec![],
                 fill_tris_low: Vec::new(),
-            });
+            
+                ..Default::default()
+});
         }
     }
 
@@ -488,10 +643,17 @@ fn split_mixed_polyline(
             .iter()
             .copied()
             .fold(0.0f32, f32::max);
-        let has_line_taper = straight_widths
-            .first()
-            .map_or(false, |&w0| straight_widths.iter().any(|&w| (w - w0).abs() > 1e-6));
-        let taper_widths = if has_line_taper || straight_widths.iter().any(|&w| w > 1e-6) {
+        // NaN breaks carry a 0 width; only real points decide whether the
+        // band tapers, so a constant-width run keeps its mitered joints.
+        let mut real_widths = line_pts
+            .iter()
+            .zip(&straight_widths)
+            .filter(|(p, _)| p[0].is_finite())
+            .map(|(_, &w)| w);
+        let has_line_taper = real_widths
+            .next()
+            .map_or(false, |w0| real_widths.any(|w| (w - w0).abs() > 1e-6));
+        let taper_widths = if has_line_taper {
             straight_widths
         } else {
             Vec::new()
@@ -504,6 +666,7 @@ fn split_mixed_polyline(
             world_width: line_world_width,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -529,7 +692,9 @@ fn split_mixed_polyline(
             plinegen,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        });
+        
+            ..Default::default()
+});
     } else if let Some(first_arc) = out.first_mut() {
         first_arc.snap_pts = snap_pts;
         first_arc.key_vertices = key_vertices.to_vec();
@@ -558,6 +723,21 @@ fn point_cloud_wires(
     let RenderObject::Lines(body_points) = rendered.object else {
         return None;
     };
+    // A cloud whose scan file is found draws its points instead of its
+    // extents box; the box stays behind, unseen, to pick the cloud, with its
+    // faces so a click among the points selects it too.
+    let mut shown = true;
+    let (mut pick_tris, mut pick_tris_low) = (Vec::new(), Vec::new());
+    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data {
+        // Its box shows too with every point hidden (the reference does).
+        shown = crate::scene::model::point_cloud::shows_no_points(document, data);
+        let c = codec::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
+        let mut tris = Vec::with_capacity(36);
+        for [a, b, d, e] in [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 4, 5], [2, 3, 6, 7], [0, 2, 4, 6], [1, 3, 5, 7]] {
+            tris.extend([c[a], c[b], c[e], c[a], c[e], c[d]]);
+        }
+        (pick_tris, pick_tris_low) = points_to_ds(tris);
+    }
     let (points, points_low) = points_to_ds(body_points);
     let mut wires = vec![WireModel {
         bg_adapt: None,
@@ -566,13 +746,14 @@ fn point_cloud_wires(
         pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
-        display_visible: true,
-        plot_visible: true,
+        display_visible: shown,
+        snap_only: false,
+        plot_visible: shown,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
+        pick_tris,
+        pick_tris_low,
         dash_from_start: false,
         dash_align_end: None,
         text_verts: Vec::new(),
@@ -592,7 +773,9 @@ fn point_cloud_wires(
         plinegen: true,
         fill_tris: Vec::new(),
         fill_tris_low: Vec::new(),
-    }];
+    
+        ..Default::default()
+}];
     let mode = crate::scene::frame::mode(
         document,
         crate::scene::frame::FrameKind::PointCloudClip,
@@ -822,6 +1005,7 @@ pub fn tessellate(
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
+                    snap_only: false,
                     plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: true,
@@ -847,7 +1031,9 @@ pub fn tessellate(
                     plinegen: true,
                     fill_tris,
                     fill_tris_low,
-                });
+                
+                    ..Default::default()
+});
             }
         }
         let mut snap_attached = false;
@@ -986,6 +1172,7 @@ pub fn tessellate(
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
+                    snap_only: false,
                     plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
@@ -1015,7 +1202,9 @@ pub fn tessellate(
                     plinegen: false,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
-                });
+                
+                    ..Default::default()
+});
             }
 
             // Snap / key vertices ride the first emitted wire only (they describe
@@ -1061,7 +1250,10 @@ pub fn tessellate(
             )),
             _ => convert(entity, document),
         });
-    if let Some(te) = te {
+    if let Some(mut te) = te {
+        if let Some(center) = geometric_center(entity) {
+            te.snap_pts.push((center, SnapHint::GeometricCenter));
+        }
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────
             //
@@ -1230,8 +1422,13 @@ pub fn tessellate(
                 // materialisation and (for block content) the block-expand
                 // transform — no separate document-wide collector.
                 let mut sdf_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
+                let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> =
+                    Vec::new();
                 {
                     if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
+                        use crate::scene::model::wire_model::{
+                            clean_searchable_text, SearchableTextRun,
+                        };
                         // Selection tints the whole run; otherwise inline `\C`
                         // colours (bin key) win, falling back to entity colour.
                         for group in &stroke_groups {
@@ -1239,6 +1436,11 @@ pub fn tessellate(
                             if crate::scene::text::web_font::requires_shaping(&run.text) {
                                 continue;
                             }
+                            // Searchable counterpart, cleaned once here and
+                            // pushed after layout below (one run per laid-out
+                            // group, so MTEXT wrap/attachment and rotation are
+                            // already baked into the origin — no re-layout).
+                            let visible = clean_searchable_text(&run.text);
                             let slx_v = (group.origin[0] - ref_lx_v) * anno + ref_lx_v;
                             let sly_v = (group.origin[1] - ref_ly_v) * anno + ref_ly_v;
                             // Base colour only (inline `\C` wins). Selection /
@@ -1255,17 +1457,18 @@ pub fn tessellate(
                                 gcolor,
                                 text_contrast_background(entity, bg_color),
                             );
-                            let quads = crate::scene::text::glyph_quads::layout_glyph_quads(
-                                &mut atlas,
-                                run.height,
-                                run.rotation,
-                                run.width_factor,
-                                run.oblique,
-                                run.tracking,
-                                &run.font,
-                                run.bold,
-                                &run.text,
-                            );
+                            let (quads, pen_adv) =
+                                crate::scene::text::glyph_quads::layout_glyph_quads(
+                                    &mut atlas,
+                                    run.height,
+                                    run.rotation,
+                                    run.width_factor,
+                                    run.oblique,
+                                    run.tracking,
+                                    &run.font,
+                                    run.bold,
+                                    &run.text,
+                                );
                             if let Some(plane) = group.plane {
                                 let scaled_origin = [
                                     plane.scale_origin[0]
@@ -1295,6 +1498,40 @@ pub fn tessellate(
                                     0.0,
                                 );
                             }
+                            // Searchable run: same adapted colour as the quads,
+                            // exact pen advance in world units (layout's final
+                            // pen position × annotation factor, like the quads).
+                            if !visible.is_empty() {
+                                let adv_world = (pen_adv as f64 * anno) as f32;
+                                let (origin, rotation) = if let Some(plane) = group.plane {
+                                    (
+                                        [
+                                            plane.scale_origin[0]
+                                                + (plane.origin[0] - plane.scale_origin[0])
+                                                    * anno,
+                                            plane.scale_origin[1]
+                                                + (plane.origin[1] - plane.scale_origin[1])
+                                                    * anno,
+                                            plane.scale_origin[2]
+                                                + (plane.origin[2] - plane.scale_origin[2])
+                                                    * anno,
+                                        ],
+                                        (plane.x_axis[1]).atan2(plane.x_axis[0]) as f32,
+                                    )
+                                } else {
+                                    ([slx_v, sly_v, elev_v], run.rotation)
+                                };
+                                searchable.push(SearchableTextRun {
+                                    text: visible,
+                                    origin,
+                                    height: (run.height as f64 * anno) as f32,
+                                    rotation,
+                                    color: gcolor,
+                                    bold: run.bold,
+                                    font: run.font.clone(),
+                                    adv_width: adv_world,
+                                });
+                            }
                         }
                     }
                 }
@@ -1323,12 +1560,69 @@ pub fn tessellate(
                     WireModel::UNBOUNDED_AABB
                 };
 
+                // FIELDDISPLAY: a field shows on a gray box behind its glyphs,
+                // on screen only — for SDF glyphs and shaped stroke text alike.
+                let mut field_background: Option<WireModel> = None;
+                if crate::entities::field::display()
+                    && crate::entities::field::hosts_field(document, entity)
+                {
+                    let runs = field_run_corner_groups(document, entity, &stroke_groups, anno, ref_origin);
+                    let corner_groups = match entity {
+                        _ if runs.is_some() => runs.unwrap_or_default(),
+                        _ if text_aabb == WireModel::UNBOUNDED_AABB => Vec::new(),
+                        EntityType::MText(m) => {
+                            let rotation = stroke_groups
+                                .iter()
+                                .find_map(|group| group.run.as_ref().map(|run| run.rotation as f64))
+                                .unwrap_or(m.rotation);
+                            oriented_mtext_corner_groups(&sdf_verts, m, rotation, 0.0, anno)
+                        }
+                        EntityType::Text(t) => vec![oriented_text_corners(
+                            &sdf_verts,
+                            [t.insertion_point.x, t.insertion_point.y],
+                            t.rotation,
+                            0.0,
+                        )],
+                        EntityType::AttributeEntity(a) => vec![oriented_text_corners(
+                            &sdf_verts,
+                            [a.insertion_point.x, a.insertion_point.y],
+                            a.rotation,
+                            0.0,
+                        )],
+                        _ => Vec::new(),
+                    };
+                    let mut ft = Vec::with_capacity(6 * corner_groups.len());
+                    let mut ftl = Vec::with_capacity(6 * corner_groups.len());
+                    for corners in &corner_groups {
+                        for &k in &[0usize, 1, 2, 0, 2, 3] {
+                            let (h, lo) = split_ds_xyz(corners[k][0], corners[k][1], elev_v);
+                            ft.push(h);
+                            ftl.push(lo);
+                        }
+                    }
+                    if !ft.is_empty() {
+                        field_background = Some(WireModel {
+                            display_visible: true,
+                            plot_visible: false,
+                            name: name.clone(),
+                            color: crate::entities::field::BACKGROUND,
+                            selected,
+                            line_weight_px,
+                            aabb: WireModel::UNBOUNDED_AABB,
+                            plinegen: true,
+                            fill_tris: ft,
+                            fill_tris_low: ftl,
+                            ..Default::default()
+                        });
+                    }
+                }
                 // Empty input (no glyphs) → emit a single empty wire so the
                 // entity still has a hit-test target via snap_pts. With SDF on
                 // this is the normal path (strokes suppressed) and the wire
                 // also carries the glyph quads built above.
                 if bins.is_empty() {
                     let mut wires: Vec<WireModel> = Vec::new();
+                    wires.extend(field_background.take());
                     // MTEXT background and frame follow the glyph bounds.
                     if text_aabb != WireModel::UNBOUNDED_AABB {
                         if let EntityType::MText(m) = entity {
@@ -1378,6 +1672,7 @@ pub fn tessellate(
                                         world_width: 0.0,
                                         depth_override: None,
                                         display_visible: true,
+                                        snap_only: false,
                                         plot_visible: true,
                                         fill_is_3d: false,
                                         fill_is_2d_solid: false,
@@ -1403,7 +1698,9 @@ pub fn tessellate(
                                         plinegen: true,
                                         fill_tris: ft,
                                         fill_tris_low: ftl,
-                                    });
+                                    
+                                        ..Default::default()
+});
                                 }
                                 // Text frame — a closed rectangle in the text
                                 // colour around the same box.
@@ -1435,6 +1732,7 @@ pub fn tessellate(
                                         world_width: 0.0,
                                         depth_override: None,
                                         display_visible: true,
+                                        snap_only: false,
                                         plot_visible: true,
                                         fill_is_3d: false,
                                         fill_is_2d_solid: false,
@@ -1460,7 +1758,9 @@ pub fn tessellate(
                                         plinegen: true,
                                         fill_tris: vec![],
                                         fill_tris_low: Vec::new(),
-                                    });
+                                    
+                                        ..Default::default()
+});
                                 }
                             }
                         }
@@ -1489,6 +1789,7 @@ pub fn tessellate(
                             world_width: 0.0,
                             depth_override: None,
                             display_visible: true,
+                            snap_only: false,
                             plot_visible: true,
                             fill_is_3d: false,
                             fill_is_2d_solid: false,
@@ -1514,7 +1815,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        });
+                        
+                            ..Default::default()
+});
                     }
                     wires.push(WireModel {
                         bg_adapt: None,
@@ -1524,6 +1827,7 @@ pub fn tessellate(
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
+                        snap_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
@@ -1533,6 +1837,7 @@ pub fn tessellate(
                         dash_from_start: false,
                         dash_align_end: None,
                         text_verts: sdf_verts,
+                        searchable_text: searchable,
                         name,
                         points: Vec::new(),
                         points_low: Vec::new(),
@@ -1554,6 +1859,7 @@ pub fn tessellate(
                 }
 
                 let mut out: Vec<WireModel> = Vec::new();
+                out.extend(field_background);
                 let mut is_first = true;
                 for bin in bins {
                     let wire_color = match bin.color {
@@ -1589,6 +1895,7 @@ pub fn tessellate(
                             world_width: 0.0,
                             depth_override: None,
                             display_visible: true,
+                            snap_only: false,
                             plot_visible: true,
                             fill_is_3d: false,
                             fill_is_2d_solid: false,
@@ -1614,7 +1921,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        });
+                        
+            ..Default::default()
+});
                     }
 
                     if !bin.fill_tris.is_empty() {
@@ -1636,6 +1945,7 @@ pub fn tessellate(
                             world_width: 0.0,
                             depth_override: None,
                             display_visible: true,
+                            snap_only: false,
                             plot_visible: true,
                             fill_is_3d: false,
                             fill_is_2d_solid: false,
@@ -1661,7 +1971,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: bin.fill_tris,
                             fill_tris_low: bin.fill_tris_low,
-                        });
+                        
+            ..Default::default()
+});
                     }
                 }
 
@@ -1680,6 +1992,7 @@ pub fn tessellate(
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
+                        snap_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
@@ -1689,6 +2002,7 @@ pub fn tessellate(
                         dash_from_start: false,
                         dash_align_end: None,
                         text_verts: sdf_verts,
+                        searchable_text: searchable,
                         name: name.clone(),
                         points: Vec::new(),
                         points_low: Vec::new(),
@@ -1717,6 +2031,7 @@ pub fn tessellate(
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
+                        snap_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
@@ -1742,7 +2057,9 @@ pub fn tessellate(
                         plinegen: true,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
-                    });
+                    
+            ..Default::default()
+});
                 }
                 return out;
             }
@@ -1788,6 +2105,7 @@ pub fn tessellate(
                             world_width: 0.0,
                             depth_override: None,
                             display_visible: true,
+                            snap_only: false,
                             plot_visible: true,
                             fill_is_3d: false,
                             fill_is_2d_solid: false,
@@ -1822,7 +2140,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        }];
+                        
+            ..Default::default()
+}];
                     }
                 }
             }
@@ -1947,6 +2267,7 @@ pub fn tessellate(
                             world_width: polyline_band_width(entity, document.header.fill_mode),
                             depth_override: None,
                             display_visible: true,
+                            snap_only: false,
                             plot_visible: true,
                             fill_is_3d,
                             fill_is_2d_solid: false,
@@ -1972,7 +2293,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        });
+                        
+                            ..Default::default()
+});
                     }
                 }
 
@@ -2018,8 +2341,11 @@ pub fn tessellate(
                         render_instance: None,
                         depth_override: None,
                         display_visible: true,
+                        snap_only: false,
                         plot_visible: true,
-                    });
+                    
+            ..Default::default()
+});
                 }
 
                 if out.is_empty() {
@@ -2031,6 +2357,7 @@ pub fn tessellate(
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
+                        snap_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
@@ -2056,7 +2383,9 @@ pub fn tessellate(
                         plinegen: true,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
-                    });
+                    
+            ..Default::default()
+});
                 }
 
                 return out;
@@ -2090,6 +2419,7 @@ pub fn tessellate(
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
+                    snap_only: false,
                     plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
@@ -2115,7 +2445,9 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
-                }];
+                
+                    ..Default::default()
+}];
             }
 
             RenderObject::SegmentedLines(points) => {
@@ -2179,6 +2511,7 @@ pub fn tessellate(
                     world_width: polyline_band_width(entity, document.header.fill_mode),
                     depth_override: None,
                     display_visible: true,
+                    snap_only: false,
                     plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
@@ -2204,7 +2537,9 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
-                }];
+                
+            ..Default::default()
+}];
             }
 
             RenderObject::TaperedLines(points, widths) => {
@@ -2257,6 +2592,7 @@ pub fn tessellate(
                     world_width,
                     depth_override: None,
                     display_visible: true,
+                    snap_only: false,
                     plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
@@ -2282,7 +2618,9 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
-                }];
+                
+                    ..Default::default()
+}];
             }
 
         }
@@ -2366,6 +2704,7 @@ pub fn tessellate(
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -2391,7 +2730,9 @@ pub fn tessellate(
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }]
+    
+            ..Default::default()
+}]
 }
 
 
@@ -2415,7 +2756,7 @@ pub(crate) enum ArrowKind {
 
 pub(crate) fn arrow_from_block(
     doc: &CadDocument,
-    handle: acadrust::types::Handle,
+    handle: codec::types::Handle,
     dimasz: f32,
 ) -> ArrowKind {
     arrow_from_block_with_deferred_hatch(doc, handle, dimasz, false)
@@ -2423,7 +2764,7 @@ pub(crate) fn arrow_from_block(
 
 pub(crate) fn arrow_from_block_with_deferred_hatch(
     doc: &CadDocument,
-    handle: acadrust::types::Handle,
+    handle: codec::types::Handle,
     dimasz: f32,
     defer_hatch: bool,
 ) -> ArrowKind {
@@ -2440,7 +2781,10 @@ pub(crate) fn arrow_from_block_with_deferred_hatch(
         .unwrap_or_else(|| arrow_from_block_name(None, dimasz))
 }
 
-fn arrow_from_block_name(name: Option<&str>, dimasz: f32) -> ArrowKind {
+/// Canonical block-name → arrow-kind mapping shared by the renderer and the
+/// dimstyle preview so both agree on what a named arrowhead looks like.
+/// Unknown / empty names fall back to the standard filled triangle.
+pub(crate) fn arrow_from_block_name(name: Option<&str>, dimasz: f32) -> ArrowKind {
     name.and_then(|name| builtin_arrow_from_block_name(name, dimasz))
         .unwrap_or(ArrowKind::Triangle {
             size: dimasz,
@@ -2504,9 +2848,13 @@ fn builtin_arrow_from_block_name(name: &str, dimasz: f32) -> Option<ArrowKind> {
             Some(ArrowKind::Origin { size: dimasz })
         }
         // `ArrowKind::Tick` draws the stroke `size` to either side of the tip
-        // (total 2·size — its `size` is a half-length, matching DIMTSZ). For
-        // a block-selected tick DIMASZ is the full stroke length, so halve it.
-        "OBLIQUE" | "ARCHTICK" => Some(ArrowKind::Tick { size: dimasz * 0.5 }),
+        // (total 2·size — its `size` is a half-length, matching DIMTSZ). The
+        // block's stroke runs (-0.5,-0.5)→(0.5,0.5) scaled by DIMASZ, so its
+        // half-length is DIMASZ/√2, not DIMASZ/2 — halving drew every
+        // oblique stroke √2 short of the file's own. (#898)
+        "OBLIQUE" | "ARCHTICK" => Some(ArrowKind::Tick {
+            size: dimasz * std::f32::consts::FRAC_1_SQRT_2,
+        }),
         "BOXFILLED" => Some(ArrowKind::Box_ {
             size: dimasz,
             filled: true,
@@ -2530,7 +2878,7 @@ fn builtin_arrow_from_block_name(name: &str, dimasz: f32) -> Option<ArrowKind> {
 
 fn custom_arrow_from_block(
     doc: &CadDocument,
-    record: &acadrust::tables::BlockRecord,
+    record: &codec::tables::BlockRecord,
     dimasz: f32,
     defer_hatch: bool,
 ) -> Option<ArrowKind> {
@@ -2556,7 +2904,7 @@ fn custom_arrow_from_block(
         doc,
         record.handle,
         crate::scene::render_graph::BlockRole::ArrowHead,
-        acadrust::types::Vector3::ZERO,
+        codec::types::Vector3::ZERO,
     )?;
     let mut lines = Vec::new();
     let mut fill = Vec::new();
@@ -2608,7 +2956,7 @@ fn append_custom_arrow_leaf(
         EntityType::Hatch(hatch) => {
             append_custom_hatch_geometry(
                 hatch,
-                acadrust::types::Vector3::ZERO,
+                codec::types::Vector3::ZERO,
                 lines,
                 fill,
             );
@@ -2633,24 +2981,31 @@ fn append_custom_arrow_leaf(
         true,
     );
     for wire in wires {
-        append_custom_wire_points(
-            &wire.points,
-            &wire.points_low,
-            acadrust::types::Vector3::ZERO,
-            lines,
-        );
+        // A wide polyline's width rides on the wire as a GPU band; an arrow
+        // keeps only geometry, so turn the band into fill or it draws hairline.
+        // (#1130)
+        if wire.world_width > 0.0 || wire.taper_widths.iter().any(|width| *width > 0.0) {
+            append_custom_band(&wire, fill);
+        } else {
+            append_custom_wire_points(
+                &wire.points,
+                &wire.points_low,
+                codec::types::Vector3::ZERO,
+                lines,
+            );
+        }
         append_custom_fill_points(
             &wire.fill_tris,
             &wire.fill_tris_low,
-            acadrust::types::Vector3::ZERO,
+            codec::types::Vector3::ZERO,
             fill,
         );
     }
 }
 
 fn append_custom_hatch_geometry(
-    hatch: &acadrust::entities::Hatch,
-    base: acadrust::types::Vector3,
+    hatch: &codec::entities::Hatch,
+    base: codec::types::Vector3,
     lines: &mut Vec<[f32; 3]>,
     fill: &mut Vec<[f32; 3]>,
 ) {
@@ -2735,10 +3090,46 @@ fn append_custom_hatch_geometry(
     );
 }
 
+/// Triangles covering a wide polyline's band, one quad per segment.
+// ponytail: no join wedges at corners; add miters if a thick arrow shows notches.
+fn append_custom_band(wire: &WireModel, fill: &mut Vec<[f32; 3]>) {
+    let at = |index: usize| {
+        let point = wire.points[index];
+        let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        (!point[0].is_nan()).then(|| {
+            [
+                point[0] as f64 + low[0] as f64,
+                point[1] as f64 + low[1] as f64,
+                point[2] as f64 + low[2] as f64,
+            ]
+        })
+    };
+    let half = |index: usize| {
+        wire.taper_widths.get(index).copied().unwrap_or(wire.world_width).max(0.0) as f64 * 0.5
+    };
+    for index in 0..wire.points.len().saturating_sub(1) {
+        let (Some(a), Some(b)) = (at(index), at(index + 1)) else {
+            continue;
+        };
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let length = dx.hypot(dy);
+        if length <= 0.0 {
+            continue;
+        }
+        let (nx, ny) = (-dy / length, dx / length);
+        let (ha, hb) = (half(index), half(index + 1));
+        let corner = |p: [f64; 3], h: f64, side: f64| {
+            [(p[0] + nx * h * side) as f32, (p[1] + ny * h * side) as f32, p[2] as f32]
+        };
+        let quad = [corner(a, ha, 1.0), corner(a, ha, -1.0), corner(b, hb, -1.0), corner(b, hb, 1.0)];
+        fill.extend([quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
+    }
+}
+
 fn append_custom_wire_points(
     points: &[[f32; 3]],
     points_low: &[[f32; 3]],
-    base: acadrust::types::Vector3,
+    base: codec::types::Vector3,
     out: &mut Vec<[f32; 3]>,
 ) {
     if points.is_empty() {
@@ -2766,7 +3157,7 @@ fn append_custom_wire_points(
 fn append_custom_fill_points(
     points: &[[f32; 3]],
     points_low: &[[f32; 3]],
-    base: acadrust::types::Vector3,
+    base: codec::types::Vector3,
     out: &mut Vec<[f32; 3]>,
 ) {
     for (index, point) in points.iter().enumerate() {
@@ -2782,6 +3173,9 @@ fn append_custom_fill_points(
 pub(crate) struct DimGeom {
     pub(crate) ext_lines: Vec<[f32; 3]>,
     pub(crate) dim_lines: Vec<[f32; 3]>,
+    /// Arrowhead / tick outlines of a dimension: drawn solid, never in the
+    /// dimension line's dashes.
+    pub(crate) arrow_lines: Vec<[f32; 3]>,
     pub(crate) arrow_fill: Vec<[f32; 3]>,
 }
 
@@ -2790,22 +3184,21 @@ impl DimGeom {
         Self {
             ext_lines: Vec::new(),
             dim_lines: Vec::new(),
+            arrow_lines: Vec::new(),
             arrow_fill: Vec::new(),
         }
     }
 }
 
 
-/// Convert an acadrust `Color` to RGBA, falling back to `inherited` for
+/// Convert an opencadcodec `Color` to RGBA, falling back to `inherited` for
 /// `ByLayer` / `ByBlock` (assumes those are already resolved upstream).
 pub(crate) fn color_or_inherit(c: &AcadColor, inherited: [f32; 4]) -> [f32; 4] {
     match c.rgb() {
-        Some((r, g, b)) => [
-            r as f32 / 255.0,
-            g as f32 / 255.0,
-            b as f32 / 255.0,
-            inherited[3],
-        ],
+        Some(_) => {
+            let [r, g, b, _] = crate::scene::convert::tess_util::aci_to_rgba(c);
+            [r, g, b, inherited[3]]
+        }
         None => inherited,
     }
 }
@@ -3062,6 +3455,36 @@ pub(crate) fn normalized_or(v: Vec3, fallback: Vec3) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arrow_name_mapping_covers_preview_kinds() {
+        // Pins the shared name→kind contract the dimstyle preview relies on.
+        assert!(matches!(
+            arrow_from_block_name(Some("OPEN"), 1.0),
+            ArrowKind::Open { .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(Some("DOT"), 1.0),
+            ArrowKind::Dot { filled: true, .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(Some("ARCHTICK"), 1.0),
+            ArrowKind::Tick { .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(Some("NONE"), 1.0),
+            ArrowKind::None
+        ));
+        // Unknown / empty names fall back to the standard filled triangle.
+        assert!(matches!(
+            arrow_from_block_name(Some("NOPE"), 1.0),
+            ArrowKind::Triangle { filled: true, .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(None, 1.0),
+            ArrowKind::Triangle { filled: true, .. }
+        ));
+    }
 
     #[test]
     fn test_split_mixed_polyline_straight_lines_have_taper_widths() {

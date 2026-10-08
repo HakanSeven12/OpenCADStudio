@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Pick point">
+  <line x1="7" y1="2" x2="7" y2="12" stroke="#6DB7ED" stroke-width="1.75" stroke-linecap="round"/>
+  <line x1="2" y1="7" x2="12" y2="7" stroke="#6DB7ED" stroke-width="1.75" stroke-linecap="round"/>
+  <circle cx="7" cy="7" r="2" fill="#6DB7ED" stroke="none"/>
+  <path d="M 8.5 8.5 L 8.5 20.5 L 12.2 16.8 L 15.5 21.5 L 18 20 L 14.8 15.2 L 20.5 15.2 Z" fill="#1A1A1A" stroke="#B4B6B9" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

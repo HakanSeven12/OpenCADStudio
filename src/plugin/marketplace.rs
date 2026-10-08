@@ -312,7 +312,7 @@ fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Download and install a release's package into the plugins folder. Verifies
-/// the API version and, when present, the `acadrust` fingerprint from the
+/// the API version and, when present, the `opencadcodec` fingerprint from the
 /// package's `plugin.toml` first. Returns the plugin id on success.
 pub fn install(release: &Release, repository: &str) -> Result<String, String> {
     let lib = release.lib_asset().ok_or("no library for this platform")?;
@@ -331,10 +331,10 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
 
     if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
         let Some(source) = manifest.acadrust_source.as_deref() else {
-            return Err("Release has no acadrust source; cannot verify ABI compatibility".to_string());
+            return Err("Release has no opencadcodec source; cannot verify ABI compatibility".to_string());
         };
         if source.is_empty() {
-            return Err("Release has no acadrust source; cannot verify ABI compatibility".to_string());
+            return Err("Release has no opencadcodec source; cannot verify ABI compatibility".to_string());
         }
         if !ocs_plugin_api::version_info::acadrust_sources_compatible(
             source,
@@ -346,7 +346,7 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
             let host_hash = ocs_plugin_api::version_info::acadrust_source_hash(host_src)
                 .unwrap_or("unknown");
             return Err(format!(
-                "Plugin built for acadrust @{plugin_hash}, but this host uses @{host_hash}"
+                "Plugin built for opencadcodec @{plugin_hash}, but this host uses @{host_hash}"
             ));
         }
     }

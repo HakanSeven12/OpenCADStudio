@@ -210,14 +210,20 @@ pub(crate) fn rgb_to_hex(rgb: [u8; 3]) -> String {
 
 pub(crate) fn parse_hex(value: &str) -> Option<[u8; 3]> {
     let value = value.trim().strip_prefix('#').unwrap_or(value.trim());
-    if value.len() != 6 {
+    // Walk pairs of hex digits as chars: the old byte-length guard let a
+    // 6-byte multibyte string (`aébé`) through to fixed-offset slices that
+    // split a character. Exactly two digits per channel, or it is not a colour.
+    let mut bytes = [0u8; 3];
+    let mut chars = value.chars();
+    for slot in &mut bytes {
+        let high = chars.next()?.to_digit(16)?;
+        let low = chars.next()?.to_digit(16)?;
+        *slot = ((high << 4) | low) as u8;
+    }
+    if chars.next().is_some() {
         return None;
     }
-    Some([
-        u8::from_str_radix(&value[0..2], 16).ok()?,
-        u8::from_str_radix(&value[2..4], 16).ok()?,
-        u8::from_str_radix(&value[4..6], 16).ok()?,
-    ])
+    Some(bytes)
 }
 
 /// Canvas mode for Model space.
@@ -356,7 +362,7 @@ impl ModelSpaceThemeConfig {
     pub fn resolve_selection_color(&self) -> [f32; 4] {
         if self.selection_highlight_color == 0 {
             crate::scene::model::wire_model::WireModel::SELECTED
-        } else if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_highlight_color) {
+        } else if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(self.selection_highlight_color) {
             [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
         } else {
             crate::scene::model::wire_model::WireModel::SELECTED
@@ -611,5 +617,25 @@ mod tests {
         assert_eq!(parse_theme_name("1"), None);
         assert_eq!(parse_theme_name("0"), None);
         assert_eq!(parse_theme_name("nonexistent_theme"), None);
+    }
+
+    /// The old guard checked the BYTE length (`value.len() != 6`) but sliced
+    /// at fixed byte offsets — a 6-byte multibyte string like `aébé` passed
+    /// the guard and then split a character:
+    /// `byte index 2 is not a char boundary; it is inside 'é'`. Pasting it
+    /// into any Options colour field killed the process on the keystroke.
+    #[test]
+    fn test_parse_hex_rejects_multibyte_input_without_panicking() {
+        for value in ["aébé", "#aébé", "éééééé", "#ébé#"] {
+            assert_eq!(parse_hex(value), None, "{value} should not parse");
+        }
+        // Non-hex garbage and wrong lengths stay None.
+        for value in ["gggggg", "a1b2c", "a1b2c34", "#GGHHII"] {
+            assert_eq!(parse_hex(value), None, "{value} should not parse");
+        }
+        // Valid input keeps working, with and without '#', with whitespace.
+        assert_eq!(parse_hex("a1b2c3"), Some([0xa1, 0xb2, 0xc3]));
+        assert_eq!(parse_hex("#A1B2C3"), Some([0xa1, 0xb2, 0xc3]));
+        assert_eq!(parse_hex("  000000  "), Some([0, 0, 0]));
     }
 }

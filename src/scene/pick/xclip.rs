@@ -10,17 +10,52 @@
 //! case. The clip is performed in 2D (XY) after the INSERT transform has been
 //! applied, matching the space the block wires are already emitted in.
 
-use acadrust::entities::Insert;
-use acadrust::objects::{ObjectType, SpatialFilter};
-use acadrust::types::{Handle, Transform, Vector3};
-use acadrust::CadDocument;
-use cadkernel::geom2d::{contains, Curve, Line, Tolerance};
+use codec::entities::Insert;
+use codec::objects::{ObjectType, SpatialFilter};
+use codec::types::{Handle, Transform, Vector3};
+use codec::CadDocument;
+use kernel::geom2d::{contains, Curve, Line, Tolerance};
 
 use crate::scene::model::wire_model::{
     decode_pattern_station_map, encode_pattern_stations, pattern_station_values, WireModel,
 };
 
 const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
+
+/// Resolve the extension dictionary handle for an object or entity, checking the entity's
+/// field, document lookup tables, and owned Dictionary / DictionaryWithDefault objects.
+fn resolve_extension_dictionary(doc: &CadDocument, owner: Handle) -> Option<Handle> {
+    if let Some(entity) = doc.get_entity(owner) {
+        if let Some(h) = entity.common().xdictionary_handle {
+            if !h.is_null() {
+                return Some(h);
+            }
+        }
+    }
+    if let Some(h) = doc.extension_dictionary_handle(owner) {
+        if !h.is_null() {
+            return Some(h);
+        }
+    }
+    doc.objects.iter().find_map(|(handle, object)| match object {
+        ObjectType::Dictionary(d) if d.owner == owner && !handle.is_null() => Some(*handle),
+        ObjectType::DictionaryWithDefault(d) if d.owner == owner && !handle.is_null() => {
+            Some(*handle)
+        }
+        _ => None,
+    })
+}
+
+/// The INSERT's extension dictionary through its own link or the document's
+/// index — both O(1). Render walks ask this for every INSERT, so it must not
+/// fall back to [`resolve_extension_dictionary`]'s scan of every object.
+fn linked_extension_dictionary(doc: &CadDocument, ins: &Insert) -> Option<Handle> {
+    ins.common
+        .xdictionary_handle
+        .filter(|h| !h.is_null())
+        .or_else(|| doc.extension_dictionary_handle(ins.common.handle))
+        .filter(|h| !h.is_null())
+}
 
 /// Resolve the enabled XCLIP spatial filter for `ins`, if any.
 ///
@@ -32,7 +67,7 @@ pub fn insert_spatial_filter<'a>(
     doc: &'a CadDocument,
     ins: &Insert,
 ) -> Option<&'a SpatialFilter> {
-    let xdict = ins.common.xdictionary_handle?;
+    let xdict = linked_extension_dictionary(doc, ins)?;
     let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
     match doc.objects.get(&spatial)? {
@@ -45,13 +80,282 @@ pub fn insert_spatial_filter<'a>(
     }
 }
 
-fn dict_entry(doc: &CadDocument, dict: Handle, key: &str) -> Option<Handle> {
-    match doc.objects.get(&dict)? {
-        ObjectType::Dictionary(d) => {
-            d.entries.iter().find(|(k, _)| k == key).map(|(_, h)| *h)
+// ── Editing (XCLIP) ─────────────────────────────────────────────────────────
+
+/// The filter's handle, when the insert has one (enabled or not).
+pub fn filter_handle(doc: &CadDocument, insert: Handle) -> Option<Handle> {
+    let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
+        return None;
+    };
+    let xdict = linked_extension_dictionary(doc, ins)?;
+    let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
+    let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
+    matches!(doc.objects.get(&spatial), Some(ObjectType::SpatialFilter(_))).then_some(spatial)
+}
+
+const ROUNDTRIP: &str = "ACAD_XREC_ROUNDTRIP";
+const INVERTED: &str = "ACAD_INVERTEDCLIP_ROUNDTRIP";
+const INVERTED_COMPARE: &str = "ACAD_INVERTEDCLIP_ROUNDTRIP_COMPARE";
+
+/// The boundary an inverted clip was drawn with (WCS), kept beside the
+/// filter's ring in an ACAD_XREC_ROUNDTRIP record as the reference keeps it.
+pub fn inverted_boundary(doc: &CadDocument, filter: &SpatialFilter) -> Option<Vec<[f64; 2]>> {
+    let x = doc.xrecord(filter.handle, ROUNDTRIP)?;
+    let mut points = Vec::new();
+    let mut inside = false;
+    for entry in &x.entries {
+        match &entry.value {
+            codec::objects::XRecordValue::String(s) if entry.code == 102 => {
+                inside = s == INVERTED;
+            }
+            codec::objects::XRecordValue::Point3D(px, py, _) if inside && entry.code == 10 => {
+                points.push([*px, *py]);
+            }
+            _ => {}
         }
-        _ => None,
     }
+    (points.len() >= 2).then_some(points)
+}
+
+/// The inverted boundary drawn as the XCLIP frame and generated polyline,
+/// else the stored one; rectangles as four corners (WCS through the stored
+/// transforms).
+pub fn clip_outline_world(doc: &CadDocument, filter: &SpatialFilter, xform: &Transform) -> Vec<[f64; 2]> {
+    match inverted_boundary(doc, filter) {
+        Some(points) => {
+            let mut outline = filter.clone();
+            outline.boundary_points = points
+                .iter()
+                .map(|p| codec::types::Vector2::new(p[0], p[1]))
+                .collect();
+            world_clip_polygon_for_transform(&outline, xform)
+        }
+        None => world_clip_polygon_for_transform(filter, xform),
+    }
+}
+
+/// The ring that shows only what lies outside `inner` (WCS, drawn order):
+/// the block's extents grown by 5 % on each side, joined to the boundary by
+/// a hairline slit — the polygon the reference stores for an inverted clip.
+// ponytail: the slit runs left from the boundary's last corner; a concave
+// boundary it would cross clips wrongly there.
+pub fn inverted_ring(inner: &[[f64; 2]], extents: ([f64; 2], [f64; 2])) -> Vec<[f64; 2]> {
+    let (lo, hi) = extents;
+    let size = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
+    let pad = size * 0.05;
+    let (x0, y0, x1, y1) = (
+        lo[0].min(inner.iter().map(|p| p[0]).fold(f64::MAX, f64::min)) - pad,
+        lo[1].min(inner.iter().map(|p| p[1]).fold(f64::MAX, f64::min)) - pad,
+        hi[0].max(inner.iter().map(|p| p[0]).fold(f64::MIN, f64::max)) + pad,
+        hi[1].max(inner.iter().map(|p| p[1]).fold(f64::MIN, f64::max)) + pad,
+    );
+    let eps = size * 4e-6;
+    let last = *inner.last().expect("a boundary has points");
+    let mut ring = inner.to_vec();
+    ring.extend([
+        [x0, last[1]],
+        [x0, y1],
+        [x1, y1],
+        [x1, y0],
+        [x0, y0],
+        [x0, last[1] - eps],
+        [last[0], last[1] - eps],
+    ]);
+    ring
+}
+
+/// A rectangle's two corners as its four, in drawing order.
+pub fn rectangle_corners(a: [f64; 2], b: [f64; 2]) -> Vec<[f64; 2]> {
+    vec![a, [b[0], a[1]], b, [a[0], b[1]]]
+}
+
+/// Remove an insert's clip (the filter and what it owns).
+pub fn remove_insert_clip(doc: &mut CadDocument, insert: Handle) -> bool {
+    let Some(spatial) = filter_handle(doc, insert) else {
+        return false;
+    };
+    if let Some(xdict) = doc.extension_dictionary_handle(spatial) {
+        let children: Vec<Handle> = match doc.objects.get(&xdict) {
+            Some(ObjectType::Dictionary(d)) => d.entries.iter().map(|(_, h)| *h).collect(),
+            Some(ObjectType::DictionaryWithDefault(d)) => d.entries.iter().map(|(_, h)| *h).collect(),
+            _ => Vec::new(),
+        };
+        for child in children {
+            doc.objects.remove(&child);
+        }
+        doc.objects.remove(&xdict);
+    }
+    doc.objects.remove(&spatial);
+    for object in doc.objects.values_mut() {
+        match object {
+            ObjectType::Dictionary(d) => d.entries.retain(|(_, h)| *h != spatial),
+            ObjectType::DictionaryWithDefault(d) => d.entries.retain(|(_, h)| *h != spatial),
+            _ => {}
+        }
+    }
+    true
+}
+
+/// Turn an insert's clip display on or off; false when it has none.
+pub fn set_insert_clip_enabled(doc: &mut CadDocument, insert: Handle, on: bool) -> bool {
+    let Some(spatial) = filter_handle(doc, insert) else {
+        return false;
+    };
+    if let Some(ObjectType::SpatialFilter(f)) = doc.objects.get_mut(&spatial) {
+        f.display_enabled = on;
+    }
+    true
+}
+
+/// Front and back clipping planes (None = off) of an insert's clip.
+pub fn set_insert_clip_depth(
+    doc: &mut CadDocument,
+    insert: Handle,
+    front: Option<Option<f64>>,
+    back: Option<Option<f64>>,
+) -> bool {
+    let Some(spatial) = filter_handle(doc, insert) else {
+        return false;
+    };
+    if let Some(ObjectType::SpatialFilter(f)) = doc.objects.get_mut(&spatial) {
+        if let Some(front) = front {
+            f.front_clip = front;
+        }
+        if let Some(back) = back {
+            f.back_clip = back;
+        }
+    }
+    true
+}
+
+/// A new clip boundary on an insert, replacing any old one. `boundary` is in
+/// WCS (two points = rectangle corners); `inverted` hides what is inside,
+/// stored as the reference stores it (the ring plus the drawn boundary).
+pub fn set_insert_clip(
+    doc: &mut CadDocument,
+    insert: Handle,
+    boundary: &[[f64; 2]],
+    inverted: bool,
+    extents: ([f64; 2], [f64; 2]),
+) -> bool {
+    use codec::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
+    use codec::types::{Matrix4, Vector2};
+    let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
+        return false;
+    };
+    let t = ins.get_transform().matrix.m;
+    let forward = glam::DMat4::from_cols_array_2d(&[
+        [t[0][0], t[1][0], t[2][0], t[3][0]],
+        [t[0][1], t[1][1], t[2][1], t[3][1]],
+        [t[0][2], t[1][2], t[2][2], t[3][2]],
+        [t[0][3], t[1][3], t[2][3], t[3][3]],
+    ]);
+    let inv = forward.inverse().to_cols_array_2d();
+    let inverse = Matrix4 {
+        m: [
+            [inv[0][0], inv[1][0], inv[2][0], inv[3][0]],
+            [inv[0][1], inv[1][1], inv[2][1], inv[3][1]],
+            [inv[0][2], inv[1][2], inv[2][2], inv[3][2]],
+            [inv[0][3], inv[1][3], inv[2][3], inv[3][3]],
+        ],
+    };
+    let existing_xdict = resolve_extension_dictionary(doc, insert);
+    remove_insert_clip(doc, insert);
+
+    // insert → extension dictionary → ACAD_FILTER → SPATIAL
+    let xdict = match existing_xdict.filter(|h| {
+        matches!(
+            doc.objects.get(h),
+            Some(ObjectType::Dictionary(_) | ObjectType::DictionaryWithDefault(_))
+        )
+    }) {
+        Some(h) => h,
+        None => {
+            let h = doc.allocate_handle();
+            let mut d = Dictionary::new();
+            (d.handle, d.owner, d.hard_owner) = (h, insert, true);
+            doc.objects.insert(h, ObjectType::Dictionary(d));
+            if let Some(entity) = doc.get_entity_mut(insert) {
+                entity.common_mut().xdictionary_handle = Some(h);
+            }
+            h
+        }
+    };
+    let acad_filter = match dict_entry(doc, xdict, "ACAD_FILTER") {
+        Some(h) => h,
+        None => {
+            let h = doc.allocate_handle();
+            let mut d = Dictionary::new();
+            (d.handle, d.owner, d.hard_owner) = (h, xdict, true);
+            doc.objects.insert(h, ObjectType::Dictionary(d));
+            match doc.objects.get_mut(&xdict) {
+                Some(ObjectType::Dictionary(parent)) => parent.add_entry("ACAD_FILTER", h),
+                Some(ObjectType::DictionaryWithDefault(parent)) => {
+                    parent.entries.push(("ACAD_FILTER".to_string(), h))
+                }
+                _ => {}
+            }
+            h
+        }
+    };
+    let stored: Vec<[f64; 2]> = if inverted {
+        let inner = if boundary.len() == 2 {
+            rectangle_corners(boundary[0], boundary[1])
+        } else {
+            boundary.to_vec()
+        };
+        inverted_ring(&inner, extents)
+    } else {
+        boundary.to_vec()
+    };
+    let spatial = doc.allocate_handle();
+    let mut filter = SpatialFilter::new();
+    filter.handle = spatial;
+    filter.owner = acad_filter;
+    filter.boundary_points = stored.iter().map(|p| Vector2::new(p[0], p[1])).collect();
+    filter.inverse_block_transform = inverse;
+    filter.clip_bound_transform = Matrix4::identity();
+    doc.objects.insert(spatial, ObjectType::SpatialFilter(filter));
+    match doc.objects.get_mut(&acad_filter) {
+        Some(ObjectType::Dictionary(parent)) => parent.add_entry("SPATIAL", spatial),
+        Some(ObjectType::DictionaryWithDefault(parent)) => {
+            parent.entries.push(("SPATIAL".to_string(), spatial))
+        }
+        _ => {}
+    }
+    if inverted {
+        let fdict = doc.ensure_extension_dictionary(spatial);
+        let record = doc.allocate_handle();
+        match doc.objects.get_mut(&fdict) {
+            Some(ObjectType::Dictionary(d)) => d.add_entry(ROUNDTRIP, record),
+            Some(ObjectType::DictionaryWithDefault(d)) => {
+                d.entries.push((ROUNDTRIP.to_string(), record))
+            }
+            _ => {}
+        }
+        let mut x = XRecord::new();
+        (x.handle, x.owner) = (record, fdict);
+        x.cloning_flags = codec::objects::DictionaryCloningFlags::KeepExisting;
+        let point = |p: &[f64; 2]| XRecordEntry::new(10, XRecordValue::Point3D(p[0], p[1], 0.0));
+        x.entries.push(XRecordEntry::string(102, INVERTED));
+        x.entries.extend(boundary.iter().map(point));
+        x.entries.push(XRecordEntry::string(102, INVERTED_COMPARE));
+        x.entries.extend(stored.iter().map(point));
+        doc.objects.insert(record, ObjectType::XRecord(x));
+    }
+    true
+}
+
+fn dict_entry(doc: &CadDocument, dict: Handle, key: &str) -> Option<Handle> {
+    let entries = match doc.objects.get(&dict)? {
+        ObjectType::Dictionary(d) => &d.entries,
+        ObjectType::DictionaryWithDefault(d) => &d.entries,
+        _ => return None,
+    };
+    entries
+        .iter()
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case(key))
+        .map(|(_, h)| *h)
 }
 
 /// Build the clip boundary as a closed world-space ring in the same f32 XY
@@ -78,6 +382,9 @@ fn world_clip_polygon_f64(
 /// Build the clip boundary with the exact transform used by the corresponding
 /// block instance. Callers that resolve block base points or parent instances
 /// pass their composed transform here so geometry and clipping share one space.
+///
+/// The filter's `inverse_block_transform` is used as stored: the codec decodes
+/// the on-disk column-major 4x3 layout into row-major `Matrix4`.
 pub fn world_clip_polygon_for_transform(
     sf: &SpatialFilter,
     xform: &Transform,
@@ -306,6 +613,7 @@ pub fn frame_wire(
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -331,7 +639,9 @@ pub fn frame_wire(
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 /// Clip a hatch fill boundary to `poly`.
@@ -763,8 +1073,8 @@ mod tests {
 
     #[test]
     fn resolves_filter_and_clips_block_geometry() {
-        use acadrust::objects::Dictionary;
-        use acadrust::types::Vector2;
+        use codec::objects::Dictionary;
+        use codec::types::Vector2;
 
         // Handles: insert, xdict, acad_filter dict, spatial filter.
         let (h_ins, h_xdict, h_filter, h_spatial) = (
@@ -808,7 +1118,7 @@ mod tests {
             text_verts: Vec::new(),
             points: vec![[5.0, 5.0, 0.0], [15.0, 5.0, 0.0]],
             ..Default::default()
-        }];
+}];
         clip_wires(&mut wires, &poly);
 
         assert_eq!(wires.len(), 1);
@@ -852,7 +1162,7 @@ mod tests {
 
     #[test]
     fn world_polygon_applies_inverse_block_then_insert() {
-        use acadrust::types::{Matrix4, Vector2};
+        use codec::types::{Matrix4, Vector2};
         // Clip stored against a normalized space: inverse_block_transform scales
         // the small boundary points up by 1000 into block space, then the insert
         // (scale 0.1 + translation) maps them to world.

@@ -10,10 +10,10 @@
 //   POLY_C — Circumscribed about circle (edges tangent to circle)
 //   POLY_E — Edge (pick two endpoints of one edge)
 
-use acadrust::entities::LwVertex;
-use acadrust::types::Vector2;
-use acadrust::{EntityType, LwPolyline};
-use cadkernel::geom2d::{
+use codec::entities::LwVertex;
+use codec::types::Vector2;
+use codec::{EntityType, LwPolyline};
+use kernel::geom2d::{
     arc_span, fillet_between_rays, Curve as KernelCurve, Frame as KernelFrame,
     Polyline as KernelPolyline, PolylineVertex as KernelVertex, Ray as KernelRay,
     Transform as KernelTransform, Vec2 as KernelVec2,

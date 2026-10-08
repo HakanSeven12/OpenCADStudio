@@ -38,13 +38,16 @@ const ST_ANNO_AUTO_ADD: &[u8] = include_bytes!("../../../assets/icons/add_scale.
 const ST_VP_SCALE_SYNC: &[u8] = include_bytes!("../../../assets/icons/sync.svg");
 
 pub struct StatusMenuData<'a> {
-    pub layout_names: Vec<String>,
+    /// Cached layout names (shared `Arc`, moved in — never deep-cloned).
+    pub layout_names: Arc<Vec<String>>,
     pub polar_custom_input: &'a str,
     pub scale_is_model: bool,
     pub current_scale_name: String,
-    pub scale_list: Vec<(String, f32, f64)>,
+    /// Cached scale picker list (shared `Arc`, moved in).
+    pub scale_list: Arc<Vec<(String, f32, f64)>>,
     pub has_selection: bool,
-    pub selection_types: Vec<String>,
+    /// Entity-type names in the current layout (shared `Arc`, moved in).
+    pub selection_types: Arc<Vec<String>>,
     pub selection_filter: &'a rustc_hash::FxHashSet<String>,
     pub tooltip_hidden: bool,
 }
@@ -72,10 +75,9 @@ impl StatusBar {
         otrack: bool,
         isometric_drafting: bool,
         iso_plane: crate::app::settings::IsoPlane,
-        layouts: Vec<String>,
+        layouts: Arc<Vec<String>>,
         block_tabs: Vec<String>,
-        reorderable_layouts: Vec<String>,
-        current_layout: String,
+        current_layout: &'a str,
         active_block: Option<String>,
         // Start/welcome view has no drawing to own layouts.
         is_start: bool,
@@ -172,7 +174,7 @@ impl StatusBar {
                     t!("Model and layout list"),
                     tooltip_hidden,
                 ),
-                statusbar_menu::layout_entries(&layout_names, &current_layout),
+                statusbar_menu::layout_entries(&layout_names, current_layout),
                 200.0,
             )
         };
@@ -231,7 +233,7 @@ impl StatusBar {
                     scale_is_model,
                     &current_scale_name,
                     viewport_scale,
-                    scale_list,
+                    &scale_list,
                 ),
                 if scale_is_model { 150.0 } else { 120.0 },
             )
@@ -378,7 +380,7 @@ impl StatusBar {
         if vis(StatusPill::Space) {
             pills.push(
                 tip(
-                    space_mode_btn(&current_layout, in_mspace),
+                    space_mode_btn(current_layout, in_mspace),
                     t!("PAPER: double-click viewport to enter MSPACE\nMODEL: click to switch to Model Space"),
                 )
                 .into(),
@@ -501,7 +503,7 @@ impl StatusBar {
                         tooltip_hidden,
                     ),
                     crate::ui::popup::selection_filter_popup::menu_entries(
-                        selection_types,
+                        &selection_types,
                         selection_filter,
                     ),
                     180.0,
@@ -571,16 +573,22 @@ impl StatusBar {
         let mut left: Vec<Element<'_, Message>> = Vec::new();
         left.push(menu_btn);
         if show_layout_tabs {
-            let reorderable_layouts: Arc<[String]> = reorderable_layouts.into();
-            for name in layouts {
-                let is_active = active_block.is_none() && name == current_layout;
+            // Paper layouts only: `layouts[0]` is always "Model". Derived once
+            // from the shared `Arc` and cloned (cheap refcount bump) per tab.
+            let reorderable_layouts: Arc<[String]> =
+                Arc::from(layouts.get(1..).unwrap_or(&[]));
+            // Shared once per frame: block tabs carry no reorder set, so reuse
+            // one empty Arc (refcount bump) instead of allocating per tab.
+            let empty_reorderable: Arc<[String]> = Arc::from([] as [String; 0]);
+            for name in layouts.iter() {
+                let is_active = active_block.is_none() && name.as_str() == current_layout;
                 let renaming = rename_state
-                    .filter(|(orig, _)| *orig == name)
+                    .filter(|(orig, _)| orig.as_str() == name.as_str())
                     .map(|(_, edit)| edit.as_str());
-                let switch_msg = Message::LayoutSwitch(name.clone());
+                let switch_msg = Message::LayoutSwitch(name.to_owned());
                 left.push(
                     space_tab(
-                        name,
+                        name.to_owned(),
                         is_active,
                         renaming,
                         !is_start,
@@ -591,16 +599,16 @@ impl StatusBar {
                     .into(),
                 );
             }
-            for name in block_tabs {
+            for name in block_tabs.iter() {
                 let is_active = active_block.as_deref() == Some(name.as_str());
-                let switch_msg = Message::BlockEditSwitch(name.clone());
+                let switch_msg = Message::BlockEditSwitch(name.to_owned());
                 left.push(
                     space_tab(
-                        name,
+                        name.to_owned(),
                         is_active,
                         None,
                         !is_start,
-                        Arc::from(Vec::<String>::new()),
+                        empty_reorderable.clone(),
                         switch_msg,
                         "SB_BLOCK_TAB",
                     )

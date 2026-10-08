@@ -5,7 +5,7 @@
 // but apply the SHAPE's own rotation / oblique / width factor so the marker
 // gives a rough indication of the glyph orientation.
 
-use acadrust::entities::Shape;
+use codec::entities::Shape;
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -62,7 +62,7 @@ fn shape_marker(
 /// absolute paths are the norm in traded files).
 fn shx_polylines(
     shape: &Shape,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
 ) -> Option<crate::scene::text::shx::ShapePolylines> {
     let base = document
         .source_path
@@ -74,7 +74,7 @@ fn shx_polylines(
     // Resolve the glyph from one style's shape (.shx) file, preferring the
     // shape NUMBER but falling back to the NAME — a DXF SHAPE carries only the
     // name (code 2), so its `shape_number` is 0.
-    let try_style = |style: &acadrust::tables::TextStyle| {
+    let try_style = |style: &codec::tables::TextStyle| {
         let font = style.font_file.trim();
         if font.is_empty() {
             return None;
@@ -130,7 +130,7 @@ fn shx_polylines(
 }
 
 impl RenderConvertible for Shape {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         // SHAPE insertion point is OCS (planar entity) — map through the
         // arbitrary axis so a mirrored shape's marker lands where it renders.
         let (ox, oy, oz) = crate::scene::view::transform::ocs_point_to_wcs(

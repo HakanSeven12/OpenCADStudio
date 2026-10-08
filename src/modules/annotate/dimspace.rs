@@ -5,7 +5,7 @@
 //   2. Select the other dimensions to space (click each, Enter to finish)
 //   3. Enter a non-negative spacing value, or choose Auto
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, SelectionEntity};
@@ -107,8 +107,8 @@ impl CadCommand for DimSpaceCommand {
                 && matches!(
                     selected.entity,
                     EntityType::Dimension(
-                        acadrust::entities::Dimension::Linear(_)
-                            | acadrust::entities::Dimension::Aligned(_)
+                        codec::entities::Dimension::Linear(_)
+                            | codec::entities::Dimension::Aligned(_)
                     )
                 )
                 && !others.contains(&selected.handle)
@@ -127,8 +127,8 @@ impl CadCommand for DimSpaceCommand {
                 if !matches!(
                     self.picked_entity.take(),
                     Some(EntityType::Dimension(
-                        acadrust::entities::Dimension::Linear(_)
-                            | acadrust::entities::Dimension::Aligned(_)
+                        codec::entities::Dimension::Linear(_)
+                            | codec::entities::Dimension::Aligned(_)
                     ))
                 ) {
                     return CmdResult::ReportError(

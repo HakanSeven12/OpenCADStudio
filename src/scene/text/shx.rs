@@ -235,7 +235,7 @@ pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff
     let mut buf = [0u8; 4];
     let s = ch.encode_utf8(&mut buf);
     for page in bigfont_code_pages(path) {
-        let Some(enc) = acadrust::io::dxf::code_page::encoding_from_code_page(page) else {
+        let Some(enc) = codec::io::dxf::code_page::encoding_from_code_page(page) else {
             continue;
         };
         let (bytes, _, unmappable) = enc.encode(s);
@@ -544,16 +544,26 @@ fn interpret(
                 }
             }
             7 => {
-                let mut sub = *b.get(i).unwrap_or(&0) as u16;
-                i += 1;
-                // A big font references subshapes by a two-byte code:
-                // `7, 0, hi, lo`.
-                if file.kind == ShxKind::Bigfont && sub == 0 {
-                    let hi = *b.get(i).unwrap_or(&0) as u16;
-                    let lo = *b.get(i + 1).unwrap_or(&0) as u16;
+                let two_bytes = |i: usize| {
+                    ((*b.get(i).unwrap_or(&0) as u16) << 8) | *b.get(i + 1).unwrap_or(&0) as u16
+                };
+                // A unifont names its subshape by a two-byte code point
+                // (`7, hi, lo`); read as one byte, the low byte ran on as an
+                // opcode and the glyph came out mangled (ISOCP's `9`, #1556).
+                // A big font uses `7, 0, hi, lo`; a shape file one byte.
+                let sub = if file.kind == ShxKind::Unifont {
                     i += 2;
-                    sub = (hi << 8) | lo;
-                }
+                    two_bytes(i - 2)
+                } else {
+                    let sub = *b.get(i).unwrap_or(&0) as u16;
+                    i += 1;
+                    if file.kind == ShxKind::Bigfont && sub == 0 {
+                        i += 2;
+                        two_bytes(i - 2)
+                    } else {
+                        sub
+                    }
+                };
                 if !skipping && sub != 0 && sub != shape_number {
                     interpret(file, sub, st, cur, out, depth + 1);
                 }

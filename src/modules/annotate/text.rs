@@ -1,8 +1,8 @@
-use acadrust::entities::{
+use codec::entities::{
     Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA,
 };
-use acadrust::tables::TextStyle;
-use acadrust::types::Vector3;
+use codec::tables::TextStyle;
+use codec::types::Vector3;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

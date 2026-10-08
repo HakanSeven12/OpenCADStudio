@@ -9,10 +9,10 @@
 // The MText is a separate entity referenced by the leader's annotation_handle
 // (DXF group 340); editing/erasing them stays in sync via that link.
 
-use acadrust::entities::mtext::AttachmentPoint;
-use acadrust::entities::{Leader, LeaderCreationType, LeaderPathType, MText};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::mtext::AttachmentPoint;
+use codec::entities::{Leader, LeaderCreationType, LeaderPathType, MText};
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::{DVec3, Mat4, Vec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
@@ -444,6 +444,7 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -469,7 +470,9 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+            ..Default::default()
+}
 }
 
 pub fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {

@@ -1,7 +1,7 @@
 //! Application language selection and embedded Fluent resources.
 
 use i18n_embed::fluent::{fluent_language_loader, FluentLanguageLoader};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 use i18n_embed::DesktopLanguageRequester;
 use i18n_embed::LanguageLoader;
 #[cfg(target_arch = "wasm32")]
@@ -163,27 +163,32 @@ fn system_languages() -> Vec<i18n_embed::unic_langid::LanguageIdentifier> {
     // for the system language, so the machine's locale must never reach
     // them — not even from a test that runs in parallel.
     #[cfg(test)]
-    return vec!["en-US".parse().expect("en-US is a valid language identifier")];
-
-    #[cfg(target_arch = "wasm32")]
-    let mut requested = WebLanguageRequester::requested_languages();
-    #[cfg(not(target_arch = "wasm32"))]
-    let requested = DesktopLanguageRequester::requested_languages();
-
-    // `navigator.languages` may be empty in privacy-restricted browser
-    // contexts. The singular preference is still exposed by mainstream
-    // browsers, so keep it as the first fallback before English.
-    #[cfg(target_arch = "wasm32")]
-    if requested.is_empty() {
-        if let Some(language) = web_sys::window()
-            .and_then(|window| window.navigator().language())
-            .and_then(|language| language.parse().ok())
-        {
-            requested.push(language);
-        }
+    {
+        vec!["en-US".parse().expect("en-US is a valid language identifier")]
     }
 
-    requested
+    #[cfg(not(test))]
+    {
+        #[cfg(target_arch = "wasm32")]
+        let mut requested = WebLanguageRequester::requested_languages();
+        #[cfg(not(target_arch = "wasm32"))]
+        let requested = DesktopLanguageRequester::requested_languages();
+
+        // `navigator.languages` may be empty in privacy-restricted browser
+        // contexts. The singular preference is still exposed by mainstream
+        // browsers, so keep it as the first fallback before English.
+        #[cfg(target_arch = "wasm32")]
+        if requested.is_empty() {
+            if let Some(language) = web_sys::window()
+                .and_then(|window| window.navigator().language())
+                .and_then(|language| language.parse().ok())
+            {
+                requested.push(language);
+            }
+        }
+
+        requested
+    }
 }
 
 fn load_language(

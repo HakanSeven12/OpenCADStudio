@@ -12,12 +12,13 @@
 
 use std::fmt;
 
-use iced::widget::{button, checkbox, column, container, row, text, text_input, Space};
+use iced::widget::{checkbox, column, container, row, text, text_input, Space};
 use iced::{Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
 use crate::modules::draw::units;
 use crate::t;
+use crate::ui::style::form::dialog_button;
 
 /// The dialog's working copy. Nothing reaches the drawing until OK, so a format
 /// can be tried against the sample and abandoned.
@@ -265,15 +266,10 @@ pub fn view_window<'a>(
 
     let actions = row![
         Space::new().width(Fill),
-        button(text(t!("Cancel")).size(12))
-            .on_press(Message::CloseModal)
-            .padding([4, 12]),
-        button(text(t!("OK")).size(12))
-            .on_press(Message::DrawingUnitsApply)
-            .style(button::primary)
-            .padding([4, 12]),
+        dialog_button(t!("OK"), Message::DrawingUnitsApply, true),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
     ]
-    .spacing(6)
+    .spacing(8)
     .align_y(iced::Center);
 
     column![row![length, angle].spacing(8), insertion, sample, actions,]

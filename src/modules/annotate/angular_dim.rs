@@ -1,7 +1,7 @@
-use acadrust::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
-use cadkernel::geom2d::{
+use codec::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
+use kernel::geom2d::{
     closest_point, line_line, Arc as KernelArc, BulgeArc, Curve as KernelCurve,
     Line as KernelLine,
 };
@@ -1093,7 +1093,7 @@ fn point_angle_in_frame(vertex: DVec3, point: DVec3, frame: (f64, f64)) -> bool 
     (angle - frame.0).rem_euclid(std::f64::consts::TAU) <= sweep + 1.0e-9
 }
 
-fn two_line_frame(
+pub(crate) fn two_line_frame(
     first_start: DVec3,
     first_end: DVec3,
     second_start: DVec3,
@@ -1172,18 +1172,64 @@ fn angular_preview_with_frame(
     let second_end = vertex + DVec3::new(end.cos(), end.sin(), 0.0) * radius;
     let mut points = vec![first, first_end, nan(), second, second_end, nan()];
     points.extend(
-        cadkernel::geom2d::tessellate::arc(
+        kernel::geom2d::tessellate::arc(
             [vertex.x, vertex.y],
             radius,
             start,
             end,
             vertex.z,
-            cadkernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
+            kernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
         )
         .into_iter()
         .map(DVec3::from_array),
     );
     points
+}
+
+/// A two-line angular dimension whose arc sits at `arc_point`, for a
+/// dimensional constraint; `None` when the lines are parallel or the arc
+/// point picks no sector.
+pub(crate) fn angular_two_line_entity(
+    first_start: DVec3,
+    first_end: DVec3,
+    second_start: DVec3,
+    second_end: DVec3,
+    arc_point: DVec3,
+    text: Option<String>,
+) -> Option<EntityType> {
+    two_line_frame(first_start, first_end, second_start, second_end, arc_point)?;
+    let mut dim = DimensionAngular2Ln::default();
+    dim.first_point = v3(first_start);
+    dim.second_point = v3(first_end);
+    dim.angle_vertex = v3(second_start);
+    dim.definition_point = v3(second_end);
+    dim.dimension_arc = v3(arc_point);
+    dim.base.definition_point = dim.definition_point;
+    // No stored text point: the style places the text (DIMTAD) beside the
+    // arc at render time, as the reference draws a dynamic dimension.
+    dim.base.insertion_point = dim.dimension_arc;
+    dim.base.actual_measurement = dim.measurement_degrees();
+    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text);
+    Some(EntityType::Dimension(Dimension::Angular2Ln(dim)))
+}
+
+/// A three-point angular dimension (vertex, two points, arc point), for a
+/// dimensional constraint.
+pub(crate) fn angular_three_point_entity(
+    vertex: DVec3,
+    first: DVec3,
+    second: DVec3,
+    arc_point: DVec3,
+    text: Option<String>,
+) -> Option<EntityType> {
+    let mut dim = DimensionAngular3Pt::new(v3(vertex), v3(first), v3(second));
+    dim.definition_point = v3(arc_point);
+    dim.base.definition_point = dim.definition_point;
+    dim.base.text_middle_point = Vector3::new(0.0, 0.0, 0.0);
+    dim.base.insertion_point = dim.definition_point;
+    dim.base.actual_measurement = dim.measurement_degrees();
+    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text);
+    Some(EntityType::Dimension(Dimension::Angular3Pt(dim)))
 }
 
 fn v3(point: DVec3) -> Vector3 {
@@ -1203,6 +1249,7 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -1228,7 +1275,9 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMANGULAR"] });

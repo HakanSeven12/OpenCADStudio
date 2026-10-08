@@ -25,7 +25,7 @@ pub const HISTORY_SCROLL_ID: &str = "command_history_scroll";
 /// Default for `COMMANDLINEFADETIME` (ms); the live value lives on
 /// [`CommandLine::fade_ms`] so it can be changed via SETVAR.
 pub const DEFAULT_COMMANDLINE_FADE_MS: u32 = 3000;
-/// COMMANDLINEFADETIME bounds in milliseconds: 0 skips the overlay entirely,
+/// COMMANDLINEFADETIME bounds in milliseconds: 0 means never fade,
 /// 60000 keeps lines for a full minute.
 pub const COMMANDLINE_FADE_MIN_MS: u32 = 0;
 pub const COMMANDLINE_FADE_MAX_MS: u32 = 60000;
@@ -51,11 +51,20 @@ fn cmd_input_id() -> iced::widget::Id {
     iced::widget::Id::new(CMD_INPUT_ID)
 }
 
-fn mcp_status(enabled: bool, busy: bool) -> (&'static str, Color) {
+/// Footer pill state for the automation channel. `waiting` — a client
+/// `user_select` / `getpoint` is parked and the person at the screen must
+/// answer — outranks `busy`: the screen has to say "act now", not just
+/// "something is running".
+fn mcp_status(enabled: bool, busy: bool, waiting: bool) -> (&'static str, Color) {
     if !enabled {
         (
             "MCP control is off",
             Color::from_rgb(0.90, 0.35, 0.35),
+        )
+    } else if waiting {
+        (
+            "MCP is waiting for you to pick — Enter confirms, Esc cancels",
+            Color::from_rgb(0.30, 0.55, 0.98),
         )
     } else if busy {
         (
@@ -155,8 +164,9 @@ pub struct CommandLine {
     pub history_open: bool,
     /// Persisted height of the full-history editor in logical pixels.
     pub history_height: f32,
-    /// Index of the currently-highlighted autocomplete suggestion, or
-    /// `None` before keyboard navigation begins. Reset when input changes.
+    /// Index of the currently-highlighted autocomplete suggestion. `None`
+    /// means the first match is pre-selected (highlighted) before keyboard
+    /// navigation begins. Reset when input changes.
     pub autocomplete_cursor: Option<usize>,
     /// Command names contributed by loaded plugins, refreshed whenever the
     /// enabled-plugin set changes. Merged into autocomplete alongside the
@@ -180,8 +190,8 @@ pub struct CommandLine {
     /// are displayed above the command window (0–50, default 3).
     cliprompt_lines: u8,
     /// COMMANDLINEFADETIME: how long overlay history lines stay visible,
-    /// in milliseconds (0–60000, default 3000). 0 skips drawing transient
-    /// lines entirely; the pinned step prompt still shows.
+    /// in milliseconds (0–60000, default 3000). 0 means history never fades;
+    /// the pinned step prompt still shows.
     fade_ms: u32,
 }
 
@@ -490,8 +500,8 @@ impl CommandLine {
         self.cliprompt_lines = n.min(50);
     }
 
-    /// COMMANDLINEFADETIME mirror (ms, 0–60000). `0` skips transient overlay
-    /// lines entirely; the pinned step prompt still shows.
+    /// COMMANDLINEFADETIME mirror (ms, 0–60000). `0` means overlay history
+    /// lines never fade; the pinned step prompt still shows.
     pub fn set_commandline_fade_ms(&mut self, ms: u32) {
         self.fade_ms = ms.min(COMMANDLINE_FADE_MAX_MS);
     }
@@ -505,7 +515,7 @@ impl CommandLine {
     }
 
     fn entry_visible(&self, e: &HistoryEntry) -> bool {
-        e.pinned || (self.fade_ms > 0 && e.created_at.elapsed().as_secs_f32() < self.fade_secs())
+        e.pinned || self.fade_ms == 0 || e.created_at.elapsed().as_secs_f32() < self.fade_secs()
     }
 
     /// Height of the overlaid prompt lines currently shown above the input
@@ -537,15 +547,26 @@ impl CommandLine {
         visible.len().min(self.cliprompt_lines as usize)
     }
 
-    /// `true` while at least one history entry is still within the
-    /// visible window — the host app uses this to drive a low-frequency
-    /// tick subscription so the overlay re-renders and fades the entry
-    /// once it expires.
+    /// `true` while at least one history entry is currently visible in the
+    /// overlay area (subject to CLIPROMPTLINES).
     pub fn has_visible_history(&self) -> bool {
         if self.cliprompt_lines == 0 {
             return false;
         }
         self.history.iter().any(|e| self.entry_visible(e))
+    }
+
+    /// `true` while at least one visible history entry is waiting to fade out.
+    /// Used by the host app to drive an animation frame subscription only when
+    /// an entry actually needs to be removed after its visible window expires.
+    /// When `fade_ms == 0` (never fade) or entries are pinned, no tick is needed.
+    pub fn has_expiring_history(&self) -> bool {
+        if self.cliprompt_lines == 0 || self.fade_ms == 0 {
+            return false;
+        }
+        self.history
+            .iter()
+            .any(|e| !e.pinned && e.created_at.elapsed().as_secs_f32() < self.fade_secs())
     }
 
     pub fn toggle_history(&mut self) {
@@ -608,11 +629,20 @@ impl CommandLine {
         true
     }
 
-    /// The command name explicitly highlighted in the autocomplete popup.
+    /// The command name highlighted in the autocomplete popup. Before any
+    /// arrow-key navigation the first match is pre-selected (the popup renders
+    /// `autocomplete_cursor.unwrap_or(0)` as highlighted), so Enter runs that
+    /// entry — never a different command resolved through another path.
     pub fn selected_suggestion(&self) -> Option<String> {
         let matches = self.autocomplete_matches();
-        self.autocomplete_cursor
-            .and_then(|index| matches.get(index).cloned())
+        if matches.is_empty() {
+            return None;
+        }
+        let index = self
+            .autocomplete_cursor
+            .unwrap_or(0)
+            .min(matches.len() - 1);
+        matches.get(index).cloned()
     }
 
     /// Autocomplete suggestions for the current input — see
@@ -633,9 +663,11 @@ impl CommandLine {
         window_height: f32,
         control_enabled: bool,
         control_busy: bool,
+        pick_pending: bool,
+        graph_open: bool,
     ) -> Element<'a, Message> {
         // Only the most recent entries pushed within COMMANDLINEFADETIME
-        // show on the overlay (0 skips transient lines). The dropdown button
+        // show on the overlay (0 means never fade). The dropdown button
         // keeps the full backlog reachable when the user actually wants it.
         let mut visible: Vec<&HistoryEntry> =
             self.history.iter().filter(|e| self.entry_visible(e)).collect();
@@ -769,12 +801,18 @@ impl CommandLine {
                 .on_input(Message::CommandInput)
                 .on_submit(Message::CommandSubmit);
         }
-        let input = input.size(11).padding(Padding {
-            top: 4.0,
-            right: 30.0,
-            bottom: 4.0,
-            left: 6.0,
-        });
+        let input = input
+            .size(11)
+            .padding(Padding {
+                top: 4.0,
+                right: 30.0,
+                bottom: 4.0,
+                left: 6.0,
+            })
+            .style(|theme: &Theme, status| text_input::Style {
+                value: text_color(theme),
+                ..text_input::default(theme, status)
+            });
         // Autocomplete suggestions panel, shown above the input row
         // when the user has typed a prefix that matches at least one
         // command. Each row is a button — clicking it dispatches the
@@ -788,7 +826,16 @@ impl CommandLine {
                 let mut col = column![].spacing(0).width(Length::Fill);
                 for (idx, cmd) in matches.iter().enumerate() {
                     let is_selected = idx == cursor;
-                    let row = button(text(cmd.clone()).size(11))
+                    // Every row keeps the icon's width so names line up.
+                    let icon: Element<'_, Message> =
+                        match crate::modules::registry::command_icon(cmd) {
+                            Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
+                            None => Space::new().width(14.0).into(),
+                        };
+                    let label = row![icon, text(cmd.clone()).size(11)]
+                        .spacing(6)
+                        .align_y(iced::Center);
+                    let row = button(label)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)
                         .padding([2, 8])
@@ -844,7 +891,7 @@ impl CommandLine {
                 .align_y(iced::alignment::Vertical::Center),
         ]
         .width(Length::Fill);
-        let (mcp_tooltip, mcp_color) = mcp_status(control_enabled, control_busy);
+        let (mcp_tooltip, mcp_color) = mcp_status(control_enabled, control_busy, pick_pending);
         let mcp_btn = button(text("MCP").size(11))
             .on_press(Message::ControlToggle)
             .style(move |theme: &Theme, status| {
@@ -866,7 +913,21 @@ impl CommandLine {
                 bottom: 0.0,
                 left: 0.0,
             });
-        let input_row = row![prompt, literal_btn, input_with_history, mcp_btn]
+        let graph_btn = button(crate::ui::icons::themed(crate::ui::icons::NODE_GRAPH, 13.0))
+            .on_press(Message::Graph(crate::ui::node_graph::GraphMsg::Toggle))
+            .style(move |theme: &Theme, status| {
+                if graph_open {
+                    button::primary(theme, status)
+                } else {
+                    button::subtle(theme, status)
+                }
+            })
+            .padding([2, 6]);
+        let graph_tip = container(text(t!("Node graph")).size(11))
+            .padding([3, 6])
+            .style(container::bordered_box);
+        let graph_btn = tooltip(graph_btn, graph_tip, tooltip::Position::Top).gap(4);
+        let input_row = row![prompt, literal_btn, input_with_history, graph_btn, mcp_btn]
             .spacing(4)
             .align_y(iced::Center);
 
@@ -930,8 +991,13 @@ impl CommandLine {
             .on_press(Message::CommandHistoryClear)
             .style(header_btn_style)
             .padding([2, 6]);
+            // Collapses the console back to the single input line (#1094).
+            let collapse_btn = button(crate::ui::icons::themed_arrow_down(11.0))
+                .on_press(Message::CommandHistoryToggle)
+                .style(header_btn_style)
+                .padding([2, 6]);
             let header = container(
-                row![Space::new().width(Length::Fill), copy_btn, clear_btn]
+                row![Space::new().width(Length::Fill), copy_btn, clear_btn, collapse_btn]
                     .spacing(6)
                     .align_y(iced::Center),
             )
@@ -1099,18 +1165,43 @@ fn header_btn_style(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// The user's command-line text colour, packed `0x01RRGGBB`; 0 keeps the
+/// theme's. Global because the history highlighter takes a plain `fn`.
+static TEXT_COLOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn set_text_color(rgb: Option<[u8; 3]>) {
+    let packed = rgb.map_or(0, |[r, g, b]| 1 << 24 | u32::from_be_bytes([0, r, g, b]));
+    TEXT_COLOR.store(packed, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn user_text_color() -> Option<Color> {
+    match TEXT_COLOR.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        packed => {
+            let [_, r, g, b] = packed.to_be_bytes();
+            Some(Color::from_rgb8(r, g, b))
+        }
+    }
+}
+
+fn text_color(theme: &Theme) -> Color {
+    user_text_color().unwrap_or(theme.palette().background.base.text)
+}
+
 fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
     let palette = theme.palette();
     match kind {
-        EntryKind::Command => palette.background.base.text,
-        EntryKind::Output => palette.background.base.text.scale_alpha(0.72),
+        EntryKind::Command => text_color(theme),
+        EntryKind::Output => text_color(theme).scale_alpha(0.72),
         EntryKind::Error => palette.danger.base.color,
-        EntryKind::Info => accessible_accent_threshold(
-            palette.primary.base.color,
-            palette.background.base.color,
-            palette.background.base.text,
-            4.5,
-        ),
+        EntryKind::Info => user_text_color().unwrap_or_else(|| {
+            accessible_accent_threshold(
+                palette.primary.base.color,
+                palette.background.base.color,
+                palette.background.base.text,
+                4.5,
+            )
+        }),
     }
 }
 
@@ -1157,9 +1248,14 @@ mod tests {
 
     #[test]
     fn mcp_status_distinguishes_off_ready_and_busy() {
-        assert_eq!(mcp_status(false, false).0, "MCP control is off");
-        assert_eq!(mcp_status(true, false).0, "MCP control is ready");
-        assert_eq!(mcp_status(true, true).0, "MCP is handling a request");
+        assert_eq!(mcp_status(false, false, false).0, "MCP control is off");
+        assert_eq!(mcp_status(true, false, false).0, "MCP control is ready");
+        assert_eq!(mcp_status(true, true, false).0, "MCP is handling a request");
+        // A parked pick outranks the plain busy state: the person must act.
+        assert_eq!(
+            mcp_status(true, true, true).0,
+            "MCP is waiting for you to pick — Enter confirms, Esc cancels"
+        );
     }
 
     #[test]
@@ -1204,6 +1300,59 @@ mod tests {
         assert_eq!(m.first().map(String::as_str), Some("AREA"), "got {m:?}");
         let m = ranked_matches("L", &[], &a);
         assert_eq!(m.first().map(String::as_str), Some("LINE"), "got {m:?}");
+    }
+
+    #[test]
+    fn preselected_top_suggestion_is_returned_without_navigation() {
+        // The popup highlights the first match before any arrow-key navigation
+        // (`unwrap_or(0)` in `view`); Enter must run that same entry. Typing
+        // `LT` with no alias table highlights `LTSCALE`, so the pre-selection
+        // must be `LTSCALE` — not `None` (which would fall through to alias /
+        // closest-match resolution and could run a different command).
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.command_aliases = FxHashMap::default();
+        line.input = "LT".to_string();
+        line.autocomplete_cursor = None;
+        let matches = line.autocomplete_matches();
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("LTSCALE"),
+            "got {matches:?}"
+        );
+        assert_eq!(
+            line.selected_suggestion().as_deref(),
+            Some("LTSCALE"),
+            "Enter must run the highlighted pre-selection"
+        );
+    }
+
+    #[test]
+    fn preselected_alias_target_is_returned_without_navigation() {
+        // With the `LT` → `LINETYPE` alias, the forced top entry is `LINETYPE`
+        // and Enter must run it without requiring arrow-key navigation.
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.command_aliases = aliases(&[("LT", "LINETYPE"), ("LTS", "LTSCALE")]);
+        line.input = "LT".to_string();
+        line.autocomplete_cursor = None;
+        assert_eq!(
+            line.selected_suggestion().as_deref(),
+            Some("LINETYPE"),
+            "got {:?}",
+            line.autocomplete_matches()
+        );
+    }
+
+    #[test]
+    fn no_preselection_without_matches_or_input() {
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.input = String::new();
+        line.autocomplete_cursor = None;
+        assert_eq!(line.selected_suggestion(), None);
+        line.input = "ZZZ_NO_SUCH_COMMAND".to_string();
+        assert_eq!(line.selected_suggestion(), None);
     }
 
     #[test]
@@ -1329,17 +1478,20 @@ mod tests {
     }
 
     #[test]
-    fn commandline_fade_zero_hides_unpinned_but_keeps_pinned() {
+    fn commandline_fade_zero_never_fades() {
         let mut line = CommandLine::new();
         line.push_info("transient");
         assert!(line.has_visible_history());
+        assert!(line.has_expiring_history());
         line.set_commandline_fade_ms(0);
-        // Non-pinned entries are skipped entirely at 0.
-        assert!(!line.has_visible_history());
-        assert_eq!(line.visible_history_count(), 0);
+        // At 0, entries never fade so history stays visible, but no timer tick is needed.
+        assert!(line.has_visible_history());
+        assert_eq!(line.visible_history_count(), 3);
+        assert!(!line.has_expiring_history());
         // Pinned step prompt still shows at 0.
         line.set_step_prompt(Some("Specify point:".to_string()));
         assert!(line.has_visible_history());
+        assert!(!line.has_expiring_history());
     }
 
     #[test]

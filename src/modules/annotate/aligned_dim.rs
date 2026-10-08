@@ -1,8 +1,8 @@
 // DIMALIGNED command — aligned dimension (measures true distance between two points).
 
-use acadrust::entities::{Dimension, DimensionAligned};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionAligned};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{
@@ -92,6 +92,7 @@ pub(crate) fn aligned_dimension_entity(
     let (d1, d2) = dim_line_endpoints(first, second, point);
     dim.base.text_middle_point = v3((d1 + d2) * 0.5);
     dim.base.insertion_point = dim.base.text_middle_point;
+    crate::entities::dimension::reset_automatic_text_position(&mut dim.base);
     dim.base.actual_measurement = dim.measurement();
     crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
     EntityType::Dimension(Dimension::Aligned(dim))
@@ -339,6 +340,7 @@ impl CadCommand for AlignedDimensionCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -364,7 +366,9 @@ impl CadCommand for AlignedDimensionCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
@@ -431,6 +435,7 @@ fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -479,7 +484,9 @@ fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 

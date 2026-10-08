@@ -35,9 +35,9 @@ impl CadCommand for IdCommand {
         let x = local.x;
         let y = local.y;
         let z = local.z;
-        let x_s = format!("{x:.4}");
-        let y_s = format!("{y:.4}");
-        let z_s = format!("{z:.4}");
+        let x_s = crate::entities::common::format_length(x);
+        let y_s = crate::entities::common::format_length(y);
+        let z_s = crate::entities::common::format_length(z);
         let msg = t!(
             "X = %{x},  Y = %{y},  Z = %{z}",
             x = x_s,

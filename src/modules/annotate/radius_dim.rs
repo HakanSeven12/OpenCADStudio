@@ -1,6 +1,6 @@
-use acadrust::entities::{Dimension, DimensionRadius};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionRadius};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
@@ -62,30 +62,63 @@ impl RadiusDimensionCommand {
         source: crate::scene::dimension_assoc::RadialSourceGeometry,
         world: DVec3,
     ) -> EntityType {
-        let plane = WorkingPlane::new(
-            DVec3::from_array(source.plane.origin),
-            DVec3::from_array(source.plane.x_axis),
-            DVec3::from_array(source.plane.y_axis),
-        );
-        let center = plane.to_local(dvec(source.center_world()));
-        let chord = plane.to_local(dvec(source.chord_at(world.to_array())));
-        let point = plane.to_local(world);
-        let mut dim = DimensionRadius::new(v3(center), v3(chord));
-        dim.base.definition_point = v3(chord);
-        dim.base.text_middle_point = v3(point);
-        dim.base.insertion_point = v3(point);
-        dim.base.text_user_positioned = true;
-        dim.leader_length = chord.distance(point);
-        dim.base.actual_measurement = dim.measurement();
-        crate::entities::dimension::set_dimension_text_override(
-            &mut dim.base,
-            self.text_override.clone(),
-        );
-        if let Some(angle) = self.text_angle {
-            dim.base.text_rotation = angle;
-        }
-        plane.place_entity(EntityType::Dimension(Dimension::Radius(dim)))
+        radial_dimension_entity(source, world, self.text_override.clone(), self.text_angle)
     }
+}
+
+/// A radius dimension of `source` with its text at `world`: the dimension
+/// line runs from the center through the text (DIMUPT).
+pub(crate) fn radial_dimension_entity(
+    source: crate::scene::dimension_assoc::RadialSourceGeometry,
+    world: DVec3,
+    text_override: Option<String>,
+    text_angle: Option<f64>,
+) -> EntityType {
+    let plane = WorkingPlane::new(
+        DVec3::from_array(source.plane.origin),
+        DVec3::from_array(source.plane.x_axis),
+        DVec3::from_array(source.plane.y_axis),
+    );
+    let center = plane.to_local(dvec(source.center_world()));
+    let chord = plane.to_local(dvec(source.chord_at(world.to_array())));
+    let point = plane.to_local(world);
+    let mut dim = DimensionRadius::new(v3(center), v3(chord));
+    dim.base.definition_point = v3(chord);
+    dim.base.text_middle_point = v3(point);
+    dim.base.insertion_point = v3(point);
+    dim.base.text_user_positioned = true;
+    dim.leader_length = chord.distance(point);
+    dim.base.actual_measurement = dim.measurement();
+    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
+    if let Some(angle) = text_angle {
+        dim.base.text_rotation = angle;
+    }
+    plane.place_entity(EntityType::Dimension(Dimension::Radius(dim)))
+}
+
+/// A radius dimension for a dimensional constraint: the leader leaves the
+/// centre towards `location`, and the style places the text.
+pub(crate) fn radius_constraint_entity(
+    center: DVec3,
+    radius: f64,
+    location: DVec3,
+    text: Option<String>,
+) -> Option<EntityType> {
+    let direction = radial_direction(center, location)?;
+    let chord = center + direction * radius;
+    let mut dim = DimensionRadius::new(v3(center), v3(chord));
+    dim.base.definition_point = v3(chord);
+    dim.leader_length = chord.distance(location).max(radius * 0.5);
+    dim.base.actual_measurement = dim.measurement();
+    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text);
+    Some(EntityType::Dimension(Dimension::Radius(dim)))
+}
+
+/// The unit direction a radial constraint's dimension points in, from the
+/// centre to where its dimension line was picked.
+pub(crate) fn radial_direction(center: DVec3, location: DVec3) -> Option<DVec3> {
+    let delta = location - center;
+    (delta.length() > 1.0e-9).then(|| delta.normalize())
 }
 
 impl CadCommand for RadiusDimensionCommand {
@@ -317,6 +350,7 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -342,7 +376,9 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMRADIUS"] });

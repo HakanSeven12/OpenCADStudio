@@ -19,17 +19,21 @@
 /// vtable so API v2 plugins keep working. v4 adds full-duplex notifications on
 /// a multiplexed socket while leaving the V2/V3 ABI and protocol untouched. v5
 /// adds the `BuiltinPlugin::on_load` lifecycle callback and
-/// `HostApi::document_path`.
-pub const API_VERSION: u32 = 5;
+/// `HostApi::document_path`. v6 appends generic host system-variable access
+/// (`HostApi::system_variable` / `set_system_variable`). v7 appends atomic,
+/// undoable replacement of a set of existing entities.
+pub const API_VERSION: u32 = 7;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the
-/// current `HostApi` trait.
-pub const API_VERSION_MIN_SUPPORTED: u32 = 2;
+/// current `HostApi` trait. V2 is no longer loaded: its ribbon wire types
+/// predate the current ones, so a V2 plugin passed the gate and then failed
+/// silently while registering its ribbon (#1085, #987).
+pub const API_VERSION_MIN_SUPPORTED: u32 = 3;
 
 /// Environment variable that caps the API major accepted by the host at
-/// runtime. Set to `4` to disable V5 plugins, `3` to disable V4, or `2` for
-/// V2-only mode.
+/// runtime. Set to `5` to disable V6 plugins, `4` to disable V5, or `3` for
+/// V3-only mode.
 pub const MAX_API_VERSION_ENV: &str = "OCS_PLUGIN_MAX_API_VERSION";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,18 +114,18 @@ mod tests {
         assert_eq!(effective_max_api_version(), 3);
         assert!(!host_accepts_plugin_version(4));
         assert!(host_accepts_plugin_version(3));
-        assert!(host_accepts_plugin_version(2));
+        assert!(!host_accepts_plugin_version(2));
         std::env::remove_var(MAX_API_VERSION_ENV);
     }
 
     #[test]
-    fn effective_max_v2_only_mode() {
+    fn effective_max_below_minimum_is_v3_only_mode() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var(MAX_API_VERSION_ENV, "2");
-        assert_eq!(effective_max_api_version(), 2);
+        assert_eq!(effective_max_api_version(), 3);
         assert!(!host_accepts_plugin_version(4));
-        assert!(!host_accepts_plugin_version(3));
-        assert!(host_accepts_plugin_version(2));
+        assert!(host_accepts_plugin_version(3));
+        assert!(!host_accepts_plugin_version(2));
         std::env::remove_var(MAX_API_VERSION_ENV);
     }
 

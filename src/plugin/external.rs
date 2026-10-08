@@ -15,7 +15,8 @@
 
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// One entry in the curated plugin registry (`plugins/registry.json`).
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ pub struct RegistryEntry {
 pub struct ReleaseInfo {
     pub tag: String,
     pub api_version: u32,
-    /// Full `acadrust` git source used by the release.
+    /// Full `opencadcodec` git source used by the release.
     pub acadrust_source: Option<String>,
     /// Whether `[opencad]` declares `acadrust_source`.
     pub acadrust_declared: bool,
@@ -56,7 +57,7 @@ pub struct ExternalPlugin {
     /// an older `plugin.toml` does not declare `repository`.
     pub repository: Option<String>,
     pub api_version: u32,
-    /// Full `acadrust` git source used by the plugin.
+    /// Full `opencadcodec` git source used by the plugin.
     pub acadrust_source: Option<String>,
     /// Whether `[opencad]` declares `acadrust_source`.
     pub acadrust_declared: bool,
@@ -68,6 +69,9 @@ pub struct ExternalPlugin {
     pub command_prefixes: Vec<String>,
     /// The package directory under the plugins folder.
     pub dir: PathBuf,
+    /// True when the package ships inside the application rather than the
+    /// per-user plugin directory.
+    pub bundled: bool,
     /// Whether a native library for this platform sits beside `plugin.toml`.
     pub lib_present: bool,
 }
@@ -155,6 +159,24 @@ pub fn plugins_dir() -> Option<PathBuf> {
     Some(p)
 }
 
+/// Read-only plugins shipped with the application. The environment override
+/// makes development and packaging tests independent of a particular bundle
+/// layout.
+pub fn bundled_plugins_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("OCS_BUNDLED_PLUGINS_DIR") {
+        return Some(PathBuf::from(p));
+    }
+    let exe = std::env::current_exe().ok()?;
+    #[cfg(target_os = "macos")]
+    {
+        return Some(exe.parent()?.parent()?.join("Resources").join("plugins"));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(exe.parent()?.join("plugins"))
+    }
+}
+
 /// Delete an installed package's folder. It stays loaded for the current
 /// session (the library is resident); the removal takes effect on next start.
 #[cfg(not(target_arch = "wasm32"))]
@@ -179,16 +201,33 @@ fn lib_extension() -> &'static str {
     }
 }
 
-/// Discover every package under the plugins directory, sorted by `ribbon_order`
-/// then id. Missing directory → empty list (not an error).
+/// Discover bundled and per-user packages, sorted by `ribbon_order` then id.
+/// A per-user package with the same id explicitly overrides the bundled copy.
+/// Missing directories are ignored.
 pub fn discover() -> Vec<ExternalPlugin> {
-    let Some(root) = plugins_dir() else {
-        return Vec::new();
+    discover_from_roots(bundled_plugins_dir().as_deref(), plugins_dir().as_deref())
+}
+
+fn discover_from_roots(
+    bundled_root: Option<&Path>,
+    user_root: Option<&Path>,
+) -> Vec<ExternalPlugin> {
+    let mut found = BTreeMap::new();
+    if let Some(root) = bundled_root {
+        discover_root(root, true, &mut found);
+    }
+    if let Some(root) = user_root {
+        discover_root(root, false, &mut found);
+    }
+    let mut found: Vec<_> = found.into_values().collect();
+    found.sort_by(|a, b| a.ribbon_order.cmp(&b.ribbon_order).then(a.id.cmp(&b.id)));
+    found
+}
+
+fn discover_root(root: &Path, bundled: bool, found: &mut BTreeMap<String, ExternalPlugin>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
     };
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        return Vec::new();
-    };
-    let mut found = Vec::new();
     for entry in entries.flatten() {
         let dir = entry.path();
         if !dir.is_dir() {
@@ -206,11 +245,10 @@ pub fn discover() -> Vec<ExternalPlugin> {
             }
             p.lib_present = lib_present_in(&dir);
             p.dir = dir;
-            found.push(p);
+            p.bundled = bundled;
+            found.insert(p.id.clone(), p);
         }
     }
-    found.sort_by(|a, b| a.ribbon_order.cmp(&b.ribbon_order).then(a.id.cmp(&b.id)));
-    found
 }
 
 /// True when a file with this platform's dynamic-library extension exists in
@@ -298,6 +336,7 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
         ribbon_order,
         command_prefixes,
         dir: PathBuf::new(),
+        bundled: false,
         lib_present: false,
     })
 }
@@ -395,7 +434,7 @@ mod loader {
                 && d.acadrust_source.is_none()
             {
                 eprintln!(
-                    "[plugin] {} declares acadrust metadata but has no fingerprint; cannot verify compatibility",
+                    "[plugin] {} declares opencadcodec metadata but has no fingerprint; cannot verify compatibility",
                     d.id
                 );
             }
@@ -411,7 +450,7 @@ mod loader {
                 out.push((
                     d.id.clone(),
                     Err(format!(
-                        "Plugin built for acadrust @{plugin_hash}, but this host uses @{host_hash}"
+                        "Plugin built for opencadcodec @{plugin_hash}, but this host uses @{host_hash}"
                     )),
                 ));
                 continue;
@@ -514,21 +553,59 @@ description = "Template plugin"
 repository = "https://github.com/example/opencad-my-plugin.git"
 
 [opencad]
-api_version = 2
+api_version = 3
 ribbon_order = 60
 command_prefixes = ["MP_"]
 xdata_apps = ["MYPLUGIN_RECORD"]
 "#;
         let p = parse_plugin_toml(toml).expect("parsed");
-        assert_eq!(p.api_version, 2);
+        assert_eq!(p.api_version, 3);
         assert_eq!(p.repository.as_deref(), Some("example/opencad-my-plugin"));
         assert!(p.command_prefixes.contains(&"MP_".to_string()));
-        assert!(p.api_compatible(), "V2 plugins must be accepted by the V4 host");
+        assert!(p.api_compatible(), "V3 plugins must be accepted by the current host");
+        let v2 = parse_plugin_toml("id=\"old\"\napi_version = 2").expect("parsed");
+        assert!(!v2.api_compatible(), "V2 plugins are no longer loaded");
     }
 
     #[test]
     fn missing_id_is_rejected() {
         assert!(parse_plugin_toml("name = \"x\"").is_none());
+    }
+
+    #[test]
+    fn discovers_bundled_plugins_and_allows_a_user_override() {
+        let base = std::env::temp_dir().join(format!(
+            "ocs-bundled-plugin-discovery-{}",
+            std::process::id()
+        ));
+        let bundled = base.join("bundled").join("opencad.python");
+        let user = base.join("user").join("opencad.python");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::create_dir_all(&user).unwrap();
+        let manifest = |version: &str| {
+            format!(
+                "[plugin]\nid=\"opencad.python\"\nversion=\"{version}\"\n[opencad]\napi_version=7\n"
+            )
+        };
+        std::fs::write(bundled.join("plugin.toml"), manifest("bundled")).unwrap();
+        std::fs::write(user.join("plugin.toml"), manifest("user")).unwrap();
+        std::fs::write(
+            bundled.join(format!("plugin.{}", lib_extension())),
+            b"fixture",
+        )
+        .unwrap();
+        std::fs::write(user.join(format!("plugin.{}", lib_extension())), b"fixture").unwrap();
+
+        let bundled_only = discover_from_roots(Some(&base.join("bundled")), None);
+        assert_eq!(bundled_only.len(), 1);
+        assert!(bundled_only[0].bundled);
+        assert_eq!(bundled_only[0].version, "bundled");
+
+        let overridden = discover_from_roots(Some(&base.join("bundled")), Some(&base.join("user")));
+        assert_eq!(overridden.len(), 1);
+        assert!(!overridden[0].bundled);
+        assert_eq!(overridden[0].version, "user");
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
@@ -635,7 +712,7 @@ rustc_version = "{host}"
 id = "opencad.test"
 name = "Test"
 version = "0.1.0"
-api_version = 2
+api_version = 3
 
 [opencad]
 rustc_version = "rustc 0.0.0-fake"
@@ -645,7 +722,7 @@ rustc_version = "rustc 0.0.0-fake"
         assert!(p.rustc_declared);
         assert!(
             p.rustc_compatible(),
-            "API v2 plugin should bypass rustc gate"
+            "API v3 plugin should bypass rustc gate"
         );
         assert!(p.loadable());
     }
@@ -702,9 +779,9 @@ acadrust_source = "0123456789012345678901234567890123456789"
     fn acadrust_mismatch_detected() {
         let host = ocs_plugin_api::version_info::host_acadrust_source();
         let other = if host.contains("94df2c3") {
-            "git+https://github.com/schoeller/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
+            "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
         } else {
-            "git+https://github.com/schoeller/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd"
+            "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd"
         };
         let toml = format!(
             r#"
@@ -720,7 +797,7 @@ acadrust_source = "{other}"
         );
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.acadrust_declared);
-        assert!(!p.acadrust_compatible(), "mismatched acadrust fingerprint should be incompatible");
+        assert!(!p.acadrust_compatible(), "mismatched opencadcodec fingerprint should be incompatible");
         assert!(!p.loadable());
     }
 
@@ -741,7 +818,7 @@ acadrust_source = "{host}"
         );
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.acadrust_declared);
-        assert!(p.acadrust_compatible(), "matching acadrust fingerprint should be compatible");
+        assert!(p.acadrust_compatible(), "matching opencadcodec fingerprint should be compatible");
     }
 
     #[test]
@@ -751,17 +828,17 @@ acadrust_source = "{host}"
 id = "opencad.test"
 name = "Test"
 version = "0.1.0"
-api_version = 2
+api_version = 3
 
 [opencad]
-acadrust_source = "git+https://github.com/schoeller/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
+acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
 "#;
         let mut p = parse_plugin_toml(toml).expect("parsed");
         p.lib_present = true;
         assert!(p.acadrust_declared);
         assert!(
             p.acadrust_compatible(),
-            "API v2 plugin should bypass acadrust gate"
+            "API v3 plugin should bypass opencadcodec gate"
         );
         assert!(p.loadable());
     }

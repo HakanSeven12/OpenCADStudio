@@ -52,14 +52,33 @@ def legacy(server: Path) -> None:
     names = set(definitions)
     assert names == TOOLS, names
     execute_request = definitions["ocs_execute"]["inputSchema"]["properties"]["request"]
-    assert len(execute_request["oneOf"]) == 16
+    variants = execute_request.get("anyOf") or execute_request.get("oneOf")
+    assert len(variants) == 39
+    op_enum = execute_request["properties"]["op"]["enum"]
+    for shipped in ("entities_create", "entities_delete", "entities_transform",
+                    "block_define", "block_delete", "file_identity", "xdata_set",
+                    "view_focus", "wblock", "plot",
+                    "entities_copy_to", "group_create", "selection_set_save",
+                    "selection_set_load", "close", "sysvar", "layout_create",
+                    "page_setup_set", "text_replace"):
+        assert shipped in op_enum, shipped
+    assert "xdata_get" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
+    assert "text_search" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
+    assert "text_audit" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
     assert execute_request["properties"]["steps"]["maxItems"] == 64
-    assert execute_request["properties"]["cmd"]["examples"][0] == "LINE 0,0 10,10"
+    variant_map = {
+        v["properties"]["op"].get("const") or v["properties"]["op"]["enum"][0]: v
+        for v in variants
+    }
+    assert variant_map["run"]["properties"]["cmd"]["type"] == "string"
     assert "set_properties" in execute_request["properties"]["op"]["enum"]
+    assert "save_verified" in execute_request["properties"]["op"]["enum"]
     assert "record_schema" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
+    assert "audit" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
     read_parameters = definitions["ocs_read"]["inputSchema"]["properties"]["parameters"]["properties"]
-    assert {"collection", "where", "paths"} <= set(read_parameters)
-    assert execute_request["properties"]["kind"]["enum"] == [
+    assert {"collection", "where", "paths", "target_format", "target_version"} <= set(read_parameters)
+    assert variant_map["save_verified"]["properties"]["target_version"]["enum"][0] == "R14"
+    assert variant_map["input"]["properties"]["kind"]["enum"] == [
         "text", "token", "point", "entity", "structure", "selection", "enter"
     ]
     for name in {"ocs_sessions", "ocs_read", "ocs_execute"}:

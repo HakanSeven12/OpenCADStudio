@@ -1,8 +1,8 @@
 use std::sync::{Mutex, OnceLock};
 
-use acadrust::entities::{LwPolyline, LwVertex, Solid3D};
-use acadrust::types::Vector2;
-use acadrust::{EntityType, Handle};
+use codec::entities::{LwPolyline, LwVertex, Solid3D};
+use codec::types::Vector2;
+use codec::{EntityType, Handle};
 use glam::{DVec2, DVec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

@@ -1,0 +1,866 @@
+{
+  "internal_kinds": [
+    "Block",
+    "BlockEnd",
+    "Seqend"
+  ],
+  "opaque_kinds": [
+    "Extended",
+    "Unknown"
+  ],
+  "editable": {
+    "Point": [
+      "layer",
+      "location",
+      "thickness",
+      "normal",
+      "x_axis_angle"
+    ],
+    "Line": [
+      "layer",
+      "start",
+      "end",
+      "thickness",
+      "normal"
+    ],
+    "Circle": [
+      "layer",
+      "center",
+      "radius",
+      "thickness",
+      "normal"
+    ],
+    "Arc": [
+      "layer",
+      "center",
+      "radius",
+      "start_angle",
+      "end_angle",
+      "thickness",
+      "normal"
+    ],
+    "Ellipse": [
+      "layer",
+      "center",
+      "major_axis",
+      "minor_axis_ratio",
+      "start_parameter",
+      "end_parameter",
+      "normal"
+    ],
+    "Polyline": [
+      "layer",
+      "closed",
+      "vertices"
+    ],
+    "Polyline2D": [
+      "layer",
+      "closed",
+      "smooth_surface",
+      "start_width",
+      "end_width",
+      "thickness",
+      "elevation",
+      "normal",
+      "vertices"
+    ],
+    "Polyline3D": [
+      "layer",
+      "flags",
+      "default_start_width",
+      "default_end_width",
+      "mesh_m_count",
+      "mesh_n_count",
+      "smooth_m_density",
+      "smooth_n_density",
+      "elevation",
+      "normal",
+      "vertices"
+    ],
+    "LwPolyline": [
+      "layer",
+      "vertices",
+      "is_closed",
+      "plinegen",
+      "constant_width",
+      "elevation",
+      "thickness",
+      "normal"
+    ],
+    "Spline": [
+      "layer",
+      "degree",
+      "flags",
+      "knots",
+      "control_points",
+      "weights",
+      "fit_points",
+      "normal",
+      "knot_tolerance",
+      "control_tolerance",
+      "fit_tolerance",
+      "begin_tangent",
+      "end_tangent",
+      "knot_parameterization",
+      "cv_frame_visible",
+      "dwg_flags1",
+      "dxf_flags"
+    ],
+    "Text": [
+      "layer",
+      "text",
+      "insertion",
+      "alignment_point",
+      "height",
+      "rotation",
+      "width_factor",
+      "oblique_angle",
+      "style",
+      "horizontal_alignment",
+      "vertical_alignment",
+      "normal",
+      "thickness",
+      "generation_flags"
+    ],
+    "MText": [
+      "layer",
+      "text",
+      "insertion",
+      "height",
+      "rectangle_width",
+      "rectangle_height",
+      "rotation",
+      "dwg_x_direction",
+      "style",
+      "attachment_point",
+      "drawing_direction",
+      "line_spacing_factor",
+      "line_spacing_style",
+      "normal",
+      "background_fill_flags",
+      "background_scale",
+      "background_transparency",
+      "is_annotative",
+      "column_data",
+      "extents_width",
+      "extents_height"
+    ],
+    "Ray": [
+      "layer",
+      "base_point",
+      "direction"
+    ],
+    "XLine": [
+      "layer",
+      "base_point",
+      "direction"
+    ],
+    "Solid": [
+      "layer",
+      "first_corner",
+      "second_corner",
+      "third_corner",
+      "fourth_corner",
+      "normal",
+      "thickness",
+      "is_trace"
+    ],
+    "Face3D": [
+      "layer",
+      "first_corner",
+      "second_corner",
+      "third_corner",
+      "fourth_corner",
+      "invisible_edges"
+    ],
+    "Insert": [
+      "layer",
+      "block_name",
+      "insert_point",
+      "x_scale",
+      "y_scale",
+      "z_scale",
+      "rotation",
+      "normal",
+      "column_count",
+      "row_count",
+      "column_spacing",
+      "row_spacing"
+    ],
+    "Tolerance": [
+      "layer",
+      "insertion_point",
+      "direction",
+      "normal",
+      "text",
+      "dimension_style_name",
+      "text_height",
+      "dimension_gap"
+    ],
+    "Shape": [
+      "layer",
+      "insertion_point",
+      "size",
+      "shape_name",
+      "shape_number",
+      "rotation",
+      "relative_x_scale",
+      "oblique_angle",
+      "normal",
+      "thickness",
+      "style_name"
+    ],
+    "AttributeDefinition": [
+      "layer",
+      "tag",
+      "prompt",
+      "default_value",
+      "insertion_point",
+      "alignment_point",
+      "height",
+      "rotation",
+      "width_factor",
+      "oblique_angle",
+      "text_style",
+      "text_generation_flags",
+      "horizontal_alignment",
+      "vertical_alignment",
+      "flags",
+      "field_length",
+      "normal",
+      "mtext_flag",
+      "is_multiline",
+      "line_count",
+      "lock_position"
+    ],
+    "AttributeEntity": [
+      "layer",
+      "tag",
+      "value",
+      "insertion_point",
+      "alignment_point",
+      "height",
+      "rotation",
+      "width_factor",
+      "oblique_angle",
+      "text_style",
+      "text_generation_flags",
+      "horizontal_alignment",
+      "vertical_alignment",
+      "flags",
+      "field_length",
+      "normal",
+      "mtext_flag",
+      "is_multiline",
+      "line_count",
+      "lock_position"
+    ],
+    "Hatch": [
+      "layer",
+      "elevation",
+      "normal",
+      "is_solid",
+      "pattern",
+      "pattern_angle",
+      "pattern_scale",
+      "pattern_type",
+      "is_double",
+      "style",
+      "is_associative",
+      "pixel_size",
+      "paths",
+      "seed_points"
+    ],
+    "Leader": [
+      "layer",
+      "dimension_style",
+      "arrow_enabled",
+      "path_type",
+      "creation_type",
+      "hookline_direction",
+      "hookline_enabled",
+      "text_height",
+      "text_width",
+      "vertices",
+      "override_color",
+      "annotation_handle",
+      "normal",
+      "horizontal_direction",
+      "block_offset",
+      "annotation_offset"
+    ],
+    "MLine": [
+      "layer",
+      "flags",
+      "justification",
+      "normal",
+      "scale_factor",
+      "style_name",
+      "vertices"
+    ],
+    "MultiLeader": [
+      "layer",
+      "content_type",
+      "path_type",
+      "line_color",
+      "line_weight",
+      "enable_landing",
+      "enable_dogleg",
+      "dogleg_length",
+      "arrowhead_size",
+      "text_color",
+      "text_frame",
+      "text_left_attachment",
+      "text_right_attachment",
+      "text_top_attachment",
+      "text_bottom_attachment",
+      "text_attachment_direction",
+      "text_attachment_point",
+      "text_alignment",
+      "text_angle_type",
+      "text_direction_negative",
+      "scale_factor",
+      "enable_annotation_scale",
+      "extend_leader_to_text",
+      "block_content_color",
+      "block_connection_type",
+      "block_rotation",
+      "block_scale",
+      "context",
+      "style_handle",
+      "text_style_handle",
+      "arrowhead_handle",
+      "line_type_handle",
+      "block_content_handle"
+    ],
+    "Table": [
+      "layer",
+      "insertion_point",
+      "horizontal_direction",
+      "normal",
+      "table_style_handle",
+      "rows",
+      "columns",
+      "merged_ranges",
+      "break_spacing",
+      "break_flow_direction",
+      "break_options"
+    ],
+    "PolygonMesh": [
+      "layer",
+      "flags",
+      "m_vertex_count",
+      "n_vertex_count",
+      "m_smooth_density",
+      "n_smooth_density",
+      "smooth_type",
+      "elevation",
+      "normal",
+      "vertices"
+    ],
+    "PolyfaceMesh": [
+      "layer",
+      "elevation",
+      "flags",
+      "normal",
+      "start_width",
+      "end_width",
+      "smooth_surface",
+      "thickness",
+      "vertices",
+      "faces"
+    ],
+    "Mesh": [
+      "layer",
+      "blend_crease",
+      "subdivision_level",
+      "vertices",
+      "faces",
+      "edges",
+      "override_option"
+    ],
+    "Helix": [
+      "layer",
+      "axis_base_point",
+      "start_point",
+      "axis_vector",
+      "radius",
+      "turns",
+      "turn_height",
+      "handedness",
+      "constraint"
+    ],
+    "RasterImage": [
+      "layer",
+      "insertion_point",
+      "u_vector",
+      "v_vector",
+      "flags",
+      "clipping_enabled",
+      "brightness",
+      "contrast",
+      "fade",
+      "clip_boundary",
+      "file_path"
+    ],
+    "Wipeout": [
+      "layer",
+      "insertion_point",
+      "u_vector",
+      "v_vector",
+      "size",
+      "flags",
+      "clipping_enabled",
+      "brightness",
+      "contrast",
+      "fade",
+      "clip_mode",
+      "clip_type",
+      "clip_boundary_vertices"
+    ],
+    "Underlay": [
+      "layer",
+      "underlay_type",
+      "definition_handle",
+      "insertion_point",
+      "x_scale",
+      "y_scale",
+      "z_scale",
+      "rotation",
+      "normal",
+      "flags",
+      "contrast",
+      "fade",
+      "clip_boundary_vertices",
+      "clip_inverted"
+    ],
+    "Viewport": [
+      "layer",
+      "center",
+      "width",
+      "height",
+      "status",
+      "view_center",
+      "view_direction",
+      "view_target",
+      "lens_length",
+      "front_clip_z",
+      "back_clip_z",
+      "view_height",
+      "twist_angle",
+      "frozen_layers",
+      "render_mode",
+      "circle_sides",
+      "ucs_icon_visible"
+    ],
+    "ViewBorder": [
+      "layer",
+      "min",
+      "max",
+      "center",
+      "scale",
+      "rotation_angle",
+      "active_viewport",
+      "scale_handle"
+    ],
+    "Light": [
+      "layer",
+      "name",
+      "light_type",
+      "position",
+      "target",
+      "status",
+      "light_color",
+      "plot_glyph",
+      "intensity",
+      "attenuation_type",
+      "use_attenuation_limits",
+      "attenuation_start_limit",
+      "attenuation_end_limit",
+      "hotspot_angle",
+      "falloff_angle",
+      "cast_shadows",
+      "shadow_type",
+      "shadow_map_size",
+      "shadow_map_softness",
+      "photometric_mode",
+      "photometric_data"
+    ],
+    "Ole2Frame": [
+      "layer",
+      "upper_left_corner",
+      "lower_right_corner",
+      "lock_aspect",
+      "is_paper_space"
+    ],
+    "Solid3D": [
+      "layer"
+    ],
+    "Body": [
+      "layer"
+    ],
+    "Region": [
+      "layer"
+    ],
+    "Surface": [
+      "layer",
+      "u_isolines",
+      "v_isolines"
+    ],
+    "SectionSymbol": [
+      "layer",
+      "symbol_scale",
+      "points",
+      "style_handle",
+      "view_rep_handle"
+    ]
+  },
+  "readable": {
+    "Tolerance": [
+      "dimension_style_handle"
+    ],
+    "Shape": [
+      "style_handle"
+    ],
+    "MLine": [
+      "start_point",
+      "style_handle",
+      "style_element_count"
+    ],
+    "Leader": [
+      "origin",
+      "dimension_gap",
+      "arrowhead_type",
+      "arrow_size",
+      "byblock_color"
+    ],
+    "AttributeEntity": [
+      "attdef_handle"
+    ],
+    "MultiLeader": [
+      "dwg_version",
+      "property_override_flags",
+      "text_align_in_ipe",
+      "text_height"
+    ],
+    "Table": [
+      "block_name",
+      "block_record_handle",
+      "data_version",
+      "value_flags",
+      "override_flag",
+      "override_border_color",
+      "override_border_line_weight",
+      "override_border_visibility",
+      "legacy_style_override",
+      "name",
+      "description",
+      "field_handles",
+      "base_style",
+      "break_data",
+      "break_ranges"
+    ],
+    "PolyfaceMesh": [
+      "seqend_handle"
+    ],
+    "Mesh": [
+      "version"
+    ],
+    "Helix": [
+      "spline",
+      "major_version",
+      "maintenance_version"
+    ],
+    "RasterImage": [
+      "class_version",
+      "definition_handle",
+      "definition_reactor_handle",
+      "size"
+    ],
+    "Wipeout": [
+      "class_version",
+      "definition_handle",
+      "definition_reactor_handle"
+    ],
+    "Viewport": [
+      "id",
+      "snap_base",
+      "snap_spacing",
+      "grid_spacing",
+      "snap_angle",
+      "clip_boundary_handle",
+      "style_sheet",
+      "ucs_at_origin",
+      "ucs_per_viewport",
+      "ucs_origin",
+      "ucs_x_axis",
+      "ucs_y_axis",
+      "ucs_handle",
+      "base_ucs_handle",
+      "ucs_ortho_type",
+      "elevation",
+      "shade_plot_mode",
+      "grid_flags",
+      "grid_major",
+      "background_handle",
+      "shade_plot_handle",
+      "visual_style_handle",
+      "sun_handle",
+      "default_lighting",
+      "default_lighting_type",
+      "brightness",
+      "contrast",
+      "ambient_color",
+      "custom_scale"
+    ],
+    "ViewBorder": [
+      "version"
+    ],
+    "Light": [
+      "class_version"
+    ],
+    "Ole2Frame": [
+      "version",
+      "source_application",
+      "ole_object_type",
+      "dwg_mode"
+    ],
+    "Solid3D": [
+      "uid",
+      "point_of_reference",
+      "history_handle"
+    ],
+    "Body": [
+      "uid",
+      "point_of_reference",
+      "history_handle"
+    ],
+    "Region": [
+      "uid",
+      "point_of_reference",
+      "history_handle"
+    ],
+    "Surface": [
+      "surface_kind",
+      "modeler_format_version",
+      "point_of_reference",
+      "history_handle"
+    ],
+    "SectionSymbol": [
+      "view_symbol_version",
+      "raw_view_symbol_70",
+      "version",
+      "raw_point_count_90",
+      "raw_flags_90",
+      "raw_point_record_count",
+      "end_a",
+      "end_b",
+      "tick_a",
+      "tick_b",
+      "label"
+    ]
+  },
+  "aliases": {
+    "Polyline": {
+      "closed": "flags"
+    },
+    "Polyline2D": {
+      "closed": "flags"
+    },
+    "Text": {
+      "text": "value",
+      "insertion": "insertion_point"
+    },
+    "MText": {
+      "text": "value",
+      "insertion": "insertion_point"
+    },
+    "Surface": {
+      "surface_kind": "kind"
+    }
+  },
+  "synthetic": {
+    "Dimension": [
+      {
+        "name": "subtype",
+        "type_id": "String",
+        "access": "read_only"
+      },
+      {
+        "name": "actual_measurement",
+        "type_id": "f64",
+        "access": "read_only"
+      },
+      {
+        "name": "text",
+        "type_id": "String",
+        "access": "read_write"
+      },
+      {
+        "name": "style_name",
+        "type_id": "String",
+        "access": "read_write"
+      },
+      {
+        "name": "normal",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "text_middle_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "attachment_point",
+        "type_id": "AttachmentPointType",
+        "access": "read_write"
+      },
+      {
+        "name": "text_rotation",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "horizontal_direction",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "flip_arrow1",
+        "type_id": "bool",
+        "access": "read_write"
+      },
+      {
+        "name": "flip_arrow2",
+        "type_id": "bool",
+        "access": "read_write"
+      },
+      {
+        "name": "text_user_positioned",
+        "type_id": "bool",
+        "access": "read_write"
+      },
+      {
+        "name": "definition_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "first_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "second_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "angle_vertex",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "dimension_arc",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "feature_location",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "leader_endpoint",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "first_extension_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "second_extension_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "center_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "first_leader_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "second_leader_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "chord_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "override_center",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "jog_point",
+        "type_id": "Vector3",
+        "access": "read_write"
+      },
+      {
+        "name": "rotation",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "ext_line_rotation",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "leader_length",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "arc_start_parameter",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "arc_end_parameter",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "jog_angle",
+        "type_id": "f64",
+        "access": "read_write"
+      },
+      {
+        "name": "is_ordinate_type_x",
+        "type_id": "bool",
+        "access": "read_write"
+      },
+      {
+        "name": "is_partial",
+        "type_id": "bool",
+        "access": "read_write"
+      },
+      {
+        "name": "has_leader",
+        "type_id": "bool",
+        "access": "read_write"
+      }
+    ]
+  }
+}

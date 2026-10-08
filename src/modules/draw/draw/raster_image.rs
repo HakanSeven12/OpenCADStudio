@@ -10,9 +10,9 @@
 //   3. User drags to pick width; height is computed from the image's aspect ratio.
 //   4. Entity is committed.
 
-use acadrust::entities::RasterImage;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::RasterImage;
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 use crate::t;
 
@@ -95,8 +95,9 @@ impl ImageCommand {
                     world_width,
                     world_height,
                 );
-                img.flags = acadrust::entities::ImageDisplayFlags::SHOW_IMAGE
-                    | acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                img.flags = codec::entities::ImageDisplayFlags::SHOW_IMAGE
+                    | codec::entities::ImageDisplayFlags::SHOW_NOT_ALIGNED
+                    | codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
                 self.plane.place_entity(EntityType::RasterImage(img))
             }
             ImageSource::Embedded(image) => {
@@ -175,6 +176,7 @@ impl CadCommand for ImageCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -200,7 +202,9 @@ impl CadCommand for ImageCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }
 

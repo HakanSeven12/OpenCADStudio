@@ -33,7 +33,7 @@ fn choices(values: &[(&str, &str)]) -> Vec<EnumChoice> {
 pub struct MLeaderStyleView<'a> {
     pub styles: Vec<String>,
     pub selected: &'a str,
-    pub style: Option<&'a acadrust::objects::MultiLeaderStyle>,
+    pub style: Option<&'a codec::objects::MultiLeaderStyle>,
     pub current: String,
     pub tab: u8,
     pub compare_name: String,

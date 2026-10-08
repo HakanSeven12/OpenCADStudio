@@ -15,8 +15,8 @@ use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
 use crate::ui::PropertiesPanel;
-use acadrust::types::Color as AcadColor;
-use acadrust::{EntityType as AcadEntityType, Handle};
+use codec::types::Color as AcadColor;
+use codec::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
@@ -191,7 +191,9 @@ impl OpenCADStudio {
         let picks_object = self.tabs[i]
             .active_cmd
             .as_ref()
-            .map(|c| c.needs_entity_pick() || c.needs_structure_point_pick())
+            .map(|c| {
+                c.needs_entity_pick() || c.needs_structure_point_pick() || c.selects_by_window()
+            })
             .unwrap_or(false);
         let has_base = self.last_point.is_some();
         // While aligned to an OTRACK ray, the point step reads a single
@@ -330,7 +332,7 @@ impl OpenCADStudio {
     /// following `ARC_CONT` starts tangentially from where drawing ended. Set to
     /// `None` for any other entity kind. Uses `last_point` (the final pick) to
     /// pick the endpoint the pen actually finished on.
-    pub(in crate::app) fn update_cont_anchor(&mut self, entity: &acadrust::EntityType) {
+    pub(in crate::app) fn update_cont_anchor(&mut self, entity: &codec::EntityType) {
         let last = self.last_point;
         self.cont_anchor = crate::modules::draw::draw::arc::continue_anchor(entity, last);
     }

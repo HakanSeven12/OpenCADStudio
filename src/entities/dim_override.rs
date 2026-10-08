@@ -7,9 +7,9 @@
 //! an override over the style default, so editing one of these rows writes here
 //! and the change round-trips to file.
 
-use acadrust::types::Color;
-use acadrust::xdata::{ExtendedData, XDataValue};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::types::Color;
+use codec::xdata::{ExtendedData, XDataValue};
+use codec::{CadDocument, EntityType, Handle};
 
 // DXF group codes of the dimension variables surfaced on the leader panel.
 pub const DIMSCALE: i16 = 40; // overall scale       (real)
@@ -284,7 +284,7 @@ pub fn set_on_entity(entity: &mut EntityType, code: i16, value: Option<XDataValu
         }
     }
     if let Some(vals) = values {
-        let mut record = acadrust::xdata::ExtendedDataRecord::new(app);
+        let mut record = codec::xdata::ExtendedDataRecord::new(app);
         for v in vals {
             record.add_value(v);
         }
@@ -450,7 +450,24 @@ fn split_template(value: &str) -> (&str, &str) {
     value.split_once("<>").unwrap_or(("", value))
 }
 
+/// Apply a dimension override row. A changed override lays automatic text
+/// out afresh, so e.g. a new DIMTAD moves it off the stored position.
 pub fn set_property(
+    doc: &mut CadDocument,
+    handle: Handle,
+    field: &str,
+    value: &str,
+) -> bool {
+    let applied = apply_property(doc, handle, field, value);
+    if applied {
+        if let Some(EntityType::Dimension(dimension)) = doc.get_entity_mut(handle) {
+            crate::entities::dimension::reset_automatic_text_position(dimension.base_mut());
+        }
+    }
+    applied
+}
+
+fn apply_property(
     doc: &mut CadDocument,
     handle: Handle,
     field: &str,
@@ -702,12 +719,14 @@ pub fn set_property(
             | "dim_alt_precision"
             | "dim_tolerance_precision"
             | "dim_alt_tolerance_precision" => parse_precision_label(trimmed),
+            // "On" is text aligned with its dimension line: the horizontal
+            // flag (DIMTIH/DIMTOH) off.
+            "dim_text_outside_align" | "dim_text_inside_align" | "dim_line_inside" => {
+                yes(trimmed).map(|value| i16::from(value == 0))
+            }
             "dim_ext_line_fixed"
-            | "dim_text_outside_align"
-            | "dim_text_inside_align"
             | "dim_text_inside"
             | "dim_line_forced"
-            | "dim_line_inside"
             | "dim_alt_enabled" => yes(trimmed),
             "dim_decimal_separator" => trimmed
                 .chars()

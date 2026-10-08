@@ -10,7 +10,7 @@ use std::borrow::Cow;
 pub struct MlStyleView<'a> {
     pub styles: Vec<String>,
     pub selected: &'a str,
-    pub style: Option<&'a acadrust::objects::MLineStyle>,
+    pub style: Option<&'a codec::objects::MLineStyle>,
     pub current: String,
     pub tab: u8,
     pub compare_name: String,

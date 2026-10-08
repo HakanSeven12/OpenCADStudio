@@ -1,11 +1,11 @@
 // OLE2FRAME binary data → presentation RGBA image.
 //
 // Extraction (compound-file walk, OlePres header parse, WMFC → EMF
-// reassembly) lives in acadrust — `extract_presentation` returns the picture
+// reassembly) lives in opencadcodec — `extract_presentation` returns the picture
 // bytes tagged by kind. This module only decodes them: rasters through the
 // `image` crate, metafiles through the `gdi` player.
 
-use acadrust::entities::{extract_presentation, OlePresentation};
+use codec::entities::{extract_presentation, OlePresentation};
 
 use super::gdi;
 

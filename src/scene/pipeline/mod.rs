@@ -26,6 +26,7 @@ pub mod gpu_upload;
 pub mod hatch_gpu;
 pub mod wipeout_gpu;
 pub mod image_gpu;
+pub mod point_cloud_gpu;
 pub mod mesh_gpu;
 pub mod text_gpu;
 pub mod uniforms;
@@ -69,7 +70,7 @@ struct SilhouetteChunk {
 
 struct SilhouetteSourceGroup {
     color: [f32; 4],
-    sources: Vec<cadkernel::brep::mesh::SilhouetteSource>,
+    sources: Vec<kernel::brep::mesh::SilhouetteSource>,
     instance_buffers: Vec<(wgpu::Buffer, u32)>,
 }
 use device_capabilities::DeviceCapabilities;
@@ -136,6 +137,7 @@ pub struct Pipeline {
     /// private backends behind one upload/LOD/draw lifecycle.
     hatch_gpu: hatch_gpu::HatchGpu,
     image_pipeline: wgpu::RenderPipeline,
+    point_cloud_pipeline: wgpu::RenderPipeline,
     /// SDF text-quad pipeline (Phase 2b): draws per-glyph quads sampling the
     /// shared glyph atlas. Fed only when `OCS_TEXT_SDF` is set (else no verts).
     text_pipeline: wgpu::RenderPipeline,
@@ -273,11 +275,11 @@ pub struct Pipeline {
     /// GPU buffer. `Some(false)` = regular wires, `Some(true)` = mesh edges.
     pub(crate) wire_arena_fallback: std::sync::Arc<Vec<WireGpu>>,
     pub(crate) wire_arena_fallback_kind: Option<bool>,
-    pub(crate) wire_arena_fallback_handles: rustc_hash::FxHashSet<acadrust::Handle>,
+    pub(crate) wire_arena_fallback_handles: rustc_hash::FxHashSet<codec::Handle>,
     /// The Model content id both arenas currently mirror (`u64::MAX` = none).
     pub(crate) wire_arena_id: u64,
     /// Handles that contributed to this slot's retained analytical uploads.
-    pub(crate) partition_contributors: rustc_hash::FxHashSet<acadrust::Handle>,
+    pub(crate) partition_contributors: rustc_hash::FxHashSet<codec::Handle>,
     /// The draw-depth generation those uploads baked. A full depth rebuild
     /// reassigns every label, so they stop being reusable when it moves.
     pub(crate) partition_depth_generation: u64,
@@ -313,6 +315,7 @@ pub struct Pipeline {
     /// viewport rect. Recomputed by `compute_wipeout_lod`.
     wipeout_skip_flags: Vec<bool>,
     gpu_images: Vec<ImageGpu>,
+    gpu_point_clouds: point_cloud_gpu::PointCloudGpu,
     /// Batched mesh geometry — every solid's LOD0 concatenated into a few large
     /// buffers so the whole set draws in a handful of calls instead of one per
     /// solid. Hover / selection never re-pack it.
@@ -322,14 +325,14 @@ pub struct Pipeline {
     /// repacked here, keeping the rest of a multi-million-triangle scene resident.
     gpu_mesh_dynamic: Vec<mesh_gpu::MeshBatchChunk>,
     mesh_disabled_chunks: rustc_hash::FxHashSet<usize>,
-    mesh_dynamic_handles: rustc_hash::FxHashSet<acadrust::Handle>,
+    mesh_dynamic_handles: rustc_hash::FxHashSet<codec::Handle>,
     /// Wire content generation whose geometry the static+dynamic mesh state
     /// mirrors. It gates replay of the same per-entity journal handoff.
     pub cached_mesh_content_id: u64,
     /// Draw ranges for each entity inside the resident mesh chunks. Highlight
     /// overlays reuse these buffers instead of uploading duplicate geometry.
     mesh_ranges_by_handle:
-        rustc_hash::FxHashMap<acadrust::Handle, Vec<MeshResidentRange>>,
+        rustc_hash::FxHashMap<codec::Handle, Vec<MeshResidentRange>>,
     mesh_highlight_draws: Vec<MeshHighlightDraw>,
     /// `(geometry_epoch, selection_generation)` the highlight overlay was built for.
     pub cached_highlight_key: (u64, u64),
@@ -344,6 +347,8 @@ pub struct Pipeline {
     pub cached_preview_hatch_source: Option<std::sync::Arc<Vec<HatchModel>>>,
     pub cached_wipeout_source: Option<std::sync::Arc<Vec<HatchModel>>>,
     pub cached_image_source: Option<std::sync::Arc<Vec<ImageModel>>>,
+    pub cached_point_cloud_source:
+        Option<std::sync::Arc<crate::scene::model::point_cloud::PointCloudSet>>,
     pub cached_text_source: Option<std::sync::Arc<Vec<text_gpu::TextVertex>>>,
     pub cached_annotation_highlight_source: Option<std::sync::Arc<Vec<WireModel>>>,
     pub cached_mesh_source: Option<std::sync::Arc<Vec<MeshLodSet>>>,
@@ -2109,6 +2114,61 @@ impl Pipeline {
             cache: None,
         });
 
+        // ── Point cloud sprites ────────────────────────────────────────────
+        let point_cloud_bgl1 = point_cloud_gpu::params_layout(device);
+        let point_cloud_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("point_cloud.pipeline_layout"),
+            bind_group_layouts: &[&frame_bgl, &point_cloud_bgl1].map(Some),
+            immediate_size: 0,
+        });
+        let point_cloud_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("point_cloud.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/shaders/point_cloud.wgsl"
+            )))),
+        });
+        let point_cloud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("point_cloud.pipeline"),
+            layout: Some(&point_cloud_layout),
+            vertex: wgpu::VertexState {
+                module: &point_cloud_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[point_cloud_gpu::instance_layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: content_stencil.clone(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLES,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &point_cloud_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let gpu_point_clouds = point_cloud_gpu::PointCloudGpu::new(device, &point_cloud_bgl1);
+
         // ── Text (SDF glyph quads) ─────────────────────────────────────────
         let text_atlas_bgl = text_gpu::TextAtlasGpu::bind_group_layout(device);
         let (
@@ -2294,6 +2354,7 @@ impl Pipeline {
             wipeout_pipeline,
             hatch_gpu,
             image_pipeline,
+            point_cloud_pipeline,
             text_pipeline,
             block_text_pipeline,
             text_highlight_pipeline,
@@ -2385,6 +2446,7 @@ impl Pipeline {
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
             gpu_images: vec![],
+            gpu_point_clouds,
             gpu_mesh_batch: vec![],
             gpu_mesh_dynamic: vec![],
             mesh_disabled_chunks: rustc_hash::FxHashSet::default(),
@@ -2400,6 +2462,7 @@ impl Pipeline {
             cached_preview_hatch_source: None,
             cached_wipeout_source: None,
             cached_image_source: None,
+            cached_point_cloud_source: None,
             cached_text_source: None,
             cached_annotation_highlight_source: None,
             cached_mesh_source: None,
@@ -2615,7 +2678,7 @@ impl Pipeline {
             wires
                 .par_iter()
                 .enumerate()
-                .filter_map(|(idx, w)| w.name.parse::<u64>().ok().map(|h| (h, idx as u32)))
+                .filter_map(|(idx, w)| wire_gpu::fast_parse_u64(&w.name).map(|h| (h, idx as u32)))
                 .collect()
         };
         let mut index: rustc_hash::FxHashMap<u64, Vec<u32>> = rustc_hash::FxHashMap::default();
@@ -2675,7 +2738,11 @@ impl Pipeline {
                     }
                     let depth = wire_gpu::wire_draw_depth(wire, depth_map);
                     let mut circles = circle_gpu::extract_circle_instances(wire, depth);
-                    let mut ellipses = ellipse_gpu::extract_ellipse_instances(wire, depth);
+                    let mut ellipses = if circles.is_none() {
+                        ellipse_gpu::extract_ellipse_instances(wire, depth)
+                    } else {
+                        None
+                    };
                     if let Some(color) = color {
                         if let Some(instances) = circles.as_mut() {
                             for instance in instances {
@@ -2720,8 +2787,8 @@ impl Pipeline {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         wires: &[WireModel],
-        selected: &rustc_hash::FxHashSet<acadrust::Handle>,
-        hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
+        selected: &rustc_hash::FxHashSet<codec::Handle>,
+        hovered: &rustc_hash::FxHashSet<codec::Handle>,
         annotation_context_wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         selected_tint: Option<[f32; 4]>,
@@ -2746,7 +2813,9 @@ impl Pipeline {
                 );
                 for &i in idxs {
                     if let Some(w) = wires.get(i as usize) {
-                        if !w.display_visible {
+                        // An unseen pick hull (a point cloud's extents box) shows while
+                        // highlighted, as the reference does.
+                        if !w.display_visible && (w.pick_tris.is_empty() || w.snap_only) {
                             continue;
                         }
                         selected_wires.push(w);
@@ -2758,7 +2827,9 @@ impl Pipeline {
             if let Some(idxs) = self.wire_handle_index.get(&h.value()) {
                 for &i in idxs {
                     if let Some(w) = wires.get(i as usize) {
-                        if !w.display_visible {
+                        // An unseen pick hull (a point cloud's extents box) shows while
+                        // highlighted, as the reference does.
+                        if !w.display_visible && (w.pick_tris.is_empty() || w.snap_only) {
                             continue;
                         }
                         hover_wires.push(w);
@@ -2903,8 +2974,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         wires: &[WireModel],
-        selected: &rustc_hash::FxHashSet<acadrust::Handle>,
-        hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
+        selected: &rustc_hash::FxHashSet<codec::Handle>,
+        hovered: &rustc_hash::FxHashSet<codec::Handle>,
         annotation_context_wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         selected_tint: Option<[f32; 4]>,
@@ -3206,20 +3277,20 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     for generator in generators {
                         if let Some(transform) = source.instance_transform {
                             let origin =
-                                transform.apply(acadrust::types::Vector3::ZERO);
+                                transform.apply(codec::types::Vector3::ZERO);
                             let vectors = [
                                 transform.apply_rotation(
-                                    acadrust::types::Vector3::UNIT_X,
+                                    codec::types::Vector3::UNIT_X,
                                 ),
                                 transform.apply_rotation(
-                                    acadrust::types::Vector3::UNIT_Y,
+                                    codec::types::Vector3::UNIT_Y,
                                 ),
                                 transform.apply_rotation(
-                                    acadrust::types::Vector3::UNIT_Z,
+                                    codec::types::Vector3::UNIT_Z,
                                 ),
                             ];
                             if let Some(transformed) =
-                                cadkernel::brep::mesh::transform_silhouette_affine(
+                                kernel::brep::mesh::transform_silhouette_affine(
                                     &generator.source,
                                     vectors.map(|vector| [vector.x, vector.y, vector.z]),
                                     [origin.x, origin.y, origin.z],
@@ -3248,7 +3319,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         let compute_group = |group: &SilhouetteSourceGroup| {
             let mut points = Vec::new();
             for source in &group.sources {
-                points.extend(cadkernel::brep::mesh::silhouette(
+                points.extend(kernel::brep::mesh::silhouette(
                     source,
                     [view.x, view.y, view.z],
                 ));
@@ -3595,7 +3666,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         meshes: &[MeshLodSet],
-        changes: &[(acadrust::Handle, crate::scene::ChangeKind)],
+        changes: &[(codec::Handle, crate::scene::ChangeKind)],
     ) -> bool {
         let started = iced::time::Instant::now();
         if self.gpu_mesh_batch.is_empty() || changes.is_empty() {
@@ -3665,15 +3736,15 @@ analytic={:.1} regular={:.1} blocks={:.1}",
     /// chunk buffers; changing hover never allocates or uploads mesh geometry.
     pub fn update_mesh_highlight(
         &mut self,
-        selected: &rustc_hash::FxHashSet<acadrust::Handle>,
-        hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
+        selected: &rustc_hash::FxHashSet<codec::Handle>,
+        hovered: &rustc_hash::FxHashSet<codec::Handle>,
         edge_wires: &[WireModel],
     ) {
-        let edge_handles: rustc_hash::FxHashSet<acadrust::Handle> = edge_wires
+        let edge_handles: rustc_hash::FxHashSet<codec::Handle> = edge_wires
             .iter()
             .filter_map(|wire| wire.name.strip_prefix("mesh-edge:"))
             .filter_map(|value| value.parse::<u64>().ok())
-            .map(acadrust::Handle::new)
+            .map(codec::Handle::new)
             .collect();
         let mut out = Vec::new();
         for handle in selected
@@ -3770,6 +3841,19 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         images: &[ImageModel],
     ) {
         self.gpu_images = ImageGpu::from_models(device, queue, images, &self.image_bgl1);
+    }
+
+    pub fn upload_point_clouds(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        set: &crate::scene::model::point_cloud::PointCloudSet,
+    ) {
+        self.gpu_point_clouds.upload(device, queue, set);
+    }
+
+    pub fn set_point_cloud_view(&mut self, queue: &wgpu::Queue, light: [f32; 12]) {
+        self.gpu_point_clouds.set_view(queue, light);
     }
 
     /// Upload the frame's SDF text-quad vertices, and (re)build the GPU glyph
@@ -4183,6 +4267,38 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 pass.set_vertex_buffer(1, img.instance_buffer.slice(..));
                 pass.draw(0..img.vertex_count, 0..img.instance_count);
             }
+        }
+
+        // ── Pass 3: point clouds ──────────────────────────────────────────
+        if !self.gpu_point_clouds.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("point_cloud.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_viewport(raster.x, raster.y, raster.width, raster.height, 0.0, 1.0);
+            pass.set_pipeline(&self.point_cloud_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
+            self.gpu_point_clouds.draw(&mut pass);
         }
 
         // ── Pass 4: solid meshes (batched) ────────────────────────────────
@@ -4844,7 +4960,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
 
         // ── Pass 7: selection overlay pass ───────────────────────────────
         // Redraws selected wires and text with depth_compare=Always so both
-        // appear on top of all other geometry at full brightness.
+        // appear on top of all other geometry at full brightness — unless
+        // faces are drawn: then edges behind a surface stay hidden while
+        // selected, as they are when not (#1031).
+        let occluded = hidden_line || !mesh_wireframe;
         let have_text_highlight =
             (!self.text_highlight_gpu.is_empty())
                 || !self.block_text_highlight_gpu.is_empty();
@@ -4881,7 +5000,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             pass.set_stencil_reference(stencil_ref);
             if !self.gpu_selected_wires.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.wire_pipeline
                 } else {
                     &self.wire_xray_pipeline
@@ -4900,7 +5019,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 }
             }
             if !self.gpu_selected_block_wires.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.block_wire_pipeline
                 } else {
                     &self.block_wire_xray_pipeline
@@ -4913,7 +5032,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 }
             }
             if !self.gpu_selected_circles.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.circle_pipeline
                 } else {
                     &self.circle_xray_pipeline
@@ -4927,7 +5046,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 }
             }
             if !self.gpu_selected_ellipses.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.ellipse_pipeline
                 } else {
                     &self.ellipse_xray_pipeline
@@ -5039,6 +5158,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.cached_preview_hatch_source = None;
         self.cached_wipeout_source = None;
         self.cached_image_source = None;
+        self.cached_point_cloud_source = None;
         self.cached_text_source = None;
         self.cached_mesh_source = None;
         self.cached_face3d_source = None;
@@ -5945,7 +6065,7 @@ mod highlight_classification_tests {
 
     #[test]
     fn each_wire_lands_in_the_bucket_the_old_predicate_chose() {
-        let wires = vec![plain("1"), circle("2"), ellipse("3"), plain("4")];
+        let wires = [plain("1"), circle("2"), ellipse("3"), plain("4")];
         let refs: Vec<&WireModel> = wires.iter().collect();
         let depth_map = rustc_hash::FxHashMap::default();
 
@@ -5975,7 +6095,7 @@ mod highlight_classification_tests {
     // reach the instances.
     #[test]
     fn the_colour_override_reaches_the_instances() {
-        let wires = vec![circle("2"), ellipse("3")];
+        let wires = [circle("2"), ellipse("3")];
         let refs: Vec<&WireModel> = wires.iter().collect();
         let depth_map = rustc_hash::FxHashMap::default();
 

@@ -4,8 +4,8 @@ use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily};
 use crate::scene::model::wire_model::WireModel;
-use acadrust::Handle;
-use cadkernel::geom2d::{
+use codec::Handle;
+use kernel::geom2d::{
     bounded_faces, contains, ring_nesting_depths, signed_area, Circle, Curve, Line, Tolerance,
 };
 use glam::DVec3;
@@ -199,11 +199,11 @@ pub struct HatchCommand {
     default_origin: [f64; 2],
     associative: bool,
     separate_hatches: bool,
-    island_style: acadrust::entities::HatchStyleType,
+    island_style: codec::entities::HatchStyleType,
     inherited: Option<(
         HatchModel,
-        acadrust::types::Color,
-        acadrust::types::Transparency,
+        codec::types::Color,
+        codec::types::Transparency,
     )>,
     plane: WorkingPlane,
 }
@@ -215,8 +215,8 @@ impl HatchCommand {
         selected_objects: Vec<Handle>,
         inherited: Option<(
             HatchModel,
-            acadrust::types::Color,
-            acadrust::types::Transparency,
+            codec::types::Color,
+            codec::types::Transparency,
         )>,
         plane: WorkingPlane,
     ) -> Self {
@@ -251,7 +251,7 @@ impl HatchCommand {
             island_style: inherited
                 .as_ref()
                 .map(|(model, _, _)| model.style)
-                .unwrap_or(acadrust::entities::HatchStyleType::Normal),
+                .unwrap_or(codec::entities::HatchStyleType::Normal),
             inherited,
             plane,
         };
@@ -293,9 +293,9 @@ impl HatchCommand {
 
     fn island_style_label(&self) -> &'static str {
         match self.island_style {
-            acadrust::entities::HatchStyleType::Normal => "Normal",
-            acadrust::entities::HatchStyleType::Outer => "Outer",
-            acadrust::entities::HatchStyleType::Ignore => "Ignore",
+            codec::entities::HatchStyleType::Normal => "Normal",
+            codec::entities::HatchStyleType::Outer => "Outer",
+            codec::entities::HatchStyleType::Ignore => "Ignore",
         }
     }
 
@@ -339,7 +339,7 @@ impl HatchCommand {
             x_axis: self.plane.x.to_array(),
             y_axis: self.plane.y.to_array(),
         };
-        let exterior: Vec<bool> = cadkernel::geom2d::ring_nesting_depths(&rings)
+        let exterior: Vec<bool> = kernel::geom2d::ring_nesting_depths(&rings)
             .into_iter()
             .map(|depth| depth == 0)
             .collect();
@@ -468,9 +468,9 @@ impl HatchCommand {
         }
     }
 
-    fn manual_boundary_path(&self) -> Option<acadrust::entities::BoundaryPath> {
-        use acadrust::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
-        use acadrust::types::Vector3;
+    fn manual_boundary_path(&self) -> Option<codec::entities::BoundaryPath> {
+        use codec::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
+        use codec::types::Vector3;
         if self.manual_pts.len() < 3 {
             return None;
         }
@@ -496,7 +496,7 @@ impl HatchCommand {
 }
 
 fn arc_bulge(start: DVec3, middle: DVec3, end: DVec3) -> Option<f64> {
-    let curvature = DVec3::from_array(cadkernel::space::curve::curvature_through(
+    let curvature = DVec3::from_array(kernel::space::curve::curvature_through(
         start.to_array(),
         middle.to_array(),
         end.to_array(),
@@ -885,14 +885,14 @@ impl CadCommand for HatchCommand {
             }
             "Y" | "ISLAND" => {
                 self.island_style = match self.island_style {
-                    acadrust::entities::HatchStyleType::Normal => {
-                        acadrust::entities::HatchStyleType::Outer
+                    codec::entities::HatchStyleType::Normal => {
+                        codec::entities::HatchStyleType::Outer
                     }
-                    acadrust::entities::HatchStyleType::Outer => {
-                        acadrust::entities::HatchStyleType::Ignore
+                    codec::entities::HatchStyleType::Outer => {
+                        codec::entities::HatchStyleType::Ignore
                     }
-                    acadrust::entities::HatchStyleType::Ignore => {
-                        acadrust::entities::HatchStyleType::Normal
+                    codec::entities::HatchStyleType::Ignore => {
+                        codec::entities::HatchStyleType::Normal
                     }
                 };
                 Some(CmdResult::NeedPoint)
@@ -956,7 +956,7 @@ impl GradientCommand {
 
     fn make_hatch(&self, rings: Vec<Vec<[f64; 2]>>) -> HatchModel {
         let (rel, origin, wcs) = pack_rings(&rings);
-        let exterior: Vec<bool> = cadkernel::geom2d::ring_nesting_depths(&rings)
+        let exterior: Vec<bool> = kernel::geom2d::ring_nesting_depths(&rings)
             .into_iter()
             .map(|depth| depth == 0)
             .collect();
@@ -994,7 +994,7 @@ impl GradientCommand {
             boundary_exterior: Some(std::sync::Arc::new(exterior)),
             boundary_sources: Some(std::sync::Arc::new(boundary_sources)),
             boundary_paths: Some(std::sync::Arc::new(boundary_paths)),
-            style: acadrust::entities::HatchStyleType::Normal,
+            style: codec::entities::HatchStyleType::Normal,
             draw_depth: 0.0,
         }
     }
@@ -1297,7 +1297,7 @@ impl BoundaryCommand {
         }
     }
 
-    fn make_entities(&self) -> Vec<acadrust::EntityType> {
+    fn make_entities(&self) -> Vec<codec::EntityType> {
         let sources = if self.restrict_sources {
             &self.active_sources
         } else {
@@ -1577,7 +1577,7 @@ inventory::submit!(crate::command::CommandRegistration { names: &["HATCH"] });  
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::EntityType;
+    use codec::EntityType;
 
     fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<[f64; 2]> {
         vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]

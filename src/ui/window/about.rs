@@ -1,7 +1,8 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, column, container, row, svg, text, Space};
+use crate::ui::style::form::dialog_button;
+use iced::widget::{column, container, row, svg, text, Space};
 use iced::{Background, Border, Element, Fill, Length, Shrink, Theme};
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
@@ -43,6 +44,39 @@ fn info_card<'a>(
     .into()
 }
 
+/// A full-width label/value line. CPU and GPU names are too long for the
+/// fixed-width cards above.
+fn info_row<'a>(
+    label: std::borrow::Cow<'static, str>,
+    value: impl iced::widget::text::IntoFragment<'a>,
+    width: Length,
+) -> Element<'a, Message> {
+    container(
+        row![
+            text(label).size(11).style(muted_style).width(Length::Fixed(110.0)),
+            text(value).size(13).width(Fill),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    )
+    .padding([8, 12])
+    .width(width)
+    .style(surface_style)
+    .into()
+}
+
+/// `Adapter (backend)` for the GPU row.
+fn gpu_summary() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        "WebGPU / WebGL".to_string()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::gpu_backend::active_gpu_summary()
+    }
+}
+
 pub(crate) fn platform_name() -> &'static str {
     #[cfg(target_arch = "wasm32")]
     {
@@ -66,6 +100,63 @@ pub(crate) fn architecture_name() -> &'static str {
         "wasm32" => "WebAssembly 32-bit",
         other => other,
     }
+}
+
+/// The text `Copy Info` puts on the clipboard: everything a bug report needs
+/// about the build and the machine, including which graphics backend the
+/// resolver picked and why.
+pub(crate) fn report() -> String {
+    use crate::sysinfo::{format_bytes, system_info};
+    let sys = system_info();
+    #[allow(unused_mut)]
+    let mut out = format!(
+        "Open CAD Studio v{}\nRevision: {}\nCommit date: {}\nProfile: {}\nFeatures: {}\n\n\
+         [System]\nOS: {} ({} {})\nCPU: {}\nLogical processors: {}\nRAM: {} total, {} available\n",
+        env!("OCS_FULL_VERSION"),
+        env!("OCS_GIT_REV"),
+        env!("OCS_COMMIT_DATE"),
+        env!("OCS_BUILD_PROFILE"),
+        env!("OCS_BUILD_FEATURES"),
+        sys.os,
+        platform_name(),
+        architecture_name(),
+        sys.cpu,
+        sys.logical_cores,
+        format_bytes(sys.ram_total),
+        format_bytes(sys.ram_available),
+    );
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::gpu_backend::{active_gpu, load_prefs};
+        let gpu = active_gpu();
+        let prefs = load_prefs();
+        let or_unknown = |s: &str| {
+            if s.is_empty() {
+                "Unknown".to_string()
+            } else {
+                s.to_string()
+            }
+        };
+        out.push_str(&format!(
+            "\n[Graphics]\nGPU: {}\nDriver: {}\nBackend: {}\nSelected by: {}\n\
+             Below WebGPU baseline: {}\nWGPU_BACKEND: {}\n\
+             Saved options: backend={}, compat renderer={}, OpenGL on older GPUs={}\n",
+            or_unknown(gpu.adapter.as_deref().unwrap_or("")),
+            or_unknown(&gpu.driver),
+            or_unknown(gpu.backend.as_deref().unwrap_or("")),
+            or_unknown(&gpu.origin),
+            if gpu.legacy { "yes" } else { "no" },
+            std::env::var("WGPU_BACKEND").unwrap_or_else(|_| "(unset)".into()),
+            prefs.backend.as_str().unwrap_or("auto"),
+            prefs.compat_renderer,
+            prefs.legacy_gl,
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        out.push_str("\n[Graphics]\nBackend: WebGPU / WebGL\n");
+    }
+    out
 }
 
 /// Build card text: the metadata suffix without its leading `+`
@@ -136,16 +227,27 @@ pub fn view_window(
     .spacing(8)
     .width(content_width);
 
-    let copy = button(text(t!("Copy Info")).size(11))
-        .on_press(Message::AboutCopyInfo)
-        .style(button::primary)
-        .padding([6, 16]);
+    let row_width = if matches!(sizing.width, Length::Fill) {
+        Fill
+    } else {
+        Length::Fixed(148.0 * 3.0 + 16.0)
+    };
+    let system = column![
+        info_row(t!("CPU"), crate::sysinfo::cpu_summary(), row_width),
+        info_row(t!("RAM"), crate::sysinfo::ram_summary(), row_width),
+        info_row(t!("GPU (backend)"), gpu_summary(), row_width),
+    ]
+    .spacing(6)
+    .width(content_width);
+
+    let copy = dialog_button(t!("Copy Info"), Message::AboutCopyInfo, true);
 
     container(
         column![
             hero,
             metadata,
             build_info,
+            system,
             row![Space::new().width(content_width), copy]
                 .width(sizing.width)
                 .align_y(iced::Center),

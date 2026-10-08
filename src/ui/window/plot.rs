@@ -158,13 +158,13 @@ pub struct PageSetupImportDraft {
     pub file: String,
     /// Each setup with whether it is ticked for import. The settings are
     /// carried along so the source file is read once.
-    pub setups: Vec<(String, acadrust::objects::PlotSettings, bool)>,
+    pub setups: Vec<(String, codec::objects::PlotSettings, bool)>,
     /// Why the file gave nothing, when it did not.
     pub error: Option<String>,
 }
 
 impl PageSetupImportDraft {
-    pub fn selected(&self) -> impl Iterator<Item = (&str, &acadrust::objects::PlotSettings)> {
+    pub fn selected(&self) -> impl Iterator<Item = (&str, &codec::objects::PlotSettings)> {
         self.setups
             .iter()
             .filter(|(_, _, on)| *on)
@@ -178,7 +178,7 @@ pub enum PageSetupImportMsg {
     /// Ask for the drawing to import from.
     Pick,
     /// The drawing was read (or could not be): its name and page setups.
-    Loaded(Result<(String, Vec<(String, acadrust::objects::PlotSettings)>), String>),
+    Loaded(Result<(String, Vec<(String, codec::objects::PlotSettings)>), String>),
     /// Tick or untick one setup.
     Toggle(String),
     /// Tick or untick every setup.
@@ -1553,7 +1553,7 @@ pub fn view_window(
                 paper_space_option(s.paperspace_last, t!("Paper space last"), PlotFlag::PaperspaceLast),
                 check(t!("Merge overlapping lines"), s.merge_lines, PlotFlag::MergeLines),
                 check(t!("Plot stamp"), s.stamp, PlotFlag::Stamp),
-                paper_space_option(s.save_to_layout, t!("Save changes to layout"), PlotFlag::SaveToLayout),
+                check(t!("Save changes to layout"), s.save_to_layout, PlotFlag::SaveToLayout),
             ]
             .spacing(6)
             .width(width),

@@ -4,8 +4,8 @@
 //   Click to add fit points. Enter (≥2 pts) → commits EntityType::Spline.
 
 use crate::t;
-use acadrust::types::Vector3;
-use acadrust::{CadDocument, EntityType, Handle, Spline};
+use codec::types::Vector3;
+use codec::{CadDocument, EntityType, Handle, Spline};
 use std::collections::HashMap;
 
 use crate::command::{CadCommand, CmdResult};
@@ -90,7 +90,7 @@ impl SplineCommand {
 }
 
 fn control_spline(points: &[[f64; 3]], degree: usize, closed: bool) -> Option<Spline> {
-    let curve = cadkernel::space::NurbsCurve3::from_control_polygon(degree, points, closed)?;
+    let curve = kernel::space::NurbsCurve3::from_control_polygon(degree, points, closed)?;
     let mut spline = Spline {
         degree: curve.degree() as i32,
         control_points: curve.control_points().iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect(),
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn closed_fitted_polyline_conversion_preserves_a_periodic_spline() {
-        use acadrust::entities::{
+        use codec::entities::{
             Polyline2D, PolylineFlags, SmoothSurfaceType, Vertex2D, VertexFlags,
         };
 

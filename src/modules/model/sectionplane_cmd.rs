@@ -1,6 +1,6 @@
-use acadrust::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
-use acadrust::types::{Color, Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
+use codec::types::{Color, Handle, Vector3};
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
@@ -172,7 +172,7 @@ impl SectionPlaneCommand {
             self.kind == SectionKind::Slice,
             depth,
         );
-        EntityType::Extended(entity)
+        EntityType::Extended(Box::new(entity))
     }
 
     fn line_at(&self, point: DVec3, viewing: DVec3, vertical_hint: DVec3) -> (Vec<DVec3>, DVec3) {

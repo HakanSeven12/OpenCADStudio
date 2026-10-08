@@ -1,11 +1,11 @@
 //! PRESSPULL selection and curve-only previews. Geometry operations stay in the kernel.
 
-use acadrust::entities::{AcisData, EmbeddedEntity, Region, Wire};
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::brep::{self, Body, FaceKey};
-use cadkernel::geom2d::{contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance};
-use cadkernel::space::Plane;
+use codec::entities::{AcisData, EmbeddedEntity, Region, Wire};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::brep::{self, Body, FaceKey};
+use kernel::geom2d::{contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance};
+use kernel::space::Plane;
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 
@@ -42,7 +42,7 @@ pub fn profile_geometry(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>, 
         _ => sweep_model::embedded_revolve_profile(entity),
     };
     if let Some((entity, transform)) = embedded {
-        if let Ok(geometry) = cadkernel::acis::sweep_profile_geometry(&entity, transform) {
+        if let Ok(geometry) = kernel::acis::sweep_profile_geometry(&entity, transform) {
             return Some(geometry);
         }
         // Exact modeler data is authoritative, not a hint to replace by chords.
@@ -93,7 +93,7 @@ fn curves_on_plane(source: Plane, curves: &[Curve], plane: WorkingPlane) -> Vec<
     let origin = plane.to_local(DVec3::from_array(source.origin));
     let x_axis = plane.vector_to_local(DVec3::from_array(source.x_axis));
     let y_axis = plane.vector_to_local(DVec3::from_array(source.y_axis));
-    let transform = cadkernel::geom2d::Transform {
+    let transform = kernel::geom2d::Transform {
         origin: [origin.x, origin.y].into(),
         x_axis: [x_axis.x, x_axis.y].into(),
         y_axis: [y_axis.x, y_axis.y].into(),
@@ -120,7 +120,7 @@ fn boundary_source(curves: Vec<Curve>) -> Option<BoundarySource> {
         length.is_finite() && length > BOUNDARY_TOLERANCE
     }).collect::<Vec<_>>();
     let segments = curves.iter().flat_map(|curve| {
-        curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+        curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
             .windows(2).filter_map(|pair| {
                 let start = pair[0];
                 let end = pair[1];
@@ -193,7 +193,7 @@ pub(crate) fn region_from_loops(loops: &[Vec<Curve>], plane: WorkingPlane) -> Op
         let mut points = Vec::new();
         for curve in ring {
             let skip = usize::from(!points.is_empty());
-            points.extend(curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+            points.extend(curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
                 .into_iter().skip(skip).map(|point| {
                     let world = kernel_plane.point_at(point);
                     Vector3::new(world[0], world[1], world[2])
@@ -372,7 +372,7 @@ pub fn preview_wires(target: &PresspullTarget, distance: f64, color: [f32; 4], i
 
 fn preview_body_wires(body: &Body, color: [f32; 4], isolines: usize) -> Vec<WireModel> {
     let wireframe = brep::mesh::tessellate_wireframe(body,
-        brep::mesh::TessellationTolerance::new(cadkernel::tessellation::DEFAULT_ANGLE, 1e-9)
+        brep::mesh::TessellationTolerance::new(kernel::tessellation::DEFAULT_ANGLE, 1e-9)
             .with_isolines(isolines));
     wireframe.edges.into_iter().map(|edge| edge.positions)
         .chain(wireframe.isolines.into_iter().map(|line| line.positions))

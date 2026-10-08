@@ -145,7 +145,7 @@ pub fn conversion_factor(from: i16, to: i16) -> Option<f64> {
 /// Paper space is deliberately left out. Its geometry is measured on the sheet,
 /// in sheet units, and means the same thing however the model is labelled —
 /// scaling it would resize the drawing frame along with the building.
-pub fn model_space_handles(scene: &crate::scene::Scene) -> Vec<acadrust::Handle> {
+pub fn model_space_handles(scene: &crate::scene::Scene) -> Vec<codec::Handle> {
     let Some(model) = scene.document.block_records.get("*Model_Space") else {
         return Vec::new();
     };

@@ -275,7 +275,7 @@ pub fn discard_guard<'a>(
             iced::widget::text(crate::t!("Unsaved changes will be discarded.")).size(13.5),
             Space::new().height(12),
             row![
-                button(iced::widget::text(crate::t!("Discard && close")).size(12))
+                button(iced::widget::text(crate::t!("Discard & close")).size(12))
                     .on_press(on_discard)
                     .padding([5, 14])
                     .style(button::danger),

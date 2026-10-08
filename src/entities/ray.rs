@@ -1,9 +1,9 @@
-use acadrust::entities::{Ray, XLine};
+use codec::entities::{Ray, XLine};
 use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    center_grip, edit_prop as edit, format_length, ro_prop as ro, square_grip,
+    edit_prop as edit, format_length, ro_prop as ro, square_grip,
 };
 use crate::entities::curve::{point_along, unit_direction};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
@@ -16,7 +16,7 @@ const DISPLAY_EXTENT: f64 = 1_000_000.0;
 // ── Ray (semi-infinite line) ──────────────────────────────────────────────────
 
 impl RenderConvertible for Ray {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         // Normalize direction to avoid f32 overflow when DXF stores
@@ -48,11 +48,14 @@ impl Grippable for Ray {
         let bp = &self.base_point;
         let dir = &self.direction;
         // Grip 0: base point (movable)
-        // Grip 1: a point along the direction (changes direction)
+        // Grip 1: a point along the direction (changes direction). A stretch
+        // grip, not a move handle: `center_grip` would flag it `is_midpoint`
+        // and the drag would arrive as `Translate`, which the direction arm
+        // ignores — the grip would silently do nothing.
         let guide_dist = 10.0_f64;
         vec![
             square_grip(0, glam::DVec3::new(bp.x, bp.y, bp.z)),
-            center_grip(
+            square_grip(
                 1,
                 glam::DVec3::new(
                     bp.x + dir.x * guide_dist,
@@ -155,7 +158,7 @@ impl Transformable for Ray {
 // ── XLine (construction line, infinite) ──────────────────────────────────────
 
 impl RenderConvertible for XLine {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         let len = (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z).sqrt();
@@ -191,7 +194,8 @@ impl Grippable for XLine {
         let guide_dist = 10.0_f64;
         vec![
             square_grip(0, glam::DVec3::new(bp.x, bp.y, bp.z)),
-            center_grip(
+            // Direction handle: a stretch grip, not a move handle (see Ray).
+            square_grip(
                 1,
                 glam::DVec3::new(
                     bp.x + dir.x * guide_dist,

@@ -6,14 +6,15 @@
 //! draw order, and clip boundaries. Leaf entities remain responsible for
 //! producing their normal wire, hatch, image, wipeout, or mesh model.
 
-use acadrust::entities::Insert;
-use acadrust::types::{Color, Matrix3, Matrix4, Transform, Vector3};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::entities::Insert;
+use codec::types::{Color, Matrix3, Matrix4, Transform, Vector3};
+use codec::{CadDocument, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::scene::view::render::{
-    has_resolved_book_color, is_effective_layer_zero, layer_render_style_viewport,
-    render_style_for_block_sub_viewport, render_style_for_viewport, InheritStyle,
+    has_resolved_book_color, has_resolved_book_color_common, is_effective_layer_zero,
+    layer_render_style_viewport, render_style_for_block_sub_viewport,
+    render_style_for_common_viewport, render_style_for_viewport, InheritStyle,
 };
 use crate::scene::BlockScalePolicy;
 
@@ -56,6 +57,7 @@ impl SceneRoot {
     }
 }
 
+/// Resolved style inheritance carried down a block reference chain.
 #[derive(Clone, Copy, Debug)]
 pub struct BlockStyle {
     pub insert: ResolvedStyle,
@@ -79,27 +81,31 @@ pub struct InsertStyleSpec {
 
 impl InsertStyleSpec {
     pub fn new(document: &CadDocument, insert: &Insert, viewport: Option<Handle>) -> Self {
-        let entity = EntityType::Insert(insert.clone());
-        let has_book_color = has_resolved_book_color(document, &entity);
-        let linetype = &insert.common.linetype;
+        let common = &insert.common;
+        let has_book_color = has_resolved_book_color_common(document, common);
+        let linetype = &common.linetype;
         Self {
-            own: BlockStyle::for_entity(document, &entity, viewport),
-            color_byblock: !has_book_color && insert.common.color == Color::ByBlock,
-            color_bylayer: !has_book_color && insert.common.color == Color::ByLayer,
-            transparency_byblock: insert.common.transparency.is_by_block(),
-            transparency_bylayer: insert.common.transparency.is_by_layer(),
+            own: BlockStyle {
+                insert: render_style_for_common_viewport(document, common, viewport),
+                layer0: layer_render_style_viewport(document, &common.layer, viewport),
+                layer0_aci: layer_aci(document, &common.layer),
+            },
+            color_byblock: !has_book_color && common.color == Color::ByBlock,
+            color_bylayer: !has_book_color && common.color == Color::ByLayer,
+            transparency_byblock: common.transparency.is_by_block(),
+            transparency_bylayer: common.transparency.is_by_layer(),
             linetype_byblock: linetype.eq_ignore_ascii_case("byblock"),
             linetype_bylayer: linetype.is_empty() || linetype.eq_ignore_ascii_case("bylayer"),
             lineweight_byblock: matches!(
-                insert.common.line_weight,
-                acadrust::types::LineWeight::ByBlock
+                common.line_weight,
+                codec::types::LineWeight::ByBlock
             ),
             lineweight_bylayer: matches!(
-                insert.common.line_weight,
-                acadrust::types::LineWeight::ByLayer
-                    | acadrust::types::LineWeight::Default
+                common.line_weight,
+                codec::types::LineWeight::ByLayer
+                    | codec::types::LineWeight::Default
             ),
-            layer0: is_effective_layer_zero(&insert.common.layer),
+            layer0: is_effective_layer_zero(&common.layer),
         }
     }
 
@@ -606,7 +612,8 @@ impl<'a> RenderSceneGraph<'a> {
             return false;
         }
         if self.frozen_layers.is_some_and(|frozen| {
-            layer.is_some_and(|layer| frozen.contains(&layer.handle))
+            frozen.contains(&common.handle)
+                || layer.is_some_and(|layer| frozen.contains(&layer.handle))
         }) {
             return false;
         }
@@ -708,7 +715,7 @@ pub struct BlockUse {
 pub(crate) fn block_record_by_name<'a>(
     document: &'a CadDocument,
     name: &str,
-) -> Option<&'a acadrust::tables::BlockRecord> {
+) -> Option<&'a codec::tables::BlockRecord> {
     document.block_records.get(name).or_else(|| {
         document
             .block_records
@@ -1012,7 +1019,7 @@ pub fn document_block_uses(document: &CadDocument) -> Vec<BlockUse> {
         }
     }
     for object in document.objects.values() {
-        let acadrust::objects::ObjectType::MultiLeaderStyle(style) = object else {
+        let codec::objects::ObjectType::MultiLeaderStyle(style) = object else {
             continue;
         };
         if let Some(handle) = style.arrowhead_handle {
@@ -1149,7 +1156,7 @@ pub fn block_contains_hatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::xdata::ExtendedDataRecord;
+    use codec::xdata::ExtendedDataRecord;
 
     #[test]
     fn applied_block_scale_skips_annotative_rescaling() {

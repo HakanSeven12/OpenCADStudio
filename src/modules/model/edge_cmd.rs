@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use acadrust::Handle;
-use cadkernel::brep::{Body, EdgeKey, FaceKey};
+use codec::Handle;
+use kernel::brep::{Body, EdgeKey, FaceKey};
 use glam::DVec3;
 
 use crate::command::{
@@ -200,8 +200,8 @@ impl SolidEdgeCommand {
         }
         let (handle, body) = self.active_body()?;
         let result = match self.operation {
-            EdgeOperation::Fillet => cadkernel::brep::fillet_edges(body, &edges, value).ok()?,
-            EdgeOperation::Chamfer => cadkernel::brep::chamfer_edges(
+            EdgeOperation::Fillet => kernel::brep::fillet_edges(body, &edges, value).ok()?,
+            EdgeOperation::Chamfer => kernel::brep::chamfer_edges(
                 body,
                 &edges,
                 self.base_face.or_else(|| self.current_loop_face())?,
@@ -230,7 +230,15 @@ impl SolidEdgeCommand {
             self.preview_for_values(self.default_value, self.other_value)
         {
             self.preview_wires = wires;
-            self.preview_hidden.push(handle);
+            // While edges are still being picked the source stays drawn: a
+            // hidden solid leaves the pick meshes, so the next edge could not
+            // be selected (#1625). The preview overlays it until confirmed.
+            if !matches!(
+                self.step,
+                EdgeStep::Selecting | EdgeStep::PickingLoop | EdgeStep::LoopConfirm
+            ) {
+                self.preview_hidden.push(handle);
+            }
         }
     }
 
@@ -864,7 +872,7 @@ fn edge_chain(body: &Body, seed: EdgeKey) -> Vec<EdgeKey> {
 fn edge_tangent_from_vertex(
     body: &Body,
     edge_key: EdgeKey,
-    vertex: cadkernel::brep::VertexKey,
+    vertex: kernel::brep::VertexKey,
 ) -> Option<DVec3> {
     let edge = body.edges.get(edge_key)?;
     let curve = body.curves.get(edge.curve)?;

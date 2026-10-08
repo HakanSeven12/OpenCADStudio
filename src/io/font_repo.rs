@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use acadrust::CadDocument;
+use codec::CadDocument;
 
 /// The community folder's GitHub contents API (lists name + download URL).
 #[cfg(not(target_arch = "wasm32"))]
@@ -40,6 +40,15 @@ pub fn fonts_dir() -> Option<PathBuf> {
 pub enum FontSource {
     Community,
     Custom(String),
+}
+
+/// Stable key for comparing bare font names without path or case differences.
+pub fn font_key(name: &str) -> String {
+    name.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .trim()
+        .to_ascii_lowercase()
 }
 
 impl FontSource {
@@ -73,7 +82,10 @@ pub fn missing_shx_fonts(doc: &CadDocument) -> Vec<String> {
         // The primary font and the big font (Asian double-byte glyphs) are
         // both plain .shx files the style depends on.
         for file in [style.font_file.trim(), style.big_font_file.trim()] {
-            if file.is_empty() || !file.to_ascii_lowercase().ends_with(".shx") {
+            if file.is_empty()
+                || !file.to_ascii_lowercase().ends_with(".shx")
+                || crate::io::linetypes::is_bundled_shape_file(file)
+            {
                 continue;
             }
             let resolved = crate::io::resolve_image_file(file, base).is_some()
@@ -266,6 +278,12 @@ mod tests {
     }
 
     #[test]
+    fn font_keys_are_bare_trimmed_and_case_insensitive() {
+        assert_eq!(font_key(r#" C:\Fonts\ROMANS.SHX "#), "romans.shx");
+        assert_eq!(font_key("folder/simplex.shx"), "simplex.shx");
+    }
+
+    #[test]
     fn rejects_a_non_listing_response() {
         assert!(parse_contents("{\"message\":\"Not Found\"}").is_err());
     }
@@ -279,7 +297,7 @@ mod tests {
         std::fs::write(dir.join("exists.shx"), b"stub").unwrap();
         let mut doc = CadDocument::new();
         let mk = |name: &str, file: &str| {
-            let mut style = acadrust::TextStyle::new(name);
+            let mut style = codec::TextStyle::new(name);
             style.font_file = file.into();
             style
         };

@@ -11,9 +11,9 @@
 // so the planar point-pick path is used (every vertex shares the polyline
 // elevation, taken from the first point's Z).
 
-use acadrust::entities::{LwPolyline, LwVertex};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::EntityType;
+use codec::entities::{LwPolyline, LwVertex};
+use codec::types::{Vector2, Vector3};
+use codec::EntityType;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};

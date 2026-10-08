@@ -1,8 +1,8 @@
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
 use iced::widget::{button, column, row, text, text_input, Space};
 use iced::{Element, Fill, Length, Shrink};
-use std::borrow::Cow;
 
 pub const FIND_INPUT_ID: &str = "find-replace-search";
 
@@ -29,14 +29,6 @@ pub fn view_window<'a>(
         .size(13);
 
     let enabled = !search.trim().is_empty();
-    let action = |label: Cow<'static, str>, message: Message| {
-        let button = button(text(label).size(12)).padding([6, 12]);
-        if enabled {
-            button.on_press(message)
-        } else {
-            button
-        }
-    };
 
     column![
         row![
@@ -56,13 +48,22 @@ pub fn view_window<'a>(
         text(status).size(11),
         row![
             Space::new().width(field_width),
-            button(text(t!("Close")).size(12))
-                .on_press(Message::CloseModal)
-                .padding([6, 12])
-                .style(button::secondary),
-            action(t!("Replace"), Message::FindReplaceOne).style(button::secondary),
-            action(t!("Replace All"), Message::FindReplaceAll).style(button::danger),
-            action(t!("Find Next"), Message::FindReplaceNext).style(button::primary),
+            dialog_button(t!("Close"), Message::CloseModal, false),
+            dialog_button_styled_opt(
+                t!("Replace"),
+                enabled.then_some(Message::FindReplaceOne),
+                button::secondary,
+            ),
+            dialog_button_styled_opt(
+                t!("Replace All"),
+                enabled.then_some(Message::FindReplaceAll),
+                button::danger,
+            ),
+            dialog_button_styled_opt(
+                t!("Find Next"),
+                enabled.then_some(Message::FindReplaceNext),
+                button::primary,
+            ),
         ]
         .spacing(8)
         .align_y(iced::Center),

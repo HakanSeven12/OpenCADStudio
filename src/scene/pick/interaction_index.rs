@@ -673,6 +673,10 @@ impl WireIndexBatch {
 }
 
 fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIndexBatch) {
+    // Drawn underlay content: neither picked nor snapped.
+    if wire.is_display_only() {
+        return;
+    }
     if let Some(aabb) = finite_wire_aabb3(wire) {
         batch.wire_entries.push(Entry3 {
             aabb,
@@ -695,7 +699,7 @@ fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIn
         );
     }
 
-    if wire.point_marker.is_none() {
+    if wire.point_marker.is_none() && !wire.is_node_marker() {
         for start in 0..wire.points.len().saturating_sub(1) {
             let Some(aabb) = points_aabb3([
                 wire_point(wire, start),
@@ -841,7 +845,7 @@ impl InteractionIndex {
         let mut next_ordinal: rustc_hash::FxHashMap<u64, u32> =
             rustc_hash::FxHashMap::with_capacity_and_hasher(n_wires.min(4096), Default::default());
         for wire in wires {
-            let handle = wire.name.parse::<u64>().ok();
+            let handle = crate::scene::pipeline::wire_gpu::fast_parse_u64(&wire.name);
             wire_handles.push(handle);
             wire_ordinals.push(handle.map(|h| {
                 let entry = next_ordinal.entry(h).or_default();

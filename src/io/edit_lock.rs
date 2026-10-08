@@ -239,8 +239,42 @@ impl Drop for EditLease {
     }
 }
 
+/// Open the drawing so other applications may still read it but not write it.
+///
+/// Windows: our handle only reads, and its share mode admits other readers
+/// (and the atomic save's replace) while refusing any write open; the shared
+/// byte lock below refuses writes through handles opened before ours. An
+/// exclusive lock would also refuse reads, so another CAD program could not
+/// even open the drawing read-only while it is being edited here.
+#[cfg(target_os = "windows")]
+fn open_drawing_for_lease(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ};
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)
+        .open(path)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_drawing_for_lease(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new().read(true).write(true).open(path)
+}
+
+/// Windows takes the shared lock (writes refused, reads allowed); elsewhere the
+/// lock is advisory and never stops a reader, so it stays exclusive.
+#[cfg(target_os = "windows")]
+fn lock_drawing(drawing: &File) -> Result<(), TryLockError> {
+    drawing.try_lock_shared()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn lock_drawing(drawing: &File) -> Result<(), TryLockError> {
+    drawing.try_lock()
+}
+
 fn acquire_drawing_lock(path: &Path) -> Result<(Option<File>, Option<String>), EditLeaseError> {
-    let drawing = match OpenOptions::new().read(true).write(true).open(path) {
+    let drawing = match open_drawing_for_lease(path) {
         Ok(file) => file,
         Err(error) if error_is_lock_conflict(&error) => {
             return Err(EditLeaseError::Locked(format!(
@@ -255,7 +289,7 @@ fn acquire_drawing_lock(path: &Path) -> Result<(Option<File>, Option<String>), E
         }
     };
 
-    match drawing.try_lock() {
+    match lock_drawing(&drawing) {
         Ok(()) => Ok((Some(drawing), None)),
         Err(TryLockError::WouldBlock) => Err(EditLeaseError::Locked(
             "Drawing is locked by another application.".to_string(),

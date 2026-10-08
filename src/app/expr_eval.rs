@@ -381,6 +381,10 @@ impl Parser {
 /// Evaluate a string as an f64 expression.
 /// Returns None on parse error.
 pub fn eval_number(input: &str) -> Option<f64> {
+    // Feet and inches (`2'9"`, `3'`, `9 1/2"`) are lengths, not arithmetic (#937).
+    if input.contains(['\'', '"']) {
+        return crate::entities::common::parse_typed_length(input);
+    }
     let tokens = tokenize(input.trim()).ok()?;
     let mut parser = Parser::new(tokens);
     let result = parser.parse_expr(0).ok()?;

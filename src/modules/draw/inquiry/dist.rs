@@ -4,6 +4,7 @@ use glam::DVec3;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::entities::common::{format_length, unit_context, without_negative_zero};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
 pub struct DistCommand {
@@ -55,12 +56,13 @@ impl CadCommand for DistCommand {
             let dist_xy = dx.hypot(dy);
             let angle_z = dz.atan2(dist_xy).to_degrees();
 
-            let dist_s = format!("{dist:.4}");
-            let angle_xy_s = format!("{angle_xy:.4}");
-            let angle_z_s = format!("{angle_z:.4}");
-            let dx_s = format!("{dx:.4}");
-            let dy_s = format!("{dy:.4}");
-            let dz_s = format!("{dz:.4}");
+            let aprec = unit_context().auprec.max(0) as usize;
+            let dist_s = format_length(dist);
+            let angle_xy_s = without_negative_zero(format!("{angle_xy:.aprec$}"));
+            let angle_z_s = without_negative_zero(format!("{angle_z:.aprec$}"));
+            let dx_s = format_length(dx);
+            let dy_s = format_length(dy);
+            let dz_s = format_length(dz);
             let msg = t!(
                 "Distance = %{dist},  Angle in XY Plane = %{angle_xy}°,  Angle from XY Plane = %{angle_z}°\n  Delta X = %{dx},  Delta Y = %{dy},  Delta Z = %{dz}",
                 dist = dist_s,
@@ -93,6 +95,7 @@ impl CadCommand for DistCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -121,10 +124,93 @@ impl CadCommand for DistCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }
 
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["DIST"] });  // DistCommand
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::CmdResult;
+    use crate::entities::common::{set_unit_context, UnitContext};
+
+    #[test]
+    fn dist_respects_precision_zero() {
+        let mut cmd = DistCommand::new();
+        set_unit_context(UnitContext {
+            lunits: 2,
+            luprec: 0,
+            aunits: 0,
+            auprec: 0,
+            angbase: 0.0,
+            angdir_cw: false,
+        });
+
+        assert!(matches!(cmd.on_point(DVec3::new(0.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        let res = cmd.on_point(DVec3::new(10.0, 0.0, 0.0));
+        match res {
+            CmdResult::Measurement(msg) => {
+                assert!(msg.contains("Distance = 10"), "Expected 'Distance = 10' in '{msg}'");
+                assert!(msg.contains("Delta X = 10"), "Expected 'Delta X = 10' in '{msg}'");
+                assert!(msg.contains("Delta Y = 0"), "Expected 'Delta Y = 0' in '{msg}'");
+                assert!(msg.contains("Delta Z = 0"), "Expected 'Delta Z = 0' in '{msg}'");
+                assert!(msg.contains("Angle in XY Plane = 0°"), "Expected 'Angle in XY Plane = 0°' in '{msg}'");
+            }
+            _ => panic!("Expected CmdResult::Measurement"),
+        }
+    }
+
+    #[test]
+    fn dist_respects_precision_four() {
+        let mut cmd = DistCommand::new();
+        set_unit_context(UnitContext {
+            lunits: 2,
+            luprec: 4,
+            aunits: 0,
+            auprec: 2,
+            angbase: 0.0,
+            angdir_cw: false,
+        });
+
+        assert!(matches!(cmd.on_point(DVec3::new(0.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        let res = cmd.on_point(DVec3::new(10.0, 5.0, 0.0));
+        match res {
+            CmdResult::Measurement(msg) => {
+                assert!(msg.contains("Distance = 11.1803"), "Expected 'Distance = 11.1803' in '{msg}'");
+                assert!(msg.contains("Delta X = 10.0000"), "Expected 'Delta X = 10.0000' in '{msg}'");
+                assert!(msg.contains("Delta Y = 5.0000"), "Expected 'Delta Y = 5.0000' in '{msg}'");
+                assert!(msg.contains("Angle in XY Plane = 26.57°"), "Expected 'Angle in XY Plane = 26.57°' in '{msg}'");
+            }
+            _ => panic!("Expected CmdResult::Measurement"),
+        }
+    }
+
+    #[test]
+    fn dist_respects_architectural_units() {
+        let mut cmd = DistCommand::new();
+        set_unit_context(UnitContext {
+            lunits: 4, // Architectural
+            luprec: 4,
+            aunits: 0,
+            auprec: 0,
+            angbase: 0.0,
+            angdir_cw: false,
+        });
+
+        assert!(matches!(cmd.on_point(DVec3::new(0.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        let res = cmd.on_point(DVec3::new(18.0, 0.0, 0.0));
+        match res {
+            CmdResult::Measurement(msg) => {
+                // 18 inches = 1'-6"
+                assert!(msg.contains("1'-6\""), "Expected 1'-6\" in '{msg}'");
+            }
+            _ => panic!("Expected CmdResult::Measurement"),
+        }
+    }
+}

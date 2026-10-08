@@ -1,14 +1,14 @@
 //! Maps parametric constraints to the drawing format's associative object graph.
 
-use acadrust::objects::{
+use codec::objects::{
     Assoc2dConstraintGroup, AssocAction, AssocActionDependency, AssocConstraintNode,
     AssocConstraintNodeData, AssocDependency, AssocDimDependencyBody, AssocEvalValue,
     AssocEvalVariant,
     AssocGeomDependency, AssocNetwork, AssocPersistentSubentId, AssocValueDependency,
     AssocVariable, AssociativeData, AssociativeObject, ObjectType,
 };
-use acadrust::types::{Handle, Vector3};
-use acadrust::{CadDocument, EntityType};
+use codec::types::{Handle, Vector3};
+use codec::{CadDocument, EntityType};
 use rustc_hash::FxHashMap;
 
 use super::named_parameters::{DrivingValue, ParameterTable};
@@ -625,7 +625,7 @@ impl<'a> GroupBuilder<'a> {
                 },
             );
         } else {
-            let arc = cadkernel::geom2d::BulgeArc::from_bulge(
+            let arc = kernel::geom2d::BulgeArc::from_bulge(
                 [start.x, start.y],
                 [end.x, end.y],
                 bulge,
@@ -1250,7 +1250,7 @@ impl Allocator<'_> {
                 has_cached_value: false,
                 cached_value: String::new(),
                 flag: false,
-                reserved: 0,
+                dependencies: Vec::new(),
             }),
         );
         self.variables.insert(name.to_string(), handle);
@@ -1459,14 +1459,14 @@ fn ensure_associative_classes_registered(document: &mut CadDocument) {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
         }
-        document.classes.add_or_update(acadrust::classes::DxfClass {
+        document.classes.add_or_update(codec::classes::DxfClass {
             dxf_name: dxf_name.to_string(),
             cpp_class_name: cpp_class_name.to_string(),
             application_name: "ObjectDBX Classes".to_string(),
-            proxy_flags: acadrust::classes::ProxyFlags(
-                acadrust::classes::ProxyFlags::ERASE_ALLOWED.0
-                    | acadrust::classes::ProxyFlags::CLONING_ALLOWED.0
-                    | acadrust::classes::ProxyFlags::DISABLES_PROXY_WARNING_DIALOG.0,
+            proxy_flags: codec::classes::ProxyFlags(
+                codec::classes::ProxyFlags::ERASE_ALLOWED.0
+                    | codec::classes::ProxyFlags::CLONING_ALLOWED.0
+                    | codec::classes::ProxyFlags::DISABLES_PROXY_WARNING_DIALOG.0,
             ),
             instance_count: 0,
             was_zombie: false,
@@ -1543,7 +1543,7 @@ fn ensure_global_network_dictionary(document: &mut CadDocument) -> Handle {
 
     remove_dictionary_entry(document, root_handle, NETWORK_DICTIONARY_KEY);
     let dictionary_handle = document.allocate_handle();
-    let mut dictionary = acadrust::objects::Dictionary::new();
+    let mut dictionary = codec::objects::Dictionary::new();
     dictionary.handle = dictionary_handle;
     dictionary.owner = root_handle;
     dictionary.reactors.push(root_handle);
@@ -1742,14 +1742,14 @@ fn group_requires_preservation(document: &CadDocument, group: &Assoc2dConstraint
 
 fn work_plane_vector(work_plane: &[Vector3; 3], local: Vector3) -> Option<Vector3> {
     let [origin, axis_x, axis_y] = *work_plane;
-    let plane = cadkernel::space::Plane::from_axes(
+    let plane = kernel::space::Plane::from_axes(
         [origin.x, origin.y, origin.z],
         [axis_x.x, axis_x.y, axis_x.z],
         [axis_y.x, axis_y.y, axis_y.z],
     );
-    let mut world = cadkernel::space::Vec3::from(plane.vector_at([local.x, local.y]));
+    let mut world = kernel::space::Vec3::from(plane.vector_at([local.x, local.y]));
     if local.z != 0.0 {
-        world = world + cadkernel::space::Vec3::from(plane.normal()?) * local.z;
+        world = world + kernel::space::Vec3::from(plane.normal()?) * local.z;
     }
     let world = world.normalize()?;
     Some(Vector3::new(world.x, world.y, world.z))
@@ -2467,9 +2467,31 @@ fn sync_retained_group_constraints(document: &mut CadDocument, set: &ParametricC
 fn detach_preserved_scope(
     document: &mut CadDocument,
     owner: Handle,
-) -> (FxHashMap<String, Handle>, Vec<Handle>) {
+) -> (FxHashMap<String, Handle>, Vec<Handle>, Vec<Handle>) {
     let Some(network_handle) = native_scope_network_handle(document, owner) else {
-        return (FxHashMap::default(), Vec::new());
+        return (FxHashMap::default(), Vec::new(), Vec::new());
+    };
+    // Actions the constraint graph does not rebuild (a swept surface's
+    // action and the unnamed variables holding its expressions) stay in the
+    // network with everything they own.
+    let foreign_actions: Vec<Handle> = match document.objects.get(&network_handle) {
+        Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::Network(network),
+            ..
+        })) => network
+            .actions
+            .iter()
+            .map(|action| action.dependency)
+            .filter(|handle| match document.objects.get(handle) {
+                Some(ObjectType::Associative(object)) => match &object.data {
+                    AssociativeData::ConstraintGroup(_) | AssociativeData::Network(_) => false,
+                    AssociativeData::Variable(variable) => variable.name.trim().is_empty(),
+                    _ => true,
+                },
+                _ => false,
+            })
+            .collect(),
+        _ => Vec::new(),
     };
     let preserved_groups: Vec<_> = native_group_handles(document, owner)
         .into_iter()
@@ -2483,11 +2505,33 @@ fn detach_preserved_scope(
             )
         })
         .collect();
-    if preserved_groups.is_empty() {
-        return (FxHashMap::default(), Vec::new());
+    if preserved_groups.is_empty() && foreign_actions.is_empty() {
+        return (FxHashMap::default(), Vec::new(), Vec::new());
     }
 
     let mut variable_handles = Vec::new();
+    // The named variables the kept actions read keep their handles.
+    for (_, object) in &document.objects {
+        let ObjectType::Associative(AssociativeObject {
+            owner,
+            data: AssociativeData::ValueDependency(value),
+            ..
+        }) = object
+        else {
+            continue;
+        };
+        let handle = value.dependency.dependent_on;
+        let named = matches!(
+            document.objects.get(&handle),
+            Some(ObjectType::Associative(AssociativeObject {
+                data: AssociativeData::Variable(variable),
+                ..
+            })) if !variable.name.trim().is_empty()
+        );
+        if named && foreign_actions.contains(owner) && !variable_handles.contains(&handle) {
+            variable_handles.push(handle);
+        }
+    }
     for group_handle in &preserved_groups {
         let Some(ObjectType::Associative(AssociativeObject {
             data: AssociativeData::ConstraintGroup(group),
@@ -2514,7 +2558,7 @@ fn detach_preserved_scope(
     let dictionary = document
         .extension_dictionary_handle(owner)
         .unwrap_or(Handle::NULL);
-    for handle in &preserved_groups {
+    for handle in preserved_groups.iter().chain(&foreign_actions) {
         if let Some(ObjectType::Associative(object)) = document.objects.get_mut(handle) {
             object.owner = dictionary;
         }
@@ -2531,7 +2575,100 @@ fn detach_preserved_scope(
     }
 
     debug_assert!(document.objects.contains_key(&network_handle));
-    (variables, preserved_groups)
+    (variables, preserved_groups, foreign_actions)
+}
+
+/// Re-evaluates the unnamed variables of kept actions (a swept surface's
+/// scale or twist expression) and the values their actions cache, so the
+/// file carries the values the named parameters give.
+fn refresh_foreign_values(
+    document: &mut CadDocument,
+    foreign_actions: &[Handle],
+    parameters: &ParameterTable,
+) {
+    let value_of = |document: &CadDocument, handle: Handle| match document.objects.get(&handle) {
+        Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::Variable(variable),
+            ..
+        })) => {
+            let mut table = parameters.clone();
+            table.set("foreignExpression", &variable.expression).ok()?;
+            table.resolve("foreignExpression").ok().filter(|value| value.is_finite())
+        }
+        _ => None,
+    };
+    let dependencies: Vec<(Handle, Handle)> = document
+        .objects
+        .iter()
+        .filter_map(|(handle, object)| match object {
+            ObjectType::Associative(AssociativeObject {
+                owner,
+                data: AssociativeData::ValueDependency(value),
+                ..
+            }) if foreign_actions.contains(owner) => Some((*handle, value.dependency.dependent_on)),
+            _ => None,
+        })
+        .collect();
+    for &handle in foreign_actions {
+        if let Some(value) = value_of(document, handle) {
+            if let Some(ObjectType::Associative(AssociativeObject {
+                data: AssociativeData::Variable(variable),
+                ..
+            })) = document.objects.get_mut(&handle)
+            {
+                variable.value = Allocator::numeric_eval(value);
+            }
+        }
+    }
+    for (dependency, source) in dependencies {
+        let Some(value) = value_of(document, source) else { continue };
+        if let Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::ValueDependency(dependency),
+            ..
+        })) = document.objects.get_mut(&dependency)
+        {
+            dependency.value = Allocator::numeric_eval(value);
+        }
+    }
+    for &handle in foreign_actions {
+        let Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::Action(action),
+            ..
+        })) = document.objects.get(&handle)
+        else {
+            continue;
+        };
+        let mut updates = Vec::new();
+        for (index, param) in action.values.iter().enumerate() {
+            for (slot, variable) in param.variables.iter().enumerate() {
+                let Some(ObjectType::Associative(AssociativeObject {
+                    data: AssociativeData::ValueDependency(dependency),
+                    ..
+                })) = document.objects.get(&variable.handle)
+                else {
+                    continue;
+                };
+                let Some(value) = value_of(document, dependency.dependency.dependent_on) else {
+                    continue;
+                };
+                // Angle parameters are cached in radians.
+                let value = if param.unit_type == 2 { value.to_radians() } else { value };
+                updates.push((index, slot, value));
+            }
+        }
+        if let Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::Action(action),
+            ..
+        })) = document.objects.get_mut(&handle)
+        {
+            for (index, slot, value) in updates {
+                action.values[index].variables[slot].value = AssocEvalVariant {
+                    code: 40,
+                    value: AssocEvalValue::Real(value),
+                };
+            }
+        }
+    }
 }
 
 /// Materializes one scope into the drawing's associative object graph.
@@ -2544,6 +2681,7 @@ fn materialize_scope(
     action_index: i32,
     existing_variables: FxHashMap<String, Handle>,
     preserved_groups: Vec<Handle>,
+    foreign_actions: Vec<Handle>,
     materialize_all_parameters: bool,
 ) -> Option<Handle> {
     let dictionary_handle = ensure_extension_dictionary(document, owner);
@@ -2579,6 +2717,7 @@ fn materialize_scope(
         && parameters.is_empty()
         && existing_variables.is_empty()
         && preserved_groups.is_empty()
+        && foreign_actions.is_empty()
     {
         return None;
     }
@@ -2749,6 +2888,25 @@ fn materialize_scope(
         }
     }
 
+    let first_foreign = allocator.variable_actions.len() as i32
+        + i32::from(group_handle.is_some())
+        + preserved_groups.len() as i32;
+    for (offset, handle) in foreign_actions.iter().copied().enumerate() {
+        if let Some(ObjectType::Associative(object)) = allocator.document.objects.get_mut(&handle) {
+            object.owner = network_handle;
+            let action = match &mut object.data {
+                AssociativeData::Action(action) => Some(action),
+                AssociativeData::Variable(variable) => Some(&mut variable.action),
+                _ => None,
+            };
+            if let Some(action) = action {
+                action.owning_network = network_handle;
+                action.action_index = first_foreign + offset as i32 + 1;
+            }
+        }
+    }
+    refresh_foreign_values(allocator.document, &foreign_actions, parameters);
+
     let network = AssocNetwork {
         action: AssocAction {
             class_version: 2,
@@ -2757,15 +2915,14 @@ fn materialize_scope(
             ..Default::default()
         },
         network_version: 0,
-        network_action_index: allocator.variable_actions.len() as i32
-            + i32::from(group_handle.is_some())
-            + preserved_groups.len() as i32,
+        network_action_index: first_foreign + foreign_actions.len() as i32,
         actions: allocator
             .variable_actions
             .iter()
             .copied()
             .chain(group_handle)
             .chain(preserved_groups)
+            .chain(foreign_actions)
             .map(|dependency| AssocActionDependency {
                 is_owned: true,
                 dependency,
@@ -2773,9 +2930,23 @@ fn materialize_scope(
             .collect(),
         owned_actions: Vec::new(),
     };
+    // The reference holds a scope's network through a dictionary of its own
+    // under the owner's extension dictionary; its parameter commands do not
+    // find a network stored directly there.
+    let holder_handle = allocator.document.allocate_handle();
+    let mut holder = codec::objects::Dictionary::new();
+    holder.handle = holder_handle;
+    holder.owner = dictionary_handle;
+    holder.duplicate_cloning = 1;
+    holder.reactors.push(dictionary_handle);
+    holder.add_entry(NETWORK_DICTIONARY_KEY, network_handle);
+    allocator
+        .document
+        .objects
+        .insert(holder_handle, ObjectType::Dictionary(holder));
     allocator.insert_associative_at(
         network_handle,
-        dictionary_handle,
+        holder_handle,
         "ASSOCNETWORK",
         "AcDbAssocNetwork",
         AssociativeData::Network(network),
@@ -2783,14 +2954,14 @@ fn materialize_scope(
     if let Some(ObjectType::Associative(network)) =
         allocator.document.objects.get_mut(&network_handle)
     {
-        network.reactors.push(dictionary_handle);
+        network.reactors.push(holder_handle);
     }
 
     set_dictionary_entry(
         allocator.document,
         dictionary_handle,
         NETWORK_DICTIONARY_KEY,
-        network_handle,
+        holder_handle,
     );
     Some(network_handle)
 }
@@ -2849,6 +3020,11 @@ impl Scene {
                 self.parametric_constraints.push(set);
             }
         }
+        // Whole-set replace (file open / reload): covers the DWG-import
+        // `enabled` / `axis_direction` / `distance_direction` / `angle_sector`
+        // writes, which happen on the local set during decode.
+        self.bump_constraints_epoch();
+        self.import_sweep_expression_links();
     }
 
     /// Makes the standard associative graph match the live command model.
@@ -2894,7 +3070,7 @@ impl Scene {
             if let Some(set) = &set {
                 sync_retained_group_constraints(&mut self.document, set);
             }
-            let (variables, groups) = detach_preserved_scope(&mut self.document, owner);
+            let (variables, groups, foreign) = detach_preserved_scope(&mut self.document, owner);
             let mut set = set.unwrap_or_else(|| {
                 if owner == model_owner {
                     ParametricConstraintSet::new(ParametricScope::ModelSpace)
@@ -2910,7 +3086,7 @@ impl Scene {
             for constraint in &mut set.constraints {
                 constraint.native_origin = None;
             }
-            scopes.push((owner, set, variables, groups));
+            scopes.push((owner, set, variables, groups, foreign));
         }
         if scopes.is_empty() {
             return;
@@ -2925,7 +3101,7 @@ impl Scene {
         );
         let root_network_handle = self.document.allocate_handle();
         let mut child_networks = Vec::new();
-        for (index, (owner, set, variables, groups)) in scopes.into_iter().enumerate() {
+        for (index, (owner, set, variables, groups, foreign)) in scopes.into_iter().enumerate() {
             let parameters = if set.local_parameters.is_empty() {
                 &self.named_parameters
             } else {
@@ -2940,6 +3116,7 @@ impl Scene {
                 index as i32 + 1,
                 variables,
                 groups,
+                foreign,
                 owner == model_owner,
             ) {
                 child_networks.push(handle);
@@ -2992,9 +3169,9 @@ mod tests {
     };
     use super::*;
     use crate::scene::ChangeKind;
-    use acadrust::entities::{Arc, Circle, Insert, Line, LwPolyline, Ray, Spline, XLine};
-    use acadrust::tables::BlockRecord;
-    use acadrust::types::Vector2;
+    use codec::entities::{Arc, Circle, Insert, Line, LwPolyline, Ray, Spline, XLine};
+    use codec::tables::BlockRecord;
+    use codec::types::Vector2;
 
     fn line_entity(scene: &mut Scene, start: (f64, f64), end: (f64, f64)) -> Handle {
         scene.add_entity(EntityType::Line(Line::from_points(
@@ -3020,14 +3197,8 @@ mod tests {
     }
 
     fn native_group_handle(document: &CadDocument, owner: Handle) -> Handle {
-        let dict = document
-            .extension_dictionary_handle(owner)
-            .expect("extension dictionary should exist");
-        let Some(ObjectType::Dictionary(dictionary)) = document.objects.get(&dict) else {
-            panic!("expected owner's extension dictionary object to exist");
-        };
-        let network_handle = dictionary
-            .get(NETWORK_DICTIONARY_KEY)
+        // The scope's network sits under a dictionary of its own.
+        let network_handle = native_scope_network_handle(document, owner)
             .expect("ACAD_ASSOCNETWORK entry should exist");
         let Some(ObjectType::Associative(AssociativeObject {
             data: AssociativeData::Network(network),
@@ -3592,7 +3763,7 @@ mod tests {
         let mut block = BlockRecord::new("fixture");
         block.handle = scene.document.allocate_handle();
         scene.document.block_records.add(block).unwrap();
-        let point = scene.add_entity(EntityType::Point(acadrust::entities::Point::at(
+        let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(
             Vector3::new(1.0, 2.0, 0.0),
         )));
         let insert = scene.add_entity(EntityType::Insert(Insert::new(
@@ -4273,7 +4444,7 @@ mod tests {
         for ext in ["dxf", "dwg"] {
             let mut scene = Scene::new();
             let ellipse = scene.add_entity(EntityType::Ellipse(
-                acadrust::entities::Ellipse::from_center_axes(
+                codec::entities::Ellipse::from_center_axes(
                     Vector3::new(0.0, 0.0, 0.0),
                     Vector3::new(4.0, 0.0, 0.0),
                     0.5,

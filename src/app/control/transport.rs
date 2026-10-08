@@ -53,6 +53,7 @@ fn listen(sender: mpsc::Sender<Envelope>) -> std::io::Result<()> {
     let mut file = options.open(&path)?;
     write!(file, "{descriptor}")?;
     drop(file);
+    let _ = crate::mcp::sync_agent_tool_schemas();
     let clients = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
         if clients.fetch_add(1, Ordering::SeqCst) >= 8 {

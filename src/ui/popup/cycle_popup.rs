@@ -11,7 +11,7 @@ use crate::app::Message;
 
 /// Row content for one overlapping candidate.
 pub struct CycleCandidate {
-    pub handle: acadrust::Handle,
+    pub handle: codec::Handle,
     pub type_name: String,
     pub layer: String,
     /// The color the object is drawn with (layer-inherited when ByLayer).
@@ -53,7 +53,7 @@ fn clamp_col_width(labels: impl Iterator<Item = usize>, glyph_w: f32, min: f32, 
 }
 
 fn item_row(
-    handle: acadrust::Handle,
+    handle: codec::Handle,
     type_name: String,
     layer: String,
     color: [f32; 4],

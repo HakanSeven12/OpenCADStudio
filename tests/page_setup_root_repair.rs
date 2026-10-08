@@ -9,8 +9,8 @@
 // truly can't be found, synthesises a fresh one so registration sticks. These
 // guards exercise that repair through the page-setup and CTAB write paths.
 
-use acadrust::objects::{ObjectType, PlotSettings};
-use acadrust::Handle;
+use codec::objects::{ObjectType, PlotSettings};
+use codec::Handle;
 use OpenCADStudio::scene::Scene;
 
 /// Break a document the way a foreign DWG does: dangle the header root pointer

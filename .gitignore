@@ -41,3 +41,6 @@ __pycache__/
 
 # Single-instance lock files the app writes next to an open drawing
 *.ocs.lock
+
+# macOS Finder metadata
+.DS_Store

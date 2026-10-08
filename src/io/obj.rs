@@ -51,11 +51,31 @@ pub fn parse_obj(src: &str, color: [f32; 4]) -> Option<MeshModel> {
                         Some((pos_i, norm_i))
                     })
                     .collect();
-                // Fan-triangulate: (0,1,2), (0,2,3), …
-                for k in 1..(descs.len() as isize - 1) {
-                    face_verts.push(descs[0]);
-                    face_verts.push(descs[k as usize]);
-                    face_verts.push(descs[k as usize + 1]);
+                // A fan is only right for convex faces; floor-plan n-gons
+                // are concave, so larger faces go through the kernel's
+                // triangulator and fall back to the fan if it declines. (#680)
+                let corners: Vec<[f64; 3]> = descs
+                    .iter()
+                    .map(|(pos_i, _)| {
+                        let p = positions.get(*pos_i).copied().unwrap_or([0.0; 3]);
+                        [p[0] as f64, p[1] as f64, p[2] as f64]
+                    })
+                    .collect();
+                let triangles = if descs.len() > 3 {
+                    crate::entities::mesh::triangulate_planar_indices(&corners)
+                } else {
+                    Vec::new()
+                };
+                if triangles.is_empty() {
+                    for k in 1..(descs.len() as isize - 1) {
+                        face_verts.push(descs[0]);
+                        face_verts.push(descs[k as usize]);
+                        face_verts.push(descs[k as usize + 1]);
+                    }
+                } else {
+                    for triangle in triangles {
+                        face_verts.extend(triangle.map(|index| descs[index]));
+                    }
                 }
             }
             _ => {}

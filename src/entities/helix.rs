@@ -1,6 +1,6 @@
-use acadrust::entities::{Helix, HelixConstraint, Spline};
-use acadrust::types::Vector3;
-use cadkernel::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
+use codec::entities::{Helix, HelixConstraint, Spline};
+use codec::types::Vector3;
+use kernel::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
 use glam::DVec3;
 
 use crate::command::EntityTransform;
@@ -451,7 +451,7 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
 fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {
     match transform {
         EntityTransform::Translate(delta) => {
-            acadrust::Entity::translate(helix, Vector3::new(delta.x, delta.y, delta.z));
+            codec::Entity::translate(helix, Vector3::new(delta.x, delta.y, delta.z));
         }
         EntityTransform::Rotate { center, axis, angle_rad } => {
             crate::scene::view::transform::apply_standard_transform(
@@ -470,14 +470,14 @@ fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {
                 *p2,
                 *working_normal,
             );
-            acadrust::Entity::apply_transform(helix, &reflection);
+            codec::Entity::apply_transform(helix, &reflection);
         }
-        EntityTransform::Affine(value) => acadrust::Entity::apply_transform(helix, value),
+        EntityTransform::Affine(value) => codec::Entity::apply_transform(helix, value),
     }
 }
 
 impl RenderConvertible for Helix {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         self.spline.to_render(document)
     }
 }
@@ -600,5 +600,31 @@ mod tests {
             assert!(Vec3::from(twice_curve.point_at(parameter))
                 .distance(Vec3::from(original_curve.point_at(parameter))) < 1.0e-8);
         }
+    }
+}
+
+/// Rebuild the derived spline after a scripted create or edit of the
+/// generating parameters. `radius` is the top radius; the base radius is the
+/// start point's distance from the axis.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn normalize_scripted_helix(old: Option<&Helix>, new: &mut Helix) -> Result<(), String> {
+    let unchanged = old.is_some_and(|old| {
+        old.axis_base_point == new.axis_base_point
+            && old.start_point == new.start_point
+            && old.axis_vector == new.axis_vector
+            && old.radius.to_bits() == new.radius.to_bits()
+            && old.turns.to_bits() == new.turns.to_bits()
+            && old.turn_height.to_bits() == new.turn_height.to_bits()
+            && old.handedness == new.handedness
+            && old.constraint == new.constraint
+    });
+    if unchanged {
+        return Ok(());
+    }
+    let top = new.radius;
+    if rebuild(new, top) {
+        Ok(())
+    } else {
+        Err("Helix parameters do not define a valid curve".into())
     }
 }

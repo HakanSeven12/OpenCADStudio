@@ -1,6 +1,6 @@
 use super::{FindMatchKey, Message, OpenCADStudio};
 use crate::entities::traits::EntityTypeOps;
-use acadrust::EntityType;
+use codec::EntityType;
 use iced::Task;
 
 impl OpenCADStudio {
@@ -316,7 +316,7 @@ fn replace_entity_text(
 }
 
 fn replace_match_text(
-    document: &mut acadrust::CadDocument,
+    document: &mut codec::CadDocument,
     target: FindMatchKey,
     search: &str,
     replacement: &str,
@@ -349,7 +349,7 @@ fn replace_match_text(
     }
 }
 
-fn match_owner_handle(target: FindMatchKey) -> acadrust::Handle {
+fn match_owner_handle(target: FindMatchKey) -> codec::Handle {
     match target {
         FindMatchKey::Entity(handle) => handle,
         FindMatchKey::BlockEntityInInsert { insert, .. } => insert,
@@ -357,7 +357,7 @@ fn match_owner_handle(target: FindMatchKey) -> acadrust::Handle {
     }
 }
 
-fn match_document_handle(target: FindMatchKey) -> acadrust::Handle {
+fn match_document_handle(target: FindMatchKey) -> codec::Handle {
     match target {
         FindMatchKey::Entity(handle) => handle,
         FindMatchKey::BlockEntityInInsert { entity, .. } => entity,
@@ -387,9 +387,9 @@ fn match_label(target: FindMatchKey) -> String {
 }
 
 fn block_contains_entity(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     block_name: &str,
-    target: acadrust::Handle,
+    target: codec::Handle,
     visited: &mut Vec<String>,
 ) -> bool {
     if visited

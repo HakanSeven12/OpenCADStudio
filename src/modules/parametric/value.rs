@@ -12,8 +12,8 @@
 //! submits) is still computed from a one-time read of current geometry —
 //! that part doesn't change.
 
-use acadrust::entities::EntityType;
-use acadrust::types::Handle;
+use codec::entities::EntityType;
+use codec::types::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind};
@@ -372,99 +372,6 @@ impl CadCommand for DistanceConstraintCommand {
     }
 }
 
-/// Constrains the angle (in degrees) from `fixed`'s direction to `moving`'s.
-pub struct AngleConstraintCommand {
-    command_name: &'static str,
-    fixed_handle: Handle,
-    moving_handle: Handle,
-    default_value: f64,
-    /// Snapshot of `Scene::named_parameters`' names at construction time —
-    /// see `parse_driving_value`'s doc comment for why a snapshot.
-    known_param_names: Vec<String>,
-}
-
-impl AngleConstraintCommand {
-    /// `None` unless both `fixed` and `moving` are lines.
-    pub fn new(scene: &Scene, fixed: Handle, moving: Handle) -> Option<Self> {
-        Self::with_name(scene, fixed, moving, "ACONSTRAINT")
-    }
-
-    pub fn with_name(
-        scene: &Scene,
-        fixed: Handle,
-        moving: Handle,
-        command_name: &'static str,
-    ) -> Option<Self> {
-        let fixed_entity = scene.document.get_entity(fixed)?;
-        let moving_entity = scene.document.get_entity(moving)?;
-        let (EntityType::Line(f), EntityType::Line(m)) = (fixed_entity, moving_entity) else {
-            return None;
-        };
-        let a1 = (f.end.y - f.start.y).atan2(f.end.x - f.start.x);
-        let a2 = (m.end.y - m.start.y).atan2(m.end.x - m.start.x);
-        let default_value = (a2 - a1).to_degrees();
-        let known_param_names = scene
-            .named_parameters()
-            .iter()
-            .map(|p| p.name.clone())
-            .collect();
-        Some(Self {
-            command_name,
-            fixed_handle: fixed,
-            moving_handle: moving,
-            default_value,
-            known_param_names,
-        })
-    }
-
-    fn build(&self, target: DrivingValue) -> Option<CmdResult> {
-        if matches!(&target, DrivingValue::Literal(value) if !value.is_finite()) {
-            return None;
-        }
-        Some(CmdResult::AddParametricConstraint {
-            kind: ConstraintKind::Angle,
-            refs: vec![
-                ParametricRef::whole(self.fixed_handle),
-                ParametricRef::whole(self.moving_handle),
-            ],
-            driving_param: Some(target),
-            label: "Angle constraint",
-        })
-    }
-}
-
-impl CadCommand for AngleConstraintCommand {
-    fn name(&self) -> &'static str {
-        self.command_name
-    }
-
-    fn prompt(&self) -> String {
-        format!("Specify angle in degrees <{:.4}>: ", self.default_value)
-    }
-
-    fn input_kind(&self) -> InputKind {
-        InputKind::SingleToken
-    }
-
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
-        CmdResult::NeedPoint
-    }
-
-    fn on_enter(&mut self) -> CmdResult {
-        self.build(DrivingValue::Literal(self.default_value))
-            .unwrap_or(CmdResult::Cancel)
-    }
-
-    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let value = parse_driving_value(text, &self.known_param_names)?;
-        self.build(value)
-    }
-
-    fn on_escape(&mut self) -> CmdResult {
-        CmdResult::Cancel
-    }
-}
-
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
@@ -532,16 +439,16 @@ mod tests {
     }
 
     fn add_line(scene: &mut Scene) -> Handle {
-        scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(6.0, 8.0, 0.0),
+        scene.add_entity(EntityType::Line(codec::entities::Line::from_points(
+            codec::types::Vector3::new(0.0, 0.0, 0.0),
+            codec::types::Vector3::new(6.0, 8.0, 0.0),
         )))
     }
 
     fn add_circle(scene: &mut Scene) -> Handle {
         scene.add_entity(EntityType::Circle(
-            acadrust::entities::Circle::from_center_radius(
-                acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            codec::entities::Circle::from_center_radius(
+                codec::types::Vector3::new(0.0, 0.0, 0.0),
                 3.0,
             ),
         ))

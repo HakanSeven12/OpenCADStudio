@@ -2,9 +2,9 @@
 //
 // Shared grips and properties for modeler entities.
 
-use acadrust::entities::{Body, Region, Solid3D, Surface};
-use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-use cadkernel::space::polygon;
+use codec::entities::{Body, Region, Solid3D, Surface};
+use codec::xdata::{ExtendedDataRecord, XDataValue};
+use kernel::space::polygon;
 use crate::t;
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -14,7 +14,7 @@ use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
 /// Shared transform for the ACIS volume entities. Translate / rotate / scale
-/// delegate to acadrust (which composes the move into the solid's ACIS
+/// delegate to opencadcodec (which composes the move into the solid's ACIS
 /// placement), and mirror delegates via a reflection transform. Without this
 /// the entity dispatcher treated solids as non-transformable, so a moved or
 /// pasted solid stayed at its original ACIS placement.
@@ -24,7 +24,7 @@ macro_rules! impl_acis_transformable {
             fn apply_transform(&mut self, t: &EntityTransform) {
                 crate::scene::view::transform::apply_standard_entity_transform(self, t, |e, p1, p2| {
                     let m = crate::scene::view::transform::reflection_about_xy_line(p1, p2);
-                    acadrust::Entity::apply_transform(e, &m);
+                    codec::Entity::apply_transform(e, &m);
                 });
             }
         }
@@ -37,14 +37,14 @@ impl_acis_transformable!(Surface);
 
 // ── shared helpers ────────────────────────────────────────────────────────────
 
-fn dvec3(v: &acadrust::types::Vector3) -> glam::DVec3 {
+fn dvec3(v: &codec::types::Vector3) -> glam::DVec3 {
     glam::DVec3::new(v.x, v.y, v.z)
 }
 
-fn translate_acis_entity<T: acadrust::Entity>(entity: &mut T, d: glam::DVec3) {
-    acadrust::Entity::translate(
+fn translate_acis_entity<T: codec::Entity>(entity: &mut T, d: glam::DVec3) {
+    codec::Entity::translate(
         entity,
-        acadrust::types::Vector3::new(d.x, d.y, d.z),
+        codec::types::Vector3::new(d.x, d.y, d.z),
     );
 }
 
@@ -110,14 +110,29 @@ fn write_surface_property_state(surface: &mut Surface, state: SurfacePropertySta
     surface.common.extended_data.upsert_record(record);
 }
 
+/// Upper bound for the header `$ISOLINES` value handed to tessellation —
+/// the Options slider's own ceiling ("Isolines per surface", 0..=64).
+pub(crate) const MAX_HEADER_ISOLINES: i16 = 64;
+
+/// Upper bound for per-surface `u/v_isolines` — the plugin editor's
+/// writable range for those fields (0..=200).
+pub(crate) const MAX_SURFACE_ISOLINES: i16 = 200;
+
+/// Header `$ISOLINES` (file- or command-controlled `i16`) → the bounded
+/// per-face isolate count handed to the kernel, which draws `0..count`
+/// isolines per face with no ceiling of its own.
+pub(crate) fn clamp_header_isolines(raw: i16) -> usize {
+    raw.clamp(0, MAX_HEADER_ISOLINES) as usize
+}
+
 pub(crate) fn surface_isoline_counts(surface: &Surface) -> [usize; 2] {
     [
-        surface.u_isolines.max(0) as usize,
-        surface.v_isolines.max(0) as usize,
+        surface.u_isolines.clamp(0, MAX_SURFACE_ISOLINES) as usize,
+        surface.v_isolines.clamp(0, MAX_SURFACE_ISOLINES) as usize,
     ]
 }
 
-fn handle_text(handle: Option<acadrust::Handle>) -> String {
+fn handle_text(handle: Option<codec::Handle>) -> String {
     handle
         .filter(|handle| handle.is_valid())
         .map(|handle| format!("{:X}", handle.value()))
@@ -125,20 +140,20 @@ fn handle_text(handle: Option<acadrust::Handle>) -> String {
 }
 
 fn acis_sections(
-    acis: &acadrust::entities::AcisData,
-    wires: &[acadrust::entities::Wire],
-    silhouettes: &[acadrust::entities::Silhouette],
-    history: Option<acadrust::Handle>,
+    acis: &codec::entities::AcisData,
+    wires: &[codec::entities::Wire],
+    silhouettes: &[codec::entities::Silhouette],
+    history: Option<codec::Handle>,
 ) -> Vec<PropSection> {
     let mut wire_types = [0usize; 5];
     let mut transformed = 0usize;
     let mut points = 0usize;
     for wire in wires {
         let index = match wire.wire_type {
-            acadrust::entities::WireType::Silhouette => 1,
-            acadrust::entities::WireType::VisibleEdge => 2,
-            acadrust::entities::WireType::HiddenEdge => 3,
-            acadrust::entities::WireType::Isoline => 4,
+            codec::entities::WireType::Silhouette => 1,
+            codec::entities::WireType::VisibleEdge => 2,
+            codec::entities::WireType::HiddenEdge => 3,
+            codec::entities::WireType::Isoline => 4,
             _ => 0,
         };
         wire_types[index] += 1;
@@ -245,7 +260,7 @@ fn acis_sections(
     ]
 }
 
-fn position_section(prefix: &str, p: &acadrust::types::Vector3) -> PropSection {
+fn position_section(prefix: &str, p: &codec::types::Vector3) -> PropSection {
     let fields = match prefix {
         "rgn" => ["rgn_px", "rgn_py", "rgn_pz"],
         "bdy" => ["bdy_px", "bdy_py", "bdy_pz"],
@@ -268,8 +283,8 @@ fn region_area_perimeter(region: &Region) -> (f64, f64) {
         let (plane, loops, true) = crate::scene::model::presspull_model::profile_geometry(
             &EntityType::Region(region.clone()),
         )? else { return None; };
-        let unit = cadkernel::space::Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
-        let transform = cadkernel::geom2d::Transform {
+        let unit = kernel::space::Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
+        let transform = kernel::geom2d::Transform {
             origin: unit.project(plane.origin)?.into(),
             x_axis: unit.project_vector(plane.x_axis)?.into(),
             y_axis: unit.project_vector(plane.y_axis)?.into(),
@@ -332,13 +347,13 @@ impl PropertyEditable for Solid3D {
             return;
         };
         let delta = match field {
-            "s3d_px" => acadrust::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
-            "s3d_py" => acadrust::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
-            "s3d_pz" => acadrust::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
+            "s3d_px" => codec::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
+            "s3d_py" => codec::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
+            "s3d_pz" => codec::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
             _ => return,
         };
-        if delta != acadrust::types::Vector3::ZERO {
-            acadrust::Entity::translate(self, delta);
+        if delta != codec::types::Vector3::ZERO {
+            codec::Entity::translate(self, delta);
         }
     }
 }
@@ -412,35 +427,37 @@ impl PropertyEditable for Body {
             return;
         };
         let delta = match field {
-            "bdy_px" => acadrust::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
-            "bdy_py" => acadrust::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
-            "bdy_pz" => acadrust::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
+            "bdy_px" => codec::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
+            "bdy_py" => codec::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
+            "bdy_pz" => codec::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
             _ => return,
         };
-        if delta != acadrust::types::Vector3::ZERO {
-            acadrust::Entity::translate(self, delta);
+        if delta != codec::types::Vector3::ZERO {
+            codec::Entity::translate(self, delta);
         }
     }
 }
 
-fn embedded_name(entity: Option<&acadrust::entities::EmbeddedEntity>) -> &'static str {
+fn embedded_name(entity: Option<&codec::entities::EmbeddedEntity>) -> &'static str {
     match entity {
-        Some(acadrust::entities::EmbeddedEntity::Point(_)) => "Point",
-        Some(acadrust::entities::EmbeddedEntity::Line(_)) => "Line",
-        Some(acadrust::entities::EmbeddedEntity::Arc(_)) => "Arc",
-        Some(acadrust::entities::EmbeddedEntity::Circle(_)) => "Circle",
-        Some(acadrust::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
-        Some(acadrust::entities::EmbeddedEntity::Spline(_)) => "Spline",
-        Some(acadrust::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
-        Some(acadrust::entities::EmbeddedEntity::Region(_)) => "Region",
-        Some(acadrust::entities::EmbeddedEntity::Ray(_)) => "Ray",
-        Some(acadrust::entities::EmbeddedEntity::XLine(_)) => "XLine",
-        Some(acadrust::entities::EmbeddedEntity::Unknown { .. }) => "Unknown",
+        Some(codec::entities::EmbeddedEntity::Point(_)) => "Point",
+        Some(codec::entities::EmbeddedEntity::Line(_)) => "Line",
+        Some(codec::entities::EmbeddedEntity::Arc(_)) => "Arc",
+        Some(codec::entities::EmbeddedEntity::Circle(_)) => "Circle",
+        Some(codec::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
+        Some(codec::entities::EmbeddedEntity::Spline(_)) => "Spline",
+        Some(codec::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
+        // A 2D / 3D polyline profile the modeler keeps as a wire body.
+        Some(codec::entities::EmbeddedEntity::Body { .. }) => "Polyline",
+        Some(codec::entities::EmbeddedEntity::Region(_)) => "Region",
+        Some(codec::entities::EmbeddedEntity::Ray(_)) => "Ray",
+        Some(codec::entities::EmbeddedEntity::XLine(_)) => "XLine",
+        Some(codec::entities::EmbeddedEntity::Unknown { .. }) => "Unknown",
         None => "None",
     }
 }
 
-fn vector_text(vector: &acadrust::types::Vector3) -> String {
+fn vector_text(vector: &codec::types::Vector3) -> String {
     format!("{:.6}, {:.6}, {:.6}", vector.x, vector.y, vector.z)
 }
 
@@ -457,7 +474,7 @@ fn matrix_text(matrix: &[f64; 16]) -> String {
         .join(" ")
 }
 
-fn sweep_options_text(options: &acadrust::entities::SurfaceSweepOptions) -> String {
+fn sweep_options_text(options: &codec::entities::SurfaceSweepOptions) -> String {
     format!(
         "draft {:.6} ({:.6}→{:.6}); twist {:.6}; scale {:.6}; align {:.6}; solid {}; flags {}/{}; align-start {}; bank {}; base {}; sweep-xform {}; path-xform {}; ref {}",
         options.draft_angle,
@@ -479,7 +496,7 @@ fn sweep_options_text(options: &acadrust::entities::SurfaceSweepOptions) -> Stri
 }
 
 fn surface_construction_section(surface: &Surface) -> PropSection {
-    use acadrust::entities::SurfaceData;
+    use codec::entities::SurfaceData;
     let mut props = vec![
         ro(t!("Kind").as_ref(), "srf_kind", format!("{:?}", surface.kind)),
         ro(t!("Modeler Format").as_ref(),
@@ -724,9 +741,9 @@ fn surface_construction_section(surface: &Surface) -> PropSection {
     }
 }
 
-fn translate_surface(surface: &mut Surface, delta: acadrust::types::Vector3) {
+fn translate_surface(surface: &mut Surface, delta: codec::types::Vector3) {
     let before = surface.point_of_reference;
-    acadrust::Entity::translate(surface, delta);
+    codec::Entity::translate(surface, delta);
     if surface.point_of_reference == before {
         surface.point_of_reference = before + delta;
     }
@@ -744,7 +761,7 @@ impl Grippable for Surface {
         if let GripApply::Translate(delta) = apply {
             translate_surface(
                 self,
-                acadrust::types::Vector3::new(delta.x, delta.y, delta.z),
+                codec::types::Vector3::new(delta.x, delta.y, delta.z),
             );
         }
     }
@@ -791,24 +808,24 @@ impl PropertyEditable for Surface {
                     return;
                 };
                 let delta = match field {
-                    "srf_px" => acadrust::types::Vector3::new(
+                    "srf_px" => codec::types::Vector3::new(
                         value - self.point_of_reference.x,
                         0.0,
                         0.0,
                     ),
-                    "srf_py" => acadrust::types::Vector3::new(
+                    "srf_py" => codec::types::Vector3::new(
                         0.0,
                         value - self.point_of_reference.y,
                         0.0,
                     ),
-                    "srf_pz" => acadrust::types::Vector3::new(
+                    "srf_pz" => codec::types::Vector3::new(
                         0.0,
                         0.0,
                         value - self.point_of_reference.z,
                     ),
                     _ => return,
                 };
-                if delta != acadrust::types::Vector3::ZERO {
+                if delta != codec::types::Vector3::ZERO {
                     translate_surface(self, delta);
                 }
             }
@@ -822,13 +839,13 @@ impl PropertyEditable for Surface {
 
 use crate::scene::model::mesh_model::MeshLodSet;
 use crate::scene::convert::solid3d_tess;
-use acadrust::{types::Vector3, EntityType};
+use codec::{types::Vector3, EntityType};
 
 const DISPLAY_DEFLECTION_COEFFICIENT: f64 = 2.5e-4;
 
 /// Shared world-space chord tolerance for solid display.
 pub fn display_deflection(
-    header: &acadrust::document::HeaderVariables,
+    header: &codec::document::HeaderVariables,
     facet_res: f64,
 ) -> Option<f64> {
     let low = header.model_space_extents_min;
@@ -911,7 +928,7 @@ pub fn tessellate_volume(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadkernel::geom2d::{Curve, Line};
+    use kernel::geom2d::{Curve, Line};
 
     fn ring(points: &[[f64; 2]]) -> Vec<Curve> {
         points.iter().copied().zip(points.iter().copied().cycle().skip(1))
@@ -938,5 +955,28 @@ mod tests {
         let (min, max) = crate::scene::convert::tess::entity_bounds(&EntityType::Region(region));
         assert_eq!(min, [0.0, 0.0, 0.0]);
         assert_eq!(max, [10.0, 10.0, 0.0]);
+    }
+
+    /// `Surface.u/v_isolines` are raw `i16` — a file can carry 32767 and the
+    /// native property editor only floors at 0 — and the counts go straight
+    /// into the kernel, which draws `0..count` isolines per face. The
+    /// bounded answer the rest of the product agrees on is the plugin
+    /// editor's writable range, 0..=200.
+    #[test]
+    fn surface_isolate_counts_stay_within_the_plugin_editor_range() {
+        use codec::entities::{Surface, SurfaceKind};
+
+        let mut surface = Surface::new(SurfaceKind::Extruded);
+        surface.u_isolines = i16::MAX;
+        surface.v_isolines = -1;
+        assert_eq!(
+            surface_isoline_counts(&surface),
+            [200, 0],
+            "a hostile surface must not hand the kernel 32767 isolines"
+        );
+
+        surface.u_isolines = 8;
+        surface.v_isolines = 6;
+        assert_eq!(surface_isoline_counts(&surface), [8, 6]);
     }
 }

@@ -99,7 +99,7 @@ impl Scene {
         if !self.any_viewport_grid_on() {
             return Vec::new();
         }
-        self.active_viewports(vw, vh, acadrust::entities::ViewportRenderMode::Wireframe2D)
+        self.active_viewports(vw, vh, codec::entities::ViewportRenderMode::Wireframe2D)
             .into_iter()
             .filter(|inst| inst.grid_on)
             .map(|inst| (inst.screen_rect, inst.camera, inst.handle))
@@ -119,7 +119,7 @@ impl Scene {
         &self,
         canvas_w: f32,
         canvas_h: f32,
-        model_mode: acadrust::entities::ViewportRenderMode,
+        model_mode: codec::entities::ViewportRenderMode,
     ) -> Vec<ViewportInstance> {
         if self.current_layout == "Model" {
             let tiles = self.model_tiles.borrow();
@@ -185,7 +185,7 @@ impl Scene {
                 height: canvas_h,
             },
             camera: sheet_cam,
-            render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
+            render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
             active: false,
             grid_on: sheet_grid_on,
             paper_sheet: true,
@@ -561,6 +561,9 @@ impl Scene {
                 .map(|l| l.is_plottable)
                 .unwrap_or(true)
         };
+        // Plot items are stacked by draw depth; a fill left at 0 lands above
+        // or below lines by chance instead of where DRAWORDER put it. (#1345)
+        let depth_map = self.draw_depth_map();
         let mut models = Vec::new();
         for (&handle, model) in self.hatches.iter() {
             let Some(source) = self.document.get_entity(handle) else {
@@ -609,6 +612,7 @@ impl Scene {
             hatch.color = style.0;
             hatch.aci = style.4;
             hatch.line_weight_px = style.3;
+            hatch.draw_depth = depth_map.get(&handle.value()).map_or(0.0, |depth| depth[0]);
             if let EntityType::Hatch(dxf) = entity {
                 if let model::hatch_model::HatchPattern::Pattern(_) = &hatch.pattern {
                     if dxf.pattern.lines.is_empty() {
@@ -762,7 +766,7 @@ impl Scene {
         if let Some(cam) = self.camera_from_view_mode(
             vp.view_direction,
             vp.view_target,
-            acadrust::types::Vector2 {
+            codec::types::Vector2 {
                 x: vp.view_center.x,
                 y: vp.view_center.y,
             },
@@ -795,7 +799,7 @@ impl Scene {
 
         // Auto-fit: aim at the content cluster centre, drop the stale view_center.
         let fit_h = cluster_half * 2.0 * 1.05;
-        let tgt = acadrust::types::Vector3 {
+        let tgt = codec::types::Vector3 {
             x: cx,
             y: cy,
             z: vp.view_target.z,
@@ -803,7 +807,7 @@ impl Scene {
         self.camera_from_view_mode(
             vp.view_direction,
             tgt,
-            acadrust::types::Vector2::ZERO,
+            codec::types::Vector2::ZERO,
             fit_h,
             vp.twist_angle,
             vp.status.perspective,
@@ -828,13 +832,7 @@ impl Scene {
         // wheel tick whenever the drawing contained one annotative object.
         // Explicit viewport annotation-scale changes still rebuild the resident
         // set; PSLTSCALE is a viewport GPU uniform.
-        let frozen = match self.document.get_entity(vp_handle) {
-            Some(EntityType::Viewport(vp)) => {
-                let f: HSet<Handle> = vp.frozen_layers.iter().cloned().collect();
-                f
-            }
-            _ => HSet::default(),
-        };
+        let frozen: HSet<Handle> = self.viewport_hidden_handles(vp_handle);
 
         let scale_handle = self.viewport_scale_handle(vp_handle);
         self.resident_wires_for(

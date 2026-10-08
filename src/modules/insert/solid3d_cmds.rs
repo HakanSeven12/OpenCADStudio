@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use acadrust::{entities::Solid3D, EntityType, Handle};
+use codec::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -166,16 +166,16 @@ impl ExtrudeCommand {
 }
 
 fn preview_body_wires(
-    body: &cadkernel::brep::Body,
+    body: &kernel::brep::Body,
     color: [f32; 4],
     isolines: usize,
 ) -> Vec<WireModel> {
     // This overlay only consumes curves. Do not triangulate the body's faces
     // on every cursor event just to discard the resulting surface mesh.
-    let wireframe = cadkernel::brep::mesh::tessellate_wireframe(
+    let wireframe = kernel::brep::mesh::tessellate_wireframe(
         body,
-        cadkernel::brep::mesh::TessellationTolerance::new(
-            cadkernel::tessellation::DEFAULT_ANGLE,
+        kernel::brep::mesh::TessellationTolerance::new(
+            kernel::tessellation::DEFAULT_ANGLE,
             1e-9,
         )
         .with_isolines(isolines),
@@ -899,12 +899,12 @@ impl CadCommand for PresspullCommand {
                 crate::scene::model::presspull_model::profile_geometry(&entity)
                     .map(|(plane, loops, _)| (plane, loops)),
             PresspullTargetKind::Face { body, face, .. } =>
-                cadkernel::brep::planar_face_profile(&body, face)
+                kernel::brep::planar_face_profile(&body, face)
                     .map(|profile| (profile.plane, profile.loops)),
         };
         if let Some((plane, loops)) = geometry {
             self.hover_cache = loops.into_iter().flatten().filter_map(|curve| {
-                let points = curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                let points = curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
                     .into_iter().map(|point| plane.point_at(point)).collect::<Vec<_>>();
                 (points.len() >= 2).then(|| {
                     let mut wire = WireModel::solid_f64(
@@ -918,7 +918,7 @@ impl CadCommand for PresspullCommand {
         self.hover_cache.clone()
     }
 
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, point: DVec3) -> CmdResult {
         if !self.needs_entity_pick() {
             return CmdResult::NeedPoint;
         }
@@ -1278,7 +1278,7 @@ impl RevolveCommand {
 }
 
 fn revolve_axis(entity: &EntityType) -> Option<(DVec3, DVec3)> {
-    let point = |value: &acadrust::types::Vector3| DVec3::new(value.x, value.y, value.z);
+    let point = |value: &codec::types::Vector3| DVec3::new(value.x, value.y, value.z);
     let (start, direction) = match entity {
         EntityType::Line(line) => (point(&line.start), point(&line.end) - point(&line.start)),
         EntityType::Ray(ray) => (point(&ray.base_point), point(&ray.direction)),
@@ -1346,7 +1346,7 @@ impl CadCommand for RevolveCommand {
     fn needs_entity_pick(&self) -> bool {
         self.step == RevolveStep::AxisObject
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
@@ -1606,6 +1606,10 @@ impl CadCommand for RevolveCommand {
 
 // ── SWEEP command ──────────────────────────────────────────────────────────
 
+/// Banking stays on for later sweeps until a twist angle is entered, as in
+/// the reference.
+static SWEEP_BANK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub struct SweepCommand {
     step: SweepStep,
     profiles: Vec<(Handle, EntityType)>,
@@ -1618,6 +1622,11 @@ pub struct SweepCommand {
     reference_start: Option<DVec3>,
     reference_length: f64,
     new_length_start: Option<DVec3>,
+    end_length: f64,
+    /// The drawing's named parameters, for Expression input.
+    parameters: crate::scene::named_parameters::ParameterTable,
+    /// The scale and twist expressions entered, if any.
+    expressions: [Option<String>; 2],
     isolines: usize,
     color: [f32; 4],
 }
@@ -1630,12 +1639,15 @@ enum SweepStep {
     Alignment,
     BasePoint,
     Scale,
+    /// The start reference length: a distance, or two points.
     ReferenceLength,
     ReferenceEnd,
+    /// The end reference length: a distance, or two points.
     NewLength,
-    NewLengthStart,
     NewLengthEnd,
     Twist,
+    ScaleExpression,
+    TwistExpression,
 }
 
 impl SweepCommand {
@@ -1648,13 +1660,30 @@ impl SweepCommand {
             preview_key: None,
             preview_cache: Vec::new(),
             mode: ExtrudeMode::Solid,
-            options: SweepOptions::default(),
+            options: SweepOptions {
+                bank: SWEEP_BANK.load(std::sync::atomic::Ordering::Relaxed),
+                ..SweepOptions::default()
+            },
             reference_start: None,
             reference_length: 1.0,
             new_length_start: None,
+            end_length: 1.0,
+            parameters: Default::default(),
+            expressions: [None, None],
             isolines,
             color,
         }
+    }
+
+    pub fn set_parameters(&mut self, parameters: crate::scene::named_parameters::ParameterTable) {
+        self.parameters = parameters;
+    }
+
+    /// An Expression input, evaluated against the drawing's parameters.
+    fn evaluate(&self, text: &str) -> Option<f64> {
+        let mut table = self.parameters.clone();
+        table.set("sweepExpression", text).ok()?;
+        table.resolve("sweepExpression").ok().filter(|value| value.is_finite())
     }
 
     pub fn set_preselection(&mut self, profiles: Vec<(Handle, EntityType)>) {
@@ -1694,6 +1723,7 @@ impl SweepCommand {
             mode: self.mode,
             options: self.options,
             color: self.color,
+            expressions: self.expressions.clone(),
         }
     }
 
@@ -1715,10 +1745,13 @@ impl SweepCommand {
         true
     }
 
-    fn length_anchor(&self) -> DVec3 {
-        self.reference_start
-            .or_else(|| self.selection_options().and_then(|options| options.base_point))
-            .unwrap_or(DVec3::ZERO)
+    /// The Reference scale is the start reference length over the end one.
+    fn set_end_length(&mut self, length: f64) -> bool {
+        if !length.is_finite() || length <= 1e-12 {
+            return false;
+        }
+        self.end_length = length;
+        self.set_scale(self.reference_length / length)
     }
 }
 
@@ -1742,25 +1775,28 @@ impl CadCommand for SweepCommand {
             ),
             SweepStep::BasePoint => t!("SWEEP  Specify base point:").into_owned(),
             SweepStep::Scale => format!(
-                "{} <{}>:", t!("SWEEP  Enter scale factor or [Reference]"), self.options.scale,
+                "{}<{:.4}>:", t!("SWEEP  Enter scale factor or [Reference/Expression]"), self.options.scale,
             ),
+            SweepStep::ScaleExpression | SweepStep::TwistExpression => t!("SWEEP  Enter expression:").into_owned(),
             SweepStep::ReferenceLength => format!(
                 "{} <{}>:",
-                t!("SWEEP  Specify reference length or first point"),
+                t!("SWEEP  Specify start reference length"),
                 crate::entities::common::format_length(self.reference_length),
             ),
-            SweepStep::ReferenceEnd => t!("SWEEP  Specify second reference point:").into_owned(),
+            SweepStep::ReferenceEnd | SweepStep::NewLengthEnd => t!("SWEEP  Specify second point:").into_owned(),
             SweepStep::NewLength => format!(
                 "{} <{}>:",
-                t!("SWEEP  Specify new length or [Points]"),
-                crate::entities::common::format_length(self.reference_length * self.options.scale),
+                t!("SWEEP  Specify end reference length"),
+                crate::entities::common::format_length(self.end_length),
             ),
-            SweepStep::NewLengthStart => t!("SWEEP  Specify first point of new length:").into_owned(),
-            SweepStep::NewLengthEnd => t!("SWEEP  Specify second point of new length:").into_owned(),
             SweepStep::Twist => format!(
-                "{} <{}>:",
-                t!("SWEEP  Specify twist angle or [Bank]"),
-                crate::entities::common::format_angle(self.options.twist_angle),
+                "{}<{}>:",
+                t!("SWEEP  Enter twist angle or allow banking for a non-planar sweep path [Bank/EXpression]"),
+                if self.options.bank {
+                    "Bank".to_string()
+                } else {
+                    format!("{:.4}", self.options.twist_angle.to_degrees())
+                },
             ),
         }
     }
@@ -1776,9 +1812,8 @@ impl CadCommand for SweepCommand {
                 CmdOption::new("Twist", "TWIST"),
             ],
             SweepStep::Alignment => vec![CmdOption::new("Yes", "YES"), CmdOption::new("No", "NO")],
-            SweepStep::Scale => vec![CmdOption::new("Reference", "REFERENCE")],
-            SweepStep::NewLength => vec![CmdOption::new("Points", "POINTS")],
-            SweepStep::Twist => vec![CmdOption::new("Bank", "BANK")],
+            SweepStep::Scale => vec![CmdOption::new("Reference", "REFERENCE"), CmdOption::new("Expression", "EXPRESSION")],
+            SweepStep::Twist => vec![CmdOption::new("Bank", "BANK"), CmdOption::new("EXpression", "EXPRESSION")],
             _ => Vec::new(),
         }
     }
@@ -1791,7 +1826,7 @@ impl CadCommand for SweepCommand {
         self.step == SweepStep::PickPath
     }
 
-    fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
         if self.step != SweepStep::PickPath || handle.is_null() || self.contains_profile(handle) {
             self.injected_path = None;
             return CmdResult::NeedPoint;
@@ -1801,11 +1836,20 @@ impl CadCommand for SweepCommand {
                 .filter(|(hovered, _)| *hovered == handle)
                 .map(|(_, entity)| entity.clone())
         });
-        if path.as_ref().is_some_and(crate::scene::model::sweep_model::is_sweep_path) {
-            self.finish(handle)
-        } else {
-            CmdResult::NeedPoint
+        let Some(path) = path.filter(crate::scene::model::sweep_model::is_sweep_path) else {
+            return CmdResult::NeedPoint;
+        };
+        self.options.path_pick = pt.is_finite().then_some(pt);
+        if (self.options.scale - 1.0).abs() > 1e-12 {
+            if let Some(message) = crate::scene::model::sweep_model::scaled_sweep_path_refusal(&path) {
+                return CmdResult::ReportMeasurement(format!(
+                    "{}\n{}",
+                    t!(message),
+                    t!("The selected path curve is not valid."),
+                ));
+            }
         }
+        self.finish(handle)
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
@@ -1827,15 +1871,12 @@ impl CadCommand for SweepCommand {
                 }
             }
             SweepStep::NewLength => {
-                self.set_scale(point.distance(self.length_anchor()) / self.reference_length);
-            }
-            SweepStep::NewLengthStart => {
                 self.new_length_start = Some(point);
                 self.step = SweepStep::NewLengthEnd;
             }
             SweepStep::NewLengthEnd => {
                 if let Some(start) = self.new_length_start {
-                    self.set_scale(point.distance(start) / self.reference_length);
+                    self.set_end_length(point.distance(start));
                 }
             }
             _ => {}
@@ -1848,6 +1889,7 @@ impl CadCommand for SweepCommand {
             SweepStep::PickProfiles | SweepStep::Mode | SweepStep::PickPath
                 | SweepStep::Alignment | SweepStep::Scale | SweepStep::ReferenceLength
                 | SweepStep::NewLength | SweepStep::Twist
+                | SweepStep::ScaleExpression | SweepStep::TwistExpression
         )
     }
 
@@ -1900,11 +1942,14 @@ impl CadCommand for SweepCommand {
                 self.step = SweepStep::PickPath;
             }
             SweepStep::Scale => {
-                if "REFERENCE".starts_with(&keyword) {
+                if "EXPRESSION".starts_with(&keyword) {
+                    self.step = SweepStep::ScaleExpression;
+                } else if "REFERENCE".starts_with(&keyword) {
                     self.reference_start = None;
                     self.new_length_start = None;
                     self.step = SweepStep::ReferenceLength;
                 } else if let Ok(scale) = value.parse::<f64>() {
+                    self.expressions[0] = None;
                     self.set_scale(scale);
                 }
             }
@@ -1916,22 +1961,42 @@ impl CadCommand for SweepCommand {
                 }
             }
             SweepStep::NewLength => {
-                if "POINTS".starts_with(&keyword) {
-                    self.step = SweepStep::NewLengthStart;
-                } else if let Some(length) = crate::entities::common::parse_typed_length(value) {
-                    self.set_scale(length / self.reference_length);
+                if let Some(length) = crate::entities::common::parse_typed_length(value) {
+                    self.set_end_length(length);
                 } else {
                     return None;
                 }
             }
+            SweepStep::ScaleExpression | SweepStep::TwistExpression => {
+                let Some(value) = self.evaluate(value) else {
+                    return Some(CmdResult::ReportMeasurement(t!(
+                        "The syntax is incorrect or a variable is not defined.  Reenter the expression or value."
+                    ).into_owned()));
+                };
+                let slot = if self.step == SweepStep::ScaleExpression { 0 } else { 1 };
+                self.expressions[slot] = Some(text.trim().to_string());
+                if self.step == SweepStep::ScaleExpression {
+                    self.set_scale(value);
+                } else {
+                    self.options.twist_angle = value.to_radians();
+                    self.options.bank = false;
+                    SWEEP_BANK.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+                self.step = SweepStep::PickPath;
+            }
             SweepStep::Twist => {
-                if "BANK".starts_with(&keyword) {
+                if keyword.len() >= 2 && "EXPRESSION".starts_with(&keyword) {
+                    self.step = SweepStep::TwistExpression;
+                } else if "BANK".starts_with(&keyword) {
                     self.options.bank = true;
+                    SWEEP_BANK.store(true, std::sync::atomic::Ordering::Relaxed);
                     self.step = SweepStep::PickPath;
                 } else if let Some(angle) = crate::entities::common::parse_angle(value) {
                     if angle.is_finite() {
                         self.options.twist_angle = angle;
+                        self.expressions[1] = None;
                         self.options.bank = false;
+                        SWEEP_BANK.store(false, std::sync::atomic::Ordering::Relaxed);
                         self.step = SweepStep::PickPath;
                     }
                 }
@@ -1947,9 +2012,12 @@ impl CadCommand for SweepCommand {
                 self.step = SweepStep::PickPath;
             }
             SweepStep::Mode => self.step = SweepStep::PickProfiles,
-            SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist
-                | SweepStep::NewLength => self.step = SweepStep::PickPath,
+            SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist => self.step = SweepStep::PickPath,
+            SweepStep::ScaleExpression | SweepStep::TwistExpression => {}
             SweepStep::ReferenceLength => self.step = SweepStep::NewLength,
+            SweepStep::NewLength => {
+                self.set_end_length(self.end_length);
+            }
             _ => return CmdResult::Cancel,
         }
         CmdResult::NeedPoint
@@ -2777,8 +2845,8 @@ pub fn empty_solid3d() -> EntityType {
 }
 
 pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType {
-    use acadrust::entities::{Surface, SurfaceData, SurfaceKind};
-    use acadrust::types::Vector3;
+    use codec::entities::{Surface, SurfaceData, SurfaceKind};
+    use codec::types::Vector3;
 
     let mut surface = Surface::new(SurfaceKind::Extruded);
     surface.u_isolines = 6;
@@ -2793,7 +2861,7 @@ pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType 
         options.is_solid = false;
         *sweep_vector = Vector3::new(direction.x, direction.y, direction.z);
     }
-    EntityType::Surface(surface)
+    EntityType::Surface(Box::new(surface))
 }
 
 pub fn empty_revolved_surface(
@@ -2803,8 +2871,8 @@ pub fn empty_revolved_surface(
     angle: f64,
     start_angle: f64,
 ) -> EntityType {
-    use acadrust::entities::{Surface, SurfaceData, SurfaceKind};
-    use acadrust::types::Vector3;
+    use codec::entities::{Surface, SurfaceData, SurfaceKind};
+    use codec::types::Vector3;
 
     let mut surface = Surface::new(SurfaceKind::Revolved);
     let axis = (axis_end - axis_start).normalize_or(DVec3::Z);
@@ -2832,7 +2900,7 @@ pub fn empty_revolved_surface(
         *stored_start = start_angle;
         *solid = false;
     }
-    EntityType::Surface(surface)
+    EntityType::Surface(Box::new(surface))
 }
 
 // ── Autocomplete registry ─────────────────────────────────
@@ -2853,7 +2921,7 @@ mod extrude_command_tests {
         command.set_preselection(
             vec![(
                 Handle::new(1),
-                EntityType::Circle(acadrust::entities::Circle::new()),
+                EntityType::Circle(codec::entities::Circle::new()),
             )],
             DVec3::ZERO,
             Some(DVec3::Z),
@@ -2875,7 +2943,7 @@ mod revolve_tests {
 
     #[test]
     fn cursor_angle_is_measured_about_the_model_axis() {
-        let profile = EntityType::Line(acadrust::entities::Line::from_coords(
+        let profile = EntityType::Line(codec::entities::Line::from_coords(
             2.0, 0.0, 0.0, 2.0, 4.0, 0.0,
         ));
         let mut command = RevolveCommand::new([1.0; 4], 0);
@@ -2908,8 +2976,8 @@ mod thicken_command_tests {
     fn thicken_filters_selection_recovers_from_invalid_text_and_measures_two_points() {
         let handle = Handle::new(42);
         let mut command = ThickenCommand::new(vec![
-            (Handle::new(1), EntityType::Line(acadrust::entities::Line::default())),
-            (handle, EntityType::Surface(acadrust::entities::Surface::new(acadrust::entities::SurfaceKind::Plane))),
+            (Handle::new(1), EntityType::Line(codec::entities::Line::default())),
+            (handle, EntityType::Surface(Box::new(codec::entities::Surface::new(codec::entities::SurfaceKind::Plane)))),
         ]);
         assert!(!command.is_selection_gathering());
         assert_eq!(command.handles, vec![handle]);

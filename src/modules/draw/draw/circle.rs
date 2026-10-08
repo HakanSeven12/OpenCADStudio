@@ -1,8 +1,8 @@
 // Circle creation commands.
 
-use acadrust::types::Vector3;
-use acadrust::{Circle, EntityType};
-use cadkernel::geom2d::{
+use codec::types::Vector3;
+use codec::{Circle, EntityType};
+use kernel::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine,
     Tolerance,
 };
@@ -12,7 +12,8 @@ use crate::command::{CadCommand, CmdResult, DynField, TangentObject, WorkingPlan
 use crate::modules::draw::defaults;
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::{TangentGeom, WireModel};
-use glam::DVec3;
+use super::arc::Ellipse2D;
+use glam::{DVec2, DVec3};
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -91,7 +92,7 @@ fn circumcircle(
     plane: WorkingPlane,
 ) -> Option<(DVec3, f64)> {
     let (a, b, c) = (plane.to_local(a), plane.to_local(b), plane.to_local(c));
-    let circle = cadkernel::geom2d::arc_through_points(
+    let circle = kernel::geom2d::arc_through_points(
         [a.x, a.y],
         [b.x, b.y],
         [c.x, c.y],
@@ -114,6 +115,17 @@ pub(crate) fn tangent_object_local(object: TangentObject, plane: WorkingPlane) -
         TangentObject::Circle { center, radius } => TangentObject::Circle {
             center: plane.to_local(center),
             radius,
+        },
+        TangentObject::Ellipse {
+            center,
+            major_axis,
+            normal,
+            minor_axis_ratio,
+        } => TangentObject::Ellipse {
+            center: plane.to_local(center),
+            major_axis: plane.vector_to_local(major_axis),
+            normal: plane.vector_to_local(normal),
+            minor_axis_ratio,
         },
     }
 }
@@ -601,6 +613,7 @@ fn solve_quadratic(a: f64, b: f64, c: f64) -> Vec<f64> {
     vec![(-b - sq) / (2.0 * a), (-b + sq) / (2.0 * a)]
 }
 
+#[allow(dead_code)]
 pub(crate) fn best_of(candidates: &[DVec3], hint: DVec3) -> Option<DVec3> {
     candidates.iter().copied().min_by(|a, b| {
         a.distance(hint)
@@ -608,6 +621,169 @@ pub(crate) fn best_of(candidates: &[DVec3], hint: DVec3) -> Option<DVec3> {
             .unwrap_or(std::cmp::Ordering::Equal)
     })
 }
+
+fn closest_point_on_obj(obj: &TangentObject, pt: DVec3, radius: f64) -> DVec3 {
+    match obj {
+        TangentObject::Line { p1, p2 } => {
+            let d = *p2 - *p1;
+            let len2 = d.x * d.x + d.y * d.y;
+            if len2 < 1e-12 {
+                *p1
+            } else {
+                let t = ((pt.x - p1.x) * d.x + (pt.y - p1.y) * d.y) / len2;
+                DVec3::new(p1.x + d.x * t, p1.y + d.y * t, 0.0)
+            }
+        }
+        TangentObject::Circle { center, radius: r_obj } => {
+            let dx = pt.x - center.x;
+            let dy = pt.y - center.y;
+            let len = dx.hypot(dy);
+            if len < 1e-9 {
+                DVec3::new(center.x + r_obj, center.y, 0.0)
+            } else {
+                let p_plus = DVec3::new(center.x + dx * (r_obj / len), center.y + dy * (r_obj / len), 0.0);
+                let p_minus = DVec3::new(center.x - dx * (r_obj / len), center.y - dy * (r_obj / len), 0.0);
+                if (p_plus.distance(pt) - radius).abs() < (p_minus.distance(pt) - radius).abs() {
+                    p_plus
+                } else {
+                    p_minus
+                }
+            }
+        }
+        TangentObject::Ellipse { center, major_axis, normal, minor_axis_ratio } => {
+            let ell = Ellipse2D::new(
+                DVec2::new(center.x, center.y),
+                DVec2::new(major_axis.x, major_axis.y),
+                normal.z,
+                *minor_axis_ratio,
+            );
+            let p_2d = DVec2::new(pt.x, pt.y);
+            let norm_pts = ell.normal_points_for_center(p_2d);
+            let closest_2d = norm_pts
+                .into_iter()
+                .min_by(|a, b| {
+                    let da = ((*a - p_2d).length() - radius).abs();
+                    let db = ((*b - p_2d).length() - radius).abs();
+                    da.total_cmp(&db)
+                })
+                .unwrap_or_else(|| ell.project_point(p_2d));
+            DVec3::new(closest_2d.x, closest_2d.y, 0.0)
+        }
+    }
+}
+
+fn object_side_alignment(obj: &TangentObject, c: DVec3, target: DVec3) -> f64 {
+    match obj {
+        TangentObject::Line { p1, p2 } => {
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            let len = dx.hypot(dy);
+            if len < 1e-12 {
+                return 1.0;
+            }
+            let nx = -dy / len;
+            let ny = dx / len;
+            let h_c = (c.x - p1.x) * nx + (c.y - p1.y) * ny;
+            let h_t = (target.x - p1.x) * nx + (target.y - p1.y) * ny;
+            if h_t.abs() < 1e-9 {
+                1.0
+            } else {
+                (h_c * h_t).signum()
+            }
+        }
+        TangentObject::Circle { center, radius: r_obj } => {
+            let dc = DVec2::new(c.x - center.x, c.y - center.y);
+            let dt = DVec2::new(target.x - center.x, target.y - center.y);
+            let lc = dc.length();
+            let lt = dt.length();
+            if lc < 1e-9 || lt < 1e-9 {
+                return 1.0;
+            }
+            let dir_dot = dc.dot(dt) / (lc * lt);
+            let c_is_external = lc > *r_obj;
+            let t_is_external = lt > *r_obj;
+            if c_is_external == t_is_external {
+                dir_dot
+            } else {
+                -1.0
+            }
+        }
+        TangentObject::Ellipse { center, major_axis, normal, minor_axis_ratio } => {
+            let ell = Ellipse2D::new(
+                DVec2::new(center.x, center.y),
+                DVec2::new(major_axis.x, major_axis.y),
+                normal.z,
+                *minor_axis_ratio,
+            );
+            let c_2d = DVec2::new(c.x, c.y);
+            let t_2d = DVec2::new(target.x, target.y);
+            let p_c = ell.project_point(c_2d);
+            let n_c = (c_2d - p_c).normalize_or_zero();
+            let p_t = ell.project_point(t_2d);
+            let n_t = (t_2d - p_t).normalize_or_zero();
+            n_c.dot(n_t)
+        }
+    }
+}
+
+fn score_ttr_candidate(
+    c: DVec3,
+    obj1: &TangentObject,
+    obj2: &TangentObject,
+    radius: f64,
+    r_inv: f64,
+    hit1: DVec3,
+    hit2: DVec3,
+    cursor: Option<DVec3>,
+) -> f64 {
+    let t1 = closest_point_on_obj(obj1, c, radius);
+    let t2 = closest_point_on_obj(obj2, c, radius);
+
+    let (s1, s2, d_cur) = if let Some(cur) = cursor {
+        let s1 = object_side_alignment(obj1, c, cur);
+        let s2 = object_side_alignment(obj2, c, cur);
+        let d_cur = ((cur - c).length() - radius).abs();
+        (s1, s2, d_cur)
+    } else {
+        // Without cursor, obj1's desired side is towards hit2, obj2's desired side is towards hit1
+        let s1 = object_side_alignment(obj1, c, hit2);
+        let s2 = object_side_alignment(obj2, c, hit1);
+        (s1, s2, 0.0)
+    };
+
+    let mismatch = (if s1 < 0.0 { 1.0 } else { 0.0 }) + (if s2 < 0.0 { 1.0 } else { 0.0 });
+    let d_pick = (t1 - hit1).length() + (t2 - hit2).length();
+
+    mismatch * 1000.0 - (s1 + s2) * 20.0 + (d_cur + d_pick) * r_inv
+}
+
+pub(crate) fn pick_best_ttr_candidate(
+    obj1: TangentObject,
+    obj2: TangentObject,
+    radius: f64,
+    hit1: DVec3,
+    hit2: DVec3,
+    cursor: Option<DVec3>,
+) -> Option<DVec3> {
+    let candidates = ttr_candidates(obj1, obj2, radius);
+    if candidates.is_empty() {
+        return None;
+    }
+    if candidates.len() == 1 {
+        return Some(candidates[0]);
+    }
+
+    let r_inv = 1.0 / radius.max(1e-6);
+
+    candidates
+        .into_iter()
+        .min_by(|&c_a, &c_b| {
+            let score_a = score_ttr_candidate(c_a, &obj1, &obj2, radius, r_inv, hit1, hit2, cursor);
+            let score_b = score_ttr_candidate(c_b, &obj1, &obj2, radius, r_inv, hit1, hit2, cursor);
+            score_a.total_cmp(&score_b)
+        })
+}
+
 
 fn best_circle_of(candidates: &[(DVec3, f64)], hint: DVec3) -> Option<(DVec3, f64)> {
     candidates
@@ -631,10 +807,242 @@ fn tangent_curve(object: TangentObject) -> KernelCurve {
             centre: [center.x, center.y],
             radius,
         }),
+        TangentObject::Ellipse {
+            center,
+            major_axis,
+            minor_axis_ratio,
+            ..
+        } => {
+            let a = major_axis.length();
+            let major_axis_2d = if a > 1e-9 {
+                [major_axis.x / a, major_axis.y / a]
+            } else {
+                [1.0, 0.0]
+            };
+            KernelCurve::Ellipse(kernel::geom2d::EllipseArc {
+                ellipse: kernel::geom2d::Ellipse {
+                    centre: [center.x, center.y],
+                    major_radius: a,
+                    minor_radius: a * minor_axis_ratio,
+                    major_axis: major_axis_2d,
+                },
+                start_parameter: 0.0,
+                end_parameter: std::f64::consts::TAU,
+            })
+        }
     }
 }
 
+fn to_ellipse2d(obj: TangentObject) -> Option<Ellipse2D> {
+    match obj {
+        TangentObject::Ellipse {
+            center,
+            major_axis,
+            normal,
+            minor_axis_ratio,
+        } => Some(Ellipse2D::new(
+            DVec2::new(center.x, center.y),
+            DVec2::new(major_axis.x, major_axis.y),
+            normal.z,
+            minor_axis_ratio,
+        )),
+        _ => None,
+    }
+}
+
+fn solve_1d_roots(
+    n_steps: usize,
+    mut eval: impl FnMut(f64) -> Option<f64>,
+) -> Vec<f64> {
+    let dt = TAU / (n_steps as f64);
+    let mut samples: Vec<(f64, Option<f64>)> = Vec::with_capacity(n_steps);
+    for i in 0..n_steps {
+        let t = i as f64 * dt;
+        let val = eval(t);
+        samples.push((t, val));
+    }
+
+    let mut roots = Vec::new();
+
+    for i in 0..n_steps {
+        let next_i = (i + 1) % n_steps;
+        let (ta, fa_opt) = samples[i];
+        let (tb_raw, fb_opt) = samples[next_i];
+        let tb = if next_i == 0 { TAU } else { tb_raw };
+
+        let (Some(fa), Some(fb)) = (fa_opt, fb_opt) else { continue };
+
+        // 1. Sign crossing
+        if fa.signum() != fb.signum() {
+            let mut lo = ta;
+            let mut hi = tb;
+            let mut best_t = 0.5 * (lo + hi);
+            for _ in 0..24 {
+                let mid = 0.5 * (lo + hi);
+                let Some(fm) = eval(mid) else { break };
+                best_t = mid;
+                if fm.abs() < 1e-12 {
+                    break;
+                }
+                if fm.signum() == fa.signum() {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            if let Some(f_val) = eval(best_t) {
+                if f_val.abs() < 1e-3 {
+                    roots.push(best_t.rem_euclid(TAU));
+                }
+            }
+        } else {
+            // 2. Local extremum touching zero (minimum or maximum)
+            let prev_i = if i == 0 { n_steps - 1 } else { i - 1 };
+            if let Some(f_prev) = samples[prev_i].1 {
+                if fa.abs() <= f_prev.abs() && fa.abs() <= fb.abs() && fa.abs() < 0.2 {
+                    let mut a = ta - dt;
+                    let mut b = tb;
+                    let phi = (5.0f64.sqrt() - 1.0) * 0.5;
+                    let mut c = b - phi * (b - a);
+                    let mut d = a + phi * (b - a);
+                    for _ in 0..24 {
+                        let fc = eval(c).map(|v| v.abs()).unwrap_or(f64::MAX);
+                        let fd = eval(d).map(|v| v.abs()).unwrap_or(f64::MAX);
+                        if fc < fd {
+                            b = d;
+                        } else {
+                            a = c;
+                        }
+                        c = b - phi * (b - a);
+                        d = a + phi * (b - a);
+                    }
+                    let best_t = 0.5 * (a + b);
+                    if let Some(f_val) = eval(best_t) {
+                        if f_val.abs() < 1e-3 {
+                            roots.push(best_t.rem_euclid(TAU));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    roots
+}
+
+fn ttr_ellipse_candidates(
+    ell: &Ellipse2D,
+    other: TangentObject,
+    radius: f64,
+) -> Vec<DVec3> {
+    let mut candidates = Vec::new();
+    let n_steps = 180;
+
+    let other_ell = to_ellipse2d(other);
+
+    // s = +1 (outer offset) and s = -1 (inner offset)
+    for &s in &[1.0, -1.0] {
+        let center_at = |t: f64| -> DVec2 {
+            let pt = ell.point_at(t);
+            let n = ell.normal_at(t);
+            pt + n * (s * radius)
+        };
+
+        match other {
+            TangentObject::Line { p1, p2 } => {
+                let dx = p2.x - p1.x;
+                let dy = p2.y - p1.y;
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 1e-9 {
+                    continue;
+                }
+                let n_line = DVec2::new(-dy / len, dx / len);
+                let p1_2d = DVec2::new(p1.x, p1.y);
+
+                for &line_side in &[1.0, -1.0] {
+                    let eval = |t: f64| -> Option<f64> {
+                        let c = center_at(t);
+                        let h = n_line.dot(c - p1_2d);
+                        Some(h - line_side * radius)
+                    };
+
+                    for t_root in solve_1d_roots(n_steps, eval) {
+                        let c = center_at(t_root);
+                        candidates.push(DVec3::new(c.x, c.y, 0.0));
+                    }
+                }
+            }
+            TangentObject::Circle { center, radius: r2 } => {
+                let c2_2d = DVec2::new(center.x, center.y);
+
+                for &is_int in &[false, true] {
+                    let target_dist = if is_int {
+                        (radius - r2).abs()
+                    } else {
+                        radius + r2
+                    };
+                    if target_dist < 1e-6 {
+                        continue;
+                    }
+                    let eval = |t: f64| -> Option<f64> {
+                        let c = center_at(t);
+                        Some((c - c2_2d).length() - target_dist)
+                    };
+
+                    for t_root in solve_1d_roots(n_steps, eval) {
+                        let c = center_at(t_root);
+                        candidates.push(DVec3::new(c.x, c.y, 0.0));
+                    }
+                }
+            }
+            TangentObject::Ellipse { .. } => {
+                if let Some(ell2) = &other_ell {
+                    for &is_enclosing in &[false, true] {
+                        let eval = |t: f64| -> Option<f64> {
+                            let c = center_at(t);
+                            let norm_pts = ell2.normal_points_for_center(c);
+                            let pt2 = if is_enclosing {
+                                norm_pts
+                                    .into_iter()
+                                    .max_by(|a, b| (*a - c).length_squared().total_cmp(&(*b - c).length_squared()))?
+                            } else {
+                                norm_pts
+                                    .into_iter()
+                                    .min_by(|a, b| (*a - c).length_squared().total_cmp(&(*b - c).length_squared()))?
+                            };
+                            let d2 = (c - pt2).length();
+                            Some(d2 - radius)
+                        };
+
+                        for t_root in solve_1d_roots(n_steps, eval) {
+                            let c = center_at(t_root);
+                            candidates.push(DVec3::new(c.x, c.y, 0.0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut unique = Vec::new();
+    for c in candidates {
+        if !unique.iter().any(|u: &DVec3| (*u - c).length_squared() < 1e-4) {
+            unique.push(c);
+        }
+    }
+    unique
+}
+
 pub(crate) fn ttr_candidates(first: TangentObject, second: TangentObject, radius: f64) -> Vec<DVec3> {
+    if radius <= 1e-9 {
+        return Vec::new();
+    }
+    if let Some(ell1) = to_ellipse2d(first) {
+        return ttr_ellipse_candidates(&ell1, second, radius);
+    }
+    if let Some(ell2) = to_ellipse2d(second) {
+        return ttr_ellipse_candidates(&ell2, first, radius);
+    }
     let first = tangent_curve(first);
     let second = tangent_curve(second);
     fillets_between(&first, &second, radius, Tolerance::default())
@@ -697,6 +1105,7 @@ fn ttt_solve_sign(objs: &[TangentObject; 3], eps: &[f64; 3]) -> Vec<(DVec3, f64)
             TangentObject::Circle { .. } => {
                 circle_idx.push(i);
             }
+            _ => {}
         }
     }
 
@@ -829,6 +1238,7 @@ pub struct CircleTTRCommand {
     step: StepTTR,
     default_r: f64,
     plane: WorkingPlane,
+    last_cursor: Option<DVec3>,
 }
 
 enum StepTTR {
@@ -851,10 +1261,11 @@ impl CircleTTRCommand {
             step: StepTTR::First,
             default_r: defaults::get_circle_radius(),
             plane: WorkingPlane::default(),
+            last_cursor: None,
         }
     }
 
-    fn result_for_radius(&self, radius: f64) -> CmdResult {
+    fn result_for_radius(&self, radius: f64, cursor: Option<DVec3>) -> CmdResult {
         if radius <= 1.0e-9 {
             return CmdResult::NeedPoint;
         }
@@ -867,9 +1278,14 @@ impl CircleTTRCommand {
         else {
             return CmdResult::NeedPoint;
         };
-        let hint = (*hit1 + *hit2) * 0.5;
-        let candidates = ttr_candidates(*obj1, *obj2, radius);
-        let Some(center) = best_of(&candidates, hint) else {
+        let Some(center) = pick_best_ttr_candidate(
+            *obj1,
+            *obj2,
+            radius,
+            *hit1,
+            *hit2,
+            cursor,
+        ) else {
             return CmdResult::NeedPoint;
         };
         defaults::set_circle_radius(radius);
@@ -927,8 +1343,10 @@ impl CadCommand for CircleTTRCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        let cursor_local = self.plane.to_local(pt);
+        self.last_cursor = Some(cursor_local);
         self.radius_from_point(pt)
-            .map(|radius| self.result_for_radius(radius))
+            .map(|radius| self.result_for_radius(radius, Some(cursor_local)))
             .unwrap_or(CmdResult::NeedPoint)
     }
 
@@ -951,6 +1369,7 @@ impl CadCommand for CircleTTRCommand {
                     hit1: h1,
                     hit2: hit,
                 };
+                self.last_cursor = None;
                 CmdResult::NeedPoint
             }
             StepTTR::Radius { .. } => CmdResult::NeedPoint,
@@ -962,12 +1381,13 @@ impl CadCommand for CircleTTRCommand {
         if r <= 0.0 {
             return Some(CmdResult::NeedPoint);
         }
-        matches!(self.step, StepTTR::Radius { .. }).then(|| self.result_for_radius(r))
+        matches!(self.step, StepTTR::Radius { .. })
+            .then(|| self.result_for_radius(r, self.last_cursor))
     }
 
     fn on_enter(&mut self) -> CmdResult {
         if matches!(self.step, StepTTR::Radius { .. }) {
-            self.result_for_radius(self.default_r)
+            self.result_for_radius(self.default_r, self.last_cursor)
         } else {
             CmdResult::Cancel
         }
@@ -986,7 +1406,16 @@ impl CadCommand for CircleTTRCommand {
         else {
             return None;
         };
-        let center = best_of(&ttr_candidates(*obj1, *obj2, radius), (*hit1 + *hit2) * 0.5)?;
+        let cursor_local = self.plane.to_local(pt);
+        self.last_cursor = Some(cursor_local);
+        let center = pick_best_ttr_candidate(
+            *obj1,
+            *obj2,
+            radius,
+            *hit1,
+            *hit2,
+            Some(cursor_local),
+        )?;
         Some(circle_wire(
             self.plane.to_world(center),
             radius,
@@ -1178,6 +1607,158 @@ mod tests {
                     && (c.x * dir.y - c.y * dir.x).abs() - 0.75 < 1e-6
             });
             assert!(ok, "no annulus candidate, got {cands:?}");
+        }
+    }
+
+    #[test]
+    fn ttr_ellipse_and_circle_test() {
+        let e1 = TangentObject::Ellipse {
+            center: DVec3::new(-30.0, 0.0, 0.0),
+            major_axis: DVec3::new(20.0, 0.0, 0.0),
+            normal: DVec3::Z,
+            minor_axis_ratio: 0.5,
+        };
+        let c2 = TangentObject::Circle {
+            center: DVec3::new(30.0, 0.0, 0.0),
+            radius: 10.0,
+        };
+        let cands = ttr_candidates(e1, c2, 20.0);
+        assert!(!cands.is_empty(), "ttr_candidates with ellipse + circle should find solutions");
+        for c in &cands {
+            let dist_to_circle_center = (c.truncate() - DVec2::new(30.0, 0.0)).length();
+            assert!(
+                (dist_to_circle_center - (20.0 + 10.0)).abs() < 1e-3
+                    || (dist_to_circle_center - 10.0).abs() < 1e-3,
+                "candidate center {c:?} must be tangent to circle"
+            );
+        }
+
+        // Test reverse order: circle first, ellipse second
+        let cands_rev = ttr_candidates(c2, e1, 20.0);
+        assert_eq!(cands.len(), cands_rev.len());
+    }
+
+    #[test]
+    fn ttr_ellipse_and_line_test() {
+        let e = TangentObject::Ellipse {
+            center: DVec3::ZERO,
+            major_axis: DVec3::new(20.0, 0.0, 0.0),
+            normal: DVec3::Z,
+            minor_axis_ratio: 0.5, // b = 10.0, bottom vertex is (0, -10, 0)
+        };
+        let line = TangentObject::Line {
+            p1: DVec3::new(-50.0, -20.0, 0.0),
+            p2: DVec3::new(50.0, -20.0, 0.0),
+        };
+        // Gap at bottom vertex (0, -10) to y = -20 is 10. Radius = 5 fits with center (0, -15, 0).
+        let cands = ttr_candidates(e, line, 5.0);
+        assert!(!cands.is_empty(), "ttr_candidates with ellipse + line should find solutions");
+        assert!(
+            cands.iter().any(|c| (c.x.abs() < 1e-3) && ((c.y - (-15.0)).abs() < 1e-3)),
+            "should contain bottom vertex solution (0, -15, 0), got: {cands:?}"
+        );
+
+        // Reverse order
+        let cands_rev = ttr_candidates(line, e, 5.0);
+        assert!(!cands_rev.is_empty());
+    }
+
+    #[test]
+    fn ttr_ellipse_and_ellipse_test() {
+        let e1 = TangentObject::Ellipse {
+            center: DVec3::new(-25.0, 0.0, 0.0),
+            major_axis: DVec3::new(15.0, 0.0, 0.0),
+            normal: DVec3::Z,
+            minor_axis_ratio: 0.6,
+        };
+        let e2 = TangentObject::Ellipse {
+            center: DVec3::new(25.0, 0.0, 0.0),
+            major_axis: DVec3::new(15.0, 0.0, 0.0),
+            normal: DVec3::Z,
+            minor_axis_ratio: 0.6,
+        };
+        // Gap between right vertex of e1 (-10, 0) and left vertex of e2 (10, 0) is 20.
+        // A circle with radius 10 fits at (0, 0, 0).
+        let cands_10 = ttr_candidates(e1, e2, 10.0);
+        assert!(!cands_10.is_empty(), "ttr_candidates with ellipse + ellipse should find solutions for R=10");
+        assert!(
+            cands_10.iter().any(|c| c.length() < 1e-2),
+            "should contain center solution at approx (0,0,0), got: {cands_10:?}"
+        );
+
+        // Radius 15 should yield symmetric solutions above and below x-axis
+        let cands_15 = ttr_candidates(e1, e2, 15.0);
+        assert!(!cands_15.is_empty(), "ttr_candidates with ellipse + ellipse should find solutions for R=15");
+        assert!(cands_15.iter().any(|c| c.y > 1.0));
+        assert!(cands_15.iter().any(|c| c.y < -1.0));
+    }
+
+    #[test]
+    fn ttr_large_radius_stays_on_cursor_side_acute_angle() {
+        let l1 = TangentObject::Line {
+            p1: DVec3::ZERO,
+            p2: DVec3::new(100.0, 0.0, 0.0),
+        };
+        let ang = 30.0f64.to_radians();
+        let l2 = TangentObject::Line {
+            p1: DVec3::ZERO,
+            p2: DVec3::new(100.0 * ang.cos(), 100.0 * ang.sin(), 0.0),
+        };
+        let hit1 = DVec3::new(20.0, 0.0, 0.0);
+        let hit2 = DVec3::new(20.0 * ang.cos(), 20.0 * ang.sin(), 0.0);
+
+        // Test across a wide range of radii from small to very large
+        for &r in &[5.0, 10.0, 30.0, 50.0, 100.0, 500.0, 2000.0] {
+            // Cursor in the acute 30-degree wedge (x > 0, y > 0)
+            let cursor = DVec3::new(r * 0.8, r * 0.2, 0.0);
+            let center = pick_best_ttr_candidate(l1, l2, r, hit1, hit2, Some(cursor))
+                .expect("should find candidate");
+            assert!(
+                center.x > 0.0 && center.y > 0.0,
+                "center should stay in acute wedge (x > 0, y > 0) for r={r}, but got {center:?}"
+            );
+
+            // Also test when cursor is None (using pick points): should also stay in acute wedge
+            let center_no_cur = pick_best_ttr_candidate(l1, l2, r, hit1, hit2, None)
+                .expect("should find candidate without cursor");
+            assert!(
+                center_no_cur.x > 0.0 && center_no_cur.y > 0.0,
+                "center without cursor should stay in acute wedge for r={r}, but got {center_no_cur:?}"
+            );
+
+            // If cursor intentionally moves into obtuse 150-degree wedge (x < 0, y > 0)
+            let cursor_obtuse = DVec3::new(-r * 0.5, r * 0.5, 0.0);
+            let center_obtuse = pick_best_ttr_candidate(l1, l2, r, hit1, hit2, Some(cursor_obtuse))
+                .expect("should find candidate");
+            assert!(
+                center_obtuse.x < 0.0 && center_obtuse.y > 0.0,
+                "center should follow cursor into obtuse wedge (x < 0, y > 0) for r={r}, got {center_obtuse:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ttr_two_circles_large_radius_stays_on_cursor_side() {
+        let c1 = TangentObject::Circle {
+            center: DVec3::new(-20.0, 0.0, 0.0),
+            radius: 10.0,
+        };
+        let c2 = TangentObject::Circle {
+            center: DVec3::new(20.0, 0.0, 0.0),
+            radius: 10.0,
+        };
+        let hit1 = DVec3::new(-20.0, 10.0, 0.0);
+        let hit2 = DVec3::new(20.0, 10.0, 0.0);
+
+        for &r in &[25.0, 35.0, 50.0, 100.0, 500.0, 2000.0] {
+            // Cursor above both circles
+            let cursor = DVec3::new(0.0, r + 10.0, 0.0);
+            let center = pick_best_ttr_candidate(c1, c2, r, hit1, hit2, Some(cursor))
+                .expect("should find candidate");
+            assert!(
+                center.y > 10.0,
+                "circle should stay externally tangent above circles for r={r}, but got {center:?}"
+            );
         }
     }
 }

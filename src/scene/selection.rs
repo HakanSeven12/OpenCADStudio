@@ -5,7 +5,7 @@ pub(crate) fn pe_url_of(entity: &EntityType) -> Option<&str> {
     entity.common().extended_data.get_record("PE_URL")
         .and_then(|record| {
             record.values.iter().find_map(|value| match value {
-                acadrust::xdata::XDataValue::String(text) => Some(text.trim()),
+                codec::xdata::XDataValue::String(text) => Some(text.trim()),
                 _ => None,
             })
         })
@@ -19,7 +19,7 @@ pub(crate) fn pe_url_description_of(entity: &EntityType) -> Option<&str> {
         .values
         .iter()
         .filter_map(|value| match value {
-            acadrust::xdata::XDataValue::String(text) => Some(text.trim()),
+            codec::xdata::XDataValue::String(text) => Some(text.trim()),
             _ => None,
         })
         .nth(1)
@@ -121,6 +121,19 @@ impl Scene {
         handles: &[Handle],
     ) -> Vec<Handle> {
         let mut expanded = self.expanded_with_leaders(handles);
+        // A viewport's clip boundary goes with its viewport: picking the
+        // boundary selects both, erasing it erases the viewport.
+        let viewports: Vec<Handle> = expanded
+            .iter()
+            .filter_map(|h| self.document.get_entity(*h).map(|e| (*h, e)))
+            .flat_map(|(h, e)| {
+                e.common().reactors.iter().copied().filter(move |r| {
+                    matches!(self.document.get_entity(*r),
+                        Some(EntityType::Viewport(vp)) if vp.clip_boundary_handle == h)
+                })
+            })
+            .collect();
+        expanded.extend(viewports);
         expanded.sort_unstable_by_key(|handle| handle.value());
         expanded.dedup();
         expanded
@@ -155,6 +168,17 @@ impl Scene {
         }
         self.selected.clear();
         self.selected_order.clear();
+        self.bump_selection_set();
+    }
+
+    /// Script-facing replacement: preserve exactly the validated input order.
+    /// UI picks still use `select_entity` and its leader/annotation expansion.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn replace_selection_exact(&mut self, handles: &[Handle]) {
+        if self.selected_handles_in_order() == handles { return; }
+        self.selected_constraint = None;
+        self.selected = handles.iter().copied().collect();
+        self.selected_order = handles.to_vec();
         self.bump_selection_set();
     }
 
@@ -820,7 +844,7 @@ impl Scene {
     /// row's value out.
     pub fn entity_property_value(
         &self,
-        entity: &acadrust::EntityType,
+        entity: &codec::EntityType,
         field: &str,
     ) -> Option<String> {
         use crate::entities::traits::EntityTypeOps;
@@ -851,9 +875,9 @@ impl Scene {
             ),
             "lineweight" => Some(Self::format_lineweight(entity.common().line_weight)),
             "transparency" => Some(match entity.common().transparency {
-                acadrust::types::Transparency::ByLayer => "ByLayer".to_string(),
-                acadrust::types::Transparency::ByBlock => "ByBlock".to_string(),
-                acadrust::types::Transparency::Explicit(alpha) => {
+                codec::types::Transparency::ByLayer => "ByLayer".to_string(),
+                codec::types::Transparency::ByBlock => "ByBlock".to_string(),
+                codec::types::Transparency::Explicit(alpha) => {
                     ((alpha as f64 / 255.0 * 100.0).round() as u32).to_string()
                 }
             }),
@@ -916,8 +940,8 @@ impl Scene {
         }
     }
 
-    fn format_color(c: acadrust::types::Color) -> String {
-        use acadrust::types::Color;
+    fn format_color(c: codec::types::Color) -> String {
+        use codec::types::Color;
         match c {
             Color::ByLayer => "ByLayer".to_string(),
             Color::None => "None".to_string(),
@@ -927,8 +951,8 @@ impl Scene {
         }
     }
 
-    fn format_lineweight(lw: acadrust::types::LineWeight) -> String {
-        use acadrust::types::LineWeight;
+    fn format_lineweight(lw: codec::types::LineWeight) -> String {
+        use codec::types::LineWeight;
         match lw {
             LineWeight::ByLayer => "ByLayer".to_string(),
             LineWeight::ByBlock => "ByBlock".to_string(),
@@ -955,6 +979,18 @@ impl Scene {
     fn remove_entities(&mut self, handles: &[Handle], respect_layer_locks: bool) {
         let erase_handles = self.handles_expanded_for_leader_annotations(handles);
 
+        // One pass over document.objects instead of a scan per erased handle.
+        let mut managers_by_section: HashMap<Handle, Vec<Handle>> = HashMap::default();
+        for (handle, object) in self.document.objects.iter() {
+            if let ObjectType::ClassObject(object) = object {
+                if let codec::objects::ClassObjectData::SectionManager(manager) = &object.data {
+                    for &section in &manager.sections {
+                        managers_by_section.entry(section).or_default().push(*handle);
+                    }
+                }
+            }
+        }
+
         let mut handle_set: HashSet<Handle> = HashSet::default();
         let mut erased: Vec<(Handle, ChangeKind)> = Vec::new();
         let mut selection_changed = false;
@@ -966,28 +1002,20 @@ impl Scene {
                 continue;
             }
             let settings_handle = self.document.get_entity(h).and_then(|entity| match entity {
-                EntityType::Extended(acadrust::entities::ExtendedEntity {
-                    data: acadrust::entities::ExtendedEntityData::SectionObject(data),
-                    ..
-                }) if !data.settings_handle.is_null() => Some(data.settings_handle),
+                EntityType::Extended(extended) => match &extended.data {
+                    codec::entities::ExtendedEntityData::SectionObject(data)
+                        if !data.settings_handle.is_null() =>
+                    {
+                        Some(data.settings_handle)
+                    }
+                    _ => None,
+                },
                 _ => None,
             });
-            let section_managers: Vec<Handle> = self
-                .document
-                .objects
-                .iter()
-                .filter_map(|(handle, object)| match object {
-                    ObjectType::ClassObject(object) => match &object.data {
-                        acadrust::objects::ClassObjectData::SectionManager(manager)
-                            if manager.sections.contains(&h) =>
-                        {
-                            Some(*handle)
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                })
-                .collect();
+            let section_managers: Vec<Handle> = managers_by_section
+                .get(&h)
+                .cloned()
+                .unwrap_or_default();
             // Delta-undo: capture the removed entity so an undo can re-insert it.
             if self.is_recording_undo() {
                 let before = self.document.get_entity_arc(h);
@@ -1009,7 +1037,7 @@ impl Scene {
                 if let Some(ObjectType::ClassObject(object)) =
                     self.document.objects.get_mut(&manager_handle)
                 {
-                    if let acadrust::objects::ClassObjectData::SectionManager(manager) =
+                    if let codec::objects::ClassObjectData::SectionManager(manager) =
                         &mut object.data
                     {
                         manager.sections.retain(|section| *section != h);
@@ -1150,8 +1178,8 @@ impl Scene {
 mod tests {
     #[test]
     fn pe_url_of_reads_standard_hyperlink_xdata() {
-        use acadrust::entities::Point;
-        use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+        use codec::entities::Point;
+        use codec::xdata::{ExtendedDataRecord, XDataValue};
 
         let mut doc = CadDocument::new();
 
@@ -1190,8 +1218,8 @@ mod tests {
 
     #[test]
     fn bulk_selection_matches_selecting_one_at_a_time() {
-        use acadrust::entities::Line;
-        use acadrust::types::Vector3;
+        use codec::entities::Line;
+        use codec::types::Vector3;
 
         let build = || {
             let mut scene = Scene::new();
@@ -1245,12 +1273,12 @@ mod tests {
 
     #[test]
     fn the_leader_index_matches_a_document_walk() {
-        use acadrust::entities::Leader;
-        use acadrust::types::Vector3;
+        use codec::entities::Leader;
+        use codec::types::Vector3;
 
         let mut scene = Scene::new();
         let line = |x: f64| {
-            EntityType::Line(acadrust::entities::Line::from_points(
+            EntityType::Line(codec::entities::Line::from_points(
                 Vector3::new(x, 0.0, 0.0),
                 Vector3::new(x + 1.0, 0.0, 0.0),
             ))
@@ -1314,8 +1342,8 @@ mod tests {
 
     #[test]
     fn adding_a_type_already_present_reuses_the_list() {
-        use acadrust::entities::{Circle, EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{Circle, EntityType, Line};
+        use codec::types::Vector3;
         use std::sync::Arc;
 
         let line = || {
@@ -1350,8 +1378,8 @@ mod tests {
 
     #[test]
     fn changing_an_entity_type_rebuilds_the_type_names() {
-        use acadrust::entities::{Circle, EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{Circle, EntityType, Line};
+        use codec::types::Vector3;
 
         let mut scene = Scene::new();
         let handle = scene.add_entity(EntityType::Line(Line::from_points(
@@ -1368,8 +1396,8 @@ mod tests {
 
     #[test]
     fn layout_type_cache_reuses_and_invalidates_on_edits_undo_and_layout() {
-        use acadrust::entities::{Circle, EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{Circle, EntityType, Line};
+        use codec::types::Vector3;
         use std::sync::Arc;
 
         let mut scene = Scene::new();

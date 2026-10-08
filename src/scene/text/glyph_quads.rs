@@ -34,6 +34,13 @@ pub struct GlyphQuad {
 /// Lay `text` out as per-glyph quads. Mirrors `tessellate_text_run`'s transform
 /// and per-character advance so the quads land exactly where the strokes would.
 /// Whitespace and glyphs with no ink advance the pen but emit no quad.
+///
+/// Returns the quads plus the final pen advance in run-local units
+/// (`cursor × scale × |width_factor|`, always ≥ 0): the exact laid-out width
+/// including spacing/tracking, so exporters can width-match (`Tz`) and cull
+/// runs without re-deriving advances from a second layout pass. Mirrored
+/// (negative width factor) runs collapse to a positive extent — the search
+/// layer reads LTR while the outlines keep the true mirror.
 #[allow(clippy::too_many_arguments)]
 pub fn layout_glyph_quads(
     atlas: &mut GlyphAtlas,
@@ -45,9 +52,9 @@ pub fn layout_glyph_quads(
     font_name: &str,
     bold: bool,
     text: &str,
-) -> Vec<GlyphQuad> {
+) -> (Vec<GlyphQuad>, f32) {
     if text.is_empty() || height <= 0.0 {
-        return vec![];
+        return (vec![], 0.0);
     }
 
     let scale = height / 9.0;
@@ -143,16 +150,19 @@ pub fn layout_glyph_quads(
                     uv_min: e.uv_min,
                     uv_max: e.uv_max,
                 });
-                cursor_x += e.advance + face.letter_spacing() * tracking;
+                cursor_x += e.advance + face.spacing_after(ch) * tracking;
             }
             None => {
                 // No ink (whitespace glyph) or atlas full: advance only.
-                let adv = face.glyph(ch).map(|g| g.advance).unwrap_or(6.0);
-                cursor_x += adv + face.letter_spacing() * tracking;
+                cursor_x += match face.glyph(ch) {
+                    Some(g) => g.advance + face.spacing_after(ch) * tracking,
+                    None => 6.0 + face.letter_spacing() * tracking,
+                };
             }
         }
     }
 
+    let pen_advance = (cursor_x * scale * wf).abs();
     // Any decoration still open at the end runs to the final pen position.
     for (slot, y) in [(under, UNDER_Y), (over, OVER_Y), (strike, STRIKE_Y)] {
         if let Some(s) = slot {
@@ -174,7 +184,7 @@ pub fn layout_glyph_quads(
         });
     }
 
-    quads
+    (quads, pen_advance)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -196,7 +206,8 @@ mod tests {
     #[test]
     fn glyphs_advance_rightward() {
         let mut atlas = GlyphAtlas::new(512, 512);
-        let quads = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
+        let (quads, _) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
         assert_eq!(quads.len(), 2, "two inked glyphs -> two quads");
         assert!(
             center(&quads[1])[0] > center(&quads[0])[0],
@@ -214,8 +225,10 @@ mod tests {
     #[test]
     fn space_emits_no_quad_but_advances() {
         let mut atlas = GlyphAtlas::new(512, 512);
-        let ab = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
-        let a_sp_a = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A A");
+        let (ab, _) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
+        let (a_sp_a, _) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A A");
         assert_eq!(a_sp_a.len(), 2, "space produces no quad");
         assert!(
             center(&a_sp_a[1])[0] > center(&ab[1])[0],
@@ -229,8 +242,9 @@ mod tests {
         // Use the baseline advance direction (glyph0 -> glyph1), which is +x when
         // flat and swings to +y after a 90° turn — independent of where a single
         // glyph's box centre sits within the cap height.
-        let flat = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
-        let turned = layout_glyph_quads(
+        let (flat, _) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
+        let (turned, _) = layout_glyph_quads(
             &mut atlas,
             10.0,
             std::f32::consts::FRAC_PI_2,
@@ -254,8 +268,10 @@ mod tests {
     #[test]
     fn taller_text_makes_bigger_quads() {
         let mut atlas = GlyphAtlas::new(512, 512);
-        let small = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
-        let big = layout_glyph_quads(&mut atlas, 20.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
+        let (small, _) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
+        let (big, _) =
+            layout_glyph_quads(&mut atlas, 20.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
         let extent = |q: &GlyphQuad| {
             let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
             for p in &q.corners {
@@ -276,13 +292,44 @@ mod tests {
     #[test]
     fn underline_emits_an_extra_solid_quad() {
         let mut atlas = GlyphAtlas::new(512, 512);
-        let plain = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AB");
+        let (plain, plain_adv) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AB");
         // `\L…\l` underlines the run — same glyph quads plus one decoration quad.
-        let under = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "\\LAB\\l");
+        let (under, under_adv) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "\\LAB\\l");
         assert_eq!(under.len(), plain.len() + 1, "underline adds one quad");
         // The decoration quad samples the atlas's solid texel (degenerate UV).
         let deco = under.last().unwrap();
         assert_eq!(deco.uv_min, deco.uv_max, "decoration quad uses the solid UV");
         assert_eq!(deco.uv_min, atlas.solid_uv());
+        // Decorations don't move the pen: same advance either way, and the
+        // advance covers both glyphs (positive, wider than one glyph).
+        assert!(
+            (under_adv - plain_adv).abs() < 1e-6,
+            "decoration must not move the pen: {under_adv} vs {plain_adv}"
+        );
+        assert!(plain_adv > 0.0, "two glyphs advance the pen");
+    }
+
+    #[test]
+    fn pen_advance_scales_with_height_and_width_factor() {
+        let mut atlas = GlyphAtlas::new(512, 512);
+        let (_, base) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AB");
+        let (_, tall) =
+            layout_glyph_quads(&mut atlas, 20.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AB");
+        assert!(
+            (tall / base - 2.0).abs() < 0.05,
+            "double height ~ double advance: {tall} vs {base}"
+        );
+        let (_, wide) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 2.0, 0.0, 1.0, "txt", false, "AB");
+        assert!(
+            (wide / base - 2.0).abs() < 0.05,
+            "double width factor ~ double advance: {wide} vs {base}"
+        );
+        let (_, empty) =
+            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "");
+        assert_eq!(empty, 0.0, "empty text advances nothing");
     }
 }

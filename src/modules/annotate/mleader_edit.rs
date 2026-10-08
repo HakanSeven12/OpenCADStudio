@@ -5,10 +5,10 @@
 // MLEADERALIGN:  select multileaders → pick base alignment direction
 // MLEADERCOLLECT: select block-content multileaders → pick collection point
 
-use acadrust::entities::{LeaderLine, MultiLeader};
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{closest_point, Curve, Line};
+use codec::entities::{LeaderLine, MultiLeader};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::geom2d::{closest_point, Curve, Line};
 use glam::{DVec3, Vec3};
 
 use crate::command::{CadCommand, CmdResult};
@@ -497,6 +497,7 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -522,7 +523,9 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+            ..Default::default()
+}
 }
 
 fn point_segment_distance_xy(point: Vector3, start: Vector3, end: Vector3) -> f64 {

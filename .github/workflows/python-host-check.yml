@@ -1,0 +1,93 @@
+name: Python host check
+
+# Checks the scripting host API and the bundled Python plugin on Linux and Windows,
+# where the plugin is loaded from `plugins/opencad.python` next to the executable.
+# The plugin tests talk to a real plugin process over IPC. They are skipped, and
+# report success, unless OCS_TEST_PYTHON_PLUGIN and OCS_PLUGIN_RUNNER_EXE are set,
+# so this workflow sets both to the freshly built plugin and executable.
+
+on:
+  pull_request:
+    paths:
+      - 'crates/ocs_plugin_api/**'
+      - 'plugins/opencad-python/**'
+      - 'src/app/plugin_host.rs'
+      - 'src/app/control/**'
+      - 'src/app/commands/**'
+      - 'src/app/settings.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/python-host-check.yml'
+  push:
+    tags: ['pr-check-*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-22.04
+            library: libopencad_python.so
+            exe: OpenCADStudio
+          - name: windows
+            os: windows-latest
+            library: opencad_python.dll
+            exe: OpenCADStudio.exe
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: python-host-check
+          workspaces: |
+            .
+            plugins/opencad-python
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev
+
+      - name: Plugin API tests
+        run: cargo test --locked -p ocs_plugin_api --features host
+
+      - name: Stage the bundled plugin
+        run: bash plugins/opencad-python/tools/stage-bundled.sh "$PWD/work/plugin" --debug
+
+      - name: Build the application (the plugin runner)
+        run: cargo build --locked --bin OpenCADStudio
+
+      - name: Plugin crate tests
+        working-directory: plugins/opencad-python
+        run: cargo test --locked
+
+      - name: Python model unit tests
+        working-directory: plugins/opencad-python
+        run: python3 -m unittest discover -s tests
+
+      - name: Host tests over real IPC
+        env:
+          OCS_TEST_PYTHON_PLUGIN: ${{ github.workspace }}/work/plugin/${{ matrix.library }}
+          OCS_PLUGIN_RUNNER_EXE: ${{ github.workspace }}/target/debug/${{ matrix.exe }}
+        run: |
+          test -f "$OCS_TEST_PYTHON_PLUGIN" || { echo "staged plugin missing: $OCS_TEST_PYTHON_PLUGIN"; exit 1; }
+          test -f "$OCS_PLUGIN_RUNNER_EXE" || { echo "runner missing: $OCS_PLUGIN_RUNNER_EXE"; exit 1; }
+          cargo test --locked --lib -- --test-threads=1 python

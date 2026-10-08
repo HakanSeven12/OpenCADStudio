@@ -17,19 +17,25 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::host::{CommandSource, CommandStep};
+use crate::host::{CommandSource, CommandStep, HostSettingValue};
 use crate::manifest::ApiVersion;
 use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup};
 
-pub use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-pub use acadrust::{CadDocument, EntityType, Handle};
+pub use codec::xdata::{ExtendedDataRecord, XDataValue};
+pub use codec::{CadDocument, EntityType, Handle};
+pub use crate::host::PreviewWire;
 
 /// Events the host forwards to an active plugin `InteractiveCommand`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InteractiveEvent {
+    /// User clicked or specified a point coordinate.
     Point([f64; 3]),
+    /// User pressed Enter or Return to complete input.
     Enter,
+    /// User selected an existing entity in the drawing.
     ObjectPick { handle: Handle, pt: [f64; 3] },
+    /// User cancelled the prompt (e.g. pressed ESC), resetting interactive collection.
+    Cancel,
 }
 
 /// Initial handshake sent by the plugin runner immediately after connecting.
@@ -76,6 +82,13 @@ pub enum HostRequest {
         code: String,
         tab_index: usize,
     },
+    /// V7: release an interactive command after completion or cancellation.
+    DropInteractive { command_id: u64 },
+    /// V7: cursor move preview update during an interactive command.
+    CursorMove {
+        command_id: u64,
+        pt: [f64; 3],
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -88,6 +101,7 @@ pub enum HostResponse {
     Manifest(OwnedPluginManifest),
     Error(String),
     CodeExecutionResult(crate::host::ExecutionResult),
+    PreviewWires(Vec<PreviewWire>),
 }
 
 /// Requests the plugin runner sends to the host.
@@ -142,6 +156,23 @@ pub enum PluginRequest {
     AddLayer(crate::host::LayerConfig),
     /// Modify specified properties of an existing layer in the active document.
     ModifyLayer(crate::host::LayerConfig),
+    /// Run a command on the active document tab's command line (AutoLISP style).
+    ExecuteCommand(String),
+    /// Read a host-managed setting without nested command dispatch.
+    GetSystemVariable { name: String },
+    /// Change a host-managed setting without nested command dispatch.
+    SetSystemVariable { name: String, value: HostSettingValue },
+    /// V7: validate and replace existing entities in a single undo step.
+    UpdateEntitiesTransaction { label: String, entities: Vec<EntityType> },
+    /// V7: synchronous selection read/write for the dispatch tab.
+    GetSelection,
+    SetSelection { handles: Vec<Handle> },
+    /// V7 (additive): kernel-backed solid create or transform.
+    SolidOperation { operation: crate::host::SolidOperation },
+    /// V7 (additive): drawing table record create/modify/rename/delete.
+    TableOperation { operation: crate::host::TableOperation },
+    /// V7 (additive): drive an OCS command.
+    RunCommand { request: crate::host::CommandRequest },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -170,6 +201,14 @@ pub enum PluginResponse {
     DocumentPath(Option<std::ffi::OsString>),
     /// Optional entity handle (e.g. from AddLayer).
     OptHandle(Option<Handle>),
+    SystemVariable(Option<HostSettingValue>),
+    SystemVariableResult(Result<HostSettingValue, String>),
+    EntityTransactionResult(Result<(), String>),
+    Selection(Vec<Handle>),
+    SelectionResult(Result<(), String>),
+    SolidResult(Result<Handle, String>),
+    TableResult(Result<Handle, String>),
+    CommandResult(Result<crate::host::CommandOutcome, String>),
 }
 
 /// Messages sent from the host to the plugin runner.

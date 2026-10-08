@@ -1,8 +1,8 @@
 use crate::scene::Scene;
-use acadrust::entities::hatch::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge, SplineEdge};
-use acadrust::types::{Vector2, Vector3};
-use cadkernel::geom2d::{refine_spline_boundary, triangulate_rings, Curve, NurbsCurve};
-use cadkernel::tessellation::DEFAULT_ANGLE;
+use codec::entities::hatch::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge, SplineEdge};
+use codec::types::{Vector2, Vector3};
+use kernel::geom2d::{refine_spline_boundary, triangulate_rings, Curve, NurbsCurve};
+use kernel::tessellation::DEFAULT_ANGLE;
 
 fn narrow(clearance: f64, offset: [f64; 2]) -> NurbsCurve {
     let line = |a: [f64; 2], b: [f64; 2]| {

@@ -19,6 +19,7 @@
 //! 15. Batch Entity Transformation & Incremental Dirty-Tracking
 //! 16. Draworder Depth Map Full Build & Incremental Patch
 //! 17. Delta-Undo Transaction Before-Image Recording
+//! 18. Viewport Render Pipeline Construction (10k Objects)
 //!
 //! Output:
 //! - Human-readable ASCII / Markdown summary table on stdout
@@ -32,20 +33,15 @@
 
 #![allow(clippy::field_reassign_with_default, clippy::manual_is_multiple_of)]
 
-use std::collections::HashMap;
-use std::env;
 use std::f64::consts::{PI, TAU};
 use std::hint::black_box;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
-
-use acadrust::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::{CadDocument, DxfReader, DxfWriter, EntityType};
+use codec::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
+use codec::types::{Vector2, Vector3};
+use codec::{CadDocument, DxfReader, DxfWriter, EntityType};
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Color, Point, Rectangle};
 
@@ -54,309 +50,26 @@ use OpenCADStudio::scene::parametric_constraints::{
 };
 use OpenCADStudio::scene::pick::hit_test::{box_hit, click_hit};
 use OpenCADStudio::scene::pick::interaction_index::InteractionIndex;
-use OpenCADStudio::scene::pick::selection_state::SelectionState;
+use OpenCADStudio::scene::pick::selection_state::{
+    SelectionGesture, SelectionState, SelectionView,
+};
 use OpenCADStudio::scene::pipeline::wire_arena::partition_wires;
 use OpenCADStudio::scene::view::camera::Camera;
 use OpenCADStudio::scene::{ChangeKind, Scene};
 use OpenCADStudio::snap::Snapper;
 use OpenCADStudio::ui::icons::{self, CHECK};
 use OpenCADStudio::ui::overlay::{
-    grid_segments, should_reuse, GridCanvasState, GridKey, GridParams, GridStyle,
+    grid_segments, selection_overlay, should_reuse, CrosshairOptions, GridCanvasState,
+    GridKey, GridParams, GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions,
+    UcsIconParams,
 };
 use OpenCADStudio::ui::properties::LinetypeItem;
 use OpenCADStudio::ui::ribbon::{LayerInfo, Ribbon};
 use OpenCADStudio::ui::style::plotstyle::build_layer_usage;
+#[path = "support/harness.rs"]
+mod harness;
 
-// ── Metric Structures ───────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BenchmarkMetric {
-    pub name: String,
-    pub description: String,
-    pub unit: String,
-    pub samples: usize,
-    pub min: f64,
-    pub max: f64,
-    pub mean: f64,
-    pub median: f64,
-    pub p95: f64,
-    pub p99: f64,
-    pub std_dev: f64,
-    pub throughput: Option<f64>,
-    pub throughput_unit: Option<String>,
-    pub target_threshold: Option<f64>,
-    pub passed_target: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BenchmarkSuiteReport {
-    pub timestamp: String,
-    pub os: String,
-    pub arch: String,
-    pub profile: String,
-    pub is_quick_mode: bool,
-    pub metrics: Vec<BenchmarkMetric>,
-}
-
-pub struct BenchmarkRunner {
-    pub quick_mode: bool,
-    pub filter: Option<String>,
-    pub baseline_path: Option<PathBuf>,
-    pub output_path: PathBuf,
-    pub results: Vec<BenchmarkMetric>,
-}
-
-impl Default for BenchmarkRunner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BenchmarkRunner {
-    pub fn new() -> Self {
-        let args: Vec<String> = env::args().collect();
-        let quick_mode =
-            args.iter().any(|a| a == "--quick" || a == "-q") || env::var("CAD_BENCH_QUICK").is_ok();
-
-        let filter = args
-            .windows(2)
-            .find(|w| w[0] == "--filter")
-            .map(|w| w[1].clone())
-            .or_else(|| env::var("CAD_BENCH_FILTER").ok());
-
-        let baseline_path = args
-            .windows(2)
-            .find(|w| w[0] == "--baseline")
-            .map(|w| PathBuf::from(&w[1]))
-            .or_else(|| env::var("CAD_BENCH_BASELINE").ok().map(PathBuf::from));
-
-        let output_path = args
-            .windows(2)
-            .find(|w| w[0] == "--output")
-            .map(|w| PathBuf::from(&w[1]))
-            .or_else(|| env::var("CAD_BENCH_OUTPUT").ok().map(PathBuf::from))
-            .unwrap_or_else(|| {
-                let target_dir = Path::new("target");
-                if !target_dir.exists() {
-                    let _ = std::fs::create_dir_all(target_dir);
-                }
-                target_dir.join("cad_performance_metrics.json")
-            });
-
-        Self {
-            quick_mode,
-            filter,
-            baseline_path,
-            output_path,
-            results: Vec::new(),
-        }
-    }
-
-    pub fn should_run(&self, name: &str) -> bool {
-        if let Some(ref filter) = self.filter {
-            name.to_lowercase().contains(&filter.to_lowercase())
-        } else {
-            true
-        }
-    }
-
-    /// Record a measured benchmark with multiple timing samples.
-    pub fn record(
-        &mut self,
-        name: &str,
-        description: &str,
-        unit: &str,
-        mut samples: Vec<f64>,
-        throughput: Option<(f64, &str)>,
-        target_threshold: Option<f64>,
-    ) {
-        if samples.is_empty() {
-            return;
-        }
-        samples.sort_by(|a, b| a.total_cmp(b));
-
-        let n = samples.len();
-        let min = samples[0];
-        let max = samples[n - 1];
-        let sum: f64 = samples.iter().sum();
-        let mean = sum / (n as f64);
-        let median = if n % 2 == 0 {
-            (samples[n / 2 - 1] + samples[n / 2]) * 0.5
-        } else {
-            samples[n / 2]
-        };
-
-        let p95_idx = ((n as f64) * 0.95).floor() as usize;
-        let p95 = samples[p95_idx.min(n - 1)];
-
-        let p99_idx = ((n as f64) * 0.99).floor() as usize;
-        let p99 = samples[p99_idx.min(n - 1)];
-
-        let variance: f64 = samples.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (n as f64);
-        let std_dev = variance.sqrt();
-
-        let passed_target = match target_threshold {
-            Some(thresh) => median <= thresh,
-            None => true,
-        };
-
-        let (thru_val, thru_unit) = match throughput {
-            Some((val, u)) => (Some(val), Some(u.to_string())),
-            None => (None, None),
-        };
-
-        self.results.push(BenchmarkMetric {
-            name: name.to_string(),
-            description: description.to_string(),
-            unit: unit.to_string(),
-            samples: n,
-            min,
-            max,
-            mean,
-            median,
-            p95,
-            p99,
-            std_dev,
-            throughput: thru_val,
-            throughput_unit: thru_unit,
-            target_threshold,
-            passed_target,
-        });
-    }
-
-    /// Print summary table to stdout and persist JSON report.
-    pub fn finish(&self) {
-        let baseline_map: HashMap<String, BenchmarkMetric> =
-            if let Some(ref path) = self.baseline_path {
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    if let Ok(report) = serde_json::from_str::<BenchmarkSuiteReport>(&content) {
-                        println!(
-                            "\nLoaded baseline from '{}' ({} metrics)",
-                            path.display(),
-                            report.metrics.len()
-                        );
-                        report
-                            .metrics
-                            .into_iter()
-                            .map(|m| (m.name.clone(), m))
-                            .collect()
-                    } else {
-                        eprintln!(
-                            "Warning: Failed to parse baseline JSON at '{}'",
-                            path.display()
-                        );
-                        HashMap::new()
-                    }
-                } else {
-                    eprintln!(
-                        "Warning: Could not read baseline file at '{}'",
-                        path.display()
-                    );
-                    HashMap::new()
-                }
-            } else {
-                HashMap::new()
-            };
-
-        println!("\n========================================================================================================================");
-        println!("                                      OPENCADSTUDIO PERFORMANCE BENCHMARK REPORT                                        ");
-        println!("========================================================================================================================");
-        println!(
-            "{:<38} | {:>8} | {:>8} | {:>8} | {:>8} | {:>16} | {:>10} | {:^6}",
-            "Benchmark Name", "Median", "Mean", "P95", "Min", "Throughput", "Baseline", "Status"
-        );
-        println!("------------------------------------------------------------------------------------------------------------------------");
-
-        for m in &self.results {
-            let throughput_str = match (&m.throughput, &m.throughput_unit) {
-                (Some(val), Some(unit)) => {
-                    if *val >= 1_000_000.0 {
-                        format!("{:.2}M {}", val / 1_000_000.0, unit)
-                    } else if *val >= 1_000.0 {
-                        format!("{:.1}k {}", val / 1_000.0, unit)
-                    } else {
-                        format!("{:.1} {}", val, unit)
-                    }
-                }
-                _ => "-".to_string(),
-            };
-
-            let baseline_col = if let Some(base) = baseline_map.get(&m.name) {
-                if base.median > 0.0 {
-                    let delta_pct = ((m.median - base.median) / base.median) * 100.0;
-                    if delta_pct < -1.0 {
-                        format!("{:+.1}% (fast)", delta_pct)
-                    } else if delta_pct > 1.0 {
-                        format!("{:+.1}% (slow)", delta_pct)
-                    } else {
-                        "~0.0%".to_string()
-                    }
-                } else {
-                    "-".to_string()
-                }
-            } else {
-                "-".to_string()
-            };
-
-            let status = if m.passed_target { "PASS" } else { "FAIL" };
-
-            println!(
-                "{:<38} | {:>6.2} {:<1} | {:>6.2} {:<1} | {:>6.2} {:<1} | {:>6.2} {:<1} | {:>16} | {:>10} | {:^6}",
-                m.name,
-                m.median,
-                m.unit,
-                m.mean,
-                m.unit,
-                m.p95,
-                m.unit,
-                m.min,
-                m.unit,
-                throughput_str,
-                baseline_col,
-                status,
-            );
-        }
-        println!("========================================================================================================================\n");
-
-        let report = BenchmarkSuiteReport {
-            timestamp: chrono_now(),
-            os: env::consts::OS.to_string(),
-            arch: env::consts::ARCH.to_string(),
-            profile: if cfg!(debug_assertions) {
-                "debug".to_string()
-            } else {
-                "release".to_string()
-            },
-            is_quick_mode: self.quick_mode,
-            metrics: self.results.clone(),
-        };
-
-        if let Ok(json) = serde_json::to_string_pretty(&report) {
-            if let Some(parent) = self.output_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Err(e) = std::fs::write(&self.output_path, json) {
-                eprintln!(
-                    "Error saving metrics to '{}': {}",
-                    self.output_path.display(),
-                    e
-                );
-            } else {
-                println!(
-                    "Saved complete performance metrics JSON to: {}\n",
-                    self.output_path.display()
-                );
-            }
-        }
-    }
-}
-
-fn chrono_now() -> String {
-    let d = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("unix_{}", d.as_secs())
-}
+use harness::BenchmarkRunner;
 
 // ── 1. Scene Entity Ingestion & Batch Creation ───────────────────────────────
 
@@ -682,6 +395,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
     let n_queries = if runner.quick_mode { 200 } else { 1_000 };
     let mut click_samples = Vec::with_capacity(5);
 
+    let draw_depth = rustc_hash::FxHashMap::default();
     for _ in 0..5 {
         let t0 = Instant::now();
         for q in 0..n_queries {
@@ -695,6 +409,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
                 bounds,
                 false,
                 8.0,
+                &draw_depth,
             );
             black_box(hit);
         }
@@ -1000,12 +715,17 @@ fn bench_selection_cloning(runner: &mut BenchmarkRunner) {
     }
 
     let mut state = SelectionState {
-        vp_size: (1920.0, 1080.0),
-        poly_points: vec![Point::new(10.0, 10.0); 64],
+        view: SelectionView {
+            vp_size: (1920.0, 1080.0),
+        },
+        gesture: SelectionGesture {
+            box_anchor: Some(Point::new(0.0, 0.0)),
+            box_current: Some(Point::new(100.0, 100.0)),
+            poly_points: vec![Point::new(10.0, 10.0); 64],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    state.box_anchor = Some(Point::new(0.0, 0.0));
-    state.box_current = Some(Point::new(100.0, 100.0));
 
     let n = if runner.quick_mode { 1_000 } else { 5_000 };
     let runs = 5;
@@ -1080,6 +800,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "DRAWING".to_string(),
@@ -1087,6 +808,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "DIMENSIONS".to_string(),
@@ -1094,6 +816,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "ANNOTATIONS".to_string(),
@@ -1101,6 +824,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
         ],
         "0",
@@ -1361,9 +1085,9 @@ fn bench_ui_icon_caching(runner: &mut BenchmarkRunner) {
     }
 }
 
-// ── 12b. Plot Style Layer-Usage Table Rebuild ───────────────────────────────
-// Covers Mission #19 `build_layer_usage`: layer names bucketed by ACI into a
-// 256-bucket table, rebuilt per Plot Style modal view.
+// ── Plot Style Layer-Usage Table Rebuild ─────────────────────────────────────
+// Covers `build_layer_usage`: layer names bucketed by ACI into a 256-bucket
+// table, rebuilt per Plot Style modal view.
 
 fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
     if !runner.should_run("ui_plotstyle_layer_usage") {
@@ -1372,9 +1096,9 @@ fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
 
     let mut doc = CadDocument::new();
     for i in 0..200 {
-        let mut layer = acadrust::tables::Layer::new(&format!("LAYER_{i:03}"));
+        let mut layer = codec::tables::Layer::new(&format!("LAYER_{i:03}"));
         layer.handle = doc.allocate_handle();
-        layer.color = acadrust::types::Color::Index((i % 8 + 1) as u8);
+        layer.color = codec::types::Color::Index((i % 8 + 1) as u8);
         let _ = doc.layers.add(layer);
     }
 
@@ -1406,6 +1130,422 @@ fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
         Some((1_000_000.0 / median_us, "rebuilds/s")),
         Some(50.0), // Target threshold < 50 µs
     );
+}
+
+// ── 12c. UI Status Bar Derived-Data Cache Hit ─────────────────────────────────
+// Covers the per-frame status-bar path (`cached_layout_names` +
+// `cached_scale_picker_list`): layout names and the annotation-scale picker
+// list are served as shared `Arc` clones instead of full doc scans.
+
+fn bench_ui_statusbar_derived_data(runner: &mut BenchmarkRunner) {
+    if !runner.should_run("ui_statusbar_derived_data") {
+        return;
+    }
+
+    // Scene shaped like a working drawing: several thousand entities,
+    // multiple paper layouts, and a populated annotation-scale list.
+    let mut scene = Scene::new();
+    for i in 0..3_000 {
+        let x = (i % 100) as f64 * 20.0;
+        let y = (i / 100) as f64 * 20.0;
+        let mut line = Line::new();
+        line.start = Vector3::new(x, y, 0.0);
+        line.end = Vector3::new(x + 15.0, y + 15.0, 0.0);
+        scene.add_entity(EntityType::Line(line));
+    }
+    for i in 0..8 {
+        let _ = scene.add_layout(&format!("SB_BENCH_{i}"));
+    }
+    for (i, (paper, drawing)) in [(1.0, 50.0), (1.0, 100.0), (0.5, 12.0), (1.0, 48.0)]
+        .iter()
+        .enumerate()
+    {
+        let _ = scene.add_scale(&format!("SB_SCALE_{i}"), *paper, *drawing);
+    }
+
+    // Warm-up: populate both caches and settle the allocator.
+    for _ in 0..10 {
+        let layouts = scene.cached_layout_names();
+        let scales = scene.cached_scale_picker_list();
+        black_box(layouts);
+        black_box(scales);
+    }
+
+    let n = if runner.quick_mode { 20 } else { 100 };
+    let runs = 5;
+    let mut samples = Vec::with_capacity(runs);
+
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for _ in 0..n {
+            let layouts = scene.cached_layout_names();
+            let scales = scene.cached_scale_picker_list();
+            black_box(layouts);
+            black_box(scales);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n as f64);
+        samples.push(per_us);
+    }
+
+    let median_us = samples[samples.len() / 2];
+    runner.record(
+        "ui_statusbar_derived_data",
+        "Status-bar cached derived data hit (layout names + scale picker Arc clones)",
+        "µs",
+        samples,
+        Some((1_000_000.0 / median_us, "hits/s")),
+        Some(50.0), // Target threshold < 50 µs
+    );
+}
+
+// ── 12d. UI Grip Vertex Budget (budgeted build + per-frame projection) ──────
+// Covers the selection-grip vertex budget (`MAX_SELECTED_GRIPS` in
+// app/settings.rs): one dense 100K-vertex polyline emits ~2 grips/vertex
+// (vertex + midpoint). The budget keeps entity order with vertex grips first
+// and truncates the parallel handle vec in lockstep, so the per-frame
+// `grips_to_screen` projection only ever sees the capped set.
+//
+// NOTE: the budget step below calls the real `apply_grip_budget`
+// (app/properties.rs) with the real `MAX_SELECTED_GRIPS` (app/settings.rs),
+// re-exported via `OpenCADStudio::app` so this external bench crate can reach
+// them (both modules are otherwise private/`pub(crate)`).
+// Projection is measured with the real `grips_to_screen` on the capped set,
+// which bounds the per-frame cost by construction: uncapped it is O(vertices),
+// budgeted it is O(cap).
+
+fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
+    if !runner.should_run("ui_grip_budget") && !runner.should_run("ui_grip_budget_build") {
+        return;
+    }
+
+    use OpenCADStudio::app::{apply_grip_budget, MAX_SELECTED_GRIPS};
+    use OpenCADStudio::scene::model::object::{GripDef, GripShape};
+    use OpenCADStudio::scene::pick::grip::grips_to_screen;
+
+    // Fixture: one dense polyline's grips — 2 per vertex (vertex + midpoint),
+    // i.e. ~200K grips for a 100K-vertex polyline in full mode. Midpoint grips
+    // mirror the real LWPolyline producer (entities/lwpolyline.rs via
+    // entities/common.rs `rectangle_grip`): `Rectangle` shape with `dir:
+    // Some(chord)` so the bench exercises the second `camera.project` in
+    // `grips_to_screen` (scene/pick/grip.rs), exactly like production.
+    let n_vertices = if runner.quick_mode { 10_000 } else { 100_000 };
+    let mut all_grips = Vec::with_capacity(2 * n_vertices);
+    for v in 0..n_vertices {
+        let base = (v % 1024) as f64;
+        all_grips.push(GripDef {
+            id: 2 * v,
+            world: glam::DVec3::new(base, base * 0.5, 0.0),
+            is_midpoint: false,
+            shape: GripShape::Square,
+            dir: None,
+            axis: None,
+        });
+        all_grips.push(GripDef {
+            id: 2 * v + 1,
+            world: glam::DVec3::new(base + 0.5, base * 0.5 + 0.25, 0.0),
+            is_midpoint: true,
+            shape: GripShape::Rectangle,
+            // In-plane segment direction of the synthetic polyline
+            // (vertices run along (1, 0.5)), matching the chord `dir` the
+            // real producer passes to `rectangle_grip`.
+            dir: Some(glam::DVec3::new(1.0, 0.5, 0.0)),
+            axis: None,
+        });
+    }
+    let all_handles: Vec<codec::Handle> = (0..all_grips.len() as u64)
+        .map(|k| codec::Handle::new(k + 1))
+        .collect();
+    let n_fixture_grips = all_grips.len();
+
+    // Budget once (selection-change path): the per-frame loop below only ever
+    // sees the capped set, exactly like view/mod.rs after refresh. Cloned so
+    // the full fixture stays available for the `ui_grip_budget_build` timing
+    // below, which measures this same selection-change cost per iteration.
+    let (capped_grips, _) = apply_grip_budget(all_grips.clone(), all_handles.clone());
+    assert_eq!(capped_grips.len(), MAX_SELECTED_GRIPS.min(2 * n_vertices));
+
+    let cam = Camera::default();
+    let bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 1920.0,
+        height: 1080.0,
+    };
+
+    // Warm-up for allocator settling.
+    for _ in 0..10 {
+        let projected = grips_to_screen(black_box(&capped_grips), &cam, bounds);
+        black_box(projected);
+    }
+
+    let n = if runner.quick_mode { 20 } else { 100 };
+    let runs = 5;
+    let mut samples = Vec::with_capacity(runs);
+
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for _ in 0..n {
+            let projected = grips_to_screen(black_box(&capped_grips), &cam, bounds);
+            black_box(projected);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n as f64);
+        samples.push(per_us);
+    }
+
+    let median_us = samples[samples.len() / 2];
+    runner.record(
+        "ui_grip_budget",
+        &format!(
+            "Budgeted per-frame grip projection ({}-grip polyline capped to {} grips)",
+            n_fixture_grips,
+            capped_grips.len()
+        ),
+        "µs",
+        samples,
+        Some(((capped_grips.len() as f64) / (median_us / 1_000_000.0), "grips/s")),
+        Some(500.0), // Target threshold < 500 µs (measured ~132 µs quick / ~147 µs full)
+    );
+
+    // Selection-change cost (previously unmeasured): `apply_grip_budget` sorts
+    // ~200K grips by `is_midpoint` (O(n log n)), builds an FxHashSet of the
+    // kept indices, and filters both parallel vecs — once per selection change,
+    // not per frame. Iteration inputs are pre-cloned before the timer so only
+    // the budget itself is measured, not the clone.
+    let n_build = if runner.quick_mode { 20 } else { 5 };
+    let mut build_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let mut build_inputs = Vec::with_capacity(n_build);
+        for _ in 0..n_build {
+            build_inputs.push((all_grips.clone(), all_handles.clone()));
+        }
+        let t0 = Instant::now();
+        for (grips_in, handles_in) in build_inputs {
+            let grips_in = black_box(grips_in);
+            let handles_in = black_box(handles_in);
+            let (capped, _) = apply_grip_budget(grips_in, handles_in);
+            black_box(capped);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n_build as f64);
+        build_samples.push(per_us);
+    }
+    let build_median_us = build_samples[build_samples.len() / 2];
+    runner.record(
+        "ui_grip_budget_build",
+        &format!(
+            "Selection-change grip budget over {} grips (sort + FxHashSet + filter)",
+            n_fixture_grips
+        ),
+        "µs",
+        build_samples,
+        Some(((n_fixture_grips as f64) / (build_median_us / 1_000_000.0), "grips/s")),
+        Some(7_000.0), // Target < 7 ms (selection-change hitch budget; measured ~2.36 ms full / ~0.30 ms quick, ~3x headroom)
+    );
+}
+
+// ── 12e. UI Constraint-Glyph Cache Hit (memoised placements) ────────────────
+// Covers the parametric constraint-glyph memo (`Scene::cached_glyph_placements`,
+// src/scene/parametric_constraints.rs): dozens of constraints whose per-frame
+// view + hit-test + dwell + click share one key, so the hot path is a cache
+// hit (key build + Arc clone), not a placements recompute (entity lookups,
+// intersections, String labels, projections).
+//
+// NOTE: the bench calls the real `cached_glyph_placements` with the same key
+// inputs the production consumers (app/view, viewport hit paths, overlay) and
+// the `cached_glyph_placements_*` unit-test fixture use
+// (`ParametricScope::ModelSpace`, full-canvas vp, values on, display 3,
+// bar 4095), so the measured hit is exactly what the frame shares.
+
+fn bench_ui_constraint_glyphs(runner: &mut BenchmarkRunner) {
+    if !runner.should_run("ui_constraint_glyphs") {
+        return;
+    }
+
+    // Fixture: dozens of horizontal constraints over a grid of short lines
+    // around the origin — mirrors the `cached_glyph_placements_*` unit-test
+    // fixture (Scene::new + add_entity + constraint add + note applied).
+    let n_constraints = if runner.quick_mode { 24 } else { 60 };
+    let mut scene = Scene::new();
+    let cols = 8;
+    for i in 0..n_constraints {
+        let x = ((i % cols) as f64) * 30.0 - 100.0;
+        let y = ((i / cols) as f64) * 30.0 - 100.0;
+        let line = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(x, y, 0.0),
+            Vector3::new(x + 20.0, y, 0.0),
+        )));
+        let id = scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+            .add(
+                ConstraintKind::Horizontal,
+                vec![ParametricRef::whole(line)],
+                None,
+            );
+        scene.note_parametric_constraint_applied(ParametricScope::ModelSpace, id, 3);
+    }
+    scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
+    let vp = (1920.0_f32, 1080.0_f32);
+
+    // Prime the cache so every timed call below is a hit (same key, same Arc).
+    let primed =
+        scene.cached_glyph_placements(ParametricScope::ModelSpace, vp, true, 3, 4095);
+    assert!(
+        !primed.is_empty(),
+        "glyph fixture must yield placements"
+    );
+    let n_glyphs = primed.len();
+
+    // Warm-up for allocator settling.
+    for _ in 0..10 {
+        let hit =
+            scene.cached_glyph_placements(ParametricScope::ModelSpace, vp, true, 3, 4095);
+        black_box(hit);
+    }
+
+    let n = if runner.quick_mode { 200 } else { 1_000 };
+    let runs = 5;
+    let mut samples = Vec::with_capacity(runs);
+
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for _ in 0..n {
+            let hit = scene.cached_glyph_placements(
+                black_box(ParametricScope::ModelSpace),
+                black_box(vp),
+                black_box(true),
+                black_box(3),
+                black_box(4095),
+            );
+            black_box(hit);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n as f64);
+        samples.push(per_us);
+    }
+
+    let median_us = samples[samples.len() / 2];
+    runner.record(
+        "ui_constraint_glyphs",
+        &format!(
+            "Constraint-glyph cache hit over {} glyphs (key build + Arc clone, no recompute)",
+            n_glyphs
+        ),
+        "µs",
+        samples,
+        Some(((n_glyphs as f64) / (median_us / 1_000_000.0), "glyphs/s")),
+        Some(0.5), // Target threshold < 0.5 µs (measured ~0.06 µs quick / ~0.15 µs full, ~3x headroom)
+    );
+}
+
+fn bench_ui_selection_overlay(runner: &mut BenchmarkRunner) {
+    if !runner.should_run("ui_selection_overlay") {
+        return;
+    }
+
+    // Fixture: the per-frame selection-overlay shape — an active snap,
+    // crosshair, one UCS tripod, empty constraint glyphs. Grip count is the
+    // scaling axis: typical selections carry dozens, the grip budget caps at
+    // 4096, so full mode measures the cap. Element (widget-tree)
+    // construction only; canvas draw/tessellation runs in the renderer.
+    let n_grips = if runner.quick_mode { 128 } else { 4096 };
+    // Warm-up for allocator settling.
+    for _ in 0..10 {
+        let _ = black_box(build_selection_overlay_element(n_grips));
+    }
+
+    let n = if runner.quick_mode { 20 } else { 100 };
+    let runs = 5;
+    let mut samples = Vec::with_capacity(runs);
+
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for _ in 0..n {
+            let elem = build_selection_overlay_element(black_box(n_grips));
+            black_box(elem);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n as f64);
+        samples.push(per_us);
+    }
+
+    let median_us = samples[samples.len() / 2];
+    runner.record(
+        "ui_selection_overlay",
+        &format!(
+            "Selection overlay Element construction with {} grips (widget tree, no draw)",
+            n_grips
+        ),
+        "µs",
+        samples,
+        Some((1_000_000.0 / median_us, "overlays/s")),
+        Some(50.0), // Target < 50 µs (2.4 µs at the 4096-grip cap, ~20x headroom)
+    );
+}
+
+fn build_selection_overlay_element(
+    n_grips: usize,
+) -> iced::Element<'static, OpenCADStudio::app::Message> {
+    use OpenCADStudio::app::{CursorType, IsoPlane};
+    use OpenCADStudio::scene::model::object::GripShape;
+    use OpenCADStudio::scene::parametric_constraints::GlyphEntry;
+    use OpenCADStudio::snap::SnapType;
+
+    let selection = Arc::new(std::cell::RefCell::new(SelectionState::default()));
+    let grips: Vec<GripMarker> = (0..n_grips)
+        .map(|i| GripMarker {
+            pos: Point::new(100.0 + i as f32 * 5.0, 200.0),
+            shape: GripShape::Square,
+            is_hot: false,
+            is_hovered: false,
+            dir: None,
+        })
+        .collect();
+    let ucs_icons = vec![UcsIconParams {
+        view_proj: Mat4::IDENTITY,
+        bounds: Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 1080.0 },
+        axes: (Vec3::X, Vec3::Y, Vec3::Z),
+        origin_screen: None,
+        hover: false,
+        selected: false,
+    }];
+    let empty_glyphs: Arc<[GlyphEntry]> = Arc::from([]);
+    let empty_selected: Arc<[bool]> = Arc::from([]);
+    selection_overlay(
+        selection,
+        Some((Point::new(400.0, 300.0), SnapType::Endpoint)),
+        None,
+        None,
+        grips,
+        None,
+        None,
+        ucs_icons,
+        vec![OstTrackPoint { screen: Point::new(500.0, 500.0) }],
+        vec![(Point::new(0.0, 0.0), Point::new(100.0, 100.0))],
+        None,
+        true,
+        vec![],
+        None,
+        None,
+        NavCursor::None,
+        false,
+        false,
+        [0.1, 0.1, 0.1, 1.0],
+        CrosshairOptions {
+            size_percent: 5,
+            pick_box: 3,
+            cursor_type: CursorType::Crosshair,
+            color: None,
+            isometric: false,
+            iso_plane: IsoPlane::Top,
+            snap_angle_deg: 0.0,
+            point_mode: false,
+            pick_pending: false,
+            hide_arms: false,
+            snap_color: None,
+        },
+        SelectionVisualOptions::default(),
+        empty_glyphs,
+        empty_selected,
+        None,
+        None,
+    )
 }
 
 // ── 13. Wide & Tapered Arc + Donut Tessellation ─────────────────────────────
@@ -1787,11 +1927,112 @@ fn bench_undo_delta_recording(runner: &mut BenchmarkRunner) {
     );
 }
 
+fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
+    if !runner.should_run("view_render") {
+        return;
+    }
+    let obj_count = if runner.quick_mode { 1_000 } else { 10_000 };
+    let mut scene = Scene::new();
+
+    // Populate scene with non-graphical document objects
+    for i in 0..obj_count {
+        let handle = codec::Handle::new(0x2000 + i as u64);
+        scene.document.objects.insert(
+            handle,
+            codec::objects::ObjectType::Dictionary(codec::objects::Dictionary::default()),
+        );
+    }
+    // Add lines to model space
+    for i in 0..100 {
+        let x = (i % 10) as f64 * 10.0;
+        let y = (i / 10) as f64 * 10.0;
+        let mut line = Line::new();
+        line.start = Vector3::new(x, y, 0.0);
+        line.end = Vector3::new(x + 5.0, y + 5.0, 0.0);
+        scene.add_entity(EntityType::Line(line));
+    }
+
+    let runs = if runner.quick_mode { 10 } else { 30 };
+    let bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 1920.0,
+        height: 1080.0,
+    };
+
+    // 1. Uncached / Before: Linear scans over document objects on every frame
+    let mut uncached_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        scene.invalidate_render_environment_cache();
+        let t0 = Instant::now();
+        let primitive = scene.build_viewports(
+            bounds,
+            codec::entities::ViewportRenderMode::Wireframe2D,
+            None,
+            false,
+            false,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        black_box(primitive);
+        let elapsed_us = t0.elapsed().as_micros() as f64;
+        uncached_samples.push(elapsed_us);
+    }
+    let median_uncached_us = uncached_samples[uncached_samples.len() / 2];
+    let fps_uncached = 1_000_000.0 / median_uncached_us.max(1.0);
+    runner.record(
+        "view_render_viewport_uncached (Before)",
+        "Uncached: 2 linear scans over document objects on every frame",
+        "µs",
+        uncached_samples,
+        Some((fps_uncached, "FPS")),
+        None,
+    );
+
+    // 2. Cached / After: Memoized document render environment + O(1) fast paths
+    let _ = scene.build_viewports(
+        bounds,
+        codec::entities::ViewportRenderMode::Wireframe2D,
+        None,
+        false,
+        false,
+        [1.0, 1.0, 1.0, 1.0],
+    );
+
+    let mut cached_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        let primitive = scene.build_viewports(
+            bounds,
+            codec::entities::ViewportRenderMode::Wireframe2D,
+            None,
+            false,
+            false,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        black_box(primitive);
+        let elapsed_us = t0.elapsed().as_micros() as f64;
+        cached_samples.push(elapsed_us);
+    }
+    let median_cached_us = cached_samples[cached_samples.len() / 2];
+    let fps_cached = 1_000_000.0 / median_cached_us.max(1.0);
+    runner.record(
+        "view_render_viewport_cached (After)",
+        "Memoized: O(1) render environment & Face3D fast-path",
+        "µs",
+        cached_samples,
+        Some((fps_cached, "FPS")),
+        Some(1000.0), // Target threshold < 1000 µs (1 ms)
+    );
+}
+
 // ── Main Entrypoint ─────────────────────────────────────────────────────────
 
 fn main() {
     println!("\nInitializing OpenCADStudio Performance Benchmarks...");
-    let mut runner = BenchmarkRunner::new();
+    let mut runner = BenchmarkRunner::new(
+        "                                      OPENCADSTUDIO PERFORMANCE BENCHMARK REPORT                                        ",
+        "cad_performance_metrics.json",
+    );
 
     if runner.quick_mode {
         println!("Mode: QUICK (reduced iteration/entity counts for fast validation)");
@@ -1811,11 +2052,16 @@ fn main() {
     bench_ui_grid_geometry(&mut runner);
     bench_ui_icon_caching(&mut runner);
     bench_ui_plotstyle_layer_usage(&mut runner);
+    bench_ui_statusbar_derived_data(&mut runner);
+    bench_ui_grip_budget(&mut runner);
+    bench_ui_constraint_glyphs(&mut runner);
+    bench_ui_selection_overlay(&mut runner);
     bench_wide_and_tapered_arc_tessellation(&mut runner);
     bench_zoom_extents_calculation(&mut runner);
     bench_batch_entity_mutation(&mut runner);
     bench_draworder_evaluation(&mut runner);
     bench_undo_delta_recording(&mut runner);
+    bench_view_render_viewport_construction(&mut runner);
 
     runner.finish();
 }

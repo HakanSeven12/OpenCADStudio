@@ -1,5 +1,5 @@
-use cadkernel::space::polygon;
-use acadrust::{EntityType, Handle};
+use kernel::space::polygon;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -169,10 +169,13 @@ impl AreaCommand {
         match measurement.perimeter {
             Some(perimeter) => crate::tr!(
                 "area", "result",
-                area = format!("{:.4}", measurement.area),
-                perimeter = format!("{perimeter:.4}"),
+                area = crate::entities::common::format_area(measurement.area),
+                perimeter = crate::entities::common::format_length(perimeter),
             ),
-            None => crate::tr!("area", "result-area-only", area = format!("{:.4}", measurement.area)),
+            None => crate::tr!(
+                "area", "result-area-only",
+                area = crate::entities::common::format_area(measurement.area),
+            ),
         }
     }
 
@@ -180,15 +183,15 @@ impl AreaCommand {
         match measurement.perimeter {
             Some(perimeter) => crate::tr!(
                 "area", "running-result",
-                area = format!("{:.4}", measurement.area),
-                perimeter = format!("{perimeter:.4}"),
-                total_area = format!("{:.4}", self.total_area),
-                total_perimeter = format!("{:.4}", self.total_perimeter),
+                area = crate::entities::common::format_area(measurement.area),
+                perimeter = crate::entities::common::format_length(perimeter),
+                total_area = crate::entities::common::format_area(self.total_area),
+                total_perimeter = crate::entities::common::format_length(self.total_perimeter),
             ),
             None => crate::tr!(
                 "area", "running-result-area-only",
-                area = format!("{:.4}", measurement.area),
-                total_area = format!("{:.4}", self.total_area),
+                area = crate::entities::common::format_area(measurement.area),
+                total_area = crate::entities::common::format_area(self.total_area),
             ),
         }
     }
@@ -372,6 +375,7 @@ impl CadCommand for AreaCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -397,7 +401,9 @@ impl CadCommand for AreaCommand {
             plinegen: true,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 
     fn area_preview_regions(&self) -> Option<Vec<AreaPreviewRegion>> {

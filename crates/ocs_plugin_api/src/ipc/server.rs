@@ -3,6 +3,27 @@
 use crate::host::HostApi;
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
+fn addressable_document_snapshot(host: &dyn HostApi) -> codec::CadDocument {
+    let mut snapshot = host.document().clone();
+    let attributes = host
+        .document()
+        .entities()
+        .filter_map(|entity| match entity {
+            codec::EntityType::Insert(insert) => Some(insert.attributes.clone()),
+            _ => None,
+        })
+        .flatten()
+        .map(codec::EntityType::AttributeEntity)
+        .collect::<Vec<_>>();
+    for attribute in attributes {
+        // Attribute entities remain canonical children of INSERT in the host
+        // document.  The IPC snapshot also indexes them by handle so plugin
+        // document models can address a child exactly like any other entity.
+        let _ = snapshot.add_entity(attribute);
+    }
+    snapshot
+}
+
 /// Apply one plugin request to the host's `HostApi` implementation.
 ///
 /// `on_start_interactive` is called when the plugin starts an interactive
@@ -54,7 +75,7 @@ pub fn handle_plugin_request(
             on_start_interactive(command_id);
             PluginResponse::Ok
         }
-        DocumentSnapshot => PluginResponse::Document(Box::new(host.document().clone())),
+        DocumentSnapshot => PluginResponse::Document(Box::new(addressable_document_snapshot(host))),
         OpenDocumentView => match host.document_view() {
             Some(info) => PluginResponse::DocumentView {
                 path: info.path,
@@ -79,5 +100,18 @@ pub fn handle_plugin_request(
         ),
         AddLayer(config) => PluginResponse::OptHandle(host.add_layer(config)),
         ModifyLayer(config) => PluginResponse::Bool(host.modify_layer(config)),
+        ExecuteCommand(cmd) => PluginResponse::Bool(host.execute_command(&cmd)),
+        GetSystemVariable { name } => PluginResponse::SystemVariable(host.system_variable(&name)),
+        SetSystemVariable { name, value } => {
+            PluginResponse::SystemVariableResult(host.set_system_variable(&name, value))
+        }
+        UpdateEntitiesTransaction { label, entities } => PluginResponse::EntityTransactionResult(
+            host.update_entities_transaction(&label, entities),
+        ),
+        GetSelection => PluginResponse::Selection(host.selection()),
+        SetSelection { handles } => PluginResponse::SelectionResult(host.set_selection(&handles)),
+        SolidOperation { operation } => PluginResponse::SolidResult(host.solid_operation(operation)),
+        TableOperation { operation } => PluginResponse::TableResult(host.table_operation(operation)),
+        RunCommand { request } => PluginResponse::CommandResult(host.run_command(request)),
     }
 }

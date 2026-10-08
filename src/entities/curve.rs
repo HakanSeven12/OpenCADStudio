@@ -28,17 +28,17 @@
 //! curves. They keep their own paths and this returns `None` for them, which
 //! is what lets a caller ask about any entity without checking first.
 
-use acadrust::entities::{
+use codec::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, LwPolyline as LwPolylineEnt,
     Polyline2D, Spline as SplineEnt,
 };
-use acadrust::types::Vector3;
-use acadrust::EntityType;
-use cadkernel::geom2d::{
+use codec::types::Vector3;
+use codec::EntityType;
+use kernel::geom2d::{
     characteristic_points, Arc, Circle, Curve, Ellipse, EllipseArc, Line, Polyline, PolylineVertex,
     Ray, SnapKind, Transform, XLine,
 };
-use cadkernel::space::{are_coplanar, coplanarity_tolerance, PlanarCurve, Plane, Vec3};
+use kernel::space::{are_coplanar, coplanarity_tolerance, PlanarCurve, Plane, Vec3};
 
 use crate::modules::draw::modify::spline_ops::spline_to_nurbs_on;
 use crate::scene::model::wire_model::SnapHint;
@@ -109,12 +109,12 @@ pub fn entity_curve(entity: &EntityType) -> Option<PlanarCurve> {
 
 /// Exact spatial source geometry for commands that traverse nonplanar curves.
 /// Curve construction and arc-length calculations remain in the kernel.
-pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::space::ArcLengthCurve3> {
-    use cadkernel::space::{ArcLengthCurve3, NurbsCurve3};
+pub fn entity_spatial_measurement(entity: &EntityType) -> Option<kernel::space::ArcLengthCurve3> {
+    use kernel::space::{ArcLengthCurve3, NurbsCurve3};
     let curve = match entity {
         EntityType::Polyline3D(polyline) => {
             if polyline.flags.spline_fit {
-                use acadrust::entities::polyline3d::SmoothSurfaceType;
+                use codec::entities::polyline3d::SmoothSurfaceType;
                 let degree = match polyline.smooth_type {
                     SmoothSurfaceType::QuadraticBSpline => 2,
                     SmoothSurfaceType::CubicBSpline | SmoothSurfaceType::Bezier => 3,
@@ -463,7 +463,7 @@ pub fn entity_with_lwpolyline_world_xy(entity: &EntityType) -> EntityType {
 
 /// World-space wire points sampled by the kernel's angular policy.
 pub fn curve_points(curve: &PlanarCurve) -> Vec<[f64; 3]> {
-    curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+    curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
 }
 
 /// The snap candidates an entity's curve offers, in the two channels the
@@ -484,9 +484,9 @@ pub fn snap_from(curve: &PlanarCurve) -> CurveSnap {
     // there and let their midpoints be derived; everything else names its own
     // ends and middle explicitly.
     //
-    // The same distinction is why a polyline's arc-segment centres are not
-    // emitted: a wire carrying a centre is treated as round elsewhere, which
-    // a polyline with one bulge in it is not.
+    // The same distinction is why a polyline's arc-segment centres carry
+    // their own hint: a wire carrying a `Center` is treated as round
+    // elsewhere, which a polyline with one bulge in it is not.
     let chain = matches!(curve.curve, Curve::Line(_) | Curve::Polyline(_));
     let mut out = CurveSnap::default();
     let mut push = |world: [f64; 3], hint: SnapHint| {
@@ -499,11 +499,26 @@ pub fn snap_from(curve: &PlanarCurve) -> CurveSnap {
             SnapKind::Endpoint => push(world, SnapHint::Endpoint),
             SnapKind::Midpoint if !chain => push(world, SnapHint::Midpoint),
             SnapKind::Centre if !chain => push(world, SnapHint::Center),
+            SnapKind::Centre => push(world, SnapHint::ArcCenter),
             SnapKind::Quadrant => push(world, SnapHint::Quadrant),
             _ => {}
         }
     }
     out
+}
+
+/// The centres and quadrants of a polyline's arc segments, for a polyline
+/// render that names its vertices itself.
+pub fn arc_segment_snaps(entity: &EntityType) -> Vec<(glam::DVec3, SnapHint)> {
+    entity_curve(entity)
+        .map(|curve| {
+            snap_from(&curve)
+                .snap_pts
+                .into_iter()
+                .filter(|(_, hint)| matches!(hint, SnapHint::ArcCenter | SnapHint::Quadrant))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The magnitude the geometry's own coordinates sit at, for scaling a
@@ -530,9 +545,9 @@ fn normalized(normal: Vector3) -> Vector3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::lwpolyline::LwVertex;
-    use acadrust::entities::{Line as LineEnt, Ray as RayEnt, XLine as XLineEnt};
-    use acadrust::types::Vector2;
+    use codec::entities::lwpolyline::LwVertex;
+    use codec::entities::{Line as LineEnt, Ray as RayEnt, XLine as XLineEnt};
+    use codec::types::Vector2;
     use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
     fn v3(x: f64, y: f64, z: f64) -> Vector3 {
@@ -726,8 +741,8 @@ mod tests {
 
     #[test]
     fn spatial_polyline_measurement_uses_unflagged_fit_controls() {
-        use acadrust::entities::polyline3d::SmoothSurfaceType;
-        use acadrust::entities::{Polyline3D, Vertex3DPolyline};
+        use codec::entities::polyline3d::SmoothSurfaceType;
+        use codec::entities::{Polyline3D, Vertex3DPolyline};
 
         let mut polyline = Polyline3D::new();
         polyline.flags.spline_fit = true;
@@ -807,6 +822,26 @@ mod tests {
     }
 
     #[test]
+    fn a_polyline_arc_segment_offers_its_centre_and_quadrants() {
+        let mut polyline = LwPolylineEnt::default();
+        polyline.normal = v3(0.0, 0.0, 1.0);
+        let mut bend = LwVertex::from_coords(0.0, 0.0);
+        bend.bulge = 0.9999999999999999;
+        polyline.vertices = vec![LwVertex::from_coords(-20.0, 0.0), bend, LwVertex::from_coords(20.0, 0.0)];
+        let snaps = arc_segment_snaps(&EntityType::LwPolyline(polyline));
+        let at = |hint: SnapHint, x: f64, y: f64| {
+            snaps.iter().any(|(p, h)| {
+                std::mem::discriminant(h) == std::mem::discriminant(&hint)
+                    && (p.x - x).abs() < 1e-9
+                    && (p.y - y).abs() < 1e-9
+            })
+        };
+        assert!(at(SnapHint::ArcCenter, 10.0, 0.0), "{snaps:?}");
+        assert!(at(SnapHint::Quadrant, 10.0, -10.0), "{snaps:?}");
+        assert!(!at(SnapHint::Quadrant, 10.0, 10.0), "{snaps:?}");
+    }
+
+    #[test]
     fn a_closed_curve_has_no_ends_to_offer() {
         let mut circle = CircleEnt::default();
         circle.radius = 1.0;
@@ -849,12 +884,12 @@ mod tests {
     /// where it happens rather than the next time somebody reaches for it.
     #[test]
     fn the_solid_layer_and_the_acis_bridge_are_reachable() {
-        let solid = cadkernel::brep::make::cuboid([0.0; 3], [1.0; 3])
+        let solid = kernel::brep::make::cuboid([0.0; 3], [1.0; 3])
             .expect("the kernel builds its own primitives");
         assert!(solid.validate().is_empty());
         assert_eq!(solid.euler_characteristic(), 2);
-        let document = acadrust::entities::acis::types::SatDocument::new();
-        let (bodies, loss) = cadkernel::acis::lift(&document);
+        let document = codec::entities::acis::types::SatDocument::new();
+        let (bodies, loss) = kernel::acis::lift(&document);
         assert!(bodies.is_empty() && loss.is_empty(), "an empty document lifts to nothing");
     }
 
@@ -886,14 +921,14 @@ mod tests {
         ray.base_point = v3(1.0, 1.0, 0.0);
         ray.direction = v3(2.0, 0.0, 0.0);
         let curve = entity_curve(&EntityType::Ray(ray)).unwrap();
-        assert_eq!(curve.extent(), cadkernel::geom2d::Extent::Forward);
+        assert_eq!(curve.extent(), kernel::geom2d::Extent::Forward);
         assert_eq!(curve.point_at(1.0), [3.0, 1.0, 0.0]);
 
         let mut line = XLineEnt::default();
         line.base_point = v3(0.0, 0.0, 0.0);
         line.direction = v3(0.0, 3.0, 0.0);
         let curve = entity_curve(&EntityType::XLine(line)).unwrap();
-        assert_eq!(curve.extent(), cadkernel::geom2d::Extent::Infinite);
+        assert_eq!(curve.extent(), kernel::geom2d::Extent::Infinite);
         assert_eq!(curve.point_at(-1.0), [0.0, -3.0, 0.0]);
     }
 }

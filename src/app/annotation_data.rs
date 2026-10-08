@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use acadrust::entities::{table::CellRange, TableBuilder};
-use acadrust::objects::{ClassObject, ClassObjectData, DataLink, DataLinkCustomData, ObjectType};
-use acadrust::types::{Handle, Vector3};
-use acadrust::{CadDocument, EntityType};
+use codec::entities::{table::CellRange, TableBuilder};
+use codec::objects::{ClassObject, ClassObjectData, DataLink, DataLinkCustomData, ObjectType};
+use codec::types::{Handle, Vector3};
+use codec::{CadDocument, EntityType};
 use iced::Task;
 
 use super::{Message, ModalKind, OpenCADStudio};
@@ -151,6 +151,12 @@ fn crop_range(rows: Vec<Vec<String>>, range: &str) -> Result<Vec<Vec<String>>, S
     };
     let (r0, r1) = (r0.min(r1), r0.max(r1));
     let (c0, c1) = (c0.min(c1), c0.max(c1));
+    // The row axis is bounded by the file (skip/take over real rows); the
+    // column axis was not — `A1:ZZZZZZ1` parses fine and then collected one
+    // String per column (~308 M slots per row, OOM). Columns past the widest
+    // row are empty in every row, so clamp the window to the data width.
+    let widest = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let c1 = c1.min(widest.saturating_sub(1));
     Ok(rows.into_iter()
         .skip(r0)
         .take(r1 - r0 + 1)
@@ -269,7 +275,7 @@ fn table_style_handle(doc: &CadDocument, name: &str) -> Option<Handle> {
     })
 }
 
-fn build_table(rows: &[Vec<String>], style: Option<Handle>, title: Option<&str>) -> acadrust::entities::Table {
+fn build_table(rows: &[Vec<String>], style: Option<Handle>, title: Option<&str>) -> codec::entities::Table {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let title_rows = usize::from(title.is_some_and(|value| !value.trim().is_empty()));
     let mut table = TableBuilder::new(rows.len().max(1) + title_rows, columns)
@@ -447,7 +453,7 @@ fn collect_drawing_paths(
         return Ok(());
     }
     if !path.is_dir() {
-        return Err(crate::tf!("Data source not found: %{path}", path = path.display()).into_owned());
+        return Err(crate::t!("Data source not found: %{path}", path = path.display()).into_owned());
     }
     for entry in std::fs::read_dir(path).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -1029,7 +1035,7 @@ impl OpenCADStudio {
                             cell.has_linked_data = false;
                             cell.data_link_rows = 0;
                             cell.data_link_columns = 0;
-                            cell.state.remove(acadrust::entities::table::CellStateFlags::LINKED | acadrust::entities::table::CellStateFlags::CONTENT_LOCKED | acadrust::entities::table::CellStateFlags::FORMAT_LOCKED);
+                            cell.state.remove(codec::entities::table::CellStateFlags::LINKED | codec::entities::table::CellStateFlags::CONTENT_LOCKED | codec::entities::table::CellStateFlags::FORMAT_LOCKED);
                         }
                     }
                 }
@@ -1449,6 +1455,27 @@ mod tests {
                 vec!["b".to_string(), "c".to_string()],
                 vec!["e".to_string(), "f".to_string()],
             ]
+        );
+    }
+
+    /// `column_index` only checks `checked_mul(26)`, so a range like
+    /// `A1:ZZZZZZ1` parses fine — and `(c0..=c1)` then collects one `String`
+    /// per column: ~308 M slots (~7 GB) for 6 Z's, and a `capacity overflow`
+    /// panic at 13 Z's. Columns past the widest row are empty in *every*
+    /// row, so the window must be clamped to the data width.
+    #[test]
+    fn crop_range_bounds_oversized_column_spans() {
+        let rows = vec![vec!["x".to_string()]];
+        // 13 Z's: pre-fix, size_hint × size_of::<String>() exceeds isize::MAX
+        // and Vec's capacity check panics before a single cell is read.
+        assert_eq!(
+            crop_range(rows.clone(), "A1:ZZZZZZZZZZZZZ1").unwrap(),
+            vec![vec!["x".to_string()]]
+        );
+        // 6 Z's — the bug-hunt report's repro — stays bounded too.
+        assert_eq!(
+            crop_range(rows, "A1:ZZZZZZ1").unwrap(),
+            vec![vec!["x".to_string()]]
         );
     }
 }

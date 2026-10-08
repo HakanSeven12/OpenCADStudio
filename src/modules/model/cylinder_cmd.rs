@@ -1,7 +1,7 @@
-use acadrust::entities::Solid3D;
-use acadrust::objects::SolidHistoryOperation;
-use acadrust::EntityType;
-use cadkernel::brep::Body;
+use codec::entities::Solid3D;
+use codec::objects::SolidHistoryOperation;
+use codec::EntityType;
+use kernel::brep::Body;
 use glam::DVec3;
 
 use crate::command::{
@@ -134,7 +134,7 @@ impl CylinderCommand {
         let plane = WorkingPlane::new(a, first_axis, second_axis);
         let local_b = plane.to_local(b);
         let local_c = plane.to_local(c);
-        let circle = cadkernel::geom2d::arc_through_points(
+        let circle = kernel::geom2d::arc_through_points(
             [0.0, 0.0],
             [local_b.x, local_b.y],
             [local_c.x, local_c.y],
@@ -248,10 +248,13 @@ impl CylinderCommand {
         else {
             return None;
         };
-        let candidates = crate::modules::draw::draw::circle::ttr_candidates(first, second, radius);
-        let local = crate::modules::draw::draw::circle::best_of(
-            &candidates,
-            (first_hit + second_hit) * 0.5,
+        let local = crate::modules::draw::draw::circle::pick_best_ttr_candidate(
+            first,
+            second,
+            radius,
+            first_hit,
+            second_hit,
+            None,
         )?;
         Some(self.plane.to_world(local))
     }
@@ -460,6 +463,16 @@ impl CylinderCommand {
 impl CadCommand for CylinderCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+
+    /// The radius step reads the cursor on the base plane through the
+    /// centre, so a base started on a raised face follows the mouse.
+    fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
+        if !matches!(self.step, Step::BaseRadius | Step::BaseDiameter) {
+            return None;
+        }
+        let frame = self.frame?;
+        Some((frame.z.normalize_or_zero(), frame.origin))
     }
 
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
@@ -721,8 +734,12 @@ impl CadCommand for CylinderCommand {
     fn point_step_accepts_keywords(&self) -> bool {
         matches!(
             self.step,
-            Step::BaseCenter | Step::BaseRadius | Step::EllipseFirst | Step::Height
+            Step::BaseCenter | Step::BaseRadius | Step::EllipseFirst
         )
+    }
+
+    fn dyn_commit_as_text(&self) -> bool {
+        matches!(self.step, Step::Height | Step::BaseDiameter)
     }
 
     fn on_text_input(&mut self, raw: &str) -> Option<CmdResult> {
@@ -814,3 +831,87 @@ fn push_ellipse(
 fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
     WireModel::solid(name.to_string(), points, WireModel::CYAN, false)
 }
+
+#[cfg(test)]
+mod cylinder_tests {
+    use super::*;
+
+    #[test]
+    fn cylinder_creation_height_workflow() {
+        // Reset defaults
+        if let Ok(mut defs) = defaults().lock() {
+            *defs = Defaults::default();
+        }
+
+        // Test 1: Typing height upon creation respects the typed height
+        let mut command = CylinderCommand::new();
+        assert!(!command.dyn_commit_as_text());
+
+        // Step 1: Center
+        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(!command.dyn_commit_as_text());
+
+        // Step 2: Radius
+        assert!(matches!(
+            command.on_point(DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+
+        // Step 3: Height
+        assert!(command.dyn_commit_as_text());
+        assert!(!command.point_step_accepts_keywords());
+
+        let res = command.on_text_input("25.0");
+        let Some(CmdResult::CommitSolid { history, .. }) = res else {
+            panic!("expected CommitSolid");
+        };
+        let SolidHistoryOperation::Cylinder(cyl) = history else {
+            panic!("expected Cylinder history");
+        };
+        assert_eq!(cyl.height, 25.0);
+        assert_eq!(defaults().lock().unwrap().height, 25.0);
+
+        // Test 2: Create cylinder with mouse drag
+        let mut cmd1 = CylinderCommand::new();
+        cmd1.on_point(DVec3::ZERO);
+        cmd1.on_point(DVec3::new(4.0, 0.0, 0.0));
+        let res1 = cmd1.on_point(DVec3::new(0.0, 0.0, 10.0));
+        let CmdResult::CommitSolid { history, .. } = res1 else {
+            panic!("expected CommitSolid");
+        };
+        let SolidHistoryOperation::Cylinder(cyl1) = history else {
+            panic!("expected Cylinder history");
+        };
+        assert_eq!(cyl1.height, 10.0);
+        assert_eq!(defaults().lock().unwrap().height, 10.0);
+
+        // Test 3: Next cylinder with Enter respects remembered mouse-dragged height
+        let mut cmd2 = CylinderCommand::new();
+        cmd2.on_point(DVec3::ZERO);
+        cmd2.on_point(DVec3::new(4.0, 0.0, 0.0));
+        let res2 = cmd2.on_enter();
+        let CmdResult::CommitSolid { history, .. } = res2 else {
+            panic!("expected CommitSolid");
+        };
+        let SolidHistoryOperation::Cylinder(cyl2) = history else {
+            panic!("expected Cylinder history");
+        };
+        assert_eq!(cyl2.height, 10.0);
+
+        // Test 4: Next cylinder: typing different height respects the new typed height (not retaining 10.0)!
+        let mut cmd3 = CylinderCommand::new();
+        cmd3.on_point(DVec3::ZERO);
+        cmd3.on_point(DVec3::new(4.0, 0.0, 0.0));
+        assert!(cmd3.dyn_commit_as_text());
+        let res3 = cmd3.on_text_input("42.0");
+        let Some(CmdResult::CommitSolid { history, .. }) = res3 else {
+            panic!("expected CommitSolid");
+        };
+        let SolidHistoryOperation::Cylinder(cyl3) = history else {
+            panic!("expected Cylinder history");
+        };
+        assert_eq!(cyl3.height, 42.0);
+        assert_eq!(defaults().lock().unwrap().height, 42.0);
+    }
+}
+

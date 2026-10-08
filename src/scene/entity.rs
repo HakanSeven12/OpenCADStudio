@@ -1,5 +1,23 @@
-// Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::*;
+
+#[derive(Debug, Clone)]
+pub struct CreateBlockOptions {
+    pub name: String,
+    pub handles: Vec<Handle>,
+    pub base_point: glam::DVec3,
+    pub world_to_block: codec::types::Transform,
+    pub block_to_world: codec::types::Transform,
+    pub mode: crate::ui::window::block_definition::BlockObjectMode,
+    pub annotative: bool,
+    pub match_orientation: bool,
+    pub scale_uniformly: bool,
+    pub allow_exploding: bool,
+    pub unit: i16,
+    pub description: String,
+    pub hyperlink_url: String,
+    pub hyperlink_desc: String,
+    pub redefine: bool,
+}
 
 /// Order sampled boundary edges into one tip-to-tail loop.
 pub(super) fn chain_path_edges(polys: Vec<Vec<[f64; 2]>>) -> Vec<[f64; 2]> {
@@ -68,7 +86,7 @@ pub(super) fn chain_path_edges_with_directions(
 }
 
 fn family_from_stored_line(
-    ln: &acadrust::entities::hatch::HatchPatternLine,
+    ln: &codec::entities::hatch::HatchPatternLine,
 ) -> crate::scene::model::hatch_model::PatFamily {
     let (ca, sa) = (ln.angle.cos(), ln.angle.sin());
     let dx = ln.offset.x * ca + ln.offset.y * sa;
@@ -125,27 +143,30 @@ impl Scene {
     /// layer 0. Auto-registering keeps it on its own layer (#252). Names are
     /// registered verbatim so the writer's (case-insensitive) lookup matches;
     /// the always-present default layer "0" and empty names are no-ops.
+    /// Flags `layer_table_dirty` so the app refreshes its layer lists.
     pub fn ensure_layer(&mut self, name: &str) {
         if name.trim().is_empty() || self.document.layers.contains(name) {
             return;
         }
-        let mut layer = acadrust::tables::Layer::new(name);
+        let mut layer = codec::tables::Layer::new(name);
         layer.handle = self.document.allocate_handle();
         let _ = self.document.layers.add(layer);
+        self.invalidate_layer_dependencies(&[name.to_string()]);
+        self.layer_table_dirty = true;
     }
 
-    pub(super) fn ensure_app_id(&mut self, name: &str) {
+    pub(crate) fn ensure_app_id(&mut self, name: &str) {
         if name.trim().is_empty() || self.document.app_ids.contains(name) {
             return;
         }
-        let mut app_id = acadrust::tables::AppId::new(name);
+        let mut app_id = codec::tables::AppId::new(name);
         app_id.handle = self.document.allocate_handle();
         let _ = self.document.app_ids.add(app_id);
     }
 
     fn prepare_section_objects(&mut self, entity: &mut EntityType) -> bool {
-        use acadrust::entities::ExtendedEntityData;
-        use acadrust::objects::{
+        use codec::entities::ExtendedEntityData;
+        use codec::objects::{
             ClassObject, ClassObjectData, SectionManager, SectionSettings, SectionTypeSettings,
         };
 
@@ -301,7 +322,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         let mesh_seed = if matches!(
             &entity,
             EntityType::Solid3D(_)
@@ -325,28 +346,7 @@ impl Scene {
             None
         };
 
-        // Auto-create an ImageDefinition object for new RasterImage entities
-        // that don't already reference one.
-        if let EntityType::RasterImage(ref mut img) = entity {
-            if img.definition_handle.is_none() {
-                use acadrust::objects::{ImageDefinition, ObjectType};
-                let def_handle = Handle::new(self.document.next_handle());
-                if self.is_recording_undo() {
-                    self.record_undo_object_before(def_handle, None);
-                }
-                let mut img_def = ImageDefinition::with_dimensions(
-                    &img.file_path,
-                    img.size.x as u32,
-                    img.size.y as u32,
-                );
-                img_def.handle = def_handle;
-                img_def.is_loaded = true;
-                self.document
-                    .objects
-                    .insert(def_handle, ObjectType::ImageDefinition(img_def));
-                img.definition_handle = Some(def_handle);
-            }
-        }
+        self.ensure_image_definition(&mut entity);
 
         // Register the entity's layer if it names one no LAYER command created
         // (e.g. a plugin-supplied layer) so it survives a DWG save instead of
@@ -517,7 +517,53 @@ impl Scene {
     /// [`add_entity`](Self::add_entity) used to commit a plugin's edit of an
     /// existing entity.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub fn update_entity(&mut self, mut entity: EntityType) -> bool {
+    pub fn update_entity(&mut self, entity: EntityType) -> bool {
+        let mut changed = Vec::with_capacity(1);
+        let mut block_change = false;
+        if !self.update_entity_impl(entity, &mut changed, &mut block_change) {
+            return false;
+        }
+        self.publish_entity_updates(changed, block_change);
+        true
+    }
+
+    /// Batched variant of [`update_entity`]: writes every replacement, then
+    /// issues a single geometry bump for the whole set instead of one bump per
+    /// entity.
+    pub fn update_entities(&mut self, updates: Vec<EntityType>) -> usize {
+        let mut moved = 0usize;
+        let mut changed = Vec::with_capacity(updates.len());
+        let mut block_change = false;
+        for entity in updates {
+            if self.update_entity_impl(entity, &mut changed, &mut block_change) {
+                moved += 1;
+            }
+        }
+        if !changed.is_empty() || block_change {
+            self.publish_entity_updates(changed, block_change);
+        }
+        moved
+    }
+
+    /// One geometry bump for a set of slot writes already reflected in
+    /// `changed` / `block_change`.
+    fn publish_entity_updates(&mut self, changed: Vec<(Handle, ChangeKind)>, block_change: bool) {
+        if block_change {
+            self.bump_geometry();
+        } else {
+            self.bump_entities(&changed);
+        }
+    }
+
+    /// Shared write path for `update_entity` / `update_entities`: validates,
+    /// records undo, writes the slot, and reseeds derived caches, recording
+    /// the change instead of bumping geometry.
+    fn update_entity_impl(
+        &mut self,
+        mut entity: EntityType,
+        changed: &mut Vec<(Handle, ChangeKind)>,
+        block_change: &mut bool,
+    ) -> bool {
         let handle = entity.common().handle;
         if self.is_layer_locked(handle) {
             return false;
@@ -525,6 +571,9 @@ impl Scene {
         let Some(existing) = self.document.get_entity(handle) else {
             return false;
         };
+        // IPC snapshots omit storage-only payloads (notably Unknown/Extended
+        // entities). Preserve them when replacing a clone from a plugin.
+        entity.preserve_storage_data_from(existing);
         // The caller edited a snapshot copy; keep the live entity in its block.
         entity.common_mut().owner_handle = existing.common().owner_handle;
 
@@ -557,7 +606,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         let mesh_seed = if matches!(
             &entity,
             EntityType::Solid3D(_)
@@ -637,12 +686,12 @@ impl Scene {
 
         if affects_blocks {
             self.mark_entity_dirty(handle);
-            self.bump_geometry();
+            *block_change = true;
         } else {
             // One entity changed in place: report just this handle so every
             // derived cache patches it instead of rebuilding (bump_entities also
             // drops it from the tessellation memos).
-            self.bump_entities(&[(handle, ChangeKind::Modified)]);
+            changed.push((handle, ChangeKind::Modified));
         }
         true
     }
@@ -652,6 +701,25 @@ impl Scene {
     /// or drop them all if the handle is now absent. Mirrors the reseed block in
     /// [`Scene::update_entity`]; used by delta-undo when it re-applies an
     /// entity's before / after image so the fills and meshes follow.
+    /// Rebuild every underlay's raster and wire, after a setting they draw
+    /// or snap by (PDFOSNAP / UOSNAP) changed.
+    pub(crate) fn reseed_underlays(&mut self) {
+        let handles: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, EntityType::Underlay(_)))
+            .map(|entity| entity.common().handle)
+            .collect();
+        for handle in &handles {
+            self.reseed_derived_caches(*handle);
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+            .collect();
+        self.bump_entities(&changes);
+    }
+
     pub(crate) fn reseed_derived_caches(&mut self, handle: Handle) {
         let (hatch_seed, image_seed) = match self.document.get_entity(handle) {
             None => (None, None),
@@ -684,15 +752,16 @@ impl Scene {
     }
 
     pub fn restore_solid_models(&mut self, handles: &[Handle]) {
-        let bodies: Vec<(Handle, cadkernel::brep::Body)> = handles
+        let bodies: Vec<(Handle, kernel::brep::Body)> = handles
             .iter()
             .filter(|handle| !self.solid_models.contains_key(handle))
             .filter_map(|&handle| {
-                let from_history = self
-                    .document
-                    .solid_history_operations(handle)
-                    .and_then(|operations| cadkernel::acis::rebuild_history(&operations).ok());
-                let body = from_history.or_else(|| match self.document.get_entity(handle) {
+                let tree = self.document.solid_history_tree(handle);
+                let rebuilt = || {
+                    tree.as_ref()
+                        .and_then(|tree| kernel::acis::rebuild_history_tree(tree).ok())
+                };
+                let stored = || match self.document.get_entity(handle) {
                     Some(EntityType::Solid3D(solid)) => {
                         crate::scene::convert::solid3d_tess::kernel_body(solid)
                     }
@@ -703,7 +772,14 @@ impl Scene {
                         crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
                     }
                     _ => None,
-                })?;
+                };
+                // A composite's saved body is what its booleans produced;
+                // replaying them is for edits, not for reading the file.
+                let body = if tree.as_ref().is_some_and(|tree| tree.has_boolean()) {
+                    stored().or_else(rebuilt)
+                } else {
+                    rebuilt().or_else(stored)
+                }?;
                 Some((handle, body))
             })
             .collect();
@@ -750,7 +826,7 @@ impl Scene {
             .objects
             .values()
             .filter_map(|o| match o {
-                acadrust::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
+                codec::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
                     Some(l.block_record)
                 }
                 _ => None,
@@ -767,7 +843,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         use crate::par::prelude::*;
         let built: Vec<(Handle, MeshLodSet, bool)> = entries
             .into_par_iter()
@@ -821,7 +897,7 @@ impl Scene {
         let layer_entry = self.document.layers.get(layer);
         let color = layer_entry
             .map(|l| &l.color)
-            .unwrap_or(&acadrust::types::Color::WHITE);
+            .unwrap_or(&codec::types::Color::WHITE);
         let [r, g, b, _] = crate::scene::convert::tess_util::aci_to_rgba(color);
         let alpha = layer_entry
             .map(|layer| 1.0 - layer.transparency.as_percent() as f32)
@@ -842,21 +918,154 @@ impl Scene {
         &mut self,
         handles: &[Handle],
         name: &str,
-        world_to_block: &acadrust::types::Transform,
-        block_to_world: &acadrust::types::Transform,
+        world_to_block: &codec::types::Transform,
+        block_to_world: &codec::types::Transform,
     ) -> Result<Handle, String> {
-        let name = name.trim();
+        self.create_block_with_options(CreateBlockOptions {
+            name: name.to_string(),
+            handles: handles.to_vec(),
+            base_point: glam::DVec3::ZERO,
+            world_to_block: *world_to_block,
+            block_to_world: *block_to_world,
+            mode: crate::ui::window::block_definition::BlockObjectMode::Convert,
+            annotative: false,
+            match_orientation: false,
+            scale_uniformly: false,
+            allow_exploding: true,
+            unit: 0,
+            description: String::new(),
+            hyperlink_url: String::new(),
+            hyperlink_desc: String::new(),
+            redefine: false,
+        })
+    }
+
+    pub fn create_block_with_options(
+        &mut self,
+        options: CreateBlockOptions,
+    ) -> Result<Handle, String> {
+        let name = options.name.trim();
         if name.is_empty() {
             return Err("Block name cannot be empty.".into());
         }
         if name.starts_with('*') {
             return Err("Block name cannot start with '*'.".into());
         }
-        if self.document.block_records.get(name).is_some() {
-            return Err(format!("Block \"{name}\" already exists."));
-        }
 
-        let source_entities: Vec<_> = handles
+        let existing = self
+            .document
+            .block_records
+            .get(name)
+            .map(|br| (br.handle, br.block_entity_handle));
+
+        let (br_handle, _block_handle) = if let Some((existing_br_h, existing_blk_h)) = existing {
+            if !options.redefine {
+                return Err(format!("Block \"{name}\" already exists."));
+            }
+            // Redefining: remove all existing entities owned by this block record (except Block/BlockEnd)
+            let owned: Vec<Handle> = self
+                .document
+                .entities()
+                .filter(|e| {
+                    e.common().owner_handle == existing_br_h
+                        && !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_))
+                })
+                .map(|e| e.common().handle)
+                .collect();
+            for h in owned {
+                self.document.remove_entity(h);
+            }
+            // Update existing BlockRecord fields
+            if let Some(br) = self.document.block_records.get_mut(name) {
+                br.units = options.unit;
+                br.description = options.description.clone();
+                br.explodable = options.allow_exploding;
+                br.scale_uniformly = options.scale_uniformly;
+            }
+            // Update existing Block entity fields
+            if let Some(EntityType::Block(b)) = self.document.get_entity_mut(existing_blk_h) {
+                b.description = options.description.clone();
+            }
+            if options.annotative {
+                let annotative_vals = vec![codec::xdata::XDataValue::Integer16(1)];
+                view::dispatch::set_entity_xdata(
+                    &mut self.document,
+                    existing_blk_h,
+                    "AcadAnnotative",
+                    Some(annotative_vals),
+                );
+            }
+            if !options.hyperlink_url.is_empty() {
+                let link_vals = vec![codec::xdata::XDataValue::String(
+                    options.hyperlink_url.clone(),
+                )];
+                view::dispatch::set_entity_xdata(
+                    &mut self.document,
+                    existing_blk_h,
+                    "PE_URL",
+                    Some(link_vals),
+                );
+            }
+            (existing_br_h, existing_blk_h)
+        } else {
+            let next = self.document.next_handle();
+            let br_handle = Handle::new(next);
+            let block_handle = Handle::new(next + 1);
+            let end_handle = Handle::new(next + 2);
+
+            let mut block_record = codec::tables::BlockRecord::new(name);
+            block_record.handle = br_handle;
+            block_record.block_entity_handle = block_handle;
+            block_record.block_end_handle = end_handle;
+            block_record.units = options.unit;
+            block_record.description = options.description.clone();
+            block_record.explodable = options.allow_exploding;
+            block_record.scale_uniformly = options.scale_uniformly;
+            self.document
+                .block_records
+                .add(block_record)
+                .map_err(|e| e.to_string())?;
+
+            let mut block = Block::new(name, codec::types::Vector3::ZERO);
+            block.common.handle = block_handle;
+            block.common.owner_handle = br_handle;
+            block.description = options.description.clone();
+            self.document
+                .add_entity(EntityType::Block(block))
+                .map_err(|e| e.to_string())?;
+
+            let mut block_end = BlockEnd::new();
+            block_end.common.handle = end_handle;
+            block_end.common.owner_handle = br_handle;
+            self.document
+                .add_entity(EntityType::BlockEnd(block_end))
+                .map_err(|e| e.to_string())?;
+
+            if options.annotative {
+                let annotative_vals = vec![codec::xdata::XDataValue::Integer16(1)];
+                view::dispatch::set_entity_xdata(
+                    &mut self.document,
+                    block_handle,
+                    "AcadAnnotative",
+                    Some(annotative_vals),
+                );
+            }
+            if !options.hyperlink_url.is_empty() {
+                let link_vals = vec![codec::xdata::XDataValue::String(
+                    options.hyperlink_url.clone(),
+                )];
+                view::dispatch::set_entity_xdata(
+                    &mut self.document,
+                    block_handle,
+                    "PE_URL",
+                    Some(link_vals),
+                );
+            }
+            (br_handle, block_handle)
+        };
+
+        let source_entities: Vec<_> = options
+            .handles
             .iter()
             .filter_map(|&h| self.document.get_entity(h).cloned().map(|e| (h, e)))
             .collect();
@@ -864,35 +1073,7 @@ impl Scene {
             return Err("No valid entities selected for block creation.".into());
         }
 
-        let next = self.document.next_handle();
-        let br_handle = Handle::new(next);
-        let block_handle = Handle::new(next + 1);
-        let end_handle = Handle::new(next + 2);
-
-        let mut block_record = acadrust::tables::BlockRecord::new(name);
-        block_record.handle = br_handle;
-        block_record.block_entity_handle = block_handle;
-        block_record.block_end_handle = end_handle;
-        self.document
-            .block_records
-            .add(block_record)
-            .map_err(|e| e.to_string())?;
-
-        let mut block = Block::new(name, acadrust::types::Vector3::ZERO);
-        block.common.handle = block_handle;
-        block.common.owner_handle = br_handle;
-        self.document
-            .add_entity(EntityType::Block(block))
-            .map_err(|e| e.to_string())?;
-
-        let mut block_end = BlockEnd::new();
-        block_end.common.handle = end_handle;
-        block_end.common.owner_handle = br_handle;
-        self.document
-            .add_entity(EntityType::BlockEnd(block_end))
-            .map_err(|e| e.to_string())?;
-
-        let local = EntityTransform::Affine(*world_to_block);
+        let local = EntityTransform::Affine(options.world_to_block);
         for (old_handle, mut entity) in source_entities {
             view::dispatch::apply_transform(&mut entity, &local);
             entity = crate::modules::draw::modify::explode::normalize_entity_for_block(entity);
@@ -901,15 +1082,19 @@ impl Scene {
             self.document
                 .add_entity(entity)
                 .map_err(|e| e.to_string())?;
-            self.erase_entities(&[old_handle]);
+            if options.mode != crate::ui::window::block_definition::BlockObjectMode::Retain {
+                self.erase_entities(&[old_handle]);
+            }
         }
 
-        let mut insert = DxfInsert::new(name, acadrust::types::Vector3::ZERO);
-        acadrust::Entity::apply_transform(&mut insert, block_to_world);
-        let insert_handle = self.add_entity(EntityType::Insert(insert));
-        // A new block definition landed in the document; advance the block
-        // epoch so consumers (the block palette stale check) notice it even
-        // when the panel stays open. Mirrors `define_block_from_owned_entities`.
+        let mut insert_handle = Handle::NULL;
+        if options.mode == crate::ui::window::block_definition::BlockObjectMode::Convert {
+            let mut insert = DxfInsert::new(name, codec::types::Vector3::ZERO);
+            codec::Entity::apply_transform(&mut insert, &options.block_to_world);
+            insert_handle = self.add_entity(EntityType::Insert(insert));
+        }
+
+        // Advance the block epoch so all consumers and viewport renderers re-tessellate
         self.bump_geometry();
         Ok(insert_handle)
     }
@@ -920,6 +1105,32 @@ impl Scene {
     /// caller starts an interactive insert so paste-as-block can prompt for the
     /// drop point. The geometry comes from the clipboard rather than live
     /// entities, so there is nothing to stage or erase. (#129)
+    /// Give a new RasterImage the ImageDefinition object it must reference,
+    /// unless it already names one.
+    fn ensure_image_definition(&mut self, entity: &mut EntityType) {
+        let EntityType::RasterImage(img) = entity else {
+            return;
+        };
+        if img.definition_handle.is_some() {
+            return;
+        }
+        use codec::objects::{ImageDefinition, ObjectType};
+        // Allocate, not peek: a peeked handle is then handed to the image
+        // itself, and the DWG writer drops the definition that shares it. (#1421)
+        let def_handle = self.document.allocate_handle();
+        if self.is_recording_undo() {
+            self.record_undo_object_before(def_handle, None);
+        }
+        let mut img_def =
+            ImageDefinition::with_dimensions(&img.file_path, img.size.x as u32, img.size.y as u32);
+        img_def.handle = def_handle;
+        img_def.is_loaded = true;
+        self.document
+            .objects
+            .insert(def_handle, ObjectType::ImageDefinition(img_def));
+        img.definition_handle = Some(def_handle);
+    }
+
     pub fn define_block_from_owned_entities(
         &mut self,
         entities: Vec<EntityType>,
@@ -945,7 +1156,7 @@ impl Scene {
         let block_handle = Handle::new(next + 1);
         let end_handle = Handle::new(next + 2);
 
-        let mut block_record = acadrust::tables::BlockRecord::new(name);
+        let mut block_record = codec::tables::BlockRecord::new(name);
         block_record.handle = br_handle;
         block_record.block_entity_handle = block_handle;
         block_record.block_end_handle = end_handle;
@@ -954,7 +1165,7 @@ impl Scene {
             .add(block_record)
             .map_err(|e| e.to_string())?;
 
-        let mut block = Block::new(name, acadrust::types::Vector3::ZERO);
+        let mut block = Block::new(name, codec::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = br_handle;
         self.document
@@ -976,6 +1187,7 @@ impl Scene {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
+            self.ensure_image_definition(&mut entity);
             let handle = self
                 .document
                 .add_entity(entity)
@@ -995,7 +1207,7 @@ impl Scene {
     pub fn define_block_raw(
         &mut self,
         name: &str,
-        base_point: acadrust::types::Vector3,
+        base_point: codec::types::Vector3,
         entities: Vec<EntityType>,
     ) {
         if name.is_empty() || self.document.block_records.get(name).is_some() {
@@ -1006,7 +1218,7 @@ impl Scene {
         let block_handle = Handle::new(next + 1);
         let end_handle = Handle::new(next + 2);
 
-        let mut block_record = acadrust::tables::BlockRecord::new(name);
+        let mut block_record = codec::tables::BlockRecord::new(name);
         block_record.handle = br_handle;
         block_record.block_entity_handle = block_handle;
         block_record.block_end_handle = end_handle;
@@ -1024,6 +1236,46 @@ impl Scene {
         block_end.common.owner_handle = br_handle;
         let _ = self.document.add_entity(EntityType::BlockEnd(block_end));
 
+        for mut entity in entities {
+            Self::reset_clone_subhandles(&mut self.document, &mut entity);
+            entity.common_mut().handle = Handle::NULL;
+            entity.common_mut().owner_handle = br_handle;
+            let _ = self.document.add_entity(entity);
+        }
+        self.bump_geometry();
+    }
+
+    /// Replace the contents and base point of block `name`, defining it when
+    /// absent. References keep pointing at it and show the new contents.
+    pub fn redefine_block_raw(
+        &mut self,
+        name: &str,
+        base_point: codec::types::Vector3,
+        entities: Vec<EntityType>,
+    ) {
+        let Some((br_handle, block_handle)) = self
+            .document
+            .block_records
+            .get(name)
+            .map(|br| (br.handle, br.block_entity_handle))
+        else {
+            return self.define_block_raw(name, base_point, entities);
+        };
+        let owned: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|e| {
+                e.common().owner_handle == br_handle
+                    && !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_))
+            })
+            .map(|e| e.common().handle)
+            .collect();
+        for h in owned {
+            self.document.remove_entity(h);
+        }
+        if let Some(EntityType::Block(block)) = self.document.get_entity_mut(block_handle) {
+            block.base_point = base_point;
+        }
         for mut entity in entities {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
@@ -1153,11 +1405,11 @@ impl Scene {
                             // normal style chain instead of the raw ACI table
                             // (#415).
                             let (bg_color, bg_aci) = match bg {
-                                acadrust::types::Color::ByLayer => {
+                                codec::types::Color::ByLayer => {
                                     let layer = self.document.layers.get(&dxf.common.layer);
                                     let aci = layer
                                         .and_then(|layer| match &layer.color {
-                                            acadrust::types::Color::Index(index) => Some(*index),
+                                            codec::types::Color::Index(index) => Some(*index),
                                             _ => None,
                                         })
                                         .unwrap_or(0);
@@ -1171,10 +1423,10 @@ impl Scene {
                                         aci,
                                     )
                                 }
-                                acadrust::types::Color::ByBlock => (style.0, style.4),
-                                acadrust::types::Color::Index(index) => (
+                                codec::types::Color::ByBlock => (style.0, style.4),
+                                codec::types::Color::Index(index) => (
                                     crate::scene::convert::tess_util::aci_to_rgba(
-                                        &acadrust::types::Color::Index(index),
+                                        &codec::types::Color::Index(index),
                                     ),
                                     index,
                                 ),
@@ -1206,6 +1458,10 @@ impl Scene {
                             | model::hatch_model::HatchPattern::Solid => {}
                         }
                     }
+                }
+                m.color = self.count_color(handle, m.color, self.current_bg());
+                if let Some(b) = &mut backdrop {
+                    b.color = self.count_color(handle, b.color, self.current_bg());
                 }
                 if tint_selected && self.selected.contains(&handle) {
                     m.color = [0.15, 0.55, 1.00, m.color[3]];
@@ -1444,7 +1700,7 @@ impl Scene {
                 }
                 let style = context.style_for(&self.document, entity);
                 let preserve_white_mask = source_hatch.is_solid
-                    && matches!(source_hatch.common.color, acadrust::types::Color::Index(7));
+                    && matches!(source_hatch.common.color, codec::types::Color::Index(7));
                 let color = if preserve_white_mask {
                     style.0
                 } else {
@@ -1478,6 +1734,37 @@ impl Scene {
                     }
                     model.boundary = std::sync::Arc::new(clipped);
                 }
+                if !context.clips.is_empty() {
+                    // The plane-local outline is a second copy of the boundary
+                    // that viewport plotting prefers; rebuild it from the
+                    // clipped outline or the XCLIP is lost there. (#1508)
+                    model.fill_plane_boundary = model.fill_plane.map(|plane| {
+                        let origin = glam::DVec3::from_array(plane.origin);
+                        let (x_axis, y_axis) = (
+                            glam::DVec3::from_array(plane.x_axis),
+                            glam::DVec3::from_array(plane.y_axis),
+                        );
+                        std::sync::Arc::new(
+                            model
+                                .boundary
+                                .iter()
+                                .map(|&[x, y]| {
+                                    if x.is_nan() || y.is_nan() {
+                                        return [f32::NAN, f32::NAN];
+                                    }
+                                    let world = glam::DVec3::new(
+                                        model.world_origin[0] + x as f64,
+                                        model.world_origin[1] + y as f64,
+                                        origin.z,
+                                    );
+                                    let local = world - origin;
+                                    [local.dot(x_axis) as f32, local.dot(y_axis) as f32]
+                                })
+                                .collect(),
+                        )
+                    });
+                }
+                model.color = self.count_color(context.root_handle, model.color, hatch_bg);
                 if tint_selected && self.selected.contains(&context.root_handle) {
                     model.color = [0.15, 0.55, 1.00, model.color[3]];
                 }
@@ -1661,7 +1948,7 @@ impl Scene {
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: acadrust::entities::HatchStyleType::Normal,
+                    style: codec::entities::HatchStyleType::Normal,
                     pattern: model::hatch_model::HatchPattern::Solid,
                     name: "WIPEOUT_FILL".into(),
                     color,
@@ -1681,10 +1968,10 @@ impl Scene {
     /// Wipeout fill boundary as small f32 offsets from the returned world_origin
     /// (the insertion point, kept in f64).
     pub(super) fn wipeout_boundary_2d(
-        wo: &acadrust::entities::Wipeout,
+        wo: &codec::entities::Wipeout,
     ) -> ([f64; 2], Vec<[f32; 2]>) {
         let origin = [wo.insertion_point.x, wo.insertion_point.y];
-        let plane = cadkernel::space::Plane::from_axes(
+        let plane = kernel::space::Plane::from_axes(
             [
                 wo.insertion_point.x,
                 wo.insertion_point.y,
@@ -1707,8 +1994,8 @@ impl Scene {
         (origin, boundary)
     }
 
-    fn wipeout_local_boundary(wo: &acadrust::entities::Wipeout) -> Vec<[f64; 2]> {
-        use acadrust::entities::{WipeoutClipMode, WipeoutClipType};
+    fn wipeout_local_boundary(wo: &codec::entities::Wipeout) -> Vec<[f64; 2]> {
+        use codec::entities::{WipeoutClipMode, WipeoutClipType};
         let mut outer = vec![
             [0.0, 0.0],
             [wo.size.x, 0.0],
@@ -1740,7 +2027,7 @@ impl Scene {
     }
 
     fn wipeout_fill_plane(
-        wipeout: &acadrust::entities::Wipeout,
+        wipeout: &codec::entities::Wipeout,
     ) -> Option<(model::hatch_model::FillPlane, Vec<[f32; 2]>)> {
         let origin = [
             wipeout.insertion_point.x,
@@ -1749,7 +2036,7 @@ impl Scene {
         ];
         let x_axis = [wipeout.u_vector.x, wipeout.u_vector.y, wipeout.u_vector.z];
         let y_axis = [wipeout.v_vector.x, wipeout.v_vector.y, wipeout.v_vector.z];
-        cadkernel::space::Plane::from_axes(origin, x_axis, y_axis).normal()?;
+        kernel::space::Plane::from_axes(origin, x_axis, y_axis).normal()?;
         let boundary = Self::wipeout_local_boundary(wipeout)
             .into_iter()
             .map(|point| [point[0] as f32, point[1] as f32])
@@ -1769,7 +2056,7 @@ impl Scene {
         world_origin: [f64; 2],
         boundary: &[[f32; 2]],
     ) -> Option<Vec<[f32; 2]>> {
-        let plane = cadkernel::space::Plane::from_axes(plane.origin, plane.x_axis, plane.y_axis);
+        let plane = kernel::space::Plane::from_axes(plane.origin, plane.x_axis, plane.y_axis);
         boundary
             .iter()
             .map(|point| {
@@ -1818,7 +2105,7 @@ impl Scene {
             let mut edge_polys: Vec<Vec<[f64; 2]>> = Vec::new();
             for edge in &path.edges {
                 if let Some(curve) = crate::entities::hatch::edge_curve(edge) {
-                    edge_polys.push(curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE));
+                    edge_polys.push(curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE));
                 }
             }
             let mut local_ring = chain_path_edges(edge_polys);
@@ -1845,7 +2132,7 @@ impl Scene {
             return None;
         }
 
-        let depths = cadkernel::geom2d::ring_nesting_depths(&rings);
+        let depths = kernel::geom2d::ring_nesting_depths(&rings);
         let mut boundary = Vec::new();
         let mut local_boundary = Vec::new();
         let mut boundary_exterior = Vec::new();
@@ -1858,9 +2145,9 @@ impl Scene {
             .zip(depths)
         {
             let keep = match dxf.style {
-                acadrust::entities::HatchStyleType::Normal => true,
-                acadrust::entities::HatchStyleType::Outer => depth <= 1,
-                acadrust::entities::HatchStyleType::Ignore => depth == 0,
+                codec::entities::HatchStyleType::Normal => true,
+                codec::entities::HatchStyleType::Outer => depth <= 1,
+                codec::entities::HatchStyleType::Ignore => depth == 0,
             };
             if !keep {
                 continue;
@@ -1873,7 +2160,7 @@ impl Scene {
             boundary.extend(ring);
             local_boundary.extend(local_ring.iter().map(|&[x, y]| [x as f32, y as f32]));
             if path.edges.iter().any(|edge| {
-                matches!(edge, acadrust::entities::BoundaryEdge::Spline(_))
+                matches!(edge, codec::entities::BoundaryEdge::Spline(_))
             }) {
                 spline_paths.push((path, local_ring, range));
             }
@@ -1958,7 +2245,7 @@ impl Scene {
                 entry.gpu.clone()
             } else if matches!(
                 dxf.pattern_type,
-                acadrust::entities::hatch::HatchPatternType::UserDefined
+                codec::entities::hatch::HatchPatternType::UserDefined
             ) {
                 // User-defined hatch: parallel lines at `pattern_angle`, spaced
                 // `pattern_scale` apart, plus a perpendicular set when
@@ -2088,7 +2375,7 @@ impl Scene {
             }
             let curves = || path.edges.iter().filter_map(crate::entities::hatch::edge_curve).collect();
             if let Some(refined) =
-                cadkernel::geom2d::refine_spline_boundary(&ring, curves, &project)
+                kernel::geom2d::refine_spline_boundary(&ring, curves, &project)
             {
                 if boundary.len() - range.len() + refined.len() > MAX_HATCH_MODEL_VERTS {
                     continue;
@@ -2156,7 +2443,7 @@ impl Scene {
 
     fn populate_images_from_document_unbumped(&mut self) {
         self.images.clear();
-        let entries: Vec<(Handle, acadrust::entities::EntityType)> = self
+        let entries: Vec<(Handle, codec::entities::EntityType)> = self
             .document
             .entities()
             .filter(|e| {
@@ -2252,14 +2539,21 @@ impl Scene {
     /// ImageModel for an image-bearing entity. `None` when it cannot decode.
     pub(super) fn image_seed_for(
         &self,
-        entity: &acadrust::entities::EntityType,
+        entity: &codec::entities::EntityType,
     ) -> Option<ImageModel> {
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
             EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole),
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
-                Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                    ImageModel::from_underlay(u, def)
+                Some(codec::objects::ObjectType::UnderlayDefinition(def)) => {
+                    // A paper-space underlay adjusts to the sheet, not the canvas.
+                    let owner = u.common.owner_handle;
+                    let background = if owner.is_null() || owner == self.model_space_block_handle() {
+                        self.bg_color
+                    } else {
+                        self.paper_bg_color
+                    };
+                    ImageModel::from_underlay(u, def, background, self.underlay_world_per_pixel)
                 }
                 _ => None,
             },
@@ -2289,6 +2583,10 @@ impl Scene {
         if !incremental {
             self.meshes.clear();
             self.block_meshes.clear();
+            // The B-rep cache follows the entities too: an undo that rebuilds
+            // everything left the undone fillet's body here, and the next
+            // edge operation brought it back (#1107). Restored on demand.
+            self.solid_models.clear();
         }
         // BLOCK-entity handles of the layout (model + paper) blocks. A solid
         // owned by one of these is top-level; anything else lives in a block
@@ -2298,7 +2596,7 @@ impl Scene {
             .objects
             .values()
             .filter_map(|o| match o {
-                acadrust::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
+                codec::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
                     Some(l.block_record)
                 }
                 _ => None,
@@ -2340,7 +2638,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         // Top-level solids: offset into the render frame, drawn flat.
         // Block-definition solids: keep block-local coords for per-INSERT
         // instancing (no offset applied here).
@@ -2453,7 +2751,7 @@ impl Scene {
             boundary_exterior: None,
             boundary_sources: None,
             boundary_paths: None,
-            style: acadrust::entities::HatchStyleType::Normal,
+            style: codec::entities::HatchStyleType::Normal,
             pattern: model::hatch_model::HatchPattern::Solid,
             name: "SOLID".into(),
             color,
@@ -2470,7 +2768,7 @@ impl Scene {
         &mut self,
         model: HatchModel,
         layer: Option<&str>,
-        entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
+        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
     ) -> Handle {
         let mut dxf = DxfHatch::new();
         dxf.style = model.style;
@@ -2478,7 +2776,7 @@ impl Scene {
             let x = glam::DVec3::from_array(plane.x_axis);
             let y = glam::DVec3::from_array(plane.y_axis);
             let normal = x.cross(y).normalize_or(glam::DVec3::Z);
-            dxf.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+            dxf.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
             dxf.elevation = glam::DVec3::from_array(plane.origin).dot(normal);
         }
         dxf.is_solid = matches!(
@@ -2528,11 +2826,11 @@ impl Scene {
                         .collect();
                     let mut bits = 0;
                     if is_outer {
-                        bits |= acadrust::entities::hatch::BoundaryPathFlags::OUTERMOST.bits();
-                        bits |= acadrust::entities::hatch::BoundaryPathFlags::EXTERNAL.bits();
+                        bits |= codec::entities::hatch::BoundaryPathFlags::OUTERMOST.bits();
+                        bits |= codec::entities::hatch::BoundaryPathFlags::EXTERNAL.bits();
                     }
                     let mut path = BoundaryPath::with_flags(
-                        acadrust::entities::hatch::BoundaryPathFlags::from_bits(bits),
+                        codec::entities::hatch::BoundaryPathFlags::from_bits(bits),
                     );
                     path.add_edge(BoundaryEdge::Polyline(edge));
                     for handle in handles {
@@ -2586,7 +2884,7 @@ impl Scene {
             .map(|point| [point[0] as f64, point[1] as f64])
             .unwrap_or(model.world_origin);
         if let crate::scene::model::hatch_model::HatchPattern::Pattern(families) = &model.pattern {
-            let mut pattern = acadrust::entities::HatchPattern::new(&model.name);
+            let mut pattern = codec::entities::HatchPattern::new(&model.name);
             let rotation = model.angle_offset as f64;
             let (rotation_sin, rotation_cos) = rotation.sin_cos();
             for family in families {
@@ -2597,7 +2895,7 @@ impl Scene {
                 let local_offset_y = family.dx as f64 * family_sin + family.dy as f64 * family_cos;
                 let base_x = family.x0 as f64 * pattern_scale;
                 let base_y = family.y0 as f64 * pattern_scale;
-                pattern.lines.push(acadrust::entities::HatchPatternLine {
+                pattern.lines.push(codec::entities::HatchPatternLine {
                     angle,
                     base_point: Vector2::new(
                         pattern_origin[0] + base_x * rotation_cos - base_y * rotation_sin,
@@ -2632,7 +2930,7 @@ impl Scene {
             shift,
         } = &model.pattern
         {
-            let to_color = |c: [f32; 4]| acadrust::types::Color::Rgb {
+            let to_color = |c: [f32; 4]| codec::types::Color::Rgb {
                 r: (c[0] * 255.0).round().clamp(0.0, 255.0) as u8,
                 g: (c[1] * 255.0).round().clamp(0.0, 255.0) as u8,
                 b: (c[2] * 255.0).round().clamp(0.0, 255.0) as u8,
@@ -2655,11 +2953,11 @@ impl Scene {
                 (model.color, *color2)
             };
             dxf.gradient_color.colors = vec![
-                acadrust::entities::hatch::GradientColorEntry {
+                codec::entities::hatch::GradientColorEntry {
                     value: 0.0,
                     color: to_color(c0),
                 },
-                acadrust::entities::hatch::GradientColorEntry {
+                codec::entities::hatch::GradientColorEntry {
                     value: 1.0,
                     color: to_color(c1),
                 },
@@ -2710,7 +3008,10 @@ impl Scene {
         // and named parameters into the fresh one.
         self.parametric_constraints.clear();
         self.named_parameters = crate::scene::named_parameters::ParameterTable::new();
+        self.bump_constraints_epoch();
         self.bump_geometry();
+        self.bump_layout_epoch();
+        self.bump_scale_epoch();
     }
 
     /// Reset to the drawing File → New produces. Every path that starts a
@@ -2725,8 +3026,18 @@ impl Scene {
     /// standard linetypes and a compatible page setup on every paper layout.
     pub fn populate_new_drawing_defaults(&mut self) {
         crate::io::linetypes::populate_document(&mut self.document);
+        // A new drawing is metric, as the reference's new drawing: metre
+        // insertion units, metric measurement, and the ISO-25 dimension style
+        // current. Standard stays available for imperial work.
+        self.document.header.measurement = 1;
+        self.document.header.insertion_units = 6;
+        let iso = crate::scene::creation_style::ensure_iso_dim_style(&mut self.document);
+        self.document.header.current_dimstyle_name = "ISO-25".to_string();
+        // The name alone leaves the header pointing at the previous style, and
+        // a DWG writes the current style by handle only.
+        self.document.header.current_dimstyle_handle = iso;
         for obj in self.document.objects.values_mut() {
-            if let acadrust::objects::ObjectType::Layout(l) = obj {
+            if let codec::objects::ObjectType::Layout(l) = obj {
                 if l.name != "Model" {
                     crate::scene::apply_default_page_setup(l, "");
                 }

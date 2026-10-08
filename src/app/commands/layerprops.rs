@@ -5,7 +5,7 @@ impl OpenCADStudio {
         match cmd {
             // ── LAYER management ─────────────────────────────────────────
             cmd if cmd == "LAYER" || cmd.starts_with("LAYER ") || cmd.starts_with("LA ") => {
-                use acadrust::tables::Layer;
+                use codec::tables::Layer;
                 let raw_rest = if cmd.starts_with("LAYER ") {
                     cmd.trim_start_matches("LAYER ").trim()
                 } else if cmd.starts_with("LA ") {
@@ -127,7 +127,7 @@ impl OpenCADStudio {
                         if let Ok(idx) = color_str.parse::<i16>() {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(&layer_name)
                             {
-                                l.color = acadrust::types::Color::from_index(idx);
+                                l.color = codec::types::Color::from_index(idx);
                                 l.color_name = None;
                                 l.book_name = None;
                                 self.push_undo_snapshot(i, "LAYER COLOR");
@@ -186,8 +186,8 @@ impl OpenCADStudio {
             // ── UCS management (inline `UCS <option> …`) ─────────────────────
             cmd if cmd.starts_with("UCS ") => {
                 use super::super::helpers::{ucs_rotated_z, ucs_to_wcs, ucs_z_axis};
-                use acadrust::tables::Ucs;
-                use acadrust::types::Vector3;
+                use codec::tables::Ucs;
+                use codec::types::Vector3;
                 let parts: Vec<&str> = cmd.splitn(4, ' ').collect();
                 let sub = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
                 let mut active_changed = false;
@@ -247,6 +247,7 @@ impl OpenCADStudio {
                                 .document
                                 .ucss
                                 .add_or_replace(ucs.clone());
+                            self.tabs[i].scene.bump_ucs_epoch();
                             self.tabs[i].active_ucs = Some(ucs);
                             active_changed = true;
                             self.tabs[i].dirty = true;
@@ -261,11 +262,12 @@ impl OpenCADStudio {
                         } else if let Some(removed) =
                             self.tabs[i].scene.document.ucss.remove(&name)
                         {
+                            self.tabs[i].scene.bump_ucs_epoch();
                             let removed_handle = removed.handle;
                             for entity in self.tabs[i].scene.document.entities_mut() {
-                                if let acadrust::EntityType::Viewport(viewport) = entity {
+                                if let codec::EntityType::Viewport(viewport) = entity {
                                     if viewport.ucs_handle == removed_handle {
-                                        viewport.ucs_handle = acadrust::Handle::NULL;
+                                        viewport.ucs_handle = codec::Handle::NULL;
                                     }
                                 }
                             }
@@ -276,9 +278,9 @@ impl OpenCADStudio {
                             if active_matches {
                                 if let Some(active) = self.tabs[i].active_ucs.as_mut() {
                                     active.name = "*ACTIVE*".to_string();
-                                    active.handle = acadrust::Handle::NULL;
-                                    active.named_ucs_handle = acadrust::Handle::NULL;
-                                    active.base_ucs_handle = acadrust::Handle::NULL;
+                                    active.handle = codec::Handle::NULL;
+                                    active.named_ucs_handle = codec::Handle::NULL;
+                                    active.base_ucs_handle = codec::Handle::NULL;
                                 }
                                 active_changed = true;
                             }
@@ -325,7 +327,7 @@ impl OpenCADStudio {
                             .and_then(|token| {
                                 u64::from_str_radix(token.trim().trim_start_matches("0x"), 16).ok()
                             })
-                            .map(acadrust::Handle::new)
+                            .map(codec::Handle::new)
                             .zip(
                                 parts
                                     .get(3)
@@ -343,6 +345,7 @@ impl OpenCADStudio {
                                 self.tabs[i].active_cmd = Some(Box::new(picker));
                             }
                             Some((handle, pick)) => {
+                                self.tabs[i].scene.restore_solid_models(&[handle]);
                                 let built = self.tabs[i]
                                     .scene
                                     .solid_models
@@ -351,13 +354,7 @@ impl OpenCADStudio {
                                         use crate::scene::model::solid_model;
                                         let face =
                                             solid_model::nearest_planar_face(body, pick.to_array())?;
-                                        solid_model::planar_face_normal(body, face)
-                                    })
-                                    .and_then(|normal| {
-                                        super::super::helpers::ucs_from_normal(
-                                            pick,
-                                            glam::DVec3::from_array(normal),
-                                        )
+                                        solid_model::planar_face_ucs(body, face, pick.to_array())
                                     });
                                 match built {
                                     Some(ucs) => {
@@ -384,7 +381,7 @@ impl OpenCADStudio {
                             .and_then(|token| {
                                 u64::from_str_radix(token.trim().trim_start_matches("0x"), 16).ok()
                             })
-                            .map(acadrust::Handle::new);
+                            .map(codec::Handle::new);
                         match target {
                             // Bare `UCS OBJECT` starts the pick; the click
                             // comes back through this arm with the handle.
@@ -808,6 +805,29 @@ impl OpenCADStudio {
                                 .push_output(crate::tf!("View '{}' saved.", name).as_ref());
                         }
                     }
+                    "WINDOW" | "W" => {
+                        // A plan view of the window between two corners.
+                        let args: Vec<&str> = parts.get(2).map(|s| s.split_whitespace().collect()).unwrap_or_default();
+                        let corner = |s: &str| {
+                            let mut c = s.split(',');
+                            Some((c.next()?.trim().parse::<f64>().ok()?, c.next()?.trim().parse::<f64>().ok()?))
+                        };
+                        match (args.first(), args.get(1).and_then(|s| corner(s)), args.get(2).and_then(|s| corner(s))) {
+                            (Some(name), Some(a), Some(b)) if a.0 != b.0 && a.1 != b.1 => {
+                                use codec::types::Vector3;
+                                let mut view = self.tabs[i].scene.current_as_named_view(name);
+                                view.target = Vector3 { x: (a.0 + b.0) / 2.0, y: (a.1 + b.1) / 2.0, z: 0.0 };
+                                view.direction = Vector3 { x: 0.0, y: 0.0, z: 1.0 };
+                                view.width = (b.0 - a.0).abs();
+                                view.height = (b.1 - a.1).abs();
+                                self.tabs[i].scene.document.views.add_or_replace(view);
+                                self.command_line.push_output(crate::tf!("View '{}' saved.", name).as_ref());
+                            }
+                            _ => self
+                                .command_line
+                                .push_error(crate::t!("Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>").as_ref()),
+                        }
+                    }
                     "DELETE" | "DEL" | "D" => {
                         let name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
                         if name.is_empty() {
@@ -857,8 +877,25 @@ impl OpenCADStudio {
                             crate::scene::CubeRegion::Face(face),
                         )));
                     }
-                    "ISO" | "ISOMETRIC" | "SWISO" => {
-                        return Some(Task::done(Message::ViewCubeHome));
+                    // Isometric presets snap to the matching ViewCube corner;
+                    // ISO alone is the south-west one.
+                    "ISO" | "ISOMETRIC" | "SWISO" | "SEISO" | "NEISO" | "NWISO" => {
+                        let (x, y) = match sub.as_str() {
+                            "SEISO" => (1.0, -1.0),
+                            "NEISO" => (1.0, 1.0),
+                            "NWISO" => (-1.0, 1.0),
+                            _ => (-1.0, -1.0),
+                        };
+                        let want = glam::Vec3::new(x, y, 1.0).normalize();
+                        let corner = (18..26)
+                            .map(crate::scene::CubeRegion::Corner)
+                            .max_by(|a, b| {
+                                a.snap_direction()
+                                    .dot(want)
+                                    .total_cmp(&b.snap_direction().dot(want))
+                            })
+                            .expect("the cube has corners");
+                        return Some(Task::done(Message::ViewCubeSnap(corner)));
                     }
                     // VIEW <name> shortcut for restore
                     _ => {
@@ -880,7 +917,7 @@ impl OpenCADStudio {
             // ── DimStyle management ───────────────────────────────────────
             // TABLESTYLE — Table Style Manager.
             cmd if cmd == "TABLESTYLE" || cmd == "TS" || cmd.starts_with("TABLESTYLE ") => {
-                use acadrust::objects::{ObjectType, TableStyle};
+                use codec::objects::{ObjectType, TableStyle};
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
@@ -930,7 +967,7 @@ impl OpenCADStudio {
                                 self.push_undo_snapshot(i, "TABLESTYLE NEW");
                                 let mut style = TableStyle::standard();
                                 style.name = name.clone();
-                                let nh = acadrust::Handle::new(
+                                let nh = codec::Handle::new(
                                     self.tabs[i].scene.document.next_handle(),
                                 );
                                 style.handle = nh;
@@ -960,7 +997,7 @@ impl OpenCADStudio {
             //   MLSTYLE SET <name>     — set current multiline style
             //   MLSTYLE DEL <name>     — delete a style (not Standard)
             cmd if cmd == "MLSTYLE" || cmd.starts_with("MLSTYLE ") => {
-                use acadrust::objects::{MLineStyle, ObjectType};
+                use codec::objects::{MLineStyle, ObjectType};
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
@@ -1009,7 +1046,7 @@ impl OpenCADStudio {
                                 self.push_undo_snapshot(i, "MLSTYLE NEW");
                                 let mut style = MLineStyle::standard();
                                 style.name = name.clone();
-                                let nh = acadrust::Handle::new(
+                                let nh = codec::Handle::new(
                                     self.tabs[i].scene.document.next_handle(),
                                 );
                                 style.handle = nh;
@@ -1089,7 +1126,7 @@ impl OpenCADStudio {
                 || cmd.starts_with("DIMSTYLE ")
                 || cmd.starts_with("DDIM ") =>
             {
-                use acadrust::tables::DimStyle;
+                use codec::tables::DimStyle;
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
@@ -1222,7 +1259,7 @@ impl OpenCADStudio {
 
             // ── MLeader Style management ──────────────────────────────────
             cmd if cmd == "MLEADERSTYLE" || cmd.starts_with("MLEADERSTYLE ") => {
-                use acadrust::objects::{MultiLeaderStyle, ObjectType};
+                use codec::objects::{MultiLeaderStyle, ObjectType};
                 let raw_rest = cmd.trim_start_matches("MLEADERSTYLE").trim();
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
@@ -1442,7 +1479,7 @@ impl OpenCADStudio {
                                 "STYLE NEW",
                                 std::slice::from_ref(&name),
                             );
-                            let style = acadrust::tables::TextStyle::new(&name);
+                            let style = codec::tables::TextStyle::new(&name);
                             let _ = self.tabs[i].scene.document.text_styles.add(style);
                             self.tabs[i].dirty = true;
                             self.commit_text_style_undo(i, undo);
@@ -1568,7 +1605,7 @@ impl OpenCADStudio {
     /// mean, because a few pixels of cursor travel cover a long way in
     /// world space.
     fn open_sketch(&mut self, i: usize) {
-        let opened_with: std::collections::HashSet<acadrust::Handle> = self.tabs[i]
+        let opened_with: std::collections::HashSet<codec::Handle> = self.tabs[i]
             .scene
             .document
             .entities()
@@ -1601,7 +1638,7 @@ impl OpenCADStudio {
                 .push_error(crate::t!("No sketch is open.").as_ref());
             return;
         };
-        let created: Vec<acadrust::Handle> = self.tabs[i]
+        let created: Vec<codec::Handle> = self.tabs[i]
             .scene
             .document
             .entities()

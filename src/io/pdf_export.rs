@@ -15,11 +15,13 @@ use crate::scene::model::hatch_model::HatchPattern;
 use crate::scene::WireModel;
 use crate::scene::model::image_model::ImageModel;
 #[cfg(not(target_arch = "wasm32"))]
+use crate::scene::model::wire_model::SearchableTextRun;
+#[cfg(not(target_arch = "wasm32"))]
 use printpdf::{
-    BlendMode, BuiltinFont, Color, ExtendedGraphicsState, ExtendedGraphicsStateId, Line,
-    LineCapStyle, LineDashPattern, LineJoinStyle, LinePoint, Mm, Op, PaintMode, PdfDocument,
-    PdfFontHandle, PdfPage, PdfSaveOptions, Point, Polygon, PolygonRing, Pt, Rgb, TextItem,
-    WindingOrder,
+    BlendMode, BuiltinFont, Codepoint, Color, ExtendedGraphicsState, ExtendedGraphicsStateId,
+    FontId, Line, LineCapStyle, LineDashPattern, LineJoinStyle, LinePoint, Mm, Op, PaintMode,
+    ParsedFont, PdfDocument, PdfFont, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Polygon,
+    PolygonRing, Pt, Rgb, TextItem, TextMatrix, TextRenderingMode, WindingOrder,
 };
 use std::path::Path;
 
@@ -242,8 +244,10 @@ fn emit_image(
     {
         return Err("Cannot plot bitmap: invalid coordinates, clip boundary, or opacity.".into());
     }
+    // The low bit (free: the pixel buffer is aligned) keeps the opaque copy
+    // of a picture apart from its transparent one.
     let key = (
-        std::sync::Arc::as_ptr(&image.pixels) as usize,
+        std::sync::Arc::as_ptr(&image.pixels) as usize | usize::from(!image.use_alpha),
         image.width,
         image.height,
     );
@@ -255,7 +259,14 @@ fn emit_image(
             doc.resources.xobjects.map.insert(
                 id.clone(),
                 printpdf::XObject::Image(printpdf::RawImage {
-                    pixels: printpdf::RawImageData::U8(image.pixels.as_ref().clone()),
+                    pixels: printpdf::RawImageData::U8(if image.use_alpha {
+                        image.pixels.as_ref().clone()
+                    } else {
+                        // Transparency off: every pixel opaque in its colour.
+                        let mut opaque = image.pixels.as_ref().clone();
+                        opaque.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+                        opaque
+                    }),
                     width: image.width as usize,
                     height: image.height as usize,
                     data_format: printpdf::RawImageFormat::RGBA8,
@@ -416,13 +427,27 @@ pub async fn pick_pdf_path_async(stem: String) -> Option<std::path::PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) -> Result<Vec<u8>, String> {
     let mut doc = PdfDocument::new("Open CAD Studio Export");
+    // Subset-embed one TrueType font per used system family before any page
+    // references them (fonts live on the document resource dictionary).
+    let fonts = SearchableFontSet::build(&mut doc, pages);
     // Borrowing all pages keeps their pixel Arcs alive until this cache is dropped.
     // Allocation addresses cannot be reused by another source during this export.
     let mut image_resources = std::collections::HashMap::new();
+    let mut text_fonts = TextFonts::default();
     for (index, page) in pages.iter().enumerate() {
-        append_pdf_page(&mut doc, &mut image_resources, page, plot_style)
-            .map_err(|error| format!("Page {}: {error}", index + 1))?;
+        append_pdf_page(
+            &mut doc,
+            &mut image_resources,
+            &mut text_fonts,
+            page,
+            plot_style,
+            &fonts,
+        )
+        .map_err(|error| format!("Page {}: {error}", index + 1))?;
     }
+    // Subset and embed the TrueType faces the text was drawn with, now that
+    // every page has recorded which glyphs it uses.
+    text_fonts.install(&mut doc);
     let mut warnings = Vec::new();
     // printpdf 0.9's `optimize` is a no-op (its `doc.compress()` is commented
     // out), so every page's content stream — megabytes of vector operators
@@ -440,8 +465,10 @@ fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) 
 fn append_pdf_page(
     doc: &mut PdfDocument,
     image_resources: &mut std::collections::HashMap<(usize, u32, u32), printpdf::XObjectId>,
+    text_fonts: &mut TextFonts,
     page: &PdfPageInput,
     fallback_plot_style: Option<&PlotStyleTable>,
+    fonts: &SearchableFontSet,
 ) -> Result<(), String> {
     let PlotContent { wires, hatches, wipeouts, images, group_splits } = &page.content;
     let (paper_w, paper_h) = (page.paper_w as f32, page.paper_h as f32);
@@ -581,7 +608,7 @@ fn append_pdf_page(
         }
         draw_items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
         sequence += 1;
-        if !wire.text_verts.is_empty() {
+        if !wire.text_verts.is_empty() || !wire.searchable_text.is_empty() {
             draw_items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
             sequence += 1;
         }
@@ -593,6 +620,23 @@ fn append_pdf_page(
     for image in images {
         draw_items.push((image.image.draw_depth, 1u8, sequence, DrawItem::Image(image)));
         sequence += 1;
+    }
+    // Everything outside the export window would only be clipped away, yet
+    // still written: a window over a corner of a large drawing came out as a
+    // blank page of several megabytes. Drop items whose ink misses the window.
+    if let Some((cx, cy, cw, ch)) = clip {
+        let marker_h = paper_h as f64 / scale.max(1e-6) as f64;
+        let window = [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64];
+        draw_items.retain(|(_, _, _, item)| {
+            let bounds = match item {
+                DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
+                    wire_sheet_bounds(&wire.wire, ox, oy, marker_h)
+                }
+                DrawItem::Hatch(hatch) => hatch_sheet_bounds(hatch, ox, oy),
+                DrawItem::Image(_) => None,
+            };
+            bounds.is_none_or(|b| sheet_overlaps(b, window))
+        });
     }
     draw_items.sort_by(|a, b| {
         a.0.total_cmp(&b.0)
@@ -644,8 +688,14 @@ fn append_pdf_page(
                 continue;
             }
             DrawItem::Text(wire) => {
-                emit_text(
+                // Outlined runs (stroke fonts, shaped/mixed scripts) keep
+                // their vector outlines and add an *invisible* (`Tr 3`) text
+                // layer on top for searching, copying and screen readers.
+                // A run that went out as embedded-font text is already
+                // searchable; only outlined runs need the invisible layer.
+                let embedded = emit_text(
                     &mut ops,
+                    text_fonts,
                     std::slice::from_ref(&wire.wire),
                     ox,
                     oy,
@@ -653,6 +703,18 @@ fn append_pdf_page(
                     plot_style,
                     options,
                 );
+                if !embedded {
+                    emit_searchable_text(
+                        &mut ops,
+                        std::slice::from_ref(&wire.wire),
+                        ox,
+                        oy,
+                        clip,
+                        plot_style,
+                        options,
+                        fonts,
+                    );
+                }
                 last_color = None;
                 last_lw = None;
                 last_dash = None;
@@ -709,8 +771,14 @@ fn append_pdf_page(
         }
         // Near-white and near-yellow (viewport active border) → dark grey for print
         // (only when no CTB override was applied).
-        if !color_overridden {
-            let is_light = r > 0.80 && g > 0.80 && b > 0.80;
+        // `aci == 0` is an explicit true colour and plots as drawn, like the
+        // hatch pass (#1621); only a pure white there is an unresolved colour 7.
+        if !color_overridden && (wire.aci != 0 || [r, g, b] == [1.0; 3]) {
+            // An authored white (not colour 7) plots as drawn, like on screen.
+            let is_light = r > 0.80
+                && g > 0.80
+                && b > 0.80
+                && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
             let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
             let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
             if is_light || is_yellow {
@@ -877,6 +945,70 @@ fn append_pdf_page(
     let page = PdfPage::new(Mm(paper_w), Mm(paper_h), ops);
     doc.pages.push(page);
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Slack around the export window, in sheet mm, so a stroke whose centreline
+/// sits just outside still contributes its width.
+const CULL_MARGIN_MM: f64 = 10.0;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sheet_overlaps(b: [f64; 4], window: [f64; 4]) -> bool {
+    b[0] <= window[2] + CULL_MARGIN_MM
+        && b[2] >= window[0] - CULL_MARGIN_MM
+        && b[1] <= window[3] + CULL_MARGIN_MM
+        && b[3] >= window[1] - CULL_MARGIN_MM
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn grow(bounds: &mut Option<[f64; 4]>, x: f64, y: f64) {
+    if !x.is_finite() || !y.is_finite() {
+        return;
+    }
+    let b = bounds.get_or_insert([x, y, x, y]);
+    b[0] = b[0].min(x);
+    b[1] = b[1].min(y);
+    b[2] = b[2].max(x);
+    b[3] = b[3].max(y);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Sheet-mm bounds of everything a wire inks (strokes, glyphs, fills).
+fn wire_sheet_bounds(wire: &WireModel, ox: f64, oy: f64, marker_h: f64) -> Option<[f64; 4]> {
+    let mut bounds = None;
+    for (index, point) in wire.points.iter().enumerate() {
+        if point[0].is_finite() && point[1].is_finite() {
+            let world = wire.point_world(index, marker_h);
+            grow(&mut bounds, world.x + ox, world.y + oy);
+        }
+    }
+    for vertex in &wire.text_verts {
+        let [x, y] = glyph_world_xy(vertex);
+        grow(&mut bounds, x + ox, y + oy);
+    }
+    for (index, point) in wire.fill_tris.iter().enumerate() {
+        let low = wire.fill_tris_low.get(index).copied().unwrap_or([0.0; 3]);
+        grow(
+            &mut bounds,
+            point[0] as f64 + low[0] as f64 + ox,
+            point[1] as f64 + low[1] as f64 + oy,
+        );
+    }
+    bounds
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Sheet-mm bounds of a hatch, resolved the way `emit_hatch` places it.
+fn hatch_sheet_bounds(hatch: &HatchModel, ox: f64, oy: f64) -> Option<[f64; 4]> {
+    let mut bounds = None;
+    for &[x, y] in hatch.boundary.iter() {
+        grow(
+            &mut bounds,
+            x as f64 + hatch.world_origin[0] + ox,
+            y as f64 + hatch.world_origin[1] + oy,
+        );
+    }
+    bounds
 }
 
 /// Build a PDF dash array (in points) from a WireModel linetype pattern.
@@ -1093,7 +1225,7 @@ fn emit_wire_fills(
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: acadrust::entities::HatchStyleType::Normal,
+                    style: codec::entities::HatchStyleType::Normal,
                     pattern: pattern.clone(),
                     name: "PLOTSTYLE".to_string(),
                     color: wire.color,
@@ -1124,21 +1256,26 @@ fn emit_wire_fills(
         if a < 0.01 {
             continue;
         }
-        let mut screening = 1.0;
-        let mut color_overridden = false;
-        if let Some(table) = plot_style {
-            if wire.aci > 0 {
-                if let Some(color) = table.resolve_color(wire.aci) {
-                    [r, g, b] = color;
-                    color_overridden = true;
+        if wire.bg_adapt.as_deref().is_some_and(|adapt| adapt.canvas_color) {
+            // A background mask: it covers with the paper itself.
+            [r, g, b] = [1.0, 1.0, 1.0];
+        } else {
+            let mut screening = 1.0;
+            let mut color_overridden = false;
+            if let Some(table) = plot_style {
+                if wire.aci > 0 {
+                    if let Some(color) = table.resolve_color(wire.aci) {
+                        [r, g, b] = color;
+                        color_overridden = true;
+                    }
+                    screening = table.resolve_screening(wire.aci);
                 }
-                screening = table.resolve_screening(wire.aci);
             }
+            if !color_overridden {
+                [r, g, b] = adapt_text_color([r, g, b]);
+            }
+            [r, g, b] = plotted_color([r, g, b], a, screening, options);
         }
-        if !color_overridden {
-            [r, g, b] = adapt_text_color([r, g, b]);
-        }
-        [r, g, b] = plotted_color([r, g, b], a, screening, options);
         ops.push(Op::SetFillColor {
             col: Color::Rgb(Rgb {
                 r,
@@ -1282,9 +1419,16 @@ fn emit_hatch(
         g = 1.0;
         b = 1.0;
     } else if !color_overridden
+        // `aci == 0` is an explicit true colour: it plots as drawn, only
+        // indexed colours meant for the dark screen are adapted. (#1417)
+        && hatch.aci != 0
         && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
     {
-        let is_light = r > 0.80 && g > 0.80 && b > 0.80;
+        // An authored white (not colour 7) plots as drawn, like on screen.
+        let is_light = r > 0.80
+            && g > 0.80
+            && b > 0.80
+            && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
         let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
         let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
         if is_light || is_yellow {
@@ -1465,7 +1609,11 @@ fn glyph_world_xy(v: &crate::scene::pipeline::text_gpu::TextVertex) -> [f64; 2] 
 /// near-white / near-yellow (colour-7-on-white) → black, near-cyan → dark blue.
 #[cfg(not(target_arch = "wasm32"))]
 fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
-    let is_light = r > 0.80 && g > 0.80 && b > 0.80;
+    // An authored white (not colour 7) plots as drawn, like on screen.
+    let is_light = r > 0.80
+        && g > 0.80
+        && b > 0.80
+        && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
     let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
     let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
     if is_light || is_yellow {
@@ -1477,6 +1625,378 @@ fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
     }
 }
 
+/// Invisible searchable text layer for laid-out runs (`Tr 3`).
+///
+/// Each `SearchableTextRun` carries the visible string plus its final
+/// world-space baseline origin, cap height, advance width and rotation — all
+/// baked by the layout stage (MTEXT `\P` newlines arrive as separate per-line
+/// runs, `attachment_point`/width wrapping and block placement already
+/// applied), so the exporter only places a `BT … Tj ET` with an
+/// arbitrary-rotation text matrix (`Tm`), honouring the MTEXT traps by
+/// construction.
+///
+/// Design (review V2): the vector outlines are **always** drawn — the plot
+/// looks pixel-identical with or without this layer — and the runs add an
+/// invisible (`Tr 3`) text layer for searching, copying and screen readers.
+/// A gap here can only affect extractability, never the rendered sheet.
+/// Decorations (underline/overline/strike), stroke fonts, shaped and mixed
+/// scripts keep working because their outlines are untouched.
+///
+/// Font choice per run (review V3 — "why Helvetica, not the DWG font?"):
+/// - A run whose style resolves to an installed TrueType family is set in a
+///   **subset CIDFontType2 of that exact family** (+ `/ToUnicode`), cut down
+///   by `allsorts` to the glyphs the plot uses. Bold runs resolve the bold
+///   face via fontdb weight matching.
+/// - SHX/LFF stroke fonts have no embeddable font program (there is no TrueType
+///   behind `txt`/`romans` — only pen strokes), unresolvable names and CFF/
+///   collection edge cases fall back to Base-14 Helvetica/Helvetica-Bold.
+///   A Type3 font synthesized from the SDF atlas would cover those exactly and
+///   is the natural follow-up; it needs no new layout data.
+/// - `Tf` takes an *em* size but `run.height` is a *cap* height: the em size
+///   is `height / cap_ratio` (per-font OS/2 sCapHeight, 0.72 for Helvetica) so
+///   the invisible run aligns with the drawn cap height.
+/// - Width-matching (`Tz`, baked into the `Tm` x-basis — equivalent, and the
+///   only horizontal scaling printpdf exposes): `k = laid_advance /
+///   natural_advance` from the run's stored pen advance and the font's hmtx
+///   advances, so centered/right-aligned runs highlight where they draw.
+/// - Scaling: the font size is converted world-mm → points via `MM_TO_PT`;
+///   the page CTM (plot scale/rotation/clip) applies on top inside the same
+///   graphics state as the wire geometry, so text and outlines scale together.
+/// - Runs fully outside the export-window clip are skipped (rect overlap on
+///   the run rect — same space as the clip polygon).
+///
+/// Returns the number of runs emitted.
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_searchable_text(
+    ops: &mut Vec<Op>,
+    wires: &[WireModel],
+    ox: f64,
+    oy: f64,
+    clip: Option<(f32, f32, f32, f32)>,
+    plot_style: Option<&PlotStyleTable>,
+    options: PdfPlotOptions,
+    fonts: &SearchableFontSet,
+) -> usize {
+    use crate::scene::model::wire_model::run_rect_overlap;
+    /// Helvetica cap height ≈ 0.72 em.
+    const HELVETICA_CAP_RATIO: f32 = 0.72;
+    let mut emitted = 0;
+    for wire in wires {
+        if wire.searchable_text.is_empty() {
+            continue;
+        }
+        let mut ctb_color: Option<[f32; 3]> = None;
+        let mut screening = 1.0;
+        if let Some(ctb) = plot_style {
+            if wire.aci > 0 {
+                ctb_color = ctb.resolve_color(wire.aci);
+                screening = ctb.resolve_screening(wire.aci);
+            }
+        }
+        for run in &wire.searchable_text {
+            if run.text.is_empty() || run.height <= 0.0 || !run.height.is_finite() {
+                continue;
+            }
+            // Export-window clip culls by run rect (origin + advance × cap
+            // height box); the survivors inherit the clip path anyway.
+            if let Some((cx, cy, cw, ch)) = clip {
+                let px = run.origin[0] + ox;
+                let py = run.origin[1] + oy;
+                if !run_rect_overlap(
+                    [px, py],
+                    run.rotation,
+                    run.adv_width as f64,
+                    run.height as f64,
+                    [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64],
+                ) {
+                    continue;
+                }
+            }
+            // Per-run font choice: the DWG style's own family when a subset
+            // is embedded, else the WinAnsi-gated Helvetica fallback.
+            enum RunFont<'a> {
+                Subset(&'a EmbeddedSubset),
+                Helvetica,
+            }
+            let choice = match crate::scene::text::font_face::Face::resolve(&run.font) {
+                crate::scene::text::font_face::Face::Ttf { family, .. } => fonts
+                    .find(&family, run.bold)
+                    .map(RunFont::Subset)
+                    .unwrap_or(RunFont::Helvetica),
+                _ => RunFont::Helvetica,
+            };
+            if matches!(choice, RunFont::Helvetica) && !is_winansi_encodable(&run.text) {
+                continue;
+            }
+            let rgb = ctb_color.unwrap_or_else(|| adapt_text_color([run.color[0], run.color[1], run.color[2]]));
+            let [r, g, b] = plotted_color(rgb, run.color[3], screening, options);
+            // World mm → page points; the page CTM (plot scale/rotation/clip)
+            // applies on top, exactly as for the wire geometry.
+            let x_pt = ((run.origin[0] + ox) * MM_TO_PT as f64) as f32;
+            let y_pt = ((run.origin[1] + oy) * MM_TO_PT as f64) as f32;
+            if !x_pt.is_finite() || !y_pt.is_finite() {
+                continue;
+            }
+            // Em size from cap height, and width-match factor baked into the
+            // Tm x-basis (= Tz, the only horizontal scaling printpdf exposes).
+            let (font_handle, size_pt, width_k) = match choice {
+                RunFont::Subset(sub) => {
+                    let size = (run.height * MM_TO_PT / sub.cap_ratio).max(0.1);
+                    (PdfFontHandle::External(sub.font_id.clone()), size, sub.width_factor(run))
+                }
+                RunFont::Helvetica => {
+                    let size = (run.height * MM_TO_PT / HELVETICA_CAP_RATIO).max(0.1);
+                    let handle = PdfFontHandle::Builtin(if run.bold {
+                        BuiltinFont::HelveticaBold
+                    } else {
+                        BuiltinFont::Helvetica
+                    });
+                    (handle, size, 1.0)
+                }
+            };
+            if !size_pt.is_finite() {
+                continue;
+            }
+            let (sin_r, cos_r) = run.rotation.sin_cos();
+            ops.push(Op::StartTextSection);
+            ops.push(Op::SetFont { font: font_handle, size: Pt(size_pt) });
+            ops.push(Op::SetTextRenderingMode {
+                mode: TextRenderingMode::Invisible,
+            });
+            ops.push(Op::SetTextMatrix {
+                matrix: printpdf::TextMatrix::Raw([
+                    cos_r * width_k,
+                    sin_r * width_k,
+                    -sin_r,
+                    cos_r,
+                    x_pt,
+                    y_pt,
+                ]),
+            });
+            ops.push(Op::SetFillColor {
+                col: Color::Rgb(Rgb { r, g, b, icc_profile: None }),
+            });
+            ops.push(Op::ShowText {
+                items: vec![TextItem::Text(run.text.clone())],
+            });
+            ops.push(Op::EndTextSection);
+            emitted += 1;
+        }
+    }
+    emitted
+}
+
+/// Whether every char in `text` survives Base-14 WinAnsi encoding.
+///
+/// ASCII + Latin-1 incl. French accents and the `°±Ø` DXF specials — but NOT
+/// the C1 control range U+0080–U+009F (unassigned in WinAnsi; emitting them
+/// would mojibake). Anything else is rejected per-run so the exporter never
+/// emits a wrong `Tj` — those runs keep their outlines and stay unsearchable.
+/// (Runs set in an embedded subset bypass this gate: Identity-H covers any
+/// glyph the subset carries.)
+#[cfg(not(target_arch = "wasm32"))]
+fn is_winansi_encodable(text: &str) -> bool {
+    text.chars().all(|c| {
+        let cp = c as u32;
+        cp <= 0xFF && !(0x80..=0x9F).contains(&cp)
+    })
+}
+
+// ── Embedded subset fonts (one system family × weight, cut to used glyphs) ──
+
+/// One embedded subset TrueType font for the search layer: a single system
+/// family at one weight, cut by `allsorts` to the glyphs the plot uses.
+#[cfg(not(target_arch = "wasm32"))]
+struct EmbeddedSubset {
+    family: String,
+    bold: bool,
+    font_id: printpdf::FontId,
+    /// Subset-space GID per char, re-parsed from the subset bytes (never
+    /// assumed from allsorts' assignment order).
+    gid_of: std::collections::BTreeMap<char, u16>,
+    /// Raw advance per subset GID, in font units (hmtx, for Tz).
+    width_of: std::collections::BTreeMap<u16, u16>,
+    upem: u16,
+    /// Cap-height fraction of em (OS/2 sCapHeight, else 0.7).
+    cap_ratio: f32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl EmbeddedSubset {
+    /// Width-match factor for a run: laid advance ÷ natural advance at the
+    /// run's cap height. 1.0 when the widths are unknown (never explodes a
+    /// selection highlight: clamped to a sane band).
+    fn width_factor(&self, run: &SearchableTextRun) -> f32 {
+        let natural: u32 = run
+            .text
+            .chars()
+            .filter_map(|c| self.gid_of.get(&c))
+            .filter_map(|g| self.width_of.get(g))
+            .map(|w| *w as u32)
+            .sum();
+        if natural == 0 || run.adv_width <= 0.0 || run.height <= 0.0 {
+            return 1.0;
+        }
+        // laid (drawing mm) vs natural at cap height, both in em fractions:
+        // k = adv / (height * Σw / (upem * cap)).
+        let k = run.adv_width * self.upem as f32 * self.cap_ratio
+            / (run.height * natural as f32);
+        if !k.is_finite() {
+            1.0
+        } else {
+            k.clamp(0.25, 4.0)
+        }
+    }
+}
+
+/// Embedded subsets for one export (Helvetica fallback needs no entry).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct SearchableFontSet {
+    subsets: Vec<EmbeddedSubset>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SearchableFontSet {
+    /// Collect every TTF-resolvable run's chars per (family, bold), subset
+    /// each bucket with `allsorts`, and register the subsets on the document.
+    /// Anything unresolvable (SHX/LFF names, big-font pairs, CFF outlines,
+    /// missing files) simply gets no entry — those runs take Helvetica.
+    fn build(doc: &mut PdfDocument, pages: &[PdfPageInput]) -> Self {
+        use std::collections::{BTreeMap, BTreeSet};
+        let mut buckets: BTreeMap<(String, bool), BTreeSet<char>> = BTreeMap::new();
+        for page in pages {
+            for wire in page.content.wires.iter() {
+                for run in &wire.searchable_text {
+                    if run.text.is_empty() {
+                        continue;
+                    }
+                    if let crate::scene::text::font_face::Face::Ttf { family, .. } =
+                        crate::scene::text::font_face::Face::resolve(&run.font)
+                    {
+                        buckets
+                            .entry((family, run.bold))
+                            .or_default()
+                            .extend(run.text.chars());
+                    }
+                }
+            }
+        }
+        let mut out = Self::default();
+        for ((family, bold), chars) in &buckets {
+            if let Some(subset) = subset_family(doc, family, *bold, chars) {
+                out.subsets.push(subset);
+            }
+        }
+        out
+    }
+
+    fn find(&self, family: &str, bold: bool) -> Option<&EmbeddedSubset> {
+        self.subsets
+            .iter()
+            .find(|s| s.family == family && s.bold == bold)
+    }
+}
+
+/// Subset one system family to `chars`, embed the subset, and register it.
+/// Returns `None` whenever embedding is impossible or pointless (no file, CFF
+/// outlines the stub can't describe, subset failure, nothing mappable) — the
+/// caller falls back to Helvetica, never to an invalid font dict.
+#[cfg(not(target_arch = "wasm32"))]
+fn subset_family(
+    doc: &mut PdfDocument,
+    family: &str,
+    bold: bool,
+    chars: &std::collections::BTreeSet<char>,
+) -> Option<EmbeddedSubset> {
+    use allsorts::{binary::read::ReadScope, font_data::FontData, tables::FontTableProvider};
+    let weight = if bold {
+        fontdb::Weight::BOLD
+    } else {
+        fontdb::Weight::NORMAL
+    };
+    let (bytes, index) = crate::scene::text::sysfont::with_face_data_weighted(
+        family,
+        weight,
+        |data, index| (data.to_vec(), index),
+    )?;
+    // Original GIDs for the used chars (+ .notdef, mandatory for subsetting).
+    let orig = ttf_parser::Face::parse(&bytes, index).ok()?;
+    let mut ids: Vec<u16> = vec![0];
+    for c in chars {
+        if let Some(gid) = orig.glyph_index(*c) {
+            if !ids.contains(&gid.0) {
+                ids.push(gid.0);
+            }
+        }
+    }
+    if ids.len() <= 1 {
+        return None;
+    }
+    let scope = ReadScope::new(&bytes);
+    let font_file = scope.read::<FontData<'_>>().ok()?;
+    let provider = font_file.table_provider(index as usize).ok()?;
+    // The no-text_layout ParsedFont stub can only describe TrueType
+    // (CIDFontType2 + FontFile2) — never mislabel CFF outlines as TrueType.
+    if provider.has_table(allsorts::tag::CFF) || provider.has_table(allsorts::tag::CFF2) {
+        return None;
+    }
+    let subset_bytes = allsorts::subset::subset(
+        &provider,
+        &ids,
+        &allsorts::subset::SubsetProfile::Pdf,
+        allsorts::subset::CmapTarget::Unicode,
+    )
+    .ok()?;
+    // Re-parse the SUBSET: GID assignment is allsorts' business, and the maps
+    // below must be in subset space. Anything unmappable stays out.
+    let sub = ttf_parser::Face::parse(&subset_bytes, 0).ok()?;
+    let upem = sub.units_per_em().max(1);
+    let cap_ratio = sub
+        .capital_height()
+        .filter(|c| *c > 0)
+        .map(|c| c as f32 / upem as f32)
+        .filter(|r| (0.2..=1.0).contains(r))
+        .unwrap_or(0.7);
+    let mut gid_chars: std::collections::BTreeMap<char, u16> = std::collections::BTreeMap::new();
+    let mut width_of: std::collections::BTreeMap<u16, u16> = std::collections::BTreeMap::new();
+    for c in chars {
+        if let Some(gid) = sub.glyph_index(*c) {
+            gid_chars.insert(*c, gid.0);
+            width_of.insert(gid.0, sub.glyph_hor_advance(gid).unwrap_or(0));
+        }
+    }
+    if gid_chars.is_empty() {
+        return None;
+    }
+    // printpdf (no text_layout) embeds `original_bytes` verbatim as the
+    // CIDFontType2 stream and derives ToUnicode/widths from these maps — so
+    // handing it the SUBSET bytes + subset-space maps yields a true subset
+    // embed with no lopdf surgery. (Metrics out before the bytes move.)
+    let (ascent, descent) = (sub.ascender(), sub.descender());
+    let cp_map: std::collections::BTreeMap<u32, u16> =
+        gid_chars.iter().map(|(c, g)| (*c as u32, *g)).collect();
+    let parsed = printpdf::ParsedFont::with_glyph_data(
+        subset_bytes,
+        0,
+        Some(family.to_string()),
+        cp_map,
+        width_of.clone(),
+        upem,
+        printpdf::FontMetrics { ascent, descent },
+    );
+    let font_id = doc.add_font(&parsed);
+    Some(EmbeddedSubset {
+        family: family.to_string(),
+        bold,
+        font_id,
+        gid_of: gid_chars,
+        width_of,
+        upem,
+        cap_ratio,
+    })
+}
+
 /// Re-emit every wire's SDF text as vector geometry.
 ///
 /// Each visible glyph rides on `wire.text_verts` as one 6-vertex quad (two
@@ -1485,28 +2005,31 @@ fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
 /// quad's `uv_min` and map it into that quad by affine interpolation of the
 /// plane rect — so a stroke (LFF) font emits polylines and a filled TrueType
 /// glyph emits filled triangles, exactly where the SDF quad sits.
+///
+/// Always drawn: the visible glyph rendering (strokes for LFF/SHX pen fonts,
+/// fills for TrueType outlines, solid bars for decorations). The invisible
+/// searchable layer above adds extractability; it never replaces this.
 #[cfg(not(target_arch = "wasm32"))]
 fn emit_text(
     ops: &mut Vec<Op>,
+    fonts: &mut TextFonts,
     wires: &[WireModel],
     ox: f64,
     oy: f64,
     scale: f32,
     plot_style: Option<&PlotStyleTable>,
     options: PdfPlotOptions,
-) {
+) -> bool {
     use crate::scene::text::sdf_atlas;
 
     if wires.iter().all(|w| w.text_verts.is_empty()) {
-        return;
+        return false;
     }
-    // Snapshot the atlas' baked-glyph geometry once; drop the lock before use.
-    let (table, solid_key) = {
-        let Ok(atlas) = sdf_atlas::text_atlas().lock() else {
-            return;
-        };
-        (atlas.export_table(), sdf_atlas::uv_key(atlas.solid_uv()))
+    // The atlas' baked-glyph geometry, snapshotted once per export.
+    let Some(snapshot) = fonts.glyph_table() else {
+        return false;
     };
+    let (table, solid_key) = (&snapshot.0, snapshot.1);
 
     // `Op::SetLineDashPattern` is persistent graphics state and the wire pass
     // above only re-emits it on change, so whatever the last wire needed is
@@ -1516,11 +2039,18 @@ fn emit_text(
         dash: LineDashPattern::default(),
     });
 
+    let mut embedded = true;
     for wire in wires {
         let verts = &wire.text_verts;
         if verts.is_empty() {
+            embedded = false;
             continue;
         }
+        // A run drawn wholly in faces the PDF can embed goes out as real text
+        // and is its own searchable layer. Any other run keeps its outlines and
+        // the invisible layer carries its text: one copy of the text either way.
+        let embed = fonts.embeds_all(verts, table, solid_key);
+        embedded &= embed;
         // Mirror the wire pass: indexed style color, screening, and pen width.
         let mut ctb_color: Option<[f32; 3]> = None;
         let mut lw_override: Option<f32> = None;
@@ -1588,10 +2118,22 @@ fn emit_text(
                 };
 
                 if !ge.fill_tris.is_empty() {
-                    // Filled TrueType glyph: one filled triangle per triple.
                     ops.push(Op::SetFillColor {
                         col: Color::Rgb(Rgb { r, g, b, icc_profile: None }),
                     });
+                    // Filled TrueType glyph from a face we can embed: draw it as
+                    // text in that font. Its outline tessellates into hundreds
+                    // of triangles for a CJK face, which made text-heavy sheets
+                    // export at hundreds of MB and crawl in viewers.
+                    if let Some(source) = ge.source.as_ref().filter(|_| embed) {
+                        if let Some(font) = fonts.font_for(source, ge.ch) {
+                            let matrix =
+                                glyph_text_matrix(source, pmin, [sx, sy], bl, br, tl, ox, oy);
+                            push_glyph_text(ops, font, source.gid, ge.ch, matrix);
+                            continue;
+                        }
+                    }
+                    // Otherwise one filled triangle per triple.
                     for tri in ge.fill_tris.chunks_exact(3) {
                         ops.push(Op::DrawPolygon {
                             polygon: Polygon {
@@ -1671,6 +2213,312 @@ fn emit_text(
             }
         }
     }
+    embedded
+}
+
+// ── Embedded TrueType text ─────────────────────────────────────────────────
+
+/// The atlas export table plus its solid-tile key.
+#[cfg(not(target_arch = "wasm32"))]
+type GlyphTable = std::sync::Arc<(
+    std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
+    u64,
+)>;
+
+/// The TrueType faces a PDF export draws text with, and the glyphs each uses.
+///
+/// Pages register glyphs as they are drawn (each under a font id fixed up
+/// front); once every page is done, [`TextFonts::install`] subsets each face to
+/// the glyphs actually used, renumbers them in the page streams, and adds the
+/// subset fonts to the document. printpdf 0.9 would otherwise embed whole
+/// fonts (its own subsetting is disabled), and a CJK face is megabytes.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct TextFonts {
+    /// The atlas export table, snapshotted once: every page's text quads are
+    /// laid out before the export starts, so one snapshot serves the whole
+    /// document. Re-walking the atlas per text wire made a 28-sheet set with
+    /// ~4 000 text entities take over nine minutes.
+    glyphs: Option<GlyphTable>,
+    fonts: Vec<EmbeddedFont>,
+    /// Font file identity → index into `fonts`; `None` = printpdf can't parse
+    /// the face, so its glyphs keep the outline fill.
+    by_blob: std::collections::HashMap<(usize, u32, u32), Option<usize>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct EmbeddedFont {
+    blob: std::sync::Arc<crate::scene::text::ttf_glyph::FontBlob>,
+    id: FontId,
+    /// Original glyph id → the character it draws (for ToUnicode).
+    used: std::collections::BTreeMap<u16, char>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TextFonts {
+    /// The atlas' glyph export table (and solid-tile key), built on first use.
+    fn glyph_table(&mut self) -> Option<GlyphTable> {
+        use crate::scene::text::sdf_atlas;
+        if self.glyphs.is_none() {
+            let atlas = sdf_atlas::text_atlas().lock().ok()?;
+            self.glyphs = Some(std::sync::Arc::new((
+                atlas.export_table(),
+                sdf_atlas::uv_key(atlas.solid_uv()),
+            )));
+        }
+        self.glyphs.clone()
+    }
+
+    /// The font id to draw `source`'s glyph with, recording the glyph as used.
+    /// `None` when the face can't be embedded.
+    fn font_for(
+        &mut self,
+        source: &crate::scene::text::ttf_glyph::GlyphSource,
+        ch: char,
+    ) -> Option<FontId> {
+        let slot = self.slot(source)?;
+        let font = &mut self.fonts[slot];
+        font.used.entry(source.gid).or_insert(ch);
+        Some(font.id.clone())
+    }
+
+    /// The `fonts` slot of `source`'s face; `None` when printpdf can't parse it.
+    fn slot(&mut self, source: &crate::scene::text::ttf_glyph::GlyphSource) -> Option<usize> {
+        match self.by_blob.get(&source.font.id) {
+            Some(slot) => *slot,
+            None => {
+                let parses =
+                    ParsedFont::from_bytes(&source.font.data, source.font.index, &mut Vec::new())
+                        .is_some();
+                let slot = parses.then(|| {
+                    self.fonts.push(EmbeddedFont {
+                        blob: source.font.clone(),
+                        id: FontId::new(),
+                        used: std::collections::BTreeMap::new(),
+                    });
+                    self.fonts.len() - 1
+                });
+                self.by_blob.insert(source.font.id, slot);
+                slot
+            }
+        }
+    }
+
+    /// Whether every glyph of `verts` is a filled glyph of a face the PDF can
+    /// embed, so the whole run can go out as real text.
+    fn embeds_all(
+        &mut self,
+        verts: &[crate::scene::pipeline::text_gpu::TextVertex],
+        table: &std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
+        solid_key: u64,
+    ) -> bool {
+        use crate::scene::text::sdf_atlas;
+        let mut any = false;
+        for quad in verts.chunks_exact(6) {
+            if quad[0].color[3] < 0.01 {
+                continue;
+            }
+            let key = sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]]);
+            if key == solid_key {
+                continue;
+            }
+            let Some(ge) = table.get(&key) else {
+                continue;
+            };
+            let Some(source) = ge.source.as_ref().filter(|_| !ge.fill_tris.is_empty()) else {
+                return false;
+            };
+            if self.slot(source).is_none() {
+                return false;
+            }
+            any = true;
+        }
+        any
+    }
+
+    /// Subset each face to its used glyphs, renumber those glyphs in the page
+    /// streams, and register the fonts under the ids the pages already use.
+    /// A face that fails to subset is embedded whole, ids unchanged.
+    fn install(self, doc: &mut PdfDocument) {
+        // A face only probed by `embeds_all` for a run that kept its outlines
+        // draws nothing.
+        for font in self.fonts.into_iter().filter(|font| !font.used.is_empty()) {
+            // `.notdef` must stay glyph 0; the subset numbers glyphs in list order.
+            let gids: Vec<u16> = std::iter::once(0)
+                .chain(font.used.keys().copied().filter(|&gid| gid != 0))
+                .collect();
+            let subset = subset_font(&font.blob, &gids)
+                .and_then(|bytes| ParsedFont::from_bytes(&bytes, 0, &mut Vec::new()));
+            let parsed = match subset {
+                Some(parsed) => {
+                    let remap: std::collections::HashMap<u16, u16> = gids
+                        .iter()
+                        .enumerate()
+                        .map(|(new, &old)| (old, new as u16))
+                        .collect();
+                    renumber_glyphs(&mut doc.pages, &font.id, &remap);
+                    parsed
+                }
+                None => {
+                    log::warn!("PDF export: font subsetting failed; embedding the whole face");
+                    let whole =
+                        ParsedFont::from_bytes(&font.blob.data, font.blob.index, &mut Vec::new());
+                    match whole {
+                        Some(parsed) => parsed,
+                        None => continue, // `font_for` already checked it parses
+                    }
+                }
+            };
+            doc.resources
+                .fonts
+                .map
+                .insert(font.id, PdfFont::new(parsed));
+        }
+    }
+}
+
+/// `blob`'s face reduced to `gids` (glyph 0 first), keeping the hinting tables
+/// a tricky CJK face (DFKai-SB, MingLiU) needs to draw its strokes in place.
+#[cfg(not(target_arch = "wasm32"))]
+fn subset_font(blob: &crate::scene::text::ttf_glyph::FontBlob, gids: &[u16]) -> Option<Vec<u8>> {
+    use allsorts::binary::read::ReadScope;
+    use allsorts::font_data::FontData;
+    use allsorts::subset::{subset, CmapTarget, SubsetProfile};
+
+    let font = ReadScope::new(&blob.data).read::<FontData<'_>>().ok()?;
+    let provider = font.table_provider(blob.index as usize).ok()?;
+    subset(
+        &provider,
+        gids,
+        &SubsetProfile::Pdf,
+        CmapTarget::Unrestricted,
+    )
+    .ok()
+}
+
+/// Rewrite the glyph ids shown in font `id` through `remap` (original → subset).
+#[cfg(not(target_arch = "wasm32"))]
+fn renumber_glyphs(
+    pages: &mut [PdfPage],
+    id: &FontId,
+    remap: &std::collections::HashMap<u16, u16>,
+) {
+    for page in pages {
+        let mut in_font = false;
+        for op in &mut page.ops {
+            match op {
+                Op::SetFont { font, .. } => {
+                    in_font = matches!(font, PdfFontHandle::External(fid) if fid == id);
+                }
+                Op::ShowText { items } if in_font => {
+                    for item in items {
+                        if let TextItem::GlyphIds(codepoints) = item {
+                            for codepoint in codepoints {
+                                if let Some(&gid) = remap.get(&codepoint.gid) {
+                                    codepoint.gid = gid;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Text matrix that lays the embedded glyph exactly over its SDF quad.
+///
+/// The quad maps the glyph's 9-unit tile rect `pmin .. pmin + size` onto the
+/// world corners `bl`/`br`/`tl`; the outline was normalised font-unit × `k`,
+/// so one em (`units_per_em` font units) spans `k · units_per_em` 9-units.
+/// With `Tf` size 1 a text-space unit is one em, which this matrix carries to
+/// sheet points under the page's CTM — the same space the wire pass draws in.
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+fn glyph_text_matrix(
+    source: &crate::scene::text::ttf_glyph::GlyphSource,
+    pmin: [f32; 2],
+    size: [f32; 2],
+    bl: [f64; 2],
+    br: [f64; 2],
+    tl: [f64; 2],
+    ox: f64,
+    oy: f64,
+) -> [f32; 6] {
+    let em = source.k as f64 * source.units_per_em.max(1) as f64;
+    let (sx, sy) = (size[0] as f64, size[1] as f64);
+    // World displacement per 9-unit along the glyph's x and y axes.
+    let ex = [(br[0] - bl[0]) / sx, (br[1] - bl[1]) / sx];
+    let ey = [(tl[0] - bl[0]) / sy, (tl[1] - bl[1]) / sy];
+    // Glyph origin (9-unit 0,0 = pen position on the baseline) in world space.
+    let (px, py) = (pmin[0] as f64, pmin[1] as f64);
+    let origin = [
+        bl[0] - px * ex[0] - py * ey[0],
+        bl[1] - px * ex[1] - py * ey[1],
+    ];
+    let pt = MM_TO_PT as f64;
+    [
+        (ex[0] * em * pt) as f32,
+        (ex[1] * em * pt) as f32,
+        (ey[0] * em * pt) as f32,
+        (ey[1] * em * pt) as f32,
+        ((origin[0] + ox) * pt) as f32,
+        ((origin[1] + oy) * pt) as f32,
+    ]
+}
+
+/// One glyph as a text object: font `font` at size 1, positioned by `matrix`.
+/// The character rides along as the glyph's Unicode so the text is searchable.
+#[cfg(not(target_arch = "wasm32"))]
+fn push_glyph_text(ops: &mut Vec<Op>, font: FontId, gid: u16, ch: char, matrix: [f32; 6]) {
+    ops.push(Op::StartTextSection);
+    ops.push(Op::SetFont {
+        font: PdfFontHandle::External(font),
+        size: Pt(1.0),
+    });
+    ops.push(Op::SetTextMatrix {
+        matrix: TextMatrix::Raw(matrix),
+    });
+    ops.push(Op::ShowText {
+        items: vec![TextItem::GlyphIds(vec![Codepoint {
+            gid,
+            offset: 0.0,
+            cid: Some(ch.to_string()),
+        }])],
+    });
+    ops.push(Op::EndTextSection);
+}
+
+/// Everything searchable in an exported file: the raw bytes (printpdf
+/// leaves small content streams uncompressed) plus any zlib streams that
+/// decode to mostly-printable text, so the assertions hold either way.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn pdf_stream_text(bytes: &[u8]) -> String {
+    use std::io::Read as _;
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    for start in 0..bytes.len().saturating_sub(2) {
+        // zlib streams start with a 2-byte header: deflate method, valid check.
+        let (cmf, flg) = (bytes[start], bytes[start + 1]);
+        if cmf & 0x0f != 8 || ((cmf as u16) << 8 | flg as u16) % 31 != 0 {
+            continue;
+        }
+        let mut decoded = Vec::new();
+        if flate2::read::ZlibDecoder::new(&bytes[start..])
+            .read_to_end(&mut decoded)
+            .is_ok()
+            && decoded.len() > 32
+        {
+            let printable = decoded
+                .iter()
+                .filter(|&&b| matches!(b, b'\n' | b'\r' | b'\t' | 32..=126))
+                .count();
+            if printable * 10 >= decoded.len() * 9 {
+                text.push_str(&String::from_utf8_lossy(&decoded));
+            }
+        }
+    }
+    text
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1730,12 +2578,122 @@ mod tests {
         assert!(bytes.len() > 200, "suspiciously small: {}", bytes.len());
     }
 
+
+    #[test]
+    fn export_fallback_plot_style_recolors_wires() {
+        // ACI 1 carrying pure device red: without a style it must export as an
+        // RGB operator; the monochrome fallback must recolor it. Guards the
+        // automation plot path, where the per-page style can be dropped.
+        let make_page = || {
+            let mut wire = PlotWire {
+                wire: WireModel::solid(
+                    "test".into(),
+                    vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.0,
+            };
+            wire.wire.aci = 1;
+            test_page(vec![wire])
+        };
+
+        let unstyled = pdf_stream_text(&build_pdf_pages(&[make_page()], None).unwrap());
+        let monochrome =
+            PlotStyleTable::builtin("monochrome.ctb").expect("shipped monochrome.ctb parses");
+        let styled =
+            pdf_stream_text(&build_pdf_pages(&[make_page()], Some(&monochrome)).unwrap());
+
+        assert!(
+            unstyled.contains("1 0 0 rg") || unstyled.contains("1 0 0 RG"),
+            "unstyled export should keep the wire's RGB color"
+        );
+        assert!(
+            !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
+            "monochrome fallback must recolor the wire"
+        );
+    }
+
+    /// Parse every stroke-width operator (`<pt> w`) out of the content text.
+    fn stroke_widths(text: &str) -> Vec<f32> {
+        let tokens: Vec<&str> = text.split_whitespace().collect();
+        tokens
+            .windows(2)
+            .filter_map(|pair| {
+                if pair[1] == "w" {
+                    pair[0].parse::<f32>().ok()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn distinct_widths(mut widths: Vec<f32>) -> Vec<f32> {
+        widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        widths.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        widths
+    }
+
+    #[test]
+    fn plot_honors_per_object_lineweight_with_and_without_style() {
+        // Two objects whose resolved lineweights differ (as two layers set to
+        // 0.13 mm and 0.50 mm produce): the PDF must carry two distinct pen
+        // widths, and a plot style that leaves weights at "use object" must
+        // keep that hierarchy.
+        let make_page = |px: f32| {
+            let mut wire = PlotWire {
+                wire: WireModel::solid(
+                    "test".into(),
+                    vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.0,
+            };
+            wire.wire.aci = 7;
+            wire.wire.line_weight_px = px;
+            test_page(vec![wire])
+        };
+
+        let monochrome =
+            PlotStyleTable::builtin("monochrome.ctb").expect("shipped monochrome.ctb parses");
+        eprintln!(
+            "monochrome resolve_lineweight(7) = {:?}",
+            monochrome.resolve_lineweight(7)
+        );
+
+        let unstyled = stroke_widths(&pdf_stream_text(
+            &build_pdf_pages(&[make_page(1.0), make_page(3.0)], None).unwrap(),
+        ));
+        let unstyled = distinct_widths(unstyled);
+        assert_eq!(unstyled.len(), 2, "two object weights, two pens: {unstyled:?}");
+        assert!(
+            (unstyled[1] / unstyled[0] - 3.0).abs() < 0.1,
+            "pen widths follow the object weights 1px:3px: {unstyled:?}"
+        );
+
+        let styled = stroke_widths(&pdf_stream_text(
+            &build_pdf_pages(&[make_page(1.0), make_page(3.0)], Some(&monochrome)).unwrap(),
+        ));
+        let styled = distinct_widths(styled);
+        assert_eq!(
+            styled.len(),
+            2,
+            "monochrome.ctb leaves weights at 'use object', so the two weights survive: {styled:?}"
+        );
+        assert!(
+            (styled[1] / styled[0] - 3.0).abs() < 0.1,
+            "weight hierarchy matches the unstyled plot: {styled:?}"
+        );
+    }
+
     // Build a WireModel carrying the SDF glyph quads for `text` in the embedded
     // "txt" stroke font, laid out into the process-wide atlas emit_text reads.
     fn text_wire(text: &str, origin: [f64; 3]) -> PlotWire {
         use crate::scene::pipeline::text_gpu::push_glyph_vertices;
         use crate::scene::text::{glyph_quads::layout_glyph_quads, sdf_atlas};
-        let quads = {
+        let (quads, _) = {
             let mut atlas = sdf_atlas::text_atlas().lock().unwrap();
             layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, text)
         };
@@ -1767,6 +2725,326 @@ mod tests {
             "text did not add content: {} !> {}",
             with_text.len(),
             no_text.len()
+        );
+    }
+
+    fn searchable_wire(text: &str, origin: [f64; 3]) -> PlotWire {
+        use crate::scene::model::wire_model::SearchableTextRun;
+        PlotWire {
+            wire: WireModel {
+                searchable_text: vec![SearchableTextRun {
+                    text: text.to_string(),
+                    origin,
+                    height: 10.0,
+                    rotation: 0.0,
+                    color: [0.0, 0.0, 0.0, 1.0],
+                    bold: false,
+                    font: "txt".into(),
+                    adv_width: 10.0 * text.chars().count().max(1) as f32,
+                }],
+                ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
+            },
+            draw_depth: 0.0,
+        }
+    }
+
+    // Outline-only export exposes zero BT operators and no extractable text;
+    // a preserved run must emit a real invisible (`Tr 3`) `BT … Tj ET` with
+    // the string, on top of the unchanged outlines.
+    #[test]
+    fn searchable_text_emits_bt_tj_with_string() {
+        let wire = searchable_wire("CMa-03", [20.0, 30.0, 0.0]);
+        let bytes = build_pdf_pages(&[test_page(vec![wire])], None).unwrap();
+        assert!(bytes.starts_with(b"%PDF"), "not a PDF");
+        let stream = pdf_stream_text(&bytes);
+        assert!(stream.contains("BT"), "no text object (BT) in searchable export");
+        assert!(
+            stream.contains("CMa-03"),
+            "searchable string missing from content stream"
+        );
+        assert!(
+            stream.contains("/Helvetica"),
+            "searchable export should reference the text font resource"
+        );
+        assert!(
+            stream.contains("Tj") || stream.contains("TJ"),
+            "no text-showing operator (Tj/TJ)"
+        );
+        assert!(
+            stream.contains("Tr"),
+            "searchable layer must be invisible (Tr rendering mode)"
+        );
+    }
+
+    // Invisible layer coexists with outlines: the searchable file carries the
+    // string while the outlines-only file does not, and the outlines are
+    // identical in both (zero visual change — the layer only adds bytes).
+    #[test]
+    fn searchable_layer_coexists_with_outlines() {
+        use crate::scene::text::sdf_atlas;
+        // Other tests share the glyph atlas; a re-bake between laying out the
+        // glyphs and exporting them moves the outline lookups, so build and
+        // export under one atlas generation.
+        let (outline_bytes, searchable_bytes) = loop {
+            let generation = sdf_atlas::generation();
+            let mut outline_only = text_wire("HELLO", [20.0, 20.0, 0.0]);
+            outline_only.wire.searchable_text.clear();
+            let mut searchable = text_wire("HELLO", [20.0, 20.0, 0.0]);
+            searchable.wire.searchable_text =
+                searchable_wire("HELLO", [20.0, 20.0, 0.0]).wire.searchable_text;
+
+            // Outlines are never suppressed: both wires keep their glyph quads.
+            assert!(
+                !searchable.wire.text_verts.is_empty(),
+                "searchable wire must keep its outline quads"
+            );
+
+            let outline_bytes = build_pdf_pages(&[test_page(vec![outline_only])], None).unwrap();
+            let searchable_bytes = build_pdf_pages(&[test_page(vec![searchable])], None).unwrap();
+            if sdf_atlas::generation() == generation {
+                break (outline_bytes, searchable_bytes);
+            }
+        };
+        let outline_stream = pdf_stream_text(&outline_bytes);
+        let searchable_stream = pdf_stream_text(&searchable_bytes);
+
+        assert!(
+            !outline_stream.contains("HELLO"),
+            "outline path must not leak extractable text"
+        );
+        assert!(
+            searchable_stream.contains("HELLO") && searchable_stream.contains("BT"),
+            "searchable path must carry extractable BT/Tj text"
+        );
+        assert!(
+            searchable_stream.contains("Tr"),
+            "searchable text must render invisibly (Tr)"
+        );
+        assert!(
+            searchable_bytes.len() > outline_bytes.len(),
+            "invisible layer adds bytes ({} > {}); visuals come from the kept outlines",
+            searchable_bytes.len(),
+            outline_bytes.len()
+        );
+    }
+
+    // Per-run fallback: a non-WinAnsi run (Greek/Cyrillic/CJK/symbols) emits
+    // no `Tj` — its outlines still draw, so nothing renders as missing glyphs.
+    #[test]
+    fn searchable_text_skips_non_winansi_runs() {
+        let wire = searchable_wire("ΩΩ", [20.0, 20.0, 0.0]);
+        let stream = pdf_stream_text(&build_pdf_pages(&[test_page(vec![wire])], None).unwrap());
+        assert!(
+            !stream.contains("BT"),
+            "non-encodable run must not emit a text object"
+        );
+    }
+
+    // Rotation must ride a text matrix (Tm), not just an angle — a 90° run
+    // keeps its string and emits a rotated Tm.
+    #[test]
+    fn searchable_text_rotation_uses_text_matrix() {
+        let mut wire = searchable_wire("AB", [20.0, 20.0, 0.0]);
+        wire.wire.searchable_text[0].rotation = std::f32::consts::FRAC_PI_2;
+        let stream = pdf_stream_text(&build_pdf_pages(&[test_page(vec![wire])], None).unwrap());
+        assert!(stream.contains("AB"), "rotated run lost its string");
+        assert!(stream.contains("Tm"), "rotated run needs an explicit text matrix (Tm)");
+    }
+
+    #[test]
+    fn winansi_filter_covers_accents_and_rejects_cjk() {
+        assert!(is_winansi_encodable("CMa-03"));
+        assert!(is_winansi_encodable("crème °±Ø"));
+        assert!(!is_winansi_encodable("Ω"));
+        assert!(!is_winansi_encodable("中"));
+        // C1 controls are unassigned in WinAnsi: emitting them would mojibake
+        // (explicit \u escapes — a literal control char would not survive
+        // editors, and NBSP U+00A0 next door *is* encodable).
+        assert!(is_winansi_encodable("a\u{a0}b")); // NBSP is WinAnsi 0xA0
+        assert!(!is_winansi_encodable("a\u{80}b"));
+        assert!(!is_winansi_encodable("a\u{9f}b"));
+    }
+
+    #[test]
+    fn width_factor_matches_laid_to_natural_advance() {
+        use std::collections::BTreeMap;
+        let sub = EmbeddedSubset {
+            family: "Test".into(),
+            bold: false,
+            font_id: printpdf::FontId::new(),
+            gid_of: [('A', 1), ('B', 2)].into_iter().collect::<BTreeMap<_, _>>(),
+            width_of: [(1, 600), (2, 620)].into_iter().collect::<BTreeMap<_, _>>(),
+            upem: 1000,
+            cap_ratio: 0.7,
+        };
+        let run = SearchableTextRun {
+            text: "AB".into(),
+            origin: [0.0, 0.0, 0.0],
+            height: 10.0,
+            rotation: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+            bold: false,
+            font: "Test".into(),
+            // Laid advance exactly equals natural at cap height, so k = 1:
+            // adv = height * Σw / (upem * cap) = 10*1220/(1000*0.7).
+            adv_width: 10.0 * 1220.0 / (1000.0 * 0.7),
+        };
+        assert!((sub.width_factor(&run) - 1.0).abs() < 1e-4);
+        let mut wide = run.clone();
+        wide.adv_width *= 2.0;
+        assert!((sub.width_factor(&wide) - 2.0).abs() < 1e-4);
+        let mut empty = run;
+        empty.adv_width = 0.0;
+        assert_eq!(sub.width_factor(&empty), 1.0);
+    }
+
+    // A TTF-backed run embeds a subset of its own family with ToUnicode —
+    // the DWG font, not Helvetica. Skips where no test font is installed.
+    #[test]
+    fn subset_embeds_the_runs_own_family_with_tounicode() {
+        let family = ["DejaVu Sans", "Liberation Sans", "Arial"]
+            .into_iter()
+            .find(|f| {
+                crate::scene::text::sysfont::with_face_data_weighted(
+                    f,
+                    fontdb::Weight::NORMAL,
+                    |_, _| true,
+                )
+                .unwrap_or(false)
+            });
+        let Some(family) = family else {
+            eprintln!("no test TTF installed; skipping subset test");
+            return;
+        };
+        let full_len =
+            crate::scene::text::sysfont::with_face_data_weighted(family, fontdb::Weight::NORMAL, |data, _| {
+                data.len()
+            })
+            .unwrap();
+        let mut wire = searchable_wire("CMa-03 pincé", [20.0, 30.0, 0.0]);
+        wire.wire.searchable_text[0].font = family.to_string();
+        // Unit level: the subset is built for the run's family and maps the
+        // used chars (extractability source of truth — the content stream
+        // carries hex GIDs, resolved via ToUnicode, not literal text).
+        let mut probe = printpdf::PdfDocument::new("subset-probe");
+        let fonts =
+            SearchableFontSet::build(&mut probe, &[test_page(vec![wire.clone()])]);
+        let sub = fonts
+            .find(family, false)
+            .expect("subset embedded for the run's own family");
+        assert!(sub.gid_of.contains_key(&'C'), "used chars must be mapped");
+        assert!(sub.gid_of.contains_key(&'é'), "accents must survive subsetting");
+        // PDF level: ToUnicode + embedded bytes, and no Helvetica fallback.
+        let bytes = build_pdf_pages(&[test_page(vec![wire])], None).unwrap();
+        let stream = pdf_stream_text(&bytes);
+        assert!(
+            stream.contains("ToUnicode"),
+            "subset font must carry a ToUnicode CMap"
+        );
+        assert!(
+            stream.contains("FontFile2"),
+            "subset font must embed its (TrueType) bytes"
+        );
+        assert!(
+            !stream.contains("/Helvetica"),
+            "own-family run must not fall back to Helvetica"
+        );
+        assert!(
+            bytes.len() < full_len,
+            "subset PDF ({} bytes) must be lighter than the full font ({} bytes)",
+            bytes.len(),
+            full_len
+        );
+    }
+
+    // Runs fully outside the export window never reach the content stream.
+    #[test]
+    fn clip_culls_runs_outside_the_export_window() {
+        let inside = searchable_wire("IN", [20.0, 20.0, 0.0]);
+        let outside = searchable_wire("OUT", [500.0, 500.0, 0.0]);
+        // Same page, windowed clip around the origin run only.
+        let mut page = test_page(vec![inside, outside]);
+        page.clip = Some((0.0, 0.0, 100.0, 100.0));
+        let stream = pdf_stream_text(&build_pdf_pages(&[page], None).unwrap());
+        assert!(stream.contains("IN"), "inside run must survive the clip");
+        assert!(!stream.contains("OUT"), "outside run must be culled by the clip");
+    }
+    // A filled TrueType glyph exports as text in an embedded subset of its
+    // face — not as its tessellated outline, which for a CJK face is hundreds
+    // of triangles per glyph (a 28-sheet DFKai-SB set came out at 320 MB).
+    #[test]
+    fn truetype_text_embeds_a_subset_font() {
+        use crate::scene::pipeline::text_gpu::push_glyph_vertices;
+        use crate::scene::text::font_face::Face;
+        use crate::scene::text::{glyph_quads::layout_glyph_quads, sdf_atlas, sysfont};
+
+        // Any installed TrueType family that draws 'H'; hosts without fonts skip.
+        let Some((family, source)) = sysfont::families().iter().find_map(|family| {
+            let face = Face::resolve(family);
+            matches!(face, Face::Ttf { .. })
+                .then(|| face.glyph_source('H'))
+                .flatten()
+                .map(|source| (family.clone(), source))
+        }) else {
+            eprintln!("no TrueType font installed; skipped");
+            return;
+        };
+        // The atlas and TEXTFILL are process-wide and other tests reset, grow
+        // or unfill them concurrently; a change between laying the quads out
+        // and exporting them invalidates their tile keys, so retry until one
+        // export runs against a stable, filled atlas.
+        let (bytes, text) = (0..20)
+            .find_map(|_| {
+                let generation = sdf_atlas::generation();
+                if !sdf_atlas::textfill() {
+                    std::thread::yield_now();
+                    return None;
+                }
+                let (quads, _) = {
+                    let mut atlas = sdf_atlas::text_atlas().lock().unwrap();
+                    layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, &family, false, "HHH")
+                };
+                assert_eq!(quads.len(), 3, "three glyphs laid out in {family}");
+                let mut verts = Vec::new();
+                push_glyph_vertices(
+                    &mut verts,
+                    &quads,
+                    [20.0, 20.0, 0.0],
+                    1.0,
+                    [0.0, 0.0, 0.0, 1.0],
+                    0.0,
+                );
+                let wire = PlotWire {
+                    wire: WireModel {
+                        text_verts: verts,
+                        ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
+                    },
+                    draw_depth: 0.0,
+                };
+                let bytes = build_pdf_pages(&[test_page(vec![wire])], None).unwrap();
+                let stable = sdf_atlas::generation() == generation && sdf_atlas::textfill();
+                stable.then(|| {
+                    let text = pdf_stream_text(&bytes);
+                    (bytes, text)
+                })
+            })
+            .expect("the shared glyph atlas never held still for one export");
+        assert!(text.contains(" Tf"), "glyphs drawn as text in a font");
+        assert_eq!(
+            text.matches(" Tm").count(),
+            3,
+            "one positioned text object per glyph"
+        );
+        assert!(
+            String::from_utf8_lossy(&bytes).contains("/FontFile2"),
+            "the TrueType program is embedded"
+        );
+        // A subset of a handful of glyphs, not the whole face.
+        assert!(
+            bytes.len() < source.font.data.len().max(200_000) / 2,
+            "PDF {} bytes vs font file {} bytes",
+            bytes.len(),
+            source.font.data.len()
         );
     }
 }

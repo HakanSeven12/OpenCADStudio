@@ -1,4 +1,4 @@
-use acadrust::entities::Circle;
+use codec::entities::Circle;
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -129,11 +129,11 @@ fn to_render(circle: &Circle) -> RenderEntity {
 
 /// Zoom-aware render converter for EntityType::Circle.
 pub fn relative_render(
-    entity: &acadrust::EntityType,
-    _document: &acadrust::CadDocument,
+    entity: &codec::EntityType,
+    _document: &codec::CadDocument,
     wpp: Option<f32>,
 ) -> Option<RenderEntity> {
-    let acadrust::EntityType::Circle(circle) = entity else {
+    let codec::EntityType::Circle(circle) = entity else {
         return None;
     };
     Some(to_render_with_wpp(circle, wpp))
@@ -204,7 +204,7 @@ fn apply_geom_prop(circle: &mut Circle, field: &str, value: &str) {
         "area" if v > 0.0 => circle.radius = (v / PI).sqrt(),
         "normal_x" | "normal_y" | "normal_z" => {
             let center = circle.center_wcs();
-            let mut normal = cadkernel::space::Vec3::new(
+            let mut normal = kernel::space::Vec3::new(
                 circle.normal.x,
                 circle.normal.y,
                 circle.normal.z,
@@ -216,12 +216,12 @@ fn apply_geom_prop(circle: &mut Circle, field: &str, value: &str) {
                 _ => {}
             }
             if let Some(normal) = normal.normalize() {
-                circle.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                circle.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
                 let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
                     (center.x, center.y, center.z),
                     (normal.x, normal.y, normal.z),
                 );
-                circle.center = acadrust::types::Vector3::new(x, y, z);
+                circle.center = codec::types::Vector3::new(x, y, z);
             }
         }
         _ => {}
@@ -273,7 +273,7 @@ fn apply_transform(circle: &mut Circle, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Circle {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }

@@ -33,6 +33,8 @@ fn extrusion_history(entity: &EntityType, direction: DVec3, anchor: DVec3) -> Op
             sweep_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
             path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
             reference_point: Vector3::new(anchor.x, anchor.y, anchor.z),
+            // Group 295: the profile frame is given (see extrusion_history).
+            flags_294_296: [false, true, false],
             ..SolidHistorySweep::default()
         }));
     }

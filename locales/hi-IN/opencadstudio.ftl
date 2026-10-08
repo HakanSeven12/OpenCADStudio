@@ -1427,6 +1427,7 @@ common =
     .zoom = ज़ूम
     .reverse-mouse-wheel-zoom-zoomwheel = माउस व्हील ज़ूम उलटें (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = टचपैड: स्क्रॉल पैन करता है, Ctrl+स्क्रॉल या पिंच ज़ूम करता है
+    .interface-scale = इंटरफ़ेस स्केल
     .zoom-factor = ज़ूम गुणक
     .how-far-one-wheel-notch-zooms-zoomfactor = व्हील का एक पायदान कितना ज़ूम करता है (ZOOMFACTOR)।
     .text-and-dimensions = पाठ और आयाम

@@ -1439,6 +1439,7 @@ common =
     .zoom = Zoom
     .reverse-mouse-wheel-zoom-zoomwheel = Mausradzoom umkehren (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: Scrollen verschiebt, Strg+Scrollen oder Zusammenziehen zoomt
+    .interface-scale = Oberflächenskalierung
     .zoom-factor = Zoomfaktor
     .how-far-one-wheel-notch-zooms-zoomfactor = Wie weit eine Radrastung zoomt (ZOOMFACTOR).
     .text-and-dimensions = Text und Bemaßung

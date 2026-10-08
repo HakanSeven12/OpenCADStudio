@@ -1438,6 +1438,7 @@ common =
     .zoom = Zoomaus
     .reverse-mouse-wheel-zoom-zoomwheel = Käännä hiiren rullan zoomaus (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Kosketuslevy: vieritys panoroi, Ctrl+vieritys tai nipistys zoomaa
+    .interface-scale = Käyttöliittymän skaalaus
     .zoom-factor = Zoomauskerroin
     .how-far-one-wheel-notch-zooms-zoomfactor = Kuinka paljon yksi rullan pykälä zoomaa (ZOOMFACTOR).
     .text-and-dimensions = Teksti ja mitoitus

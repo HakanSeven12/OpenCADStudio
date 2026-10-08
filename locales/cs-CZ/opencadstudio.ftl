@@ -1438,6 +1438,7 @@ common =
     .zoom = Zoom
     .reverse-mouse-wheel-zoom-zoomwheel = Obrátit zoom kolečkem myši (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: posun posouvá pohled, Ctrl+posun nebo sevření zvětšuje
+    .interface-scale = Měřítko rozhraní
     .zoom-factor = Faktor zoomu
     .how-far-one-wheel-notch-zooms-zoomfactor = O kolik přiblíží jeden zub kolečka (ZOOMFACTOR).
     .text-and-dimensions = Text a kóty

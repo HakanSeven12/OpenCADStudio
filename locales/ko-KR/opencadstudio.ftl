@@ -1438,6 +1438,7 @@ common =
     .zoom = 줌
     .reverse-mouse-wheel-zoom-zoomwheel = 마우스 휠 줌 방향 반전 (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = 터치패드: 스크롤은 화면 이동, Ctrl+스크롤 또는 핀치는 확대/축소
+    .interface-scale = 인터페이스 배율
     .zoom-factor = 줌 배율
     .how-far-one-wheel-notch-zooms-zoomfactor = 휠 한 칸이 확대하는 정도 (ZOOMFACTOR).
     .text-and-dimensions = 문자 및 치수

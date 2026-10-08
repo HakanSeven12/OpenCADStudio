@@ -1440,6 +1440,7 @@ common =
     .zoom = ຊູມ
     .reverse-mouse-wheel-zoom-zoomwheel = ສະຫຼັບທິດທາງການໝຸນລໍ້ເມົາສ໌ຊູມ (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = ທັດແພດ: ເລື່ອນເພື່ອຍ້າຍມຸມມອງ, Ctrl+ເລື່ອນ ຫຼື ບີບເພື່ອຊູມ
+    .interface-scale = ຂະໜາດສ່ວນຕິດຕໍ່
     .zoom-factor = ຕົວຄູນການຊູມ
     .how-far-one-wheel-notch-zooms-zoomfactor = ໄລຍະຊູມຕໍ່ການໝຸນລໍ້ເມົາສ໌ໜຶ່ງຄລິກ (ZOOMFACTOR).
     .text-and-dimensions = ຂໍ້ຄວາມ ແລະ ຂະໜາດ

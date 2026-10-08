@@ -1429,6 +1429,7 @@ common =
     .zoom = ズーム
     .reverse-mouse-wheel-zoom-zoomwheel = マウス ホイールのズーム方向を反転 (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = タッチパッド: スクロールで画面移動、Ctrl+スクロールまたはピンチでズーム
+    .interface-scale = インターフェースの拡大率
     .zoom-factor = ズーム倍率
     .how-far-one-wheel-notch-zooms-zoomfactor = ホイール 1 ノッチのズーム量 (ZOOMFACTOR)。
     .text-and-dimensions = 文字と寸法

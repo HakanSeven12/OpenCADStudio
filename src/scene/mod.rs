@@ -3696,6 +3696,11 @@ impl Scene {
                     changes.push(change);
                 }
             }
+            for change in self.refresh_associative_sweeps(&changes) {
+                if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                    changes.push(change);
+                }
+            }
             if solve_parametric && !self.parametric_constraints.is_empty() {
                 for change in self.refresh_parametric_constraints_with_initial_policy(
                     &changes,
@@ -7499,7 +7504,7 @@ impl Scene {
             let Some(EntityType::Viewport(viewport)) = self.document.get_entity(handle) else {
                 continue;
             };
-            if viewport.common.owner_handle != paper_block || !viewport.status.is_on {
+            if viewport.common.owner_handle != paper_block || !viewport.is_on() {
                 continue;
             }
             let mode = render_mode_override.unwrap_or(viewport.render_mode);

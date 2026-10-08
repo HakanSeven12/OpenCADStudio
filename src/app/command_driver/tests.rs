@@ -935,14 +935,17 @@ mod delobj_tests {
                 expected,
             );
         }
-        assert_eq!(
-            sweep_source_presence(2, crate::command::ExtrudeMode::Surface),
-            (false, false),
-        );
-        assert_eq!(
-            sweep_source_presence(3, crate::command::ExtrudeMode::Surface),
-            (false, true),
-        );
+        // A swept surface is associative by default (SURFACEASSOCIATIVITY 1)
+        // and keeps the profile and path it follows, whatever DELOBJ says;
+        // DELOBJ reaches surfaces only with associativity off, a profile-wide
+        // switch this parallel test leaves alone.
+        assert!(crate::scene::model::sweep_model::surface_associativity());
+        for value in [2, 3] {
+            assert_eq!(
+                sweep_source_presence(value, crate::command::ExtrudeMode::Surface),
+                (true, true),
+            );
+        }
     }
 }
 

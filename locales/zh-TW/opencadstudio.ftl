@@ -1438,6 +1438,7 @@ common =
     .zoom = 縮放
     .reverse-mouse-wheel-zoom-zoomwheel = 反轉滑鼠滾輪縮放方向 (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = 觸控板：捲動平移，Ctrl+捲動或捏合縮放
+    .interface-scale = 介面縮放
     .zoom-factor = 縮放係數
     .how-far-one-wheel-notch-zooms-zoomfactor = 滾輪每一格的縮放幅度 (ZOOMFACTOR)。
     .text-and-dimensions = 文字與標註

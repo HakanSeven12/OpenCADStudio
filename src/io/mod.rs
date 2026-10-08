@@ -2539,7 +2539,7 @@ fn fix_viewport_status_flags(doc: &mut CadDocument) {
             // If bit 0 is not set but bit 15 is, this is an external-format viewport:
             // treat bit 15 as "on" and bit 14 as "locked".
             if (bits & 0x0001) == 0 && (bits & 0x8000) != 0 {
-                vp.status.is_on = true;
+                vp.turn_on();
                 vp.status.locked = (bits & 0x4000) != 0;
             }
         }

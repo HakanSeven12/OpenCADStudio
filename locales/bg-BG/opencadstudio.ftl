@@ -1438,6 +1438,7 @@ common =
     .zoom = Мащабиране
     .reverse-mouse-wheel-zoom-zoomwheel = Обръщане на мащабирането с колелцето (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Тъчпад: превъртането мести изгледа, Ctrl+превъртане или щипване мащабира
+    .interface-scale = Мащаб на интерфейса
     .zoom-factor = Коефициент на мащабиране
     .how-far-one-wheel-notch-zooms-zoomfactor = Колко мащабира едно щракване на колелцето (ZOOMFACTOR).
     .text-and-dimensions = Текст и размери

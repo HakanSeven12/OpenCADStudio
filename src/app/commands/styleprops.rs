@@ -279,7 +279,7 @@ impl OpenCADStudio {
                             if name.is_empty() {
                                 None
                             } else {
-                                Some(name.clone())
+                                Some(name.to_uppercase())
                             }
                         })
                         .collect();
@@ -310,6 +310,17 @@ impl OpenCADStudio {
                                 .map(|ds| ds.dimtxsty.clone()),
                         )
                         .filter(|s| !s.is_empty())
+                        .map(|s| s.to_uppercase())
+                        .collect();
+                    // Complex linetypes reach their text and shape styles by handle.
+                    let linetype_styles: rustc_hash::FxHashSet<codec::Handle> = self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .flat_map(|lt| lt.elements.iter())
+                        .filter_map(|element| element.complex.as_ref())
+                        .map(|complex| complex.style_handle)
                         .collect();
                     // Linetypes: entity references plus every layer's own
                     // linetype — a ByLayer entity reaches it through the layer.
@@ -334,6 +345,7 @@ impl OpenCADStudio {
                                 .map(|l| l.line_type.clone()),
                         )
                         .filter(|s| !s.is_empty())
+                        .map(|s| s.to_uppercase())
                         .collect();
 
                     // Live blocks are reachable from layouts and style roots
@@ -403,7 +415,9 @@ impl OpenCADStudio {
                             .document
                             .layers
                             .iter()
-                            .filter(|l| l.name != "0" && !used_layers.contains(&l.name))
+                            .filter(|l| {
+                                l.name != "0" && !used_layers.contains(&l.name.to_uppercase())
+                            })
                             .map(|l| l.name.clone())
                             .collect()
                     } else {
@@ -415,8 +429,14 @@ impl OpenCADStudio {
                             .document
                             .text_styles
                             .iter()
+                            // Unnamed shape-file records serve complex linetypes
+                            // and are never listed for purging.
                             .filter(|s| {
-                                s.name != "Standard" && !used_text_styles.contains(&s.name)
+                                !s.name.is_empty()
+                                    && !s.is_shape_file
+                                    && !s.name.eq_ignore_ascii_case("Standard")
+                                    && !used_text_styles.contains(&s.name.to_uppercase())
+                                    && !linetype_styles.contains(&s.handle)
                             })
                             .map(|s| s.name.clone())
                             .collect()
@@ -432,7 +452,7 @@ impl OpenCADStudio {
                             .iter()
                             .filter(|lt| {
                                 !standard.iter().any(|s| s.eq_ignore_ascii_case(&lt.name))
-                                    && !used_linetypes.contains(&lt.name)
+                                    && !used_linetypes.contains(&lt.name.to_uppercase())
                             })
                             .map(|lt| lt.name.clone())
                             .collect()
@@ -479,16 +499,17 @@ impl OpenCADStudio {
                         snapshot_pushed = true;
                     }
 
-                    // Apply removals (mutable)
-                    for name in &layer_remove {
-                        self.tabs[i].scene.document.layers.remove(name);
-                    }
-                    for name in &style_remove {
-                        self.tabs[i].scene.document.text_styles.remove(name);
-                    }
-                    for name in &lt_remove {
-                        self.tabs[i].scene.document.line_types.remove(name);
-                    }
+                    // Apply removals (mutable). Count what actually went: an
+                    // entry the table cannot remove by name would otherwise be
+                    // listed again on every pass and never let the loop end.
+                    let doc = &mut self.tabs[i].scene.document;
+                    let layers_gone =
+                        layer_remove.iter().filter(|n| doc.layers.remove(n).is_some()).count();
+                    let styles_gone =
+                        style_remove.iter().filter(|n| doc.text_styles.remove(n).is_some()).count();
+                    let lts_gone =
+                        lt_remove.iter().filter(|n| doc.line_types.remove(n).is_some()).count();
+                    let mut blocks_gone = 0usize;
                     for name in &block_remove {
                         // Drop the block definition's member entities (and the
                         // BLOCK/ENDBLK delimiters) before the record so no orphaned
@@ -506,12 +527,17 @@ impl OpenCADStudio {
                         for h in handles {
                             self.tabs[i].scene.document.remove_entity(h);
                         }
-                        self.tabs[i].scene.document.block_records.remove(name);
+                        if self.tabs[i].scene.document.block_records.remove(name).is_some() {
+                            blocks_gone += 1;
+                        }
                     }
-                    n_layers += layer_remove.len();
-                    n_styles += style_remove.len();
-                    n_lts += lt_remove.len();
-                    n_blocks += block_remove.len();
+                    n_layers += layers_gone;
+                    n_styles += styles_gone;
+                    n_lts += lts_gone;
+                    n_blocks += blocks_gone;
+                    if layers_gone + styles_gone + lts_gone + blocks_gone == 0 {
+                        break;
+                    }
                 }
 
                 // Remove draw-order tables whose owning blocks are gone.
@@ -1093,6 +1119,7 @@ impl OpenCADStudio {
                     | "DGNOSNAP"
                     | "UOSNAP"
                     | "FIELDDISPLAY"
+                    | "SURFACEASSOCIATIVITY"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
@@ -1296,6 +1323,28 @@ impl OpenCADStudio {
                                     "Enter new value for PDFIMPORTIMAGEPATH, or . for none <\"{}\">:",
                                     image_path()
                                 ));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "SURFACEASSOCIATIVITY" {
+                        use crate::scene::model::sweep_model;
+                        let current = i16::from(sweep_model::surface_associativity());
+                        match value.as_deref().map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v))) {
+                            Some(Some(mode)) => {
+                                if current != mode {
+                                    sweep_model::set_surface_associativity(mode == 1);
+                                    self.save_config();
+                                }
+                            }
+                            Some(None) => {
+                                self.command_line.push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                self.command_line.push_output(&format!("Enter new value for SURFACEASSOCIATIVITY <{current}>:"));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                            None => {
+                                self.command_line.push_output(&format!("Enter new value for SURFACEASSOCIATIVITY <{current}>:"));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }

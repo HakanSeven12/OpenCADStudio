@@ -8391,6 +8391,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::UiScaleChanged(percent) => {
+                self.ui_scale_percent = crate::app::settings::clamp_ui_scale(percent);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::ZoomFactorChanged(factor) => {
                 self.zoom_factor = crate::app::settings::clamp_zoom_factor(factor);
                 // The field beside the slider reads the same value, so the

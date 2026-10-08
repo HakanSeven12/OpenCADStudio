@@ -1438,6 +1438,7 @@ common =
     .zoom = Powiększenie
     .reverse-mouse-wheel-zoom-zoomwheel = Odwróć powiększanie kółkiem myszy (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: przewijanie przesuwa widok, Ctrl+przewijanie lub szczypanie powiększa
+    .interface-scale = Skala interfejsu
     .zoom-factor = Współczynnik powiększenia
     .how-far-one-wheel-notch-zooms-zoomfactor = O ile powiększa jedno kliknięcie kółka (ZOOMFACTOR).
     .text-and-dimensions = Tekst i wymiary

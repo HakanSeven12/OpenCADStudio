@@ -1439,6 +1439,7 @@ common =
     .zoom = Zoom
     .reverse-mouse-wheel-zoom-zoomwheel = Inverter o zoom da roda do mouse (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: rolar move a vista, Ctrl+rolar ou pinçar aplica zoom
+    .interface-scale = Escala da interface
     .zoom-factor = Fator de zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = Quanto um passo da roda amplia (ZOOMFACTOR).
     .text-and-dimensions = Texto e cotas

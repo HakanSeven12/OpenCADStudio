@@ -927,11 +927,14 @@ bg={bg_ms:.1}ms n={view_count}"
                     snap_angle_deg: self.snap_angle_deg,
                     pick_pending: self.pending_pick_label().is_some(),
                     // An infinite-line preview runs along the arms; drop them
-                    // so the preview stays visible (#1437).
-                    hide_arms: tab
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|c| matches!(c.name(), "XLINE" | "RAY")),
+                    // so the preview stays visible (#1437). A command asking
+                    // for objects shows the pickbox alone, so picking reads
+                    // apart from both idle and point input (#1661).
+                    hide_arms: tab.active_cmd.as_ref().is_some_and(|c| {
+                        matches!(c.name(), "XLINE" | "RAY")
+                            || c.needs_entity_pick()
+                            || c.is_selection_gathering()
+                    }),
                     snap_color: self.snap_marker_color,
                 },
                 crate::ui::overlay::SelectionVisualOptions {

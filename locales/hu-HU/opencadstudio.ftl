@@ -1438,6 +1438,7 @@ common =
     .zoom = Nagyítás
     .reverse-mouse-wheel-zoom-zoomwheel = Egérgörgős nagyítás megfordítása (ZOOMWHEEL)
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Érintőpad: a görgetés mozgat, a Ctrl+görgetés vagy csippentés nagyít
+    .interface-scale = Felület mérete
     .zoom-factor = Nagyítási tényező
     .how-far-one-wheel-notch-zooms-zoomfactor = Mennyit nagyít egy görgőkattanás (ZOOMFACTOR).
     .text-and-dimensions = Szöveg és méretezés

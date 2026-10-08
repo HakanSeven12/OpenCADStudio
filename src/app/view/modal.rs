@@ -317,6 +317,7 @@ impl OpenCADStudio {
                             commandline_fade_ms: self.commandline_fade_ms,
                             zoom_wheel_reversed: self.zoom_wheel_reversed,
                             touchpad_pan: self.touchpad_pan,
+                            ui_scale_percent: self.ui_scale_percent,
                             zoom_factor: self.zoom_factor,
                             texteditmode: self.texteditmode,
                             dimension_continue_mode: self.dimension_continue_mode,

@@ -719,7 +719,7 @@ impl OpenCADStudio {
                                             vp.view_height,
                                             vp.height,
                                         ),
-                                        vp.status.is_on,
+                                        vp.is_on(),
                                         vp.status.locked,
                                     ))
                                 } else {

@@ -1801,7 +1801,7 @@ mod tests {
         viewport.id = 2;
         viewport.width = 100.0;
         viewport.height = 50.0;
-        viewport.status.is_on = true;
+        viewport.turn_on();
         scene.add_entity(codec::EntityType::Viewport(viewport));
         for entity in scene.document.entities_mut() {
             if let codec::EntityType::Viewport(viewport) = entity {

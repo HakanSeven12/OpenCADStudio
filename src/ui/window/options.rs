@@ -61,6 +61,8 @@ pub struct AppPrefs {
     pub zoom_wheel_reversed: bool,
     /// Scroll pans and Ctrl+scroll zooms (touchpads).
     pub touchpad_pan: bool,
+    /// Interface scale in percent.
+    pub ui_scale_percent: u16,
     /// ZOOMFACTOR. The slider sets the range the system variable has; the
     /// field beside it reaches `settings::ZOOM_FACTOR_MAX`.
     pub zoom_factor: i32,
@@ -679,6 +681,23 @@ pub fn view_window<'a>(
         .width(sizing.width),
         Space::new().height(12),
         color_controls,
+        Space::new().height(16),
+        // A list, not a slider: the dialog rescales under the cursor as the
+        // value changes, which would drag a slider along with it.
+        row![
+            text(crate::t!("Interface scale")).size(12).width(150),
+            iced::widget::pick_list(
+                Some(format!("{}%", prefs.ui_scale_percent)),
+                [75u16, 100, 125, 150, 175, 200].map(|p| format!("{p}%")).to_vec(),
+                |label: &String| label.clone(),
+            )
+            .on_select(|label: String| {
+                Message::UiScaleChanged(label.trim_end_matches('%').parse().unwrap_or(100))
+            })
+            .width(sizing.width),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
         Space::new().height(24),
         row![
             text(crate::t!("Model Space Appearance")).size(15),

@@ -714,7 +714,7 @@ fn bench_selection_cloning(runner: &mut BenchmarkRunner) {
         return;
     }
 
-    let mut state = SelectionState {
+    let state = SelectionState {
         view: SelectionView {
             vp_size: (1920.0, 1080.0),
         },
@@ -2025,6 +2025,140 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
     );
 }
 
+// ── 19. Viewport Navigation & Spatial Candidate Scaling ─────────────────────
+
+fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
+    if !runner.should_run("navigation") && !runner.should_run("nav_") {
+        return;
+    }
+
+    // Fixture: populated scene with mixed entities
+    let n_entities = if runner.quick_mode { 1_000 } else { 5_000 };
+    let mut scene = Scene::new();
+    for i in 0..n_entities {
+        let x = (i % 100) as f64 * 20.0;
+        let y = (i / 100) as f64 * 20.0;
+        let mut line = Line::new();
+        line.start = Vector3::new(x, y, 0.0);
+        line.end = Vector3::new(x + 15.0, y + 15.0, 0.0);
+        scene.add_entity(EntityType::Line(line));
+    }
+
+    let bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 1920.0,
+        height: 1080.0,
+    };
+    let mut cam = Camera::default();
+
+    // Warm up viewports
+    let _ = scene.build_viewports(
+        bounds,
+        codec::entities::ViewportRenderMode::Wireframe2D,
+        None,
+        false,
+        false,
+        [1.0, 1.0, 1.0, 1.0],
+    );
+
+    let n_pans = if runner.quick_mode { 2_000 } else { 10_000 };
+    let runs = 5;
+
+    // 1. Pure Camera Pan Calculation + Viewport update (matrix update & generation bump)
+    let mut pan_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for step in 0..n_pans {
+            let dx = (step % 10) as f32 * 2.0;
+            let dy = (step % 5) as f32 * 2.0;
+            cam.pan_screen(dx, dy, bounds.height);
+            let primitive = scene.build_viewports(
+                bounds,
+                codec::entities::ViewportRenderMode::Wireframe2D,
+                None,
+                false,
+                false,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            black_box(primitive);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n_pans as f64);
+        pan_samples.push(per_us);
+    }
+    let median_pan_us = pan_samples[pan_samples.len() / 2];
+    runner.record(
+        "nav_camera_pan_viewport_update",
+        "Camera pan_screen + build_viewports (pure GPU uniform update)",
+        "µs",
+        pan_samples,
+        Some((1_000_000.0 / median_pan_us, "pans/s")),
+        Some(50.0), // Target < 50 µs (< 0.05 ms)
+    );
+
+    // 2. Spatial Hover Candidate Search (R-tree spatial query during idle cursor sweep)
+    let wires = scene.entity_wires();
+    let (view_rot, eye) = (cam.view_proj_rte(bounds), cam.eye());
+    let n_hover = if runner.quick_mode { 500 } else { 2_000 };
+    let mut hover_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for i in 0..n_hover {
+            let cursor = DVec3::new((i % 200) as f64 * 10.0, ((i / 2) % 200) as f64 * 10.0, 0.0);
+            let candidates = scene.interaction_hover_candidates_near(
+                Arc::clone(&wires),
+                cursor,
+                view_rot,
+                eye,
+                bounds,
+                10.0,
+            );
+            black_box(candidates);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n_hover as f64);
+        hover_samples.push(per_us);
+    }
+    let median_hover_us = hover_samples[hover_samples.len() / 2];
+    runner.record(
+        "nav_spatial_hover_candidate_search",
+        "Spatial hover candidate search (R-tree candidate culling for cursor movement)",
+        "µs",
+        hover_samples,
+        Some((1_000_000.0 / median_hover_us, "queries/s")),
+        Some(30.0), // Target < 30 µs (< 0.03 ms)
+    );
+
+    // 3. Viewport Assembly Scaling (build_viewports on active camera_generation bump)
+    let n_frames = if runner.quick_mode { 200 } else { 1_000 };
+    let mut assemble_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for _ in 0..n_frames {
+            scene.camera_generation += 1;
+            let prim = scene.build_viewports(
+                bounds,
+                codec::entities::ViewportRenderMode::Wireframe2D,
+                None,
+                true,
+                true,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            black_box(prim);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n_frames as f64);
+        assemble_samples.push(per_us);
+    }
+    let median_assemble_us = assemble_samples[assemble_samples.len() / 2];
+    runner.record(
+        "nav_viewport_assembly_scaling",
+        "ViewportData assembly per camera_generation change (live navigation frame prep)",
+        "µs",
+        assemble_samples,
+        Some((1_000_000.0 / median_assemble_us, "frames/s")),
+        Some(500.0), // Target < 500 µs (0.5 ms) for 5k entities
+    );
+}
+
 // ── Main Entrypoint ─────────────────────────────────────────────────────────
 
 fn main() {
@@ -2062,6 +2196,8 @@ fn main() {
     bench_draworder_evaluation(&mut runner);
     bench_undo_delta_recording(&mut runner);
     bench_view_render_viewport_construction(&mut runner);
+    bench_navigation_latency_and_coalescing(&mut runner);
 
     runner.finish();
 }
+

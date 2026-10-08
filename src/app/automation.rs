@@ -871,6 +871,42 @@ impl OpenCADStudio {
                     for h in explicit {
                         self.tabs[i].scene.select_entity(h, false);
                     }
+                    // Or by a window / crossing box in world XY, through the
+                    // viewport's own box test.
+                    if let Some(window) = req["window"].as_array() {
+                        let corner = |index: usize| window.get(index).and_then(Value::as_f64);
+                        let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+                            (corner(0), corner(1), corner(2), corner(3))
+                        else {
+                            return err("select: window needs [x1, y1, x2, y2]");
+                        };
+                        let crossing = req["crossing"].as_bool().unwrap_or(false);
+                        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
+                        let tile = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
+                        let bounds = iced::Rectangle {
+                            width: tile.width,
+                            height: tile.height,
+                            ..iced::Rectangle::default()
+                        };
+                        let screen = |x: f64, y: f64| {
+                            let camera = self.tabs[i].scene.camera.borrow();
+                            camera.project(glam::DVec3::new(x, y, 0.0), bounds)
+                        };
+                        let (Some(a), Some(p)) = (screen(x1, y1), screen(x2, y2)) else {
+                            return err("select: the window is not in view");
+                        };
+                        let (mut handles, _) = self.box_selection_handles(
+                            i,
+                            &None,
+                            bounds,
+                            iced::Point::new(a.x, a.y),
+                            iced::Point::new(p.x, p.y),
+                            crossing,
+                        );
+                        handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
+                        self.tabs[i].scene.select_entities(&handles);
+                        self.tabs[i].scene.expand_selection_for_groups(&handles);
+                    }
                     // Or by type / layer.
                     let type_filter = req["type"].as_str();
                     let layer_filter = req["layer"].as_str();
@@ -1765,7 +1801,7 @@ mod tests {
         viewport.id = 2;
         viewport.width = 100.0;
         viewport.height = 50.0;
-        viewport.status.is_on = true;
+        viewport.turn_on();
         scene.add_entity(codec::EntityType::Viewport(viewport));
         for entity in scene.document.entities_mut() {
             if let codec::EntityType::Viewport(viewport) = entity {

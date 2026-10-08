@@ -114,6 +114,13 @@ impl Scene {
                 }
                 self.record_undo_object_before(gh, None);
             }
+            for member in group.entities.clone() {
+                if let Some(entity) = self.document.get_entity_mut(member) {
+                    if !entity.common().reactors.contains(&gh) {
+                        entity.common_mut().reactors.push(gh);
+                    }
+                }
+            }
             self.document.objects.insert(gh, ObjectType::Group(group));
             if let Some(ObjectType::Dictionary(dict)) =
                 self.document.objects.get_mut(&group_dict_handle)

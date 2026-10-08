@@ -53,6 +53,8 @@ pub enum Language {
     JaJp,
     #[serde(rename = "ko-KR")]
     KoKr,
+    #[serde(rename = "lo-LA")]
+    LoLa,
     #[serde(rename = "cs-CZ")]
     CsCz,
     #[serde(rename = "it-IT")]
@@ -70,7 +72,7 @@ pub enum Language {
 }
 
 impl Language {
-    pub const ALL: [Language; 22] = [
+    pub const ALL: [Language; 23] = [
         Language::System,
         Language::EnUs,
         Language::BgBg,
@@ -85,6 +87,7 @@ impl Language {
         Language::ItIt,
         Language::JaJp,
         Language::KoKr,
+        Language::LoLa,
         Language::PlPl,
         Language::RuRu,
         Language::ZhCn,
@@ -112,6 +115,7 @@ impl Language {
             Language::ArSa => vec!["ar-SA".parse().expect("valid locale")],
             Language::JaJp => vec!["ja-JP".parse().expect("valid locale")],
             Language::KoKr => vec!["ko-KR".parse().expect("valid locale")],
+            Language::LoLa => vec!["lo-LA".parse().expect("valid locale")],
             Language::CsCz => vec!["cs-CZ".parse().expect("valid locale")],
             Language::ItIt => vec!["it-IT".parse().expect("valid locale")],
             Language::FiFi => vec!["fi-FI".parse().expect("valid locale")],
@@ -139,6 +143,7 @@ impl Language {
             Language::ArSa => crate::tr!("language", "arabic"),
             Language::JaJp => crate::tr!("language", "japanese"),
             Language::KoKr => crate::tr!("language", "korean"),
+            Language::LoLa => crate::tr!("language", "lao"),
             Language::CsCz => crate::tr!("language", "czech"),
             Language::ItIt => crate::tr!("language", "italian"),
             Language::FiFi => crate::tr!("language", "finnish"),

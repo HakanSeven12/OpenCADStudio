@@ -662,6 +662,8 @@ impl OpenCADStudio {
             polar: self.polar_mode,
             polar_increment_deg: self.polar_increment_deg,
             zoom_wheel_reversed: self.zoom_wheel_reversed,
+            touchpad_pan: self.touchpad_pan,
+            ui_scale_percent: self.ui_scale_percent,
             zoom_factor: self.zoom_factor,
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
@@ -678,6 +680,7 @@ impl OpenCADStudio {
             image_frame: crate::scene::frame::profile_image_mode(),
             attdef_on_screen: crate::modules::draw::draw::attdef::session().on_screen,
             field_display: crate::entities::field::display(),
+            surface_associativity: crate::scene::model::sweep_model::surface_associativity(),
             ncopy_bind: self.ncopy_bind,
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
@@ -762,6 +765,8 @@ impl OpenCADStudio {
         self.polar_mode = s.polar;
         self.polar_increment_deg = s.polar_increment_deg;
         self.zoom_wheel_reversed = s.zoom_wheel_reversed;
+        self.touchpad_pan = s.touchpad_pan;
+        self.ui_scale_percent = crate::app::settings::clamp_ui_scale(s.ui_scale_percent);
         self.zoom_factor = crate::app::settings::clamp_zoom_factor(s.zoom_factor);
         // Like the drafting-rotation field below, the Options field edits a
         // buffer rather than the value, so it is reseeded whenever the value
@@ -787,6 +792,7 @@ impl OpenCADStudio {
         crate::scene::frame::set_profile_image_mode(s.image_frame);
         crate::modules::draw::draw::attdef::session().on_screen = s.attdef_on_screen;
         crate::entities::field::set_display(s.field_display);
+        crate::scene::model::sweep_model::set_surface_associativity(s.surface_associativity);
         self.ncopy_bind = s.ncopy_bind;
         self.cursor_type = s.cursor_type;
         self.crosshair_color = s.crosshair_color;
@@ -1883,6 +1889,11 @@ impl OpenCADStudio {
         // A file saved without the built-in Standard styles (foreign
         // or damaged) gets them re-seeded so nothing dangles (#366).
         crate::app::style_ops::ensure_standard_styles(&mut self.tabs[i].scene.document);
+        // Copies made by earlier releases kept their source's dimension
+        // association; such a file is reported as damaged elsewhere.
+        crate::scene::dimension_assoc::drop_stray_dimension_reactors(
+            &mut self.tabs[i].scene.document,
+        );
         // Follow the file's saved current UCS from the moment it opens.
         self.tabs[i].adopt_active_ucs_from_header();
         // Adopt the drawing's own Ortho ($ORTHOMODE) and running OSNAP

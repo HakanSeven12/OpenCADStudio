@@ -21,7 +21,7 @@ impl Scene {
             })
             .filter(|vp| {
                 vp.common.owner_handle == paper_block
-                    && vp.status.is_on
+                    && vp.is_on()
                     && only_vp.map_or(true, |h| vp.common.handle == h)
                     && exclude_vp.map_or(true, |h| vp.common.handle != h)
             })
@@ -439,7 +439,7 @@ impl Scene {
             .iter()
             .filter_map(|handle| match self.document.get_entity(*handle) {
                 Some(EntityType::Viewport(viewport))
-                    if viewport.common.owner_handle == paper_block && viewport.status.is_on =>
+                    if viewport.common.owner_handle == paper_block && viewport.is_on() =>
                 {
                     Some(viewport)
                 }

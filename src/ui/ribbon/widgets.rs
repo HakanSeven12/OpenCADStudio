@@ -996,7 +996,9 @@ pub(super) fn render_large<'a>(
             let tools_w = tool_count * TOOL_BUTTON_W
                 + (tool_count - 1.0).max(0.0) * TOOL_SPACING
                 + GROUP_PADDING;
-            let combo_w = (LARGE_W * 2.5).max(tools_w);
+            // Wide enough to read a typical layer name (about 25 characters)
+            // in the closed combo.
+            let combo_w = (LARGE_W * 2.5).max(tools_w).max(250.0);
 
             let info = layer_infos.iter().find(|l| l.name == active_layer);
             let lc = info.map(|l| l.color).unwrap_or(Color::WHITE);

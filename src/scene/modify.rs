@@ -823,6 +823,7 @@ impl Scene {
 
             let _ = self.sync_displayed_annotation_context(leader_handle);
         }
+        remap_copied_reactors(&mut self.document, &handle_map);
         // Complete group copies record their new Group objects and dictionary
         // entry as targeted object deltas inside copy_complete_groups.
         self.copy_complete_groups(&handle_map);
@@ -1129,6 +1130,54 @@ impl Scene {
         rebuilt
     }
 
+    /// Associative swept surfaces follow edits of their profile or path:
+    /// swept again from them with the options they were made with. A
+    /// surface edited along with its sources keeps its own edit. Returns the
+    /// surfaces rebuilt.
+    pub(crate) fn refresh_associative_sweeps(&mut self, changes: &[(Handle, crate::scene::ChangeKind)]) -> Vec<(Handle, crate::scene::ChangeKind)> {
+        use crate::scene::model::sweep_model;
+        let changed = changes.iter()
+            .filter(|(_, kind)| !matches!(kind, crate::scene::ChangeKind::Removed))
+            .map(|(handle, _)| *handle)
+            .collect::<rustc_hash::FxHashSet<_>>();
+        // Every edit passes through here: a drawing with no associative
+        // swept surface (no application registered for them) skips the scan.
+        if changed.is_empty() || !self.document.app_ids.contains(sweep_model::SWEEP_SOURCES_APP) {
+            return Vec::new();
+        }
+        let linked = self.document.entities()
+            .filter(|entity| matches!(entity, EntityType::Surface(_)))
+            .filter_map(|entity| {
+                let handle = entity.common().handle;
+                let (profile, path) = sweep_model::sweep_sources(entity)?;
+                (!changed.contains(&handle) && (changed.contains(&profile) || changed.contains(&path)))
+                    .then_some((handle, profile, path))
+            })
+            .collect::<Vec<_>>();
+        let mut rebuilt = Vec::new();
+        for (handle, profile, path) in linked {
+            let (Some(surface), Some(profile), Some(path)) = (
+                self.document.get_entity(handle),
+                self.document.get_entity(profile),
+                self.document.get_entity(path),
+            ) else { continue };
+            let Some((record, body)) = sweep_model::resweep_from_sources(surface, profile, path) else { continue };
+            let EntityType::Surface(fresh) = sweep_model::swept_surface_entity(&record) else { continue };
+            let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else { continue };
+            let Some(display) = self.prepare_solid_model_display(handle, &body) else { continue };
+            let before = self.document.get_entity(handle).cloned().map(std::sync::Arc::new);
+            self.record_undo_before(handle, before);
+            if let Some(EntityType::Surface(surface)) = self.document.get_entity_mut(handle) {
+                surface.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
+                surface.surface_data = fresh.surface_data;
+                surface.point_of_reference = fresh.point_of_reference;
+            }
+            self.register_prepared_solid_model(handle, body, display);
+            rebuilt.push((handle, crate::scene::ChangeKind::Modified));
+        }
+        rebuilt
+    }
+
     /// Swept surfaces the reference keeps associative to a scale or twist
     /// expression (an associative swept surface action whose value parameter
     /// depends on an expression variable) are linked the same way here.
@@ -1139,6 +1188,7 @@ impl Scene {
             _ => None,
         };
         let mut links = Vec::new();
+        let mut sources = Vec::new();
         for item in self.document.objects.values() {
             let ObjectType::Associative(action) = item else { continue };
             let AssociativeData::Action(action) = &action.data else { continue };
@@ -1159,6 +1209,32 @@ impl Scene {
             if expressions.iter().any(Option::is_some) {
                 links.push((written.dependent_on, expressions));
             }
+            // The profile and path the action reads.
+            let source = |name: &str| {
+                action.owned_parameters.iter().find_map(|parameter| {
+                    let Some(AssociativeData::PathActionParam(path)) = object(*parameter) else { return None };
+                    if path.compound.action_param.name != name { return None; }
+                    let Some(AssociativeData::EdgeActionParam(edge)) = object(*path.compound.parameters.first()?) else { return None };
+                    match object(edge.single_dependency.dependency) {
+                        Some(AssociativeData::Dependency(dependency)) => Some(dependency.dependent_on),
+                        _ => None,
+                    }
+                })
+            };
+            if let (Some(profile), Some(path)) = (source("SweepProfile"), source("SweepPath")) {
+                sources.push((written.dependent_on, profile, path));
+            }
+        }
+        for (surface, profile, path) in sources {
+            let Some(entity @ EntityType::Surface(value)) = self.document.get_entity(surface) else { continue };
+            if crate::scene::model::sweep_model::sweep_sources(entity).is_some() { continue; }
+            let codec::entities::SurfaceData::Swept { options, .. } = &value.surface_data else { continue };
+            let linked = crate::command::SweepOptions {
+                align: options.sweep_alignment_flags == 1,
+                bank: options.bank,
+                ..crate::command::SweepOptions::default()
+            };
+            crate::scene::model::sweep_model::link_sweep_sources(&mut self.document, surface, profile, path, &linked);
         }
         for (handle, expressions) in links {
             let Some(entity) = self.document.get_entity(handle) else { continue };
@@ -1801,5 +1877,22 @@ impl Scene {
         if !hatch_changes.is_empty() {
             self.bump_entities(&hatch_changes);
         }
+    }
+}
+
+/// A copy reacts only to what was copied with it: each reactor of the source
+/// that maps to a copy follows it there, and the rest (the source's dimension
+/// association, group, associative hatch) are dropped. The association and
+/// group copies add their own reactors afterwards.
+pub(crate) fn remap_copied_reactors(
+    document: &mut codec::CadDocument,
+    handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+) {
+    for &copy in handle_map.values() {
+        let Some(entity) = document.get_entity_mut(copy) else {
+            continue;
+        };
+        let reactors = &mut entity.common_mut().reactors;
+        *reactors = reactors.iter().filter_map(|reactor| handle_map.get(reactor).copied()).collect();
     }
 }

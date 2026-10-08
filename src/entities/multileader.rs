@@ -703,11 +703,7 @@ fn apply_grip(
             } else {
                 old_sign
             };
-            ml.context.text_attachment_point = if new_sign >= 0.0 {
-                codec::entities::multileader::TextAttachmentPointType::Left
-            } else {
-                codec::entities::multileader::TextAttachmentPointType::Right
-            };
+            set_mleader_text_side(ml, new_sign >= 0.0);
             set_mleader_text_location(ml, target + axis * (new_sign * (dogleg + gap)));
 
             if let Some(root) = ml.context.leader_roots.first_mut() {
@@ -2226,10 +2222,10 @@ impl MultiLeaderTess for MultiLeader {
             };
             // The context's attachment point exists in every DWG version;
             // the entity-level copy only exists from R2010 on.
-            let h_anchor: f32 = match ctx.text_alignment {
-                TextAlignmentType::Left => 0.0,
-                TextAlignmentType::Center => 0.5,
-                TextAlignmentType::Right => 1.0,
+            let h_anchor: f32 = match ctx.text_attachment_point {
+                codec::entities::multileader::TextAttachmentPointType::Left => 0.0,
+                codec::entities::multileader::TextAttachmentPointType::Center => 0.5,
+                codec::entities::multileader::TextAttachmentPointType::Right => 1.0,
             };
             // Pick the vertical-anchor attachment based on text_attachment_direction:
             //   Horizontal — leader attaches left/right; use ml.text_left_attachment
@@ -2713,5 +2709,25 @@ mod tests {
             !text_wire.fill_tris.is_empty(),
             "Arabic text must emit shaped vector fill triangles"
         );
+    }
+}
+
+/// Put the text on the right (`to_right`) or left of its landing: the text
+/// block attaches by its near edge, and left- or right-justified text turns
+/// to read away from the leader. Centred text stays centred.
+pub(crate) fn set_mleader_text_side(ml: &mut MultiLeader, to_right: bool) {
+    use codec::entities::multileader::TextAttachmentPointType;
+    let (attachment, alignment) = if to_right {
+        (TextAttachmentPointType::Left, TextAlignmentType::Left)
+    } else {
+        (TextAttachmentPointType::Right, TextAlignmentType::Right)
+    };
+    ml.text_attachment_point = attachment;
+    ml.context.text_attachment_point = attachment;
+    if ml.context.text_alignment != TextAlignmentType::Center {
+        ml.context.text_alignment = alignment;
+    }
+    if ml.text_alignment != TextAlignmentType::Center {
+        ml.text_alignment = alignment;
     }
 }

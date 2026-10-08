@@ -204,6 +204,8 @@ pub static SELECT: OpDef = OpDef {
         opt("handles", Ty::Handles, "Explicit entity handles to select."),
         opt("type", Ty::Str, "Entity type filter."),
         opt("layer", Ty::Str, "Layer name filter."),
+        opt("window", Ty::Raw(r#"{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4}"#), "World XY box [x1, y1, x2, y2]: selects what lies inside it, as a viewport window does."),
+        opt("crossing", Ty::Bool, "With window: also select what the box crosses."),
         opt("clear", Ty::Bool, "Clear existing selection before applying."),
         opt("where", Ty::ArrayOf(&Ty::Raw(r#"{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string"},"value":{}},"required":["path"]}"#)), "Property filter predicates."),
     ],

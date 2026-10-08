@@ -9,7 +9,7 @@ pub(crate) mod config;
 pub use automation::{export_headless, serve};
 mod annotation_data;
 mod command_driver;
-pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel};
+pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel, PasteSpace};
 pub(crate) mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
@@ -559,6 +559,10 @@ pub(super) struct OpenCADStudio {
     polar_increment_deg: f32,
     /// Reverse the mouse-wheel zoom direction when true (ZOOMWHEEL = 1).
     zoom_wheel_reversed: bool,
+    /// Scroll pans and Ctrl+scroll zooms (touchpads); see `scroll_intent`.
+    touchpad_pan: bool,
+    /// Interface scale in percent, applied through the window scale factor.
+    ui_scale_percent: u16,
     /// Mouse-wheel zoom sensitivity (ZOOMFACTOR), held inside
     /// `settings::ZOOM_FACTOR_MIN..=settings::ZOOM_FACTOR_MAX`. `SETVAR`
     /// only sets the range the system variable itself has; the Options
@@ -2375,6 +2379,9 @@ pub enum Message {
     CommandLineFadeChanged(i32),
     /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
     ZoomWheelReversedChanged(bool),
+    TouchpadPanChanged(bool),
+    /// Interface scale in percent (Options > Display).
+    UiScaleChanged(u16),
     /// Change how far one wheel notch zooms, from the Options slider
     /// (ZOOMFACTOR).
     ZoomFactorChanged(i32),
@@ -4157,6 +4164,8 @@ impl OpenCADStudio {
             polar_mode: false,
             polar_increment_deg: 45.0,
             zoom_wheel_reversed: false,
+            touchpad_pan: false,
+            ui_scale_percent: 100,
             zoom_factor: 60,
             zoom_factor_input: 60.to_string(),
             cursor_size: 5,
@@ -4900,6 +4909,7 @@ pub fn run() -> iced::Result {
         ..iced::Settings::default()
     })
     .subscription(OpenCADStudio::subscription)
+    .scale_factor(|state: &OpenCADStudio, _| f32::from(state.ui_scale_percent) / 100.0)
     .title(|state: &OpenCADStudio, window_id: window::Id| {
         let _ = window_id; // all dialogs are in-canvas modals now
         if let Some(tab) = state.tabs.get(state.active_tab) {

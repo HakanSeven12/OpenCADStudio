@@ -4796,6 +4796,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "User Preferences" => Some(("common", "user-preferences")),
         "Zoom" => Some(("common", "zoom")),
         "Reverse mouse wheel zoom (ZOOMWHEEL)" => Some(("common", "reverse-mouse-wheel-zoom-zoomwheel")),
+        "Touchpad: scroll pans, Ctrl+scroll or pinch zooms" => Some(("common", "touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms")),
+        "Interface scale" => Some(("common", "interface-scale")),
         "Zoom factor" => Some(("common", "zoom-factor")),
         "How far one wheel notch zooms (ZOOMFACTOR)." => Some(("common", "how-far-one-wheel-notch-zooms-zoomfactor")),
         "Text and Dimensions" => Some(("common", "text-and-dimensions")),

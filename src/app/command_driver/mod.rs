@@ -95,7 +95,7 @@ mod constraint;
 mod dim_edit;
 
 pub(crate) use clipboard::{
-    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference,
+    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference, PasteSpace,
 };
 
 impl OpenCADStudio {

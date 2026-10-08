@@ -693,12 +693,7 @@ fn build_mleader(
     let to_right = (elbow_pt - arrow_pt).dot(ux.as_dvec3()) >= 0.0;
     let sign = if to_right { 1.0 } else { -1.0 };
     let landing = ux * (sign as f32);
-    ml.context.text_attachment_point =
-        if to_right {
-            codec::entities::multileader::TextAttachmentPointType::Left
-        } else {
-            codec::entities::multileader::TextAttachmentPointType::Right
-        };
+    crate::entities::multileader::set_mleader_text_side(&mut ml, to_right);
 
     ml.context.text_rotation = (ux.y as f64).atan2(ux.x as f64);
     ml.context.text_direction = Vector3::new(ux.x as f64, ux.y as f64, 0.0);

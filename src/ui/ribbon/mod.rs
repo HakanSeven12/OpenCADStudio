@@ -1129,9 +1129,9 @@ impl Ribbon {
             .spacing(2),
         )
             .style(popup_panel_style)
-            .width(Length::Fixed(220.0));
+            .width(Length::Fixed(300.0));
 
-        let (align_right, h_pad, top) = self.dd_anchor(LAYER_COMBO_ID, 220.0, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(LAYER_COMBO_ID, 300.0, win.0);
         let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
 
         Some(dropdown_backdrop(positioned))

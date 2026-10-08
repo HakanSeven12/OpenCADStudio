@@ -113,7 +113,7 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
                     field: "vp_on",
                     value: PropValue::BoolToggle {
                         field: "vp_on",
-                        value: vp.status.is_on,
+                        value: vp.is_on(),
                     },
                 },
                 ro(
@@ -193,11 +193,14 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
             return;
         }
         "vp_on" => {
-            vp.status.is_on = if value == "toggle" {
-                !vp.status.is_on
+            // turn_on/turn_off keep the explicit-off bit in step, so a
+            // viewport the file marked off can be turned back on.
+            let on = if value == "toggle" { !vp.is_on() } else { value == "true" };
+            if on {
+                vp.turn_on();
             } else {
-                value == "true"
-            };
+                vp.turn_off();
+            }
             return;
         }
         "vp_perspective" => {

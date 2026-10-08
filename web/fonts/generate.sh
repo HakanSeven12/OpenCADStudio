@@ -44,6 +44,10 @@ dl /tmp/NotoThai.ttf "$RAW/NotoSansThai/hinted/ttf/NotoSansThai-Regular.ttf"
 merge /tmp/NotoThai.ttf /tmp/NotoThaiMerged.ttf
 sub /tmp/NotoThaiMerged.ttf "U+0000-024F,U+1E00-1EFF,U+2000-206F,U+0E00-0E7F" thai.ttf
 
+dl /tmp/NotoLao.ttf "$RAW/NotoSansLao/hinted/ttf/NotoSansLao-Regular.ttf"
+merge /tmp/NotoLao.ttf /tmp/NotoLaoMerged.ttf
+sub /tmp/NotoLaoMerged.ttf "U+0000-024F,U+1E00-1EFF,U+2000-206F,U+0E80-0EFF" lao.ttf
+
 dl /tmp/NotoDeva.ttf "$RAW/NotoSansDevanagari/hinted/ttf/NotoSansDevanagari-Regular.ttf"
 merge /tmp/NotoDeva.ttf /tmp/NotoDevaMerged.ttf
 sub /tmp/NotoDevaMerged.ttf "U+0000-024F,U+1E00-1EFF,U+2000-206F,U+0900-097F,U+A8E0-A8FF" devanagari.ttf

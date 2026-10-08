@@ -489,6 +489,8 @@ impl OpenCADStudio {
             .collect::<Vec<_>>();
         // Group 294: a base point the user picked.
         let picked_base = options.base_point.is_some();
+        let several = profiles.len() > 1;
+        let picked = options;
         let options = sweep_model::sweep_selection_options(&selection, options);
         let pending = if profiles.is_empty() {
             None
@@ -532,8 +534,10 @@ impl OpenCADStudio {
                     continue;
                 }
             };
+            // An associative surface keeps the profile and path it reads.
+            let associative = surface && sweep_model::surface_associativity();
             let deletes_path =
-                crate::app::delobj_deletes_auxiliary(delete_objects, surface);
+                !associative && crate::app::delobj_deletes_auxiliary(delete_objects, surface);
             if deletes_path && self.tabs[i].scene.is_layer_locked(path_handle) {
                 failed += 1;
                 continue;
@@ -546,6 +550,14 @@ impl OpenCADStudio {
                     created,
                     &expressions,
                 );
+                if associative {
+                    // A picked base point, or the one several profiles share.
+                    let linked = crate::command::SweepOptions {
+                        base_point: if picked_base || several { options.and_then(|o| o.base_point) } else { None },
+                        ..picked
+                    };
+                    sweep_model::link_sweep_sources(&mut self.tabs[i].scene.document, created, handle, path_handle, &linked);
+                }
                 created
             } else {
                 self.add_solid_model(
@@ -558,7 +570,7 @@ impl OpenCADStudio {
                 failed += 1;
             } else {
                 created_handles.push(created);
-                if delete_profiles {
+                if delete_profiles && !associative {
                     consumed.push(handle);
                 }
                 if deletes_path {

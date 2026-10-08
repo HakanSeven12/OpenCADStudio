@@ -183,6 +183,11 @@ pub const ZOOM_FACTOR_MAX: i32 = 500;
 /// Hold a ZOOMFACTOR inside the range the application can store, wherever it
 /// arrives from — the slider, the Options field, or a configuration file
 /// written by hand or by an older build.
+/// Interface scale in percent, kept to the range the Options slider offers.
+pub fn clamp_ui_scale(percent: u16) -> u16 {
+    percent.clamp(75, 200)
+}
+
 pub fn clamp_zoom_factor(v: i32) -> i32 {
     v.clamp(ZOOM_FACTOR_MIN, ZOOM_FACTOR_MAX)
 }
@@ -388,6 +393,11 @@ pub struct UserSettings {
     pub polar: bool,
     pub polar_increment_deg: f32,
     pub zoom_wheel_reversed: bool,
+    /// Scrolling pans and Ctrl+scroll (a touchpad pinch) zooms, for a
+    /// touchpad that reports two-finger drags as wheel scrolls.
+    pub touchpad_pan: bool,
+    /// Interface scale in percent, on top of the display's own scale.
+    pub ui_scale_percent: u16,
     pub zoom_factor: i32,
     /// CURSORSIZE: normalized crosshair reach; 5 retains the original 60 px arms.
     pub cursor_size: i32,
@@ -412,6 +422,8 @@ pub struct UserSettings {
     pub attdef_on_screen: bool,
     /// FIELDDISPLAY: fields show on a gray background.
     pub field_display: bool,
+    /// SURFACEASSOCIATIVITY: new surfaces stay associative to their sources.
+    pub surface_associativity: bool,
     /// Nested-copy symbol handling: false inserts, true binds.
     pub ncopy_bind: bool,
     /// Last Options page; unknown saved names fall back without rejecting the config.
@@ -807,6 +819,8 @@ impl Default for UserSettings {
             polar: false,
             polar_increment_deg: 45.0,
             zoom_wheel_reversed: false,
+            touchpad_pan: false,
+            ui_scale_percent: 100,
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
@@ -823,6 +837,7 @@ impl Default for UserSettings {
             image_frame: 1,
             attdef_on_screen: true,
             field_display: true,
+            surface_associativity: true,
             ncopy_bind: false,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,

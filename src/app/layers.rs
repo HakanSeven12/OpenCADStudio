@@ -62,10 +62,25 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let doc_layers = self.tabs[i].scene.document.layers.clone();
         let vp_info = self.tabs[i].scene.viewport_list();
+        let names_before: Vec<String> =
+            self.tabs[i].layers.layers.iter().map(|l| l.name.clone()).collect();
         self.tabs[i]
             .layers
             .sync_with_viewports(&doc_layers, vp_info);
         self.sync_ribbon_layers();
+        // The Properties palette lists layer names it read when it was built;
+        // a layer added, removed or renamed must reach that list too (#1664).
+        // Only then: the rebuild is costly for a large selection.
+        let names_changed = self.tabs[i].layers.layers.len() != names_before.len()
+            || self.tabs[i]
+                .layers
+                .layers
+                .iter()
+                .zip(&names_before)
+                .any(|(layer, before)| layer.name != *before);
+        if names_changed {
+            self.refresh_properties();
+        }
     }
 
     /// Pick up layers an entity edit registered on the fly (`ensure_layer`).

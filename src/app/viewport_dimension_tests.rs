@@ -27,7 +27,7 @@ fn fixture() -> (OpenCADStudio, Handle, ViewportFrame) {
     viewport.view_height = 1000.0;
     viewport.custom_scale = 0.1;
     viewport.view_direction = Vector3::UNIT_Z;
-    viewport.status.is_on = true;
+    viewport.turn_on();
     let viewport = scene.add_entity(EntityType::Viewport(viewport));
     let frame = scene.viewport_frame(viewport).unwrap();
     scene.document.header.dimension_associativity = 2;
@@ -484,7 +484,7 @@ fn viewport_dimension_eligibility_is_shared_and_uses_clipping() {
         first.viewport
     );
     if let Some(EntityType::Viewport(vp)) = scene.document.get_entity_mut(first.viewport) {
-        vp.status.is_on = false;
+        vp.turn_off();
     }
     assert!(scene.viewport_frames_at_paper_point(paper).is_empty());
     assert!(scene.dimension_pick_through_viewport(paper, 0.2).is_none());

@@ -379,6 +379,11 @@ impl shader::Primitive for Primitive {
         viewport: &Viewport,
     ) {
         let nav_prepare_started = iced::time::Instant::now();
+        if let Some(gap_ms) = crate::perf::take_view_to_prepare_ms() {
+            if gap_ms >= 1.0 {
+                crate::perf_record!("[perf] layout-draw {:>7.1}ms", gap_ms);
+            }
+        }
         let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
         let recovering = pipeline.gpu_error_epoch != errors_at_entry;
         if recovering {
@@ -1232,6 +1237,7 @@ retained_contributors={}",
             if inner.wire_arena_id == vp.wire_content_id
                 && inner.wire_cull_key != cull_key
             {
+                let t_cull = iced::time::Instant::now();
                 let mut visible = if inner.wire_arena_fallback_kind == Some(false) {
                     inner.wire_arena_fallback.as_ref().clone()
                 } else {
@@ -1257,6 +1263,10 @@ retained_contributors={}",
                         clip_size.width,
                         clip_size.height,
                     ));
+                }
+                let cull_ms = t_cull.elapsed().as_secs_f64() * 1000.0;
+                if crate::perf::enabled() {
+                    crate::perf_record!("[perf] wire-cull {:>7.2}ms items={}", cull_ms, visible.len());
                 }
                 inner.gpu_wires = std::sync::Arc::new(visible);
                 inner.wire_cull_key = cull_key;
@@ -1294,9 +1304,9 @@ retained_contributors={}",
                 sample.started.elapsed().as_secs_f64() * 1000.0,
                 self.viewports.len(),
             ));
-        } else if crate::perf::enabled() && prepare_ms >= 5.0 {
+        } else if crate::perf::enabled() {
             crate::perf_record!(
-                "[perf] frame-prepare {:>7.1}ms viewports={}",
+                "[perf] frame-prepare {:>7.2}ms viewports={}",
                 prepare_ms,
                 self.viewports.len(),
             );
@@ -1370,6 +1380,7 @@ retained_contributors={}",
             }
         }
         let render_ms = nav_render_started.elapsed().as_secs_f64() * 1000.0;
+        crate::perf::note_frame_render(render_ms);
         if let Some(sample) = self.nav_perf {
             crate::perf::record(format_args!(
                 "[perf] nav-render op={} space={} mode={} encode={:.2}ms elapsed={:.2}ms viewports={}",

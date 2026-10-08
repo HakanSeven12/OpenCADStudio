@@ -977,7 +977,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         // A tracking ray carries its own base, so it needs no anchor: that is
         // how OTRACK and Extension accepted a bare distance for the *first*
         // point of a command, before any anchor exists.
-        let pt = if let Some((base, dir)) = self.active_distance_ray(i) {
+        let distance_ray = self.active_distance_ray(i);
+        let pt = if let Some((base, dir)) = distance_ray {
             base + dir * dist
         } else {
             let anchor = self.tabs[i]
@@ -1010,6 +1011,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         self.dyn_coord_absolute = false;
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
+        if let Some((_, dir)) = distance_ray {
+            self.snapper.remember_distance_reference(dir);
+        }
         self.push_ucs_to_cmd(i);
 
         let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt))?;
@@ -4655,6 +4659,37 @@ mod layer_name_target_tests {
             .map(|l| (l.name.clone(), l.visible))
             .collect();
         assert_eq!(before, after, "unknown name must change nothing");
+    }
+
+    #[test]
+    fn layer_transparency_edit_pushes_undo() {
+        // #43: every sibling layer arm pushes an undo entry; transparency must too.
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::LayerTransparencyEdit("0".to_string(), "50".to_string()));
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before + 1,
+            "transparency edit must push an undo entry like its siblings"
+        );
+        let panel = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "0")
+            .expect("layer 0 in panel");
+        assert_eq!(panel.transparency, 50);
+        app.undo_active_tab();
+        let panel = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "0")
+            .expect("layer 0 in panel");
+        assert_eq!(panel.transparency, 0, "undo must restore transparency");
     }
 }
 

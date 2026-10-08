@@ -18,6 +18,7 @@
   <summary xml:lang="it-IT">Applicazione CAD 2D/3D per disegni DWG e DXF</summary>
   <summary xml:lang="ja-JP">DWGとDXF図面用の2D/3D CADアプリ</summary>
   <summary xml:lang="ko-KR">DWG 및 DXF 도면용 2D/3D CAD 앱</summary>
+  <summary xml:lang="lo-LA">ແອັບພລິເຄຊັນ CAD 2D/3D ສຳລັບຮູບແຕ້ມ DWG ແລະ DXF</summary>
   <summary xml:lang="nl-NL">2D/3D-CAD-toepassing voor DWG- en DXF-tekeningen</summary>
   <summary xml:lang="pl-PL">Aplikacja CAD 2D/3D do rysunków DWG i DXF</summary>
   <summary xml:lang="pt-BR">Aplicativo CAD 2D/3D para desenhos DWG e DXF</summary>
@@ -40,6 +41,7 @@
     <p xml:lang="it-IT">Crea e modifica disegni tecnici nei formati DWG e DXF.</p>
     <p xml:lang="ja-JP">DWGおよびDXF形式で技術図面を作成・編集できます。</p>
     <p xml:lang="ko-KR">DWG 및 DXF 형식으로 기술 도면을 만들고 편집하세요.</p>
+    <p xml:lang="lo-LA">ສ້າງ ແລະ ແກ້ໄຂຮູບແຕ້ມເຕັກນິກໃນຮູບແບບ DWG ແລະ DXF.</p>
     <p xml:lang="nl-NL">Maak en bewerk technische tekeningen in DWG- en DXF-indeling.</p>
     <p xml:lang="pl-PL">Twórz i edytuj rysunki techniczne w formatach DWG i DXF.</p>
     <p xml:lang="pt-BR">Crie e edite desenhos técnicos nos formatos DWG e DXF.</p>
@@ -94,6 +96,9 @@
     <keyword xml:lang="ko-KR">그리기</keyword>
     <keyword xml:lang="ko-KR">설계</keyword>
     <keyword xml:lang="ko-KR">공학</keyword>
+    <keyword xml:lang="lo-LA">ຮູບແຕ້ມ</keyword>
+    <keyword xml:lang="lo-LA">ອອກແບບ</keyword>
+    <keyword xml:lang="lo-LA">ວິສະວະກຳ</keyword>
     <keyword xml:lang="nl-NL">Tekening</keyword>
     <keyword xml:lang="nl-NL">Ontwerp</keyword>
     <keyword xml:lang="nl-NL">Technisch</keyword>

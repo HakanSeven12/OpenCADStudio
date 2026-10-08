@@ -237,6 +237,11 @@ pub struct Snapper {
     /// consumed by Extension snap and extended-intersection logic. These rays
     /// belong only to OTRACK when Perpendicular OSNAP is enabled. (#695)
     pub tracking_perp_dirs: Vec<Vec<DVec3>>,
+    /// Perpendicular direction carried from a point placed by typed distance
+    /// along an Extension/OTRACK ray. It survives only until the next point
+    /// commit, so the source ray can still drive a perpendicular construction
+    /// through the newly placed point.
+    post_distance_perp_dir: Option<DVec3>,
     /// Last snap world position (for dwell detection).
     pub last_snap_world: Option<DVec3>,
     /// When the cursor first rested near `last_snap_world`.
@@ -301,6 +306,7 @@ impl Default for Snapper {
             tracking_points: Vec::new(),
             tracking_dirs: Vec::new(),
             tracking_perp_dirs: Vec::new(),
+            post_distance_perp_dir: None,
             last_snap_world: None,
             dwell_since: None,
             dwell_acquired: false,
@@ -751,7 +757,18 @@ impl Snapper {
         ucs_x: DVec3,
         ucs_y: DVec3,
     ) -> Option<OtrackHit> {
-        if !self.otrack_enabled || self.tracking_points.is_empty() {
+        // A point created by typed distance along Extension/OTRACK carries
+        // that source direction for exactly one following point. Perpendicular
+        // OSNAP may use it even when F11 tracking itself is off.
+        let carried_perp = if self.is_on(SnapType::Perpendicular) {
+            self.post_distance_perp_dir.zip(last_point)
+        } else {
+            None
+        };
+
+        if (!self.otrack_enabled || self.tracking_points.is_empty())
+            && carried_perp.is_none()
+        {
             return None;
         }
 
@@ -861,6 +878,18 @@ impl Snapper {
                 }
             }
         }
+        // Typed distance along an Extension/OTRACK ray creates a new point
+        // that still knows the direction it came from. Offer exactly one
+        // perpendicular ray through that new point for the following pick.
+        if let Some((dir, origin)) = carried_perp {
+            rays.push(Ray {
+                origin,
+                dir,
+                group: self.tracking_points.len(),
+                kind: TrackingKind::Perpendicular,
+            });
+        }
+
         // OTRACK rays come first; the auxiliary rays appended below (polar from
         // last_point, ortho axis from last_point) only participate in
         // intersection locking, never in single-ray fallback.
@@ -1006,11 +1035,21 @@ impl Snapper {
         best.map(|(_, h)| h)
     }
 
+    /// Carry the direction of a reference ray used by typed-distance entry
+    /// into the next point, as its perpendicular construction direction.
+    pub fn remember_distance_reference(&mut self, dir: DVec3) {
+        let planar = DVec3::new(dir.x, dir.y, 0.0);
+        self.post_distance_perp_dir = planar
+            .try_normalize()
+            .map(|unit| DVec3::new(-unit.y, unit.x, 0.0));
+    }
+
     /// Clear all acquired tracking points (e.g. when command ends).
     pub fn clear_tracking(&mut self) {
         self.tracking_points.clear();
         self.tracking_dirs.clear();
         self.tracking_perp_dirs.clear();
+        self.post_distance_perp_dir = None;
         self.parallel_ref = None;
         self.parallel_dwell = None;
         self.last_snap_world = None;
@@ -1152,6 +1191,7 @@ impl Snapper {
             tracking_points: Vec::new(),
             tracking_dirs: Vec::new(),
             tracking_perp_dirs: Vec::new(),
+            post_distance_perp_dir: None,
             last_snap_world: None,
             dwell_since: None,
             dwell_acquired: false,
@@ -4162,6 +4202,70 @@ mod ext_tests {
             hit.cross.is_none(),
             "a single-ray alignment reported a crossing vector: {:?}",
             hit.cross
+        );
+    }
+
+    #[test]
+    fn typed_distance_reference_offers_perpendicular_for_next_point() {
+        let mut s = Snapper::default();
+        s.enabled.insert(SnapType::Perpendicular);
+        // This must not depend on F11: the carried construction belongs to
+        // Perpendicular OSNAP itself.
+        s.otrack_enabled = false;
+        s.osnap_radius_px = 10.0;
+
+        // The first point was placed along a horizontal Extension ray.
+        s.remember_distance_reference(DVec3::X);
+        let base = DVec3::new(2_000.0, 3_000.0, 0.0);
+
+        let view_rot = Mat4::from_scale(Vec3::splat(0.0001));
+        let eye = DVec3::ZERO;
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+
+        // Pull almost vertically from the newly placed point. The preserved
+        // horizontal reference must produce a vertical perpendicular guide.
+        let cursor = base + DVec3::Y * 5_000.0 + DVec3::X * 0.05;
+        let hit = s
+            .otrack_snap(
+                cursor,
+                view_rot,
+                eye,
+                bounds,
+                None,
+                Some(base),
+                None,
+                false,
+                DVec3::X,
+                DVec3::Y,
+            )
+            .expect("carried Extension direction should offer perpendicular");
+
+        assert_eq!(hit.kind, TrackingKind::Perpendicular);
+        assert!((hit.base - base).length() < 1e-12);
+        assert!((hit.aligned.x - base.x).abs() < 1e-12);
+        assert!((hit.aligned.y - (base.y + 5_000.0)).abs() < 1e-9);
+
+        // It is deliberately one-step state: the next accepted point clears it.
+        s.clear_tracking();
+        assert!(
+            s.otrack_snap(
+                cursor,
+                view_rot,
+                eye,
+                bounds,
+                None,
+                Some(base),
+                None,
+                false,
+                DVec3::X,
+                DVec3::Y,
+            )
+            .is_none()
         );
     }
 

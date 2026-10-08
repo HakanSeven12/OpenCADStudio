@@ -4818,44 +4818,6 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     }
                 }
             }
-            // Live overlay wires (command preview / interim / grip drag) always
-            // on top: the xray pipeline (depth_compare=Always, no depth write)
-            // keeps them visible through any occluding geometry — a 3D solid, or
-            // 2D geometry drawn in front — so a command preview is never hidden.
-            // No scissor.
-            if self.gpu_preview_wires.iter().any(|pw| pw.instance_count > 0) {
-                pass.set_pipeline(&self.wire_xray_pipeline);
-                for pw in &self.gpu_preview_wires {
-                    if pw.instance_count > 0 {
-                        if let Some(bg) = &pw.const_bind_group {
-                            pass.set_bind_group(1, bg.as_ref(), &[]);
-                        }
-                        pass.set_vertex_buffer(0, pw.instance_buffer.slice(..));
-                        pass.draw(
-                            0..6,
-                            pw.first_instance..pw.first_instance + pw.instance_count,
-                        );
-                    }
-                }
-            }
-            if self.gpu_preview_circles.iter().any(|cg| cg.instance_count > 0) {
-                pass.set_pipeline(&self.circle_xray_pipeline);
-                for cg in &self.gpu_preview_circles {
-                    if cg.instance_count > 0 {
-                        pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
-                        pass.draw(0..6, 0..cg.instance_count);
-                    }
-                }
-            }
-            if self.gpu_preview_ellipses.iter().any(|eg| eg.instance_count > 0) {
-                pass.set_pipeline(&self.ellipse_xray_pipeline);
-                for eg in &self.gpu_preview_ellipses {
-                    if eg.instance_count > 0 {
-                        pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
-                        pass.draw(0..6, 0..eg.instance_count);
-                    }
-                }
-            }
         }
 
         // ── Pass 5c: SDF text quads (drawn over wires) ────────────────────
@@ -4864,9 +4826,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         if let Some(atlas) = &self.text_atlas_gpu {
             let have_base = !self.text_gpu.is_empty();
             let have_blocks = !self.block_text_gpu.is_empty();
-            let have_preview =
-                !self.text_preview_gpu.is_empty();
-            if have_base || have_blocks || have_preview {
+            if have_base || have_blocks {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("text.render_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -4905,14 +4865,6 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                         pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
                         pass.set_vertex_buffer(1, text.instance_buffer.slice(..));
                         pass.draw(0..text.vertex_count, 0..text.instance_count);
-                    }
-                }
-                // Grip-drag / command-preview glyphs, drawn over the base text.
-                if have_preview {
-                    pass.set_pipeline(&self.text_pipeline);
-                    for text in &self.text_preview_gpu {
-                        pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
-                        pass.draw(0..text.vertex_count, 0..1);
                     }
                 }
             }
@@ -4955,6 +4907,109 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 pass.set_vertex_buffer(0, wipeout.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(1, wipeout.instance_buffer.slice(..));
                 pass.draw(0..6, 0..wipeout.instance_count);
+            }
+        }
+
+        // ── Pass 6b: live command/grip preview overlay ────────────────────
+        // Wipeouts intentionally mask resident drawing geometry, but they must
+        // never mask temporary construction geometry belonging to an active
+        // command or grip edit. Draw those previews after the wipeout pass.
+        //
+        // The xray variants keep previews independent of resident depth while
+        // the shared content stencil still respects viewport/XCLIP clipping.
+        let have_preview_overlay =
+            self.gpu_preview_wires.iter().any(|wire| wire.instance_count > 0)
+                || self.gpu_preview_circles.iter().any(|circle| circle.instance_count > 0)
+                || self.gpu_preview_ellipses.iter().any(|ellipse| ellipse.instance_count > 0)
+                || !self.text_preview_gpu.is_empty();
+
+        if have_preview_overlay {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("preview_overlay.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            pass.set_viewport(
+                raster.x,
+                raster.y,
+                raster.width,
+                raster.height,
+                0.0,
+                1.0,
+            );
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
+
+            if self.gpu_preview_wires.iter().any(|wire| wire.instance_count > 0) {
+                pass.set_pipeline(&self.wire_xray_pipeline);
+                for wire in &self.gpu_preview_wires {
+                    if wire.instance_count == 0 {
+                        continue;
+                    }
+                    if let Some(bg) = &wire.const_bind_group {
+                        pass.set_bind_group(1, bg.as_ref(), &[]);
+                    }
+                    pass.set_vertex_buffer(0, wire.instance_buffer.slice(..));
+                    pass.draw(
+                        0..6,
+                        wire.first_instance..wire.first_instance + wire.instance_count,
+                    );
+                }
+            }
+
+            if self.gpu_preview_circles.iter().any(|circle| circle.instance_count > 0) {
+                pass.set_pipeline(&self.circle_xray_pipeline);
+                for circle in &self.gpu_preview_circles {
+                    if circle.instance_count > 0 {
+                        pass.set_vertex_buffer(0, circle.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..circle.instance_count);
+                    }
+                }
+            }
+
+            if self.gpu_preview_ellipses.iter().any(|ellipse| ellipse.instance_count > 0) {
+                pass.set_pipeline(&self.ellipse_xray_pipeline);
+                for ellipse in &self.gpu_preview_ellipses {
+                    if ellipse.instance_count > 0 {
+                        pass.set_vertex_buffer(0, ellipse.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..ellipse.instance_count);
+                    }
+                }
+            }
+
+            if let Some(atlas) = &self.text_atlas_gpu {
+                if !self.text_preview_gpu.is_empty() {
+                    // Same glyph shader as ordinary text, but depth-independent:
+                    // previews are temporary UI geometry, not resident drawing.
+                    pass.set_pipeline(&self.text_highlight_pipeline);
+                    pass.set_bind_group(1, &atlas.bind_group, &[]);
+                    for text in &self.text_preview_gpu {
+                        pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
+                        pass.draw(0..text.vertex_count, 0..1);
+                    }
+                }
             }
         }
 

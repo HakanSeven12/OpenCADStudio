@@ -840,8 +840,11 @@ pub fn extrusion_surface_data(
         sweep_entity: Some(profile),
         options: SurfaceSweepOptions {
             draft_angle: value.draft_angle,
-            draft_start_distance: value.start_draft_distance,
-            draft_end_distance: value.end_draft_distance,
+            // The reference keeps no draft distances on an extruded
+            // surface; a distance there reads as a taper when it
+            // re-extrudes the surface from a changed profile.
+            draft_start_distance: 0.0,
+            draft_end_distance: 0.0,
             twist_angle: value.twist_angle,
             scale_factor: value.scale_factor,
             align_angle: value.align_angle,

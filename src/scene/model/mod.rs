@@ -17,6 +17,7 @@ pub mod solid_history;
 pub mod sweep_model;
 pub mod presspull_model;
 pub mod loft_command_model;
+pub mod surface_sources;
 mod sweep_command_model;
 pub mod visual_style_model;
 pub mod object;

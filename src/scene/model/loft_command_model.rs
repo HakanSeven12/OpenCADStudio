@@ -7,7 +7,7 @@ use kernel::brep::Body;
 use crate::command::{ExtrudeMode, LoftOptions, LoftSectionSelection};
 use super::sweep_model::embedded_path;
 
-fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
+pub(crate) fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
     match entity {
         EntityType::Region(region) => Some(EmbeddedEntity::Region(region.clone())),
         EntityType::Point(point) => Some(EmbeddedEntity::Point(point.clone())),

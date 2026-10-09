@@ -2657,6 +2657,225 @@ fn pending_swept_surfaces(document: &CadDocument) -> Vec<(Handle, Handle, Handle
     pending
 }
 
+/// Associative extruded, revolved and lofted surfaces made here that the
+/// drawing's network does not carry yet, with their sources.
+fn pending_source_surfaces(
+    document: &CadDocument,
+) -> Vec<(Handle, crate::scene::model::surface_sources::SurfaceSources)> {
+    use crate::scene::model::{surface_sources, sweep_model};
+    let carried: Vec<Handle> = document
+        .objects
+        .keys()
+        .filter_map(|handle| action_surface(document, *handle))
+        .collect();
+    let mut pending = document
+        .entities()
+        .filter(|entity| matches!(entity, codec::EntityType::Surface(_)))
+        .filter_map(|entity| {
+            let sources = surface_sources::surface_sources(entity)?;
+            let surface = entity.common().handle;
+            (!carried.contains(&surface)
+                && sources.handles().iter().all(|handle| {
+                    document.get_entity(*handle).is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some())
+                }))
+            .then_some((surface, sources))
+        })
+        .collect::<Vec<_>>();
+    pending.sort_by_key(|(surface, _)| surface.value());
+    pending
+}
+
+/// Whether the drawing has associative surfaces its network has to carry.
+fn has_pending_surfaces(document: &CadDocument) -> bool {
+    !pending_swept_surfaces(document).is_empty() || !pending_source_surfaces(document).is_empty()
+}
+
+/// The reference's associative network for each pending extruded, revolved
+/// or lofted surface: an action with the matching surface action body that
+/// writes the surface and reads its sources through path parameters (an
+/// empty one for a revolve axis given by points and for a loft without a
+/// path), with the surface's values as value parameters. Returns the
+/// network's new actions in order.
+fn materialize_source_surface_actions(
+    allocator: &mut Allocator,
+    network: Handle,
+    pending: &[(Handle, crate::scene::model::surface_sources::SurfaceSources)],
+    first_index: i32,
+) -> Vec<Handle> {
+    use crate::scene::model::surface_sources::SurfaceSources;
+    use crate::scene::model::sweep_model;
+    use codec::objects::*;
+    let mut added = Vec::new();
+    for (surface, sources) in pending.iter() {
+        let surface = *surface;
+        let document = &*allocator.document;
+        // The value parameters: name, unit type, values, and whether they
+        // control the surface.
+        let real = |value: f64| AssocEvalVariant { code: 40, value: AssocEvalValue::Real(value) };
+        let short = |value: i32| AssocEvalVariant { code: 70, value: AssocEvalValue::Short(value as i16) };
+        let (kind, class, dxf, values, params): (
+            AssocSurfaceActionKind,
+            &str,
+            &str,
+            Vec<(&str, i32, Vec<AssocEvalVariant>, bool)>,
+            Vec<(&str, Option<Handle>)>,
+        ) = match sources {
+            SurfaceSources::Extrude { profile, height, taper, .. } => (
+                AssocSurfaceActionKind::Extruded,
+                "AcDbAssocExtrudedSurfaceActionBody",
+                "ACDBASSOCEXTRUDEDSURFACEACTIONBODY",
+                vec![("ExtrusionHeight", 1, vec![real(*height)], true), ("ExtrusionTaperAngle", 2, vec![real(*taper)], true)],
+                vec![("ExtrudeProfile", Some(*profile))],
+            ),
+            SurfaceSources::Revolve { profile, axis, angle, .. } => (
+                AssocSurfaceActionKind::Revolved,
+                "AcDbAssocRevolvedSurfaceActionBody",
+                "ACDBASSOCREVOLVEDSURFACEACTIONBODY",
+                vec![("RevolveAngle", 2, vec![real(*angle)], true)],
+                vec![("RevolveProfile", Some(*profile)), ("RevolvePath", *axis)],
+            ),
+            SurfaceSources::Loft { sections } => {
+                let loft = document.solid_history_operations(surface).and_then(|operations| {
+                    operations.into_iter().find_map(|operation| match operation {
+                        SolidHistoryOperation::Loft(record) => record.parameters,
+                        _ => None,
+                    })
+                });
+                let (continuity, bulge) = loft.map_or(((1, 1), (0.5, 0.5)), |p| {
+                    ((p.start_continuity, p.end_continuity), (p.start_bulge, p.end_bulge))
+                });
+                (
+                    AssocSurfaceActionKind::Lofted,
+                    "AcDbAssocLoftedSurfaceActionBody",
+                    "ACDBASSOCLOFTEDSURFACEACTIONBODY",
+                    vec![
+                        ("Continuity", 0, vec![short(continuity.0), short(continuity.1)], false),
+                        ("Bulge", 0, vec![real(bulge.0), real(bulge.1)], false),
+                    ],
+                    sections.iter().map(|section| ("CrossSection", Some(*section)))
+                        .chain(std::iter::once(("PathCurve", None)))
+                        .collect(),
+                )
+            }
+        };
+        let curves = params
+            .iter()
+            .map(|(_, source)| match source {
+                Some(source) => document.get_entity(*source).and_then(sweep_model::assoc_edge_curve).map(Some),
+                None => Some(None),
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(curves) = curves else { continue };
+        let document = &mut *allocator.document;
+        let (action, body, written) = (document.allocate_handle(), document.allocate_handle(), document.allocate_handle());
+        let dependency = |dependent_on: Handle, read: bool, id: i32, order: i32| AssocDependency {
+            class_version: 2,
+            status: 0,
+            is_read_dependency: read,
+            is_write_dependency: !read,
+            is_attached_to_object: true,
+            is_delegating_to_owning_action: true,
+            order,
+            dependent_on,
+            name: None,
+            read_dependency: Handle::NULL,
+            node: Handle::NULL,
+            dependency_body: Handle::NULL,
+            dependency_body_id: id,
+        };
+        let mut objects: Vec<(Handle, Handle, &str, &str, AssociativeData)> = Vec::new();
+        let mut reactors: Vec<(Handle, Handle)> = vec![(surface, written)];
+        let mut dependencies = vec![written];
+        let mut owned = Vec::new();
+        objects.push((written, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(surface, false, 1, i32::MIN))));
+        for ((name, source), curve) in params.iter().zip(curves) {
+            let document = &mut *allocator.document;
+            let parameter = document.allocate_handle();
+            let mut children = Vec::new();
+            if let (Some(source), Some((action_type, subcurve_kind, curve))) = (source, curve) {
+                let (edge, read) = (document.allocate_handle(), document.allocate_handle());
+                objects.push((edge, parameter, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam",
+                    AssociativeData::EdgeActionParam(AssocEdgeActionParam {
+                        single_dependency: AssocSingleDependencyActionParam {
+                            action_param: AssocActionParam { is_r2013: 1, version: 0, name: String::new() },
+                            dependency_class_version: 0,
+                            dependency: read,
+                            class_version: 0,
+                        },
+                        parameter: Handle::NULL,
+                        has_action: true,
+                        action_type,
+                        subcurve_kind,
+                        curve,
+                    })));
+                objects.push((read, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency",
+                    AssociativeData::Dependency(dependency(*source, true, dependencies.len() as i32 + 1, 0))));
+                reactors.push((*source, read));
+                dependencies.push(read);
+                children.push(edge);
+            }
+            objects.push((parameter, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam",
+                AssociativeData::PathActionParam(AssocPathActionParam {
+                    compound: AssocCompoundActionParam {
+                        action_param: AssocActionParam { is_r2013: 1, version: 0, name: name.to_string() },
+                        class_version: 0,
+                        status: 0,
+                        parameters: children,
+                        child_parameter: None,
+                    },
+                    version: 0,
+                })));
+            owned.push(parameter);
+        }
+        objects.push((action, network, "ACDBASSOCACTION", "AcDbAssocAction", AssociativeData::Action(AssocAction {
+            class_version: 2,
+            geometry_status: 0,
+            owning_network: network,
+            action_body: body,
+            action_index: 0,
+            max_dependency_index: dependencies.len() as i32,
+            dependencies: dependencies.iter().map(|handle| AssocActionDependency { is_owned: true, dependency: *handle }).collect(),
+            owned_parameters: owned,
+            values: values
+                .into_iter()
+                .map(|(name, unit_type, amounts, controls)| AssocValueParam {
+                    class_version: 0,
+                    name: name.to_string(),
+                    unit_type,
+                    variables: amounts.into_iter().map(|value| AssocValueParamVariable { value, handle: Handle::NULL }).collect(),
+                    controlled_object_dependency: if controls { written } else { Handle::NULL },
+                })
+                .collect(),
+        })));
+        objects.push((body, action, dxf, class, AssociativeData::SurfaceActionBody(AssocSurfaceActionBody {
+            kind,
+            action_body: AssocActionBody { version: 2 },
+            surface_body: AssocSurfaceBody { version: 0, dependency: written, is_semi_associative: false, marker: 1, is_semi_override: false, grip_status: 0 },
+            ..Default::default()
+        })));
+        for (handle, owner, dxf, class, data) in objects {
+            allocator.insert_associative_at(handle, owner, dxf, class, data);
+        }
+        for (target, reactor) in reactors {
+            let document = &mut *allocator.document;
+            if let Some(entity) = document.get_entity_mut(target) {
+                entity.common_mut().reactors.push(reactor);
+            } else if let Some(ObjectType::Associative(object)) = document.objects.get_mut(&target) {
+                object.reactors.push(reactor);
+            }
+        }
+        added.push(action);
+    }
+    for (offset, handle) in added.iter().copied().enumerate() {
+        if let Some(ObjectType::Associative(AssociativeObject { data: AssociativeData::Action(action), .. })) =
+            allocator.document.objects.get_mut(&handle)
+        {
+            action.action_index = first_index + offset as i32 + 1;
+        }
+    }
+    added
+}
+
 /// The names an expression reads.
 fn expression_names(expression: &str) -> Vec<String> {
     let mut names = Vec::new();
@@ -3005,7 +3224,7 @@ fn materialize_scope(
         && existing_variables.is_empty()
         && preserved_groups.is_empty()
         && foreign_actions.is_empty()
-        && !(materialize_all_parameters && !pending_swept_surfaces(document).is_empty())
+        && !(materialize_all_parameters && has_pending_surfaces(document))
     {
         return None;
     }
@@ -3191,8 +3410,13 @@ fn materialize_scope(
     }
     refresh_foreign_values(allocator.document, &foreign_actions, parameters);
     let pending = if materialize_all_parameters { pending_swept_surfaces(allocator.document) } else { Vec::new() };
-    let surface_actions = materialize_swept_surface_actions(
+    let mut surface_actions = materialize_swept_surface_actions(
         &mut allocator, network_handle, parameters, &pending, first_foreign + foreign_actions.len() as i32);
+    let pending_sources = if materialize_all_parameters { pending_source_surfaces(allocator.document) } else { Vec::new() };
+    let source_actions = materialize_source_surface_actions(
+        &mut allocator, network_handle, &pending_sources,
+        first_foreign + (foreign_actions.len() + surface_actions.len()) as i32);
+    surface_actions.extend(source_actions);
 
     let network = AssocNetwork {
         action: AssocAction {
@@ -3352,7 +3576,7 @@ impl Scene {
             if set.is_none()
                 && !existing
                 && (owner != model_owner
-                    || (self.named_parameters.is_empty() && pending_swept_surfaces(&self.document).is_empty()))
+                    || (self.named_parameters.is_empty() && !has_pending_surfaces(&self.document)))
             {
                 continue;
             }

@@ -1064,6 +1064,7 @@ pub struct RevolveCommand {
     handles: Vec<Handle>,
     preview_profiles: Vec<(Handle, EntityType)>,
     injected_axis: Option<EntityType>,
+    axis_object: Option<Handle>,
     axis_start: DVec3,
     axis_end: DVec3,
     working_plane: WorkingPlane,
@@ -1114,6 +1115,7 @@ impl RevolveCommand {
             handles: Vec::new(),
             preview_profiles: Vec::new(),
             injected_axis: None,
+            axis_object: None,
             axis_start: DVec3::ZERO,
             axis_end: DVec3::new(0.0, 0.0, 1.0),
             working_plane: WorkingPlane::default(),
@@ -1253,6 +1255,7 @@ impl RevolveCommand {
         };
         self.axis_start = self.working_plane.origin;
         self.axis_end = self.axis_start + direction;
+        self.axis_object = None;
         self.step = RevolveStep::Angle;
         CmdResult::NeedPoint
     }
@@ -1269,6 +1272,7 @@ impl RevolveCommand {
             handles: self.handles.clone(),
             axis_start: self.axis_start,
             axis_end: self.axis_end,
+            axis_object: self.axis_object,
             angle,
             start_angle: self.start_angle,
             mode: self.mode,
@@ -1352,12 +1356,13 @@ impl CadCommand for RevolveCommand {
         }
         match self.step {
             RevolveStep::AxisObject => {
-                let Some((start, end)) = self.injected_axis.take().as_ref().and_then(revolve_axis)
-                else {
+                let axis = self.injected_axis.take();
+                let Some((start, end)) = axis.as_ref().and_then(revolve_axis) else {
                     return CmdResult::NeedPoint;
                 };
                 self.axis_start = start;
                 self.axis_end = end;
+                self.axis_object = matches!(axis, Some(EntityType::Line(_))).then_some(handle);
                 self.step = RevolveStep::Angle;
                 CmdResult::NeedPoint
             }
@@ -1368,6 +1373,7 @@ impl CadCommand for RevolveCommand {
         match self.step {
             RevolveStep::AxisStart => {
                 self.axis_start = pt;
+                self.axis_object = None;
                 self.step = RevolveStep::AxisEnd;
                 CmdResult::NeedPoint
             }

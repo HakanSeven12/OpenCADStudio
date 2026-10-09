@@ -525,6 +525,60 @@ pub fn assoc_edge_curve(entity: &EntityType) -> Option<(i32, codec::objects::Ass
             }
             Some((47, K::None, values))
         }
+        // Ellipse (17): centre, unit major axis, unit minor axis (the normal
+        // across the major one), major and minor radius, start and end
+        // parameter, 0.
+        EntityType::Ellipse(ellipse) => {
+            let major = glam::DVec3::new(ellipse.major_axis.x, ellipse.major_axis.y, ellipse.major_axis.z);
+            let normal = glam::DVec3::new(ellipse.normal.x, ellipse.normal.y, ellipse.normal.z).try_normalize()?;
+            let radius = major.length();
+            let axis = major.try_normalize()?;
+            Some((17, K::Ellipse, vec![
+                point(glam::DVec3::new(ellipse.center.x, ellipse.center.y, ellipse.center.z)),
+                point(axis),
+                point(normal.cross(axis)),
+                V::Real(radius),
+                V::Real(radius * ellipse.minor_axis_ratio),
+                V::Real(ellipse.start_parameter),
+                V::Real(ellipse.end_parameter),
+                V::Real(0.0),
+            ]))
+        }
+        // NURBS (42): rational flag, a second flag (0), degree, knot
+        // tolerance, then knots, weights (empty unless rational) and control
+        // points, each as its length, the length reserved (at least 8) and the
+        // growth step 8, followed by the items.
+        EntityType::Spline(spline) => {
+            // A fit-point spline as the curve through its points, its knots
+            // in the fit parameter (chord length) as the reference keeps them.
+            let curve = crate::entities::spline::nurbs3(spline)?;
+            let mut knots = curve.knots().to_vec();
+            if crate::entities::spline::uses_fit_method(spline) && spline.knot_parameterization == 0 {
+                let chord: f64 = spline.fit_points.windows(2)
+                    .map(|pair| ((pair[1].x - pair[0].x).powi(2) + (pair[1].y - pair[0].y).powi(2) + (pair[1].z - pair[0].z).powi(2)).sqrt())
+                    .sum();
+                let (low, high) = (knots[0], knots[knots.len() - 1]);
+                if high - low > 0.0 && chord > 0.0 && (high - low - chord).abs() > 1e-9 * chord {
+                    knots.iter_mut().for_each(|knot| *knot = (*knot - low) / (high - low) * chord);
+                }
+            }
+            let points = curve.control_points();
+            if points.len() < 2 || knots.is_empty() { return None; }
+            let rational = curve.weights().iter().any(|weight| (weight - 1.0).abs() > 1e-12);
+            let header = |values: &mut Vec<V>, count: usize| {
+                values.extend([V::Int(count as i32), V::Int(if count == 0 { 0 } else { count.max(8) } as i32), V::Int(8)]);
+            };
+            let tolerance = if spline.knot_tolerance > 0.0 { spline.knot_tolerance } else { 1e-9 };
+            let mut values = vec![V::Bool(rational), V::Bool(false), V::Int(curve.degree() as i32), V::Real(tolerance)];
+            header(&mut values, knots.len());
+            values.extend(knots.iter().map(|knot| V::Real(*knot)));
+            let weights = if rational { curve.weights() } else { &[] };
+            header(&mut values, weights.len());
+            values.extend(weights.iter().map(|weight| V::Real(*weight)));
+            header(&mut values, points.len());
+            values.extend(points.iter().map(|p| V::Point(P::new(p[0], p[1], p[2]))));
+            Some((42, K::Nurb3d, values))
+        }
         _ => None,
     }
 }

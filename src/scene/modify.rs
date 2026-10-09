@@ -1178,6 +1178,98 @@ impl Scene {
         rebuilt
     }
 
+    /// Associative extruded, revolved and lofted surfaces follow edits of
+    /// their sources: made again from them with the values they were made
+    /// with. A surface edited along with its sources keeps its own edit.
+    /// Returns the surfaces rebuilt.
+    pub(crate) fn refresh_associative_surfaces(&mut self, changes: &[(Handle, crate::scene::ChangeKind)]) -> Vec<(Handle, crate::scene::ChangeKind)> {
+        use crate::scene::model::surface_sources::{axis_points, surface_sources, SurfaceSources, SURFACE_SOURCES_APP};
+        use crate::scene::model::sweep_model;
+        use codec::objects::SolidHistoryOperation;
+        let changed = changes.iter()
+            .filter(|(_, kind)| !matches!(kind, crate::scene::ChangeKind::Removed))
+            .map(|(handle, _)| *handle)
+            .collect::<rustc_hash::FxHashSet<_>>();
+        if changed.is_empty() || !self.document.app_ids.contains(SURFACE_SOURCES_APP) {
+            return Vec::new();
+        }
+        let linked = self.document.entities()
+            .filter(|entity| matches!(entity, EntityType::Surface(_)))
+            .filter_map(|entity| {
+                let handle = entity.common().handle;
+                let sources = surface_sources(entity)?;
+                (!changed.contains(&handle) && sources.handles().iter().any(|source| changed.contains(source)))
+                    .then_some((handle, sources))
+            })
+            .collect::<Vec<_>>();
+        let mut rebuilt = Vec::new();
+        for (handle, sources) in linked {
+            let source = |handle: Handle| self.document.get_entity(handle).cloned();
+            // The surface made again: a history step, or a body with its data.
+            let made: Option<Result<SolidHistoryOperation, (kernel::brep::Body, codec::entities::SurfaceData)>> = match &sources {
+                SurfaceSources::Extrude { profile, height, direction, taper } => (|| {
+                    let entity = source(*profile)?;
+                    let (shape, _) = sweep_model::extrusion_profile_of(&entity)?;
+                    let direction = match direction {
+                        Some(direction) => *direction,
+                        None => glam::DVec3::from_array(shape.plane.normal()?) * *height,
+                    };
+                    if self.document.solid_history_operations(handle).is_some() {
+                        return sweep_model::extrusion_history(&entity, None, direction.to_array(), *taper, shape.plane.origin).map(Ok);
+                    }
+                    let body = sweep_model::extruded_surface(&entity, direction.to_array(), *taper)?;
+                    let EntityType::Surface(fresh) = crate::modules::insert::solid3d_cmds::empty_extruded_surface(direction, *taper) else { return None };
+                    Some(Err((body, fresh.surface_data)))
+                })(),
+                SurfaceSources::Revolve { profile, axis, start, end, angle, start_angle } => (|| {
+                    let entity = source(*profile)?;
+                    let (start, end) = axis
+                        .and_then(|axis| self.document.get_entity(axis).and_then(axis_points))
+                        .unwrap_or((*start, *end));
+                    let body = sweep_model::revolved_surface(&entity, start.to_array(), end.to_array(), *angle, *start_angle)?;
+                    let EntityType::Surface(fresh) = crate::modules::insert::solid3d_cmds::empty_revolved_surface(&entity, start, end, *angle, *start_angle) else { return None };
+                    Some(Err((body, fresh.surface_data)))
+                })(),
+                SurfaceSources::Loft { sections } => (|| {
+                    let operations = self.document.solid_history_operations(handle)?;
+                    let mut record = operations.into_iter().find_map(|operation| match operation {
+                        SolidHistoryOperation::Loft(record) => Some(record),
+                        _ => None,
+                    })?;
+                    if record.cross_sections.len() != sections.len() {
+                        return None;
+                    }
+                    record.cross_sections = sections.iter()
+                        .map(|section| source(*section).as_ref().and_then(crate::scene::model::loft_command_model::embedded_section))
+                        .collect::<Option<Vec<_>>>()?;
+                    Some(Ok(SolidHistoryOperation::Loft(record)))
+                })(),
+            };
+            let before = self.document.get_entity(handle).cloned().map(std::sync::Arc::new);
+            match made {
+                Some(Ok(operation)) => {
+                    self.record_undo_before(handle, before);
+                    if self.rebuild_solid_history(handle, operation) {
+                        rebuilt.push((handle, crate::scene::ChangeKind::Modified));
+                    }
+                }
+                Some(Err((body, data))) => {
+                    let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else { continue };
+                    let Some(display) = self.prepare_solid_model_display(handle, &body) else { continue };
+                    self.record_undo_before(handle, before);
+                    if let Some(EntityType::Surface(surface)) = self.document.get_entity_mut(handle) {
+                        surface.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
+                        surface.surface_data = data;
+                    }
+                    self.register_prepared_solid_model(handle, body, display);
+                    rebuilt.push((handle, crate::scene::ChangeKind::Modified));
+                }
+                None => {}
+            }
+        }
+        rebuilt
+    }
+
     /// Swept surfaces the reference keeps associative to a scale or twist
     /// expression (an associative swept surface action whose value parameter
     /// depends on an expression variable) are linked the same way here.
@@ -1189,12 +1281,57 @@ impl Scene {
         };
         let mut links = Vec::new();
         let mut sources = Vec::new();
+        let mut others = Vec::new();
         for item in self.document.objects.values() {
             let ObjectType::Associative(action) = item else { continue };
             let AssociativeData::Action(action) = &action.data else { continue };
             let Some(AssociativeData::SurfaceActionBody(body)) = object(action.action_body) else { continue };
-            if body.kind != AssocSurfaceActionKind::Swept { continue; }
             let Some(AssociativeData::Dependency(written)) = object(body.surface_body.dependency) else { continue };
+            // The entities a named path parameter reads (an edge of a region
+            // reads through a geometry dependency).
+            let read = |name: &str| -> Vec<Handle> {
+                action.owned_parameters.iter().filter_map(|parameter| {
+                    let Some(AssociativeData::PathActionParam(path)) = object(*parameter) else { return None };
+                    if path.compound.action_param.name != name { return None; }
+                    let Some(AssociativeData::EdgeActionParam(edge)) = object(*path.compound.parameters.first()?) else { return None };
+                    match object(edge.single_dependency.dependency) {
+                        Some(AssociativeData::Dependency(dependency)) => Some(dependency.dependent_on),
+                        Some(AssociativeData::GeomDependency(dependency)) => Some(dependency.dependency.dependent_on),
+                        _ => None,
+                    }
+                }).collect()
+            };
+            let real = |name: &str| action.values.iter().find(|value| value.name == name)
+                .and_then(|value| value.variables.first())
+                .and_then(|variable| match variable.value.value {
+                    codec::objects::AssocEvalValue::Real(value) => Some(value),
+                    _ => None,
+                });
+            match body.kind {
+                AssocSurfaceActionKind::Extruded => {
+                    if let (Some(profile), Some(height), Some(taper)) =
+                        (read("ExtrudeProfile").first().copied(), real("ExtrusionHeight"), real("ExtrusionTaperAngle"))
+                    {
+                        others.push((written.dependent_on, (body.kind, vec![profile], None, height, taper)));
+                    }
+                    continue;
+                }
+                AssocSurfaceActionKind::Revolved => {
+                    if let (Some(profile), Some(angle)) = (read("RevolveProfile").first().copied(), real("RevolveAngle")) {
+                        others.push((written.dependent_on, (body.kind, vec![profile], read("RevolvePath").first().copied(), angle, 0.0)));
+                    }
+                    continue;
+                }
+                AssocSurfaceActionKind::Lofted => {
+                    let sections = read("CrossSection");
+                    if sections.len() >= 2 {
+                        others.push((written.dependent_on, (body.kind, sections, None, 0.0, 0.0)));
+                    }
+                    continue;
+                }
+                AssocSurfaceActionKind::Swept => {}
+                _ => continue,
+            }
             let mut expressions: [Option<String>; 2] = [None, None];
             for value in &action.values {
                 let slot = match value.name.as_str() { "ScaleFactor" => 0, "TwistAngle" => 1, _ => continue };
@@ -1210,18 +1347,7 @@ impl Scene {
                 links.push((written.dependent_on, expressions));
             }
             // The profile and path the action reads.
-            let source = |name: &str| {
-                action.owned_parameters.iter().find_map(|parameter| {
-                    let Some(AssociativeData::PathActionParam(path)) = object(*parameter) else { return None };
-                    if path.compound.action_param.name != name { return None; }
-                    let Some(AssociativeData::EdgeActionParam(edge)) = object(*path.compound.parameters.first()?) else { return None };
-                    match object(edge.single_dependency.dependency) {
-                        Some(AssociativeData::Dependency(dependency)) => Some(dependency.dependent_on),
-                        _ => None,
-                    }
-                })
-            };
-            if let (Some(profile), Some(path)) = (source("SweepProfile"), source("SweepPath")) {
+            if let (Some(profile), Some(path)) = (read("SweepProfile").first().copied(), read("SweepPath").first().copied()) {
                 sources.push((written.dependent_on, profile, path));
             }
         }
@@ -1240,6 +1366,44 @@ impl Scene {
             let Some(entity) = self.document.get_entity(handle) else { continue };
             if crate::scene::model::sweep_model::sweep_expressions(entity).is_some() { continue; }
             crate::scene::model::sweep_model::link_sweep_expressions(&mut self.document, handle, &expressions);
+        }
+        // Associative extruded, revolved and lofted surfaces follow their
+        // sources here too.
+        use crate::scene::model::surface_sources::{link_surface_sources, surface_sources, SurfaceSources};
+        for (surface, (kind, handles, axis, amount, taper)) in others {
+            let Some(entity @ EntityType::Surface(value)) = self.document.get_entity(surface) else { continue };
+            if surface_sources(entity).is_some() { continue; }
+            let linked = match (kind, &value.surface_data) {
+                (AssocSurfaceActionKind::Extruded, codec::entities::SurfaceData::Extruded { sweep_vector, .. }) => {
+                    let profile = handles[0];
+                    let along = glam::DVec3::new(sweep_vector.x, sweep_vector.y, sweep_vector.z);
+                    // A direction other than the profile's normal is kept.
+                    let normal = self.document.get_entity(profile)
+                        .and_then(|entity| crate::scene::model::sweep_model::extrusion_profile_of(entity))
+                        .and_then(|(shape, _)| shape.plane.normal())
+                        .map(glam::DVec3::from_array);
+                    let direction = match normal {
+                        Some(normal) if (normal * amount - along).length() <= 1e-9 * amount.abs().max(1.0) => None,
+                        _ if along.length() > 1e-12 => Some(along),
+                        _ => None,
+                    };
+                    SurfaceSources::Extrude { profile, height: amount, direction, taper }
+                }
+                (AssocSurfaceActionKind::Revolved, codec::entities::SurfaceData::Revolved { axis_point, axis_vector, start_angle, .. }) => {
+                    let start = glam::DVec3::new(axis_point.x, axis_point.y, axis_point.z);
+                    SurfaceSources::Revolve {
+                        profile: handles[0],
+                        axis,
+                        start,
+                        end: start + glam::DVec3::new(axis_vector.x, axis_vector.y, axis_vector.z),
+                        angle: amount,
+                        start_angle: *start_angle,
+                    }
+                }
+                (AssocSurfaceActionKind::Lofted, _) => SurfaceSources::Loft { sections: handles },
+                _ => continue,
+            };
+            link_surface_sources(&mut self.document, surface, &linked);
         }
     }
 

@@ -34,7 +34,7 @@ impl OpenCADStudio {
         if let Some(side) = self.dock_edge_menu {
             if !self.dock_visible_groups(side).is_empty() {
                 // Checked = open and docked on this edge.
-                let shown: Vec<_> = crate::ui::dock::PanelId::ALL
+                let checked: Vec<_> = crate::ui::dock::PanelId::ALL
                     .iter()
                     .map(|p| {
                         let here = self.dock.location(*p).map(|(s, _)| s) == Some(side);
@@ -55,7 +55,7 @@ impl OpenCADStudio {
                         .on_right_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
                         .into(),
                 );
-                layers.push(place_at(dock_edge_menu(side, &shown), x.max(0.0), plus_top));
+                layers.push(place_at(dock_edge_menu(side, &checked), x.max(0.0), plus_top));
             }
         }
         // While a panel is dragged, preview where it lands.
@@ -173,10 +173,6 @@ impl OpenCADStudio {
             Some(DropTarget::Join { side: s, group, .. }) if s == side => Some(group),
             _ => None,
         };
-        let tip_side = match side {
-            DockSide::Left => iced::widget::tooltip::Position::Right,
-            DockSide::Right => iced::widget::tooltip::Position::Left,
-        };
         let mut items: Vec<Element<'_, Message>> = Vec::new();
         for gi in self.dock_visible_groups(side) {
             let is_shown = shown == Some(gi);
@@ -218,15 +214,13 @@ impl OpenCADStudio {
                         .center_y(Length::Fixed(STRIP_CELL_H)),
                 )
                 .on_press(Message::Dock(DockMsg::IconPress(id)))
-                .on_enter(Message::Dock(DockMsg::Hover(Some(id))))
-                .on_exit(Message::Dock(DockMsg::Hover(None)))
+                .on_enter(Message::Dock(DockMsg::Hover(id)))
+                .on_exit(Message::Dock(DockMsg::HoverEnd(id)))
                 .interaction(iced::mouse::Interaction::Pointer);
                 icons.push(cell.into());
             }
 
             // The group grip: a band on the window side holding the edge bar.
-            // Explicit heights: the tooltip around the band sizes it to its
-            // content, so a `Fill` bar would stop short of the row's bottom.
             let bar_w = if lit { 5.0 } else { 3.0 };
             let bar_inset = 5.0;
             let bar = container(
@@ -275,15 +269,9 @@ impl OpenCADStudio {
                     }),
             )
             .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
-            .on_enter(Message::Dock(DockMsg::GripHover(Some((side, gi)))))
-            .on_exit(Message::Dock(DockMsg::GripHover(None)))
+            .on_enter(Message::Dock(DockMsg::GripHover(side, gi)))
+            .on_exit(Message::Dock(DockMsg::GripHoverEnd(side, gi)))
             .interaction(iced::mouse::Interaction::Grab);
-            let band = iced::widget::tooltip(
-                band,
-                text(t!("Drag to move group")).size(10),
-                tip_side,
-            )
-            .gap(4);
             let band = container(band)
                 .width(Fill)
                 .height(Length::Fixed(row_h))
@@ -292,7 +280,9 @@ impl OpenCADStudio {
                     DockSide::Right => iced::alignment::Horizontal::Right,
                 });
             items.push(
-                container(stack![column(icons), band])
+                // A stack is as tall as its first layer, so the icon column
+                // spans the whole row; the edge bar then centres on the row.
+                container(stack![column(icons).height(Length::Fixed(row_h)), band])
                     .width(Length::Fixed(DOCK_STRIP_W))
                     .height(Length::Fixed(row_h))
                     .style(move |theme: &Theme| container::Style {
@@ -512,7 +502,7 @@ impl OpenCADStudio {
         // on its empty areas don't fall through to the drawing below.
         let panel = mouse_area(framed)
             .on_press(Message::Dock(DockMsg::FloatRaise(f.id)))
-            .on_enter(Message::Dock(DockMsg::Hover(Some(f.id))))
+            .on_enter(Message::Dock(DockMsg::Hover(f.id)))
             .on_exit(Message::Dock(DockMsg::HoverExit))
             .interaction(iced::mouse::Interaction::Idle);
         // A hidden panel keeps its title bar where it sits when shown.
@@ -534,7 +524,7 @@ impl OpenCADStudio {
     ) -> Element<'_, Message> {
         use crate::app::config::DockSide;
         use crate::ui::dock::DropTarget;
-        let (ww, avail) = self.dock_workspace_size();
+        let (ww, _) = self.dock_workspace_size();
         let strip = crate::ui::dock::DOCK_STRIP_W;
         let tint = |side: DockSide, w: f32| -> Element<'_, Message> {
             let band = container(Space::new())
@@ -556,51 +546,20 @@ impl OpenCADStudio {
                 .into()
         };
         let mut layers: Vec<Element<'_, Message>> = Vec::new();
-        let docked = match target {
-            DropTarget::Edge { side, index } => {
-                let mut after = self.dock.clone();
-                after.dock(id, side, index);
-                Some((side, after))
-            }
-            DropTarget::Join { side, group, index } => {
-                let mut after = self.dock.clone();
-                after.join_group(id, side, group, index);
-                Some((side, after))
-            }
+        let group_drag = self.dock_drag.and_then(|d| d.movement()).and_then(|(_, g, _)| g);
+        let marks_side = match target {
+            DropTarget::Edge { side, .. } | DropTarget::Join { side, .. } => Some(side),
             DropTarget::Float { x, y } => {
                 let (w, h) = self.dock_float_size(id);
-                layers.push(place_at(
-                    dock_ghost(id, w + DOCK_FLOAT_BAR_W, h),
-                    x,
-                    y,
-                ));
+                layers.push(place_at(dock_ghost(id, w + DOCK_FLOAT_BAR_W, h), x, y));
                 None
             }
         };
-        // A whole group shows only the strip feedback and its ghost; the
-        // column keeps showing what is there.
-        let group_drag = self.dock_drag.and_then(|d| d.movement()).and_then(|(_, g, _)| g);
-        let docked = docked.map(|(side, after)| (side, group_drag.is_none().then_some(after)));
-        let marks_side = docked.as_ref().map(|(side, _)| *side);
-        if let Some((side, Some(after))) = docked {
-            // Lay the group out as it will be after the drop.
-            if let Some((_, gi)) = after.location(id) {
-                let group = &after.groups(side)[gi];
-                let open: Vec<usize> = (0..group.panels.len())
-                    .filter(|i| group.panels[*i] == id || self.dock_panel_visible(group.panels[*i]))
-                    .collect();
-                let weights: Vec<f32> = open.iter().map(|i| group.weights[*i]).collect();
-                let spans = crate::ui::dock::slot_spans(&weights, avail);
-                let at = open
-                    .iter()
-                    .position(|i| group.panels[*i] == id)
-                    .expect("dropped panel");
-                let (top, bottom) = spans[at];
-                let w = group
-                    .panels
-                    .iter()
-                    .map(|p| after.width(*p, self.win_size.0))
-                    .fold(0.0, f32::max);
+        // A single pallet also gets a ghost where it lands in the column; a
+        // whole group shows only the strip feedback, as the column keeps
+        // showing what is there.
+        if let (Some(side), None) = (marks_side, group_drag) {
+            if let Some((top, bottom, w)) = self.dock_landing(id, target) {
                 let x = match side {
                     DockSide::Left => strip,
                     DockSide::Right => (ww - w - strip).max(0.0),
@@ -625,6 +584,37 @@ impl OpenCADStudio {
             .width(Fill)
             .height(Fill)
             .into()
+    }
+
+    /// Where docked pallet `id` would sit after dropping on `target`: its
+    /// span (top, bottom) in its group as laid out after the drop, and the
+    /// group's width. `None` for a floating target.
+    fn dock_landing(
+        &self,
+        id: crate::ui::dock::PanelId,
+        target: crate::ui::dock::DropTarget,
+    ) -> Option<(f32, f32, f32)> {
+        use crate::ui::dock::DropTarget;
+        let mut after = self.dock.clone();
+        match target {
+            DropTarget::Edge { side, index } => {
+                after.dock(id, side, index);
+            }
+            DropTarget::Join { side, group, index } => {
+                after.join_group(id, side, group, index);
+            }
+            DropTarget::Float { .. } => return None,
+        }
+        let (side, gi) = after.location(id)?;
+        let group = &after.groups(side)[gi];
+        let open: Vec<usize> = (0..group.panels.len())
+            .filter(|i| group.panels[*i] == id || self.dock_panel_visible(group.panels[*i]))
+            .collect();
+        let weights: Vec<f32> = open.iter().map(|i| group.weights[*i]).collect();
+        let at = open.iter().position(|i| group.panels[*i] == id)?;
+        let (_, avail) = self.dock_workspace_size();
+        let (top, bottom) = *crate::ui::dock::slot_spans(&weights, avail).get(at)?;
+        Some((top, bottom, after.group_width_px(side, gi, self.win_size.0)))
     }
 
     /// The icon strip's drop marks for `target` on `side`: a short line with
@@ -767,13 +757,10 @@ fn dock_icon_ghost(icons: &[crate::ui::dock::PanelId]) -> Element<'static, Messa
         .into()
 }
 
-/// Canvas that draws a label rotated 90° (for a collapsed panel's bar).
+/// Canvas that draws a floating title bar's label, reading upward from the
+/// bar's bottom end.
 struct VBarLabel {
     text: String,
-    clockwise: bool,
-    /// Start the text at the reading-start end of the bar instead of
-    /// centring it.
-    from_start: bool,
 }
 
 impl canvas::Program<Message> for VBarLabel {
@@ -790,27 +777,15 @@ impl canvas::Program<Message> for VBarLabel {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.with_save(|frame| {
             frame.translate(iced::Vector::new(bounds.width / 2.0, bounds.height / 2.0));
-            frame.rotate(iced::Radians(if self.clockwise {
-                std::f32::consts::FRAC_PI_2
-            } else {
-                -std::f32::consts::FRAC_PI_2
-            }));
-            // After the rotation the text runs along local +x, so the
-            // reading start sits at -height/2.
-            let (position, align_x) = if self.from_start {
-                (
-                    iced::Point::new(-bounds.height / 2.0, 0.0),
-                    iced::advanced::text::Alignment::Left,
-                )
-            } else {
-                (iced::Point::ORIGIN, iced::advanced::text::Alignment::Center)
-            };
+            frame.rotate(iced::Radians(-std::f32::consts::FRAC_PI_2));
+            // After the rotation the text runs along local +x (upward), so
+            // the bar's bottom end sits at -height/2.
             frame.fill_text(canvas::Text {
                 content: self.text.clone(),
-                position,
+                position: iced::Point::new(-bounds.height / 2.0, 0.0),
                 color: theme.palette().background.base.text.scale_alpha(0.72),
                 size: iced::Pixels(13.0),
-                align_x,
+                align_x: iced::advanced::text::Alignment::Left,
                 align_y: iced::alignment::Vertical::Center,
                 shaping: iced::advanced::text::Shaping::Advanced,
                 ..Default::default()
@@ -840,9 +815,7 @@ fn floating_title_bar(
     let close = crate::ui::dock::close_button(id, tip);
     let pin = crate::ui::dock::pin_button(id, auto_collapse, tip);
     let title = canvas(VBarLabel {
-        text: id.title().to_string(),
-        clockwise: false,
-        from_start: true,
+        text: t!(id.title()).into_owned(),
     })
     .width(Fill)
     .height(Fill);
@@ -875,8 +848,8 @@ fn floating_title_bar(
     .into()
 }
 
-/// Grabbable separator for a docked panel managed by the general dock. Same
-/// visual as the previous per-panel divider but emits generic dock messages.
+/// Grabbable separator between a docked pallet and the viewport: drag to
+/// size its group, double-click to reset the width.
 fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
     let line = container(Space::new())
         .width(Length::Fixed(DOCK_DIVIDER_W))
@@ -900,13 +873,13 @@ const DOCK_MENU_W: f32 = 230.0;
 
 /// The pallet menu of an edge's + button, styled like the right-click menu:
 /// one row per pallet with its icon, its name and a check mark when it is
-/// open on this edge. `shown` holds each pallet with that state.
+/// open on this edge. `checked` holds each pallet with that state.
 fn dock_edge_menu(
     side: crate::app::config::DockSide,
-    shown: &[(crate::ui::dock::PanelId, bool)],
+    checked: &[(crate::ui::dock::PanelId, bool)],
 ) -> Element<'static, Message> {
     use crate::ui::dock::DockMsg;
-    let rows: Vec<Element<'static, Message>> = shown
+    let rows: Vec<Element<'static, Message>> = checked
         .iter()
         .map(|(id, checked)| {
             let id = *id;
@@ -918,7 +891,7 @@ fn dock_edge_menu(
             button(
                 row![
                     crate::ui::icons::themed(id.icon(), 16.0),
-                    text(id.title()).size(12).width(Fill),
+                    text(t!(id.title())).size(12).width(Fill),
                     check,
                 ]
                 .spacing(8)
@@ -991,7 +964,7 @@ fn dock_splitter(
 /// its name as the header.
 fn dock_ghost(id: crate::ui::dock::PanelId, w: f32, h: f32) -> Element<'static, Message> {
     let header = container(
-        text(id.title())
+        text(t!(id.title()))
             .size(12)
             .wrapping(iced::widget::text::Wrapping::None)
             .ellipsis(iced::advanced::text::Ellipsis::End),

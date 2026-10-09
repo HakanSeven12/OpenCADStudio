@@ -911,17 +911,7 @@ impl OpenCADStudio {
                 if self.show_external_references {
                     // Always open expanded so the panel is immediately usable;
                     // dock it on the right if the user closed it from the layout.
-                    if !self
-                        .dock
-                        .is_placed(crate::ui::dock::PanelId::ExternalReferences)
-                    {
-                        self.dock.dock(
-                            crate::ui::dock::PanelId::ExternalReferences,
-                            crate::app::config::DockSide::Right,
-                            usize::MAX,
-                        );
-                    }
-                    self.dock_reveal(crate::ui::dock::PanelId::ExternalReferences);
+                    self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);
                     self.refresh_xref_manager();
                 }
             }

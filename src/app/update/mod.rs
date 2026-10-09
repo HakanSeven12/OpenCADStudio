@@ -2580,12 +2580,7 @@ impl OpenCADStudio {
             Message::ToggleXrefManager => {
                 self.show_external_references ^= true;
                 if self.show_external_references {
-                    use crate::app::config::DockSide;
-                    use crate::ui::dock::PanelId;
-                    if !self.dock.is_placed(PanelId::ExternalReferences) {
-                        self.dock.dock(PanelId::ExternalReferences, DockSide::Right, usize::MAX);
-                    }
-                    self.dock_reveal(PanelId::ExternalReferences);
+                    self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);
                     self.refresh_xref_manager();
                 }
                 Task::none()

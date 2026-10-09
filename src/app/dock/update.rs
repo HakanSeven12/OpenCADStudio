@@ -55,8 +55,18 @@ impl OpenCADStudio {
                 }
                 self.save_config();
             }
-            DockMsg::TitleHover(id) => self.dock_title_hover = id,
-            DockMsg::GripHover(grip) => self.dock_grip_hover = grip,
+            DockMsg::TitleHover(id) => self.dock_title_hover = Some(id),
+            DockMsg::TitleHoverEnd(id) => {
+                if self.dock_title_hover == Some(id) {
+                    self.dock_title_hover = None;
+                }
+            }
+            DockMsg::GripHover(side, gi) => self.dock_grip_hover = Some((side, gi)),
+            DockMsg::GripHoverEnd(side, gi) => {
+                if self.dock_grip_hover == Some((side, gi)) {
+                    self.dock_grip_hover = None;
+                }
+            }
             DockMsg::FloatRaise(id) => self.dock.raise_float(id),
             DockMsg::FloatOut(id) => {
                 // Float beside the edge it was docked on, near the top.
@@ -114,15 +124,18 @@ impl OpenCADStudio {
             }
             DockMsg::Close(id) => return self.dock_set_open(id, false),
             DockMsg::Hover(id) => {
-                self.dock_icon_hover = id;
+                self.dock_icon_hover = Some(id);
                 // Only an auto-hiding edge (or floating pallet) reacts to
                 // hover: it reveals the hovered pallet's group. Otherwise
                 // groups switch on click. Ignored mid-drag, when the pointer
                 // is over the preview rather than the strip.
-                if let Some(id) = id {
-                    if self.dock_drag.is_none() && self.dock.auto_hides(id) {
-                        self.dock_reveal(id);
-                    }
+                if self.dock_drag.is_none() && self.dock.auto_hides(id) {
+                    self.dock_reveal(id);
+                }
+            }
+            DockMsg::HoverEnd(id) => {
+                if self.dock_icon_hover == Some(id) {
+                    self.dock_icon_hover = None;
                 }
             }
             DockMsg::HoverExit => {
@@ -218,23 +231,15 @@ impl OpenCADStudio {
                 } else {
                     grab
                 };
-                // Store the grab first: the drop target reads it.
-                self.dock_drag = Some(DockDrag::Move {
-                    panel,
-                    group,
-                    origin: Some(origin),
-                    target,
-                    grab,
-                });
-                if !started {
-                    return;
-                }
-                let found = self.dock_drop_target(point);
-                // A whole group only moves between group positions: it
-                // cannot join another group or float.
-                let target = match (group, found) {
-                    (Some(_), DropTarget::Edge { .. }) | (None, _) => Some(found),
-                    (Some(_), _) => None,
+                let target = if started {
+                    // A whole group only moves between group positions: it
+                    // cannot join another group or float.
+                    match (group, self.dock_drop_target(point, grab)) {
+                        (Some(_), found @ DropTarget::Edge { .. }) | (None, found) => Some(found),
+                        (Some(_), _) => None,
+                    }
+                } else {
+                    target
                 };
                 self.dock_drag = Some(DockDrag::Move {
                     panel,
@@ -251,11 +256,14 @@ impl OpenCADStudio {
                 lower,
             } => {
                 let Some(last) = last else { return };
+                let Some(weights) = self.dock.groups(side).get(group).map(|g| &g.weights) else {
+                    return;
+                };
                 let (_, avail) = self.dock_workspace_size();
                 let total: f32 = self
                     .dock_slot_spans(side)
                     .iter()
-                    .map(|(i, _, _)| self.dock.groups(side)[group].weights[*i])
+                    .filter_map(|(i, _, _)| weights.get(*i))
                     .sum();
                 if avail > 0.0 && total > 0.0 {
                     let per_px = total / avail;
@@ -334,50 +342,33 @@ impl OpenCADStudio {
         id: crate::ui::dock::PanelId,
         open: bool,
     ) -> iced::Task<Message> {
-        use crate::ui::dock::PanelId;
+        use crate::ui::dock::{DockDrag, PanelId};
+        let mut task = iced::Task::none();
         if open {
-            let task = if self.dock_panel_visible(id) {
-                iced::Task::none()
-            } else {
+            if !self.dock_panel_visible(id) {
                 match id {
                     PanelId::Properties => {
                         self.show_properties = true;
                         self.ribbon.set_properties(true);
-                        iced::Task::none()
                     }
-                    PanelId::BlockPalette => {
-                        self.open_blocks_palette(None);
-                        iced::Task::none()
-                    }
+                    PanelId::BlockPalette => self.open_blocks_palette(None),
                     PanelId::ExternalReferences => {
                         self.show_external_references = true;
                         self.refresh_xref_manager();
-                        iced::Task::none()
                     }
-                    PanelId::Browser => {
-                        self.show_browser = true;
-                        iced::Task::none()
+                    PanelId::Browser => self.show_browser = true,
+                    PanelId::NodeGraph => {
+                        task = self.on_graph(crate::ui::node_graph::GraphMsg::Toggle);
                     }
-                    PanelId::NodeGraph => self.on_graph(crate::ui::node_graph::GraphMsg::Toggle),
-                    PanelId::PointCloudManager => {
-                        self.pc_manager.show = true;
-                        iced::Task::none()
-                    }
-                    PanelId::Count => {
-                        self.set_count_palette(true);
-                        iced::Task::none()
-                    }
-                    PanelId::SheetSetManager => {
-                        self.show_sheet_set_manager(true);
-                        iced::Task::none()
-                    }
+                    PanelId::PointCloudManager => self.pc_manager.show = true,
+                    PanelId::Count => self.set_count_palette(true),
+                    PanelId::SheetSetManager => self.show_sheet_set_manager(true),
                     PanelId::Layers => {
                         self.sync_ribbon_layers();
                         self.show_layers = true;
-                        iced::Task::none()
                     }
                 }
-            };
+            }
             self.dock_reveal(id);
             return task;
         }
@@ -407,16 +398,32 @@ impl OpenCADStudio {
                 self.ribbon.deactivate_tool_if("LAYERS");
             }
         }
+        self.dock_unpeek(id);
+        // A closed pallet cannot stay held by the pointer.
+        let held = match self.dock_drag {
+            Some(DockDrag::Move { panel, .. } | DockDrag::Width(panel)) => panel == id,
+            _ => false,
+        };
+        if held {
+            self.dock_drag = None;
+        }
+        task
+    }
+
+    /// Show `id` where the layout has it, first docking it on the right edge
+    /// when it has no place yet (opened for the first time, or never moved).
+    pub(crate) fn dock_open_at_default(&mut self, id: crate::ui::dock::PanelId) {
+        if !self.dock.is_placed(id) {
+            self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
+        }
+        self.dock_reveal(id);
+    }
+
+    /// Stop revealing `id` (it closed).
+    pub(crate) fn dock_unpeek(&mut self, id: crate::ui::dock::PanelId) {
         if self.dock_peek == Some(id) {
             self.dock_peek = None;
         }
-        if self
-            .dock_drag
-            .is_some_and(|d| d.movement().is_some_and(|(p, _, _)| p == id) || d == crate::ui::dock::DockDrag::Width(id))
-        {
-            self.dock_drag = None;
-        }
-        iced::Task::none()
     }
 
     /// Whether `id` is currently rendered (not closed, not on the start screen /
@@ -457,10 +464,13 @@ impl OpenCADStudio {
         side: crate::app::config::DockSide,
         gi: usize,
     ) -> Vec<crate::ui::dock::PanelId> {
-        self.dock.groups(side)[gi]
-            .panels
-            .iter()
-            .copied()
+        // A stale index (a message from before the layout changed) reads as
+        // an empty group rather than a crash.
+        self.dock
+            .groups(side)
+            .get(gi)
+            .into_iter()
+            .flat_map(|g| g.panels.iter().copied())
             .filter(|id| self.dock_panel_visible(*id))
             .collect()
     }
@@ -563,8 +573,12 @@ impl OpenCADStudio {
     /// on an edge's icon strip it joins a group between its icons or starts a
     /// new group; over the shown group's pallets it stacks above / below the
     /// one under the pointer; on an empty edge it starts a group; anywhere
-    /// else it floats.
-    pub(crate) fn dock_drop_target(&self, p: iced::Point) -> crate::ui::dock::DropTarget {
+    /// else it floats, held at `grab` from its top-left corner.
+    pub(crate) fn dock_drop_target(
+        &self,
+        p: iced::Point,
+        grab: iced::Vector,
+    ) -> crate::ui::dock::DropTarget {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DropTarget, StripHit, DOCK_EDGE_ZONE, DOCK_STRIP_W};
         let (ww, wh) = self.dock_workspace_size();
@@ -591,7 +605,7 @@ impl OpenCADStudio {
                         side,
                         index: at.unwrap_or(self.dock.groups(side).len()),
                     },
-                    StripHit::Tab { group, index } => {
+                    StripHit::Join { group, index } => {
                         // Map the gap among open pallets to a position among
                         // all of the group's pallets.
                         let open = self.dock_group_visible(side, group);
@@ -622,10 +636,6 @@ impl OpenCADStudio {
                 }
             }
         }
-        let grab = match self.dock_drag {
-            Some(crate::ui::dock::DockDrag::Move { grab, .. }) => grab,
-            _ => iced::Vector::new(0.0, 0.0),
-        };
         let x = (p.x - grab.x).clamp(0.0, (ww - 60.0).max(0.0));
         let y = (p.y - grab.y).clamp(0.0, (wh - 30.0).max(0.0));
         DropTarget::Float { x, y }

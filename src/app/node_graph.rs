@@ -173,11 +173,7 @@ impl OpenCADStudio {
                     // The node library docks on the right on first use; after
                     // that it stays wherever the user moved it.
                     let id = crate::ui::dock::PanelId::NodeGraph;
-                    if !self.dock.is_placed(id) {
-                        self.dock
-                            .dock(id, crate::app::config::DockSide::Right, usize::MAX);
-                    }
-                    self.dock_reveal(id);
+                    self.dock_open_at_default(id);
                     return self.graph_run(i);
                 }
             }

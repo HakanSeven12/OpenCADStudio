@@ -26,10 +26,12 @@ pub enum DockMsg {
     AutoCollapseToggle(PanelId),
     /// Close / hide `panel`.
     Close(PanelId),
-    /// The pointer entered (`Some`) or left (`None`) a pallet's strip icon or
-    /// floating frame: highlights the icon and, where the pallet auto-hides,
-    /// reveals it.
-    Hover(Option<PanelId>),
+    /// The pointer entered a pallet's strip icon or floating frame:
+    /// highlights the icon and, where the pallet auto-hides, reveals it.
+    Hover(PanelId),
+    /// The pointer left that icon or frame. Carries the pallet so a late
+    /// "left" never clears the hover of the element just entered.
+    HoverEnd(PanelId),
     /// Pointer moved while a panel is dragging or resizing.
     DragMove(iced::Point),
     /// Pointer released after a drag / resize.
@@ -45,8 +47,10 @@ pub enum DockMsg {
     /// Begin resizing floating `panel` from its corner grip; `true` for the
     /// bottom-left grip (a panel whose title bar is on the right).
     FloatResizeGrab(PanelId, bool),
-    /// The pointer entered (`Some`) or left (`None`) a docked title bar.
-    TitleHover(Option<PanelId>),
+    /// The pointer entered a docked title bar (shows its pin and close).
+    TitleHover(PanelId),
+    /// The pointer left that title bar.
+    TitleHoverEnd(PanelId),
     /// Open (`Some`) the pallet menu of an edge's icon strip (its + button),
     /// or close it (`None`).
     EdgeMenu(Option<DockSide>),
@@ -55,9 +59,10 @@ pub enum DockMsg {
     EdgeMenuToggle(DockSide, PanelId),
     /// Begin dragging a whole group by its edge band in the icon strip.
     GroupGrab(DockSide, usize),
-    /// The pointer entered (`Some`) or left (`None`) a group's edge band.
-    GripHover(Option<(DockSide, usize)>),
-
+    /// The pointer entered a group's edge band (side, group).
+    GripHover(DockSide, usize),
+    /// The pointer left that edge band.
+    GripHoverEnd(DockSide, usize),
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
     /// Double-click on a floating title bar: dock the panel on that side.
@@ -305,6 +310,18 @@ pub struct FloatPanel {
     pub h: f32,
 }
 
+impl FloatPanel {
+    /// Keep a placement read from disk usable: finite, on the workspace's
+    /// positive side, and at least the minimum size.
+    fn heal(&mut self) {
+        let finite_or = |v: f32, fallback: f32| if v.is_finite() { v } else { fallback };
+        self.x = finite_or(self.x, 0.0).max(0.0);
+        self.y = finite_or(self.y, 0.0).max(0.0);
+        self.w = finite_or(self.w, self.id.default_width()).clamp(DOCK_MIN_W, self.id.max_width());
+        self.h = finite_or(self.h, FLOAT_MIN_H).max(FLOAT_MIN_H);
+    }
+}
+
 /// Smallest floating panel height.
 pub const FLOAT_MIN_H: f32 = 160.0;
 /// Smallest on-screen height of a stacked pallet while dragging a splitter.
@@ -407,11 +424,13 @@ impl DockState {
             let groups = self.groups_mut(side);
             for g in groups.iter_mut() {
                 g.heal();
-                let keep: Vec<bool> = g.panels.iter().map(|id| seen.insert(*id)).collect();
-                let mut k = keep.iter();
-                g.weights.retain(|_| *k.next().expect("parallel"));
-                let mut k = keep.iter();
-                g.panels.retain(|_| *k.next().expect("parallel"));
+                (g.panels, g.weights) = g
+                    .panels
+                    .iter()
+                    .zip(&g.weights)
+                    .filter(|(id, _)| seen.insert(**id))
+                    .map(|(id, w)| (*id, *w))
+                    .unzip();
             }
             groups.retain(|g| !g.panels.is_empty());
             let len = groups.len();
@@ -419,6 +438,7 @@ impl DockState {
             self.show_group(side, shown);
         }
         self.floating.retain(|f| seen.insert(f.id));
+        self.floating.iter_mut().for_each(FloatPanel::heal);
     }
 
     /// Where (if anywhere) a panel is docked: its side and group index.
@@ -451,9 +471,7 @@ impl DockState {
 
     /// Docked width for `id`, clamped to sane bounds.
     pub fn width(&self, id: PanelId, win_w: f32) -> f32 {
-        self.settings(id)
-            .width
-            .clamp(DOCK_MIN_W, id.max_width().min(win_w * 0.45).max(DOCK_MIN_W))
+        on_screen_width(self.settings(id).width, id.max_width(), win_w)
     }
 
     /// The floating auto-hide flag of `id` (a docked pallet follows its
@@ -509,9 +527,12 @@ impl DockState {
     }
 
     /// Group `group`'s docked width: its own once sized, else the widest of
-    /// its pallets' own widths.
+    /// its pallets' own widths. A group that no longer exists reads as the
+    /// minimum width.
     pub fn group_width(&self, side: DockSide, group: usize) -> f32 {
-        let g = &self.groups(side)[group];
+        let Some(g) = self.groups(side).get(group) else {
+            return DOCK_MIN_W;
+        };
         if g.width > 0.0 {
             return g.width;
         }
@@ -523,9 +544,10 @@ impl DockState {
 
     /// The widest group `group` may be: the most any of its pallets allows.
     fn group_max_width(&self, side: DockSide, group: usize) -> f32 {
-        self.groups(side)[group]
-            .panels
-            .iter()
+        self.groups(side)
+            .get(group)
+            .into_iter()
+            .flat_map(|g| g.panels.iter())
             .map(|id| id.max_width())
             .fold(DOCK_MIN_W, f32::max)
     }
@@ -533,8 +555,11 @@ impl DockState {
     /// Group `group`'s on-screen width in a `win_w` wide window, clamped like
     /// [`Self::width`].
     pub fn group_width_px(&self, side: DockSide, group: usize, win_w: f32) -> f32 {
-        let max = self.group_max_width(side, group).min(win_w * 0.45).max(DOCK_MIN_W);
-        self.group_width(side, group).clamp(DOCK_MIN_W, max)
+        on_screen_width(
+            self.group_width(side, group),
+            self.group_max_width(side, group),
+            win_w,
+        )
     }
 
     /// Size group `group` on `side`, clamped.
@@ -547,9 +572,11 @@ impl DockState {
 
     /// Give group `group` the widest default width of its pallets.
     pub fn reset_group_width(&mut self, side: DockSide, group: usize) {
-        let width = self.groups(side)[group]
-            .panels
-            .iter()
+        let width = self
+            .groups(side)
+            .get(group)
+            .into_iter()
+            .flat_map(|g| g.panels.iter())
             .map(|id| id.default_width())
             .fold(DOCK_MIN_W, f32::max);
         self.set_group_width(side, group, width);
@@ -566,12 +593,17 @@ impl DockState {
             return Some((side, gi, pos, weight, false));
         }
         self.groups_mut(side).remove(gi);
-        // Keep showing the same group, or its neighbour when it went away.
+        self.after_group_removed(side, gi);
+        Some((side, gi, pos, weight, true))
+    }
+
+    /// Group `gi` was taken off `side`: keep showing the same group, or its
+    /// neighbour when the shown group itself went away.
+    fn after_group_removed(&mut self, side: DockSide, gi: usize) {
         let shown = self.shown(side);
         if shown > gi || (shown == gi && shown > 0 && shown >= self.groups(side).len()) {
             self.show_group(side, shown - 1);
         }
-        Some((side, gi, pos, weight, true))
     }
 
     /// Dock `id` as a new group of its own on `side` at insertion `index`
@@ -640,12 +672,10 @@ impl DockState {
                 index -= 1;
             }
         }
-        let shown_here = self.shown(side);
         let g = self.groups_mut(side).remove(group);
-        if side != to && shown_here > group {
-            self.show_group(side, shown_here - 1);
-        } else if side != to && shown_here >= self.groups(side).len() && shown_here > 0 {
-            self.show_group(side, shown_here - 1);
+        // Moving within an edge shows the moved group below anyway.
+        if side != to {
+            self.after_group_removed(side, group);
         }
         let dest = self.groups_mut(to);
         let index = index.min(dest.len());
@@ -814,6 +844,12 @@ pub fn portion(weight: f32) -> u16 {
     (weight * 1000.0).round().clamp(1.0, u16::MAX as f32) as u16
 }
 
+/// `width` clamped to what fits on screen: at least [`DOCK_MIN_W`], at most
+/// `max` and 45 % of a `win_w` wide window.
+fn on_screen_width(width: f32, max: f32, win_w: f32) -> f32 {
+    width.clamp(DOCK_MIN_W, max.min(win_w * 0.45).max(DOCK_MIN_W))
+}
+
 /// Smallest docked width a panel may be dragged or sized to.
 pub const DOCK_MIN_W: f32 = 200.0;
 /// Largest docked width a panel may be dragged or sized to.
@@ -889,8 +925,8 @@ pub fn strip_layout(groups: &[(usize, usize)]) -> (Vec<StripGroup>, f32) {
 pub enum StripHit {
     /// A new group before group `group`; `None` = after the last group.
     NewGroup(Option<usize>),
-    /// Group `group`, at position `index` among its open pallets.
-    Tab { group: usize, index: usize },
+    /// Join group `group`, at position `index` among its open pallets.
+    Join { group: usize, index: usize },
 }
 
 /// Classify a pointer at strip height `y`: on a divider (or the gap above
@@ -904,7 +940,7 @@ pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
         if y < g.icons_bottom() - STRIP_NEW_GROUP_SLOP {
             let index = (((y - g.icons_top) / STRIP_CELL_H).round().max(0.0) as usize)
                 .min(g.icons);
-            return StripHit::Tab {
+            return StripHit::Join {
                 group: g.group,
                 index,
             };
@@ -961,8 +997,8 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
     )
     .on_press(Message::Dock(DockMsg::DockGrab(id)))
     .on_double_click(Message::Dock(DockMsg::FloatOut(id)))
-    .on_enter(Message::Dock(DockMsg::TitleHover(Some(id))))
-    .on_exit(Message::Dock(DockMsg::TitleHover(None)))
+    .on_enter(Message::Dock(DockMsg::TitleHover(id)))
+    .on_exit(Message::Dock(DockMsg::TitleHoverEnd(id)))
     .interaction(iced::mouse::Interaction::Grab)
     .into()
 }
@@ -1355,17 +1391,17 @@ mod tests {
         // Top half of the first icon: into group 0 at the top.
         assert_eq!(
             strip_hit(g0.icons_top + 10.0, &layout),
-            StripHit::Tab { group: 0, index: 0 }
+            StripHit::Join { group: 0, index: 0 }
         );
         // Between the first and second icon of group 0.
         assert_eq!(
             strip_hit(g0.icons_top + STRIP_CELL_H + 4.0, &layout),
-            StripHit::Tab { group: 0, index: 1 }
+            StripHit::Join { group: 0, index: 1 }
         );
         // Lower half of the last icon: into group 0 at the end.
         assert_eq!(
             strip_hit(g0.icons_bottom() - 8.0, &layout),
-            StripHit::Tab { group: 0, index: 3 }
+            StripHit::Join { group: 0, index: 3 }
         );
         // On the divider between the groups: a new group before group 2.
         assert_eq!(strip_hit(g0.bottom(), &layout), StripHit::NewGroup(Some(2)));

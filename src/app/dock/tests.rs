@@ -335,14 +335,14 @@ fn dock_hover_reveals_groups_only_on_an_auto_hiding_edge() {
     assert!(!app.dock.edge_auto_hide(DockSide::Right));
     assert!(!app.dock_edge_expanded(DockSide::Left));
     // Hovering an icon flies its group out.
-    let _ = app.on_dock(DockMsg::Hover(Some(PanelId::Browser)));
+    let _ = app.on_dock(DockMsg::Hover(PanelId::Browser));
     assert!(app.dock_edge_expanded(DockSide::Left));
     assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
     let _ = app.on_dock(DockMsg::HoverExit);
     assert!(!app.dock_edge_expanded(DockSide::Left));
     // Without auto-hide, hovering does not switch groups (clicks do).
     let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
-    let _ = app.on_dock(DockMsg::Hover(Some(PanelId::Properties)));
+    let _ = app.on_dock(DockMsg::Hover(PanelId::Properties));
     assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
     assert!(app.dock_edge_expanded(DockSide::Left));
 }

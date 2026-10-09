@@ -22,13 +22,7 @@ impl OpenCADStudio {
     /// Names -VIEW checks its input against, taken from the drawing.
     pub(super) fn dash_view_names(&self, i: usize) -> ViewNames {
         let document = &self.tabs[i].scene.document;
-        let visual_styles: Vec<(String, Handle)> = match document
-            .objects
-            .get(&document.header.acad_visualstyle_dict_handle)
-        {
-            Some(ObjectType::Dictionary(dictionary)) => dictionary.entries.clone(),
-            _ => Vec::new(),
-        };
+        let visual_styles = crate::io::visual_styles::offered(document);
         let live_sections: Vec<(String, Handle)> = document
             .entities()
             .filter_map(|entity| match entity {
@@ -260,7 +254,15 @@ impl OpenCADStudio {
                 view.live_section_handle = old.live_section_handle;
                 view.background_handle = old.background_handle;
             }
-            None => view.handle = document.allocate_handle(),
+            None => {
+                view.handle = document.allocate_handle();
+                if view.visual_style_handle.is_null() {
+                    view.visual_style_handle = crate::io::visual_styles::offered(document)
+                        .into_iter()
+                        .find(|(name, _)| name == "2D Wireframe")
+                        .map_or(Handle::NULL, |(_, handle)| handle);
+                }
+            }
         }
         document.views.add_or_replace(view);
         self.tabs[i].dirty = true;
@@ -281,13 +283,7 @@ impl OpenCADStudio {
         };
         match setting {
             "BACKGROUND" => view.background_handle = Handle::NULL,
-            "VISUALSTYLE" => {
-                let styles = match document.objects.get(&document.header.acad_visualstyle_dict_handle) {
-                    Some(ObjectType::Dictionary(dictionary)) => dictionary.entries.clone(),
-                    _ => Vec::new(),
-                };
-                view.visual_style_handle = find(styles);
-            }
+            "VISUALSTYLE" => view.visual_style_handle = find(crate::io::visual_styles::offered(document)),
             "SECTION" => {
                 let sections: Vec<(String, Handle)> = document
                     .entities()

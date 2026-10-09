@@ -20,6 +20,7 @@ pub mod stl;
 pub mod xref;
 pub mod xref_model;
 pub mod linetypes;
+pub mod visual_styles;
 pub mod line_read;
 pub mod patterns;
 pub mod update_check;

@@ -2792,7 +2792,7 @@ impl OpenCADStudio {
             let mut layers: Vec<Element<'_, Message>> = Vec::new();
             for (n, gi) in expanded.iter().enumerate() {
                 if n > 0 {
-                    layers.push(dock_splitter(side, expanded[n - 1], *gi));
+                    layers.push(dock_splitter(side, expanded[n - 1], *gi, col_w));
                 }
                 let weight = self.dock.groups(side)[*gi].weight;
                 layers.push(
@@ -3505,12 +3505,14 @@ impl canvas::Program<Message> for VBarLabel {
 
 /// Width of a collapsed (auto-collapsing) panel's tab in the edge strip.
 const DOCK_RAIL_W: f32 = 28.0;
+/// Width of the grabbable divider between a docked panel and the viewport.
+const DOCK_DIVIDER_W: f32 = 5.0;
 
 /// Grabbable separator for a docked panel managed by the general dock. Same
 /// visual as the previous per-panel divider but emits generic dock messages.
 fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
     let line = container(Space::new())
-        .width(Length::Fixed(5.0))
+        .width(Length::Fixed(DOCK_DIVIDER_W))
         .height(Fill)
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.neutral.color)),
@@ -3598,14 +3600,17 @@ fn dock_tab_strip(
 }
 
 /// Draggable bar between two expanded slots on an edge; double-click gives
-/// every slot on the edge the same height again.
+/// every slot on the edge the same height again. It spans exactly the slots'
+/// width (panel plus its divider): a `Fill` width would stretch the whole
+/// edge column across the workspace and squeeze the drawing view.
 fn dock_splitter(
     side: crate::app::config::DockSide,
     upper: usize,
     lower: usize,
+    col_w: f32,
 ) -> Element<'static, Message> {
     let line = container(Space::new())
-        .width(Fill)
+        .width(Length::Fixed(col_w + DOCK_DIVIDER_W))
         .height(Length::Fixed(5.0))
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.neutral.color)),

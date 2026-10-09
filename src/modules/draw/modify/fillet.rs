@@ -769,6 +769,9 @@ enum FilletEntity {
         handle: Handle,
         seg_idx: usize,
     },
+    /// A circle, ellipse or spline: filleted through the kernel's general
+    /// construction, and trimmed only when it has ends to trim.
+    Curve(EntityType),
 }
 
 impl FilletEntity {
@@ -776,6 +779,9 @@ impl FilletEntity {
         match e {
             EntityType::Line(l) => Some(Self::Line(l.clone())),
             EntityType::Arc(a) => Some(Self::Arc(a.clone())),
+            EntityType::Circle(_) | EntityType::Ellipse(_) | EntityType::Spline(_) => {
+                crate::entities::curve::entity_curve_xy(e).map(|_| Self::Curve(e.clone()))
+            }
             _ => None,
         }
     }
@@ -794,6 +800,7 @@ impl FilletEntity {
             Self::Line(l) => EntityType::Line(l.clone()),
             Self::Arc(a) => EntityType::Arc(a.clone()),
             Self::LwPoly { poly, .. } => EntityType::LwPolyline(poly.clone()),
+            Self::Curve(entity) => entity.clone(),
         }
     }
 
@@ -802,6 +809,20 @@ impl FilletEntity {
             Self::Line(l) => l.start.z,
             Self::Arc(a) => a.center.z,
             Self::LwPoly { poly, .. } => poly.elevation,
+            Self::Curve(EntityType::Circle(c)) => c.center.z,
+            Self::Curve(EntityType::Ellipse(e)) => e.center.z,
+            Self::Curve(EntityType::Spline(s)) => s.control_points.first().map_or(0.0, |p| p.z),
+            Self::Curve(_) => 0.0,
+        }
+    }
+
+    /// The shape as a kernel curve in plan.
+    fn kernel_curve(&self) -> Option<KernelCurve> {
+        match self {
+            Self::Line(l) => Some(line_curve(l)),
+            Self::Arc(a) => Some(arc_curve(a)),
+            Self::LwPoly { poly, seg_idx, .. } => Some(line_curve(&lwpoly_seg_as_line(poly, *seg_idx))),
+            Self::Curve(entity) => crate::entities::curve::entity_curve_xy(entity),
         }
     }
 }
@@ -824,6 +845,9 @@ fn compute_fillet_entities(
     };
     if picks_arc_segment(e1) || picks_arc_segment(e2) {
         return None;
+    }
+    if matches!(e1, FilletEntity::Curve(_)) || matches!(e2, FilletEntity::Curve(_)) {
+        return fillet_curves(e1, click1, e2, click2, radius, z);
     }
 
     match (e1, e2) {
@@ -1011,6 +1035,8 @@ fn compute_fillet_entities(
                 None
             }
         }
+        // Answered by `fillet_curves` above.
+        (FilletEntity::Curve(_), _) | (_, FilletEntity::Curve(_)) => None,
     }
 }
 
@@ -1266,6 +1292,116 @@ fn fillet_arc_arc(
         ));
     }
     None
+}
+
+/// FILLET where one side is a circle, ellipse or spline. The kernel finds the
+/// tangent arcs; each side is then cut back to its tangent point, keeping the
+/// part that was picked. A closed curve has no end to cut back and is left
+/// whole.
+fn fillet_curves(
+    e1: &FilletEntity,
+    click1: [f64; 2],
+    e2: &FilletEntity,
+    click2: [f64; 2],
+    radius: f64,
+    z: f64,
+) -> Option<(EntityType, EntityType, Option<EntityType>)> {
+    if radius < 1e-9 {
+        return None;
+    }
+    let (a, b) = (e1.kernel_curve()?, e2.kernel_curve()?);
+    let common = match e1 {
+        FilletEntity::Line(l) => l.common.clone(),
+        FilletEntity::Arc(a) => a.common.clone(),
+        FilletEntity::LwPoly { poly, .. } => poly.common.clone(),
+        FilletEntity::Curve(entity) => entity.common().clone(),
+    };
+    for fillet in ranked_fillets(&a, click1, &b, click2, radius) {
+        let (Some(first), Some(second)) = (
+            trim_to_tangent(e1, &a, fillet.tangent1, click1),
+            trim_to_tangent(e2, &b, fillet.tangent2, click2),
+        ) else {
+            continue;
+        };
+        return Some((
+            first,
+            second,
+            Some(EntityType::Arc(fillet_entity(&fillet, radius, z, &common))),
+        ));
+    }
+    None
+}
+
+/// One side of a fillet cut back to where the arc touches it, the picked part
+/// kept. `None` when the touch is off a bounded curve's drawn part — only a
+/// line may be extended to meet the arc.
+fn trim_to_tangent(
+    entity: &FilletEntity,
+    curve: &KernelCurve,
+    touch: [f64; 2],
+    click: [f64; 2],
+) -> Option<EntityType> {
+    match entity {
+        FilletEntity::Line(l) => trim_line_to_point(l, touch, click).map(EntityType::Line),
+        FilletEntity::LwPoly { poly, seg_idx, .. } => {
+            let line = lwpoly_seg_as_line(poly, *seg_idx);
+            let trimmed = trim_line_to_point(&line, touch, click)?;
+            Some(EntityType::LwPolyline(rebuild_poly_from_trimmed_line(poly, *seg_idx, &line, &trimmed)))
+        }
+        FilletEntity::Arc(arc) => {
+            let (centre, _, start, end, _) = arc_geom(arc);
+            let at = arc_angle_at(centre, touch);
+            let clamped = clamp_angle_to_arc(at, start, end);
+            if (norm_angle(at) - norm_angle(clamped)).abs() > 0.01 {
+                return None;
+            }
+            let picked = clamp_angle_to_arc(arc_angle_at(centre, click), start, end);
+            Some(EntityType::Arc(
+                if (clamped - start).rem_euclid(TAU) <= (picked - start).rem_euclid(TAU) {
+                    trim_arc(arc, clamped, end)
+                } else {
+                    trim_arc(arc, start, clamped)
+                },
+            ))
+        }
+        FilletEntity::Curve(source) => {
+            let at = curve.parameter_at(touch);
+            let on = curve.point_at(at);
+            let scale = 1e-6 * (1.0 + touch[0].abs().max(touch[1].abs()));
+            if (on[0] - touch[0]).hypot(on[1] - touch[1]) > scale.max(1e-6 * curve.length()) {
+                return None;
+            }
+            if curve.is_closed() {
+                return Some(source.clone());
+            }
+            let keep_end = curve.parameter_at(click) >= at;
+            match source {
+                // Its plan image runs the entity's own parameter only when
+                // it faces up; a mirrored one is left alone.
+                EntityType::Ellipse(ellipse) if ellipse.normal.z > 0.0 => {
+                    let mut trimmed = ellipse.clone();
+                    trimmed.common.handle = Handle::NULL;
+                    let sweep = {
+                        let raw = ellipse.end_parameter - ellipse.start_parameter;
+                        if raw <= 0.0 { raw + TAU } else { raw }
+                    };
+                    let cut = ellipse.start_parameter + at * sweep;
+                    if keep_end {
+                        trimmed.start_parameter = cut;
+                    } else {
+                        trimmed.end_parameter = cut;
+                    }
+                    Some(EntityType::Ellipse(trimmed))
+                }
+                EntityType::Spline(spline) => {
+                    let (low, high) = super::spline_ops::spline_range(spline)?;
+                    let (head, tail) = super::spline_ops::spline_cut(spline, low + at * (high - low))?;
+                    Some(EntityType::Spline(if keep_end { tail } else { head }))
+                }
+                _ => None,
+            }
+        }
+    }
 }
 
 /// Trim a line endpoint nearest to the intersection point, keeping the click side.

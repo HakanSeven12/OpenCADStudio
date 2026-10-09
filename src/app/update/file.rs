@@ -408,10 +408,16 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
 }
 
 /// Stamp the owning entity's effective color index onto a plot wire so CTB
-/// plot-style lookups (`wire.aci > 0`) apply: an entity's own ACI 1-255 is
-/// used as-is, ByLayer resolves through the layer table, and true-color
-/// objects keep `aci = 0` ("0 means true-color" — no CTB mapping). Wires
-/// whose owner cannot be resolved keep the index they carry.
+/// plot-style lookups (`wire.aci > 0`) apply.
+///
+/// Direct entities are resolved here from their authored color/layer. Expanded
+/// block wires are different: `BlockCache` has already resolved their effective
+/// ACI through ByBlock and layer-0/ByLayer inheritance. Their wire name points
+/// at the host INSERT rather than the child entity that produced the geometry,
+/// so resolving that INSERT again would destroy the child's effective ACI.
+///
+/// In particular, a true-color INSERT on an indexed-color layer would overwrite
+/// an inherited child ACI with 0 and bypass the CTB entirely.
 fn plot_owner_aci(scene: &crate::scene::Scene, wire: &mut crate::scene::WireModel) {
     let Some(handle) = crate::scene::Scene::handle_from_wire_name(&wire.name) else {
         return;
@@ -419,6 +425,14 @@ fn plot_owner_aci(scene: &crate::scene::Scene, wire: &mut crate::scene::WireMode
     let Some(entity) = scene.document.get_entity(handle) else {
         return;
     };
+
+    // Expanded block geometry already carries the effective ACI calculated by
+    // BlockCache. `wire.name` identifies the host INSERT for picking, not the
+    // block child whose color inheritance produced `wire.aci`.
+    if matches!(entity, codec::EntityType::Insert(_)) {
+        return;
+    }
+
     let common = entity.common();
     wire.aci = match &common.color {
         codec::types::Color::Index(index) => *index,
@@ -433,6 +447,77 @@ fn plot_owner_aci(scene: &crate::scene::Scene, wire: &mut crate::scene::WireMode
             .unwrap_or(7),
         _ => 0,
     };
+}
+
+#[cfg(test)]
+mod plot_owner_aci_tests {
+    use super::plot_owner_aci;
+
+    #[test]
+    fn expanded_block_wire_keeps_its_resolved_effective_aci() {
+        let mut scene = crate::scene::Scene::new();
+
+        // Real-world regression case:
+        // the INSERT itself has explicit true-color white, while its block
+        // children are layer 0 + ByLayer. BlockCache resolves those children
+        // through the INSERT's layer and stores that effective ACI on the wire.
+        let mut insert = codec::entities::Insert::new(
+            "*U264",
+            codec::types::Vector3::ZERO,
+        );
+        insert.common.color = codec::types::Color::Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+
+        let insert_handle = scene
+            .document
+            .add_entity(codec::EntityType::Insert(insert))
+            .expect("insert must be added");
+
+        let mut wire = crate::scene::WireModel::default();
+        wire.name = insert_handle.value().to_string();
+
+        // Pretend BlockCache resolved the layer-0 child to indexed color 5.
+        // The plot preparation step must preserve it instead of replacing it
+        // with ACI 0 from the host INSERT's true color.
+        wire.aci = 5;
+
+        plot_owner_aci(&scene, &mut wire);
+
+        assert_eq!(
+            wire.aci, 5,
+            "expanded block geometry must keep the effective ACI already resolved by BlockCache"
+        );
+    }
+
+    #[test]
+    fn direct_entity_still_refreshes_aci_from_its_owner() {
+        let mut scene = crate::scene::Scene::new();
+
+        let mut line = codec::entities::Line::from_points(
+            codec::types::Vector3::ZERO,
+            codec::types::Vector3::new(1.0, 0.0, 0.0),
+        );
+        line.common.color = codec::types::Color::Index(1);
+
+        let line_handle = scene
+            .document
+            .add_entity(codec::EntityType::Line(line))
+            .expect("line must be added");
+
+        let mut wire = crate::scene::WireModel::default();
+        wire.name = line_handle.value().to_string();
+        wire.aci = 5;
+
+        plot_owner_aci(&scene, &mut wire);
+
+        assert_eq!(
+            wire.aci, 1,
+            "ordinary entity plot wires must still resolve ACI from their owner"
+        );
+    }
 }
 
 fn plot_scene_content(
@@ -1710,6 +1795,22 @@ impl OpenCADStudio {
         }
     }
 
+    /// Drop Plot-dialog state that belongs to the previously active drawing.
+    ///
+    /// Plot settings such as paper size and CTB are document/layout data.
+    /// A newly opened DWG may reuse the same tab index and layout name as the
+    /// startup drawing, so `(tab, layout)` alone is not enough to identify the
+    /// context. Keeping that cache makes the first Plot dialog show the startup
+    /// A4/no-CTB state; the second opening then appears correct only because the
+    /// first one refreshed the runtime state.
+    fn reset_plot_session_for_opened_document(&mut self) {
+        self.plot_prev = None;
+        self.plot_prev_context = None;
+        self.plot_reconcile_printer_media = None;
+        self.plot_setup_template = None;
+        self.plot_window = None;
+    }
+
     pub(super) fn on_file_opened(
         &mut self,
         name: String,
@@ -1981,6 +2082,12 @@ impl OpenCADStudio {
             self.tabs[i].scene.load_current_layout_state();
             self.tabs[i].refresh_active_ucs();
         }
+
+        // The tab may have been reused for the newly opened file. Any Plot
+        // dialog cache belongs to the previous/startup drawing and must not
+        // win over this DWG's embedded layout settings on the first Ctrl+P.
+        self.reset_plot_session_for_opened_document();
+
         // Object isolation is session-only. A newly opened drawing must
         // not inherit the previous tab's filter, and persisted entity
         // visibility remains independent (not an isolation session).
@@ -3794,22 +3901,27 @@ impl OpenCADStudio {
         let previous_style = self.active_plot_style.clone();
         let previous_window = self.plot_window;
 
-        // Once Print All has an explicit override, reopening Options must keep
-        // those settings instead of replacing them with the active layout's
-        // page setup.
-        let keep_print_all_override = self.print_all_settings_override;
-
-        // Refresh runtime data such as printers, paper sizes, plot styles and
-        // named page setups.
+        // Refresh runtime-only data such as printers, available media,
+        // CTB names, scales and page-setup rows.
+        //
+        // `on_plot_dialog_open()` also seeds the editor from the active
+        // layout. That is correct for normal PLOT, but Print All Options is a
+        // shared batch override editor: its persisted user choices must win.
         let task = self.on_plot_dialog_open();
 
-        if keep_print_all_override {
-            // Restore only the user-editable plot settings. Runtime lists populated
-            // above remain intact.
-            self.plot_dialog.copy_settings_from(&previous);
-            self.active_plot_style = previous_style.clone();
-            self.plot_window = previous_window;
-        }
+        // Restore only user-editable values. `copy_settings_from` deliberately
+        // leaves the freshly refreshed runtime lists intact.
+        //
+        // Do this even on the first Print All Options opening after restarting
+        // OCS. Previously this happened only when `print_all_settings_override`
+        // was already true, so the first opening always fell back to the
+        // active layout/default A4 and lost the persisted CTB selection.
+        self.plot_dialog.copy_settings_from(&previous);
+
+        // Preserve the parsed CTB when it matches the restored selection.
+        // If it is absent/stale, dialog_plot_style() can resolve it by name.
+        self.active_plot_style = previous_style.clone();
+        self.plot_window = previous_window;
 
         self.print_all_options_prev = Some(previous);
         self.print_all_plot_style_prev = Some(previous_style);
@@ -4342,7 +4454,15 @@ impl OpenCADStudio {
     /// layout's plot settings and the printers found on the system.
     pub(super) fn on_plot_dialog_open(&mut self) -> Task<Message> {
         use crate::io::paper_catalog::Orientation;
+
+        let cur = self.tabs[self.active_tab].scene.current_layout.clone();
+        let same_context = self
+            .plot_prev_context
+            .as_ref()
+            .is_some_and(|(tab, layout)| *tab == self.active_tab && layout == &cur);
+
         let previous = self.plot_dialog.clone();
+
         let scales: Vec<(String, f64)> = self.tabs[self.active_tab]
             .scene
             .scale_list()
@@ -4427,31 +4547,72 @@ impl OpenCADStudio {
             self.command_line
                 .push_warning(crate::tf!("Could not list printers: {error}").as_ref());
         }
-        self.plot_prev = Some(previous);
-        let cur = self.tabs[self.active_tab].scene.current_layout.clone();
+        self.plot_prev = Some(previous.clone());
         let layout_entry = format!("*{cur}*");
-        // The auto-applied page setup must not reset the output device: a
-        // drawing rarely stores one, so honouring it would snap the dialog
-        // back to the system default on every open. The user's last choice
-        // (persisted across sessions with the rest of the dialog) survives
-        // unless the setup names an explicit device of its own.
-        let kept_printer = self.plot_dialog.printer.clone();
-        let kept_to_file = self.plot_dialog.to_file;
-        if self.tabs[self.active_tab]
-            .scene
-            .plot_settings_for(&cur)
-            .is_some()
-        {
-            self.select_page_setup(&layout_entry);
+
+        if same_context {
+            // #1654: reopening Plot for the same drawing/layout must keep the
+            // values the user just edited. The layout page setup is the initial
+            // seed, not something that should overwrite paper, scale, CTB,
+            // orientation, area and output choices on every Ctrl+P.
+            //
+            // `copy_settings_from` deliberately leaves refreshed runtime lists
+            // (printers, media, scales, page setups, etc.) untouched.
+            self.plot_dialog.copy_settings_from(&previous);
+            self.plot_dialog.selected_setup = previous.selected_setup.clone();
+
+            // A custom ratio such as 1:3 may not exist in the drawing's named
+            // scale list. select_page_setup() normally adds it while loading a
+            // PlotSettings, but same-context reopening intentionally skips that
+            // reload. Keep the restored custom scale available to the picker so
+            // the validation below does not collapse it to 1:1.
+            if !self.plot_dialog.fit_to_paper
+                && !self
+                    .plot_dialog
+                    .scales
+                    .iter()
+                    .any(|(name, _)| name == &self.plot_dialog.scale)
+            {
+                let factor = plot_dialog_scale_factor(&self.plot_dialog);
+
+                if factor.is_finite() && factor > 0.0 {
+                    let name = self.plot_dialog.scale.clone();
+                    self.plot_dialog.scales.push((name, factor));
+                    self.plot_dialog.scales.sort_by(|a, b| {
+                        a.1.partial_cmp(&b.1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+            }
         } else {
-            self.select_page_setup(crate::ui::window::plot::SETUP_PREV);
+            // First open for this tab/layout: seed the editor from its actual
+            // page setup. An explicit setup selection later still uses
+            // `select_page_setup` and therefore intentionally replaces fields.
+            //
+            // Keep the chosen output device when a drawing page setup does not
+            // name one of its own.
+            let kept_printer = self.plot_dialog.printer.clone();
+            let kept_to_file = self.plot_dialog.to_file;
+
+            if self.tabs[self.active_tab]
+                .scene
+                .plot_settings_for(&cur)
+                .is_some()
+            {
+                self.select_page_setup(&layout_entry);
+            } else {
+                self.select_page_setup(crate::ui::window::plot::SETUP_PREV);
+            }
+
+            let setup_named_a_device =
+                self.plot_dialog.printer.is_some() || self.plot_dialog.to_file;
+            if !setup_named_a_device {
+                self.plot_dialog.printer = kept_printer;
+                self.plot_dialog.to_file = kept_to_file;
+            }
         }
-        let setup_named_a_device =
-            self.plot_dialog.printer.is_some() || self.plot_dialog.to_file;
-        if !setup_named_a_device {
-            self.plot_dialog.printer = kept_printer;
-            self.plot_dialog.to_file = kept_to_file;
-        }
+
+        self.plot_prev_context = Some((self.active_tab, cur.clone()));
         // A persisted plot window (saved with the dialog settings) restores
         // across sessions; a freshly loaded one wins so the two stay in sync.
         if self.plot_window.is_none() {
@@ -4481,29 +4642,57 @@ impl OpenCADStudio {
             }
         }
         self.active_modal = Some(crate::app::ModalKind::Plot);
-        self.request_printer_media()
+        // Loading printer capabilities is informational when Plot merely
+        // opens. It must not replace the sheet stored in the drawing.
+        self.request_printer_media(false)
     }
 
     /// Keep the dialog's view of the selected printer's media current: use the
     /// session cache when the printer was asked before, otherwise ask it in
     /// the background and clear the stale answer meanwhile. PDF output and
     /// the default printer list the catalogue instead.
-    fn request_printer_media(&mut self) -> Task<Message> {
-        let d = &mut self.plot_dialog;
-        let Some(printer) = (!d.to_file).then(|| d.printer.clone()).flatten() else {
-            d.printer_media = None;
+    fn request_printer_media(&mut self, reconcile: bool) -> Task<Message> {
+        let Some(printer) = (!self.plot_dialog.to_file)
+            .then(|| self.plot_dialog.printer.clone())
+            .flatten()
+        else {
+            self.plot_dialog.printer_media = None;
+            self.plot_reconcile_printer_media = None;
             return Task::none();
         };
-        if let Some(caps) = crate::io::plot_device::cached_printer_capabilities(&printer) {
-            d.printer_media = Some(caps);
+
+        // PAPERUPDATE is relevant after the user explicitly changes the
+        // device/page setup. Merely reopening Plot must leave the drawing's
+        // stored paper untouched.
+        self.plot_reconcile_printer_media =
+            reconcile.then(|| printer.clone());
+
+        if let Some(caps) =
+            crate::io::plot_device::cached_printer_capabilities(&printer)
+        {
+            self.plot_dialog.printer_media = Some(caps);
+
+            if reconcile {
+                self.reconcile_sheet_with_printer(&printer);
+            }
+
             return Task::none();
         }
-        d.printer_media = None;
+
+        self.plot_dialog.printer_media = None;
         let name = printer.clone();
+
         background_task(
             crate::t!("Printer capabilities"),
             move || crate::io::plot_device::printer_capabilities(&printer),
-            move |caps| Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::PrinterMedia(name, caps)),
+            move |caps| {
+                Message::PlotDlg(
+                    crate::ui::window::plot::PlotDlgMsg::PrinterMedia(
+                        name,
+                        caps,
+                    ),
+                )
+            },
         )
     }
 
@@ -4668,6 +4857,9 @@ impl OpenCADStudio {
         };
         match msg {
             M::Close => {
+                // Keep the user's last Plot choices available for the next
+                // invocation even when the dialog was simply closed.
+                self.save_config();
                 self.close_active_modal();
                 Task::none()
             }
@@ -4685,14 +4877,35 @@ impl OpenCADStudio {
                     self.plot_dialog.printer = Some(s);
                 }
                 self.save_config();
-                self.request_printer_media()
+                // This is an explicit device change, so PAPERUPDATE may
+                // reconcile an unsupported sheet when its capabilities arrive.
+                self.request_printer_media(true)
             }
             M::PrinterMedia(printer, caps) => {
-                let d = &mut self.plot_dialog;
-                if !d.to_file && d.printer.as_deref() == Some(printer.as_str()) {
-                    d.printer_media = caps;
-                    self.reconcile_sheet_with_printer(&printer);
+                let still_current =
+                    !self.plot_dialog.to_file
+                        && self.plot_dialog.printer.as_deref()
+                            == Some(printer.as_str());
+
+                if still_current {
+                    self.plot_dialog.printer_media = caps;
+
+                    let reconcile = self
+                        .plot_reconcile_printer_media
+                        .as_deref()
+                        .is_some_and(|pending| {
+                            pending.eq_ignore_ascii_case(&printer)
+                        });
+
+                    if reconcile {
+                        // Keep the explicit-device context alive while this
+                        // printer remains selected. Capability updates for the
+                        // same user-selected device must continue to obey
+                        // PAPERUPDATE.
+                        self.reconcile_sheet_with_printer(&printer);
+                    }
                 }
+
                 Task::none()
             }
             M::CustomPaper(msg) => {
@@ -4952,13 +5165,48 @@ impl OpenCADStudio {
                 Task::done(Message::Command("PLOTWINDOW".into()))
             }
             M::SelectSetup(name) => {
+                // Print All Options edits the page setups represented by the
+                // layout rows. With "Save changes to layout" enabled, preserve
+                // the setup we are leaving before another one is loaded.
+                if self.print_all_options
+                    && self.plot_dialog.save_to_layout
+                    && self.plot_dialog.selected_setup != name
+                {
+                    let previous = self.plot_dialog.selected_setup.clone();
+
+                    if is_layout_entry(&previous) {
+                        let layout = layout_entry_name(&previous).to_string();
+                        self.apply_dialog_to_named_layout(&layout);
+                    } else if previous
+                        == crate::ui::window::plot::SETUP_PREV
+                    {
+                        // `<previous>` is a transient snapshot, not an actual
+                        // page setup. `plot_prev_context` records which layout
+                        // that snapshot came from.
+                        //
+                        // If the user returns to that same layout, commit the
+                        // restored snapshot to it before reloading the row.
+                        if let Some((tab, layout)) =
+                            self.plot_prev_context.clone()
+                        {
+                            let target = format!("*{layout}*");
+
+                            if tab == self.active_tab && name == target {
+                                self.apply_dialog_to_named_layout(&layout);
+                            }
+                        }
+                    }
+                }
+
                 self.select_page_setup(&name);
+
                 if self.print_all_options {
                     self.plot_dialog.paper_space = true;
                     self.plot_dialog.area = "Layout".into();
                 }
+
                 // The setup may name a different printer.
-                self.request_printer_media()
+                self.request_printer_media(true)
             }
             M::SetCurrent => {
                 self.apply_dialog_to_layout();
@@ -5385,6 +5633,38 @@ impl OpenCADStudio {
         self.apply_plot_page_settings();
     }
 
+    /// Persist the current Plot editor into a specific layout.
+    ///
+    /// This is needed by Print All Options because selecting `*Layout1*`,
+    /// `*Layout2*`, etc. does not switch `scene.current_layout`.
+    fn apply_dialog_to_named_layout(&mut self, layout_name: &str) {
+        use codec::objects::{PlotPaperUnits, PlotSettings};
+
+        let i = self.active_tab;
+
+        let base = self.tabs[i]
+            .scene
+            .plot_settings_for(layout_name)
+            .unwrap_or_else(|| {
+                let mut settings = PlotSettings::new("");
+                settings.paper_units = PlotPaperUnits::Millimeters;
+                settings
+            });
+
+        let ps = self.plot_settings_from_dialog(base);
+
+        if self.tabs[i]
+            .scene
+            .set_layout_plot_settings(layout_name, &ps)
+        {
+            self.tabs[i].dirty = true;
+
+            if self.tabs[i].scene.current_layout == layout_name {
+                self.tabs[i].scene.bump_geometry_no_blocks();
+            }
+        }
+    }
+
     /// Open a preview PDF, export a PDF, or send the job to the chosen printer.
     fn on_plot_dlg_commit(&mut self, preview: bool) -> Task<Message> {
         let d = self.plot_dialog.clone();
@@ -5534,10 +5814,21 @@ impl OpenCADStudio {
         if d.style_name.is_empty() || d.style_missing || !d.apply_plot_styles {
             return None;
         }
-        self.active_plot_style
+
+        // Fast path: the selected table is already active.
+        if let Some(table) = self
+            .active_plot_style
             .as_ref()
             .filter(|table| table.name.eq_ignore_ascii_case(&d.style_name))
-            .cloned()
+        {
+            return Some(table.clone());
+        }
+
+        // The dialog selection is persisted separately from the parsed CTB
+        // object. After reopening a drawing the name may be correct while the
+        // in-memory table is still the previous/default one. Plotting must not
+        // silently ignore the selected CTB in that state.
+        crate::io::plot_style::PlotStyleTable::load_named(&d.style_name).ok()
     }
 
     pub(in crate::app) fn window_plot_job(&self) -> Option<PdfPageInput> {
@@ -6675,6 +6966,322 @@ mod plot_device_persistence_tests {
             "the chosen printer must survive the auto-applied page setup"
         );
         assert!(!app.plot_dialog.to_file);
+    }
+
+    /// Reopening Plot in the same tab/layout keeps the user's most recent
+    /// paper, scale and CTB choices instead of reloading the layout page setup
+    /// over them. Regression test for #1654.
+    #[test]
+    fn reopening_same_plot_context_keeps_recent_settings() {
+        let mut app = OpenCADStudio::new_for_test();
+
+        // First open seeds from the drawing/layout as usual.
+        let _ = app.on_plot_dialog_open();
+
+        // User edits the high-frequency Plot settings.
+        app.plot_dialog.paper = "ISO_A3_(297.00_x_420.00_MM)".into();
+        app.plot_dialog.paper_width_mm = 297.0;
+        app.plot_dialog.paper_height_mm = 420.0;
+        app.plot_dialog.scale = "1:100".into();
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.style_name = "office.ctb".into();
+        app.plot_dialog.apply_plot_styles = true;
+
+        // Reopening Ctrl+P in the same layout must not reapply the layout's
+        // old page setup and erase those choices.
+        let _ = app.on_plot_dialog_open();
+
+        assert_eq!(
+            app.plot_dialog.paper,
+            "ISO_A3_(297.00_x_420.00_MM)"
+        );
+        assert_eq!(app.plot_dialog.scale, "1:100");
+        assert!(!app.plot_dialog.fit_to_paper);
+        assert_eq!(app.plot_dialog.style_name, "office.ctb");
+        assert!(app.plot_dialog.apply_plot_styles);
+    }
+
+    /// Opening a different drawing in a reused tab must invalidate the Plot
+    /// session cache. The first Plot dialog must read paper and CTB from the
+    /// newly opened document instead of showing the startup drawing's values.
+    #[test]
+    fn newly_opened_document_forces_first_plot_dialog_to_read_layout() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+
+        app.tabs[i].scene.current_layout = "Layout1".into();
+
+        let mut ps = app.tabs[i]
+            .scene
+            .plot_settings_for("Layout1")
+            .expect("Layout1 must exist");
+
+        ps.paper_size = "ISO_A2_(420.00_x_594.00_MM)".into();
+        ps.paper_width = 420.0;
+        ps.paper_height = 594.0;
+        ps.current_style_sheet =
+            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        ps.flags.plot_plot_styles = true;
+
+        assert!(
+            app.tabs[i]
+                .scene
+                .set_layout_plot_settings("Layout1", &ps)
+        );
+
+        // Reproduce stale state inherited from the startup/previous drawing.
+        app.plot_dialog.paper =
+            "ISO_A4_(210.00_x_297.00_MM)".into();
+        app.plot_dialog.style_name.clear();
+        app.plot_dialog.apply_plot_styles = false;
+
+        app.plot_prev = Some(app.plot_dialog.clone());
+        app.plot_prev_context =
+            Some((i, "Layout1".into()));
+
+        // Installing another drawing must make that state unusable.
+        app.reset_plot_session_for_opened_document();
+
+        assert!(app.plot_prev.is_none());
+        assert!(app.plot_prev_context.is_none());
+
+        let _ = app.on_plot_dialog_open();
+
+        assert_eq!(
+            app.plot_dialog.paper,
+            "ISO_A2_(420.00_x_594.00_MM)",
+            "the first Plot opening must use the new drawing's paper"
+        );
+
+        assert!(
+            app.plot_dialog
+                .style_name
+                .eq_ignore_ascii_case(
+                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
+                ),
+            "the first Plot opening must use the new drawing's CTB"
+        );
+
+        assert!(
+            app.plot_dialog.apply_plot_styles,
+            "the stored CTB must already be enabled on the first Plot opening"
+        );
+    }
+
+    /// Print All Options is a shared batch-settings editor. On the first
+    /// opening after restarting OCS it must keep the persisted user choices
+    /// instead of replacing them with the active layout's page setup.
+    #[test]
+    fn print_all_options_keeps_persisted_plot_preferences_on_first_open() {
+        let mut app = OpenCADStudio::new_for_test();
+
+        // Simulate preferences restored from the previous application session.
+        app.plot_dialog.paper =
+            "ISO_A2_(420.00_x_594.00_MM)".into();
+        app.plot_dialog.paper_width_mm = 420.0;
+        app.plot_dialog.paper_height_mm = 594.0;
+        app.plot_dialog.scale = "1:1000".into();
+        app.plot_dialog.style_name =
+            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        app.plot_dialog.apply_plot_styles = true;
+
+        // Fresh process: no explicit Print All override exists yet.
+        app.print_all_settings_override = false;
+
+        let _ = app.on_print_all_options();
+
+        assert_eq!(
+            app.plot_dialog.paper,
+            "ISO_A2_(420.00_x_594.00_MM)",
+            "first Print All Options opening must keep the persisted paper"
+        );
+
+        assert_eq!(
+            app.plot_dialog.scale,
+            "1:1000",
+            "first Print All Options opening must keep the persisted scale"
+        );
+
+        assert!(
+            app.plot_dialog
+                .style_name
+                .eq_ignore_ascii_case(
+                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
+                ),
+            "first Print All Options opening must keep the persisted CTB"
+        );
+
+        assert!(
+            app.plot_dialog.apply_plot_styles,
+            "the persisted CTB must remain enabled"
+        );
+
+        assert!(
+            app.print_all_options,
+            "the dialog must remain in Print All Options mode"
+        );
+    }
+
+    /// `<previous>` belongs to the layout that produced the snapshot.
+    /// Returning to that layout with "Save changes to layout" enabled must
+    /// preserve the restored paper/CTB instead of reloading the old embedded
+    /// page setup over it.
+    #[test]
+    fn previous_snapshot_is_saved_back_to_its_origin_layout() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+
+        app.tabs[i].scene.current_layout = "Layout1".into();
+
+        // Layout1 still contains an old page setup.
+        let mut stored = app.tabs[i]
+            .scene
+            .plot_settings_for("Layout1")
+            .expect("Layout1 must exist");
+
+        stored.paper_size = "ISO_A4_(210.00_x_297.00_MM)".into();
+        stored.paper_width = 210.0;
+        stored.paper_height = 297.0;
+        stored.current_style_sheet.clear();
+        stored.flags.plot_plot_styles = false;
+
+        assert!(
+            app.tabs[i]
+                .scene
+                .set_layout_plot_settings("Layout1", &stored)
+        );
+
+        // `<previous>` is the desired state that originally belonged to
+        // Layout1.
+        app.print_all_options = true;
+        app.plot_prev_context = Some((i, "Layout1".into()));
+        app.plot_dialog.selected_setup =
+            crate::ui::window::plot::SETUP_PREV.into();
+
+        app.plot_dialog.paper =
+            "ISO_A2_(420.00_x_594.00_MM)".into();
+        app.plot_dialog.paper_width_mm = 420.0;
+        app.plot_dialog.paper_height_mm = 594.0;
+        app.plot_dialog.style_name =
+            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        app.plot_dialog.apply_plot_styles = true;
+        app.plot_dialog.save_to_layout = true;
+
+        let _ = app.on_plot_dlg(
+            crate::ui::window::plot::PlotDlgMsg::SelectSetup(
+                "*Layout1*".into(),
+            ),
+        );
+
+        let saved = app.tabs[i]
+            .scene
+            .plot_settings_for("Layout1")
+            .expect("Layout1 must still exist");
+
+        assert_eq!(
+            saved.paper_size,
+            "ISO_A2_(420.00_x_594.00_MM)"
+        );
+
+        assert!(
+            saved.current_style_sheet.eq_ignore_ascii_case(
+                crate::io::plot_style::MONOCHROME_PLOT_STYLE
+            )
+        );
+
+        assert!(saved.flags.plot_plot_styles);
+
+        assert_eq!(
+            app.plot_dialog.paper,
+            "ISO_A2_(420.00_x_594.00_MM)"
+        );
+
+        assert!(
+            app.plot_dialog
+                .style_name
+                .eq_ignore_ascii_case(
+                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
+                )
+        );
+    }
+
+    /// A CTB selected in the dialog must be usable even when the parsed
+    /// active table was not restored with it. This is the state seen after
+    /// reopening a drawing: the dropdown can name the correct CTB while the
+    /// first preview otherwise plots using raw layer colours.
+    #[test]
+    fn selected_ctb_is_resolved_when_active_table_is_stale() {
+        let mut app = OpenCADStudio::new_for_test();
+
+        app.plot_dialog.style_name =
+            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        app.plot_dialog.apply_plot_styles = true;
+        app.plot_dialog.style_missing = false;
+
+        // Reproduce a fresh-session mismatch: the visible selection exists,
+        // but no matching parsed table is active yet.
+        app.active_plot_style = None;
+
+        let table = app
+            .dialog_plot_style(&app.plot_dialog)
+            .expect("selected CTB must be resolved by name");
+
+        assert!(
+            table
+                .name
+                .eq_ignore_ascii_case(
+                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
+                ),
+            "the table used for plotting must match the visible CTB selection"
+        );
+    }
+
+    /// Printer capability discovery on merely opening Plot must never mutate
+    /// the paper stored in the drawing. PAPERUPDATE is applied only after an
+    /// explicit device/page-setup choice.
+    #[test]
+    fn opening_plot_does_not_replace_sheet_when_printer_media_arrives() {
+        use crate::io::paper_catalog::{resolve, Margins};
+        use crate::io::plot_device::{
+            PrinterCapabilities,
+            PrinterMedia,
+        };
+
+        let a2 =
+            resolve("ISO_A2_(420.00_x_594.00_MM)").expect("A2");
+        let a4 =
+            resolve("ISO_A4_(210.00_x_297.00_MM)").expect("A4");
+
+        let caps = std::sync::Arc::new(PrinterCapabilities {
+            media: vec![PrinterMedia {
+                paper: a4.clone(),
+                margins: Margins::uniform(3.0),
+                borderless: false,
+            }],
+            default_paper: Some(a4),
+        });
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.plot_dialog.to_file = false;
+        app.plot_dialog.printer =
+            Some("OCS Test Printer".into());
+        app.plot_dialog.paper = a2.canonical.to_string();
+        app.plot_dialog.paper_update = 1;
+
+        // No explicit printer change is pending: this models the asynchronous
+        // capability reply caused only by opening the Plot dialog.
+        app.plot_reconcile_printer_media = None;
+
+        let _ = app.on_plot_dlg(crate::ui::window::plot::PlotDlgMsg::PrinterMedia(
+            "OCS Test Printer".into(),
+            Some(caps),
+        ));
+
+        assert_eq!(
+            app.plot_dialog.paper,
+            a2.canonical,
+            "opening Plot must preserve the drawing's stored sheet"
+        );
     }
 
     /// A layout whose plot settings name an explicit device wins over the

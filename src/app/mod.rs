@@ -1109,6 +1109,14 @@ pub(super) struct OpenCADStudio {
     /// Snapshot of the dialog's settings taken when it opened, restored by the
     /// `<previous>` list entry.
     plot_prev: Option<crate::ui::window::plot::PlotDialogState>,
+    /// Tab/layout that last owned the Plot dialog. Reopening Plot in the same
+    /// context keeps the user's last paper, scale, CTB and output choices
+    /// instead of reapplying the layout page setup over them.
+    plot_prev_context: Option<(usize, String)>,
+    /// Printer whose capability reply is allowed to reconcile the current
+    /// sheet. Set only after an explicit printer/page-setup choice; merely
+    /// opening Plot must never replace the drawing's stored paper size.
+    plot_reconcile_printer_media: Option<String>,
     /// Full source settings behind the fields currently shown in Plot.
     plot_setup_template: Option<codec::objects::PlotSettings>,
     /// Paper layouts shown by Print All, in tab order with their selection.
@@ -4400,6 +4408,8 @@ impl OpenCADStudio {
             plot_orientation: crate::io::paper_catalog::Orientation::Landscape,
             plot_dialog: crate::ui::window::plot::PlotDialogState::default(),
             plot_prev: None,
+            plot_prev_context: None,
+            plot_reconcile_printer_media: None,
             plot_setup_template: None,
             print_all_layouts: Vec::new(),
             print_all_options: false,

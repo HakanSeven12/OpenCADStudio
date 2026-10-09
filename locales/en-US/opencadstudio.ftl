@@ -2509,6 +2509,12 @@ inquiry =
     .id-specify-point = ID  Specify point:
     .list-no-entities-selected-select-entities-firs = LIST: no entities selected. Select entities first.
     .massprop-no-entities-selected-select-entities = MASSPROP: no entities selected. Select entities first.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ has no closed body to measure.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Volume=__ocs_fmt_1__  Centroid=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Moments of inertia  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Products of inertia  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Radii of gyration  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Principal moments about centroid  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE  Select object to measure:
     .measure-specify-segment-length = MEASURE  Specify segment length:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM  Enter an option [Distance/Radius/Angle/ARea]:

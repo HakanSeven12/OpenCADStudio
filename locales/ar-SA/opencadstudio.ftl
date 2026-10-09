@@ -2521,6 +2521,12 @@ inquiry =
     .id-specify-point = ID  حدد نقطة:
     .list-no-entities-selected-select-entities-firs = LIST: لم تُحدد كيانات. حدد الكيانات أولًا.
     .massprop-no-entities-selected-select-entities = MASSPROP: لم تُحدد كيانات. حدد الكيانات أولًا.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ لا يحتوي على جسم مغلق لقياسه.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  الحجم=__ocs_fmt_1__  مركز الثقل=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = عزوم القصور الذاتي  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = جداءات القصور الذاتي  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = أنصاف أقطار الدوران  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = العزوم الرئيسية حول مركز الثقل  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE  حدد الكائن المراد قياسه:
     .measure-specify-segment-length = MEASURE  حدد طول المقطع:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM  أدخل خيارًا [مسافة/نصف قطر/زاوية/مساحة]:

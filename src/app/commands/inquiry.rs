@@ -1114,6 +1114,63 @@ impl OpenCADStudio {
                     for (handle, _) in &selected {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
                             use crate::entities::traits::EntityTypeOps;
+                            // A solid's properties come from its B-rep: exact
+                            // where the kernel knows the shape, a fine mesh
+                            // otherwise — not the display mesh.
+                            let acis = match entity {
+                                codec::EntityType::Solid3D(solid) => Some(&solid.acis_data),
+                                codec::EntityType::Body(body) => Some(&body.acis_data),
+                                _ => None,
+                            };
+                            if let Some(acis) = acis {
+                                let properties = crate::scene::convert::solid3d_tess::kernel_acis_body(acis)
+                                    .and_then(|body| kernel::brep::mass_properties(&body));
+                                let Some(p) = properties else {
+                                    self.command_line.push_error(crate::tf!(
+                                        "MASSPROP: {} has no closed body to measure.",
+                                        crate::entities::names::dxf_name(entity),
+                                    ).as_ref());
+                                    continue;
+                                };
+                                let [x, y, z] = p.centroid;
+                                let [ix, iy, iz] = p.moment_of_inertia;
+                                let [pxy, pyz, pzx] = p.product_of_inertia;
+                                let [rx, ry, rz] = p.radii_of_gyration;
+                                let [i1, i2, i3] = p.principal_moments;
+                                self.command_line.push_output(crate::tf!(
+                                    "{}  Volume={:.4}  Centroid=({:.4},{:.4},{:.4})",
+                                    crate::entities::names::dxf_name(entity),
+                                    p.volume,
+                                    x,
+                                    y,
+                                    z,
+                                ).as_ref());
+                                self.command_line.push_output(crate::tf!(
+                                    "Moments of inertia  X={:.4}  Y={:.4}  Z={:.4}",
+                                    ix,
+                                    iy,
+                                    iz,
+                                ).as_ref());
+                                self.command_line.push_output(crate::tf!(
+                                    "Products of inertia  XY={:.4}  YZ={:.4}  ZX={:.4}",
+                                    pxy,
+                                    pyz,
+                                    pzx,
+                                ).as_ref());
+                                self.command_line.push_output(crate::tf!(
+                                    "Radii of gyration  X={:.4}  Y={:.4}  Z={:.4}",
+                                    rx,
+                                    ry,
+                                    rz,
+                                ).as_ref());
+                                self.command_line.push_output(crate::tf!(
+                                    "Principal moments about centroid  I={:.4}  J={:.4}  K={:.4}",
+                                    i1,
+                                    i2,
+                                    i3,
+                                ).as_ref());
+                                continue;
+                            }
                             if let Some(props) = entity.mass_props() {
                                 self.command_line.push_output(crate::tf!(
                                     "{}  Area={:.4}  Perimeter={:.4}  Centroid=({:.4},{:.4})",

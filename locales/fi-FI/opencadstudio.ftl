@@ -2508,6 +2508,12 @@ inquiry =
     .id-specify-point = ID Määritä piste:
     .list-no-entities-selected-select-entities-firs = LIST: entiteettejä ei ole valittu. Valitse ensin entiteetit.
     .massprop-no-entities-selected-select-entities = MASSPROP: entiteettejä ei ole valittu. Valitse ensin entiteetit.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ ei sisällä suljettua kappaletta mitattavaksi.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Tilavuus=__ocs_fmt_1__  Painopiste=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Hitausmomentit  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Tulohitausmomentit  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Hitaussäteet  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Päähitausmomentit painopisteen suhteen  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE Valitse mitattava kohde:
     .measure-specify-segment-length = MEASURE Määritä segmentin pituus:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM Enter vaihtoehto [etäisyys/säde/kulma/pinta-ala]:

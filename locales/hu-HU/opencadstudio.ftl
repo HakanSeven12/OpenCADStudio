@@ -2508,6 +2508,12 @@ inquiry =
     .id-specify-point = ID Pont megadása:
     .list-no-entities-selected-select-entities-firs = LIST: nincsenek kiválasztva entitások. Először válassza ki az entitásokat.
     .massprop-no-entities-selected-select-entities = MASSPROP: nincsenek kiválasztva entitások. Először válassza ki az entitásokat.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ nem tartalmaz mérhető zárt testet.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Térfogat=__ocs_fmt_1__  Súlypont=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Tehetetlenségi nyomatékok  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Deviációs nyomatékok  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Tehetetlenségi sugarak  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Fő tehetetlenségi nyomatékok a súlypontra  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE Válassza ki a mérendő objektumot:
     .measure-specify-segment-length = MEASURE Adja meg a szegmens hosszát:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM Enter egy opció [Távolság / Sugár / Szög / Terület]:

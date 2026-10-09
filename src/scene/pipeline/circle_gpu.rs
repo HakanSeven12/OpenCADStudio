@@ -306,7 +306,12 @@ pub fn extract_circle_instances(
 
 /// Allocation-free check whether this wire consists entirely of analytical circle/arc instances.
 pub fn can_extract_circle_instances(wire: &crate::scene::WireModel) -> bool {
-    if wire.tangent_geoms.is_empty()
+    // Patterned circular curves stay on the regular wire pipeline. Its dash
+    // path is shared with LINE/POLYLINE and remains consistent across file
+    // open/save cycles. The analytical circle path is reserved for continuous
+    // curves until its linetype phase/LOD behaviour is fully equivalent.
+    if wire.pattern_length > 0.0
+        || wire.tangent_geoms.is_empty()
         || !wire.fill_tris.is_empty()
         || wire.fill_is_3d
         || !wire.text_verts.is_empty()
@@ -344,7 +349,8 @@ pub fn extract_circle_instances_into(
     draw_depth: f32,
     out: &mut Vec<CircleInstance>,
 ) -> bool {
-    if wire.tangent_geoms.is_empty()
+    if wire.pattern_length > 0.0
+        || wire.tangent_geoms.is_empty()
         || !wire.fill_tris.is_empty()
         || wire.fill_is_3d
         || !wire.text_verts.is_empty()

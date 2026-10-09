@@ -2509,6 +2509,12 @@ inquiry =
     .id-specify-point = ID  ກຳນົດຈຸດ:
     .list-no-entities-selected-select-entities-firs = LIST: ບໍ່ມີອົງປະກອບຖືກເລືອກ. ກະລຸນາເລືອກອົງປະກອບກ່ອນ.
     .massprop-no-entities-selected-select-entities = MASSPROP: ບໍ່ມີອົງປະກອບຖືກເລືອກ. ກະລຸນາເລືອກອົງປະກອບກ່ອນ.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ ບໍ່ມີຕົວປິດໃຫ້ວັດແທກ.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  ປະລິມາດ=__ocs_fmt_1__  ຈຸດສູນກາງມວນ=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = ໂມເມັນຄວາມເສື່ອຍ  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = ຜົນຄູນຄວາມເສື່ອຍ  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = ລັດສະໝີການໝູນ  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = ໂມເມັນຫຼັກອ້ອມຈຸດສູນກາງມວນ  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE  ເລືອກວັດຖຸທີ່ຈະວັດແທກ:
     .measure-specify-segment-length = MEASURE  ກຳນົດຄວາມຍາວຂອງສ່ວນແບ່ງ:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM  ປ້ອນຕົວເລືອກ [Distance/Radius/Angle/ARea]:

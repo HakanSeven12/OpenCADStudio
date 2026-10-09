@@ -2497,6 +2497,12 @@ inquiry =
     .id-specify-point = ID निर्दिष्ट बिंदु:
     .list-no-entities-selected-select-entities-firs = LIST: कोई ऑब्जेक्ट नहीं चुना गया। पहले ऑब्जेक्ट चुनें।
     .massprop-no-entities-selected-select-entities = MASSPROP: कोई ऑब्जेक्ट नहीं चुना गया। पहले ऑब्जेक्ट चुनें।
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ में मापने के लिए कोई बंद पिंड नहीं है।
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  आयतन=__ocs_fmt_1__  केन्द्रक=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = जड़त्व आघूर्ण  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = जड़त्व गुणनफल  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = घूर्णन त्रिज्याएँ  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = केन्द्रक के सापेक्ष मुख्य आघूर्ण  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE ऑब्जेक्ट को मापने के लिए चुनें:
     .measure-specify-segment-length = MEASURE सेगमेंट की लंबाई निर्दिष्ट करें:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM विकल्प दर्ज करें [दूरी / त्रिज्या / कोण / क्षेत्रफल]:

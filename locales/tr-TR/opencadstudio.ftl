@@ -2490,6 +2490,12 @@ inquiry =
     .id-specify-point = ID  Noktayı belirtin:
     .list-no-entities-selected-select-entities-firs = LIST: Nesne seçilmedi. Önce nesneleri seçin.
     .massprop-no-entities-selected-select-entities = MASSPROP: Nesne seçilmedi. Önce nesneleri seçin.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ için ölçülecek kapalı gövde yok.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Hacim=__ocs_fmt_1__  Ağırlık merkezi=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Eylemsizlik momentleri  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Eylemsizlik çarpımları  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Jirasyon yarıçapları  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Ağırlık merkezine göre asal momentler  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE  Ölçülecek nesneyi seçin:
     .measure-specify-segment-length = MEASURE  Parça uzunluğunu belirtin:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM  Bir seçenek girin [Mesafe/Yarıçap/Açı/Alan]:

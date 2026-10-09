@@ -2509,6 +2509,12 @@ inquiry =
     .id-specify-point = ID Specificeer punt:
     .list-no-entities-selected-select-entities-firs = LIST: geen objecten geselecteerd. Selecteer eerst objecten.
     .massprop-no-entities-selected-select-entities = MASSPROP: geen objecten geselecteerd. Selecteer eerst objecten.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ heeft geen gesloten lichaam om te meten.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Volume=__ocs_fmt_1__  Zwaartepunt=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Traagheidsmomenten  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Deviatiemomenten  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Gyratiestralen  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Hoofdtraagheidsmomenten om het zwaartepunt  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE Selecteer object om mee te meten:
     .measure-specify-segment-length = MEASURE segmentlengte specificeren:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM Voer een optie in [Afstand / Straal / Hoek / Oppervlakte]:

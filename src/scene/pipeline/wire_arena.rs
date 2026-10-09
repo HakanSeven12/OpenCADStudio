@@ -1775,6 +1775,58 @@ mod tests {
     }
 
     #[test]
+    fn patterned_circle_and_arc_stay_in_regular_wire_pipeline() {
+        use crate::scene::model::wire_model::TangentGeom;
+
+        let mut circle = WireModel::default();
+        circle.points = vec![
+            [10.0, 0.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [-10.0, 0.0, 0.0],
+        ];
+        circle.tangent_geoms.push(TangentGeom::PlanarCircle {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+        });
+        circle.pattern_length = 1.0;
+        circle.pattern = [0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+        let mut arc = WireModel::default();
+        arc.points = vec![
+            [10.0, 0.0, 0.0],
+            [7.0, 7.0, 0.0],
+            [0.0, 10.0, 0.0],
+        ];
+        arc.tangent_geoms.push(TangentGeom::Arc {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+        });
+        arc.pattern_length = 1.0;
+        arc.pattern = [0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+        let wires = vec![circle, arc];
+        let depth_map = rustc_hash::FxHashMap::default();
+        let partitioned = partition_wires(&wires, &depth_map);
+
+        assert_eq!(
+            partitioned.circle_instances.len(),
+            0,
+            "patterned circular curves must not use the analytical circle path"
+        );
+        assert_eq!(
+            partitioned.regular.len(),
+            2,
+            "patterned circle and arc must fall back to the regular dashed-wire path"
+        );
+    }
+
+    #[test]
     fn partition_wires_partitions_thick_and_tapered_arcs() {
         use crate::scene::model::wire_model::TangentGeom;
 

@@ -760,83 +760,21 @@ impl OpenCADStudio {
                 }
             }
 
-            // -VIEW: the command-line form. Its presets set the standard
-            // orthographic and isometric views; the rest are VIEW's verbs.
+            // -VIEW: the command-line form of VIEW (modules/view/view_cmd.rs).
+            // The command gathers the input; `-VIEW >…` carries out what it
+            // gathered. A whole line (`-VIEW _O _FRONT`) feeds its words to
+            // the command one by one, as typed.
             "-VIEW" => {
-                use crate::command::KeywordCommand;
-                let c = KeywordCommand::new(
-                    "-VIEW",
-                    "Enter an option [?/Delete/Orthographic/Restore/Save/sEttings/Window]:",
-                    vec![
-                        ("?", "?", None),
-                        ("Delete", "DELETE", Some("Enter view name(s) to delete:")),
-                        ("Orthographic", "ORTHOGRAPHIC", None),
-                        ("Restore", "RESTORE", Some("Enter view name to restore:")),
-                        ("Save", "SAVE", Some("Enter view name to save:")),
-                    ],
-                )
-                .with_hidden(&["TOP", "BOTTOM", "FRONT", "BACK", "LEFT", "RIGHT", "SWISO", "SEISO", "NEISO", "NWISO"]);
+                use crate::command::CadCommand;
+                let c = crate::modules::view::view_cmd::DashViewCommand::new(self.dash_view_names(i));
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
+            cmd if cmd.starts_with("-VIEW >") => {
+                return Some(self.run_dash_view(&cmd["-VIEW >".len()..], i));
+            }
             cmd if cmd.starts_with("-VIEW ") => {
-                let words: Vec<String> = cmd["-VIEW ".len()..]
-                    .split_whitespace()
-                    .map(|word| word.trim_start_matches('_').to_ascii_uppercase())
-                    .collect();
-                let first = words.first().map(String::as_str).unwrap_or("");
-                let preset = |word: &str| -> Option<&'static str> {
-                    ["TOP", "BOTTOM", "FRONT", "BACK", "LEFT", "RIGHT", "SWISO", "SEISO", "NEISO", "NWISO"]
-                        .into_iter()
-                        .find(|name| name.eq_ignore_ascii_case(word))
-                };
-                // The Orthographic face: Top/Bottom/Front/BAck/Left/Right.
-                let face = |word: &str| -> Option<&'static str> {
-                    match word {
-                        "BA" | "BAC" | "BACK" => Some("BACK"),
-                        _ => ["TOP", "BOTTOM", "FRONT", "LEFT", "RIGHT"]
-                            .into_iter()
-                            .find(|name| !word.is_empty() && name.starts_with(word)),
-                    }
-                };
-                let orthographic = !first.is_empty() && "ORTHOGRAPHIC".starts_with(first);
-                let view = if orthographic {
-                    match words.get(1) {
-                        Some(word) => face(word),
-                        None => {
-                            use crate::command::KeywordCommand;
-                            let c = KeywordCommand::new(
-                                "-VIEW ORTHOGRAPHIC",
-                                "Enter an option [Top/Bottom/Front/BAck/Left/Right]<Top>:",
-                                vec![
-                                    ("Top", "TOP", None),
-                                    ("Bottom", "BOTTOM", None),
-                                    ("Front", "FRONT", None),
-                                    ("BAck", "BACK", None),
-                                    ("Left", "LEFT", None),
-                                    ("Right", "RIGHT", None),
-                                ],
-                            )
-                            .with_default("TOP");
-                            self.command_line.push_info(&c.prompt());
-                            self.tabs[i].active_cmd = Some(Box::new(c));
-                            return Some(self.finish_dispatch(cmd));
-                        }
-                    }
-                } else {
-                    preset(first)
-                };
-                if let Some(view) = view {
-                    self.command_line.push_output(crate::t!("Regenerating model.").as_ref());
-                    return self.dispatch_layerprops(&format!("VIEW {view}"), i);
-                }
-                if orthographic {
-                    self.command_line.push_error(crate::t!("Invalid option keyword.").as_ref());
-                    return Some(self.finish_dispatch(cmd));
-                }
-                // View names keep their case.
-                let rest = cmd["-VIEW ".len()..].split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
-                return self.dispatch_layerprops(format!("VIEW {first} {rest}").trim_end(), i);
+                return Some(self.run_command_line(cmd));
             }
             "VIEW" => {
                 use crate::command::KeywordCommand;
@@ -936,45 +874,14 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    // Standard orientation presets — snap the camera to a world
-                    // axis view (these names take precedence over a same-named
-                    // saved view, matching the standard orientation behaviour).
-                    "TOP" | "FRONT" | "BACK" | "LEFT" | "RIGHT" | "BOTTOM" => {
-                        use crate::scene::pipeline::viewcube::{
-                            FACE_BACK, FACE_BOTTOM, FACE_FRONT, FACE_LEFT, FACE_RIGHT, FACE_TOP,
-                        };
-                        let face = match sub.as_str() {
-                            "TOP" => FACE_TOP,
-                            "BOTTOM" => FACE_BOTTOM,
-                            "FRONT" => FACE_FRONT,
-                            "BACK" => FACE_BACK,
-                            "RIGHT" => FACE_RIGHT,
-                            _ => FACE_LEFT,
-                        };
-                        return Some(Task::done(Message::ViewCubeSnapWorld(
-                            crate::scene::CubeRegion::Face(face),
-                        )));
+                    // Standard orientation presets: the world views -VIEW sets,
+                    // with the orthographic UCS while UCSORTHO is on. These
+                    // names take precedence over a same-named saved view.
+                    "TOP" | "FRONT" | "BACK" | "LEFT" | "RIGHT" | "BOTTOM" | "SWISO" | "SEISO" | "NEISO" | "NWISO" => {
+                        return Some(self.apply_view_preset(&sub));
                     }
-                    // Isometric presets snap to the matching ViewCube corner;
                     // ISO alone is the south-west one.
-                    "ISO" | "ISOMETRIC" | "SWISO" | "SEISO" | "NEISO" | "NWISO" => {
-                        let (x, y) = match sub.as_str() {
-                            "SEISO" => (1.0, -1.0),
-                            "NEISO" => (1.0, 1.0),
-                            "NWISO" => (-1.0, 1.0),
-                            _ => (-1.0, -1.0),
-                        };
-                        let want = glam::Vec3::new(x, y, 1.0).normalize();
-                        let corner = (18..26)
-                            .map(crate::scene::CubeRegion::Corner)
-                            .max_by(|a, b| {
-                                a.snap_direction()
-                                    .dot(want)
-                                    .total_cmp(&b.snap_direction().dot(want))
-                            })
-                            .expect("the cube has corners");
-                        return Some(Task::done(Message::ViewCubeSnap(corner)));
-                    }
+                    "ISO" | "ISOMETRIC" => return Some(self.apply_view_preset("SWISO")),
                     // VIEW <name> shortcut for restore
                     _ => {
                         let name = sub.clone();

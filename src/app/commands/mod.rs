@@ -28,6 +28,7 @@ mod blockvars;
 mod plotvars;
 mod styleprops;
 mod view;
+mod view_presets;
 
 // `DrawOrderRefCommand` lives in the `view` family file but is referenced by
 // path (`commands::DrawOrderRefCommand`) from `update.rs`, so re-export it at

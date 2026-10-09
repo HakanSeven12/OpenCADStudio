@@ -5912,15 +5912,25 @@ properties={:.1}ms picked={}",
     }
 
     fn snap_view_region(&mut self, region: CubeRegion, r_ucs: glam::Mat4) -> Task<Message> {
+        self.snap_view_region_as(region, r_ucs, true)
+    }
+
+    /// A standard view preset (-VIEW): the world view itself, kept when it
+    /// is shown already, with no cube message.
+    pub(in crate::app) fn snap_view_preset(&mut self, region: CubeRegion) -> Task<Message> {
+        self.snap_view_region_as(region, glam::Mat4::IDENTITY, false)
+    }
+
+    fn snap_view_region_as(&mut self, region: CubeRegion, r_ucs: glam::Mat4, cube: bool) -> Task<Message> {
         let i = self.active_tab;
         self.clear_navigation_hover(i);
         self.tabs[i].scene.remember_current_view();
         let mut region = region;
-        // "Already there → flip to opposite" check: compare the
-        // current gaze direction with the region's target gaze.
+        // "Already there → flip to opposite" check for a cube click: compare
+        // the current gaze direction with the region's target gaze.
         let target_dir = r_ucs.transform_vector3(region.snap_direction());
         let cur_dir = self.tabs[i].scene.active_gaze_dir();
-        if cur_dir.dot(target_dir) > 0.9999 {
+        if cube && cur_dir.dot(target_dir) > 0.9999 {
             region = region.opposite();
         }
         let eye_dir = r_ucs.transform_vector3(region.snap_direction());
@@ -5950,8 +5960,10 @@ properties={:.1}ms picked={}",
             }
         }
         self.tabs[i].scene.camera_generation += 1;
-        self.command_line
-            .push_output(crate::tf!("View: {}", crate::t!(region.label())).as_ref());
+        if cube {
+            self.command_line
+                .push_output(crate::tf!("View: {}", crate::t!(region.label())).as_ref());
+        }
         Task::none()
     }
 

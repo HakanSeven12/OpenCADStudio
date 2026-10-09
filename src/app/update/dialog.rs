@@ -652,6 +652,14 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.save_config();
                 task
             }
+            DockMsg::GripHover(grip) => {
+                self.dock_grip_hover = grip;
+                iced::Task::none()
+            }
+            DockMsg::IconHover(id) => {
+                self.dock_icon_hover = id;
+                iced::Task::none()
+            }
             DockMsg::GroupGrab(side, gi) => {
                 if let Some(&id) = self.dock_group_visible(side, gi).first() {
                     self.dock_begin_drag(id);
@@ -2232,10 +2240,15 @@ mod tests {
         app.dock.join_group(PanelId::BlockPalette, DockSide::Left, 0, 1);
         let (layout, _) = app.dock_strip_layout(DockSide::Left);
         let top = layout[0].icons_top;
-        // Drag the Properties icon below the Blocks icon.
+        // Drag the Properties icon onto the lower half of the Blocks icon:
+        // below it, still in the group (the divider under it would start a
+        // new group).
         let _ = app.on_dock(DockMsg::IconPress(PanelId::Properties));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, top + 10.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, top + 2.0 * STRIP_CELL_H)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(
+            18.0,
+            top + 2.0 * STRIP_CELL_H - 10.0,
+        )));
         assert_eq!(
             app.dock_drag_target,
             Some(DropTarget::Join {
@@ -2252,6 +2265,41 @@ mod tests {
     }
 
     #[test]
+    fn dock_dragging_an_icon_into_another_group_lands_between_its_icons() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockGroup, DockMsg, DropTarget, PanelId, STRIP_CELL_H};
+        let mut app = dock_app();
+        app.show_browser = true;
+        app.dock.left = vec![
+            DockGroup::stack(vec![PanelId::Properties, PanelId::Browser]),
+            DockGroup::single(PanelId::BlockPalette),
+        ];
+        app.dock.right.clear();
+        let (layout, _) = app.dock_strip_layout(DockSide::Left);
+        // Drag the Blocks icon (group 1) to between Properties and Browser.
+        let _ = app.on_dock(DockMsg::IconPress(PanelId::BlockPalette));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(20.0, layout[1].icons_top + 10.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(
+            20.0,
+            layout[0].icons_top + STRIP_CELL_H + 2.0,
+        )));
+        assert_eq!(
+            app.dock_drag_target,
+            Some(DropTarget::Join {
+                side: DockSide::Left,
+                group: 0,
+                index: 1
+            })
+        );
+        let _ = app.on_dock(DockMsg::DragRelease);
+        assert_eq!(app.dock.left.len(), 1, "the emptied group goes away");
+        assert_eq!(
+            app.dock.left[0].panels,
+            vec![PanelId::Properties, PanelId::BlockPalette, PanelId::Browser]
+        );
+    }
+
+    #[test]
     fn dock_grip_drag_moves_a_whole_group() {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DockGroup, DockMsg, PanelId};
@@ -2264,7 +2312,7 @@ mod tests {
         app.dock.right.clear();
         let (layout, plus_top) = app.dock_strip_layout(DockSide::Left);
         let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 0));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, layout[0].grip_top + 2.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, layout[0].top + 2.0)));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, plus_top + 10.0)));
         let _ = app.on_dock(DockMsg::DragRelease);
         assert_eq!(app.dock.left[0].panels, vec![PanelId::BlockPalette]);

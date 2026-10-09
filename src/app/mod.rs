@@ -876,6 +876,10 @@ pub(super) struct OpenCADStudio {
     /// Group being dragged by its strip grip (side, slot index). While set,
     /// `dock_dragging` holds the group's shown panel for the preview.
     pub(crate) dock_dragging_group: Option<(crate::app::config::DockSide, usize)>,
+    /// Group whose edge band (group grip) the pointer is over.
+    pub(crate) dock_grip_hover: Option<(crate::app::config::DockSide, usize)>,
+    /// Pallet whose strip icon the pointer is over.
+    pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -4318,6 +4322,8 @@ impl OpenCADStudio {
             dock_title_hover: None,
             dock_edge_menu: None,
             dock_dragging_group: None,
+            dock_grip_hover: None,
+            dock_icon_hover: None,
             xref_col_drag: None,
             xref_col_last: None,
             xref_split_drag: false,

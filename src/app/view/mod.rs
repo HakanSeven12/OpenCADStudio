@@ -2830,81 +2830,188 @@ impl OpenCADStudio {
         )
     }
 
-    /// An edge's vertical icon strip: per group a grip bar (drag it to move
-    /// the group) over its open pallets' icons, the shown group framed on a
-    /// grey background, then a + button opening the pallet menu. Heights
-    /// follow `dock::strip_layout`, which drop targeting uses too.
+    /// An edge's vertical icon strip: per group its open pallets' icons in a
+    /// row ended by a hairline divider, then a + button opening the pallet
+    /// menu. The band along a group's window-side edge is its grip: it
+    /// carries the blue bar of the shown group, lights up while hovered (or
+    /// while it is a drop target) and drags the whole group; an icon shows its
+    /// group on click and drags just that pallet. Heights follow
+    /// `dock::strip_layout`, which drop targeting uses too.
     fn dock_icon_strip(&self, side: crate::app::config::DockSide) -> Element<'_, Message> {
-        use crate::ui::dock::{DockMsg, DOCK_STRIP_W, STRIP_CELL_H, STRIP_GAP, STRIP_GRIP_H};
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{
+            DockMsg, DropTarget, DOCK_STRIP_W, STRIP_CELL_H, STRIP_DIVIDER_H, STRIP_GRIP_W,
+            STRIP_PAD, STRIP_PLUS_GAP,
+        };
         let shown = self.dock_shown_group(side);
+        let dragging = self.dock_drag_target.is_some();
+        let target_group = match self.dock_drag_target {
+            Some(DropTarget::Join { side: s, group, .. }) if s == side => Some(group),
+            _ => None,
+        };
+        let tip_side = match side {
+            DockSide::Left => iced::widget::tooltip::Position::Right,
+            DockSide::Right => iced::widget::tooltip::Position::Left,
+        };
         let mut items: Vec<Element<'_, Message>> = Vec::new();
         for gi in self.dock_visible_groups(side) {
-            items.push(Space::new().height(STRIP_GAP).into());
-            let grip = container(
-                container(Space::new())
-                    .width(Length::Fixed(18.0))
-                    .height(Length::Fixed(3.0))
-                    .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(
-                            theme.palette().background.strong.color,
-                        )),
+            let is_shown = shown == Some(gi);
+            let lit = target_group == Some(gi)
+                || (!dragging && self.dock_grip_hover == Some((side, gi)));
+            let group_dragged = dragging && self.dock_dragging_group == Some((side, gi));
+            let panels = self.dock_group_visible(side, gi);
+            let row_h = 2.0 * STRIP_PAD + panels.len() as f32 * STRIP_CELL_H;
+
+            let mut icons: Vec<Element<'_, Message>> = vec![Space::new().height(STRIP_PAD).into()];
+            for id in panels {
+                let faded = group_dragged
+                    || (dragging
+                        && self.dock_dragging_group.is_none()
+                        && self.dock_dragging == Some(id));
+                let glyph = if faded {
+                    crate::ui::icons::themed_disabled(id.icon(), 20.0)
+                } else if is_shown {
+                    crate::ui::icons::themed(id.icon(), 20.0)
+                } else {
+                    crate::ui::icons::themed_secondary(id.icon(), 20.0)
+                };
+                let hovered = !dragging && self.dock_icon_hover == Some(id);
+                let cell = container(glyph)
+                    .center_x(Length::Fixed(STRIP_CELL_H))
+                    .center_y(Length::Fixed(STRIP_CELL_H - 2.0))
+                    .style(move |theme: &Theme| container::Style {
+                        background: hovered
+                            .then(|| Background::Color(theme.palette().background.weak.color)),
                         border: Border {
-                            radius: 1.5.into(),
+                            radius: 5.0.into(),
                             ..Default::default()
                         },
                         ..Default::default()
-                    }),
-            )
-            .center_x(Length::Fixed(DOCK_STRIP_W))
-            .center_y(Length::Fixed(STRIP_GRIP_H));
-            let mut group_items: Vec<Element<'_, Message>> = vec![mouse_area(grip)
-                .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
-                .interaction(iced::mouse::Interaction::Grab)
-                .into()];
-            for id in self.dock_group_visible(side, gi) {
+                    });
                 let cell = mouse_area(
-                    container(crate::ui::icons::themed(id.icon(), 20.0))
+                    container(cell)
                         .center_x(Length::Fixed(DOCK_STRIP_W))
                         .center_y(Length::Fixed(STRIP_CELL_H)),
                 )
                 .on_press(Message::Dock(DockMsg::IconPress(id)))
-                .on_enter(Message::Dock(DockMsg::Hover(id)))
+                .on_enter(Message::Dock(DockMsg::IconHover(Some(id))))
+                .on_exit(Message::Dock(DockMsg::IconHover(None)))
                 .interaction(iced::mouse::Interaction::Pointer);
-                group_items.push(
-                    iced::widget::tooltip(
-                        cell,
-                        text(id.title()).size(10),
-                        match side {
-                            crate::app::config::DockSide::Left => {
-                                iced::widget::tooltip::Position::Right
-                            }
-                            crate::app::config::DockSide::Right => {
-                                iced::widget::tooltip::Position::Left
-                            }
-                        },
-                    )
-                    .gap(4)
-                    .into(),
+                icons.push(
+                    iced::widget::tooltip(cell, text(id.title()).size(10), tip_side)
+                        .gap(4)
+                        .into(),
                 );
             }
-            let is_shown = shown == Some(gi);
+
+            // The group grip: a band on the window side holding the edge bar.
+            let bar_w = if lit { 5.0 } else { 3.0 };
+            let bar = container(Space::new().width(bar_w).height(Fill)).style(move |theme: &Theme| {
+                let palette = theme.palette();
+                let (color, glow) = if lit {
+                    (Some(palette.primary.weak.color), true)
+                } else if is_shown {
+                    (Some(palette.primary.base.color), false)
+                } else {
+                    (None, false)
+                };
+                container::Style {
+                    background: color.map(Background::Color),
+                    border: Border {
+                        radius: match side {
+                            DockSide::Left => iced::border::Radius::default().right(3.0),
+                            DockSide::Right => iced::border::Radius::default().left(3.0),
+                        },
+                        ..Default::default()
+                    },
+                    shadow: if glow {
+                        iced::Shadow {
+                            color: palette.primary.base.color.scale_alpha(0.55),
+                            offset: iced::Vector::new(0.0, 0.0),
+                            blur_radius: 8.0,
+                        }
+                    } else {
+                        iced::Shadow::default()
+                    },
+                    ..Default::default()
+                }
+            });
+            let band = mouse_area(
+                container(bar)
+                    .width(Length::Fixed(STRIP_GRIP_W))
+                    .height(Fill)
+                    .padding(iced::Padding {
+                        top: 5.0,
+                        bottom: 5.0,
+                        left: 0.0,
+                        right: 0.0,
+                    })
+                    .align_x(match side {
+                        DockSide::Left => iced::alignment::Horizontal::Left,
+                        DockSide::Right => iced::alignment::Horizontal::Right,
+                    }),
+            )
+            .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
+            .on_enter(Message::Dock(DockMsg::GripHover(Some((side, gi)))))
+            .on_exit(Message::Dock(DockMsg::GripHover(None)))
+            .interaction(iced::mouse::Interaction::Grab);
+            let band = iced::widget::tooltip(
+                band,
+                text(t!("Drag to move group")).size(10),
+                tip_side,
+            )
+            .gap(4);
+            let band = container(band)
+                .width(Fill)
+                .height(Fill)
+                .align_x(match side {
+                    DockSide::Left => iced::alignment::Horizontal::Left,
+                    DockSide::Right => iced::alignment::Horizontal::Right,
+                });
             items.push(
-                container(column(group_items))
+                container(stack![column(icons), band])
                     .width(Length::Fixed(DOCK_STRIP_W))
+                    .height(Length::Fixed(row_h))
                     .style(move |theme: &Theme| container::Style {
-                        // The shown group sits on the grey background.
-                        background: is_shown
-                            .then(|| Background::Color(theme.palette().background.weak.color)),
+                        background: lit.then(|| {
+                            Background::Color(theme.palette().primary.weak.color.scale_alpha(0.12))
+                        }),
+                        ..Default::default()
+                    })
+                    .into(),
+            );
+            items.push(
+                container(Space::new())
+                    .width(Fill)
+                    .height(Length::Fixed(STRIP_DIVIDER_H))
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(
+                            theme.palette().background.neutral.color,
+                        )),
                         ..Default::default()
                     })
                     .into(),
             );
         }
-        items.push(Space::new().height(STRIP_GAP).into());
+        items.push(Space::new().height(STRIP_PLUS_GAP).into());
         let plus = button(crate::ui::icons::themed_secondary(crate::ui::icons::PLUS, 14.0))
             .on_press(Message::Dock(DockMsg::EdgeMenu(Some(side))))
-            .style(button::subtle)
-            .padding([5, 8]);
+            .style(|theme: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        theme.palette().background.weak.color
+                    }
+                    _ => theme.palette().background.weakest.color,
+                })),
+                border: Border {
+                    radius: 14.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .width(Length::Fixed(28.0))
+            .height(Length::Fixed(28.0))
+            .padding(7);
         items.push(container(plus).center_x(Length::Fixed(DOCK_STRIP_W)).into());
         container(column(items))
             .width(Length::Fixed(DOCK_STRIP_W))
@@ -3145,7 +3252,12 @@ impl OpenCADStudio {
                 None
             }
         };
-        if let Some((side, after)) = docked {
+        // A whole group shows only the strip feedback and its ghost; the
+        // column keeps showing what is there.
+        let group_drag = self.dock_dragging_group;
+        let docked = docked.map(|(side, after)| (side, group_drag.is_none().then_some(after)));
+        let marks_side = docked.as_ref().map(|(side, _)| *side);
+        if let Some((side, Some(after))) = docked {
             // Lay the group out as it will be after the drop.
             if let Some((_, gi)) = after.location(id) {
                 let group = &after.groups(side)[gi];
@@ -3172,11 +3284,162 @@ impl OpenCADStudio {
                 layers.push(place_at(dock_ghost(&[id], id, w, bottom - top), x, top));
             }
         }
+        // On top: the strip's drop marks and a ghost of what is dragged
+        // following the pointer.
+        if let Some(side) = marks_side {
+            layers.extend(self.dock_strip_drop_marks(side, target));
+            if let Some(p) = self.dock_drag_last {
+                let icons = match group_drag {
+                    Some((s, g)) => self.dock_group_visible(s, g),
+                    None => vec![id],
+                };
+                layers.push(place_at(dock_icon_ghost(&icons), p.x - 16.0, p.y - 15.0));
+            }
+        }
         iced::widget::Stack::with_children(layers)
             .width(Fill)
             .height(Fill)
             .into()
     }
+
+    /// The icon strip's drop marks for `target` on `side`: a short line with
+    /// end caps between a group's icons (join that group there), or a
+    /// full-width line on a divider with a "+ New group" badge.
+    fn dock_strip_drop_marks(
+        &self,
+        side: crate::app::config::DockSide,
+        target: crate::ui::dock::DropTarget,
+    ) -> Vec<Element<'_, Message>> {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DropTarget, DOCK_STRIP_W, STRIP_CELL_H};
+        let (ww, _) = self.dock_workspace_size();
+        let strip_x = match side {
+            DockSide::Left => 0.0,
+            DockSide::Right => ww - DOCK_STRIP_W,
+        };
+        let (layout, _) = self.dock_strip_layout(side);
+        let mut marks: Vec<Element<'_, Message>> = Vec::new();
+        match target {
+            DropTarget::Join { group, index, .. } => {
+                let Some(g) = layout.iter().find(|g| g.group == group) else {
+                    return marks;
+                };
+                // Icons above the insertion point, counted as the strip shows
+                // them (the dragged icon still sits in its old place).
+                let dragged = self.dock_dragging;
+                let above = self.dock.groups(side)[group].panels[..index]
+                    .iter()
+                    .filter(|p| self.dock_panel_visible(**p) || Some(**p) == dragged)
+                    .count();
+                let y = g.icons_top + above as f32 * STRIP_CELL_H;
+                marks.push(place_at(dock_insert_line(), strip_x + 7.0, y - 3.5));
+            }
+            DropTarget::Edge { index, .. } => {
+                let y = layout
+                    .iter()
+                    .find(|g| g.group >= index)
+                    .map(|g| g.top)
+                    .or_else(|| layout.last().map(|g| g.bottom()))
+                    .unwrap_or(0.0);
+                marks.push(place_at(
+                    container(Space::new())
+                        .width(Length::Fixed(DOCK_STRIP_W))
+                        .height(Length::Fixed(4.0))
+                        .style(dock_drop_line_style)
+                        .into(),
+                    strip_x,
+                    (y - 2.0).max(0.0),
+                ));
+                const BADGE_W: f32 = 96.0;
+                let badge = container(text(format!("+ {}", t!("New group"))).size(10))
+                    .width(Length::Fixed(BADGE_W))
+                    .center_x(Length::Fixed(BADGE_W))
+                    .padding([2, 6])
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(theme.palette().primary.base.color)),
+                        text_color: Some(theme.palette().primary.base.text),
+                        border: Border {
+                            radius: 9.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    });
+                let badge_x = match side {
+                    DockSide::Left => DOCK_STRIP_W + 6.0,
+                    DockSide::Right => ww - DOCK_STRIP_W - 6.0 - BADGE_W,
+                };
+                marks.push(place_at(badge.into(), badge_x, (y - 9.0).max(0.0)));
+            }
+            DropTarget::Float { .. } => {}
+        }
+        marks
+    }
+}
+
+/// The glowing accent used by the strip's drop lines.
+fn dock_drop_line_style(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(theme.palette().primary.base.color)),
+        border: Border {
+            radius: 2.0.into(),
+            ..Default::default()
+        },
+        shadow: iced::Shadow {
+            color: theme.palette().primary.base.color.scale_alpha(0.8),
+            offset: iced::Vector::new(0.0, 0.0),
+            blur_radius: 6.0,
+        },
+        ..Default::default()
+    }
+}
+
+/// The short insertion line with end caps shown between a group's icons.
+fn dock_insert_line() -> Element<'static, Message> {
+    let cap = || {
+        container(Space::new())
+            .width(Length::Fixed(3.0))
+            .height(Length::Fixed(7.0))
+            .style(dock_drop_line_style)
+    };
+    row![
+        cap(),
+        container(Space::new())
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(3.0))
+            .style(dock_drop_line_style),
+        cap(),
+    ]
+    .align_y(iced::Center)
+    .height(Length::Fixed(7.0))
+    .into()
+}
+
+/// The ghost following the pointer while pallets are dragged: their icons
+/// in an accent-framed box.
+fn dock_icon_ghost(icons: &[crate::ui::dock::PanelId]) -> Element<'static, Message> {
+    let glyphs: Vec<Element<'static, Message>> = icons
+        .iter()
+        .map(|id| {
+            container(crate::ui::icons::themed(id.icon(), 18.0))
+                .center_x(Length::Fixed(32.0))
+                .center_y(Length::Fixed(30.0))
+                .into()
+        })
+        .collect();
+    container(column(glyphs))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.primary.base.color.scale_alpha(0.22))),
+                border: Border {
+                    color: palette.primary.base.color,
+                    width: 1.5,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
 }
 
 // ── Document tab bar ───────────────────────────────────────────────────────

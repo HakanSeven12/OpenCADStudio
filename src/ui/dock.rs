@@ -51,8 +51,12 @@ pub enum DockMsg {
     /// Pallet menu pick: hide `panel` when it shows, else open it docked on
     /// the edge (as a new group unless it already has a group there).
     EdgeMenuToggle(DockSide, PanelId),
-    /// Begin dragging a whole group (slot) by its grip in the icon strip.
+    /// Begin dragging a whole group by its edge band in the icon strip.
     GroupGrab(DockSide, usize),
+    /// The pointer entered (`Some`) or left (`None`) a group's edge band.
+    GripHover(Option<(DockSide, usize)>),
+    /// The pointer entered (`Some`) or left (`None`) a pallet's strip icon.
+    IconHover(Option<PanelId>),
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
     /// Double-click on a floating title bar: dock the panel on that side.
@@ -727,67 +731,85 @@ pub const DOCK_EDGE_ZONE: f32 = 48.0;
 /// Width of the grabbable divider between a docked slot and the viewport.
 pub const DOCK_DIVIDER_W: f32 = 5.0;
 /// Width of an edge's vertical icon strip (the groups' tabs).
-pub const DOCK_STRIP_W: f32 = 36.0;
+pub const DOCK_STRIP_W: f32 = 40.0;
 /// Height of one pallet icon in the strip.
 pub const STRIP_CELL_H: f32 = 32.0;
-/// Height of the grip bar above each group's icons.
-pub const STRIP_GRIP_H: f32 = 10.0;
-/// Space above the first group and between groups in the strip.
-pub const STRIP_GAP: f32 = 6.0;
+/// Space above and below a group's icons, inside the group.
+pub const STRIP_PAD: f32 = 6.0;
+/// Hairline divider between groups.
+pub const STRIP_DIVIDER_H: f32 = 1.0;
+/// Space between the last group and the + button.
+pub const STRIP_PLUS_GAP: f32 = 8.0;
+/// Width of the band along a group's window-side edge that drags the whole
+/// group (the icons drag single pallets).
+pub const STRIP_GRIP_W: f32 = 8.0;
+/// How far the "new group" zone around a divider reaches into the icons on
+/// either side.
+const STRIP_NEW_GROUP_SLOP: f32 = 4.0;
 
 /// Where one group sits in an edge's icon strip, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StripGroup {
-    /// Slot index on the edge.
+    /// Group index on the edge.
     pub group: usize,
-    /// Top of the group's grip bar.
-    pub grip_top: f32,
+    /// Top of the group's row (just below the divider above it).
+    pub top: f32,
     /// Top of the group's first icon.
     pub icons_top: f32,
-    /// Number of icons (visible tabs).
+    /// Number of icons (open pallets).
     pub icons: usize,
 }
 
-/// Lay out the icon strip for `groups` = (slot index, visible tab count),
+impl StripGroup {
+    /// Bottom of the group's last icon.
+    pub fn icons_bottom(&self) -> f32 {
+        self.icons_top + self.icons as f32 * STRIP_CELL_H
+    }
+
+    /// Bottom of the group's row (where its divider starts).
+    pub fn bottom(&self) -> f32 {
+        self.icons_bottom() + STRIP_PAD
+    }
+}
+
+/// Lay out the icon strip for `groups` = (group index, open pallet count),
 /// returning each group's place and the top of the + button below them.
 pub fn strip_layout(groups: &[(usize, usize)]) -> (Vec<StripGroup>, f32) {
-    let mut y = STRIP_GAP;
+    let mut y = 0.0;
     let placed = groups
         .iter()
         .map(|&(group, icons)| {
-            let grip_top = y;
-            let icons_top = grip_top + STRIP_GRIP_H;
-            y = icons_top + icons as f32 * STRIP_CELL_H + STRIP_GAP;
-            StripGroup {
+            let g = StripGroup {
                 group,
-                grip_top,
-                icons_top,
+                top: y,
+                icons_top: y + STRIP_PAD,
                 icons,
-            }
+            };
+            y = g.bottom() + STRIP_DIVIDER_H;
+            g
         })
         .collect();
-    (placed, y)
+    (placed, y + STRIP_PLUS_GAP)
 }
 
 /// What a dragged pallet released at height `y` over the icon strip joins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StripHit {
-    /// A new group before slot `group`; `None` = after the last group.
+    /// A new group before group `group`; `None` = after the last group.
     NewGroup(Option<usize>),
-    /// Group `group`, at position `index` among its visible icons.
+    /// Group `group`, at position `index` among its open pallets.
     Tab { group: usize, index: usize },
 }
 
-/// Classify a pointer at strip height `y`: over a group's grip (or the gap
-/// above it) starts a new group there, over its icons joins it between the
-/// nearest icons, below every group starts a new last group.
+/// Classify a pointer at strip height `y`: on a divider (or the gap above
+/// the first group) starts a new group there, over a group's icons joins it
+/// between the nearest icons, below every group starts a new last group.
 pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
     for g in layout {
-        if y < g.icons_top {
+        if y < g.icons_top + STRIP_NEW_GROUP_SLOP {
             return StripHit::NewGroup(Some(g.group));
         }
-        let bottom = g.icons_top + g.icons as f32 * STRIP_CELL_H + STRIP_GAP * 0.5;
-        if y < bottom {
+        if y < g.icons_bottom() - STRIP_NEW_GROUP_SLOP {
             let index = (((y - g.icons_top) / STRIP_CELL_H).round().max(0.0) as usize)
                 .min(g.icons);
             return StripHit::Tab {
@@ -1211,23 +1233,33 @@ mod tests {
     }
 
     #[test]
-    fn strip_hit_maps_grips_icons_and_the_end() {
+    fn strip_hit_maps_dividers_icons_and_the_end() {
         // Two groups: three icons, then one.
         let (layout, plus_top) = strip_layout(&[(0, 3), (2, 1)]);
         let g0 = layout[0];
         let g1 = layout[1];
-        assert_eq!(g0.grip_top, STRIP_GAP);
-        assert_eq!(g1.icons_top, g1.grip_top + STRIP_GRIP_H);
-        assert_eq!(plus_top, g1.icons_top + STRIP_CELL_H + STRIP_GAP);
-        // On the first grip: a new group before slot 0.
-        assert_eq!(strip_hit(g0.grip_top + 2.0, &layout), StripHit::NewGroup(Some(0)));
+        assert_eq!(g0.icons_top, STRIP_PAD);
+        assert_eq!(g1.top, g0.bottom() + STRIP_DIVIDER_H);
+        assert_eq!(plus_top, g1.bottom() + STRIP_DIVIDER_H + STRIP_PLUS_GAP);
+        // Above the first icon: a new group before group 0.
+        assert_eq!(strip_hit(2.0, &layout), StripHit::NewGroup(Some(0)));
+        // Top half of the first icon: into group 0 at the top.
+        assert_eq!(
+            strip_hit(g0.icons_top + 10.0, &layout),
+            StripHit::Tab { group: 0, index: 0 }
+        );
         // Between the first and second icon of group 0.
         assert_eq!(
             strip_hit(g0.icons_top + STRIP_CELL_H + 4.0, &layout),
             StripHit::Tab { group: 0, index: 1 }
         );
-        // On the second group's grip: a new group before slot 2.
-        assert_eq!(strip_hit(g1.grip_top + 1.0, &layout), StripHit::NewGroup(Some(2)));
+        // Lower half of the last icon: into group 0 at the end.
+        assert_eq!(
+            strip_hit(g0.icons_bottom() - 8.0, &layout),
+            StripHit::Tab { group: 0, index: 3 }
+        );
+        // On the divider between the groups: a new group before group 2.
+        assert_eq!(strip_hit(g0.bottom(), &layout), StripHit::NewGroup(Some(2)));
         // Below everything: a new last group.
         assert_eq!(strip_hit(plus_top + 20.0, &layout), StripHit::NewGroup(None));
     }

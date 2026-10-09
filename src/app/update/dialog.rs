@@ -2112,6 +2112,31 @@ mod tests {
     }
 
     #[test]
+    fn dock_dragging_a_lone_pallet_over_its_own_group_is_a_no_op() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DropTarget, PanelId};
+        let mut app = dock_app();
+        let before = app.dock.clone();
+        // The right edge's only group holds just the block palette; drag it
+        // around over itself.
+        let target = drag_panel(
+            &mut app,
+            PanelId::BlockPalette,
+            iced::Point::new(1500.0, 10.0),
+            iced::Point::new(1450.0, 600.0),
+        );
+        assert_eq!(
+            target,
+            Some(DropTarget::Join {
+                side: DockSide::Right,
+                group: 0,
+                index: 1
+            })
+        );
+        assert_eq!(app.dock, before);
+    }
+
+    #[test]
     fn dock_click_without_drag_changes_nothing() {
         let mut app = dock_app();
         let before = app.dock.clone();

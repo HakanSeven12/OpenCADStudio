@@ -557,6 +557,11 @@ impl DockState {
         if group >= self.groups(side).len() {
             return false;
         }
+        // A pallet alone in its group has nowhere to move within it (and
+        // detaching it would remove the group being joined).
+        if self.groups(side)[group].panels == [id] {
+            return self.show_group(side, group);
+        }
         let before = self.clone();
         let width = self.group_width(side, group);
         let joining = !self.groups(side)[group].panels.contains(&id);
@@ -1086,6 +1091,12 @@ mod tests {
         assert_eq!(state.left[0].panels[0], PanelId::BlockPalette);
         // Dropping it where it already is changes nothing.
         assert!(!state.join_group(PanelId::BlockPalette, DockSide::Left, 0, 1));
+        // Nor does dropping a pallet that is alone in its group onto it.
+        state.dock(PanelId::Count, DockSide::Right, 0);
+        for index in 0..=1 {
+            assert!(!state.join_group(PanelId::Count, DockSide::Right, 0, index));
+        }
+        assert_eq!(state.right[0].panels, vec![PanelId::Count]);
     }
 
     #[test]

@@ -80,6 +80,20 @@ impl PanelId {
         }
     }
 
+    /// The panel's icon: the one on the ribbon tool that opens it.
+    pub fn icon(self) -> &'static [u8] {
+        match self {
+            PanelId::Properties => include_bytes!("../../assets/icons/properties.svg"),
+            PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
+            PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
+            PanelId::Browser => include_bytes!("../../assets/icons/content_browser.svg"),
+            PanelId::NodeGraph => crate::ui::icons::NODE_GRAPH,
+            PanelId::PointCloudManager => include_bytes!("../../assets/icons/pc_attach.svg"),
+            PanelId::Count => include_bytes!("../../assets/icons/data_extract.svg"),
+            PanelId::SheetSetManager => include_bytes!("../../assets/icons/sheetset.svg"),
+        }
+    }
+
     /// Default dock width for a freshly-created panel instance.
     fn default_width(self) -> f32 {
         match self {
@@ -559,9 +573,25 @@ use crate::app::Message;
 use iced::widget::{button, container, mouse_area, row, text, tooltip, Space};
 use iced::{Background, Border, Color, Element, Length, Theme};
 
+/// How a panel is framed where it is shown, passed to its view so the shared
+/// chrome can adapt.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Chrome {
+    /// The panel auto-collapses (its pin is on).
+    pub auto_collapse: bool,
+    /// The panel floats; its title lives in the vertical side bar drawn by
+    /// the floating frame instead of the horizontal title bar.
+    pub floating: bool,
+}
+
 /// The row every docked panel starts with: its title, the auto-collapse pin
-/// and close. Pressing the row starts re-docking the panel.
-pub fn title_bar<'a>(id: PanelId, title: String, auto_collapse: bool) -> Element<'a, Message> {
+/// and close. Pressing the row starts re-docking the panel. A floating panel
+/// gets nothing here: its frame draws a vertical title bar beside it.
+pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, Message> {
+    if chrome.floating {
+        return Space::new().width(0).height(0).into();
+    }
+    let auto_collapse = chrome.auto_collapse;
     let pin_icon = if auto_collapse {
         crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
     } else {
@@ -639,11 +669,18 @@ pub fn tool_button<'a>(
         .into()
 }
 
-/// A docked panel's body: fixed width, full height, padded, on the base
-/// background with a neutral edge.
-pub fn frame<'a>(content: impl Into<Element<'a, Message>>, width: f32) -> Element<'a, Message> {
-    container(content)
-        .padding(6)
+/// A docked panel's body: its title bar flush along the top (as on the
+/// Properties panel), then the padded content; fixed width, full height, on
+/// the base background with a neutral edge.
+pub fn frame<'a>(
+    title_bar: Element<'a, Message>,
+    content: impl Into<Element<'a, Message>>,
+    width: f32,
+) -> Element<'a, Message> {
+    container(iced::widget::column![
+        title_bar,
+        container(content).padding(6).height(Length::Fill)
+    ])
         .width(Length::Fixed(width))
         .height(Length::Fill)
         .style(|theme: &Theme| container::Style {
@@ -908,6 +945,39 @@ mod tests {
         state.ensure_settings();
         assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
         assert_eq!(state.right.len(), 1);
+    }
+
+    #[test]
+    fn every_panel_has_its_own_icon() {
+        let ids = [
+            PanelId::Properties,
+            PanelId::BlockPalette,
+            PanelId::ExternalReferences,
+            PanelId::Browser,
+            PanelId::NodeGraph,
+            PanelId::PointCloudManager,
+            PanelId::Count,
+            PanelId::SheetSetManager,
+        ];
+        for (i, a) in ids.iter().enumerate() {
+            assert!(a.icon().starts_with(b"<svg"), "{a:?} icon is not an SVG");
+            for b in &ids[i + 1..] {
+                assert_ne!(a.icon(), b.icon(), "{a:?} and {b:?} share an icon");
+            }
+        }
+    }
+
+    #[test]
+    fn floating_title_bar_replaces_the_horizontal_one() {
+        let floating = Chrome {
+            auto_collapse: false,
+            floating: true,
+        };
+        let bar: Element<'_, Message> = title_bar(PanelId::Count, "Count".into(), floating);
+        assert_eq!(
+            bar.as_widget().size(),
+            iced::Size::new(Length::Fixed(0.0), Length::Fixed(0.0))
+        );
     }
 
     #[test]

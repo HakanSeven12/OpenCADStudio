@@ -2848,6 +2848,7 @@ impl OpenCADStudio {
                 .collect::<Vec<_>>()
                 .join(" · "),
             clockwise: side == crate::app::config::DockSide::Left,
+            from_start: false,
         })
         .width(Fill)
         .height(Fill);
@@ -2884,22 +2885,27 @@ impl OpenCADStudio {
             .into()
     }
 
-    /// The content of panel `id` at `width`.
+    /// The content of panel `id` at `width`. A `floating` panel leaves its
+    /// title to the floating frame's vertical title bar.
     fn panel_body<'a>(
         &'a self,
         id: crate::ui::dock::PanelId,
         width: f32,
+        floating: bool,
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
-        let auto_collapse = self.dock.auto_collapse(id);
+        let chrome = crate::ui::dock::Chrome {
+            auto_collapse: self.dock.auto_collapse(id),
+            floating,
+        };
         match id {
-            crate::ui::dock::PanelId::Properties => tab.properties.view(width, auto_collapse),
+            crate::ui::dock::PanelId::Properties => tab.properties.view(width, chrome),
             crate::ui::dock::PanelId::BlockPalette => {
-                crate::ui::window::block_palette::view(&self.block_palette, width, auto_collapse)
+                crate::ui::window::block_palette::view(&self.block_palette, width, chrome)
             }
             crate::ui::dock::PanelId::ExternalReferences => self.xref_manager.view(
                 width,
-                auto_collapse,
+                chrome,
                 tab.xref_missing,
                 &tab.scene.document,
             ),
@@ -2907,9 +2913,9 @@ impl OpenCADStudio {
                 &tab.scene.document,
                 tab.sketch_session.as_ref().map(|session| session.name.as_str()),
                 width,
-                auto_collapse,
+                chrome,
             ),
-            crate::ui::dock::PanelId::NodeGraph => tab.graph.panel(width, auto_collapse),
+            crate::ui::dock::PanelId::NodeGraph => tab.graph.panel(width, chrome),
             crate::ui::dock::PanelId::Count => crate::ui::window::count_palette::view(
                 &self.count_palette,
                 tab.count.as_ref(),
@@ -2917,17 +2923,17 @@ impl OpenCADStudio {
                 tab.id,
                 tab.scene.geometry_epoch,
                 width,
-                auto_collapse,
+                chrome,
             ),
             crate::ui::dock::PanelId::PointCloudManager => crate::ui::window::pc_manager::view(
                 &self.pc_manager,
                 &tab.scene.document,
                 &tab.scene.selected_handles_in_order(),
                 width,
-                auto_collapse,
+                chrome,
             ),
             crate::ui::dock::PanelId::SheetSetManager => {
-                crate::ui::window::sheet_set::view(&self.sheet_set, width, auto_collapse)
+                crate::ui::window::sheet_set::view(&self.sheet_set, width, chrome)
             }
         }
     }
@@ -2946,7 +2952,7 @@ impl OpenCADStudio {
     ) -> Element<'a, Message> {
         let tabs = self.dock_group_visible_tabs(side, gi);
         let id = self.dock_group_shown(side, gi).expect("visible group");
-        let body = self.panel_body(id, width, tab);
+        let body = self.panel_body(id, width, false, tab);
         let panel: Element<'_, Message> = if tabs.len() > 1 {
             column![dock_tab_strip(&tabs, id, width), body]
                 .height(Fill)
@@ -2961,7 +2967,10 @@ impl OpenCADStudio {
         }
     }
 
-    /// A floating panel at its saved place, with a corner grip to resize it.
+    /// A floating panel at its saved place: a vertical title bar on the side
+    /// facing the nearer workspace edge, the panel beside it, and a corner
+    /// grip to resize it. With its pin on, the panel hides down to the title
+    /// bar until hovered.
     fn floating_panel<'a>(
         &'a self,
         f: crate::ui::dock::FloatPanel,
@@ -2969,45 +2978,62 @@ impl OpenCADStudio {
     ) -> Element<'a, Message> {
         use crate::ui::dock::DockMsg;
         let (ww, wh) = self.dock_workspace_size();
-        let grip = mouse_area(
-            container(crate::ui::icons::themed_secondary(crate::ui::icons::RESIZE, 12.0))
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(14.0))
-                .center_x(Length::Fixed(14.0))
-                .center_y(Length::Fixed(14.0)),
-        )
-        .on_press(Message::Dock(DockMsg::FloatResizeGrab(f.id)))
-        .interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
-        let body = stack![
-            self.panel_body(f.id, f.w, tab),
-            container(grip)
-                .width(Fill)
-                .height(Fill)
-                .align_x(iced::alignment::Horizontal::Right)
-                .align_y(iced::alignment::Vertical::Bottom),
-        ]
-        .width(Length::Fixed(f.w))
-        .height(Length::Fixed(f.h));
-        let framed = container(body).style(|theme: &Theme| container::Style {
-            border: Border {
-                color: theme.palette().background.strong.color,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            shadow: iced::Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 14.0,
-            },
-            ..Default::default()
-        });
+        let bar_left = f.x + (f.w + DOCK_FLOAT_BAR_W) * 0.5 < ww * 0.5;
+        let hidden = self.dock.auto_collapse(f.id) && self.dock_expanded != Some(f.id);
+        let bar = floating_title_bar(f.id, self.dock.auto_collapse(f.id), bar_left);
+        let content: Element<'_, Message> = if hidden {
+            bar
+        } else {
+            let grip = mouse_area(
+                container(crate::ui::icons::themed_secondary(crate::ui::icons::RESIZE, 12.0))
+                    .center_x(Length::Fixed(14.0))
+                    .center_y(Length::Fixed(14.0)),
+            )
+            .on_press(Message::Dock(DockMsg::FloatResizeGrab(f.id)))
+            .interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
+            let body = stack![
+                self.panel_body(f.id, f.w, true, tab),
+                container(grip)
+                    .width(Fill)
+                    .height(Fill)
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .align_y(iced::alignment::Vertical::Bottom),
+            ]
+            .width(Length::Fixed(f.w))
+            .height(Fill);
+            if bar_left {
+                row![bar, body].into()
+            } else {
+                row![body, bar].into()
+            }
+        };
+        let total_w = if hidden { DOCK_FLOAT_BAR_W } else { f.w + DOCK_FLOAT_BAR_W };
+        let framed = container(content)
+            .height(Length::Fixed(f.h))
+            .style(|theme: &Theme| container::Style {
+                border: Border {
+                    color: theme.palette().background.strong.color,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 14.0,
+                },
+                ..Default::default()
+            });
         // The idle cursor marks the panel as opaque to the pointer, so clicks
         // on its empty areas don't fall through to the drawing below.
         let panel = mouse_area(framed)
             .on_press(Message::Dock(DockMsg::FloatRaise(f.id)))
+            .on_enter(Message::Dock(DockMsg::Hover(f.id)))
+            .on_exit(Message::Dock(DockMsg::HoverExit))
             .interaction(iced::mouse::Interaction::Idle);
+        // A hidden panel keeps its title bar where it sits when shown.
+        let x = if hidden && !bar_left { f.x + f.w } else { f.x };
         // Keep the panel on screen when the window shrank since it was placed.
-        let x = f.x.min(ww - f.w).max(0.0);
+        let x = x.min(ww - total_w).max(0.0);
         let y = f.y.min(wh - f.h).max(0.0);
         place_at(panel.into(), x, y)
     }
@@ -3081,7 +3107,11 @@ impl OpenCADStudio {
             }
             DropTarget::Float { x, y } => {
                 let (w, h) = self.dock_float_size(id);
-                layers.push(place_at(dock_ghost(&[id], id, w, h), x, y));
+                layers.push(place_at(
+                    dock_ghost(&[id], id, w + DOCK_FLOAT_BAR_W, h),
+                    x,
+                    y,
+                ));
             }
         }
         iced::widget::Stack::with_children(layers)
@@ -3467,6 +3497,9 @@ fn pane_mouse_area<'a>(idx: usize) -> Element<'a, Message> {
 struct VBarLabel {
     text: String,
     clockwise: bool,
+    /// Start the text at the reading-start end of the bar instead of
+    /// centring it.
+    from_start: bool,
 }
 
 impl canvas::Program<Message> for VBarLabel {
@@ -3488,12 +3521,22 @@ impl canvas::Program<Message> for VBarLabel {
             } else {
                 -std::f32::consts::FRAC_PI_2
             }));
+            // After the rotation the text runs along local +x, so the
+            // reading start sits at -height/2.
+            let (position, align_x) = if self.from_start {
+                (
+                    iced::Point::new(-bounds.height / 2.0, 0.0),
+                    iced::advanced::text::Alignment::Left,
+                )
+            } else {
+                (iced::Point::ORIGIN, iced::advanced::text::Alignment::Center)
+            };
             frame.fill_text(canvas::Text {
                 content: self.text.clone(),
-                position: iced::Point::ORIGIN,
+                position,
                 color: theme.palette().background.base.text.scale_alpha(0.72),
                 size: iced::Pixels(13.0),
-                align_x: iced::advanced::text::Alignment::Center,
+                align_x,
                 align_y: iced::alignment::Vertical::Center,
                 shaping: iced::advanced::text::Shaping::Advanced,
                 ..Default::default()
@@ -3507,6 +3550,87 @@ impl canvas::Program<Message> for VBarLabel {
 const DOCK_RAIL_W: f32 = 28.0;
 /// Width of the grabbable divider between a docked panel and the viewport.
 const DOCK_DIVIDER_W: f32 = 5.0;
+/// Width of a floating panel's vertical title bar.
+const DOCK_FLOAT_BAR_W: f32 = 28.0;
+
+/// A floating panel's vertical title bar: close then the hide (auto-collapse)
+/// pin at the top, the panel's icon at the bottom with its title reading
+/// upward above it. Pressing the bar's free area drags the panel.
+fn floating_title_bar(
+    id: crate::ui::dock::PanelId,
+    auto_collapse: bool,
+    on_left: bool,
+) -> Element<'static, Message> {
+    use crate::ui::dock::DockMsg;
+    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
+        .on_press(Message::Dock(DockMsg::Close(id)))
+        .style(button::subtle)
+        .padding([3, 5]);
+    let close = iced::widget::tooltip(
+        close,
+        text(t!("Close")).size(10),
+        if on_left {
+            iced::widget::tooltip::Position::Left
+        } else {
+            iced::widget::tooltip::Position::Right
+        },
+    )
+    .gap(4);
+    let pin_icon = if auto_collapse {
+        crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
+    } else {
+        crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
+    };
+    let pin = button(pin_icon)
+        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(id)))
+        .style(move |theme: &Theme, status| {
+            let mut style = button::subtle(theme, status);
+            if auto_collapse {
+                let palette = theme.palette();
+                style.background = Some(Background::Color(palette.primary.weak.color));
+                style.text_color = palette.primary.weak.text;
+                style.border.color = palette.primary.base.color;
+                style.border.width = 1.0;
+            }
+            style
+        })
+        .padding([3, 5]);
+    let pin = iced::widget::tooltip(
+        pin,
+        text(t!("Auto-hide")).size(10),
+        if on_left {
+            iced::widget::tooltip::Position::Left
+        } else {
+            iced::widget::tooltip::Position::Right
+        },
+    )
+    .gap(4);
+    let title = canvas(VBarLabel {
+        text: id.title().to_string(),
+        clockwise: false,
+        from_start: true,
+    })
+    .width(Fill)
+    .height(Fill);
+    let bar = column![
+        close,
+        pin,
+        container(title).width(Fill).height(Fill).padding([6, 0]),
+        container(crate::ui::icons::themed(id.icon(), 16.0)).center_x(Fill),
+    ]
+    .spacing(2)
+    .padding([4, 0])
+    .align_x(iced::Center)
+    .width(Length::Fixed(DOCK_FLOAT_BAR_W))
+    .height(Fill);
+    mouse_area(container(bar).style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.weak.color)),
+        ..Default::default()
+    }))
+    .on_press(Message::Dock(DockMsg::DockGrab(id)))
+    .interaction(iced::mouse::Interaction::Grab)
+    .into()
+}
 
 /// Grabbable separator for a docked panel managed by the general dock. Same
 /// visual as the previous per-panel divider but emits generic dock messages.

@@ -659,8 +659,8 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
 }
 
 /// Build the docked panel element from the palette state.
-pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<'_, Message> {
-    let title_bar = crate::ui::dock::title_bar(PanelId::BlockPalette, crate::t!("Blocks").into_owned(), auto_collapse);
+pub fn view(palette: &BlockPalette, width: f32, chrome: crate::ui::dock::Chrome) -> Element<'_, Message> {
+    let title_bar = crate::ui::dock::title_bar(PanelId::BlockPalette, crate::t!("Blocks").into_owned(), chrome);
 
     let tabs = {
         let buttons = [Tab::Current, Tab::Recent, Tab::Favorites, Tab::Libraries].map(|t| {
@@ -801,7 +801,7 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
             .into()
     };
 
-    crate::ui::dock::frame(column![title_bar, top, body, options_card(palette)].spacing(6), width)
+    crate::ui::dock::frame(title_bar, column![top, body, options_card(palette)].spacing(6), width)
 }
 
 /// Width of the ribbon's block gallery.

@@ -32,6 +32,9 @@ pub struct Profile {
 /// is handed over as the arcs it is made of rather than as one curve with
 /// nowhere for the sweep to start.
 pub fn profile_of(entity: &EntityType) -> Option<Profile> {
+    if let Some(profile) = region_loop(entity) {
+        return (profile.pieces.len() >= 3).then_some(profile);
+    }
     let planar = entity_curve(entity).or_else(|| planar_polygon_entity(entity))?;
     if !planar.curve.is_closed() {
         return None;
@@ -46,6 +49,9 @@ pub fn profile_of(entity: &EntityType) -> Option<Profile> {
 /// An entity-level planar curve suitable for either a solid profile or an
 /// open surface profile.
 pub fn extrusion_profile_of(entity: &EntityType) -> Option<(Profile, bool)> {
+    if let Some(profile) = region_loop(entity) {
+        return Some((profile, true));
+    }
     let planar = entity_curve(entity).or_else(|| planar_polygon_entity(entity))?;
     let closed = planar.curve.is_closed();
     let pieces = profile_pieces(&planar.curve, closed)?;
@@ -56,6 +62,22 @@ pub fn extrusion_profile_of(entity: &EntityType) -> Option<(Profile, bool)> {
         },
         closed,
     ))
+}
+
+/// A region of one boundary loop as that loop, read from the region's exact
+/// edges (its display wires hold one wire per edge), a lone closed edge split
+/// as a closed curve is.
+fn region_loop(entity: &EntityType) -> Option<Profile> {
+    let EntityType::Region(_) = entity else { return None };
+    let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
+    let [boundary] = loops.as_slice() else { return None };
+    let single = boundary.len() == 1;
+    let pieces = boundary
+        .iter()
+        .map(|piece| profile_pieces(piece, single))
+        .collect::<Option<Vec<_>>>()?
+        .concat();
+    Some(Profile { plane, pieces })
 }
 
 fn profile_pieces(curve: &Curve, closed: bool) -> Option<Vec<Curve>> {
@@ -291,11 +313,8 @@ pub fn extruded_surface(
     direction: [f64; 3],
     taper_angle: f64,
 ) -> Option<Body> {
-    // A region's surface is its one boundary loop, read from its exact edges.
-    if let EntityType::Region(_) = entity {
-        let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
-        let [boundary] = loops.as_slice() else { return None };
-        return brep::extrude_surface_tapered(plane, boundary, direction, taper_angle);
+    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+        return None;
     }
     let (profile, _) = extrusion_profile_of(entity)?;
     brep::extrude_surface_tapered(

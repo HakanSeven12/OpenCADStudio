@@ -1479,6 +1479,7 @@ fn compact_state(state: &Value) -> Value {
         "geometry_revision",
         "camera_revision",
         "selection",
+        "selection_revision",
         "command",
         "modal",
         "event_cursor",

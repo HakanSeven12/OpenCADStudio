@@ -170,14 +170,13 @@ fn generate_type_registry(out_dir: &Path) {
             "AssocEvalValue",
             trace_simple::<codec::objects::AssocEvalValue>,
         ),
-        (
-            "AssocCompositeSegment",
-            trace_simple::<codec::objects::AssocCompositeSegment>,
-        ),
-        (
-            "AssocSubcurve",
-            trace_simple::<codec::objects::AssocSubcurve>,
-        ),
+        // `AssocCompositeSegment` and `AssocSubcurve` are fork-codec
+        // additions (the H8h raw-capture subcurve model); the upstream
+        // codec carries only `AssocSubcurveKind`, and this branch must
+        // build against both (the fork pins now, upstream after the codec
+        // PR merges). The nested trace from `AssociativeData` records
+        // them on the fork codec; the explicit seeds stay out so the
+        // build script compiles against either codec.
         (
             "AssocSubcurveKind",
             trace_simple::<codec::objects::AssocSubcurveKind>,

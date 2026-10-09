@@ -376,8 +376,7 @@
       "subdivision_level",
       "vertices",
       "faces",
-      "edges",
-      "unknown_b1"
+      "edges"
     ],
     "Helix": [
       "layer",

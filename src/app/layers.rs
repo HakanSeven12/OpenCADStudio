@@ -230,7 +230,7 @@ impl OpenCADStudio {
                 }
             })
             .collect();
-        let active_table = self.ribbon.active_table_style.clone();
+        let active_table = doc.header.current_table_style_name.clone();
         let active_table = if table_names.contains(&active_table) {
             active_table
         } else {

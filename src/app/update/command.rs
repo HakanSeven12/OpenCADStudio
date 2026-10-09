@@ -2342,7 +2342,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.tabs[i].dirty = true;
                     }
                     StyleKey::TableStyle => {
-                        self.ribbon.active_table_style = name;
+                        self.ribbon.active_table_style = name.clone();
+                        let i = self.active_tab;
+                        let found = self.tabs[i].scene.document.objects.values().any(|o| {
+                            matches!(o, codec::objects::ObjectType::TableStyle(ts) if ts.name == name)
+                        });
+                        if found {
+                            self.tabs[i].scene.document.header.current_table_style_name = name;
+                            self.tabs[i].dirty = true;
+                        }
                     }
                 }
                 Task::none()
@@ -4709,6 +4717,62 @@ mod layer_name_target_tests {
             .find(|l| l.name == "0")
             .expect("layer 0 in panel");
         assert_eq!(panel.transparency, 0, "undo must restore transparency");
+    }
+}
+
+#[cfg(test)]
+mod tablestyle_ribbon_tests {
+    // #45: picking a table style in the ribbon must write the document header
+    // (like Text/Dim/MLeader), not just the ribbon mirror.
+    use crate::app::OpenCADStudio;
+    use crate::modules::StyleKey;
+
+    #[test]
+    fn tablestyle_ribbon_pick_writes_header_and_dirties() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut extra = codec::objects::TableStyle::standard();
+        extra.name = "EXTRA".to_string();
+        extra.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .insert(extra.handle, codec::objects::ObjectType::TableStyle(extra));
+        app.tabs[i].dirty = false;
+        let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_table_style_name,
+            "EXTRA",
+            "ribbon pick must reach the document header"
+        );
+        assert!(
+            app.tabs[i].dirty,
+            "ribbon pick must dirty the tab like its siblings"
+        );
+    }
+
+    #[test]
+    fn tablestyle_pick_flows_into_table_insert() {
+        // End-to-end: ribbon pick → header → insert dialog defaults to the pick.
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut extra = codec::objects::TableStyle::standard();
+        extra.name = "EXTRA".to_string();
+        extra.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .insert(extra.handle, codec::objects::ObjectType::TableStyle(extra));
+        let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
+        app.open_table_insert();
+        assert_eq!(
+            app.table_insert.style, "EXTRA",
+            "insert dialog must default to the ribbon-picked style"
+        );
     }
 }
 

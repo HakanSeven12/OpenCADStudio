@@ -3018,6 +3018,11 @@ mod tests {
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 5.0, 0.0),
         );
+        // The fork codec defaults leaders to NoAnnotation (authored wires
+        // only pair a typed leader with a real annotation slot; a defaulted
+        // WithText leader with a dangling null association is rejected by
+        // the strict loaders), so the typed-with-text case opts in.
+        leader.creation_type = LeaderCreationType::WithText;
         leader.annotation_handle = text_handle;
         let entity = codec::EntityType::Leader(leader.clone());
         validate_new_canvas_entity(&entity).unwrap();

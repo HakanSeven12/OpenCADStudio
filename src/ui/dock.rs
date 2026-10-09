@@ -310,6 +310,9 @@ pub struct DockState {
     pub right: Vec<DockGroup>,
     /// The group each edge shows (left, right).
     pub shown: (usize, usize),
+    /// Auto-hide per edge (left, right): the edge shows only its icon strip
+    /// until an icon is hovered.
+    pub auto_hide: (bool, bool),
     /// Floating panels, back → front.
     pub floating: Vec<FloatPanel>,
     /// Per-panel width / auto-collapse settings, keyed by `PanelId`. A
@@ -323,6 +326,7 @@ impl Default for DockState {
             left: vec![DockGroup::single(PanelId::Properties)],
             right: vec![DockGroup::single(PanelId::BlockPalette)],
             shown: (0, 0),
+            auto_hide: (false, false),
             floating: Vec::new(),
             panels: BTreeMap::new(),
         }
@@ -435,8 +439,39 @@ impl DockState {
             .clamp(DOCK_MIN_W, id.max_width().min(win_w * 0.45).max(DOCK_MIN_W))
     }
 
+    /// The floating auto-hide flag of `id` (a docked pallet follows its
+    /// edge instead; see [`Self::auto_hides`]).
     pub fn auto_collapse(&self, id: PanelId) -> bool {
         self.settings(id).auto_collapse
+    }
+
+    /// Whether `side` auto-hides.
+    pub fn edge_auto_hide(&self, side: DockSide) -> bool {
+        match side {
+            DockSide::Left => self.auto_hide.0,
+            DockSide::Right => self.auto_hide.1,
+        }
+    }
+
+    /// Whether `id` auto-hides where it is: by its edge's setting when
+    /// docked, by its own when floating.
+    pub fn auto_hides(&self, id: PanelId) -> bool {
+        match self.location(id) {
+            Some((side, _)) => self.edge_auto_hide(side),
+            None => self.auto_collapse(id),
+        }
+    }
+
+    /// Flip auto-hide where `id` is: its whole edge when docked, the pallet
+    /// itself when floating. Returns the new state.
+    pub fn toggle_auto_hide(&mut self, id: PanelId) -> bool {
+        let on = !self.auto_hides(id);
+        match self.location(id) {
+            Some((DockSide::Left, _)) => self.auto_hide.0 = on,
+            Some((DockSide::Right, _)) => self.auto_hide.1 = on,
+            None => self.set_auto_collapse(id, on),
+        }
+        on
     }
 
     /// Set the persisted width, clamped.
@@ -1129,6 +1164,28 @@ mod tests {
         assert!((state.left[0].weights.iter().sum::<f32>() - 2.0).abs() < 1e-6);
         state.reset_splits(DockSide::Left, 0);
         assert_eq!(state.left[0].weights, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn auto_hide_is_per_edge_for_docked_and_per_pallet_when_floating() {
+        let mut state = DockState::default();
+        state.join_group(PanelId::Browser, DockSide::Left, 0, 1);
+        assert!(state.toggle_auto_hide(PanelId::Properties));
+        // The whole left edge auto-hides, the right edge does not.
+        assert!(state.auto_hides(PanelId::Browser));
+        assert!(!state.auto_hides(PanelId::BlockPalette));
+        // A floating pallet keeps its own setting.
+        state.float(FloatPanel {
+            id: PanelId::Count,
+            x: 0.0,
+            y: 0.0,
+            w: 250.0,
+            h: 300.0,
+        });
+        assert!(!state.auto_hides(PanelId::Count));
+        assert!(state.toggle_auto_hide(PanelId::Count));
+        assert!(state.auto_hides(PanelId::Count));
+        assert!(!state.edge_auto_hide(DockSide::Right));
     }
 
     #[test]

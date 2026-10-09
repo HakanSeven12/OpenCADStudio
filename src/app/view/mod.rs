@@ -1940,9 +1940,13 @@ bg={bg_ms:.1}ms n={view_count}"
         // catcher that closes it on any click elsewhere.
         if let Some(side) = self.dock_edge_menu {
             if !self.dock_visible_groups(side).is_empty() {
+                // Checked = open and docked on this edge.
                 let shown: Vec<_> = crate::ui::dock::PanelId::ALL
                     .iter()
-                    .map(|p| (*p, self.dock_panel_visible(*p)))
+                    .map(|p| {
+                        let here = self.dock.location(*p).map(|(s, _)| s) == Some(side);
+                        (*p, here && self.dock_panel_visible(*p))
+                    })
                     .collect();
                 let (_, plus_top) = self.dock_strip_layout(side);
                 let strip = crate::ui::dock::DOCK_STRIP_W;
@@ -2927,7 +2931,7 @@ impl OpenCADStudio {
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
         let chrome = crate::ui::dock::Chrome {
-            auto_collapse: self.dock.auto_collapse(id),
+            auto_collapse: self.dock.auto_hides(id),
             floating,
             title_hovered: self.dock_title_hover == Some(id),
         };
@@ -3635,7 +3639,7 @@ const DOCK_MENU_W: f32 = 230.0;
 
 /// The pallet menu of an edge's + button, styled like the right-click menu:
 /// one row per pallet with its icon, its name and a check mark when it is
-/// shown. `shown` holds each pallet with that state.
+/// open on this edge. `shown` holds each pallet with that state.
 fn dock_edge_menu(
     side: crate::app::config::DockSide,
     shown: &[(crate::ui::dock::PanelId, bool)],

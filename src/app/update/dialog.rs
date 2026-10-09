@@ -633,7 +633,11 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 iced::Task::none()
             }
             DockMsg::EdgeMenuToggle(side, id) => {
-                if self.dock_panel_visible(id) {
+                // Checked = open and docked on this edge: unchecking hides it.
+                // Anything else (closed, floating, on the other edge) moves
+                // here and opens.
+                let here = self.dock.location(id).map(|(s, _)| s) == Some(side);
+                if here && self.dock_panel_visible(id) {
                     let task = self.on_dock(DockMsg::Close(id));
                     self.save_config();
                     return task;
@@ -666,8 +670,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 iced::Task::none()
             }
             DockMsg::AutoCollapseToggle(id) => {
-                let on = !self.dock.auto_collapse(id);
-                self.dock.set_auto_collapse(id, on);
+                // Docked: auto-hide for the whole edge; floating: this pallet.
+                let on = self.dock.toggle_auto_hide(id);
                 self.dock_expanded = if on { None } else { Some(id) };
                 self.save_config();
                 iced::Task::none()
@@ -722,19 +726,22 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 // Ignored while dragging/resizing: the pointer is over the
                 // drag preview, not a rail, so a hover must not collapse the
                 // panel being dragged or repoint the resize target.
-                if self.dock_dragging.is_none() && self.dock_resizing.is_none() {
+                // Only an auto-hiding edge (or floating pallet) reacts to
+                // hover: it flies the hovered group out. Otherwise groups
+                // switch on click.
+                if self.dock_dragging.is_none()
+                    && self.dock_resizing.is_none()
+                    && self.dock.auto_hides(id)
+                {
                     self.dock_expanded = Some(id);
-                    // Hovering an auto-hiding group's icon flies it out.
-                    if self.dock.auto_collapse(id) {
-                        self.dock.show_group_of(id);
-                    }
+                    self.dock.show_group_of(id);
                 }
                 iced::Task::none()
             }
             DockMsg::HoverExit => {
                 if self.dock_dragging.is_none() && self.dock_resizing.is_none() {
                     if let Some(id) = self.dock_expanded {
-                        if self.dock.auto_collapse(id) {
+                        if self.dock.auto_hides(id) {
                             self.dock_expanded = None;
                         }
                     }
@@ -991,14 +998,15 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
     }
 
     /// Whether `side` draws its shown group beside the icon strip: always,
-    /// unless all its pallets auto-hide and none is hovered.
+    /// unless the edge auto-hides and none of the group's icons is hovered.
     pub(crate) fn dock_edge_expanded(&self, side: crate::app::config::DockSide) -> bool {
         let Some(gi) = self.dock_shown_group(side) else {
             return false;
         };
-        let panels = self.dock_group_visible(side, gi);
-        panels.iter().any(|id| !self.dock.auto_collapse(*id))
-            || self.dock_expanded.is_some_and(|e| panels.contains(&e))
+        !self.dock.edge_auto_hide(side)
+            || self
+                .dock_expanded
+                .is_some_and(|e| self.dock_group_visible(side, gi).contains(&e))
     }
 
     /// Width of group `gi` on `side`: its pallets share the widest one's
@@ -2010,9 +2018,9 @@ mod tests {
         app.show_block_palette = true;
         let id = crate::ui::dock::PanelId::BlockPalette;
         let _ = app.on_dock(crate::ui::dock::DockMsg::AutoCollapseToggle(id));
-        assert!(app.dock.auto_collapse(id), "pin enables auto-collapse");
+        assert!(app.dock.auto_hides(id), "pin enables auto-hide");
         let _ = app.on_dock(crate::ui::dock::DockMsg::AutoCollapseToggle(id));
-        assert!(!app.dock.auto_collapse(id), "second pin disables auto-collapse");
+        assert!(!app.dock.auto_hides(id), "second pin disables auto-hide");
         let _ = app.on_dock(crate::ui::dock::DockMsg::Close(id));
         assert!(!app.show_block_palette, "close dismisses the sidebar");
     }
@@ -2287,16 +2295,35 @@ mod tests {
     }
 
     #[test]
-    fn dock_auto_hiding_group_shows_while_its_icon_is_hovered() {
+    fn dock_auto_hide_edge_shows_the_hovered_group() {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{DockMsg, PanelId};
+        use crate::ui::dock::{DockGroup, DockMsg, PanelId};
         let mut app = dock_app();
+        app.show_browser = true;
+        app.dock.left.push(DockGroup::single(PanelId::Browser));
+        // The pin on any docked pallet turns auto-hide on for its edge.
         let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
+        assert!(app.dock.edge_auto_hide(DockSide::Left));
+        assert!(!app.dock.edge_auto_hide(DockSide::Right));
         assert!(!app.dock_edge_expanded(DockSide::Left));
-        let _ = app.on_dock(DockMsg::Hover(PanelId::Properties));
+        // Hovering an icon flies its group out.
+        let _ = app.on_dock(DockMsg::Hover(PanelId::Browser));
         assert!(app.dock_edge_expanded(DockSide::Left));
+        assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
         let _ = app.on_dock(DockMsg::HoverExit);
         assert!(!app.dock_edge_expanded(DockSide::Left));
+    }
+
+    #[test]
+    fn dock_hover_does_not_switch_groups_without_auto_hide() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockGroup, DockMsg, PanelId};
+        let mut app = dock_app();
+        app.show_browser = true;
+        app.dock.left.push(DockGroup::single(PanelId::Browser));
+        let _ = app.on_dock(DockMsg::Hover(PanelId::Browser));
+        assert_eq!(app.dock_shown_group(DockSide::Left), Some(0));
+        assert!(app.dock_edge_expanded(DockSide::Left));
     }
 
     #[test]
@@ -2345,6 +2372,12 @@ mod tests {
         // Opening it again from the same edge reuses that place.
         let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
         assert_eq!(app.dock.left.len(), 2);
+        // A pallet open on the other edge is not checked here: picking it
+        // moves it over instead of hiding it.
+        let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::BlockPalette));
+        assert!(app.show_block_palette);
+        assert!(app.dock.right.is_empty());
+        assert_eq!(app.dock.location(PanelId::BlockPalette), Some((DockSide::Left, 2)));
     }
 
     #[test]

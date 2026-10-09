@@ -545,12 +545,9 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
     /// whichever panel the message names.
     pub(super) fn on_dock(&mut self, m: crate::ui::dock::DockMsg) -> iced::Task<Message> {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{DockMsg, DropTarget, FloatPanel, PanelId};
+        use crate::ui::dock::{DockDrag, DockMsg, DropTarget, FloatPanel};
         match m {
-            DockMsg::DockGrab(id) => {
-                self.dock_begin_drag(id);
-                iced::Task::none()
-            }
+            DockMsg::DockGrab(id) => self.dock_begin(DockDrag::moving(id, None), Some(id)),
             DockMsg::IconPress(id) => {
                 // An icon press shows the icon's group and may also start
                 // dragging the pallet; a plain click never passes the drag
@@ -558,56 +555,54 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 if self.dock.show_group_of(id) {
                     self.save_config();
                 }
-                self.dock_begin_drag(id);
-                iced::Task::none()
+                self.dock_begin(DockDrag::moving(id, None), Some(id));
             }
-            DockMsg::ResizeGrab(id) => {
-                self.dock_resizing = Some(id);
-                self.dock_dragging = None;
-                self.dock_drag_last = None;
-                self.dock_drag_target = None;
-                self.dock_expanded = Some(id);
-                iced::Task::none()
+            DockMsg::GroupGrab(side, gi) => {
+                if let Some(&id) = self.dock_group_visible(side, gi).first() {
+                    self.dock_begin(DockDrag::moving(id, Some((side, gi))), Some(id));
+                }
             }
-            DockMsg::SplitGrab(side, gi, upper, lower) => {
-                self.dock_split_drag = Some((side, gi, upper, lower));
-                self.dock_dragging = None;
-                self.dock_drag_last = None;
-                self.dock_drag_target = None;
-                iced::Task::none()
+            DockMsg::ResizeGrab(id) => self.dock_begin(DockDrag::Width(id), Some(id)),
+            DockMsg::SplitGrab(side, group, upper, lower) => self.dock_begin(
+                DockDrag::Split {
+                    side,
+                    group,
+                    upper,
+                    lower,
+                },
+                None,
+            ),
+            DockMsg::FloatResizeGrab(panel, from_left) => {
+                self.dock.raise_float(panel);
+                self.dock_begin(DockDrag::FloatSize { panel, from_left }, None);
             }
             DockMsg::SplitReset(side, gi) => {
                 self.dock.reset_splits(side, gi);
                 self.save_config();
-                iced::Task::none()
             }
-            DockMsg::FloatResizeGrab(id, from_left) => {
-                self.dock.raise_float(id);
-                self.dock_float_resizing = Some((id, from_left));
-                self.dock_dragging = None;
-                self.dock_drag_last = None;
-                self.dock_drag_target = None;
-                iced::Task::none()
+            DockMsg::WidthReset(id) => {
+                if let Some((side, gi)) = self.dock.location(id) {
+                    self.dock.reset_group_width(side, gi);
+                } else {
+                    self.dock.reset_width(id);
+                }
+                self.save_config();
             }
-            DockMsg::TitleHover(id) => {
-                self.dock_title_hover = id;
-                iced::Task::none()
-            }
+            DockMsg::TitleHover(id) => self.dock_title_hover = id,
+            DockMsg::GripHover(grip) => self.dock_grip_hover = grip,
+            DockMsg::FloatRaise(id) => self.dock.raise_float(id),
             DockMsg::FloatOut(id) => {
                 // Float beside the edge it was docked on, near the top.
                 let (ww, _) = self.dock_workspace_size();
                 let (w, h) = self.dock_float_size(id);
+                let strip = crate::ui::dock::DOCK_STRIP_W;
                 let x = match self.dock.location(id) {
                     Some((DockSide::Right, _)) => {
-                        ww - crate::ui::dock::DOCK_STRIP_W
-                            - self.dock_column_width(DockSide::Right)
-                            - w
-                            - 60.0
+                        ww - strip - self.dock_column_width(DockSide::Right) - w - 60.0
                     }
-                    _ => crate::ui::dock::DOCK_STRIP_W + self.dock_column_width(DockSide::Left) + 40.0,
+                    _ => strip + self.dock_column_width(DockSide::Left) + 40.0,
                 };
-                self.dock_dragging = None;
-                self.dock_drag_target = None;
+                self.dock_drag = None;
                 if self.dock.float(FloatPanel {
                     id,
                     x: x.max(0.0),
@@ -617,328 +612,344 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 }) {
                     self.save_config();
                 }
-                iced::Task::none()
             }
             DockMsg::DockTo(id, side) => {
-                self.dock_dragging = None;
-                self.dock_drag_target = None;
+                self.dock_drag = None;
                 if self.dock.dock(id, side, usize::MAX) {
-                    self.dock_expanded = Some(id);
                     self.save_config();
                 }
-                iced::Task::none()
             }
-            DockMsg::EdgeMenu(side) => {
-                self.dock_edge_menu = side;
-                iced::Task::none()
-            }
+            DockMsg::EdgeMenu(side) => self.dock_edge_menu = side,
             DockMsg::EdgeMenuToggle(side, id) => {
                 // Checked = open and docked on this edge: unchecking hides it.
                 // Anything else (closed, floating, on the other edge) moves
-                // here and opens.
+                // here and opens, in its own group here if it has one, else
+                // as a new group; adding a pallet ends the menu's job.
                 let here = self.dock.location(id).map(|(s, _)| s) == Some(side);
-                if here && self.dock_panel_visible(id) {
-                    let task = self.on_dock(DockMsg::Close(id));
+                if !here {
+                    self.dock.dock(id, side, usize::MAX);
+                } else if self.dock_panel_visible(id) {
+                    let task = self.dock_set_open(id, false);
                     self.save_config();
                     return task;
                 }
-                // A pallet opened from an edge's menu lands on that edge: in
-                // its own group there if it has one, else as a new group.
-                if self.dock.location(id).map(|(s, _)| s) != Some(side) {
-                    self.dock.dock(id, side, usize::MAX);
-                }
-                let task = self.dock_open_panel(id);
-                self.dock.show_group_of(id);
-                // Adding a pallet is the end of the menu's job.
                 self.dock_edge_menu = None;
+                let task = self.dock_set_open(id, true);
                 self.save_config();
-                task
-            }
-            DockMsg::GripHover(grip) => {
-                self.dock_grip_hover = grip;
-                iced::Task::none()
-            }
-            DockMsg::IconHover(id) => {
-                self.dock_icon_hover = id;
-                iced::Task::none()
-            }
-            DockMsg::GroupGrab(side, gi) => {
-                if let Some(&id) = self.dock_group_visible(side, gi).first() {
-                    self.dock_begin_drag(id);
-                    self.dock_dragging_group = Some((side, gi));
-                }
-                iced::Task::none()
-            }
-            DockMsg::FloatRaise(id) => {
-                self.dock.raise_float(id);
-                iced::Task::none()
-            }
-            DockMsg::WidthReset(id) => {
-                self.dock.reset_width(id);
-                self.dock.set_group_width(id, self.dock.settings(id).width);
-                self.save_config();
-                iced::Task::none()
+                return task;
             }
             DockMsg::AutoCollapseToggle(id) => {
                 // Docked: auto-hide for the whole edge; floating: this pallet.
-                let on = self.dock.toggle_auto_hide(id);
-                self.dock_expanded = if on { None } else { Some(id) };
+                if self.dock.toggle_auto_hide(id) {
+                    self.dock_peek = None;
+                }
                 self.save_config();
-                iced::Task::none()
             }
-            DockMsg::Close(id) => {
-                match id {
-                    PanelId::BlockPalette => {
-                        self.show_block_palette = false;
-                        self.block_palette.placing = None;
-                    }
-                    PanelId::ExternalReferences => {
-                        self.show_external_references = false;
-                    }
-                    PanelId::Browser => {
-                        self.show_browser = false;
-                    }
-                    PanelId::NodeGraph => {
-                        self.show_node_graph = false;
-                    }
-                    PanelId::PointCloudManager => {
-                        self.pc_manager.show = false;
-                    }
-                    PanelId::Count => {
-                        self.count_palette.show = false;
-                        self.ribbon.set_count_palette(false);
-                    }
-                    PanelId::SheetSetManager => {
-                        self.sheet_set.show = false;
-                        self.ribbon.set_sheet_set(false);
-                    }
-                    PanelId::Properties => {
-                        self.show_properties = false;
-                        self.ribbon.set_properties(false);
-                    }
-                    PanelId::Layers => {
-                        self.show_layers = false;
-                        self.ribbon.deactivate_tool_if("LAYERS");
-                    }
-                }
-                if self.dock_expanded == Some(id) {
-                    self.dock_expanded = None;
-                }
-                if self.dock_dragging == Some(id) {
-                    self.dock_dragging = None;
-                }
-                if self.dock_resizing == Some(id) {
-                    self.dock_resizing = None;
-                }
-                iced::Task::none()
-            }
+            DockMsg::Close(id) => return self.dock_set_open(id, false),
             DockMsg::Hover(id) => {
-                // Ignored while dragging/resizing: the pointer is over the
-                // drag preview, not a rail, so a hover must not collapse the
-                // panel being dragged or repoint the resize target.
+                self.dock_icon_hover = id;
                 // Only an auto-hiding edge (or floating pallet) reacts to
-                // hover: it flies the hovered group out. Otherwise groups
-                // switch on click.
-                if self.dock_dragging.is_none()
-                    && self.dock_resizing.is_none()
-                    && self.dock.auto_hides(id)
-                {
-                    self.dock_expanded = Some(id);
-                    self.dock.show_group_of(id);
+                // hover: it reveals the hovered pallet's group. Otherwise
+                // groups switch on click. Ignored mid-drag, when the pointer
+                // is over the preview rather than the strip.
+                if let Some(id) = id {
+                    if self.dock_drag.is_none() && self.dock.auto_hides(id) {
+                        self.dock_reveal(id);
+                    }
                 }
-                iced::Task::none()
             }
             DockMsg::HoverExit => {
-                if self.dock_dragging.is_none() && self.dock_resizing.is_none() {
-                    if let Some(id) = self.dock_expanded {
-                        if self.dock.auto_hides(id) {
-                            self.dock_expanded = None;
-                        }
-                    }
-                }
-                iced::Task::none()
-            }
-            DockMsg::DragMove(point) => {
-                // NOTE: xref column drags intentionally do NOT ride this
-                // path: its points live in workspace space while the header
-                // tracker reports header-local points, and mixing the two
-                // produced a one-time jump plus a stuck drag. Column moves
-                // arrive via Message::XrefColMove only.
-                if let Some(id) = self.dock_dragging {
-                    let origin = *self.dock_drag_origin.get_or_insert(point);
-                    let moved = (point.x - origin.x).hypot(point.y - origin.y);
-                    if self.dock_drag_target.is_none() && moved >= DOCK_DRAG_THRESHOLD {
-                        // Hold a floating panel where it was grabbed; a docked
-                        // one by its title bar.
-                        self.dock_grab_offset = match self.dock.float_rect(id) {
-                            Some(f) => iced::Vector::new(origin.x - f.x, origin.y - f.y),
-                            None => iced::Vector::new(
-                                (self.dock.width(id, self.win_size.0) * 0.5).min(120.0),
-                                14.0,
-                            ),
-                        };
-                    }
-                    if self.dock_drag_target.is_some() || moved >= DOCK_DRAG_THRESHOLD {
-                        let target = self.dock_drop_target(point);
-                        // A whole group only moves between group positions:
-                        // it cannot join another group or float.
-                        self.dock_drag_target = match (self.dock_dragging_group, target) {
-                            (Some(_), DropTarget::Edge { .. }) | (None, _) => Some(target),
-                            (Some(_), _) => None,
-                        };
-                    }
-                } else if let Some((side, gi, upper, lower)) = self.dock_split_drag {
-                    if let Some(last) = self.dock_drag_last {
-                        let (_, avail) = self.dock_workspace_size();
-                        let total: f32 = self
-                            .dock_slot_spans(side)
-                            .iter()
-                            .map(|(i, _, _)| self.dock.groups(side)[gi].weights[*i])
-                            .sum();
-                        if avail > 0.0 && total > 0.0 {
-                            let per_px = total / avail;
-                            self.dock.shift_split(
-                                side,
-                                gi,
-                                upper,
-                                lower,
-                                (point.y - last.y) * per_px,
-                                crate::ui::dock::GROUP_MIN_H * per_px,
-                            );
-                        }
-                    }
-                } else if let Some((id, from_left)) = self.dock_float_resizing {
-                    if let (Some(last), Some(f)) = (self.dock_drag_last, self.dock.float_rect(id)) {
-                        let dx = point.x - last.x;
-                        self.dock.resize_float(
-                            id,
-                            if from_left { f.w - dx } else { f.w + dx },
-                            f.h + point.y - last.y,
-                            from_left,
-                        );
-                    }
-                } else if self.layer_col_dragging {
-                    if let Some(last) = self.dock_drag_last {
-                        self.layer_name_col_w =
-                            (self.layer_name_col_w + point.x - last.x).clamp(60.0, 640.0);
-                    }
-                } else if let Some(id) = self.dock_resizing {
-                    if let Some(last) = self.dock_drag_last {
-                        let dx = point.x - last.x;
-                        let delta = match self.dock.location(id) {
-                            Some((DockSide::Left, _)) => dx,
-                            _ => -dx,
-                        };
-                        // The divider sizes the panel's group; every group
-                        // keeps its own width.
-                        let cur = match self.dock.location(id) {
-                            Some((side, gi)) => self.dock_group_width(side, gi),
-                            None => self.dock.settings(id).width,
-                        } + delta;
-                        self.dock.set_group_width(id, cur);
-                    }
-                }
-                if self.dock_dragging.is_some()
-                    || self.dock_resizing.is_some()
-                    || self.dock_split_drag.is_some()
-                    || self.dock_float_resizing.is_some()
-                    || self.layer_col_dragging
+                if self.dock_drag.is_none()
+                    && self.dock_peek.is_some_and(|id| self.dock.auto_hides(id))
                 {
-                    self.dock_drag_last = Some(point);
+                    self.dock_peek = None;
                 }
-                iced::Task::none()
             }
+            DockMsg::DragMove(point) => self.dock_drag_move(point),
             DockMsg::DragRelease => {
-                let mut changed = self.dock_resizing.is_some()
-                    || self.dock_split_drag.is_some()
-                    || self.dock_float_resizing.is_some();
-                if let (Some((side, gi)), Some(DropTarget::Edge { side: to, index })) =
-                    (self.dock_dragging_group, self.dock_drag_target)
-                {
-                    changed |= self.dock.move_group(side, gi, to, index);
-                } else if let (Some(id), Some(target)) = (self.dock_dragging, self.dock_drag_target) {
-                    let moved = match target {
-                        DropTarget::Edge { side, index } => self.dock.dock(id, side, index),
-                        DropTarget::Join { side, group, index } => {
-                            self.dock.join_group(id, side, group, index)
-                        }
-                        DropTarget::Float { x, y } => {
-                            let (w, h) = self.dock_float_size(id);
-                            self.dock.float(FloatPanel { id, x, y, w, h })
-                        }
-                    };
-                    if moved {
-                        self.dock_expanded = Some(id);
+                let mut changed = false;
+                match self.dock_drag.take() {
+                    Some(DockDrag::Move {
+                        group: Some((side, gi)),
+                        target: Some(DropTarget::Edge { side: to, index }),
+                        ..
+                    }) => changed = self.dock.move_group(side, gi, to, index),
+                    Some(DockDrag::Move {
+                        panel,
+                        group: None,
+                        target: Some(target),
+                        ..
+                    }) => {
+                        changed = match target {
+                            DropTarget::Edge { side, index } => self.dock.dock(panel, side, index),
+                            DropTarget::Join { side, group, index } => {
+                                self.dock.join_group(panel, side, group, index)
+                            }
+                            DropTarget::Float { x, y } => {
+                                let (w, h) = self.dock_float_size(panel);
+                                self.dock.float(FloatPanel {
+                                    id: panel,
+                                    x,
+                                    y,
+                                    w,
+                                    h,
+                                })
+                            }
+                        };
                     }
-                    changed |= moved;
+                    Some(DockDrag::Move { .. } | DockDrag::LayerColumn) | None => {}
+                    Some(DockDrag::Width(_) | DockDrag::Split { .. } | DockDrag::FloatSize { .. }) => {
+                        changed = true;
+                    }
                 }
                 if changed {
                     self.save_config();
                 }
-                self.dock_dragging = None;
-                self.dock_dragging_group = None;
-                self.dock_resizing = None;
-                self.dock_split_drag = None;
-                self.dock_float_resizing = None;
                 self.dock_drag_last = None;
-                self.dock_drag_origin = None;
-                self.dock_drag_target = None;
                 self.xref_col_drag = None;
                 self.xref_col_last = None;
                 self.xref_split_drag = false;
-                self.layer_col_dragging = false;
-                iced::Task::none()
             }
         }
-    }
-
-    /// Show panel `id` where the layout has it, running its usual open path
-    /// (refreshes, ribbon highlight) when it was closed.
-    fn dock_open_panel(&mut self, id: crate::ui::dock::PanelId) -> iced::Task<Message> {
-        use crate::ui::dock::PanelId;
-        if self.dock_panel_visible(id) {
-            return iced::Task::none();
-        }
-        match id {
-            PanelId::Properties => {
-                self.show_properties = true;
-                self.ribbon.set_properties(true);
-            }
-            PanelId::BlockPalette => self.open_blocks_palette(None),
-            PanelId::ExternalReferences => {
-                self.show_external_references = true;
-                self.refresh_xref_manager();
-            }
-            PanelId::Browser => self.show_browser = true,
-            PanelId::NodeGraph => {
-                return self.on_graph(crate::ui::node_graph::GraphMsg::Toggle);
-            }
-            PanelId::PointCloudManager => self.pc_manager.show = true,
-            PanelId::Count => self.set_count_palette(true),
-            PanelId::SheetSetManager => self.show_sheet_set_manager(true),
-            PanelId::Layers => {
-                self.sync_ribbon_layers();
-                self.show_layers = true;
-            }
-        }
-        self.dock_expanded = Some(id);
         iced::Task::none()
     }
 
-    /// Start a (not yet confirmed) drag of `id`: it only moves once the
-    /// pointer travels past `DOCK_DRAG_THRESHOLD`.
-    fn dock_begin_drag(&mut self, id: crate::ui::dock::PanelId) {
-        self.dock.raise_float(id);
-        self.dock_dragging = Some(id);
-        self.dock_dragging_group = None;
-        self.dock_edge_menu = None;
-        self.dock_resizing = None;
-        self.dock_split_drag = None;
-        self.dock_float_resizing = None;
+    /// Pointer motion while something in the dock is dragged.
+    fn dock_drag_move(&mut self, point: iced::Point) {
+        // NOTE: xref column drags intentionally do NOT ride this path: its
+        // points live in workspace space while the header tracker reports
+        // header-local points, and mixing the two produced a one-time jump
+        // plus a stuck drag. Column moves arrive via Message::XrefColMove
+        // only.
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockDrag, DropTarget};
+        let last = self.dock_drag_last.replace(point);
+        let Some(drag) = self.dock_drag else {
+            return;
+        };
+        match drag {
+            DockDrag::Move {
+                panel,
+                group,
+                origin,
+                target,
+                grab,
+            } => {
+                let origin = origin.unwrap_or(point);
+                let moved = (point.x - origin.x).hypot(point.y - origin.y);
+                let started = target.is_some() || moved >= DOCK_DRAG_THRESHOLD;
+                // Hold a floating panel where it was grabbed; a docked one by
+                // its title bar.
+                let grab = if target.is_none() && started {
+                    match self.dock.float_rect(panel) {
+                        Some(f) => iced::Vector::new(origin.x - f.x, origin.y - f.y),
+                        None => iced::Vector::new(
+                            (self.dock.width(panel, self.win_size.0) * 0.5).min(120.0),
+                            14.0,
+                        ),
+                    }
+                } else {
+                    grab
+                };
+                // Store the grab first: the drop target reads it.
+                self.dock_drag = Some(DockDrag::Move {
+                    panel,
+                    group,
+                    origin: Some(origin),
+                    target,
+                    grab,
+                });
+                if !started {
+                    return;
+                }
+                let found = self.dock_drop_target(point);
+                // A whole group only moves between group positions: it
+                // cannot join another group or float.
+                let target = match (group, found) {
+                    (Some(_), DropTarget::Edge { .. }) | (None, _) => Some(found),
+                    (Some(_), _) => None,
+                };
+                self.dock_drag = Some(DockDrag::Move {
+                    panel,
+                    group,
+                    origin: Some(origin),
+                    target,
+                    grab,
+                });
+            }
+            DockDrag::Split {
+                side,
+                group,
+                upper,
+                lower,
+            } => {
+                let Some(last) = last else { return };
+                let (_, avail) = self.dock_workspace_size();
+                let total: f32 = self
+                    .dock_slot_spans(side)
+                    .iter()
+                    .map(|(i, _, _)| self.dock.groups(side)[group].weights[*i])
+                    .sum();
+                if avail > 0.0 && total > 0.0 {
+                    let per_px = total / avail;
+                    self.dock.shift_split(
+                        side,
+                        group,
+                        upper,
+                        lower,
+                        (point.y - last.y) * per_px,
+                        crate::ui::dock::GROUP_MIN_H * per_px,
+                    );
+                }
+            }
+            DockDrag::FloatSize { panel, from_left } => {
+                let (Some(last), Some(f)) = (last, self.dock.float_rect(panel)) else {
+                    return;
+                };
+                let dx = point.x - last.x;
+                self.dock.resize_float(
+                    panel,
+                    if from_left { f.w - dx } else { f.w + dx },
+                    f.h + point.y - last.y,
+                    from_left,
+                );
+            }
+            DockDrag::LayerColumn => {
+                let Some(last) = last else { return };
+                self.layer_name_col_w =
+                    (self.layer_name_col_w + point.x - last.x).clamp(60.0, 640.0);
+            }
+            DockDrag::Width(id) => {
+                let Some(last) = last else { return };
+                let dx = point.x - last.x;
+                match self.dock.location(id) {
+                    // The divider sizes the panel's group.
+                    Some((side, gi)) => {
+                        let delta = if side == DockSide::Left { dx } else { -dx };
+                        let cur = self.dock_group_width(side, gi) + delta;
+                        self.dock.set_group_width(side, gi, cur);
+                    }
+                    None => {
+                        let cur = self.dock.settings(id).width + dx;
+                        self.dock.set_width(id, cur);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Start `drag`, peeking `peek` (a pallet being dragged or resized stays
+    /// shown on an auto-hiding edge).
+    fn dock_begin(&mut self, drag: crate::ui::dock::DockDrag, peek: Option<crate::ui::dock::PanelId>) {
+        if let crate::ui::dock::DockDrag::Move { panel, .. } = drag {
+            self.dock.raise_float(panel);
+        }
+        self.dock_drag = Some(drag);
         self.dock_drag_last = None;
-        self.dock_drag_origin = None;
-        self.dock_drag_target = None;
-        self.dock_expanded = Some(id);
+        self.dock_edge_menu = None;
+        if peek.is_some() {
+            self.dock_peek = peek;
+        }
+    }
+
+    /// Bring `id` into view: show its group on its edge and, where it
+    /// auto-hides, keep it revealed until the pointer leaves.
+    pub(crate) fn dock_reveal(&mut self, id: crate::ui::dock::PanelId) {
+        self.dock.show_group_of(id);
+        self.dock_peek = Some(id);
+    }
+
+    /// Open or close pallet `id`, running its usual open path (refreshes,
+    /// ribbon highlight) or close path. An opened pallet is revealed where
+    /// the layout has it.
+    pub(crate) fn dock_set_open(
+        &mut self,
+        id: crate::ui::dock::PanelId,
+        open: bool,
+    ) -> iced::Task<Message> {
+        use crate::ui::dock::PanelId;
+        if open {
+            let task = if self.dock_panel_visible(id) {
+                iced::Task::none()
+            } else {
+                match id {
+                    PanelId::Properties => {
+                        self.show_properties = true;
+                        self.ribbon.set_properties(true);
+                        iced::Task::none()
+                    }
+                    PanelId::BlockPalette => {
+                        self.open_blocks_palette(None);
+                        iced::Task::none()
+                    }
+                    PanelId::ExternalReferences => {
+                        self.show_external_references = true;
+                        self.refresh_xref_manager();
+                        iced::Task::none()
+                    }
+                    PanelId::Browser => {
+                        self.show_browser = true;
+                        iced::Task::none()
+                    }
+                    PanelId::NodeGraph => self.on_graph(crate::ui::node_graph::GraphMsg::Toggle),
+                    PanelId::PointCloudManager => {
+                        self.pc_manager.show = true;
+                        iced::Task::none()
+                    }
+                    PanelId::Count => {
+                        self.set_count_palette(true);
+                        iced::Task::none()
+                    }
+                    PanelId::SheetSetManager => {
+                        self.show_sheet_set_manager(true);
+                        iced::Task::none()
+                    }
+                    PanelId::Layers => {
+                        self.sync_ribbon_layers();
+                        self.show_layers = true;
+                        iced::Task::none()
+                    }
+                }
+            };
+            self.dock_reveal(id);
+            return task;
+        }
+        match id {
+            PanelId::BlockPalette => {
+                self.show_block_palette = false;
+                self.block_palette.placing = None;
+            }
+            PanelId::ExternalReferences => self.show_external_references = false,
+            PanelId::Browser => self.show_browser = false,
+            PanelId::NodeGraph => self.show_node_graph = false,
+            PanelId::PointCloudManager => self.pc_manager.show = false,
+            PanelId::Count => {
+                self.count_palette.show = false;
+                self.ribbon.set_count_palette(false);
+            }
+            PanelId::SheetSetManager => {
+                self.sheet_set.show = false;
+                self.ribbon.set_sheet_set(false);
+            }
+            PanelId::Properties => {
+                self.show_properties = false;
+                self.ribbon.set_properties(false);
+            }
+            PanelId::Layers => {
+                self.show_layers = false;
+                self.ribbon.deactivate_tool_if("LAYERS");
+            }
+        }
+        if self.dock_peek == Some(id) {
+            self.dock_peek = None;
+        }
+        if self
+            .dock_drag
+            .is_some_and(|d| d.movement().is_some_and(|(p, _, _)| p == id) || d == crate::ui::dock::DockDrag::Width(id))
+        {
+            self.dock_drag = None;
+        }
+        iced::Task::none()
     }
 
     /// Whether `id` is currently rendered (not closed, not on the start screen /
@@ -1015,18 +1026,13 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         };
         !self.dock.edge_auto_hide(side)
             || self
-                .dock_expanded
+                .dock_peek
                 .is_some_and(|e| self.dock_group_visible(side, gi).contains(&e))
     }
 
-    /// Width of group `gi` on `side`: its pallets share the widest one's
-    /// width.
+    /// On-screen width of group `gi` on `side`.
     pub(crate) fn dock_group_width(&self, side: crate::app::config::DockSide, gi: usize) -> f32 {
-        self.dock.groups(side)[gi]
-            .panels
-            .iter()
-            .map(|id| self.dock.width(*id, self.win_size.0))
-            .fold(0.0, f32::max)
+        self.dock.group_width_px(side, gi, self.win_size.0)
     }
 
     /// Width of the pallet column beside `side`'s icon strip: the shown
@@ -1149,8 +1155,12 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 }
             }
         }
-        let x = (p.x - self.dock_grab_offset.x).clamp(0.0, (ww - 60.0).max(0.0));
-        let y = (p.y - self.dock_grab_offset.y).clamp(0.0, (wh - 30.0).max(0.0));
+        let grab = match self.dock_drag {
+            Some(crate::ui::dock::DockDrag::Move { grab, .. }) => grab,
+            _ => iced::Vector::new(0.0, 0.0),
+        };
+        let x = (p.x - grab.x).clamp(0.0, (ww - 60.0).max(0.0));
+        let y = (p.y - grab.y).clamp(0.0, (wh - 30.0).max(0.0));
         DropTarget::Float { x, y }
     }
 
@@ -2051,6 +2061,11 @@ mod tests {
         app
     }
 
+    /// Where the current dock drag would land, if it has started.
+    fn drag_target(app: &OpenCADStudio) -> Option<crate::ui::dock::DropTarget> {
+        app.dock_drag.and_then(|d| d.movement()).and_then(|(_, _, target)| target)
+    }
+
     /// Press `id`'s title bar at `from`, drag to `to`, and return the target
     /// shown just before release.
     fn drag_panel(
@@ -2063,7 +2078,7 @@ mod tests {
         let _ = app.on_dock(DockMsg::DockGrab(id));
         let _ = app.on_dock(DockMsg::DragMove(from));
         let _ = app.on_dock(DockMsg::DragMove(to));
-        let target = app.dock_drag_target;
+        let target = drag_target(app);
         let _ = app.on_dock(DockMsg::DragRelease);
         target
     }
@@ -2252,7 +2267,7 @@ mod tests {
             top + 2.0 * STRIP_CELL_H - 10.0,
         )));
         assert_eq!(
-            app.dock_drag_target,
+            drag_target(&app),
             Some(DropTarget::Join {
                 side: DockSide::Left,
                 group: 0,
@@ -2286,7 +2301,7 @@ mod tests {
             layout[0].icons_top + STRIP_CELL_H + 2.0,
         )));
         assert_eq!(
-            app.dock_drag_target,
+            drag_target(&app),
             Some(DropTarget::Join {
                 side: DockSide::Left,
                 group: 0,
@@ -2327,7 +2342,7 @@ mod tests {
         let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 1));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, 300.0)));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(800.0, 400.0)));
-        assert_eq!(app.dock_drag_target, None);
+        assert_eq!(drag_target(&app), None);
         let _ = app.on_dock(DockMsg::DragRelease);
         assert_eq!(app.dock, before);
     }
@@ -2382,7 +2397,7 @@ mod tests {
         assert!(!app.dock.edge_auto_hide(DockSide::Right));
         assert!(!app.dock_edge_expanded(DockSide::Left));
         // Hovering an icon flies its group out.
-        let _ = app.on_dock(DockMsg::Hover(PanelId::Browser));
+        let _ = app.on_dock(DockMsg::Hover(Some(PanelId::Browser)));
         assert!(app.dock_edge_expanded(DockSide::Left));
         assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
         let _ = app.on_dock(DockMsg::HoverExit);
@@ -2396,7 +2411,7 @@ mod tests {
         let mut app = dock_app();
         app.show_browser = true;
         app.dock.left.push(DockGroup::single(PanelId::Browser));
-        let _ = app.on_dock(DockMsg::Hover(PanelId::Browser));
+        let _ = app.on_dock(DockMsg::Hover(Some(PanelId::Browser)));
         assert_eq!(app.dock_shown_group(DockSide::Left), Some(0));
         assert!(app.dock_edge_expanded(DockSide::Left));
     }
@@ -2471,11 +2486,11 @@ mod tests {
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(300.0, 100.0)));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(330.0, 100.0)));
         let _ = app.on_dock(DockMsg::DragRelease);
-        // The group was 260 wide (its widest pallet); both pallets take 290.
-        assert_eq!(app.dock.settings(PanelId::Properties).width, 290.0);
-        assert_eq!(app.dock.settings(PanelId::BlockPalette).width, 290.0);
-        assert_eq!(app.dock.settings(PanelId::Count).width, 280.0);
+        // The group was 260 wide (its widest pallet); it is now 290, while
+        // the other group and the pallets' own widths are untouched.
         assert_eq!(app.dock_group_width(DockSide::Left, 0), 290.0);
+        assert_eq!(app.dock_group_width(DockSide::Left, 1), 280.0);
+        assert_eq!(app.dock.settings(PanelId::Properties).width, 250.0);
     }
 
     #[test]
@@ -2493,41 +2508,53 @@ mod tests {
         assert!(app.dock.float_rect(PanelId::Layers).is_some());
     }
 
-    /// Drive the real view through iced's `UserInterface`: point at the
-    /// first text `label`, feed `events` one at a time, and between events
-    /// hand the published messages to the app and rebuild the view while
-    /// keeping the widget-tree cache, as the runtime does.
-    fn drive_view(app: &mut OpenCADStudio, label: &str, events: &[iced::Event]) {
-        use iced_test::core::{mouse, shell, widget, window, Size};
-        use iced_test::runtime::user_interface::{Cache, UserInterface};
-        use iced_test::selector::Bounded;
-        use iced_test::Selector;
-        let mut renderer = iced_test::futures::futures::executor::block_on(
+    /// A headless renderer for driving the real view.
+    fn headless_renderer() -> iced::Renderer {
+        iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(
                 iced_test::core::renderer::Settings::default(),
                 None,
             ),
         )
-        .expect("headless renderer");
-        let size = Size::new(1600.0, 900.0);
-        let mut cache = Cache::default();
-        let mut cursor = mouse::Cursor::Unavailable;
-        {
-            let mut ui = UserInterface::build(app.view_main(), size, cache, &mut renderer);
-            let mut find = Selector::find(label);
-            ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
-            if let widget::operation::Outcome::Some(Some(target)) = widget::Operation::finish(&find) {
-                if let Some(bounds) = target.visible_bounds() {
-                    cursor = mouse::Cursor::Available(bounds.center());
-                }
-            }
-            cache = ui.into_cache();
+        .expect("headless renderer")
+    }
+
+    /// Size the real view is laid out at.
+    const VIEW_SIZE: iced::Size = iced::Size::new(1600.0, 900.0);
+
+    /// Centre of the first text `label` in the real view.
+    fn find_in_view(app: &OpenCADStudio, label: &str) -> iced::Point {
+        use iced_test::core::widget;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::selector::Bounded;
+        use iced_test::Selector;
+        let mut renderer = headless_renderer();
+        let mut ui = UserInterface::build(app.view_main(), VIEW_SIZE, Cache::default(), &mut renderer);
+        let mut find = Selector::find(label);
+        ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+        match widget::Operation::finish(&find) {
+            widget::operation::Outcome::Some(Some(target)) => target
+                .visible_bounds()
+                .expect("visible")
+                .center(),
+            _ => panic!("{label} not found"),
         }
-        assert!(matches!(cursor, mouse::Cursor::Available(_)), "{label} not found");
+    }
+
+    /// Drive the real view through iced's `UserInterface` with the pointer at
+    /// `at`: feed `events` one at a time, and between events hand the
+    /// published messages to the app and rebuild the view while keeping the
+    /// widget-tree cache, as the runtime does.
+    fn drive_view(app: &mut OpenCADStudio, at: iced::Point, events: &[iced::Event]) {
+        use iced_test::core::{mouse, shell, window};
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        let mut renderer = headless_renderer();
+        let mut cache = Cache::default();
+        let cursor = mouse::Cursor::Available(at);
         for event in events {
             let mut messages = Vec::new();
             {
-                let mut ui = UserInterface::build(app.view_main(), size, cache, &mut renderer);
+                let mut ui = UserInterface::build(app.view_main(), VIEW_SIZE, cache, &mut renderer);
                 let _ = ui.update(
                     &window::Headless,
                     &shell::Waker::noop(),
@@ -2552,10 +2579,39 @@ mod tests {
         let release =
             iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left));
         // The block palette's title text sits in its docked title bar.
-        drive_view(&mut app, "Blocks", &[press.clone(), release.clone(), press, release]);
+        let title = find_in_view(&app, "Blocks");
+        drive_view(&mut app, title, &[press.clone(), release.clone(), press, release]);
         assert!(
             app.dock.float_rect(PanelId::BlockPalette).is_some(),
             "a double-click on a docked title bar floats the pallet"
+        );
+    }
+
+    #[test]
+    fn hovering_a_strip_icon_reveals_an_auto_hiding_edge_in_the_real_view() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId, STRIP_CELL_H, STRIP_PAD};
+        let mut app = dock_app();
+        // Mirror the layout onto the left so the block palette's title marks
+        // where the workspace starts, then auto-hide the right edge.
+        let title = find_in_view(&app, "Blocks");
+        let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::BlockPalette));
+        assert!(!app.dock_edge_expanded(DockSide::Right));
+        // The title bar text sits ~13 px below the workspace top; the strip's
+        // first icon is centred STRIP_PAD + half a cell below it.
+        let workspace_top = title.y - 13.0;
+        let icon = iced::Point::new(
+            VIEW_SIZE.width - crate::ui::dock::DOCK_STRIP_W / 2.0,
+            workspace_top + STRIP_PAD + STRIP_CELL_H / 2.0,
+        );
+        drive_view(
+            &mut app,
+            icon,
+            &[iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: icon })],
+        );
+        assert!(
+            app.dock_edge_expanded(DockSide::Right),
+            "hovering the icon reveals the auto-hiding edge"
         );
     }
 
@@ -2575,11 +2631,12 @@ mod tests {
 
     #[test]
     fn blockpalette_width_reset() {
-        let mut app = fresh();
+        use crate::app::config::DockSide;
+        let mut app = dock_app();
         let id = crate::ui::dock::PanelId::BlockPalette;
-        app.dock.set_width(id, 500.0);
+        app.dock.set_group_width(DockSide::Right, 0, 500.0);
         let _ = app.on_dock(crate::ui::dock::DockMsg::WidthReset(id));
-        assert_eq!(app.dock.settings(id).width, 260.0);
+        assert_eq!(app.dock.group_width(DockSide::Right, 0), 260.0);
     }
 
     #[test]

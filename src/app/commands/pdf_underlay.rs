@@ -377,12 +377,12 @@ impl OpenCADStudio {
                 if !self.dock.is_placed(id) {
                     self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
                 }
-                self.dock_expanded = Some(id);
+                self.dock_reveal(id);
             }
             "POINTCLOUDMANAGERCLOSE" => {
                 self.pc_manager.show = false;
-                if self.dock_expanded == Some(crate::ui::dock::PanelId::PointCloudManager) {
-                    self.dock_expanded = None;
+                if self.dock_peek == Some(crate::ui::dock::PanelId::PointCloudManager) {
+                    self.dock_peek = None;
                 }
             }
             "_PCUNCROP" =>self.edit_selected_point_clouds(i, "POINTCLOUDUNCROP", |data| data.croppings.clear()),

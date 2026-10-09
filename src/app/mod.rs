@@ -845,41 +845,23 @@ pub(super) struct OpenCADStudio {
     pub(crate) bg_picker: Option<BgTarget>,
     /// General edge-stack dock layout for the side panels.
     pub(crate) dock: crate::ui::dock::DockState,
-    /// Which panel is currently floated at full height (hovered, or a pinned
-    /// panel on top).
-    pub(crate) dock_expanded: Option<crate::ui::dock::PanelId>,
-    /// Panel currently being dragged between sides / reordered.
-    pub(crate) dock_dragging: Option<crate::ui::dock::PanelId>,
-    /// Panel currently being width-resized.
-    pub(crate) dock_resizing: Option<crate::ui::dock::PanelId>,
-    /// Last pointer position during a drag / resize.
+    /// Pallet revealed although it auto-hides (its edge's group, or its
+    /// floating frame): hovered, being dragged, or just opened. Cleared when
+    /// the pointer leaves.
+    pub(crate) dock_peek: Option<crate::ui::dock::PanelId>,
+    /// What the pointer is dragging in the dock (pallet, group, width,
+    /// splitter, floating size, Layer Manager column).
+    pub(crate) dock_drag: Option<crate::ui::dock::DockDrag>,
+    /// Pallet whose strip icon (or floating frame) the pointer is over.
+    pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
+    /// Last pointer position during a dock drag.
     pub(crate) dock_drag_last: Option<iced::Point>,
-    /// Live drop target, shown as a preview while dragging. `None` until the
-    /// pointer has moved far enough to count as a drag, so a click on a title
-    /// bar or tab never moves the panel.
-    pub(crate) dock_drag_target: Option<crate::ui::dock::DropTarget>,
-    /// First pointer position of the current panel drag.
-    pub(crate) dock_drag_origin: Option<iced::Point>,
-    /// Pointer offset from a dragged panel's top-left corner, so a floated
-    /// panel lands where it is held rather than jumping to the pointer.
-    pub(crate) dock_grab_offset: iced::Vector,
-    /// Splitter being dragged between two pallets of a group (side, group,
-    /// upper, lower).
-    pub(crate) dock_split_drag: Option<(crate::app::config::DockSide, usize, usize, usize)>,
-    /// Floating panel being resized from its corner grip, and whether from
-    /// the bottom-left corner.
-    pub(crate) dock_float_resizing: Option<(crate::ui::dock::PanelId, bool)>,
     /// Docked panel whose title bar the pointer is over (shows pin / close).
     pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
     /// Edge whose icon-strip pallet menu (+) is open.
     pub(crate) dock_edge_menu: Option<crate::app::config::DockSide>,
-    /// Group being dragged by its strip grip (side, slot index). While set,
-    /// `dock_dragging` holds the group's shown panel for the preview.
-    pub(crate) dock_dragging_group: Option<(crate::app::config::DockSide, usize)>,
     /// Group whose edge band (group grip) the pointer is over.
     pub(crate) dock_grip_hover: Option<(crate::app::config::DockSide, usize)>,
-    /// Pallet whose strip icon the pointer is over.
-    pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -968,9 +950,6 @@ pub(super) struct OpenCADStudio {
     modal_drag_last: Option<Point>,
     /// True while the modal title bar is held (a drag is in progress).
     modal_dragging: bool,
-    /// Layer Manager: dragging the Name-column divider (width follows the
-    /// shared ModalDragMove flow).
-    layer_col_dragging: bool,
     /// Layer Manager Name column width in px, adjusted by the divider drag.
     layer_name_col_w: f32,
     /// How far the user has dragged the modal's corner resize grip from the
@@ -4310,18 +4289,11 @@ impl OpenCADStudio {
             block_palette: Default::default(),
             xref_manager: Default::default(),
             dock: Default::default(),
-            dock_expanded: None,
-            dock_dragging: None,
-            dock_resizing: None,
+            dock_peek: None,
+            dock_drag: None,
             dock_drag_last: None,
-            dock_drag_target: None,
-            dock_drag_origin: None,
-            dock_grab_offset: iced::Vector::new(0.0, 0.0),
-            dock_split_drag: None,
-            dock_float_resizing: None,
             dock_title_hover: None,
             dock_edge_menu: None,
-            dock_dragging_group: None,
             dock_grip_hover: None,
             dock_icon_hover: None,
             xref_col_drag: None,
@@ -4360,7 +4332,6 @@ impl OpenCADStudio {
             modal_offset: iced::Vector::ZERO,
             modal_drag_last: None,
             modal_dragging: false,
-            layer_col_dragging: false,
             layer_name_col_w: 130.0,
             modal_resize: iced::Vector::ZERO,
             modal_content_size: None,

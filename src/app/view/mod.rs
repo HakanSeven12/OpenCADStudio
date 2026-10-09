@@ -1931,7 +1931,10 @@ bg={bg_ms:.1}ms n={view_count}"
         let mut layers: Vec<Element<'_, Message>> = vec![workspace];
         for f in &self.dock.floating {
             // Once a drag is under way only its preview shows the panel.
-            let dragged = self.dock_dragging == Some(f.id) && self.dock_drag_target.is_some();
+            let dragged = self
+                .dock_drag
+                .and_then(|d| d.movement())
+                .is_some_and(|(panel, _, target)| panel == f.id && target.is_some());
             if self.dock_panel_visible(f.id) && !dragged {
                 layers.push(self.floating_panel(*f, tab));
             }
@@ -1966,7 +1969,7 @@ bg={bg_ms:.1}ms n={view_count}"
             }
         }
         // While a panel is dragged, preview where it lands.
-        if let (Some(id), Some(target)) = (self.dock_dragging, self.dock_drag_target) {
+        if let Some((id, _, Some(target))) = self.dock_drag.and_then(|d| d.movement()) {
             layers.push(self.dock_drop_preview(id, target));
         }
         // Always a stack (and, below, always a mouse area), even with nothing
@@ -1977,31 +1980,26 @@ bg={bg_ms:.1}ms n={view_count}"
             .width(Fill)
             .height(Fill)
             .into();
-        let any_dragging = self.dock_dragging.is_some();
-        let any_splitting = self.dock_split_drag.is_some();
-        let any_resizing = self.dock_resizing.is_some()
-            || self.dock_float_resizing.is_some()
-            || self.layer_col_dragging
+        use crate::ui::dock::DockDrag;
+        let capturing = self.dock_drag.is_some()
             || self.xref_col_drag.is_some()
             || self.xref_split_drag;
-        let capturing = any_dragging || any_resizing || any_splitting;
         let mut capture = mouse_area(workspace);
         if capturing {
             capture = capture
                 .on_move(move |p| Message::Dock(crate::ui::dock::DockMsg::DragMove(p)))
                 .on_release(Message::Dock(crate::ui::dock::DockMsg::DragRelease))
-                .interaction(if let Some((_, from_left)) = self.dock_float_resizing {
-                    if from_left {
+                .interaction(match self.dock_drag {
+                    Some(DockDrag::FloatSize { from_left: true, .. }) => {
                         iced::mouse::Interaction::ResizingDiagonallyUp
-                    } else {
+                    }
+                    Some(DockDrag::FloatSize { from_left: false, .. }) => {
                         iced::mouse::Interaction::ResizingDiagonallyDown
                     }
-                } else if any_resizing {
-                    iced::mouse::Interaction::ResizingHorizontally
-                } else if any_splitting {
-                    iced::mouse::Interaction::ResizingVertically
-                } else {
-                    iced::mouse::Interaction::Grabbing
+                    Some(DockDrag::Split { .. }) => iced::mouse::Interaction::ResizingVertically,
+                    Some(DockDrag::Move { .. }) => iced::mouse::Interaction::Grabbing,
+                    // Widths, the Layer Manager column and the xref drags.
+                    _ => iced::mouse::Interaction::ResizingHorizontally,
                 });
         }
         let workspace: Element<'_, Message> = capture.into();
@@ -2844,8 +2842,10 @@ impl OpenCADStudio {
             STRIP_PAD, STRIP_PLUS_GAP,
         };
         let shown = self.dock_shown_group(side);
-        let dragging = self.dock_drag_target.is_some();
-        let target_group = match self.dock_drag_target {
+        let movement = self.dock_drag.and_then(|d| d.movement());
+        let move_target = movement.and_then(|(_, _, target)| target);
+        let dragging = move_target.is_some();
+        let target_group = match move_target {
             Some(DropTarget::Join { side: s, group, .. }) if s == side => Some(group),
             _ => None,
         };
@@ -2858,7 +2858,8 @@ impl OpenCADStudio {
             let is_shown = shown == Some(gi);
             let lit = target_group == Some(gi)
                 || (!dragging && self.dock_grip_hover == Some((side, gi)));
-            let group_dragged = dragging && self.dock_dragging_group == Some((side, gi));
+            let group_dragged =
+                dragging && movement.is_some_and(|(_, group, _)| group == Some((side, gi)));
             let panels = self.dock_group_visible(side, gi);
             let row_h = 2.0 * STRIP_PAD + panels.len() as f32 * STRIP_CELL_H;
 
@@ -2866,8 +2867,7 @@ impl OpenCADStudio {
             for id in panels {
                 let faded = group_dragged
                     || (dragging
-                        && self.dock_dragging_group.is_none()
-                        && self.dock_dragging == Some(id));
+                        && movement.is_some_and(|(panel, group, _)| group.is_none() && panel == id));
                 let glyph = if faded {
                     crate::ui::icons::themed_disabled(id.icon(), 20.0)
                 } else if is_shown {
@@ -2894,8 +2894,8 @@ impl OpenCADStudio {
                         .center_y(Length::Fixed(STRIP_CELL_H)),
                 )
                 .on_press(Message::Dock(DockMsg::IconPress(id)))
-                .on_enter(Message::Dock(DockMsg::IconHover(Some(id))))
-                .on_exit(Message::Dock(DockMsg::IconHover(None)))
+                .on_enter(Message::Dock(DockMsg::Hover(Some(id))))
+                .on_exit(Message::Dock(DockMsg::Hover(None)))
                 .interaction(iced::mouse::Interaction::Pointer);
                 icons.push(
                     iced::widget::tooltip(cell, text(id.title()).size(10), tip_side)
@@ -3120,11 +3120,13 @@ impl OpenCADStudio {
         let (ww, wh) = self.dock_workspace_size();
         // The bar faces the nearer workspace edge; while resizing, it stays
         // opposite the grip being dragged so it cannot flip mid-drag.
-        let bar_left = match self.dock_float_resizing {
-            Some((id, from_left)) if id == f.id => !from_left,
+        let bar_left = match self.dock_drag {
+            Some(crate::ui::dock::DockDrag::FloatSize { panel, from_left }) if panel == f.id => {
+                !from_left
+            }
             _ => f.x + (f.w + DOCK_FLOAT_BAR_W) * 0.5 < ww * 0.5,
         };
-        let hidden = self.dock.auto_collapse(f.id) && self.dock_expanded != Some(f.id);
+        let hidden = self.dock.auto_collapse(f.id) && self.dock_peek != Some(f.id);
         let bar = floating_title_bar(f.id, self.dock.auto_collapse(f.id), bar_left);
         let content: Element<'_, Message> = if hidden {
             bar
@@ -3190,7 +3192,7 @@ impl OpenCADStudio {
         // on its empty areas don't fall through to the drawing below.
         let panel = mouse_area(framed)
             .on_press(Message::Dock(DockMsg::FloatRaise(f.id)))
-            .on_enter(Message::Dock(DockMsg::Hover(f.id)))
+            .on_enter(Message::Dock(DockMsg::Hover(Some(f.id))))
             .on_exit(Message::Dock(DockMsg::HoverExit))
             .interaction(iced::mouse::Interaction::Idle);
         // A hidden panel keeps its title bar where it sits when shown.
@@ -3248,7 +3250,7 @@ impl OpenCADStudio {
             DropTarget::Float { x, y } => {
                 let (w, h) = self.dock_float_size(id);
                 layers.push(place_at(
-                    dock_ghost(&[id], id, w + DOCK_FLOAT_BAR_W, h),
+                    dock_ghost(id, w + DOCK_FLOAT_BAR_W, h),
                     x,
                     y,
                 ));
@@ -3257,7 +3259,7 @@ impl OpenCADStudio {
         };
         // A whole group shows only the strip feedback and its ghost; the
         // column keeps showing what is there.
-        let group_drag = self.dock_dragging_group;
+        let group_drag = self.dock_drag.and_then(|d| d.movement()).and_then(|(_, g, _)| g);
         let docked = docked.map(|(side, after)| (side, group_drag.is_none().then_some(after)));
         let marks_side = docked.as_ref().map(|(side, _)| *side);
         if let Some((side, Some(after))) = docked {
@@ -3284,7 +3286,7 @@ impl OpenCADStudio {
                     DockSide::Right => (ww - w - strip).max(0.0),
                 };
                 layers.push(tint(side, w));
-                layers.push(place_at(dock_ghost(&[id], id, w, bottom - top), x, top));
+                layers.push(place_at(dock_ghost(id, w, bottom - top), x, top));
             }
         }
         // On top: the strip's drop marks and a ghost of what is dragged
@@ -3329,7 +3331,7 @@ impl OpenCADStudio {
                 };
                 // Icons above the insertion point, counted as the strip shows
                 // them (the dragged icon still sits in its old place).
-                let dragged = self.dock_dragging;
+                let dragged = self.dock_drag.and_then(|d| d.movement()).map(|(p, _, _)| p);
                 let above = self.dock.groups(side)[group].panels[..index]
                     .iter()
                     .filter(|p| self.dock_panel_visible(**p) || Some(**p) == dragged)
@@ -3992,47 +3994,27 @@ fn dock_splitter(
         .into()
 }
 
-/// The blue drop ghost: a `w`×`h` panel outline whose header shows the tabs
-/// the slot will hold, with the dragged panel's tab highlighted.
-fn dock_ghost(
-    tabs: &[crate::ui::dock::PanelId],
-    dragged: crate::ui::dock::PanelId,
-    w: f32,
-    h: f32,
-) -> Element<'static, Message> {
-    let cells: Vec<Element<'static, Message>> = tabs
-        .iter()
-        .map(|id| {
-            let is_dragged = *id == dragged;
-            container(
-                text(id.title())
-                    .size(12)
-                    .wrapping(iced::widget::text::Wrapping::None)
-                    .ellipsis(iced::advanced::text::Ellipsis::End),
-            )
-            .width(Fill)
-            .padding([5, 8])
-            .clip(true)
-            .style(move |theme: &Theme| {
-                let palette = theme.palette();
-                container::Style {
-                    background: Some(Background::Color(if is_dragged {
-                        palette.primary.base.color
-                    } else {
-                        palette.primary.weak.color
-                    })),
-                    text_color: Some(if is_dragged {
-                        palette.primary.base.text
-                    } else {
-                        palette.primary.weak.text
-                    }),
-                    ..Default::default()
-                }
-            })
-            .into()
-        })
-        .collect();
-    container(column![row(cells).spacing(2), Space::new()])
+/// The blue drop ghost: a `w`×`h` outline of where pallet `id` lands, with
+/// its name as the header.
+fn dock_ghost(id: crate::ui::dock::PanelId, w: f32, h: f32) -> Element<'static, Message> {
+    let header = container(
+        text(id.title())
+            .size(12)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .ellipsis(iced::advanced::text::Ellipsis::End),
+    )
+    .width(Fill)
+    .padding([5, 8])
+    .clip(true)
+    .style(|theme: &Theme| {
+        let palette = theme.palette();
+        container::Style {
+            background: Some(Background::Color(palette.primary.base.color)),
+            text_color: Some(palette.primary.base.text),
+            ..Default::default()
+        }
+    });
+    container(column![header, Space::new()])
         .width(Length::Fixed(w.max(1.0)))
         .height(Length::Fixed(h.max(1.0)))
         .clip(true)

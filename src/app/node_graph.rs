@@ -177,7 +177,7 @@ impl OpenCADStudio {
                         self.dock
                             .dock(id, crate::app::config::DockSide::Right, usize::MAX);
                     }
-                    self.dock_expanded = Some(id);
+                    self.dock_reveal(id);
                     return self.graph_run(i);
                 }
             }

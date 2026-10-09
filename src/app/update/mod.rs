@@ -2573,7 +2573,7 @@ impl OpenCADStudio {
                     self.save_config();
                 }
                 self.dock.raise_float(PanelId::Layers);
-                self.dock_expanded = Some(PanelId::Layers);
+                self.dock_reveal(PanelId::Layers);
                 Task::none()
             }
 
@@ -2585,7 +2585,7 @@ impl OpenCADStudio {
                     if !self.dock.is_placed(PanelId::ExternalReferences) {
                         self.dock.dock(PanelId::ExternalReferences, DockSide::Right, usize::MAX);
                     }
-                    self.dock_expanded = Some(PanelId::ExternalReferences);
+                    self.dock_reveal(PanelId::ExternalReferences);
                     self.refresh_xref_manager();
                 }
                 Task::none()
@@ -9043,7 +9043,7 @@ impl OpenCADStudio {
             Message::LayerNameColGrab => {
                 // Start a Name-column divider drag; the dock's pointer capture
                 // feeds it (see `on_dock`).
-                self.layer_col_dragging = true;
+                self.dock_drag = Some(crate::ui::dock::DockDrag::LayerColumn);
                 self.dock_drag_last = None;
                 Task::none()
             }

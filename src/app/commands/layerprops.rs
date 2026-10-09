@@ -687,7 +687,7 @@ impl OpenCADStudio {
                     }
                     // Open expanded so it is usable straight away; the pin
                     // button still collapses it.
-                    self.dock_expanded = Some(id);
+                    self.dock_reveal(id);
                     self.command_line
                         .push_output(crate::t!("Browser opened.").as_ref());
                 } else {

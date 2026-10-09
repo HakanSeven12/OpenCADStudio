@@ -239,9 +239,9 @@ impl OpenCADStudio {
             if !self.dock.is_placed(id) {
                 self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
             }
-            self.dock_expanded = Some(id);
-        } else if self.dock_expanded == Some(id) {
-            self.dock_expanded = None;
+            self.dock_reveal(id);
+        } else if self.dock_peek == Some(id) {
+            self.dock_peek = None;
         }
     }
 

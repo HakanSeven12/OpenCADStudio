@@ -1,12 +1,12 @@
-//! General edge-stack docking for side panels.
+//! Docking for side panels (pallets).
 //!
-//! Any number of dockable panels (Properties, the block palette, future
-//! palettes) live in an ordered vertical stack of slots on the left or right
-//! edge of the drawing view, or float over it. A slot holds one panel or
-//! several sharing it as tabs, and owns an adjustable share of the edge
-//! height. This module owns the persisted layout (which panels are docked or
-//! floating, where, at what size, and whether each auto-collapses) plus the
-//! pure geometry used to render and hover an edge's stacked slots.
+//! Pallets (Properties, the block palette, the Layer Manager, …) dock on the
+//! left or right edge of the drawing view, or float over it. Each edge holds
+//! an ordered list of groups and shows one group at a time; a group's pallets
+//! stack top to bottom, each with an adjustable share of the height, and the
+//! group has its own width. An icon strip along the edge lists every group.
+//! This module owns the persisted layout and the pure geometry used to draw
+//! and hit-test it; the app owns the transient drag / hover state.
 
 use crate::app::config::DockSide;
 use serde::{Deserialize, Serialize};
@@ -26,8 +26,10 @@ pub enum DockMsg {
     AutoCollapseToggle(PanelId),
     /// Close / hide `panel`.
     Close(PanelId),
-    /// The pointer is over `panel`, raising it to full height.
-    Hover(PanelId),
+    /// The pointer entered (`Some`) or left (`None`) a pallet's strip icon or
+    /// floating frame: highlights the icon and, where the pallet auto-hides,
+    /// reveals it.
+    Hover(Option<PanelId>),
     /// Pointer moved while a panel is dragging or resizing.
     DragMove(iced::Point),
     /// Pointer released after a drag / resize.
@@ -55,8 +57,7 @@ pub enum DockMsg {
     GroupGrab(DockSide, usize),
     /// The pointer entered (`Some`) or left (`None`) a group's edge band.
     GripHover(Option<(DockSide, usize)>),
-    /// The pointer entered (`Some`) or left (`None`) a pallet's strip icon.
-    IconHover(Option<PanelId>),
+
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
     /// Double-click on a floating title bar: dock the panel on that side.
@@ -192,19 +193,24 @@ pub struct DockGroup {
     pub panels: Vec<PanelId>,
     /// Relative height of each pallet, parallel to `panels`.
     pub weights: Vec<f32>,
+    /// The group's docked width; 0 until first sized, meaning "the widest
+    /// of its pallets' own widths" (see [`DockState::group_width`]).
+    #[serde(default)]
+    pub width: f32,
 }
 
 impl DockGroup {
     pub fn single(id: PanelId) -> Self {
-        Self {
-            panels: vec![id],
-            weights: vec![1.0],
-        }
+        Self::stack(vec![id])
     }
 
     pub fn stack(panels: Vec<PanelId>) -> Self {
         let weights = vec![1.0; panels.len()];
-        Self { panels, weights }
+        Self {
+            panels,
+            weights,
+            width: 0.0,
+        }
     }
 
     /// Keep one sane weight per pallet (configs edited by hand, or written
@@ -242,8 +248,7 @@ impl DockGroup {
 }
 
 /// On-disk forms of one entry of an edge list. Configs from before groups
-/// stored each stacked pallet as a bare id; this branch's earlier builds
-/// stored tab groups.
+/// stored each stacked pallet as a bare id.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum GroupRepr {
@@ -252,8 +257,9 @@ enum GroupRepr {
         panels: Vec<PanelId>,
         #[serde(default)]
         weights: Vec<f32>,
+        #[serde(default)]
+        width: f32,
     },
-    Tabs { tabs: Vec<PanelId> },
 }
 
 /// Read an edge list. Bare ids were pallets stacked on the edge, all shown
@@ -268,8 +274,15 @@ where
     for repr in reprs {
         match repr {
             GroupRepr::Single(id) => legacy.push(id),
-            GroupRepr::Stack { panels, weights } => groups.push(DockGroup { panels, weights }),
-            GroupRepr::Tabs { tabs } => groups.push(DockGroup::stack(tabs)),
+            GroupRepr::Stack {
+                panels,
+                weights,
+                width,
+            } => groups.push(DockGroup {
+                panels,
+                weights,
+                width,
+            }),
         }
     }
     if !legacy.is_empty() {
@@ -319,8 +332,8 @@ pub struct DockState {
     pub auto_hide: (bool, bool),
     /// Floating panels, back → front.
     pub floating: Vec<FloatPanel>,
-    /// Per-panel width / auto-collapse settings, keyed by `PanelId`. A
-    /// group's pallets share one width, so each group keeps its own.
+    /// Per-panel settings, keyed by `PanelId`: the width a pallet floats at
+    /// (and starts a new group with) and its floating auto-hide.
     pub panels: BTreeMap<PanelId, DockPanel>,
 }
 
@@ -495,25 +508,51 @@ impl DockState {
         entry.auto_collapse = on;
     }
 
-    /// The saved width a group's pallets share: the widest of them, so a
-    /// group whose pallets were sized apart renders at one width.
+    /// Group `group`'s docked width: its own once sized, else the widest of
+    /// its pallets' own widths.
     pub fn group_width(&self, side: DockSide, group: usize) -> f32 {
-        self.groups(side)[group]
-            .panels
+        let g = &self.groups(side)[group];
+        if g.width > 0.0 {
+            return g.width;
+        }
+        g.panels
             .iter()
             .map(|id| self.settings(*id).width)
             .fold(DOCK_MIN_W, f32::max)
     }
 
-    /// Set the width of `id` and of every other pallet in its group.
-    pub fn set_group_width(&mut self, id: PanelId, width: f32) {
-        let panels = match self.location(id) {
-            Some((side, gi)) => self.groups(side)[gi].panels.clone(),
-            None => vec![id],
-        };
-        for p in panels {
-            self.set_width(p, width);
+    /// The widest group `group` may be: the most any of its pallets allows.
+    fn group_max_width(&self, side: DockSide, group: usize) -> f32 {
+        self.groups(side)[group]
+            .panels
+            .iter()
+            .map(|id| id.max_width())
+            .fold(DOCK_MIN_W, f32::max)
+    }
+
+    /// Group `group`'s on-screen width in a `win_w` wide window, clamped like
+    /// [`Self::width`].
+    pub fn group_width_px(&self, side: DockSide, group: usize, win_w: f32) -> f32 {
+        let max = self.group_max_width(side, group).min(win_w * 0.45).max(DOCK_MIN_W);
+        self.group_width(side, group).clamp(DOCK_MIN_W, max)
+    }
+
+    /// Size group `group` on `side`, clamped.
+    pub fn set_group_width(&mut self, side: DockSide, group: usize, width: f32) {
+        let max = self.group_max_width(side, group);
+        if let Some(g) = self.groups_mut(side).get_mut(group) {
+            g.width = width.clamp(DOCK_MIN_W, max);
         }
+    }
+
+    /// Give group `group` the widest default width of its pallets.
+    pub fn reset_group_width(&mut self, side: DockSide, group: usize) {
+        let width = self.groups(side)[group]
+            .panels
+            .iter()
+            .map(|id| id.default_width())
+            .fold(DOCK_MIN_W, f32::max);
+        self.set_group_width(side, group, width);
     }
 
     /// Take `id` out of the layout. Returns the group it left, its position
@@ -555,8 +594,8 @@ impl DockState {
 
     /// Stack `id` into group `group` on `side` at position `index` (0 = top,
     /// `len` = bottom), both counted before the move, and show the group. A
-    /// pallet already in the group moves within it. A joining pallet takes on
-    /// the group's width. Returns whether the layout changed.
+    /// pallet already in the group moves within it; the group keeps its
+    /// width. Returns whether the layout changed.
     pub fn join_group(&mut self, id: PanelId, side: DockSide, group: usize, index: usize) -> bool {
         if group >= self.groups(side).len() {
             return false;
@@ -567,8 +606,6 @@ impl DockState {
             return self.show_group(side, group);
         }
         let before = self.clone();
-        let width = self.group_width(side, group);
-        let joining = !self.groups(side)[group].panels.contains(&id);
         let mut group = group;
         let mut index = index;
         let mut weight = self.groups(side)[group].mean_weight();
@@ -584,9 +621,6 @@ impl DockState {
             }
         }
         self.groups_mut(side)[group].insert(index, id, weight);
-        if joining {
-            self.set_width(id, width);
-        }
         self.show_group(side, group);
         *self != before
     }
@@ -683,6 +717,64 @@ impl DockState {
     }
 }
 
+/// What the pointer is dragging in the dock, if anything.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DockDrag {
+    /// Moving pallet `panel`, or with `group` that whole group (`panel` is
+    /// then its first open pallet, used for the preview). Nothing moves
+    /// until the pointer has travelled past the drag threshold from
+    /// `origin`; from then on `target` is where it would land and `grab` the
+    /// pointer's offset from the dragged frame's top-left corner.
+    Move {
+        panel: PanelId,
+        group: Option<(DockSide, usize)>,
+        origin: Option<iced::Point>,
+        target: Option<DropTarget>,
+        grab: iced::Vector,
+    },
+    /// Sizing the width of `panel`'s group (or of `panel`, floating).
+    Width(PanelId),
+    /// Moving the splitter between pallets `upper` and `lower` of a group.
+    Split {
+        side: DockSide,
+        group: usize,
+        upper: usize,
+        lower: usize,
+    },
+    /// Sizing floating `panel` from its bottom-left (`from_left`) or
+    /// bottom-right corner.
+    FloatSize { panel: PanelId, from_left: bool },
+    /// Sizing the Layer Manager's Name column.
+    LayerColumn,
+}
+
+impl DockDrag {
+    /// Start moving `panel` (a whole group with `group`).
+    pub fn moving(panel: PanelId, group: Option<(DockSide, usize)>) -> Self {
+        DockDrag::Move {
+            panel,
+            group,
+            origin: None,
+            target: None,
+            grab: iced::Vector::new(0.0, 0.0),
+        }
+    }
+
+    /// The pallet being moved, the group if a whole group moves, and where
+    /// it would land (once past the drag threshold).
+    pub fn movement(&self) -> Option<(PanelId, Option<(DockSide, usize)>, Option<DropTarget>)> {
+        match *self {
+            DockDrag::Move {
+                panel,
+                group,
+                target,
+                ..
+            } => Some((panel, group, target)),
+            _ => None,
+        }
+    }
+}
+
 /// Where a dragged panel lands on release.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DropTarget {
@@ -699,8 +791,8 @@ pub enum DropTarget {
     Float { x: f32, y: f32 },
 }
 
-/// Split `avail` pixels of height between slots of `weights`, returning each
-/// slot's `(top, bottom)`.
+/// Split `avail` pixels of height between stacked pallets of `weights`,
+/// returning each one's `(top, bottom)`.
 pub fn slot_spans(weights: &[f32], avail: f32) -> Vec<(f32, f32)> {
     let total: f32 = weights.iter().sum();
     if total <= 0.0 {
@@ -717,7 +809,7 @@ pub fn slot_spans(weights: &[f32], avail: f32) -> Vec<(f32, f32)> {
         .collect()
 }
 
-/// Integer share for iced's `FillPortion` from a slot weight.
+/// Integer share for iced's `FillPortion` from a pallet's weight.
 pub fn portion(weight: f32) -> u16 {
     (weight * 1000.0).round().clamp(1.0, u16::MAX as f32) as u16
 }
@@ -728,9 +820,9 @@ pub const DOCK_MIN_W: f32 = 200.0;
 pub const DOCK_MAX_W: f32 = 600.0;
 /// Width of the band along an empty edge that docks a dragged panel there.
 pub const DOCK_EDGE_ZONE: f32 = 48.0;
-/// Width of the grabbable divider between a docked slot and the viewport.
+/// Width of the grabbable divider between a docked group and the viewport.
 pub const DOCK_DIVIDER_W: f32 = 5.0;
-/// Width of an edge's vertical icon strip (the groups' tabs).
+/// Width of an edge's vertical icon strip.
 pub const DOCK_STRIP_W: f32 = 40.0;
 /// Height of one pallet icon in the strip.
 pub const STRIP_CELL_H: f32 = 32.0;
@@ -1106,8 +1198,8 @@ mod tests {
             vec![PanelId::Properties, PanelId::BlockPalette]
         );
         assert_eq!(state.left[0].weights.len(), 2);
-        // It takes on the group's width.
-        assert_eq!(state.settings(PanelId::BlockPalette).width, 320.0);
+        // The group keeps its width.
+        assert_eq!(state.group_width(DockSide::Left, 0), 320.0);
         // Moving it above Properties keeps it in the group.
         assert!(state.join_group(PanelId::BlockPalette, DockSide::Left, 0, 0));
         assert_eq!(state.left[0].panels[0], PanelId::BlockPalette);
@@ -1197,6 +1289,23 @@ mod tests {
         assert!((state.left[0].weights.iter().sum::<f32>() - 2.0).abs() < 1e-6);
         state.reset_splits(DockSide::Left, 0);
         assert_eq!(state.left[0].weights, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn group_width_is_its_own_once_set() {
+        let mut state = DockState::default();
+        state.join_group(PanelId::Browser, DockSide::Left, 0, 1);
+        // Unset: the widest pallet (Properties 250 > Browser 230).
+        assert_eq!(state.group_width(DockSide::Left, 0), 250.0);
+        state.set_group_width(DockSide::Left, 0, 333.0);
+        assert_eq!(state.group_width(DockSide::Left, 0), 333.0);
+        // Pallet widths are untouched; other groups keep theirs.
+        assert_eq!(state.settings(PanelId::Properties).width, 250.0);
+        assert_eq!(state.group_width(DockSide::Right, 0), 260.0);
+        state.set_group_width(DockSide::Left, 0, 5000.0);
+        assert_eq!(state.group_width(DockSide::Left, 0), DOCK_MAX_W);
+        state.reset_group_width(DockSide::Left, 0);
+        assert_eq!(state.group_width(DockSide::Left, 0), 250.0);
     }
 
     #[test]

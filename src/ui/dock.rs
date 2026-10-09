@@ -43,6 +43,12 @@ pub enum DockMsg {
     FloatResizeGrab(PanelId, bool),
     /// The pointer entered (`Some`) or left (`None`) a docked title bar.
     TitleHover(Option<PanelId>),
+    /// Open (`Some`) the pallet menu of a slot (side, slot index), or close
+    /// it (`None`).
+    TabMenu(Option<(DockSide, usize)>),
+    /// Pallet menu pick: show `panel` as a tab of the slot, or hide it when
+    /// it already shows there.
+    TabMenuToggle(DockSide, usize, PanelId),
     /// Bring floating `panel` to the front.
     FloatRaise(PanelId),
     /// The pointer left the edge column; collapse any auto-collapsing panel.
@@ -69,6 +75,18 @@ pub enum PanelId {
 }
 
 impl PanelId {
+    /// Every panel, in the order the pallet menu lists them.
+    pub const ALL: [PanelId; 8] = [
+        PanelId::Properties,
+        PanelId::BlockPalette,
+        PanelId::ExternalReferences,
+        PanelId::Browser,
+        PanelId::NodeGraph,
+        PanelId::PointCloudManager,
+        PanelId::Count,
+        PanelId::SheetSetManager,
+    ];
+
     /// Localized-friendly display name used by the collapsed/edge chrome.
     pub fn title(self) -> &'static str {
         match self {
@@ -288,16 +306,7 @@ impl DockState {
     /// written by an older version (or edited by hand): a panel placed twice
     /// keeps only its first placement.
     pub fn ensure_settings(&mut self) {
-        for id in [
-            PanelId::Properties,
-            PanelId::BlockPalette,
-            PanelId::ExternalReferences,
-            PanelId::Browser,
-            PanelId::NodeGraph,
-            PanelId::PointCloudManager,
-            PanelId::Count,
-            PanelId::SheetSetManager,
-        ] {
+        for id in PanelId::ALL {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -571,8 +580,8 @@ pub enum DropTarget {
 }
 
 /// Which part of a docked slot the pointer is over while dragging: the top
-/// and bottom quarters split the slot (dock above / below), the middle joins
-/// it as a tab.
+/// and bottom bands (35 % each) split the slot (dock above / below), the
+/// middle 30 % joins it as a tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotZone {
     Above,
@@ -583,7 +592,7 @@ pub enum SlotZone {
 /// Classify a pointer at `y` within a slot spanning `top..bottom`.
 pub fn slot_zone(y: f32, top: f32, bottom: f32) -> SlotZone {
     let h = (bottom - top).max(1.0);
-    let band = (h * 0.25).min(80.0);
+    let band = h * 0.35;
     if y < top + band {
         SlotZone::Above
     } else if y > bottom - band {
@@ -629,13 +638,17 @@ pub const DOCK_DIVIDER_W: f32 = 5.0;
 /// Height of a docked slot's tab strip.
 pub const DOCK_TAB_H: f32 = 24.0;
 
+/// Pitch of one icon tab in a tab strip (tab plus the gap after it).
+pub const DOCK_TAB_CELL_W: f32 = 30.0;
+/// Left inset of the first tab in a tab strip.
+pub const DOCK_TAB_INSET: f32 = 4.0;
+
 /// Insertion position (0..=`count`) for a tab dropped at `x` on a strip of
-/// `count` equal tabs spanning `x0..x0 + width`.
-pub fn tab_insert_index(x: f32, x0: f32, width: f32, count: usize) -> usize {
-    if count == 0 || width <= 0.0 {
+/// `count` left-aligned tabs of pitch `cell` starting at `x0`.
+pub fn tab_insert_index(x: f32, x0: f32, cell: f32, count: usize) -> usize {
+    if count == 0 || cell <= 0.0 {
         return 0;
     }
-    let cell = width / count as f32;
     (((x - x0) / cell).round().max(0.0) as usize).min(count)
 }
 
@@ -955,10 +968,11 @@ mod tests {
 
     #[test]
     fn tab_insert_index_rounds_to_the_nearest_gap() {
-        assert_eq!(tab_insert_index(0.0, 0.0, 300.0, 3), 0);
-        assert_eq!(tab_insert_index(140.0, 0.0, 300.0, 3), 1);
-        assert_eq!(tab_insert_index(290.0, 0.0, 300.0, 3), 3);
-        assert_eq!(tab_insert_index(-20.0, 0.0, 300.0, 3), 0);
+        assert_eq!(tab_insert_index(0.0, 0.0, 30.0, 3), 0);
+        assert_eq!(tab_insert_index(40.0, 0.0, 30.0, 3), 1);
+        assert_eq!(tab_insert_index(85.0, 0.0, 30.0, 3), 3);
+        assert_eq!(tab_insert_index(250.0, 0.0, 30.0, 3), 3);
+        assert_eq!(tab_insert_index(-20.0, 0.0, 30.0, 3), 0);
     }
 
     #[test]
@@ -1116,12 +1130,12 @@ mod tests {
     }
 
     #[test]
-    fn slot_zone_splits_quarters() {
+    fn slot_zone_splits_into_stacking_and_tab_bands() {
         assert_eq!(slot_zone(10.0, 0.0, 400.0), SlotZone::Above);
+        assert_eq!(slot_zone(130.0, 0.0, 400.0), SlotZone::Above);
         assert_eq!(slot_zone(200.0, 0.0, 400.0), SlotZone::Middle);
+        assert_eq!(slot_zone(270.0, 0.0, 400.0), SlotZone::Below);
         assert_eq!(slot_zone(390.0, 0.0, 400.0), SlotZone::Below);
-        // Tall slots cap the split bands so the tab zone stays generous.
-        assert_eq!(slot_zone(100.0, 0.0, 1000.0), SlotZone::Middle);
     }
 
     #[test]

@@ -868,6 +868,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_float_resizing: Option<(crate::ui::dock::PanelId, bool)>,
     /// Docked panel whose title bar the pointer is over (shows pin / close).
     pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
+    /// Slot (side, index) whose pallet menu is open.
+    pub(crate) dock_tab_menu: Option<(crate::app::config::DockSide, usize)>,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -4308,6 +4310,7 @@ impl OpenCADStudio {
             dock_split_drag: None,
             dock_float_resizing: None,
             dock_title_hover: None,
+            dock_tab_menu: None,
             xref_col_drag: None,
             xref_col_last: None,
             xref_split_drag: false,

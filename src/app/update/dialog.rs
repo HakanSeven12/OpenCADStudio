@@ -592,6 +592,33 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.dock_title_hover = id;
                 iced::Task::none()
             }
+            DockMsg::TabMenu(slot) => {
+                self.dock_tab_menu = slot;
+                iced::Task::none()
+            }
+            DockMsg::TabMenuToggle(side, gi, id) => {
+                if gi >= self.dock.groups(side).len() {
+                    self.dock_tab_menu = None;
+                    return iced::Task::none();
+                }
+                if self.dock_group_visible_tabs(side, gi).contains(&id) {
+                    // Unchecking hides the pallet; it keeps its tab, so it
+                    // comes back here when opened again.
+                    let task = self.on_dock(DockMsg::Close(id));
+                    if self.dock_group_shown(side, gi).is_none() {
+                        self.dock_tab_menu = None;
+                    }
+                    self.save_config();
+                    return task;
+                }
+                self.dock.add_tab(id, side, gi, None);
+                // Joining may have removed an earlier slot on this side.
+                self.dock_tab_menu = self.dock.location(id);
+                let task = self.dock_open_panel(id);
+                self.dock.select_tab(id);
+                self.save_config();
+                task
+            }
             DockMsg::FloatRaise(id) => {
                 self.dock.raise_float(id);
                 iced::Task::none()
@@ -782,6 +809,35 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 iced::Task::none()
             }
         }
+    }
+
+    /// Show panel `id` where the layout has it, running its usual open path
+    /// (refreshes, ribbon highlight) when it was closed.
+    fn dock_open_panel(&mut self, id: crate::ui::dock::PanelId) -> iced::Task<Message> {
+        use crate::ui::dock::PanelId;
+        if self.dock_panel_visible(id) {
+            return iced::Task::none();
+        }
+        match id {
+            PanelId::Properties => {
+                self.show_properties = true;
+                self.ribbon.set_properties(true);
+            }
+            PanelId::BlockPalette => self.open_blocks_palette(None),
+            PanelId::ExternalReferences => {
+                self.show_external_references = true;
+                self.refresh_xref_manager();
+            }
+            PanelId::Browser => self.show_browser = true,
+            PanelId::NodeGraph => {
+                return self.on_graph(crate::ui::node_graph::GraphMsg::Toggle);
+            }
+            PanelId::PointCloudManager => self.pc_manager.show = true,
+            PanelId::Count => self.set_count_palette(true),
+            PanelId::SheetSetManager => self.show_sheet_set_manager(true),
+        }
+        self.dock_expanded = Some(id);
+        iced::Task::none()
     }
 
     /// Start a (not yet confirmed) drag of `id`: it only moves once the
@@ -980,13 +1036,16 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             };
             // Over a tab strip: drop between its tabs (reorders a member).
             let tabs = self.dock_group_visible_tabs(side, gi);
-            if tabs.len() > 1 && p.y < top + crate::ui::dock::DOCK_TAB_H {
+            if self.dock_expanded_groups(side).contains(&gi)
+                && p.y < top + crate::ui::dock::DOCK_TAB_H
+            {
                 let x0 = self.dock_column_x0(side)
-                    + if side == DockSide::Right { crate::ui::dock::DOCK_DIVIDER_W } else { 0.0 };
+                    + if side == DockSide::Right { crate::ui::dock::DOCK_DIVIDER_W } else { 0.0 }
+                    + crate::ui::dock::DOCK_TAB_INSET;
                 let visible_at = crate::ui::dock::tab_insert_index(
                     p.x,
                     x0,
-                    self.dock_column_width(side),
+                    crate::ui::dock::DOCK_TAB_CELL_W,
                     tabs.len(),
                 );
                 // Map the gap among visible tabs to a position in all tabs.
@@ -2005,11 +2064,11 @@ mod tests {
         let mut app = dock_app();
         app.dock.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
         app.dock.right.clear();
-        // Tabs: Properties | Blocks across the 250 px column. Drag the
-        // Properties tab past the end of the strip.
+        // Icon tabs: Properties | Blocks from the left. Drag the Properties
+        // tab past the Blocks tab.
         let _ = app.on_dock(DockMsg::SelectTab(PanelId::Properties));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(60.0, 12.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(245.0, 12.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(10.0, 12.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(70.0, 12.0)));
         assert_eq!(
             app.dock_drag_target,
             Some(DropTarget::Tab {
@@ -2024,6 +2083,29 @@ mod tests {
             vec![PanelId::BlockPalette, PanelId::Properties]
         );
         assert_eq!(app.dock.left[0].active, PanelId::Properties);
+    }
+
+    #[test]
+    fn dock_tab_menu_adds_and_hides_pallets() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = dock_app();
+        app.show_browser = false;
+        let _ = app.on_dock(DockMsg::TabMenu(Some((DockSide::Left, 0))));
+        // Checking a closed pallet opens it as a tab of this slot.
+        let _ = app.on_dock(DockMsg::TabMenuToggle(DockSide::Left, 0, PanelId::Browser));
+        assert!(app.show_browser);
+        assert_eq!(app.dock.left[0].tabs, vec![PanelId::Properties, PanelId::Browser]);
+        assert_eq!(app.dock.left[0].active, PanelId::Browser);
+        // Checking a pallet docked elsewhere moves it here.
+        let _ = app.on_dock(DockMsg::TabMenuToggle(DockSide::Left, 0, PanelId::BlockPalette));
+        assert!(app.dock.right.is_empty());
+        assert_eq!(app.dock.left[0].tabs.len(), 3);
+        // Unchecking hides it but keeps its tab.
+        let _ = app.on_dock(DockMsg::TabMenuToggle(DockSide::Left, 0, PanelId::Browser));
+        assert!(!app.show_browser);
+        assert!(app.dock.left[0].tabs.contains(&PanelId::Browser));
+        assert_eq!(app.dock_tab_menu, Some((DockSide::Left, 0)));
     }
 
     #[test]

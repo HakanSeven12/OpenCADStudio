@@ -674,7 +674,7 @@ pub fn assoc_source_supported(entity: &EntityType) -> bool {
 }
 
 /// The arbitrary-axis X direction of an entity normal.
-fn arbitrary_x(normal: glam::DVec3) -> glam::DVec3 {
+pub(crate) fn arbitrary_x(normal: glam::DVec3) -> glam::DVec3 {
     let world = if normal.x.abs() < 1.0 / 64.0 && normal.y.abs() < 1.0 / 64.0 { glam::DVec3::Y } else { glam::DVec3::Z };
     world.cross(normal).normalize()
 }

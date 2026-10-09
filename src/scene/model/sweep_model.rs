@@ -662,24 +662,11 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
     }
 }
 
-/// The frame placing a plane's coordinates in the world: its axes, normal
-/// and origin as matrix columns.
-fn plane_frame(plane: &Plane) -> Option<[f64; 16]> {
-    let normal = plane.normal()?;
-    let column = |v: [f64; 3], w: f64| glam::DVec4::new(v[0], v[1], v[2], w);
-    Some(glam::DMat4::from_cols(
-        column(plane.x_axis, 0.0),
-        column(plane.y_axis, 0.0),
-        column(normal, 0.0),
-        column(plane.origin, 1.0),
-    )
-    .to_cols_array())
-}
-
 /// A region of one boundary loop as the curve the reference records for it
-/// as a profile: a lone circle or whole ellipse as itself, a loop of lines
-/// and arcs as a closed polyline in the region's plane (with that plane's
-/// frame), read from the region's modeler edges.
+/// as a profile: a circle (one edge, or arcs of one circle making a whole
+/// turn) or whole ellipse as itself, a loop of lines and arcs as a closed
+/// polyline in its own coordinate system about the region's normal, read
+/// from the region's modeler edges.
 pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
     let EntityType::Region(region) = entity else { return None };
     if !region.acis_data.has_data() {
@@ -695,6 +682,19 @@ pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f
             let mut value = codec::entities::Circle::new();
             value.center = world(plane.point_at(circle.centre));
             value.radius = circle.radius;
+            value.normal = normal;
+            return Some((EmbeddedEntity::Circle(value), identity));
+        }
+        [Curve::Arc(first), rest @ ..]
+            if rest.iter().all(|piece| matches!(piece, Curve::Arc(arc)
+                if (arc.centre[0] - first.centre[0]).hypot(arc.centre[1] - first.centre[1]) <= 1e-9 * (1.0 + first.radius)
+                    && (arc.radius - first.radius).abs() <= 1e-9 * (1.0 + first.radius)))
+                && (boundary.iter().map(|piece| match piece { Curve::Arc(arc) => arc.sweep(), _ => 0.0 }).sum::<f64>()
+                    - std::f64::consts::TAU).abs() <= 1e-9 =>
+        {
+            let mut value = codec::entities::Circle::new();
+            value.center = world(plane.point_at(first.centre));
+            value.radius = first.radius;
             value.normal = normal;
             return Some((EmbeddedEntity::Circle(value), identity));
         }
@@ -734,17 +734,24 @@ pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f
     } else {
         first_start
     };
+    // The polyline in its object coordinates: the arbitrary axes of the normal.
+    let axis_normal = glam::DVec3::new(normal.x, normal.y, normal.z);
+    let axis_x = super::sweep_command_model::arbitrary_x(axis_normal);
+    let axis_y = axis_normal.cross(axis_x);
     let mut polyline = LwPolyline::new();
+    polyline.normal = normal;
+    polyline.elevation = glam::DVec3::from_array(plane.origin).dot(axis_normal);
     for piece in boundary {
         let (start, end, bulge) = ends(piece)?;
         let (from, to, bulge) = if close(start, at) { (start, end, bulge) } else if close(end, at) { (end, start, -bulge) } else { return None };
-        let mut vertex = LwVertex::new(Vector2::new(from[0], from[1]));
+        let point = glam::DVec3::from_array(plane.point_at(from));
+        let mut vertex = LwVertex::new(Vector2::new(point.dot(axis_x), point.dot(axis_y)));
         vertex.bulge = bulge;
         polyline.vertices.push(vertex);
         at = to;
     }
     polyline.is_closed = true;
-    Some((EmbeddedEntity::LwPolyline(polyline), plane_frame(&plane)?))
+    Some((EmbeddedEntity::LwPolyline(polyline), identity))
 }
 
 fn embedded_planar_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {

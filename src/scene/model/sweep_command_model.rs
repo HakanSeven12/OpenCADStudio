@@ -12,7 +12,10 @@ use super::sweep_model::{embedded_path, embedded_revolve_profile};
 /// A 3D polyline profile or path as the reference records it: a wire body.
 fn embedded_sweep_profile(entity: &EntityType) -> Option<(codec::entities::EmbeddedEntity, [f64; 16])> {
     match entity {
-        EntityType::Region(region) => Some((codec::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array())),
+        // A region as the curve round it, as the reference records it.
+        EntityType::Region(region) => super::sweep_model::region_boundary_entity(entity).or_else(|| {
+            Some((codec::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array()))
+        }),
         EntityType::Polyline3D(value) => Some((polyline_wire(value)?, glam::DMat4::IDENTITY.to_cols_array())),
         _ => embedded_revolve_profile(entity),
     }

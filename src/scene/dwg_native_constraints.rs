@@ -2851,6 +2851,11 @@ fn source_reads(
     };
     let sizes = loops.iter().map(Vec::len).collect::<Vec<_>>();
     let ids = register_region_subents(document, &sizes)?;
+    // The region carries the step its edge names belong to; without it (and
+    // without named edges in its modeler data) the reference cannot find
+    // the edges again.
+    crate::scene::view::dispatch::set_entity_xdata(document, source, "ACAD_STEPID",
+        Some(vec![codec::xdata::XDataValue::Integer32(ids.first()? - 1)]));
     let curves = loops.into_iter().flatten().collect::<Vec<_>>();
     let pairs = curves.iter().map(|_| (document.allocate_handle(), document.allocate_handle())).collect::<Vec<_>>();
     for (index, (curve, (edge, read))) in curves.into_iter().zip(pairs.iter().copied()).enumerate() {

@@ -662,9 +662,97 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
     }
 }
 
+/// The frame placing a plane's coordinates in the world: its axes, normal
+/// and origin as matrix columns.
+fn plane_frame(plane: &Plane) -> Option<[f64; 16]> {
+    let normal = plane.normal()?;
+    let column = |v: [f64; 3], w: f64| glam::DVec4::new(v[0], v[1], v[2], w);
+    Some(glam::DMat4::from_cols(
+        column(plane.x_axis, 0.0),
+        column(plane.y_axis, 0.0),
+        column(normal, 0.0),
+        column(plane.origin, 1.0),
+    )
+    .to_cols_array())
+}
+
+/// A region of one boundary loop as the curve the reference records for it
+/// as a profile: a lone circle or whole ellipse as itself, a loop of lines
+/// and arcs as a closed polyline in the region's plane (with that plane's
+/// frame), read from the region's modeler edges.
+pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
+    let EntityType::Region(region) = entity else { return None };
+    if !region.acis_data.has_data() {
+        return None;
+    }
+    let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
+    let [boundary] = loops.as_slice() else { return None };
+    let world = |v: [f64; 3]| Vector3::new(v[0], v[1], v[2]);
+    let normal = world(plane.normal()?);
+    let identity = glam::DMat4::IDENTITY.to_cols_array();
+    match boundary.as_slice() {
+        [Curve::Circle(circle)] => {
+            let mut value = codec::entities::Circle::new();
+            value.center = world(plane.point_at(circle.centre));
+            value.radius = circle.radius;
+            value.normal = normal;
+            return Some((EmbeddedEntity::Circle(value), identity));
+        }
+        [Curve::Ellipse(arc)] if (arc.sweep() - std::f64::consts::TAU).abs() <= 1e-9 => {
+            let ellipse = arc.ellipse;
+            let centre = Vec3::from(plane.point_at(ellipse.centre));
+            let tip = Vec3::from(plane.point_at([
+                ellipse.centre[0] + ellipse.major_axis[0] * ellipse.major_radius,
+                ellipse.centre[1] + ellipse.major_axis[1] * ellipse.major_radius,
+            ]));
+            let mut value = codec::entities::Ellipse::new();
+            value.center = world(centre.to_array());
+            value.major_axis = world((tip - centre).to_array());
+            value.minor_axis_ratio = ellipse.minor_radius / ellipse.major_radius;
+            value.start_parameter = arc.start_parameter;
+            value.end_parameter = arc.start_parameter + std::f64::consts::TAU;
+            value.normal = normal;
+            return Some((EmbeddedEntity::Ellipse(value), identity));
+        }
+        _ => {}
+    }
+    // Walk the loop head to tail; an arc run against its direction turns
+    // clockwise (negative bulge).
+    let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-9 * (1.0 + a[0].abs().max(a[1].abs()));
+    let ends = |piece: &Curve| match piece {
+        Curve::Line(line) => Some((line.start, line.end, 0.0)),
+        Curve::Arc(arc) => {
+            let at = |angle: f64| [arc.centre[0] + arc.radius * angle.cos(), arc.centre[1] + arc.radius * angle.sin()];
+            Some((at(arc.start_angle), at(arc.end_angle), (arc.sweep() / 4.0).tan()))
+        }
+        _ => None,
+    };
+    let (first_start, first_end, _) = ends(boundary.first()?)?;
+    let second = boundary.get(1).and_then(ends);
+    let mut at = if second.is_some_and(|(start, end, _)| close(first_start, start) || close(first_start, end)) {
+        first_end
+    } else {
+        first_start
+    };
+    let mut polyline = LwPolyline::new();
+    for piece in boundary {
+        let (start, end, bulge) = ends(piece)?;
+        let (from, to, bulge) = if close(start, at) { (start, end, bulge) } else if close(end, at) { (end, start, -bulge) } else { return None };
+        let mut vertex = LwVertex::new(Vector2::new(from[0], from[1]));
+        vertex.bulge = bulge;
+        polyline.vertices.push(vertex);
+        at = to;
+    }
+    polyline.is_closed = true;
+    Some((EmbeddedEntity::LwPolyline(polyline), plane_frame(&plane)?))
+}
+
 fn embedded_planar_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
     if region_with_holes(entity) {
         return None;
+    }
+    if let Some(found) = region_boundary_entity(entity) {
+        return Some(found);
     }
     if !matches!(entity, EntityType::Polyline3D(_)) {
         if let Some(embedded) = embedded_path(entity) {

@@ -8,23 +8,109 @@ use crate::command::EntityTransform;
 
 type Parsed<T> = Result<T, Value>;
 
-/// `[x,y]` or `[x,y,z]` (missing z = 0) from `req[key]`.
-fn point_field(req: &Value, key: &str) -> Parsed<codec::types::Vector3> {
-    let values = req[key]
-        .as_array()
+/// Parse `[x,y]` or `[x,y,z]` without silently turning a malformed
+/// coordinate into zero.
+fn point_value(value: Option<&Value>, label: &str, code: &str) -> Parsed<codec::types::Vector3> {
+    let values = value
+        .and_then(Value::as_array)
         .filter(|v| (2..=3).contains(&v.len()))
-        .ok_or_else(|| failure("invalid_point", format!("{key} must be [x,y] or [x,y,z]")))?;
+        .ok_or_else(|| failure(code, format!("{label} must be [x,y] or [x,y,z]")))?;
     let coord = |i: usize| {
         values[i]
             .as_f64()
             .filter(|v| v.is_finite())
-            .ok_or_else(|| failure("invalid_point", format!("{key} needs finite coordinates")))
+            .ok_or_else(|| failure(code, format!("{label} needs finite coordinates")))
     };
-    Ok(codec::types::Vector3::new(coord(0)?, coord(1)?, values.get(2).and_then(Value::as_f64).unwrap_or(0.0)))
+    let z = values
+        .get(2)
+        .map(|value| {
+            value
+                .as_f64()
+                .filter(|v| v.is_finite())
+                .ok_or_else(|| failure(code, format!("{label} needs finite coordinates")))
+        })
+        .transpose()?
+        .unwrap_or(0.0);
+    Ok(codec::types::Vector3::new(coord(0)?, coord(1)?, z))
+}
+
+/// `[x,y]` or `[x,y,z]` (missing z = 0) from `req[key]`.
+fn point_field(req: &Value, key: &str) -> Parsed<codec::types::Vector3> {
+    point_value(req.get(key), key, "invalid_point")
 }
 
 fn deg_field(req: &Value, key: &str) -> f64 {
     req[key].as_f64().unwrap_or(0.0).to_radians()
+}
+
+/// Reject fields that the typed builder would otherwise silently ignore.
+fn validate_entity_fields(spec: &Value, kind: &str) -> Parsed<()> {
+    let Some(object) = spec.as_object() else {
+        return Ok(());
+    };
+    for field in object.keys() {
+        let allowed = match kind {
+            "LINE" => matches!(
+                field.as_str(),
+                "type" | "start" | "end" | "thickness" | "layer" | "color"
+            ),
+            "CIRCLE" => matches!(field.as_str(), "type" | "center" | "radius" | "layer" | "color"),
+            "ARC" => matches!(
+                field.as_str(),
+                "type" | "center" | "radius" | "start_angle_deg" | "end_angle_deg" | "layer" | "color"
+            ),
+            // Kept here so the schema remains forward-compatible with the
+            // Spline entity API when that builder lands separately.
+            "SPLINE" => matches!(
+                field.as_str(),
+                "type" | "degree" | "knots" | "control_points" | "fit_points" | "weights"
+                    | "closed" | "periodic" | "rational" | "planar" | "linear" | "layer" | "color"
+            ),
+            "LWPOLYLINE" | "POLYLINE" => matches!(
+                field.as_str(),
+                "type" | "vertices" | "closed" | "constant_width" | "layer" | "color"
+            ),
+            "POINT" => matches!(field.as_str(), "type" | "location" | "layer" | "color"),
+            "TEXT" => matches!(
+                field.as_str(),
+                "type" | "value" | "position" | "height" | "rotation_deg" | "style" | "layer" | "color"
+            ),
+            "MTEXT" => matches!(
+                field.as_str(),
+                "type" | "value" | "position" | "height" | "width" | "rotation_deg" | "style" | "layer" | "color"
+            ),
+            "INSERT" => matches!(
+                field.as_str(),
+                "type" | "block" | "position" | "scale" | "rotation_deg" | "layer" | "color"
+            ),
+            "SOLID" => matches!(field.as_str(), "type" | "corners" | "layer" | "color"),
+            "HATCH" => matches!(
+                field.as_str(),
+                "type" | "boundary" | "solid" | "pattern" | "pattern_scale" | "pattern_angle_deg" | "layer" | "color"
+            ),
+            _ => true,
+        };
+        if !allowed {
+            return Err(failure(
+                "unknown_entity_field",
+                format!("Unknown field '{field}' for {kind} entity"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Required finite angle in degrees, converted to radians without a default.
+fn finite_angle_field(spec: &Value, key: &str) -> Parsed<f64> {
+    let degrees = spec[key]
+        .as_f64()
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| failure("invalid_angle", format!("arc needs a finite {key}")))?;
+    let radians = degrees.to_radians();
+    radians
+        .is_finite()
+        .then_some(radians)
+        .ok_or_else(|| failure("invalid_angle", format!("arc needs a finite {key}")))
 }
 
 pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<codec::Handle>> {
@@ -87,12 +173,28 @@ fn apply_common_properties(spec: &Value, entity: &mut codec::EntityType) -> Pars
     Ok(())
 }
 
+/// An explicit text style must exist in the current document; otherwise a
+/// typo would silently fall back to the default style.
+fn text_style_field(spec: &Value, document: &codec::CadDocument) -> Parsed<Option<String>> {
+    let Some(style) = spec["style"].as_str().filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    if !document.text_styles.contains(style) {
+        return Err(failure(
+            "invalid_text_style",
+            format!("Text style '{style}' does not exist in the document"),
+        ));
+    }
+    Ok(Some(style.to_owned()))
+}
+
 /// One `entities` array entry → a real entity. Geometry validation happens
 /// here so a bad definition aborts the whole batch before anything commits.
-fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
+fn build_entity(spec: &Value, document: &codec::CadDocument) -> Parsed<codec::EntityType> {
     use codec::entities::*;
     use codec::types::Vector3;
     let kind = spec["type"].as_str().unwrap_or("").to_ascii_uppercase();
+    validate_entity_fields(spec, &kind)?;
     let entity = match kind.as_str() {
         "LINE" => {
             let mut line = Line::from_points(point_field(spec, "start")?, point_field(spec, "end")?);
@@ -113,12 +215,19 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
                 .as_f64()
                 .filter(|r| r.is_finite() && *r > 0.0)
                 .ok_or_else(|| failure("invalid_radius", "arc needs a finite radius > 0"))?;
-            EntityType::Arc(Arc::from_center_radius_angles(
+            let arc = Arc::from_center_radius_angles(
                 point_field(spec, "center")?,
                 radius,
-                deg_field(spec, "start_angle_deg"),
-                deg_field(spec, "end_angle_deg"),
-            ))
+                finite_angle_field(spec, "start_angle_deg")?,
+                finite_angle_field(spec, "end_angle_deg")?,
+            );
+            if !arc.sweep_angle().is_finite() || arc.sweep_angle() <= 0.0 {
+                return Err(failure(
+                    "invalid_sweep",
+                    "arc start_angle_deg and end_angle_deg must define a finite non-zero sweep",
+                ));
+            }
+            EntityType::Arc(arc)
         }
         "LWPOLYLINE" | "POLYLINE" => {
             let vertices = spec["vertices"]
@@ -152,8 +261,8 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
             let mut text = Text::with_value(value, point_field(spec, "position")?)
                 .with_height(spec["height"].as_f64().unwrap_or(2.5).abs().max(1e-6))
                 .with_rotation(deg_field(spec, "rotation_deg"));
-            if let Some(style) = spec["style"].as_str().filter(|s| !s.is_empty()) {
-                text.style = style.to_owned();
+            if let Some(style) = text_style_field(spec, document)? {
+                text.style = style;
             }
             EntityType::Text(text)
         }
@@ -168,6 +277,9 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
                 mtext.rectangle_width = width;
             }
             mtext.rotation = deg_field(spec, "rotation_deg");
+            if let Some(style) = text_style_field(spec, document)? {
+                mtext.style = style;
+            }
             EntityType::MText(mtext)
         }
         "INSERT" => {
@@ -197,25 +309,33 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
             EntityType::Insert(insert)
         }
         "SOLID" => {
-            let corners = spec["corners"]
+            let raw_corners = spec["corners"]
                 .as_array()
                 .filter(|v| (3..=4).contains(&v.len()))
                 .ok_or_else(|| failure("invalid_corners", "solid needs 3 or 4 corners"))?;
-            let corner = |i: usize| -> Parsed<Vector3> {
-                let raw = &corners[i];
-                let coord = |k: usize| {
-                    raw.get(k)
-                        .and_then(Value::as_f64)
-                        .filter(|v| v.is_finite())
-                        .unwrap_or(0.0)
-                };
-                Ok(Vector3::new(coord(0), coord(1), coord(2)))
+            let corners: Vec<Vector3> = raw_corners
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    if value.as_array().is_none_or(|values| values.len() != 3) {
+                        return Err(failure(
+                            "invalid_corners",
+                            format!("corners[{index}] must be [x,y,z]"),
+                        ));
+                    }
+                    point_value(
+                        Some(value),
+                        &format!("corners[{index}]"),
+                        "invalid_corners",
+                    )
+                })
+                .collect::<Parsed<_>>()?;
+            let solid = match corners.as_slice() {
+                [first, second, third] => Solid::triangle(*first, *second, *third),
+                [first, second, third, fourth] => Solid::new(*first, *second, *third, *fourth),
+                _ => unreachable!("corner count was validated above"),
             };
-            let fourth = corners
-                .get(3)
-                .map(|_| corner(3))
-                .unwrap_or_else(|| Ok(Vector3::ZERO));
-            EntityType::Solid(Solid::new(corner(0)?, corner(1)?, corner(2)?, fourth?))
+            EntityType::Solid(solid)
         }
         "HATCH" => {
             let boundary = spec["boundary"]
@@ -271,7 +391,12 @@ impl OpenCADStudio {
             .as_array()
             .filter(|v| !v.is_empty())
             .ok_or_else(|| failure("entities_required", "Supply entities:[{type:…},…]"))?;
-        let built: Vec<codec::EntityType> = list.iter().map(build_entity).collect::<Parsed<_>>()?;
+        let built: Vec<codec::EntityType> = {
+            let document = &self.tabs[self.active_tab].scene.document;
+            list.iter()
+                .map(|spec| build_entity(spec, document))
+                .collect::<Parsed<_>>()?
+        };
 
         let i = self.active_tab;
         self.push_undo_snapshot(i, "ENTITIESCREATE");

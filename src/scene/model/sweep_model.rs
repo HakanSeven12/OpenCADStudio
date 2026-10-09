@@ -291,8 +291,11 @@ pub fn extruded_surface(
     direction: [f64; 3],
     taper_angle: f64,
 ) -> Option<Body> {
-    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
-        return None;
+    // A region's surface is its one boundary loop, read from its exact edges.
+    if let EntityType::Region(_) = entity {
+        let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
+        let [boundary] = loops.as_slice() else { return None };
+        return brep::extrude_surface_tapered(plane, boundary, direction, taper_angle);
     }
     let (profile, _) = extrusion_profile_of(entity)?;
     brep::extrude_surface_tapered(

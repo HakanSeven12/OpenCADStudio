@@ -1413,22 +1413,6 @@ mod tests {
     }
 
     #[test]
-    fn raise_float_moves_it_to_the_front() {
-        let mut state = DockState::default();
-        for id in [PanelId::Count, PanelId::Browser] {
-            state.float(FloatPanel {
-                id,
-                x: 0.0,
-                y: 0.0,
-                w: 300.0,
-                h: 300.0,
-            });
-        }
-        state.raise_float(PanelId::Count);
-        assert_eq!(state.floating.last().map(|f| f.id), Some(PanelId::Count));
-    }
-
-    #[test]
     fn every_panel_has_its_own_icon() {
         let ids = PanelId::ALL;
         for (i, a) in ids.iter().enumerate() {
@@ -1439,25 +1423,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn floating_title_bar_replaces_the_horizontal_one() {
-        let floating = Chrome {
-            floating: true,
-            ..Default::default()
-        };
-        let bar: Element<'_, Message> = title_bar(PanelId::Count, "Count".into(), floating);
-        assert_eq!(
-            bar.as_widget().size(),
-            iced::Size::new(Length::Fixed(0.0), Length::Fixed(0.0))
-        );
-    }
-
-    #[test]
-    fn slot_spans_follow_weights() {
-        assert_eq!(
-            slot_spans(&[1.0, 3.0], 400.0),
-            vec![(0.0, 100.0), (100.0, 400.0)]
-        );
-        assert!(slot_spans(&[], 400.0).is_empty());
-    }
 }

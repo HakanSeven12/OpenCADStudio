@@ -16,6 +16,7 @@ pub(crate) mod dim_viewport;
 mod viewport_dimension_tests;
 #[cfg(test)]
 mod dimension_preview_tests;
+mod dock;
 mod document;
 mod drafting_settings;
 pub(crate) mod expr_eval;

@@ -43,12 +43,14 @@ pub enum DockMsg {
     FloatResizeGrab(PanelId, bool),
     /// The pointer entered (`Some`) or left (`None`) a docked title bar.
     TitleHover(Option<PanelId>),
-    /// Open (`Some`) the pallet menu of a slot (side, slot index), or close
-    /// it (`None`).
-    TabMenu(Option<(DockSide, usize)>),
-    /// Pallet menu pick: show `panel` as a tab of the slot, or hide it when
-    /// it already shows there.
-    TabMenuToggle(DockSide, usize, PanelId),
+    /// Open (`Some`) the pallet menu of an edge's icon strip (its + button),
+    /// or close it (`None`).
+    EdgeMenu(Option<DockSide>),
+    /// Pallet menu pick: hide `panel` when it shows, else open it docked on
+    /// the edge (as a new group unless it already has a group there).
+    EdgeMenuToggle(DockSide, PanelId),
+    /// Begin dragging a whole group (slot) by its grip in the icon strip.
+    GroupGrab(DockSide, usize),
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
     /// Double-click on a floating title bar: dock the panel on that side.
@@ -503,6 +505,28 @@ impl DockState {
         }
     }
 
+    /// Move slot `group` on `side` to insertion `index` on `to` (counted
+    /// before the move). Returns whether the layout changed.
+    pub fn move_group(&mut self, side: DockSide, group: usize, to: DockSide, index: usize) -> bool {
+        if group >= self.groups(side).len() {
+            return false;
+        }
+        let mut index = index;
+        if side == to {
+            if index == group || index == group + 1 {
+                return false;
+            }
+            if group < index {
+                index -= 1;
+            }
+        }
+        let g = self.groups_mut(side).remove(group);
+        let dest = self.groups_mut(to);
+        let index = index.min(dest.len());
+        dest.insert(index, g);
+        true
+    }
+
     /// Float `id` at `rect`, on top of the other floating panels.
     pub fn float(&mut self, rect: FloatPanel) -> bool {
         let before = self.clone();
@@ -641,25 +665,79 @@ pub const DOCK_MIN_W: f32 = 200.0;
 pub const DOCK_MAX_W: f32 = 600.0;
 /// Width of the band along an empty edge that docks a dragged panel there.
 pub const DOCK_EDGE_ZONE: f32 = 48.0;
-/// Width of a collapsed (auto-collapsing) slot's tab in the edge strip.
-pub const DOCK_RAIL_W: f32 = 28.0;
 /// Width of the grabbable divider between a docked slot and the viewport.
 pub const DOCK_DIVIDER_W: f32 = 5.0;
-/// Height of a docked slot's tab strip.
-pub const DOCK_TAB_H: f32 = 28.0;
+/// Width of an edge's vertical icon strip (the groups' tabs).
+pub const DOCK_STRIP_W: f32 = 36.0;
+/// Height of one pallet icon in the strip.
+pub const STRIP_CELL_H: f32 = 32.0;
+/// Height of the grip bar above each group's icons.
+pub const STRIP_GRIP_H: f32 = 10.0;
+/// Space above the first group and between groups in the strip.
+pub const STRIP_GAP: f32 = 6.0;
 
-/// Pitch of one icon tab in a tab strip (tab plus the gap after it).
-pub const DOCK_TAB_CELL_W: f32 = 34.0;
-/// Left inset of the first tab in a tab strip.
-pub const DOCK_TAB_INSET: f32 = 4.0;
+/// Where one group sits in an edge's icon strip, top to bottom.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StripGroup {
+    /// Slot index on the edge.
+    pub group: usize,
+    /// Top of the group's grip bar.
+    pub grip_top: f32,
+    /// Top of the group's first icon.
+    pub icons_top: f32,
+    /// Number of icons (visible tabs).
+    pub icons: usize,
+}
 
-/// Insertion position (0..=`count`) for a tab dropped at `x` on a strip of
-/// `count` left-aligned tabs of pitch `cell` starting at `x0`.
-pub fn tab_insert_index(x: f32, x0: f32, cell: f32, count: usize) -> usize {
-    if count == 0 || cell <= 0.0 {
-        return 0;
+/// Lay out the icon strip for `groups` = (slot index, visible tab count),
+/// returning each group's place and the top of the + button below them.
+pub fn strip_layout(groups: &[(usize, usize)]) -> (Vec<StripGroup>, f32) {
+    let mut y = STRIP_GAP;
+    let placed = groups
+        .iter()
+        .map(|&(group, icons)| {
+            let grip_top = y;
+            let icons_top = grip_top + STRIP_GRIP_H;
+            y = icons_top + icons as f32 * STRIP_CELL_H + STRIP_GAP;
+            StripGroup {
+                group,
+                grip_top,
+                icons_top,
+                icons,
+            }
+        })
+        .collect();
+    (placed, y)
+}
+
+/// What a dragged pallet released at height `y` over the icon strip joins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StripHit {
+    /// A new group before slot `group`; `None` = after the last group.
+    NewGroup(Option<usize>),
+    /// Group `group`, at position `index` among its visible icons.
+    Tab { group: usize, index: usize },
+}
+
+/// Classify a pointer at strip height `y`: over a group's grip (or the gap
+/// above it) starts a new group there, over its icons joins it between the
+/// nearest icons, below every group starts a new last group.
+pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
+    for g in layout {
+        if y < g.icons_top {
+            return StripHit::NewGroup(Some(g.group));
+        }
+        let bottom = g.icons_top + g.icons as f32 * STRIP_CELL_H + STRIP_GAP * 0.5;
+        if y < bottom {
+            let index = (((y - g.icons_top) / STRIP_CELL_H).round().max(0.0) as usize)
+                .min(g.icons);
+            return StripHit::Tab {
+                group: g.group,
+                index,
+            };
+        }
     }
-    (((x - x0) / cell).round().max(0.0) as usize).min(count)
+    StripHit::NewGroup(None)
 }
 
 // ── Shared panel chrome ─────────────────────────────────────────────────
@@ -978,12 +1056,40 @@ mod tests {
     }
 
     #[test]
-    fn tab_insert_index_rounds_to_the_nearest_gap() {
-        assert_eq!(tab_insert_index(0.0, 0.0, 30.0, 3), 0);
-        assert_eq!(tab_insert_index(40.0, 0.0, 30.0, 3), 1);
-        assert_eq!(tab_insert_index(85.0, 0.0, 30.0, 3), 3);
-        assert_eq!(tab_insert_index(250.0, 0.0, 30.0, 3), 3);
-        assert_eq!(tab_insert_index(-20.0, 0.0, 30.0, 3), 0);
+    fn strip_hit_maps_grips_icons_and_the_end() {
+        // Two groups: three icons, then one.
+        let (layout, plus_top) = strip_layout(&[(0, 3), (2, 1)]);
+        let g0 = layout[0];
+        let g1 = layout[1];
+        assert_eq!(g0.grip_top, STRIP_GAP);
+        assert_eq!(g1.icons_top, g1.grip_top + STRIP_GRIP_H);
+        assert_eq!(plus_top, g1.icons_top + STRIP_CELL_H + STRIP_GAP);
+        // On the first grip: a new group before slot 0.
+        assert_eq!(strip_hit(g0.grip_top + 2.0, &layout), StripHit::NewGroup(Some(0)));
+        // Between the first and second icon of group 0.
+        assert_eq!(
+            strip_hit(g0.icons_top + STRIP_CELL_H + 4.0, &layout),
+            StripHit::Tab { group: 0, index: 1 }
+        );
+        // On the second group's grip: a new group before slot 2.
+        assert_eq!(strip_hit(g1.grip_top + 1.0, &layout), StripHit::NewGroup(Some(2)));
+        // Below everything: a new last group.
+        assert_eq!(strip_hit(plus_top + 20.0, &layout), StripHit::NewGroup(None));
+    }
+
+    #[test]
+    fn move_group_reorders_and_crosses_edges() {
+        let mut state = DockState::default();
+        state.left.push(DockGroup::single(PanelId::Browser, 1.0));
+        state.left.push(DockGroup::single(PanelId::Count, 1.0));
+        // Same spot (before itself or after itself) changes nothing.
+        assert!(!state.move_group(DockSide::Left, 1, DockSide::Left, 1));
+        assert!(!state.move_group(DockSide::Left, 1, DockSide::Left, 2));
+        assert!(state.move_group(DockSide::Left, 0, DockSide::Left, 3));
+        assert_eq!(state.left[2].tabs, vec![PanelId::Properties]);
+        assert!(state.move_group(DockSide::Left, 2, DockSide::Right, 0));
+        assert_eq!(state.right[0].tabs, vec![PanelId::Properties]);
+        assert_eq!(state.left.len(), 2);
     }
 
     #[test]

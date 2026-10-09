@@ -870,8 +870,11 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_float_resizing: Option<(crate::ui::dock::PanelId, bool)>,
     /// Docked panel whose title bar the pointer is over (shows pin / close).
     pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
-    /// Slot (side, index) whose pallet menu is open.
-    pub(crate) dock_tab_menu: Option<(crate::app::config::DockSide, usize)>,
+    /// Edge whose icon-strip pallet menu (+) is open.
+    pub(crate) dock_edge_menu: Option<crate::app::config::DockSide>,
+    /// Group being dragged by its strip grip (side, slot index). While set,
+    /// `dock_dragging` holds the group's shown panel for the preview.
+    pub(crate) dock_dragging_group: Option<(crate::app::config::DockSide, usize)>,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -4312,7 +4315,8 @@ impl OpenCADStudio {
             dock_split_drag: None,
             dock_float_resizing: None,
             dock_title_hover: None,
-            dock_tab_menu: None,
+            dock_edge_menu: None,
+            dock_dragging_group: None,
             xref_col_drag: None,
             xref_col_last: None,
             xref_split_drag: false,

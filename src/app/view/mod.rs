@@ -1936,39 +1936,29 @@ bg={bg_ms:.1}ms n={view_count}"
                 layers.push(self.floating_panel(*f, tab));
             }
         }
-        // An open pallet menu hangs under its slot's menu button, over a
+        // An open pallet menu hangs beside its edge's + button, over a
         // catcher that closes it on any click elsewhere.
-        if let Some((side, gi)) = self.dock_tab_menu {
-            let span = self
-                .dock_slot_spans(side)
-                .into_iter()
-                .find(|(g, _, _)| *g == gi);
-            if let Some((_, top, _)) = span {
-                let tabs = self.dock_group_visible_tabs(side, gi);
+        if let Some(side) = self.dock_edge_menu {
+            if !self.dock_visible_groups(side).is_empty() {
                 let shown: Vec<_> = crate::ui::dock::PanelId::ALL
                     .iter()
-                    .map(|p| (*p, tabs.contains(p)))
+                    .map(|p| (*p, self.dock_panel_visible(*p)))
                     .collect();
-                let right_pad = 2.0;
-                let button_right = self.dock_column_x0(side)
-                    + if side == crate::app::config::DockSide::Right {
-                        DOCK_DIVIDER_W
-                    } else {
-                        0.0
+                let (_, plus_top) = self.dock_strip_layout(side);
+                let strip = crate::ui::dock::DOCK_STRIP_W;
+                let x = match side {
+                    crate::app::config::DockSide::Left => strip + 4.0,
+                    crate::app::config::DockSide::Right => {
+                        self.dock_workspace_size().0 - strip - DOCK_MENU_W - 4.0
                     }
-                    + self.dock_column_width(side)
-                    - right_pad;
+                };
                 layers.push(
                     mouse_area(Space::new().width(Fill).height(Fill))
-                        .on_press(Message::Dock(crate::ui::dock::DockMsg::TabMenu(None)))
-                        .on_right_press(Message::Dock(crate::ui::dock::DockMsg::TabMenu(None)))
+                        .on_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
+                        .on_right_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
                         .into(),
                 );
-                layers.push(place_at(
-                    dock_tab_menu(side, gi, &shown),
-                    (button_right - DOCK_MENU_W).max(0.0),
-                    top + crate::ui::dock::DOCK_TAB_H,
-                ));
+                layers.push(place_at(dock_edge_menu(side, &shown), x.max(0.0), plus_top));
             }
         }
         // While a panel is dragged, preview where it lands.
@@ -2779,56 +2769,32 @@ impl OpenCADStudio {
         iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::unfocus())
     }
 
-    /// Build one edge: a narrow tab strip at the very edge plus the expanded
-    /// slots sliding out beside it. Auto-collapsing (pinned) slots are always
-    /// visible as equal-height tabs in the strip (via `Fill` distribution);
-    /// hovering a tab raises its slot beside the strip, so switching between
-    /// stacked panels is a direct tab-to-tab hover with no width-jumping
-    /// collapse dance. Unpinned slots are always expanded and split the column
-    /// height by their weights, with a draggable splitter between neighbours.
-    /// The whole edge is one hover region: leaving it collapses any
-    /// auto-collapsing slot, but moving between the tabs and the expanded slot
-    /// does not. `None` when nothing on the edge is shown.
+    /// Build one edge: the vertical icon strip at the very edge plus the
+    /// expanded groups beside it. The strip lists every shown group's pallets
+    /// as icons under a grip bar, with a + button below them; clicking an
+    /// icon shows that pallet in its group. Unpinned groups are always
+    /// expanded and split the column height by their weights, with a
+    /// draggable splitter between neighbours. An auto-hiding (pinned) group
+    /// lives only in the strip until one of its icons is hovered. The whole
+    /// edge is one hover region: leaving it collapses any auto-hiding group.
+    /// `None` when nothing on the edge is shown.
     fn build_edge_stack<'a>(
         &'a self,
         side: crate::app::config::DockSide,
         tab: &'a DocumentTab,
     ) -> Option<Element<'a, Message>> {
-        let visible = self.dock_visible_groups(side);
-        if visible.is_empty() {
+        if self.dock_visible_groups(side).is_empty() {
             return None;
         }
-        let shown = |gi: usize| self.dock_group_shown(side, gi).expect("visible group");
-        let pinned: Vec<usize> = visible
-            .iter()
-            .copied()
-            .filter(|gi| self.dock.auto_collapse(shown(*gi)))
-            .collect();
         let expanded = self.dock_expanded_groups(side);
-        // Each expanded slot renders at its shown panel's saved width; the
-        // column is as wide as the widest one currently showing.
         let col_w = expanded
             .iter()
             .map(|gi| self.dock_group_width(side, *gi))
             .fold(0.0, f32::max);
 
-        let tab_strip = (!pinned.is_empty()).then(|| {
-            let tabs: Vec<Element<'_, Message>> = pinned
-                .iter()
-                .map(|gi| {
-                    let tabs = self.dock_group_visible_tabs(side, *gi);
-                    self.rail_slice(
-                        shown(*gi),
-                        &tabs,
-                        side,
-                        self.dock_dragging.is_some_and(|d| tabs.contains(&d)),
-                    )
-                })
-                .collect();
-            column(tabs).width(DOCK_RAIL_W).height(Fill).into()
-        });
+        let strip = self.dock_icon_strip(side);
         let expanded_stack = (!expanded.is_empty()).then(|| {
-            // Expanded slots stack one below the other, each taking its
+            // Expanded groups stack one below the other, each taking its
             // weighted share of the column height — never overlapping.
             let mut layers: Vec<Element<'_, Message>> = Vec::new();
             for (n, gi) in expanded.iter().enumerate() {
@@ -2848,20 +2814,12 @@ impl OpenCADStudio {
         let mut children: Vec<Element<'_, Message>> = Vec::new();
         match side {
             crate::app::config::DockSide::Left => {
-                if let Some(t) = tab_strip {
-                    children.push(t);
-                }
-                if let Some(e) = expanded_stack {
-                    children.push(e);
-                }
+                children.push(strip);
+                children.extend(expanded_stack);
             }
             crate::app::config::DockSide::Right => {
-                if let Some(e) = expanded_stack {
-                    children.push(e);
-                }
-                if let Some(t) = tab_strip {
-                    children.push(t);
-                }
+                children.extend(expanded_stack);
+                children.push(strip);
             }
         }
         Some(
@@ -2871,52 +2829,98 @@ impl OpenCADStudio {
         )
     }
 
-    /// One narrow tab in the edge strip, naming every panel of its slot.
-    /// Equal `Fill` heights across the tabs give each 1/N of the strip;
-    /// hovering or clicking it raises its slot.
-    fn rail_slice(
-        &self,
-        id: crate::ui::dock::PanelId,
-        tabs: &[crate::ui::dock::PanelId],
-        side: crate::app::config::DockSide,
-        is_dragging: bool,
-    ) -> Element<'_, Message> {
-        let label = canvas(VBarLabel {
-            text: tabs
-                .iter()
-                .map(|t| t.title())
-                .collect::<Vec<_>>()
-                .join(" · "),
-            clockwise: side == crate::app::config::DockSide::Left,
-            from_start: false,
-        })
-        .width(Fill)
-        .height(Fill);
-        // Hovering raises the slot but leaves the rail looking as it is.
-        let bg = move |theme: &Theme| {
-            let palette = theme.palette();
-            if is_dragging {
-                palette.primary.weak.color.scale_alpha(0.55)
-            } else {
-                palette.background.base.color
+    /// An edge's vertical icon strip: per shown group a grip bar (drag it to
+    /// move the group) and its pallets' icons (the group's tabs; the shown one
+    /// on a grey background), then a + button opening the pallet menu.
+    /// Heights follow `dock::strip_layout`, which drop targeting uses too.
+    fn dock_icon_strip(&self, side: crate::app::config::DockSide) -> Element<'_, Message> {
+        use crate::ui::dock::{DockMsg, DOCK_STRIP_W, STRIP_CELL_H, STRIP_GAP, STRIP_GRIP_H};
+        let mut items: Vec<Element<'_, Message>> = Vec::new();
+        for gi in self.dock_visible_groups(side) {
+            items.push(Space::new().height(STRIP_GAP).into());
+            let grip = container(
+                container(Space::new())
+                    .width(Length::Fixed(18.0))
+                    .height(Length::Fixed(3.0))
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(
+                            theme.palette().background.strong.color,
+                        )),
+                        border: Border {
+                            radius: 1.5.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+            )
+            .center_x(Length::Fixed(DOCK_STRIP_W))
+            .center_y(Length::Fixed(STRIP_GRIP_H));
+            items.push(
+                mouse_area(grip)
+                    .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
+                    .interaction(iced::mouse::Interaction::Grab)
+                    .into(),
+            );
+            let shown = self.dock_group_shown(side, gi);
+            for id in self.dock_group_visible_tabs(side, gi) {
+                let is_active = Some(id) == shown;
+                let icon = container(crate::ui::icons::themed(id.icon(), 20.0))
+                    .center_x(Length::Fixed(STRIP_CELL_H - 4.0))
+                    .center_y(Length::Fixed(STRIP_CELL_H - 4.0))
+                    .style(move |theme: &Theme| container::Style {
+                        // Only the shown pallet of the group gets a background.
+                        background: is_active
+                            .then(|| Background::Color(theme.palette().background.weak.color)),
+                        border: Border {
+                            radius: 4.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    });
+                let cell = mouse_area(
+                    container(icon)
+                        .center_x(Length::Fixed(DOCK_STRIP_W))
+                        .center_y(Length::Fixed(STRIP_CELL_H)),
+                )
+                .on_press(Message::Dock(DockMsg::SelectTab(id)))
+                .on_enter(Message::Dock(DockMsg::Hover(id)))
+                .interaction(iced::mouse::Interaction::Pointer);
+                items.push(
+                    iced::widget::tooltip(
+                        cell,
+                        text(id.title()).size(10),
+                        match side {
+                            crate::app::config::DockSide::Left => {
+                                iced::widget::tooltip::Position::Right
+                            }
+                            crate::app::config::DockSide::Right => {
+                                iced::widget::tooltip::Position::Left
+                            }
+                        },
+                    )
+                    .gap(4)
+                    .into(),
+                );
             }
-        };
-        let tab = container(label)
-            .width(Length::Fixed(DOCK_RAIL_W))
+        }
+        items.push(Space::new().height(STRIP_GAP).into());
+        let plus = button(crate::ui::icons::themed_secondary(crate::ui::icons::PLUS, 14.0))
+            .on_press(Message::Dock(DockMsg::EdgeMenu(Some(side))))
+            .style(button::subtle)
+            .padding([5, 8]);
+        items.push(container(plus).center_x(Length::Fixed(DOCK_STRIP_W)).into());
+        container(column(items))
+            .width(Length::Fixed(DOCK_STRIP_W))
             .height(Fill)
-            .style(move |theme: &Theme| container::Style {
-                background: Some(Background::Color(bg(theme))),
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.base.color)),
                 border: Border {
                     color: theme.palette().background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
-            });
-        mouse_area(tab)
-            .interaction(iced::mouse::Interaction::Pointer)
-            .on_press(Message::Dock(crate::ui::dock::DockMsg::DockGrab(id)))
-            .on_enter(Message::Dock(crate::ui::dock::DockMsg::Hover(id)))
+            })
             .into()
     }
 
@@ -2977,8 +2981,8 @@ impl OpenCADStudio {
         }
     }
 
-    /// An expanded slot: its tab strip (when it holds more than one shown
-    /// panel), the shown panel, and a grabbable divider against the viewport.
+    /// An expanded slot: its shown panel (the group's tabs live in the icon
+    /// strip) and a grabbable divider against the viewport.
     /// Hovering is handled by the enclosing edge region (see
     /// `build_edge_stack`), so the body stays fully interactive without
     /// fighting the region's hover tracking.
@@ -2989,16 +2993,8 @@ impl OpenCADStudio {
         width: f32,
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
-        let tabs = self.dock_group_visible_tabs(side, gi);
         let id = self.dock_group_shown(side, gi).expect("visible group");
-        let body = self.panel_body(id, width, false, tab);
-        let panel: Element<'_, Message> = if tabs.len() > 1 {
-            column![dock_tab_strip(&tabs, id, width, side, gi), body]
-                .height(Fill)
-                .into()
-        } else {
-            body
-        };
+        let panel = self.panel_body(id, width, false, tab);
         let divider = dock_divider(id);
         match side {
             crate::app::config::DockSide::Left => row![panel, divider].height(Fill).into(),
@@ -3113,8 +3109,11 @@ impl OpenCADStudio {
         let (ww, _) = self.dock_workspace_size();
         let id_w = self.dock.width(id, self.win_size.0);
         let edge_w = |side: DockSide| self.dock_column_width(side).max(id_w);
+        let strip = crate::ui::dock::DOCK_STRIP_W;
+        // The tint covers the edge's icon strip and column; the ghost sits in
+        // the column beside the strip.
         let tint = |side: DockSide| -> Element<'_, Message> {
-            let w = edge_w(side);
+            let w = edge_w(side) + strip;
             let band = container(Space::new())
                 .width(Length::Fixed(w))
                 .height(Fill)
@@ -3134,8 +3133,8 @@ impl OpenCADStudio {
                 .into()
         };
         let edge_x = |side: DockSide, w: f32| match side {
-            DockSide::Left => 0.0,
-            DockSide::Right => (ww - w).max(0.0),
+            DockSide::Left => strip,
+            DockSide::Right => (ww - w - strip).max(0.0),
         };
         let mut layers: Vec<Element<'_, Message>> = Vec::new();
         match target {
@@ -3689,84 +3688,16 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
         .into()
 }
 
-use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_RAIL_W};
+use crate::ui::dock::DOCK_DIVIDER_W;
 
-/// The tab row above a docked slot holding several pallets: one icon tab per
-/// shown pallet, from the left, and a menu button on the right that lists
-/// every pallet (drawn by `dock_tab_menu`). Pressing a tab shows its pallet;
-/// dragging it reorders the tabs or pulls the pallet out.
-fn dock_tab_strip(
-    tabs: &[crate::ui::dock::PanelId],
-    active: crate::ui::dock::PanelId,
-    width: f32,
-    side: crate::app::config::DockSide,
-    gi: usize,
-) -> Element<'static, Message> {
-    use crate::ui::dock::{DockMsg, DOCK_TAB_CELL_W, DOCK_TAB_INSET};
-    const TAB_GAP: f32 = 2.0;
-    let mut cells: Vec<Element<'static, Message>> = tabs
-        .iter()
-        .map(|id| {
-            let id = *id;
-            let is_active = id == active;
-            let cell = container(crate::ui::icons::themed(id.icon(), 18.0))
-                .center_x(Length::Fixed(DOCK_TAB_CELL_W - TAB_GAP))
-                .center_y(Fill)
-                .style(move |theme: &Theme| container::Style {
-                    // Only the shown tab gets a background.
-                    background: is_active
-                        .then(|| Background::Color(theme.palette().background.weak.color)),
-                    border: Border {
-                        radius: iced::border::Radius::default().top(4.0),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                });
-            let cell = mouse_area(cell)
-                .on_press(Message::Dock(DockMsg::SelectTab(id)))
-                .interaction(iced::mouse::Interaction::Pointer);
-            iced::widget::tooltip(
-                cell,
-                text(id.title()).size(10),
-                iced::widget::tooltip::Position::Bottom,
-            )
-            .gap(4)
-            .into()
-        })
-        .collect();
-    cells.push(Space::new().width(Fill).into());
-    cells.push(
-        button(crate::ui::icons::themed_secondary(crate::ui::icons::MENU, 14.0))
-            .on_press(Message::Dock(DockMsg::TabMenu(Some((side, gi)))))
-            .style(button::subtle)
-            .padding([3, 5])
-            .into(),
-    );
-    container(row(cells).spacing(TAB_GAP).height(Fill).align_y(iced::Center))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(crate::ui::dock::DOCK_TAB_H))
-        .padding(iced::Padding {
-            top: 3.0,
-            right: 2.0,
-            bottom: 0.0,
-            left: DOCK_TAB_INSET,
-        })
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.strong.color)),
-            ..Default::default()
-        })
-        .into()
-}
-
-/// Width of the tab row's pallet menu.
+/// Width of the icon strip's pallet menu.
 const DOCK_MENU_W: f32 = 230.0;
 
-/// The pallet menu of slot (`side`, `gi`), styled like the right-click menu:
-/// one row per pallet with its icon, its name and a check mark when it shows
-/// in this slot. `shown` holds each pallet with that state.
-fn dock_tab_menu(
+/// The pallet menu of an edge's + button, styled like the right-click menu:
+/// one row per pallet with its icon, its name and a check mark when it is
+/// shown. `shown` holds each pallet with that state.
+fn dock_edge_menu(
     side: crate::app::config::DockSide,
-    gi: usize,
     shown: &[(crate::ui::dock::PanelId, bool)],
 ) -> Element<'static, Message> {
     use crate::ui::dock::DockMsg;
@@ -3788,7 +3719,7 @@ fn dock_tab_menu(
                 .spacing(8)
                 .align_y(iced::Center),
             )
-            .on_press(Message::Dock(DockMsg::TabMenuToggle(side, gi, id)))
+            .on_press(Message::Dock(DockMsg::EdgeMenuToggle(side, id)))
             .style(|theme: &Theme, status| {
                 let palette = theme.palette();
                 button::Style {

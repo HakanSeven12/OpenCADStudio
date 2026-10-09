@@ -2773,7 +2773,7 @@ impl OpenCADStudio {
         // column is as wide as the widest one currently showing.
         let col_w = expanded
             .iter()
-            .map(|gi| self.dock.width(shown(*gi), self.win_size.0))
+            .map(|gi| self.dock_group_width(side, *gi))
             .fold(0.0, f32::max);
 
         let tab_strip = (!pinned.is_empty()).then(|| {
@@ -2785,7 +2785,6 @@ impl OpenCADStudio {
                         shown(*gi),
                         &tabs,
                         side,
-                        self.dock_expanded.is_some_and(|e| tabs.contains(&e)),
                         self.dock_dragging.is_some_and(|d| tabs.contains(&d)),
                     )
                 })
@@ -2844,7 +2843,6 @@ impl OpenCADStudio {
         id: crate::ui::dock::PanelId,
         tabs: &[crate::ui::dock::PanelId],
         side: crate::app::config::DockSide,
-        is_active: bool,
         is_dragging: bool,
     ) -> Element<'_, Message> {
         let label = canvas(VBarLabel {
@@ -2858,11 +2856,10 @@ impl OpenCADStudio {
         })
         .width(Fill)
         .height(Fill);
+        // Hovering raises the slot but leaves the rail looking as it is.
         let bg = move |theme: &Theme| {
             let palette = theme.palette();
-            if is_active {
-                palette.primary.weak.color
-            } else if is_dragging {
+            if is_dragging {
                 palette.primary.weak.color.scale_alpha(0.55)
             } else {
                 palette.background.base.color
@@ -2874,11 +2871,7 @@ impl OpenCADStudio {
             .style(move |theme: &Theme| container::Style {
                 background: Some(Background::Color(bg(theme))),
                 border: Border {
-                    color: if is_active {
-                        theme.palette().primary.base.color
-                    } else {
-                        theme.palette().background.neutral.color
-                    },
+                    color: theme.palette().background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -3117,16 +3110,23 @@ impl OpenCADStudio {
                     top,
                 ));
             }
-            DropTarget::Tab { side, group } => {
+            DropTarget::Tab { side, group, index } => {
                 let (top, bottom) = self
                     .dock_slot_spans(side)
                     .into_iter()
                     .find(|(gi, _, _)| *gi == group)
                     .map(|(_, t, b)| (t, b))
                     .unwrap_or((0.0, 0.0));
-                let mut tabs = self.dock_group_visible_tabs(side, group);
-                tabs.retain(|t| *t != id);
-                tabs.push(id);
+                // The slot's tabs as they will be after the drop.
+                let mut preview = self.dock.clone();
+                preview.add_tab(id, side, group, index);
+                let tabs: Vec<_> = preview
+                    .location(id)
+                    .map(|(s, gi)| preview.groups(s)[gi].tabs.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|t| *t == id || self.dock_panel_visible(*t))
+                    .collect();
                 let w = edge_w(side);
                 layers.push(tint(side));
                 layers.push(place_at(
@@ -3576,10 +3576,6 @@ impl canvas::Program<Message> for VBarLabel {
     }
 }
 
-/// Width of a collapsed (auto-collapsing) panel's tab in the edge strip.
-const DOCK_RAIL_W: f32 = 28.0;
-/// Width of the grabbable divider between a docked panel and the viewport.
-const DOCK_DIVIDER_W: f32 = 5.0;
 /// Width of a floating panel's vertical title bar.
 const DOCK_FLOAT_BAR_W: f32 = 28.0;
 
@@ -3645,8 +3641,7 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
         .into()
 }
 
-/// Height of a docked slot's tab strip.
-const DOCK_TAB_H: f32 = 24.0;
+use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_RAIL_W, DOCK_TAB_H};
 
 /// The tab row above a slot holding several panels. Pressing a tab shows its
 /// panel; dragging it pulls the panel out of the slot.

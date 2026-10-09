@@ -420,15 +420,35 @@ impl DockState {
         *self != before
     }
 
-    /// Add `id` as a tab of slot `group` on `side` (index counted before the
-    /// move) and show it. Returns whether the layout changed.
-    pub fn add_tab(&mut self, id: PanelId, side: DockSide, group: usize) -> bool {
+    /// Add `id` as a tab of slot `group` on `side` (slot index counted
+    /// before the move) and show it. `index` is the tab position, counted in
+    /// the slot's tabs before the move; `None` appends a newcomer and leaves
+    /// a tab already in the slot where it is. A joining panel takes on the
+    /// slot's width, so switching tabs never changes the column width.
+    /// Returns whether the layout changed.
+    pub fn add_tab(
+        &mut self,
+        id: PanelId,
+        side: DockSide,
+        group: usize,
+        index: Option<usize>,
+    ) -> bool {
         if group >= self.groups(side).len() {
             return false;
         }
-        if self.groups(side)[group].tabs.contains(&id) {
-            return self.select_tab(id);
+        let before = self.clone();
+        if let Some(pos) = self.groups(side)[group].tabs.iter().position(|t| *t == id) {
+            // Reordering within the slot.
+            let g = &mut self.groups_mut(side)[group];
+            if let Some(index) = index {
+                g.tabs.remove(pos);
+                let index = if pos < index { index - 1 } else { index };
+                g.tabs.insert(index.min(g.tabs.len()), id);
+            }
+            g.active = id;
+            return *self != before;
         }
+        let width = self.group_width(side, group);
         let mut group = group;
         if let Some((old_side, old_i, removed)) = self.detach(id) {
             if old_side == side && removed && old_i < group {
@@ -436,9 +456,32 @@ impl DockState {
             }
         }
         let g = &mut self.groups_mut(side)[group];
-        g.tabs.push(id);
+        let index = index.unwrap_or(g.tabs.len()).min(g.tabs.len());
+        g.tabs.insert(index, id);
         g.active = id;
+        self.set_width(id, width);
         true
+    }
+
+    /// The saved width a slot's panels share: the widest of its tabs, so a
+    /// slot whose tabs were sized apart (older configs) renders at one width.
+    pub fn group_width(&self, side: DockSide, group: usize) -> f32 {
+        self.groups(side)[group]
+            .tabs
+            .iter()
+            .map(|id| self.settings(*id).width)
+            .fold(DOCK_MIN_W, f32::max)
+    }
+
+    /// Set the width of `id` and of every other tab in its slot.
+    pub fn set_group_width(&mut self, id: PanelId, width: f32) {
+        let tabs = match self.location(id) {
+            Some((side, gi)) => self.groups(side)[gi].tabs.clone(),
+            None => vec![id],
+        };
+        for t in tabs {
+            self.set_width(t, width);
+        }
     }
 
     /// Float `id` at `rect`, on top of the other floating panels.
@@ -516,8 +559,13 @@ impl DockState {
 pub enum DropTarget {
     /// A new slot on `side` at insertion `index` (0 = top, len = bottom).
     Edge { side: DockSide, index: usize },
-    /// A new tab in slot `group` on `side`.
-    Tab { side: DockSide, group: usize },
+    /// A tab in slot `group` on `side`, at position `index` among the
+    /// slot's tabs (before the move), or appended / left in place for `None`.
+    Tab {
+        side: DockSide,
+        group: usize,
+        index: Option<usize>,
+    },
     /// Floating with its top-left corner at (`x`, `y`).
     Float { x: f32, y: f32 },
 }
@@ -574,6 +622,22 @@ pub const DOCK_MIN_W: f32 = 200.0;
 pub const DOCK_MAX_W: f32 = 600.0;
 /// Width of the band along an empty edge that docks a dragged panel there.
 pub const DOCK_EDGE_ZONE: f32 = 48.0;
+/// Width of a collapsed (auto-collapsing) slot's tab in the edge strip.
+pub const DOCK_RAIL_W: f32 = 28.0;
+/// Width of the grabbable divider between a docked slot and the viewport.
+pub const DOCK_DIVIDER_W: f32 = 5.0;
+/// Height of a docked slot's tab strip.
+pub const DOCK_TAB_H: f32 = 24.0;
+
+/// Insertion position (0..=`count`) for a tab dropped at `x` on a strip of
+/// `count` equal tabs spanning `x0..x0 + width`.
+pub fn tab_insert_index(x: f32, x0: f32, width: f32, count: usize) -> usize {
+    if count == 0 || width <= 0.0 {
+        return 0;
+    }
+    let cell = width / count as f32;
+    (((x - x0) / cell).round().max(0.0) as usize).min(count)
+}
 
 // ── Shared panel chrome ─────────────────────────────────────────────────
 
@@ -829,7 +893,7 @@ mod tests {
     #[test]
     fn layout_round_trips_through_serde() {
         let mut state = DockState::default();
-        state.add_tab(PanelId::Browser, DockSide::Left, 0);
+        state.add_tab(PanelId::Browser, DockSide::Left, 0, None);
         state.float(FloatPanel {
             id: PanelId::Count,
             x: 10.0,
@@ -845,7 +909,7 @@ mod tests {
     #[test]
     fn add_tab_joins_a_slot_and_shows_the_new_tab() {
         let mut state = DockState::default();
-        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 0));
+        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None));
         assert!(state.right.is_empty(), "its old slot disappears");
         assert_eq!(state.left.len(), 1);
         assert_eq!(
@@ -858,9 +922,49 @@ mod tests {
     }
 
     #[test]
+    fn add_tab_reorders_within_a_slot() {
+        let mut state = DockState::default();
+        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
+        state.add_tab(PanelId::Browser, DockSide::Left, 0, None);
+        // Drag the first tab to the end.
+        assert!(state.add_tab(PanelId::Properties, DockSide::Left, 0, Some(3)));
+        assert_eq!(
+            state.left[0].tabs,
+            vec![PanelId::BlockPalette, PanelId::Browser, PanelId::Properties]
+        );
+        // Drag the last tab to the front.
+        assert!(state.add_tab(PanelId::Properties, DockSide::Left, 0, Some(0)));
+        assert_eq!(state.left[0].tabs[0], PanelId::Properties);
+        // A middle drop (None) leaves a member where it is.
+        assert!(!state.add_tab(PanelId::Properties, DockSide::Left, 0, None));
+        // A newcomer can land at a given position.
+        state.add_tab(PanelId::Count, DockSide::Left, 0, Some(1));
+        assert_eq!(state.left[0].tabs[1], PanelId::Count);
+    }
+
+    #[test]
+    fn tabs_share_the_slot_width() {
+        let mut state = DockState::default();
+        state.set_width(PanelId::Properties, 320.0);
+        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
+        assert_eq!(state.settings(PanelId::BlockPalette).width, 320.0);
+        state.set_group_width(PanelId::BlockPalette, 400.0);
+        assert_eq!(state.settings(PanelId::Properties).width, 400.0);
+        assert_eq!(state.group_width(DockSide::Left, 0), 400.0);
+    }
+
+    #[test]
+    fn tab_insert_index_rounds_to_the_nearest_gap() {
+        assert_eq!(tab_insert_index(0.0, 0.0, 300.0, 3), 0);
+        assert_eq!(tab_insert_index(140.0, 0.0, 300.0, 3), 1);
+        assert_eq!(tab_insert_index(290.0, 0.0, 300.0, 3), 3);
+        assert_eq!(tab_insert_index(-20.0, 0.0, 300.0, 3), 0);
+    }
+
+    #[test]
     fn docking_a_tab_out_keeps_the_rest_of_the_group() {
         let mut state = DockState::default();
-        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0);
+        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
         // Pull the shown tab out below the group.
         assert!(state.dock(PanelId::BlockPalette, DockSide::Left, 1));
         assert_eq!(state.left.len(), 2);
@@ -878,7 +982,7 @@ mod tests {
         ];
         state.right.clear();
         // Slot 1 (Properties) is slot 0 once the palette's slot is gone.
-        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 1));
+        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 1, None));
         assert_eq!(state.left.len(), 1);
         assert_eq!(
             state.left[0].tabs,

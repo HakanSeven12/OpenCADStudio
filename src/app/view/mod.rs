@@ -1936,6 +1936,41 @@ bg={bg_ms:.1}ms n={view_count}"
                 layers.push(self.floating_panel(*f, tab));
             }
         }
+        // An open pallet menu hangs under its slot's menu button, over a
+        // catcher that closes it on any click elsewhere.
+        if let Some((side, gi)) = self.dock_tab_menu {
+            let span = self
+                .dock_slot_spans(side)
+                .into_iter()
+                .find(|(g, _, _)| *g == gi);
+            if let Some((_, top, _)) = span {
+                let tabs = self.dock_group_visible_tabs(side, gi);
+                let shown: Vec<_> = crate::ui::dock::PanelId::ALL
+                    .iter()
+                    .map(|p| (*p, tabs.contains(p)))
+                    .collect();
+                let right_pad = 2.0;
+                let button_right = self.dock_column_x0(side)
+                    + if side == crate::app::config::DockSide::Right {
+                        DOCK_DIVIDER_W
+                    } else {
+                        0.0
+                    }
+                    + self.dock_column_width(side)
+                    - right_pad;
+                layers.push(
+                    mouse_area(Space::new().width(Fill).height(Fill))
+                        .on_press(Message::Dock(crate::ui::dock::DockMsg::TabMenu(None)))
+                        .on_right_press(Message::Dock(crate::ui::dock::DockMsg::TabMenu(None)))
+                        .into(),
+                );
+                layers.push(place_at(
+                    dock_tab_menu(side, gi, &shown),
+                    (button_right - DOCK_MENU_W).max(0.0),
+                    top + crate::ui::dock::DOCK_TAB_H,
+                ));
+            }
+        }
         // While a panel is dragged, preview where it lands.
         if let (Some(id), Some(target)) = (self.dock_dragging, self.dock_drag_target) {
             layers.push(self.dock_drop_preview(id, target));
@@ -2957,15 +2992,13 @@ impl OpenCADStudio {
         let tabs = self.dock_group_visible_tabs(side, gi);
         let id = self.dock_group_shown(side, gi).expect("visible group");
         let body = self.panel_body(id, width, false, tab);
-        let menu = (self.dock_tab_menu == Some((side, gi))).then(|| {
-            crate::ui::dock::PanelId::ALL.map(|p| {
-                (p, self.dock_panel_visible(p) && tabs.contains(&p))
-            })
-        });
-        let panel: Element<'_, Message> =
-            column![dock_tab_strip(&tabs, id, width, side, gi, menu), body]
+        let panel: Element<'_, Message> = if tabs.len() > 1 {
+            column![dock_tab_strip(&tabs, id, width, side, gi), body]
                 .height(Fill)
-                .into();
+                .into()
+        } else {
+            body
+        };
         let divider = dock_divider(id);
         match side {
             crate::app::config::DockSide::Left => row![panel, divider].height(Fill).into(),
@@ -3658,18 +3691,16 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
 
 use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_RAIL_W};
 
-/// The tab row above a docked slot: one icon tab per shown pallet, from the
-/// left, and a menu button on the right listing every pallet. Pressing a tab
-/// shows its pallet; dragging it reorders the tabs or pulls the pallet out.
-/// `menu` holds each pallet with whether it shows in this slot while the
-/// menu is open.
+/// The tab row above a docked slot holding several pallets: one icon tab per
+/// shown pallet, from the left, and a menu button on the right that lists
+/// every pallet (drawn by `dock_tab_menu`). Pressing a tab shows its pallet;
+/// dragging it reorders the tabs or pulls the pallet out.
 fn dock_tab_strip(
     tabs: &[crate::ui::dock::PanelId],
     active: crate::ui::dock::PanelId,
     width: f32,
     side: crate::app::config::DockSide,
     gi: usize,
-    menu: Option<[(crate::ui::dock::PanelId, bool); crate::ui::dock::PanelId::ALL.len()]>,
 ) -> Element<'static, Message> {
     use crate::ui::dock::{DockMsg, DOCK_TAB_CELL_W, DOCK_TAB_INSET};
     const TAB_GAP: f32 = 2.0;
@@ -3678,28 +3709,18 @@ fn dock_tab_strip(
         .map(|id| {
             let id = *id;
             let is_active = id == active;
-            let cell = container(crate::ui::icons::themed(id.icon(), 14.0))
+            let cell = container(crate::ui::icons::themed(id.icon(), 18.0))
                 .center_x(Length::Fixed(DOCK_TAB_CELL_W - TAB_GAP))
                 .center_y(Fill)
-                .style(move |theme: &Theme| {
-                    let palette = theme.palette();
-                    container::Style {
-                        background: Some(Background::Color(if is_active {
-                            palette.background.base.color
-                        } else {
-                            palette.background.weak.color
-                        })),
-                        border: Border {
-                            color: if is_active {
-                                palette.primary.base.color
-                            } else {
-                                palette.background.neutral.color
-                            },
-                            width: if is_active { 1.0 } else { 0.5 },
-                            radius: iced::border::Radius::default().top(4.0),
-                        },
+                .style(move |theme: &Theme| container::Style {
+                    // Only the shown tab gets a background.
+                    background: is_active
+                        .then(|| Background::Color(theme.palette().background.weak.color)),
+                    border: Border {
+                        radius: iced::border::Radius::default().top(4.0),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 });
             let cell = mouse_area(cell)
                 .on_press(Message::Dock(DockMsg::SelectTab(id)))
@@ -3714,62 +3735,11 @@ fn dock_tab_strip(
         })
         .collect();
     cells.push(Space::new().width(Fill).into());
-    let menu_open = menu.is_some();
-    let menu_button = button(crate::ui::icons::themed_secondary(crate::ui::icons::MENU, 12.0))
-        .on_press(Message::Dock(DockMsg::TabMenu(
-            (!menu_open).then_some((side, gi)),
-        )))
-        .style(button::subtle)
-        .padding([2, 5]);
-    let rows: Vec<Element<'static, Message>> = menu
-        .iter()
-        .flatten()
-        .map(|(id, checked)| {
-            let id = *id;
-            let check: Element<'static, Message> = if *checked {
-                crate::ui::icons::themed(crate::ui::icons::CHECK, 12.0)
-            } else {
-                Space::new().width(12).height(12).into()
-            };
-            button(
-                row![
-                    check,
-                    crate::ui::icons::themed(id.icon(), 14.0),
-                    text(id.title()).size(12),
-                ]
-                .spacing(8)
-                .align_y(iced::Center),
-            )
-            .on_press(Message::Dock(DockMsg::TabMenuToggle(side, gi, id)))
-            .style(button::subtle)
-            .padding([4, 8])
-            .width(Fill)
-            .into()
-        })
-        .collect();
-    let popup: Element<'static, Message> = container(column(rows).spacing(1).padding(4))
-        .width(Length::Fixed(220.0))
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        })
-        .into();
     cells.push(
-        iced_aw::DropDown::new(menu_button, popup, menu_open)
-            // Open away from the window edge the slot is docked against.
-            .alignment(match side {
-                crate::app::config::DockSide::Left => iced_aw::drop_down::Alignment::BottomEnd,
-                crate::app::config::DockSide::Right => {
-                    iced_aw::drop_down::Alignment::BottomStart
-                }
-            })
-            .offset(2.0)
-            .on_dismiss(Message::Dock(DockMsg::TabMenu(None)))
+        button(crate::ui::icons::themed_secondary(crate::ui::icons::MENU, 14.0))
+            .on_press(Message::Dock(DockMsg::TabMenu(Some((side, gi)))))
+            .style(button::subtle)
+            .padding([3, 5])
             .into(),
     );
     container(row(cells).spacing(TAB_GAP).height(Fill).align_y(iced::Center))
@@ -3783,6 +3753,74 @@ fn dock_tab_strip(
         })
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.strong.color)),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Width of the tab row's pallet menu.
+const DOCK_MENU_W: f32 = 230.0;
+
+/// The pallet menu of slot (`side`, `gi`), styled like the right-click menu:
+/// one row per pallet with its icon, its name and a check mark when it shows
+/// in this slot. `shown` holds each pallet with that state.
+fn dock_tab_menu(
+    side: crate::app::config::DockSide,
+    gi: usize,
+    shown: &[(crate::ui::dock::PanelId, bool)],
+) -> Element<'static, Message> {
+    use crate::ui::dock::DockMsg;
+    let rows: Vec<Element<'static, Message>> = shown
+        .iter()
+        .map(|(id, checked)| {
+            let id = *id;
+            let check: Element<'static, Message> = if *checked {
+                crate::ui::icons::themed(crate::ui::icons::CHECK, 12.0)
+            } else {
+                Space::new().width(12).height(12).into()
+            };
+            button(
+                row![
+                    crate::ui::icons::themed(id.icon(), 16.0),
+                    text(id.title()).size(12).width(Fill),
+                    check,
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .on_press(Message::Dock(DockMsg::TabMenuToggle(side, gi, id)))
+            .style(|theme: &Theme, status| {
+                let palette = theme.palette();
+                button::Style {
+                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+                        .then(|| Background::Color(palette.background.weak.color)),
+                    text_color: palette.background.base.text,
+                    border: Border {
+                        radius: 3.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            })
+            .padding([5, 8])
+            .width(Fill)
+            .into()
+        })
+        .collect();
+    container(column(rows).spacing(1).padding(4))
+        .width(Length::Fixed(DOCK_MENU_W))
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.base.color)),
+            border: Border {
+                color: theme.palette().background.neutral.color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 12.0,
+            },
             ..Default::default()
         })
         .into()

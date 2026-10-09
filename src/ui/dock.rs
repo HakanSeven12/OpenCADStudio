@@ -646,10 +646,10 @@ pub const DOCK_RAIL_W: f32 = 28.0;
 /// Width of the grabbable divider between a docked slot and the viewport.
 pub const DOCK_DIVIDER_W: f32 = 5.0;
 /// Height of a docked slot's tab strip.
-pub const DOCK_TAB_H: f32 = 24.0;
+pub const DOCK_TAB_H: f32 = 28.0;
 
 /// Pitch of one icon tab in a tab strip (tab plus the gap after it).
-pub const DOCK_TAB_CELL_W: f32 = 30.0;
+pub const DOCK_TAB_CELL_W: f32 = 34.0;
 /// Left inset of the first tab in a tab strip.
 pub const DOCK_TAB_INSET: f32 = 4.0;
 

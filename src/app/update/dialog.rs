@@ -1002,7 +1002,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
 
     /// Left x of the expanded slots on `side` (past the auto-hide rail, if
     /// the edge has one) in workspace pixels.
-    fn dock_column_x0(&self, side: crate::app::config::DockSide) -> f32 {
+    pub(crate) fn dock_column_x0(&self, side: crate::app::config::DockSide) -> f32 {
         use crate::app::config::DockSide;
         let has_rail = self.dock_visible_groups(side).into_iter().any(|gi| {
             self.dock_group_shown(side, gi)
@@ -1084,7 +1084,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             };
             // Over a tab strip: drop between its tabs (reorders a member).
             let tabs = self.dock_group_visible_tabs(side, gi);
-            if self.dock_expanded_groups(side).contains(&gi)
+            if tabs.len() > 1
+                && self.dock_expanded_groups(side).contains(&gi)
                 && p.y < top + crate::ui::dock::DOCK_TAB_H
             {
                 let x0 = self.dock_column_x0(side)
@@ -2116,7 +2117,7 @@ mod tests {
         // tab past the Blocks tab.
         let _ = app.on_dock(DockMsg::SelectTab(PanelId::Properties));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(10.0, 12.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(70.0, 12.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(78.0, 12.0)));
         assert_eq!(
             app.dock_drag_target,
             Some(DropTarget::Tab {

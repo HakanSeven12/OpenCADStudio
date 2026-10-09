@@ -1378,7 +1378,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 if let Some(idx) = new_idx {
                     self.tabs[i].layers.selected = Some(idx);
                     self.tabs[i].layers.selected_multi = vec![idx];
-                    self.tabs[i].layers.editing = Some(idx);
+                    self.tabs[i].layers.editing = Some(new_name.clone());
                     self.tabs[i].layers.edit_buf = new_name.clone();
                 }
                 self.sync_ribbon_layers();
@@ -1558,16 +1558,18 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
 
     pub(super) fn on_layer_rename_commit(&mut self) -> Task<Message> {
                 let i = self.active_tab;
-                let editing_idx = self.tabs[i].layers.editing.take();
-                if let Some(idx) = editing_idx {
+                let editing_name = self.tabs[i].layers.editing.take();
+                if let Some(old_name) = editing_name {
                     let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
-                    let old_name = self.tabs[i]
+                    // The name was captured at RenameStart; look it up fresh so
+                    // a sort/sync/filter in between cannot retarget the rename.
+                    // Deleted meanwhile → clear and no-op.
+                    let still_there = self.tabs[i]
                         .layers
                         .layers
-                        .get(idx)
-                        .map(|l| l.name.clone())
-                        .unwrap_or_default();
-                    if !new_name.is_empty() && new_name != old_name {
+                        .iter()
+                        .any(|l| l.name == old_name);
+                    if !new_name.is_empty() && new_name != old_name && still_there {
                         self.push_undo_snapshot(i, "LAYER RENAME");
                         if !self.tabs[i].rename_layer(&old_name, &new_name) {
                             self.discard_last_undo_entry(i);
@@ -4445,13 +4447,15 @@ mod layer_rename_tests {
 
     fn rename_layer(app: &mut OpenCADStudio, old_name: &str, new_name: &str) {
         let i = app.active_tab;
-        let idx = app.tabs[i]
-            .layers
-            .layers
-            .iter()
-            .position(|layer| layer.name == old_name)
-            .expect("layer exists in panel");
-        app.tabs[i].layers.editing = Some(idx);
+        assert!(
+            app.tabs[i]
+                .layers
+                .layers
+                .iter()
+                .any(|layer| layer.name == old_name),
+            "layer exists in panel"
+        );
+        app.tabs[i].layers.editing = Some(old_name.to_string());
         app.tabs[i].layers.edit_buf = new_name.to_string();
         let _ = app.on_layer_rename_commit();
     }
@@ -4490,8 +4494,13 @@ mod layer_rename_tests {
     fn current_layer_rename_updates_name_and_allocated_handle() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i].layers.editing.expect("new layer is being edited");
-        let old_name = app.tabs[i].layers.layers[idx].name.clone();
+        let old_name = app.tabs[i].layers.editing.clone().expect("new layer is being edited");
+        let idx = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == old_name)
+            .expect("editing layer in panel");
         app.tabs[i]
             .scene
             .document
@@ -4528,8 +4537,13 @@ mod layer_rename_tests {
     fn layer_rename_undo_redo_restores_active_layer() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i].layers.editing.expect("new layer is being edited");
-        let old_name = app.tabs[i].layers.layers[idx].name.clone();
+        let old_name = app.tabs[i].layers.editing.clone().expect("new layer is being edited");
+        let idx = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == old_name)
+            .expect("editing layer in panel");
         app.tabs[i].layers.selected = Some(idx);
         let _ = app.on_layer_set_current();
 
@@ -4554,7 +4568,13 @@ mod layer_rename_tests {
         let old_name = app.tabs[i].layers.edit_buf.clone();
         rename_layer(&mut app, &old_name, "A");
         let _ = app.on_layer_new();
-        let b_idx = app.tabs[i].layers.editing.expect("new layer is being edited");
+        let b_name = app.tabs[i].layers.editing.clone().expect("new layer is being edited");
+        let b_idx = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == b_name)
+            .expect("editing layer in panel");
         app.tabs[i].layers.selected = Some(b_idx);
         let _ = app.on_layer_set_current();
         let header_name = app.tabs[i].scene.document.header.current_layer_name.clone();
@@ -4617,13 +4637,15 @@ mod layer_name_target_tests {
 
     fn rename_layer(app: &mut OpenCADStudio, old_name: &str, new_name: &str) {
         let i = app.active_tab;
-        let idx = app.tabs[i]
-            .layers
-            .layers
-            .iter()
-            .position(|layer| layer.name == old_name)
-            .expect("layer exists in panel");
-        app.tabs[i].layers.editing = Some(idx);
+        assert!(
+            app.tabs[i]
+                .layers
+                .layers
+                .iter()
+                .any(|layer| layer.name == old_name),
+            "layer exists in panel"
+        );
+        app.tabs[i].layers.editing = Some(old_name.to_string());
         app.tabs[i].layers.edit_buf = new_name.to_string();
         let _ = app.on_layer_rename_commit();
     }
@@ -4665,6 +4687,103 @@ mod layer_name_target_tests {
         assert!(
             app.tabs[i].scene.document.layers.get("ZULU").unwrap().flags.off,
             "document ZULU should be off"
+        );
+    }
+
+    #[test]
+    fn layer_rename_commit_follows_name_across_resort() {
+        // #44: rename state keyed by name survives a panel re-sort; a stale
+        // row index would rename the wrong layer.
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.tabs[i].layers.editing = Some("ZULU".to_string());
+        app.tabs[i].layers.edit_buf = "ZULU_NEW".to_string();
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        let _ = app.update(Message::LayerRenameCommit);
+        let names: Vec<String> = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .map(|l| l.name.clone())
+            .collect();
+        assert!(
+            names.contains(&"ZULU_NEW".to_string()),
+            "ZULU must be renamed, got {names:?}"
+        );
+        assert!(
+            !names.contains(&"ZULU".to_string()),
+            "old name must be gone, got {names:?}"
+        );
+        assert!(
+            app.tabs[i].scene.document.layers.contains("ZULU_NEW"),
+            "document must follow the rename"
+        );
+    }
+
+    #[test]
+    fn layer_rename_commit_deleted_layer_is_noop() {
+        // Renaming a layer deleted mid-edit must clear state without
+        // renaming anything or pushing undo.
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        app.tabs[i].layers.editing = Some("GONE".to_string());
+        app.tabs[i].layers.edit_buf = "NEW".to_string();
+        let _ = app.update(Message::LayerRenameCommit);
+        assert!(app.tabs[i].layers.editing.is_none(), "stale edit must clear");
+        assert!(
+            app.tabs[i].layers.edit_buf.is_empty(),
+            "stale edit buffer must clear"
+        );
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            undo_before,
+            "no-op commit must not push undo"
+        );
+        assert!(
+            !app.tabs[i].scene.document.layers.contains("NEW"),
+            "nothing must be renamed"
+        );
+    }
+
+    #[test]
+    fn layer_rename_commit_empty_name_is_noop() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        app.tabs[i].layers.editing = Some("ZULU".to_string());
+        app.tabs[i].layers.edit_buf = "   ".to_string();
+        let _ = app.update(Message::LayerRenameCommit);
+        assert!(app.tabs[i].layers.editing.is_none(), "edit must clear");
+        assert!(
+            app.tabs[i].scene.document.layers.contains("ZULU"),
+            "blank commit must not rename"
+        );
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            undo_before,
+            "blank commit must not push undo"
+        );
+    }
+
+    #[test]
+    fn layer_color_picker_toggle_follows_name_across_resort() {
+        // Same name-keying guarantee as rename, for the swatch row.
+        let mut app = app_with_zulu_alpha();
+        let _ = app.update(Message::LayerColorPickerToggle("ZULU".to_string()));
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        let i = app.active_tab;
+        assert_eq!(
+            app.tabs[i].layers.color_picker_row,
+            Some("ZULU".to_string()),
+            "picker must stay on ZULU across a resort"
+        );
+        let _ = app.update(Message::LayerColorPickerToggle("ZULU".to_string()));
+        assert!(
+            app.tabs[i].layers.color_picker_row.is_none(),
+            "second toggle must close the picker"
         );
     }
 

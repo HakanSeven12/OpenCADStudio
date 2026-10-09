@@ -127,11 +127,15 @@ pub struct LayerPanel {
     /// All selected rows (Ctrl/Shift extend it). Bulk property changes and
     /// deletion act on every row here. Empty ⇔ nothing selected.
     pub selected_multi: Vec<usize>,
-    pub editing: Option<usize>,
+    /// Layer being renamed (row text-input open). Keyed by NAME so a
+    /// rebuild/sort between start and commit cannot retarget it (#44);
+    /// `selected`/`selected_multi` below stay index-based and are re-resolved.
+    pub editing: Option<String>,
     pub edit_buf: String,
     pub current_layer: String,
     pub linetype_items: Vec<LinetypeItem>,
-    pub color_picker_row: Option<usize>,
+    /// Row whose color swatch is open. Name-keyed for the same reason (#44).
+    pub color_picker_row: Option<String>,
     pub color_full_palette: bool,
     pub linetype_combo: combo_box::State<LinetypeItem>,
     pub lw_combo: combo_box::State<LwItem>,
@@ -459,8 +463,8 @@ impl LayerPanel {
             let is_anchor = self.selected == Some(i);
             let is_sel = is_anchor || self.selected_multi.contains(&i);
             let is_current = layer.name == self.current_layer;
-            let is_editing = self.editing == Some(i);
-            let color_open = self.color_picker_row == Some(i);
+            let is_editing = self.editing.as_deref() == Some(layer.name.as_str());
+            let color_open = self.color_picker_row.as_deref() == Some(layer.name.as_str());
 
             let (ltc, lwc) = if is_anchor {
                 (Some(&self.linetype_combo), Some(&self.lw_combo))

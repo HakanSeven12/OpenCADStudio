@@ -656,6 +656,7 @@ impl OpenCADStudio {
                 self.control_screenshot(path, screenshot);
                 Task::none()
             }
+            Message::ControlCaptureFrame { redrew } => self.on_control_capture_frame(redrew),
             Message::Graph(message) => self.on_graph(message),
 
             Message::ControlToggle => {

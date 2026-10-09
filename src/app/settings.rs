@@ -424,6 +424,10 @@ pub struct UserSettings {
     pub field_display: bool,
     /// SURFACEASSOCIATIVITY: new surfaces stay associative to their sources.
     pub surface_associativity: bool,
+    /// UCSORTHO: an orthographic view preset also sets its orthographic UCS.
+    pub ucs_ortho: bool,
+    /// UCSVIEW: a saved named view keeps the current UCS.
+    pub ucs_view: bool,
     /// Nested-copy symbol handling: false inserts, true binds.
     pub ncopy_bind: bool,
     /// Last Options page; unknown saved names fall back without rejecting the config.
@@ -838,6 +842,8 @@ impl Default for UserSettings {
             attdef_on_screen: true,
             field_display: true,
             surface_associativity: true,
+            ucs_ortho: true,
+            ucs_view: true,
             ncopy_bind: false,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,

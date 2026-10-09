@@ -68,7 +68,10 @@ pub fn extrusion_profile_of(entity: &EntityType) -> Option<(Profile, bool)> {
 /// edges (its display wires hold one wire per edge), a lone closed edge split
 /// as a closed curve is.
 fn region_loop(entity: &EntityType) -> Option<Profile> {
-    let EntityType::Region(_) = entity else { return None };
+    let EntityType::Region(region) = entity else { return None };
+    if !region.acis_data.has_data() {
+        return None;
+    }
     let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
     let [boundary] = loops.as_slice() else { return None };
     let single = boundary.len() == 1;
@@ -78,6 +81,11 @@ fn region_loop(entity: &EntityType) -> Option<Profile> {
         .collect::<Option<Vec<_>>>()?
         .concat();
     Some(Profile { plane, pieces })
+}
+
+/// Whether a region has more than one boundary loop.
+fn region_with_holes(entity: &EntityType) -> bool {
+    matches!(entity, EntityType::Region(_)) && region_profiles(entity).is_some_and(|(_, loops)| loops.len() > 1)
 }
 
 fn profile_pieces(curve: &Curve, closed: bool) -> Option<Vec<Curve>> {
@@ -182,10 +190,16 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
     ))
 }
 
+/// A region's boundary loops: from its modeler edges when it has them (its
+/// display wires then hold one wire per edge), else from its wires.
 fn region_profiles(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>)> {
     let EntityType::Region(region) = entity else {
         return None;
     };
+    if region.acis_data.has_data() {
+        let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
+        return (!loops.is_empty()).then_some((plane, loops));
+    }
     let plane = planar_polygon_entity(entity)?.plane;
     let mut profiles = Vec::with_capacity(region.wires.len());
     for wire in &region.wires {
@@ -313,7 +327,7 @@ pub fn extruded_surface(
     direction: [f64; 3],
     taper_angle: f64,
 ) -> Option<Body> {
-    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+    if region_with_holes(entity) {
         return None;
     }
     let (profile, _) = extrusion_profile_of(entity)?;
@@ -330,7 +344,7 @@ pub fn extruded_along_path(
     path: &EntityType,
     taper_angle: f64,
 ) -> Option<Body> {
-    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+    if region_with_holes(entity) {
         if taper_angle.abs() > 1e-12 {
             return None;
         }
@@ -493,7 +507,7 @@ pub fn revolve_history(
     if !angle.is_finite()
         || angle.abs() <= 1e-12
         || !start_angle.is_finite()
-        || matches!(entity, EntityType::Region(region) if region.wires.len() > 1)
+        || region_with_holes(entity)
     {
         return None;
     }
@@ -649,7 +663,7 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
 }
 
 fn embedded_planar_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
-    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+    if region_with_holes(entity) {
         return None;
     }
     if !matches!(entity, EntityType::Polyline3D(_)) {

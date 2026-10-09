@@ -49,6 +49,10 @@ pub enum DockMsg {
     /// Pallet menu pick: show `panel` as a tab of the slot, or hide it when
     /// it already shows there.
     TabMenuToggle(DockSide, usize, PanelId),
+    /// Double-click on a docked title bar: float the panel.
+    FloatOut(PanelId),
+    /// Double-click on a floating title bar: dock the panel on that side.
+    DockTo(PanelId, DockSide),
     /// Bring floating `panel` to the front.
     FloatRaise(PanelId),
     /// The pointer left the edge column; collapse any auto-collapsing panel.
@@ -72,11 +76,13 @@ pub enum PanelId {
     Count,
     /// The open sheet sets: subsets and sheets.
     SheetSetManager,
+    /// The Layer Manager (LAYERS).
+    Layers,
 }
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 8] = [
+    pub const ALL: [PanelId; 9] = [
         PanelId::Properties,
         PanelId::BlockPalette,
         PanelId::ExternalReferences,
@@ -85,6 +91,7 @@ impl PanelId {
         PanelId::PointCloudManager,
         PanelId::Count,
         PanelId::SheetSetManager,
+        PanelId::Layers,
     ];
 
     /// Localized-friendly display name used by the collapsed/edge chrome.
@@ -98,6 +105,7 @@ impl PanelId {
             PanelId::PointCloudManager => "Point Cloud Manager",
             PanelId::Count => "Count",
             PanelId::SheetSetManager => "Sheet Set Manager",
+            PanelId::Layers => "Layer Manager",
         }
     }
 
@@ -112,6 +120,7 @@ impl PanelId {
             PanelId::PointCloudManager => include_bytes!("../../assets/icons/pc_attach.svg"),
             PanelId::Count => include_bytes!("../../assets/icons/data_extract.svg"),
             PanelId::SheetSetManager => include_bytes!("../../assets/icons/sheetset.svg"),
+            PanelId::Layers => include_bytes!("../../assets/icons/layers/panel.svg"),
         }
     }
 
@@ -126,6 +135,7 @@ impl PanelId {
             PanelId::PointCloudManager => 280.0,
             PanelId::Count => 280.0,
             PanelId::SheetSetManager => 280.0,
+            PanelId::Layers => 560.0,
         }
     }
 
@@ -133,7 +143,7 @@ impl PanelId {
     /// column-rich, so it allows double the shared maximum.
     fn max_width(self) -> f32 {
         match self {
-            PanelId::ExternalReferences => DOCK_MAX_W * 2.0,
+            PanelId::ExternalReferences | PanelId::Layers => DOCK_MAX_W * 2.0,
             _ => DOCK_MAX_W,
         }
     }
@@ -699,6 +709,7 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
             .padding([3, 6]),
     )
     .on_press(Message::Dock(DockMsg::DockGrab(id)))
+    .on_double_click(Message::Dock(DockMsg::FloatOut(id)))
     .on_enter(Message::Dock(DockMsg::TitleHover(Some(id))))
     .on_exit(Message::Dock(DockMsg::TitleHover(None)))
     .interaction(iced::mouse::Interaction::Grab)
@@ -1098,16 +1109,7 @@ mod tests {
 
     #[test]
     fn every_panel_has_its_own_icon() {
-        let ids = [
-            PanelId::Properties,
-            PanelId::BlockPalette,
-            PanelId::ExternalReferences,
-            PanelId::Browser,
-            PanelId::NodeGraph,
-            PanelId::PointCloudManager,
-            PanelId::Count,
-            PanelId::SheetSetManager,
-        ];
+        let ids = PanelId::ALL;
         for (i, a) in ids.iter().enumerate() {
             assert!(a.icon().starts_with(b"<svg"), "{a:?} icon is not an SVG");
             for b in &ids[i + 1..] {

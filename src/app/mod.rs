@@ -814,6 +814,8 @@ pub(super) struct OpenCADStudio {
     render_mode_preview: Option<codec::entities::ViewportRenderMode>,
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
+    /// The Layer Manager pallet (LAYERS) is open.
+    pub(crate) show_layers: bool,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
     /// Node graph overlay over the viewport.
@@ -1963,7 +1965,6 @@ pub enum ModalKind {
     PluginManager,
     UpdateNotice,
     DonationPrompt,
-    Layers,
     LayerStateManager,
     LayerTranslator,
     DrawingUnits,
@@ -4285,6 +4286,7 @@ impl OpenCADStudio {
             render_mode_menu_open: false,
             render_mode_preview: None,
             show_properties: true,
+            show_layers: false,
             show_block_palette: false,
             show_node_graph: false,
             property_target_override: None,

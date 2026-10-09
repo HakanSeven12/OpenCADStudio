@@ -1952,6 +1952,7 @@ bg={bg_ms:.1}ms n={view_count}"
         let any_splitting = self.dock_split_drag.is_some();
         let any_resizing = self.dock_resizing.is_some()
             || self.dock_float_resizing.is_some()
+            || self.layer_col_dragging
             || self.xref_col_drag.is_some()
             || self.xref_split_drag;
         let workspace: Element<'_, Message> = if any_dragging || any_resizing || any_splitting {
@@ -2935,6 +2936,9 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::SheetSetManager => {
                 crate::ui::window::sheet_set::view(&self.sheet_set, width, chrome)
             }
+            crate::ui::dock::PanelId::Layers => {
+                tab.layers.view_panel(self.layer_name_col_w, width, chrome)
+            }
         }
     }
 
@@ -3620,6 +3624,15 @@ fn floating_title_bar(
         ..Default::default()
     }))
     .on_press(Message::Dock(DockMsg::DockGrab(id)))
+    // Double-click docks it against the edge its title bar faces.
+    .on_double_click(Message::Dock(DockMsg::DockTo(
+        id,
+        if on_left {
+            crate::app::config::DockSide::Left
+        } else {
+            crate::app::config::DockSide::Right
+        },
+    )))
     .interaction(iced::mouse::Interaction::Grab)
     .into()
 }
@@ -3643,7 +3656,7 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
         .into()
 }
 
-use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_RAIL_W, DOCK_TAB_H};
+use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_RAIL_W};
 
 /// The tab row above a docked slot: one icon tab per shown pallet, from the
 /// left, and a menu button on the right listing every pallet. Pressing a tab
@@ -3656,7 +3669,7 @@ fn dock_tab_strip(
     width: f32,
     side: crate::app::config::DockSide,
     gi: usize,
-    menu: Option<[(crate::ui::dock::PanelId, bool); 8]>,
+    menu: Option<[(crate::ui::dock::PanelId, bool); crate::ui::dock::PanelId::ALL.len()]>,
 ) -> Element<'static, Message> {
     use crate::ui::dock::{DockMsg, DOCK_TAB_CELL_W, DOCK_TAB_INSET};
     const TAB_GAP: f32 = 2.0;

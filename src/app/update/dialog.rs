@@ -592,6 +592,38 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.dock_title_hover = id;
                 iced::Task::none()
             }
+            DockMsg::FloatOut(id) => {
+                // Float beside the edge it was docked on, near the top.
+                let (ww, _) = self.dock_workspace_size();
+                let (w, h) = self.dock_float_size(id);
+                let x = match self.dock.location(id) {
+                    Some((DockSide::Right, _)) => {
+                        ww - self.dock_column_width(DockSide::Right) - w - 60.0
+                    }
+                    _ => self.dock_column_width(DockSide::Left) + 40.0,
+                };
+                self.dock_dragging = None;
+                self.dock_drag_target = None;
+                if self.dock.float(FloatPanel {
+                    id,
+                    x: x.max(0.0),
+                    y: 40.0,
+                    w,
+                    h,
+                }) {
+                    self.save_config();
+                }
+                iced::Task::none()
+            }
+            DockMsg::DockTo(id, side) => {
+                self.dock_dragging = None;
+                self.dock_drag_target = None;
+                if self.dock.dock(id, side, usize::MAX) {
+                    self.dock_expanded = Some(id);
+                    self.save_config();
+                }
+                iced::Task::none()
+            }
             DockMsg::TabMenu(slot) => {
                 self.dock_tab_menu = slot;
                 iced::Task::none()
@@ -665,6 +697,10 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     PanelId::Properties => {
                         self.show_properties = false;
                         self.ribbon.set_properties(false);
+                    }
+                    PanelId::Layers => {
+                        self.show_layers = false;
+                        self.ribbon.deactivate_tool_if("LAYERS");
                     }
                 }
                 if self.dock_expanded == Some(id) {
@@ -749,6 +785,11 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             from_left,
                         );
                     }
+                } else if self.layer_col_dragging {
+                    if let Some(last) = self.dock_drag_last {
+                        self.layer_name_col_w =
+                            (self.layer_name_col_w + point.x - last.x).clamp(60.0, 640.0);
+                    }
                 } else if let Some(id) = self.dock_resizing {
                     if let Some(last) = self.dock_drag_last {
                         let dx = point.x - last.x;
@@ -768,6 +809,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     || self.dock_resizing.is_some()
                     || self.dock_split_drag.is_some()
                     || self.dock_float_resizing.is_some()
+                    || self.layer_col_dragging
                 {
                     self.dock_drag_last = Some(point);
                 }
@@ -806,6 +848,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.xref_col_drag = None;
                 self.xref_col_last = None;
                 self.xref_split_drag = false;
+                self.layer_col_dragging = false;
                 iced::Task::none()
             }
         }
@@ -835,6 +878,10 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             PanelId::PointCloudManager => self.pc_manager.show = true,
             PanelId::Count => self.set_count_palette(true),
             PanelId::SheetSetManager => self.show_sheet_set_manager(true),
+            PanelId::Layers => {
+                self.sync_ribbon_layers();
+                self.show_layers = true;
+            }
         }
         self.dock_expanded = Some(id);
         iced::Task::none()
@@ -871,6 +918,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             PanelId::PointCloudManager => self.pc_manager.show,
             PanelId::Count => self.count_palette.show,
             PanelId::SheetSetManager => self.sheet_set.show,
+            PanelId::Layers => self.show_layers,
         }
     }
 
@@ -2106,6 +2154,35 @@ mod tests {
         assert!(!app.show_browser);
         assert!(app.dock.left[0].tabs.contains(&PanelId::Browser));
         assert_eq!(app.dock_tab_menu, Some((DockSide::Left, 0)));
+    }
+
+    #[test]
+    fn layers_command_opens_a_floating_pallet_and_toggles_it_closed() {
+        use crate::ui::dock::PanelId;
+        let mut app = dock_app();
+        let _ = app.update(Message::ToggleLayers);
+        assert!(app.show_layers);
+        assert!(app.active_modal.is_none(), "no modal backdrop");
+        let f = app.dock.float_rect(PanelId::Layers).expect("floats on first use");
+        assert!(f.x > 0.0 && f.y >= 0.0);
+        let _ = app.update(Message::ToggleLayers);
+        assert!(!app.show_layers);
+        // Its place is kept for next time.
+        assert!(app.dock.float_rect(PanelId::Layers).is_some());
+    }
+
+    #[test]
+    fn dock_double_clicks_float_and_dock_panels() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = dock_app();
+        let _ = app.on_dock(DockMsg::FloatOut(PanelId::Properties));
+        assert!(app.dock.left.is_empty());
+        let f = app.dock.float_rect(PanelId::Properties).expect("floating");
+        assert!(f.x > 0.0, "floats clear of the left edge");
+        let _ = app.on_dock(DockMsg::DockTo(PanelId::Properties, DockSide::Right));
+        assert!(app.dock.floating.is_empty());
+        assert_eq!(app.dock.location(PanelId::Properties), Some((DockSide::Right, 1)));
     }
 
     #[test]

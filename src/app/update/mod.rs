@@ -2552,14 +2552,28 @@ impl OpenCADStudio {
             Message::ScriptLine(line) => self.feed_script_line(&line),
 
             Message::ToggleLayers => {
-                if self.active_modal == Some(super::ModalKind::Layers) {
-                    self.ribbon.deactivate_tool_if("LAYERS");
-                    self.active_modal = None;
-                    self.reset_modal_geometry();
-                } else {
-                    self.sync_ribbon_layers();
-                    self.active_modal = Some(super::ModalKind::Layers);
+                use crate::ui::dock::PanelId;
+                if self.show_layers {
+                    return self.on_dock(crate::ui::dock::DockMsg::Close(PanelId::Layers));
                 }
+                self.sync_ribbon_layers();
+                self.show_layers = true;
+                if !self.dock.is_placed(PanelId::Layers) {
+                    // First use: float it over the middle of the drawing,
+                    // where the dialog used to open.
+                    let (ww, wh) = self.dock_workspace_size();
+                    let (w, h) = self.dock_float_size(PanelId::Layers);
+                    self.dock.float(crate::ui::dock::FloatPanel {
+                        id: PanelId::Layers,
+                        x: ((ww - w) * 0.5).max(0.0),
+                        y: ((wh - h) * 0.5).max(0.0),
+                        w,
+                        h,
+                    });
+                    self.save_config();
+                }
+                self.dock.raise_float(PanelId::Layers);
+                self.dock_expanded = Some(PanelId::Layers);
                 Task::none()
             }
 
@@ -6261,8 +6275,11 @@ impl OpenCADStudio {
                     // Ctrl+A in the MText editor selects all of its text.
                     self.mtext_select_all();
                     Task::none()
-                } else if self.active_modal == Some(super::ModalKind::Layers) {
-                    // Select every row in the Layer Manager (#236).
+                } else if self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
+                    && self.tabs[i].layers.selected.is_some()
+                {
+                    // Select every row in the Layer Manager (#236) while the
+                    // user is working in it (a layer row is selected).
                     let n = self.tabs[i].layers.layers.len();
                     self.tabs[i].layers.selected_multi = (0..n).collect();
                     self.tabs[i].layers.selected = (n > 0).then_some(0);
@@ -9024,17 +9041,16 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::LayerNameColGrab => {
-                // Start a Name-column divider drag; rides ModalDragMove.
+                // Start a Name-column divider drag; the dock's pointer capture
+                // feeds it (see `on_dock`).
                 self.layer_col_dragging = true;
-                self.modal_drag_last = None;
+                self.dock_drag_last = None;
                 Task::none()
             }
             Message::ModalDragMove(p) => {
                 if let Some(last) = self.modal_drag_last {
                     let (dx, dy) = (p.x - last.x, p.y - last.y);
-                    if self.layer_col_dragging {
-                        self.layer_name_col_w = (self.layer_name_col_w + dx).clamp(60.0, 640.0);
-                    } else if self.modal_resizing {
+                    if self.modal_resizing {
                         // The grip sits bottom-right, so dragging out grows the
                         // box. The delta is added to each dialog's natural size,
                         // so clamp it at zero — dragging in past the natural size
@@ -9068,7 +9084,7 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                if self.modal_dragging || self.modal_resizing || self.layer_col_dragging {
+                if self.modal_dragging || self.modal_resizing {
                     self.modal_drag_last = Some(p);
                 }
                 Task::none()
@@ -9076,7 +9092,6 @@ impl OpenCADStudio {
             Message::ModalDragRelease => {
                 self.modal_dragging = false;
                 self.modal_resizing = false;
-                self.layer_col_dragging = false;
                 self.modal_drag_last = None;
                 Task::none()
             }

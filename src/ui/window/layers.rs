@@ -323,13 +323,46 @@ impl LayerPanel {
         self.linetype_items = items;
     }
 
-    /// Render the layer panel as the full content of its own OS window.
-    pub fn view_window(
+    /// The Layer Manager as a dock pallet: its title bar, then the table at
+    /// its natural width, scrolling sideways when the pallet is narrower.
+    pub fn view_panel(
         &self,
         name_col_w: f32,
-        sizing: crate::ui::modal::ModalSizing,
+        width: f32,
+        chrome: crate::ui::dock::Chrome,
     ) -> Element<'_, Message> {
-        self.view_content(name_col_w, sizing)
+        use crate::ui::dock::PanelId;
+        let title_bar = crate::ui::dock::title_bar(
+            PanelId::Layers,
+            crate::tr!("modal", "layer-manager"),
+            chrome,
+        );
+        let table = self.view_content(
+            name_col_w,
+            crate::ui::modal::ModalSizing {
+                width: Length::Shrink,
+                height: Length::Fill,
+            },
+        );
+        let body = scrollable(table)
+            .direction(iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new(),
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        container(column![title_bar, body])
+            .width(Length::Fixed(width))
+            .height(Length::Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.base.color)),
+                border: Border {
+                    color: theme.palette().background.neutral.color,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     fn view_content(

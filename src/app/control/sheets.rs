@@ -50,14 +50,38 @@ impl OpenCADStudio {
     /// "set":{"MIRRTEXT":0}}` writes (one undo step, validated per name).
     pub(super) fn control_sysvar(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         if let Some(set) = req["set"].as_object() {
-            self.push_undo_snapshot(self.active_tab, "SYSVAR");
+            let i = self.active_tab;
+            // Validate the complete batch before opening history or changing the
+            // document. Apart from making the operation atomic, this keeps a
+            // later bad variable from leaving an earlier variable half-applied.
+            {
+                let document = &self.tabs[i].scene.document;
+                for (name, value) in set {
+                    validate_sysvar(document, name, value)?;
+                }
+            }
+
+            self.push_undo_snapshot(i, "SYSVAR");
             let mut applied = serde_json::Map::new();
             for (name, value) in set {
-                set_sysvar(&mut self.tabs[self.active_tab].scene.document, name, value)
-                    .map_err(|e| {
-                        // Nothing committed yet — the snapshot is empty.
-                        e
+                if name.eq_ignore_ascii_case("clayer") {
+                    let layer = value
+                        .as_str()
+                        .expect("validate_sysvar checked CLAYER as a string");
+                    self.set_current_layer_name(i, layer).map_err(|error| {
+                        failure(
+                            "invalid_sysvar_value",
+                            format!("Layer {layer:?} could not be made current: {error}"),
+                        )
                     })?;
+                } else {
+                    set_sysvar(&mut self.tabs[i].scene.document, name, value)?;
+                }
+                // System variables are persisted drawing state, not merely a
+                // UI preference. CLAYER is already marked dirty by the unified
+                // layer path; keeping this assignment for every variable makes
+                // mixed batches follow the same contract.
+                self.tabs[i].dirty = true;
                 applied.insert(name.to_ascii_lowercase(), value.clone());
             }
             self.set_control_result(json!({ "set": applied }));
@@ -573,7 +597,79 @@ fn read_sysvar(scene: &crate::scene::Scene, name: &str) -> Option<Value> {
     Some(value)
 }
 
+fn validate_sysvar(document: &codec::CadDocument, name: &str, value: &Value) -> Result<(), Value> {
+    let failure = |message: &str| crate::app::control::failure("invalid_sysvar_value", message);
+    match name.to_ascii_lowercase().as_str() {
+        "ltscale" => {
+            positive(value, "ltscale", failure)?;
+        }
+        "pdmode" => {
+            integer(value, "pdmode", failure)?;
+        }
+        "pdsize" => {
+            value
+                .as_f64()
+                .filter(|v| v.is_finite())
+                .ok_or_else(|| failure("pdsize needs a finite number"))?;
+        }
+        "celtscale" => {
+            positive(value, "celtscale", failure)?;
+        }
+        "textsize" => {
+            positive(value, "textsize", failure)?;
+        }
+        "filletrad" => {
+            value
+                .as_f64()
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .ok_or_else(|| failure("filletrad needs a finite number >= 0"))?;
+        }
+        "mirrtext" => {
+            // Keep the historical coercion used by set_sysvar: omitted or
+            // non-integer values resolve to the enabled state.
+        }
+        "insunits" => {
+            integer(value, "insunits", failure)?;
+        }
+        "osmode" => {
+            value
+                .as_i64()
+                .and_then(|v| i32::try_from(v).ok())
+                .ok_or_else(|| failure("osmode needs an integer"))?;
+        }
+        "clayer" => {
+            let name = value
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| failure("clayer needs a layer name"))?;
+            if document.layers.get(name).is_none() {
+                return Err(failure(&format!("Layer '{name}' does not exist")));
+            }
+        }
+        "ctextstyle" => {
+            let name = value
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| failure("ctextstyle needs a text style name"))?;
+            if document.text_styles.get(name).is_none() {
+                return Err(failure(&format!("Text style '{name}' does not exist")));
+            }
+        }
+        other => {
+            return Err(crate::app::control::failure(
+                "unknown_sysvar",
+                format!(
+                    "System variable '{other}' is read-only or unknown. Writable: {}",
+                    "celtscale, clayer, ctextstyle, filletrad, insunits, ltscale, mirrtext, osmode, pdmode, pdsize, textsize"
+                ),
+            ))
+        }
+    }
+    Ok(())
+}
+
 fn set_sysvar(document: &mut codec::CadDocument, name: &str, value: &Value) -> Result<(), Value> {
+    validate_sysvar(document, name, value)?;
     let failure = |message: &str| crate::app::control::failure("invalid_sysvar_value", message);
     let header = &mut document.header;
     match name.to_ascii_lowercase().as_str() {

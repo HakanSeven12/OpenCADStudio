@@ -69,6 +69,16 @@ pub(crate) fn property_json(p: &crate::scene::model::object::Property) -> Value 
 }
 pub(super) const NAMES: &[&str] = &[
     "close_modal",
+    // Native-only: the "changed outside" dialog does not exist in the web
+    // build, so neither does its action set.
+    #[cfg(not(target_arch = "wasm32"))]
+    "external_change_reload",
+    #[cfg(not(target_arch = "wasm32"))]
+    "external_change_overwrite",
+    #[cfg(not(target_arch = "wasm32"))]
+    "external_change_save_as",
+    #[cfg(not(target_arch = "wasm32"))]
+    "external_change_cancel",
     "pdf_dialog_ok",
     "pdf_layer_toggle",
     "pc_manager_toggle",
@@ -974,6 +984,17 @@ impl OpenCADStudio {
         let name = string(req, "name")?;
         let msg = match name {
             "close_modal" => Message::CloseModal,
+            // The "changed outside" modal's suggested actions (D6): reload
+            // the disk copy, keep the in-memory one and overwrite, save as,
+            // or dismiss. Native only — the web build has no such dialog.
+            #[cfg(not(target_arch = "wasm32"))]
+            "external_change_reload" => Message::ExternalChangeReload,
+            #[cfg(not(target_arch = "wasm32"))]
+            "external_change_overwrite" => Message::ExternalChangeOverwrite,
+            #[cfg(not(target_arch = "wasm32"))]
+            "external_change_save_as" => Message::ExternalChangeSaveAs,
+            #[cfg(not(target_arch = "wasm32"))]
+            "external_change_cancel" => Message::ExternalChangeCancel,
             // The open PDF dialog's OK button.
             // Underlay Layers: switch a layer of the shown underlay.
             "pdf_layer_toggle" => Message::PdfDialog(

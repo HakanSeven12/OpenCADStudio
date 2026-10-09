@@ -649,6 +649,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 }
                 let task = self.dock_open_panel(id);
                 self.dock.show_group_of(id);
+                // Adding a pallet is the end of the menu's job.
+                self.dock_edge_menu = None;
                 self.save_config();
                 task
             }
@@ -2438,6 +2440,8 @@ mod tests {
         assert_eq!(app.dock.left.len(), 2);
         assert_eq!(app.dock.left[1].panels, vec![PanelId::Browser]);
         assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
+        assert_eq!(app.dock_edge_menu, None, "the menu closes after adding");
+        let _ = app.on_dock(DockMsg::EdgeMenu(Some(DockSide::Left)));
         // Unchecking hides it but keeps its place.
         let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
         assert!(!app.show_browser);
@@ -2487,6 +2491,72 @@ mod tests {
         assert!(!app.show_layers);
         // Its place is kept for next time.
         assert!(app.dock.float_rect(PanelId::Layers).is_some());
+    }
+
+    /// Drive the real view through iced's `UserInterface`: point at the
+    /// first text `label`, feed `events` one at a time, and between events
+    /// hand the published messages to the app and rebuild the view while
+    /// keeping the widget-tree cache, as the runtime does.
+    fn drive_view(app: &mut OpenCADStudio, label: &str, events: &[iced::Event]) {
+        use iced_test::core::{mouse, shell, widget, window, Size};
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::selector::Bounded;
+        use iced_test::Selector;
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                None,
+            ),
+        )
+        .expect("headless renderer");
+        let size = Size::new(1600.0, 900.0);
+        let mut cache = Cache::default();
+        let mut cursor = mouse::Cursor::Unavailable;
+        {
+            let mut ui = UserInterface::build(app.view_main(), size, cache, &mut renderer);
+            let mut find = Selector::find(label);
+            ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+            if let widget::operation::Outcome::Some(Some(target)) = widget::Operation::finish(&find) {
+                if let Some(bounds) = target.visible_bounds() {
+                    cursor = mouse::Cursor::Available(bounds.center());
+                }
+            }
+            cache = ui.into_cache();
+        }
+        assert!(matches!(cursor, mouse::Cursor::Available(_)), "{label} not found");
+        for event in events {
+            let mut messages = Vec::new();
+            {
+                let mut ui = UserInterface::build(app.view_main(), size, cache, &mut renderer);
+                let _ = ui.update(
+                    &window::Headless,
+                    &shell::Waker::noop(),
+                    std::slice::from_ref(event),
+                    cursor,
+                    &mut renderer,
+                    &mut messages,
+                );
+                cache = ui.into_cache();
+            }
+            for message in messages {
+                let _ = app.update(message);
+            }
+        }
+    }
+
+    #[test]
+    fn docked_title_bar_double_click_floats_the_pallet_in_the_real_view() {
+        use crate::ui::dock::PanelId;
+        let mut app = dock_app();
+        let press = iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
+        let release =
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left));
+        // The block palette's title text sits in its docked title bar.
+        drive_view(&mut app, "Blocks", &[press.clone(), release.clone(), press, release]);
+        assert!(
+            app.dock.float_rect(PanelId::BlockPalette).is_some(),
+            "a double-click on a docked title bar floats the pallet"
+        );
     }
 
     #[test]

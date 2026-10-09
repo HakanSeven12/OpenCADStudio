@@ -1969,14 +1969,14 @@ bg={bg_ms:.1}ms n={view_count}"
         if let (Some(id), Some(target)) = (self.dock_dragging, self.dock_drag_target) {
             layers.push(self.dock_drop_preview(id, target));
         }
-        let workspace: Element<'_, Message> = if layers.len() == 1 {
-            layers.pop().expect("workspace layer")
-        } else {
-            iced::widget::Stack::with_children(layers)
-                .width(Fill)
-                .height(Fill)
-                .into()
-        };
+        // Always a stack (and, below, always a mouse area), even with nothing
+        // on top: iced keeps a widget's state only while the tree keeps its
+        // shape, and a title bar's double-click needs its first click to
+        // survive the drag that pressing the bar starts.
+        let workspace: Element<'_, Message> = iced::widget::Stack::with_children(layers)
+            .width(Fill)
+            .height(Fill)
+            .into();
         let any_dragging = self.dock_dragging.is_some();
         let any_splitting = self.dock_split_drag.is_some();
         let any_resizing = self.dock_resizing.is_some()
@@ -1984,8 +1984,10 @@ bg={bg_ms:.1}ms n={view_count}"
             || self.layer_col_dragging
             || self.xref_col_drag.is_some()
             || self.xref_split_drag;
-        let workspace: Element<'_, Message> = if any_dragging || any_resizing || any_splitting {
-            mouse_area(workspace)
+        let capturing = any_dragging || any_resizing || any_splitting;
+        let mut capture = mouse_area(workspace);
+        if capturing {
+            capture = capture
                 .on_move(move |p| Message::Dock(crate::ui::dock::DockMsg::DragMove(p)))
                 .on_release(Message::Dock(crate::ui::dock::DockMsg::DragRelease))
                 .interaction(if let Some((_, from_left)) = self.dock_float_resizing {
@@ -2000,11 +2002,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     iced::mouse::Interaction::ResizingVertically
                 } else {
                     iced::mouse::Interaction::Grabbing
-                })
-                .into()
-        } else {
-            workspace
-        };
+                });
+        }
+        let workspace: Element<'_, Message> = capture.into();
         let command_line = self.command_line.view(
             allow_autocomplete,
             dyn_capturing,
@@ -2905,8 +2905,16 @@ impl OpenCADStudio {
             }
 
             // The group grip: a band on the window side holding the edge bar.
+            // Explicit heights: the tooltip around the band sizes it to its
+            // content, so a `Fill` bar would stop short of the row's bottom.
             let bar_w = if lit { 5.0 } else { 3.0 };
-            let bar = container(Space::new().width(bar_w).height(Fill)).style(move |theme: &Theme| {
+            let bar_inset = 5.0;
+            let bar = container(
+                Space::new()
+                    .width(bar_w)
+                    .height(Length::Fixed(row_h - 2.0 * bar_inset)),
+            )
+            .style(move |theme: &Theme| {
                 let palette = theme.palette();
                 let (color, glow) = if lit {
                     (Some(palette.primary.weak.color), true)
@@ -2939,13 +2947,8 @@ impl OpenCADStudio {
             let band = mouse_area(
                 container(bar)
                     .width(Length::Fixed(STRIP_GRIP_W))
-                    .height(Fill)
-                    .padding(iced::Padding {
-                        top: 5.0,
-                        bottom: 5.0,
-                        left: 0.0,
-                        right: 0.0,
-                    })
+                    .height(Length::Fixed(row_h))
+                    .align_y(iced::alignment::Vertical::Center)
                     .align_x(match side {
                         DockSide::Left => iced::alignment::Horizontal::Left,
                         DockSide::Right => iced::alignment::Horizontal::Right,
@@ -2963,7 +2966,7 @@ impl OpenCADStudio {
             .gap(4);
             let band = container(band)
                 .width(Fill)
-                .height(Fill)
+                .height(Length::Fixed(row_h))
                 .align_x(match side {
                     DockSide::Left => iced::alignment::Horizontal::Left,
                     DockSide::Right => iced::alignment::Horizontal::Right,

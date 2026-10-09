@@ -97,6 +97,8 @@ mod dialog;
 mod dynamic;
 mod file;
 pub(in crate::app) use file::background_task;
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::app) use file::native_paths_match;
 mod page_setup_import;
 mod style;
 pub(in crate::app) mod util;

@@ -128,7 +128,7 @@ fn plot_render_mode_override(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn native_paths_match(left: &std::path::Path, right: &std::path::Path) -> bool {
+pub(in crate::app) fn native_paths_match(left: &std::path::Path, right: &std::path::Path) -> bool {
     match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
         (Ok(left), Ok(right)) => left == right,
         _ => left == right,

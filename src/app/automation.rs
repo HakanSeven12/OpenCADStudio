@@ -451,11 +451,34 @@ pub(super) fn requested_save_target(
     Ok((version, is_dxf))
 }
 
+fn is_generated_dimension_block_name(name: &str) -> bool {
+    let Some(suffix) = name
+        .strip_prefix("*D")
+        .or_else(|| name.strip_prefix("*d"))
+    else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Save-time baking materializes a Dimension's graphics in an anonymous
+/// `*D<n>` block. Those members are derived display geometry, not additional
+/// logical drawing entities; named block members remain part of the manifest.
+fn is_dimension_display_entity(document: &codec::CadDocument, entity: &codec::EntityType) -> bool {
+    let owner = entity.common().owner_handle;
+    document.block_records.iter().any(|block| {
+        block.handle == owner && is_generated_dimension_block_name(&block.name)
+    })
+}
+
 fn document_manifest(document: &codec::CadDocument) -> Value {
     let mut by_type: BTreeMap<String, u64> = BTreeMap::new();
     let mut by_layer: BTreeMap<String, u64> = BTreeMap::new();
     let mut total = 0u64;
     for entity in document.entities() {
+        if is_dimension_display_entity(document, entity) {
+            continue;
+        }
         *by_type
             .entry(crate::entities::names::ui_name(entity).to_string())
             .or_default() += 1;
@@ -1522,6 +1545,16 @@ impl OpenCADStudio {
             .map_err(|error| json!({
                 "ok":false,"status":"failed","code":"save_failed","error":error,
             }))?;
+        // The bytes are now ours even if a later hash/audit/reopen check fails.
+        // Refresh the guard immediately so a diagnostic failure cannot make the
+        // next ordinary save look like an external edit of the same path.
+        if self.tabs[i]
+            .current_path
+            .as_deref()
+            .is_some_and(|current| super::update::native_paths_match(current, &path))
+        {
+            self.refresh_native_edit_guard_after_save(i, &path, false, None);
+        }
         let sha256 = sha256_file(&path).map_err(|error| json!({
             "ok":false,"status":"failed","code":"hash_failed","error":error,
             "saved":path,
@@ -1688,6 +1721,134 @@ mod tests {
         assert_eq!(result["manifest"]["total"], 1, "{result}");
         assert_eq!(result["sha256"].as_str().map(str::len), Some(64));
         assert!(path.is_file());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn manifest_ignores_dimension_display_members_but_keeps_named_block_members() {
+        use codec::entities::{Dimension, DimensionLinear, Line};
+        use codec::tables::BlockRecord;
+        use codec::types::Vector3;
+        use codec::{CadDocument, EntityType};
+
+        let mut document = CadDocument::new();
+        let mut detail = BlockRecord::new("DETAIL");
+        detail.handle = document.allocate_handle();
+        let detail_handle = detail.handle;
+        document.block_records.add(detail).unwrap();
+        let mut detail_line = Line::from_points(
+            Vector3::new(20.0, 0.0, 0.0),
+            Vector3::new(30.0, 0.0, 0.0),
+        );
+        detail_line.common.owner_handle = detail_handle;
+        document.add_entity(EntityType::Line(detail_line)).unwrap();
+
+        let mut dimension = DimensionLinear::new(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        );
+        dimension.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        document
+            .add_entity(EntityType::Dimension(Dimension::Linear(dimension)))
+            .unwrap();
+        crate::modules::draw::modify::explode::bake_dimension_blocks(&mut document);
+
+        let manifest = super::document_manifest(&document);
+        assert_eq!(manifest["total"], 2, "{manifest}");
+        assert_eq!(manifest["by_type"]["Dimension"], 1, "{manifest}");
+        assert_eq!(manifest["by_type"]["Line"], 1, "{manifest}");
+    }
+
+    #[test]
+    fn save_verified_dimension_round_trip_ignores_generated_display_block() {
+        use codec::entities::{Dimension, DimensionLinear, EntityType};
+        use codec::types::Vector3;
+
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut dimension = DimensionLinear::new(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        );
+        dimension.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(EntityType::Dimension(Dimension::Linear(dimension)));
+        let path = std::env::temp_dir().join(format!(
+            "ocs_verified_dimension_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_file(&path);
+        let result = app
+            .save_verified_request(&serde_json::json!({
+                "path":path,
+                "target_format":"dwg",
+                "target_version":"R14",
+                "overwrite":true,
+            }))
+            .expect("dimension save_verified");
+        assert_eq!(result["verified"], true, "{result}");
+        assert_eq!(result["manifest"]["total"], 1, "{result}");
+        assert_eq!(result["manifest"]["by_type"]["Dimension"], 1, "{result}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_verified_refreshes_current_disk_fingerprint_for_follow_up_save() {
+        use codec::entities::{Dimension, DimensionLinear, EntityType};
+        use codec::types::Vector3;
+
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut dimension = DimensionLinear::new(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        );
+        dimension.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .add_entity(EntityType::Dimension(Dimension::Linear(dimension)));
+        let path = std::env::temp_dir().join(format!(
+            "ocs_verified_dimension_follow_up_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_file(&path);
+        let version = app.tabs[i].scene.document.version;
+        app.save_tab_synchronously_protected_as(i, path.clone(), version, true)
+            .expect("initial protected save");
+
+        let result = app
+            .save_verified_request(&serde_json::json!({
+                "path":path,
+                "target_format":"dwg",
+                "target_version":"R14",
+                "overwrite":true,
+            }))
+            .expect("dimension save_verified");
+        assert_eq!(result["verified"], true, "{result}");
+        let captured = crate::io::edit_lock::FileFingerprint::capture(&path).unwrap();
+        assert_eq!(app.tabs[i].disk_fingerprint.as_ref(), Some(&captured));
+
+        let ordinary = app.automation_op(
+            &serde_json::json!({"op":"save", "path":path}).to_string(),
+        );
+        assert_eq!(ordinary["ok"], true, "{ordinary}");
+        assert!(!ordinary["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("changed outside"));
         let _ = std::fs::remove_file(path);
     }
 

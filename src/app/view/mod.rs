@@ -2770,43 +2770,40 @@ impl OpenCADStudio {
     }
 
     /// Build one edge: the vertical icon strip at the very edge plus the
-    /// expanded groups beside it. The strip lists every shown group's pallets
-    /// as icons under a grip bar, with a + button below them; clicking an
-    /// icon shows that pallet in its group. Unpinned groups are always
-    /// expanded and split the column height by their weights, with a
-    /// draggable splitter between neighbours. An auto-hiding (pinned) group
-    /// lives only in the strip until one of its icons is hovered. The whole
-    /// edge is one hover region: leaving it collapses any auto-hiding group.
-    /// `None` when nothing on the edge is shown.
+    /// edge's shown group beside it. The strip lists every group as a grip
+    /// bar over its pallets' icons, with a + button below; clicking an icon
+    /// shows its group. The shown group's pallets stack top to bottom, each
+    /// at its weighted share of the height, with a draggable splitter between
+    /// neighbours. A group whose pallets all auto-hide shows only while one
+    /// of its icons (or the group itself) is hovered; leaving the edge hides
+    /// it again. `None` when nothing on the edge is open.
     fn build_edge_stack<'a>(
         &'a self,
         side: crate::app::config::DockSide,
         tab: &'a DocumentTab,
     ) -> Option<Element<'a, Message>> {
-        if self.dock_visible_groups(side).is_empty() {
-            return None;
-        }
-        let expanded = self.dock_expanded_groups(side);
-        let col_w = expanded
-            .iter()
-            .map(|gi| self.dock_group_width(side, *gi))
-            .fold(0.0, f32::max);
-
+        let gi = self.dock_shown_group(side)?;
         let strip = self.dock_icon_strip(side);
-        let expanded_stack = (!expanded.is_empty()).then(|| {
-            // Expanded groups stack one below the other, each taking its
-            // weighted share of the column height — never overlapping.
+        let column_el = self.dock_edge_expanded(side).then(|| {
+            let width = self.dock_group_width(side, gi);
+            let group = &self.dock.groups(side)[gi];
             let mut layers: Vec<Element<'_, Message>> = Vec::new();
-            for (n, gi) in expanded.iter().enumerate() {
-                if n > 0 {
-                    layers.push(dock_splitter(side, expanded[n - 1], *gi, col_w));
+            let mut prev: Option<usize> = None;
+            for (pos, id) in group.panels.iter().enumerate() {
+                if !self.dock_panel_visible(*id) {
+                    continue;
                 }
-                let weight = self.dock.groups(side)[*gi].weight;
+                if let Some(upper) = prev {
+                    layers.push(dock_splitter(side, gi, upper, pos, width));
+                }
                 layers.push(
-                    container(self.expanded_group(side, *gi, col_w, tab))
-                        .height(Length::FillPortion(crate::ui::dock::portion(weight)))
+                    container(self.expanded_panel(*id, side, width, tab))
+                        .height(Length::FillPortion(crate::ui::dock::portion(
+                            group.weights[pos],
+                        )))
                         .into(),
                 );
+                prev = Some(pos);
             }
             column(layers).height(Fill).into()
         });
@@ -2815,10 +2812,10 @@ impl OpenCADStudio {
         match side {
             crate::app::config::DockSide::Left => {
                 children.push(strip);
-                children.extend(expanded_stack);
+                children.extend(column_el);
             }
             crate::app::config::DockSide::Right => {
-                children.extend(expanded_stack);
+                children.extend(column_el);
                 children.push(strip);
             }
         }
@@ -2829,12 +2826,13 @@ impl OpenCADStudio {
         )
     }
 
-    /// An edge's vertical icon strip: per shown group a grip bar (drag it to
-    /// move the group) and its pallets' icons (the group's tabs; the shown one
-    /// on a grey background), then a + button opening the pallet menu.
-    /// Heights follow `dock::strip_layout`, which drop targeting uses too.
+    /// An edge's vertical icon strip: per group a grip bar (drag it to move
+    /// the group) over its open pallets' icons, the shown group framed on a
+    /// grey background, then a + button opening the pallet menu. Heights
+    /// follow `dock::strip_layout`, which drop targeting uses too.
     fn dock_icon_strip(&self, side: crate::app::config::DockSide) -> Element<'_, Message> {
         use crate::ui::dock::{DockMsg, DOCK_STRIP_W, STRIP_CELL_H, STRIP_GAP, STRIP_GRIP_H};
+        let shown = self.dock_shown_group(side);
         let mut items: Vec<Element<'_, Message>> = Vec::new();
         for gi in self.dock_visible_groups(side) {
             items.push(Space::new().height(STRIP_GAP).into());
@@ -2855,37 +2853,20 @@ impl OpenCADStudio {
             )
             .center_x(Length::Fixed(DOCK_STRIP_W))
             .center_y(Length::Fixed(STRIP_GRIP_H));
-            items.push(
-                mouse_area(grip)
-                    .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
-                    .interaction(iced::mouse::Interaction::Grab)
-                    .into(),
-            );
-            let shown = self.dock_group_shown(side, gi);
-            for id in self.dock_group_visible_tabs(side, gi) {
-                let is_active = Some(id) == shown;
-                let icon = container(crate::ui::icons::themed(id.icon(), 20.0))
-                    .center_x(Length::Fixed(STRIP_CELL_H - 4.0))
-                    .center_y(Length::Fixed(STRIP_CELL_H - 4.0))
-                    .style(move |theme: &Theme| container::Style {
-                        // Only the shown pallet of the group gets a background.
-                        background: is_active
-                            .then(|| Background::Color(theme.palette().background.weak.color)),
-                        border: Border {
-                            radius: 4.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    });
+            let mut group_items: Vec<Element<'_, Message>> = vec![mouse_area(grip)
+                .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
+                .interaction(iced::mouse::Interaction::Grab)
+                .into()];
+            for id in self.dock_group_visible(side, gi) {
                 let cell = mouse_area(
-                    container(icon)
+                    container(crate::ui::icons::themed(id.icon(), 20.0))
                         .center_x(Length::Fixed(DOCK_STRIP_W))
                         .center_y(Length::Fixed(STRIP_CELL_H)),
                 )
-                .on_press(Message::Dock(DockMsg::SelectTab(id)))
+                .on_press(Message::Dock(DockMsg::IconPress(id)))
                 .on_enter(Message::Dock(DockMsg::Hover(id)))
                 .interaction(iced::mouse::Interaction::Pointer);
-                items.push(
+                group_items.push(
                     iced::widget::tooltip(
                         cell,
                         text(id.title()).size(10),
@@ -2902,6 +2883,18 @@ impl OpenCADStudio {
                     .into(),
                 );
             }
+            let is_shown = shown == Some(gi);
+            items.push(
+                container(column(group_items))
+                    .width(Length::Fixed(DOCK_STRIP_W))
+                    .style(move |theme: &Theme| container::Style {
+                        // The shown group sits on the grey background.
+                        background: is_shown
+                            .then(|| Background::Color(theme.palette().background.weak.color)),
+                        ..Default::default()
+                    })
+                    .into(),
+            );
         }
         items.push(Space::new().height(STRIP_GAP).into());
         let plus = button(crate::ui::icons::themed_secondary(crate::ui::icons::PLUS, 14.0))
@@ -2981,19 +2974,17 @@ impl OpenCADStudio {
         }
     }
 
-    /// An expanded slot: its shown panel (the group's tabs live in the icon
-    /// strip) and a grabbable divider against the viewport.
-    /// Hovering is handled by the enclosing edge region (see
-    /// `build_edge_stack`), so the body stays fully interactive without
-    /// fighting the region's hover tracking.
-    fn expanded_group<'a>(
+    /// A pallet of the shown group: its body plus a grabbable divider
+    /// against the viewport (sizing the whole group). Hovering is handled by
+    /// the enclosing edge region (see `build_edge_stack`), so the body stays
+    /// fully interactive without fighting the region's hover tracking.
+    fn expanded_panel<'a>(
         &'a self,
+        id: crate::ui::dock::PanelId,
         side: crate::app::config::DockSide,
-        gi: usize,
         width: f32,
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
-        let id = self.dock_group_shown(side, gi).expect("visible group");
         let panel = self.panel_body(id, width, false, tab);
         let divider = dock_divider(id);
         match side {
@@ -3097,8 +3088,9 @@ impl OpenCADStudio {
     }
 
     /// The live drop preview for dragged panel `id`: a tint over the target
-    /// edge plus a panel-sized ghost where it lands — a new slot above or
-    /// below, a new tab over a whole slot, or a floating window.
+    /// edge plus a panel-sized ghost where it lands — stacked into a group
+    /// (sized as that group will be), as a new group of its own (full
+    /// height), or as a floating window.
     fn dock_drop_preview(
         &self,
         id: crate::ui::dock::PanelId,
@@ -3106,16 +3098,11 @@ impl OpenCADStudio {
     ) -> Element<'_, Message> {
         use crate::app::config::DockSide;
         use crate::ui::dock::DropTarget;
-        let (ww, _) = self.dock_workspace_size();
-        let id_w = self.dock.width(id, self.win_size.0);
-        let edge_w = |side: DockSide| self.dock_column_width(side).max(id_w);
+        let (ww, avail) = self.dock_workspace_size();
         let strip = crate::ui::dock::DOCK_STRIP_W;
-        // The tint covers the edge's icon strip and column; the ghost sits in
-        // the column beside the strip.
-        let tint = |side: DockSide| -> Element<'_, Message> {
-            let w = edge_w(side) + strip;
+        let tint = |side: DockSide, w: f32| -> Element<'_, Message> {
             let band = container(Space::new())
-                .width(Length::Fixed(w))
+                .width(Length::Fixed(w + strip))
                 .height(Fill)
                 .style(|theme: &Theme| container::Style {
                     background: Some(Background::Color(
@@ -3132,46 +3119,17 @@ impl OpenCADStudio {
                 })
                 .into()
         };
-        let edge_x = |side: DockSide, w: f32| match side {
-            DockSide::Left => strip,
-            DockSide::Right => (ww - w - strip).max(0.0),
-        };
         let mut layers: Vec<Element<'_, Message>> = Vec::new();
-        match target {
+        let docked = match target {
             DropTarget::Edge { side, index } => {
-                let (top, bottom) = self.dock_edge_preview_span(id, side, index);
-                let w = edge_w(side);
-                layers.push(tint(side));
-                layers.push(place_at(
-                    dock_ghost(&[id], id, w, bottom - top),
-                    edge_x(side, w),
-                    top,
-                ));
+                let mut after = self.dock.clone();
+                after.dock(id, side, index);
+                Some((side, after))
             }
-            DropTarget::Tab { side, group, index } => {
-                let (top, bottom) = self
-                    .dock_slot_spans(side)
-                    .into_iter()
-                    .find(|(gi, _, _)| *gi == group)
-                    .map(|(_, t, b)| (t, b))
-                    .unwrap_or((0.0, 0.0));
-                // The slot's tabs as they will be after the drop.
-                let mut preview = self.dock.clone();
-                preview.add_tab(id, side, group, index);
-                let tabs: Vec<_> = preview
-                    .location(id)
-                    .map(|(s, gi)| preview.groups(s)[gi].tabs.clone())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|t| *t == id || self.dock_panel_visible(*t))
-                    .collect();
-                let w = edge_w(side);
-                layers.push(tint(side));
-                layers.push(place_at(
-                    dock_ghost(&tabs, id, w, bottom - top),
-                    edge_x(side, w),
-                    top,
-                ));
+            DropTarget::Join { side, group, index } => {
+                let mut after = self.dock.clone();
+                after.join_group(id, side, group, index);
+                Some((side, after))
             }
             DropTarget::Float { x, y } => {
                 let (w, h) = self.dock_float_size(id);
@@ -3180,58 +3138,40 @@ impl OpenCADStudio {
                     x,
                     y,
                 ));
+                None
+            }
+        };
+        if let Some((side, after)) = docked {
+            // Lay the group out as it will be after the drop.
+            if let Some((_, gi)) = after.location(id) {
+                let group = &after.groups(side)[gi];
+                let open: Vec<usize> = (0..group.panels.len())
+                    .filter(|i| group.panels[*i] == id || self.dock_panel_visible(group.panels[*i]))
+                    .collect();
+                let weights: Vec<f32> = open.iter().map(|i| group.weights[*i]).collect();
+                let spans = crate::ui::dock::slot_spans(&weights, avail);
+                let at = open
+                    .iter()
+                    .position(|i| group.panels[*i] == id)
+                    .expect("dropped panel");
+                let (top, bottom) = spans[at];
+                let w = group
+                    .panels
+                    .iter()
+                    .map(|p| after.width(*p, self.win_size.0))
+                    .fold(0.0, f32::max);
+                let x = match side {
+                    DockSide::Left => strip,
+                    DockSide::Right => (ww - w - strip).max(0.0),
+                };
+                layers.push(tint(side, w));
+                layers.push(place_at(dock_ghost(&[id], id, w, bottom - top), x, top));
             }
         }
         iced::widget::Stack::with_children(layers)
             .width(Fill)
             .height(Fill)
             .into()
-    }
-
-    /// Vertical span the dragged panel `id` would take as a new slot at
-    /// insertion `index` on `side`, after it leaves its current place.
-    fn dock_edge_preview_span(
-        &self,
-        id: crate::ui::dock::PanelId,
-        side: crate::app::config::DockSide,
-        index: usize,
-    ) -> (f32, f32) {
-        let (_, avail) = self.dock_workspace_size();
-        let groups = self.dock.groups(side);
-        let lone_here = |gi: usize| self.dock_group_visible_tabs(side, gi) == [id];
-        let mut own_weight = None;
-        // (weight, is_new) for each visible slot after the move.
-        let mut slots: Vec<(f32, bool)> = Vec::new();
-        let mut inserted = false;
-        for gi in self.dock_visible_groups(side) {
-            if !inserted && gi >= index {
-                slots.push((0.0, true));
-                inserted = true;
-            }
-            if lone_here(gi) {
-                own_weight = Some(groups[gi].weight);
-                continue;
-            }
-            slots.push((groups[gi].weight, false));
-        }
-        if !inserted {
-            slots.push((0.0, true));
-        }
-        let others: Vec<f32> = slots.iter().filter(|s| !s.1).map(|s| s.0).collect();
-        let new_weight = own_weight.unwrap_or(if others.is_empty() {
-            1.0
-        } else {
-            others.iter().sum::<f32>() / others.len() as f32
-        });
-        let weights: Vec<f32> = slots
-            .iter()
-            .map(|(w, is_new)| if *is_new { new_weight } else { *w })
-            .collect();
-        let at = slots.iter().position(|s| s.1).expect("new slot");
-        crate::ui::dock::slot_spans(&weights, avail)
-            .get(at)
-            .copied()
-            .unwrap_or((0.0, avail))
     }
 }
 
@@ -3757,12 +3697,13 @@ fn dock_edge_menu(
         .into()
 }
 
-/// Draggable bar between two expanded slots on an edge; double-click gives
-/// every slot on the edge the same height again. It spans exactly the slots'
-/// width (panel plus its divider): a `Fill` width would stretch the whole
-/// edge column across the workspace and squeeze the drawing view.
+/// Draggable bar between two stacked pallets of group `gi`; double-click
+/// gives every pallet of the group the same height again. It spans exactly
+/// the pallets' width (panel plus its divider): a `Fill` width would stretch
+/// the whole edge column across the workspace and squeeze the drawing view.
 fn dock_splitter(
     side: crate::app::config::DockSide,
+    gi: usize,
     upper: usize,
     lower: usize,
     col_w: f32,
@@ -3775,8 +3716,8 @@ fn dock_splitter(
             ..Default::default()
         });
     mouse_area(line)
-        .on_press(Message::Dock(crate::ui::dock::DockMsg::SplitGrab(side, upper, lower)))
-        .on_double_click(Message::Dock(crate::ui::dock::DockMsg::SplitReset(side)))
+        .on_press(Message::Dock(crate::ui::dock::DockMsg::SplitGrab(side, gi, upper, lower)))
+        .on_double_click(Message::Dock(crate::ui::dock::DockMsg::SplitReset(side, gi)))
         .interaction(iced::mouse::Interaction::ResizingVertically)
         .into()
 }

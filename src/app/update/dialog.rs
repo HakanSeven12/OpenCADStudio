@@ -551,10 +551,11 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.dock_begin_drag(id);
                 iced::Task::none()
             }
-            DockMsg::SelectTab(id) => {
-                // A tab press shows the tab and may also start pulling it out
-                // of the group; a plain click never passes the drag threshold.
-                if self.dock.select_tab(id) {
+            DockMsg::IconPress(id) => {
+                // An icon press shows the icon's group and may also start
+                // dragging the pallet; a plain click never passes the drag
+                // threshold.
+                if self.dock.show_group_of(id) {
                     self.save_config();
                 }
                 self.dock_begin_drag(id);
@@ -568,15 +569,15 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.dock_expanded = Some(id);
                 iced::Task::none()
             }
-            DockMsg::SplitGrab(side, upper, lower) => {
-                self.dock_split_drag = Some((side, upper, lower));
+            DockMsg::SplitGrab(side, gi, upper, lower) => {
+                self.dock_split_drag = Some((side, gi, upper, lower));
                 self.dock_dragging = None;
                 self.dock_drag_last = None;
                 self.dock_drag_target = None;
                 iced::Task::none()
             }
-            DockMsg::SplitReset(side) => {
-                self.dock.reset_splits(side);
+            DockMsg::SplitReset(side, gi) => {
+                self.dock.reset_splits(side, gi);
                 self.save_config();
                 iced::Task::none()
             }
@@ -598,9 +599,12 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 let (w, h) = self.dock_float_size(id);
                 let x = match self.dock.location(id) {
                     Some((DockSide::Right, _)) => {
-                        ww - self.dock_column_width(DockSide::Right) - w - 60.0
+                        ww - crate::ui::dock::DOCK_STRIP_W
+                            - self.dock_column_width(DockSide::Right)
+                            - w
+                            - 60.0
                     }
-                    _ => self.dock_column_width(DockSide::Left) + 40.0,
+                    _ => crate::ui::dock::DOCK_STRIP_W + self.dock_column_width(DockSide::Left) + 40.0,
                 };
                 self.dock_dragging = None;
                 self.dock_drag_target = None;
@@ -640,12 +644,12 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     self.dock.dock(id, side, usize::MAX);
                 }
                 let task = self.dock_open_panel(id);
-                self.dock.select_tab(id);
+                self.dock.show_group_of(id);
                 self.save_config();
                 task
             }
             DockMsg::GroupGrab(side, gi) => {
-                if let Some(id) = self.dock_group_shown(side, gi) {
+                if let Some(&id) = self.dock_group_visible(side, gi).first() {
                     self.dock_begin_drag(id);
                     self.dock_dragging_group = Some((side, gi));
                 }
@@ -720,6 +724,10 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 // panel being dragged or repoint the resize target.
                 if self.dock_dragging.is_none() && self.dock_resizing.is_none() {
                     self.dock_expanded = Some(id);
+                    // Hovering an auto-hiding group's icon flies it out.
+                    if self.dock.auto_collapse(id) {
+                        self.dock.show_group_of(id);
+                    }
                 }
                 iced::Task::none()
             }
@@ -754,26 +762,27 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         };
                     }
                     if self.dock_drag_target.is_some() || moved >= DOCK_DRAG_THRESHOLD {
-                        let target = self.dock_drop_target(id, point);
-                        // A whole group only moves between slots: it cannot
-                        // join another group or float.
+                        let target = self.dock_drop_target(point);
+                        // A whole group only moves between group positions:
+                        // it cannot join another group or float.
                         self.dock_drag_target = match (self.dock_dragging_group, target) {
                             (Some(_), DropTarget::Edge { .. }) | (None, _) => Some(target),
                             (Some(_), _) => None,
                         };
                     }
-                } else if let Some((side, upper, lower)) = self.dock_split_drag {
+                } else if let Some((side, gi, upper, lower)) = self.dock_split_drag {
                     if let Some(last) = self.dock_drag_last {
                         let (_, avail) = self.dock_workspace_size();
                         let total: f32 = self
-                            .dock_expanded_groups(side)
+                            .dock_slot_spans(side)
                             .iter()
-                            .map(|gi| self.dock.groups(side)[*gi].weight)
+                            .map(|(i, _, _)| self.dock.groups(side)[gi].weights[*i])
                             .sum();
                         if avail > 0.0 && total > 0.0 {
                             let per_px = total / avail;
                             self.dock.shift_split(
                                 side,
+                                gi,
                                 upper,
                                 lower,
                                 (point.y - last.y) * per_px,
@@ -803,22 +812,13 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             Some((DockSide::Left, _)) => dx,
                             _ => -dx,
                         };
-                        // The divider sizes the whole edge column: every
-                        // shown group on the edge takes the new width (and
-                        // keeps it if it moves elsewhere later).
-                        match self.dock.location(id) {
-                            Some((side, _)) => {
-                                let cur = self.dock_column_width(side) + delta;
-                                for gi in self.dock_visible_groups(side) {
-                                    let shown = self.dock.groups(side)[gi].active;
-                                    self.dock.set_group_width(shown, cur);
-                                }
-                            }
-                            None => {
-                                let cur = self.dock.settings(id).width + delta;
-                                self.dock.set_group_width(id, cur);
-                            }
-                        }
+                        // The divider sizes the panel's group; every group
+                        // keeps its own width.
+                        let cur = match self.dock.location(id) {
+                            Some((side, gi)) => self.dock_group_width(side, gi),
+                            None => self.dock.settings(id).width,
+                        } + delta;
+                        self.dock.set_group_width(id, cur);
                     }
                 }
                 if self.dock_dragging.is_some()
@@ -842,8 +842,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 } else if let (Some(id), Some(target)) = (self.dock_dragging, self.dock_drag_target) {
                     let moved = match target {
                         DropTarget::Edge { side, index } => self.dock.dock(id, side, index),
-                        DropTarget::Tab { side, group, index } => {
-                            self.dock.add_tab(id, side, group, index)
+                        DropTarget::Join { side, group, index } => {
+                            self.dock.join_group(id, side, group, index)
                         }
                         DropTarget::Float { x, y } => {
                             let (w, h) = self.dock_float_size(id);
@@ -954,77 +954,74 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         )
     }
 
-    /// Visible tabs of slot `gi` on `side`. Closed panels keep their tab but
-    /// take no space, so a slot with no visible tab is not rendered at all.
-    pub(crate) fn dock_group_visible_tabs(
+    /// The open pallets of group `gi` on `side`, top → bottom. Closed
+    /// pallets keep their place but take no space, so a group with none open
+    /// is not drawn at all.
+    pub(crate) fn dock_group_visible(
         &self,
         side: crate::app::config::DockSide,
         gi: usize,
     ) -> Vec<crate::ui::dock::PanelId> {
         self.dock.groups(side)[gi]
-            .tabs
+            .panels
             .iter()
             .copied()
             .filter(|id| self.dock_panel_visible(*id))
             .collect()
     }
 
-    /// The panel slot `gi` on `side` shows: its active tab, or the first
-    /// visible one when the active panel is closed.
-    pub(crate) fn dock_group_shown(
-        &self,
-        side: crate::app::config::DockSide,
-        gi: usize,
-    ) -> Option<crate::ui::dock::PanelId> {
-        let active = self.dock.groups(side)[gi].active;
-        if self.dock_panel_visible(active) {
-            return Some(active);
-        }
-        self.dock_group_visible_tabs(side, gi).first().copied()
-    }
-
-    /// Indices of the slots on `side` that render (hold a visible panel).
+    /// Indices of the groups on `side` with an open pallet (listed in the
+    /// icon strip).
     pub(crate) fn dock_visible_groups(&self, side: crate::app::config::DockSide) -> Vec<usize> {
         (0..self.dock.groups(side).len())
-            .filter(|gi| self.dock_group_shown(side, *gi).is_some())
+            .filter(|gi| !self.dock_group_visible(side, *gi).is_empty())
             .collect()
     }
 
-    /// Visible slots on `side` that are open in the edge column rather than
-    /// reduced to a rail tab: not auto-collapsing, or hovered.
-    pub(crate) fn dock_expanded_groups(&self, side: crate::app::config::DockSide) -> Vec<usize> {
-        self.dock_visible_groups(side)
-            .into_iter()
-            .filter(|gi| {
-                let shown = self.dock_group_shown(side, *gi).expect("visible group");
-                !self.dock.auto_collapse(shown)
-                    || self
-                        .dock_expanded
-                        .is_some_and(|e| self.dock_group_visible_tabs(side, *gi).contains(&e))
-            })
-            .collect()
+    /// The group `side` draws: the one it shows, or the first with an open
+    /// pallet when that one has none.
+    pub(crate) fn dock_shown_group(&self, side: crate::app::config::DockSide) -> Option<usize> {
+        let visible = self.dock_visible_groups(side);
+        let shown = self.dock.shown(side);
+        if visible.contains(&shown) {
+            Some(shown)
+        } else {
+            visible.first().copied()
+        }
     }
 
-    /// Width of slot `gi` on `side`: all its tabs share the widest one's
-    /// width, so switching tabs never resizes the column.
+    /// Whether `side` draws its shown group beside the icon strip: always,
+    /// unless all its pallets auto-hide and none is hovered.
+    pub(crate) fn dock_edge_expanded(&self, side: crate::app::config::DockSide) -> bool {
+        let Some(gi) = self.dock_shown_group(side) else {
+            return false;
+        };
+        let panels = self.dock_group_visible(side, gi);
+        panels.iter().any(|id| !self.dock.auto_collapse(*id))
+            || self.dock_expanded.is_some_and(|e| panels.contains(&e))
+    }
+
+    /// Width of group `gi` on `side`: its pallets share the widest one's
+    /// width.
     pub(crate) fn dock_group_width(&self, side: crate::app::config::DockSide, gi: usize) -> f32 {
         self.dock.groups(side)[gi]
-            .tabs
+            .panels
             .iter()
             .map(|id| self.dock.width(*id, self.win_size.0))
             .fold(0.0, f32::max)
     }
 
-    /// Width of the edge column on `side`: its widest shown slot.
+    /// Width of the pallet column beside `side`'s icon strip: the shown
+    /// group's width, or nothing when it is hidden.
     pub(crate) fn dock_column_width(&self, side: crate::app::config::DockSide) -> f32 {
-        self.dock_visible_groups(side)
-            .into_iter()
-            .map(|gi| self.dock_group_width(side, gi))
-            .fold(0.0, f32::max)
+        match self.dock_shown_group(side) {
+            Some(gi) if self.dock_edge_expanded(side) => self.dock_group_width(side, gi),
+            _ => 0.0,
+        }
     }
 
-    /// The icon strip of `side`: each shown group's place, and the top of the
-    /// + button.
+    /// The icon strip of `side`: each listed group's place, and the top of
+    /// the + button.
     pub(crate) fn dock_strip_layout(
         &self,
         side: crate::app::config::DockSide,
@@ -1032,26 +1029,29 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         let groups: Vec<(usize, usize)> = self
             .dock_visible_groups(side)
             .into_iter()
-            .map(|gi| (gi, self.dock_group_visible_tabs(side, gi).len()))
+            .map(|gi| (gi, self.dock_group_visible(side, gi).len()))
             .collect();
         crate::ui::dock::strip_layout(&groups)
     }
 
-    /// Visible slots on `side` with their vertical span in the workspace.
+    /// The open pallets of `side`'s shown group, each as (position in the
+    /// group, top, bottom) in the workspace.
     pub(crate) fn dock_slot_spans(
         &self,
         side: crate::app::config::DockSide,
     ) -> Vec<(usize, f32, f32)> {
+        let Some(gi) = self.dock_shown_group(side) else {
+            return Vec::new();
+        };
         let (_, avail) = self.dock_workspace_size();
-        let visible = self.dock_visible_groups(side);
-        let weights: Vec<f32> = visible
-            .iter()
-            .map(|gi| self.dock.groups(side)[*gi].weight)
+        let group = &self.dock.groups(side)[gi];
+        let open: Vec<usize> = (0..group.panels.len())
+            .filter(|i| self.dock_panel_visible(group.panels[*i]))
             .collect();
-        visible
-            .into_iter()
+        let weights: Vec<f32> = open.iter().map(|i| group.weights[*i]).collect();
+        open.into_iter()
             .zip(crate::ui::dock::slot_spans(&weights, avail))
-            .map(|(gi, (top, bottom))| (gi, top, bottom))
+            .map(|(i, (top, bottom))| (i, top, bottom))
             .collect()
     }
 
@@ -1068,82 +1068,68 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         )
     }
 
-    /// Where dragged panel `id` lands if released at workspace point `p`:
-    /// near an edge it docks (above / below a slot, or as a tab in the middle
-    /// of one), anywhere else it floats.
-    pub(crate) fn dock_drop_target(
-        &self,
-        id: crate::ui::dock::PanelId,
-        p: iced::Point,
-    ) -> crate::ui::dock::DropTarget {
+    /// Where a dragged pallet lands if released at workspace point `p`:
+    /// on an edge's icon strip it joins a group between its icons or starts a
+    /// new group; over the shown group's pallets it stacks above / below the
+    /// one under the pointer; on an empty edge it starts a group; anywhere
+    /// else it floats.
+    pub(crate) fn dock_drop_target(&self, p: iced::Point) -> crate::ui::dock::DropTarget {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{slot_zone, DropTarget, SlotZone, DOCK_EDGE_ZONE};
+        use crate::ui::dock::{DropTarget, StripHit, DOCK_EDGE_ZONE, DOCK_STRIP_W};
         let (ww, wh) = self.dock_workspace_size();
         for side in [DockSide::Left, DockSide::Right] {
-            let zone = (self.dock_column_width(side) + crate::ui::dock::DOCK_STRIP_W)
-                .max(DOCK_EDGE_ZONE);
-            let inside = match side {
-                DockSide::Left => p.x <= zone,
-                DockSide::Right => p.x >= ww - zone,
+            let listed = !self.dock_visible_groups(side).is_empty();
+            let from_edge = match side {
+                DockSide::Left => p.x,
+                DockSide::Right => ww - p.x,
             };
-            if !inside {
+            if !listed {
+                if from_edge <= DOCK_EDGE_ZONE {
+                    return DropTarget::Edge {
+                        side,
+                        index: self.dock.groups(side).len(),
+                    };
+                }
                 continue;
             }
-            // Over the icon strip: join a group between its icons, or start
-            // a new group at a grip / below the last group.
-            let on_strip = !self.dock_visible_groups(side).is_empty()
-                && match side {
-                    DockSide::Left => p.x <= crate::ui::dock::DOCK_STRIP_W,
-                    DockSide::Right => p.x >= ww - crate::ui::dock::DOCK_STRIP_W,
-                };
-            if on_strip {
+            // Over the icon strip.
+            if from_edge <= DOCK_STRIP_W {
                 let (layout, _) = self.dock_strip_layout(side);
                 return match crate::ui::dock::strip_hit(p.y, &layout) {
-                    crate::ui::dock::StripHit::NewGroup(at) => DropTarget::Edge {
+                    StripHit::NewGroup(at) => DropTarget::Edge {
                         side,
                         index: at.unwrap_or(self.dock.groups(side).len()),
                     },
-                    crate::ui::dock::StripHit::Tab { group, index } => {
-                        // Map the gap among visible icons to a position in
-                        // all of the group's tabs.
-                        let tabs = self.dock_group_visible_tabs(side, group);
-                        let all = &self.dock.groups(side)[group].tabs;
-                        let index = tabs
+                    StripHit::Tab { group, index } => {
+                        // Map the gap among open pallets to a position among
+                        // all of the group's pallets.
+                        let open = self.dock_group_visible(side, group);
+                        let all = &self.dock.groups(side)[group].panels;
+                        let index = open
                             .get(index)
                             .and_then(|t| all.iter().position(|a| a == t))
                             .unwrap_or(all.len());
-                        DropTarget::Tab {
-                            side,
-                            group,
-                            index: Some(index),
-                        }
+                        DropTarget::Join { side, group, index }
                     }
                 };
             }
-            let spans = self.dock_slot_spans(side);
-            let Some(&(gi, top, bottom)) = spans
-                .iter()
-                .find(|(_, _, bottom)| p.y < *bottom)
-                .or(spans.last())
-            else {
-                return DropTarget::Edge {
-                    side,
-                    index: self.dock.groups(side).len(),
-                };
-            };
-            return match slot_zone(p.y, top, bottom) {
-                SlotZone::Above => DropTarget::Edge { side, index: gi },
-                SlotZone::Below => DropTarget::Edge { side, index: gi + 1 },
-                // Tabbing a panel onto its own lone slot changes nothing.
-                SlotZone::Middle if self.dock_group_visible_tabs(side, gi) == [id] => {
-                    DropTarget::Edge { side, index: gi }
+            // Over the shown group's pallets: above or below the one there.
+            if from_edge <= DOCK_STRIP_W + self.dock_column_width(side) {
+                let gi = self.dock_shown_group(side).expect("listed edge");
+                let spans = self.dock_slot_spans(side);
+                if let Some(&(pos, top, bottom)) = spans
+                    .iter()
+                    .find(|(_, _, bottom)| p.y < *bottom)
+                    .or(spans.last())
+                {
+                    let index = if p.y < (top + bottom) * 0.5 { pos } else { pos + 1 };
+                    return DropTarget::Join {
+                        side,
+                        group: gi,
+                        index,
+                    };
                 }
-                SlotZone::Middle => DropTarget::Tab {
-                    side,
-                    group: gi,
-                    index: None,
-                },
-            };
+            }
         }
         let x = (p.x - self.dock_grab_offset.x).clamp(0.0, (ww - 60.0).max(0.0));
         let y = (p.y - self.dock_grab_offset.y).clamp(0.0, (wh - 30.0).max(0.0));
@@ -2065,24 +2051,55 @@ mod tests {
     }
 
     #[test]
-    fn blockpalette_dock_moves_to_other_side_and_persists() {
+    fn blockpalette_dropped_on_the_top_half_of_a_pallet_stacks_above_it() {
         use crate::app::config::DockSide;
-        use crate::ui::dock::DropTarget;
+        use crate::ui::dock::{DropTarget, PanelId};
         let mut app = dock_app();
-        let id = crate::ui::dock::PanelId::BlockPalette;
+        let id = PanelId::BlockPalette;
         assert_eq!(app.dock.location(id), Some((DockSide::Right, 0)));
-        // Top quarter of the Properties slot: dock above it.
         let target = drag_panel(
             &mut app,
             id,
             iced::Point::new(1500.0, 10.0),
-            iced::Point::new(100.0, 40.0),
+            iced::Point::new(150.0, 300.0),
         );
-        assert_eq!(target, Some(DropTarget::Edge { side: DockSide::Left, index: 0 }));
-        assert_eq!(app.dock.location(id), Some((DockSide::Left, 0)));
         assert_eq!(
-            app.dock.location(crate::ui::dock::PanelId::Properties),
-            Some((DockSide::Left, 1))
+            target,
+            Some(DropTarget::Join {
+                side: DockSide::Left,
+                group: 0,
+                index: 0
+            })
+        );
+        assert_eq!(
+            app.dock.left[0].panels,
+            vec![PanelId::BlockPalette, PanelId::Properties]
+        );
+        assert!(app.dock.right.is_empty());
+    }
+
+    #[test]
+    fn dock_drop_on_the_bottom_half_stacks_below() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DropTarget, PanelId};
+        let mut app = dock_app();
+        let target = drag_panel(
+            &mut app,
+            PanelId::BlockPalette,
+            iced::Point::new(1500.0, 10.0),
+            iced::Point::new(150.0, 700.0),
+        );
+        assert_eq!(
+            target,
+            Some(DropTarget::Join {
+                side: DockSide::Left,
+                group: 0,
+                index: 1
+            })
+        );
+        assert_eq!(
+            app.dock.left[0].panels,
+            vec![PanelId::Properties, PanelId::BlockPalette]
         );
     }
 
@@ -2098,216 +2115,54 @@ mod tests {
     }
 
     #[test]
-    fn dock_drop_in_slot_middle_adds_a_tab() {
+    fn dock_drop_below_the_strip_groups_starts_a_new_shown_group() {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DropTarget, PanelId};
         let mut app = dock_app();
+        let (_, plus_top) = app.dock_strip_layout(DockSide::Left);
         let target = drag_panel(
             &mut app,
             PanelId::BlockPalette,
             iced::Point::new(1500.0, 10.0),
-            iced::Point::new(100.0, 450.0),
+            iced::Point::new(18.0, plus_top + 10.0),
         );
         assert_eq!(
             target,
-            Some(DropTarget::Tab {
-                side: DockSide::Left,
-                group: 0,
-                index: None
-            })
-        );
-        assert_eq!(
-            app.dock.left[0].tabs,
-            vec![PanelId::Properties, PanelId::BlockPalette]
-        );
-        assert_eq!(app.dock.left[0].active, PanelId::BlockPalette);
-        // Clicking the Properties tab shows it again.
-        let _ = app.on_dock(crate::ui::dock::DockMsg::SelectTab(PanelId::Properties));
-        let _ = app.on_dock(crate::ui::dock::DockMsg::DragRelease);
-        assert_eq!(app.dock.left[0].active, PanelId::Properties);
-        assert_eq!(app.dock.left[0].tabs.len(), 2);
-    }
-
-    #[test]
-    fn dock_dragging_an_icon_along_the_strip_reorders_it() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::{DockMsg, DropTarget, PanelId, STRIP_CELL_H};
-        let mut app = dock_app();
-        app.dock.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
-        app.dock.right.clear();
-        // Icons: Properties above Blocks. Drag the Properties icon below the
-        // Blocks icon.
-        let (layout, _) = app.dock_strip_layout(DockSide::Left);
-        let top = layout[0].icons_top;
-        let _ = app.on_dock(DockMsg::SelectTab(PanelId::Properties));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, top + 10.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, top + 2.0 * STRIP_CELL_H)));
-        assert_eq!(
-            app.dock_drag_target,
-            Some(DropTarget::Tab {
-                side: DockSide::Left,
-                group: 0,
-                index: Some(2)
-            })
-        );
-        let _ = app.on_dock(DockMsg::DragRelease);
-        assert_eq!(
-            app.dock.left[0].tabs,
-            vec![PanelId::BlockPalette, PanelId::Properties]
-        );
-    }
-
-    #[test]
-    fn dock_dropping_an_icon_below_the_strip_groups_starts_a_new_group() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::{DockMsg, DropTarget, PanelId};
-        let mut app = dock_app();
-        app.dock.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
-        let (layout, plus_top) = app.dock_strip_layout(DockSide::Left);
-        let _ = app.on_dock(DockMsg::SelectTab(PanelId::BlockPalette));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, layout[0].icons_top + 40.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, plus_top + 10.0)));
-        assert_eq!(
-            app.dock_drag_target,
             Some(DropTarget::Edge {
                 side: DockSide::Left,
                 index: 1
             })
         );
-        let _ = app.on_dock(DockMsg::DragRelease);
         assert_eq!(app.dock.left.len(), 2);
-        assert_eq!(app.dock.left[1].tabs, vec![PanelId::BlockPalette]);
+        assert_eq!(app.dock.left[1].panels, vec![PanelId::BlockPalette]);
+        // The new group is the one shown: the column holds only the palette.
+        assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
+        assert_eq!(app.dock_slot_spans(DockSide::Left), vec![(0, 0.0, 900.0)]);
     }
 
     #[test]
-    fn dock_grip_drag_moves_a_whole_group() {
+    fn dock_icon_press_switches_the_shown_group() {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DockGroup, DockMsg, PanelId};
         let mut app = dock_app();
+        app.show_browser = true;
         app.dock.left = vec![
-            DockGroup {
-                tabs: vec![PanelId::Properties, PanelId::Browser],
-                active: PanelId::Properties,
-                weight: 1.0,
-            },
-            DockGroup::single(PanelId::BlockPalette, 1.0),
+            DockGroup::stack(vec![PanelId::Properties, PanelId::BlockPalette]),
+            DockGroup::single(PanelId::Browser),
         ];
         app.dock.right.clear();
-        app.show_browser = true;
-        let (layout, plus_top) = app.dock_strip_layout(DockSide::Left);
-        let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 0));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, layout[0].grip_top + 2.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, plus_top + 10.0)));
+        // Group 0 shows both stacked pallets.
+        assert_eq!(app.dock_slot_spans(DockSide::Left).len(), 2);
+        let _ = app.on_dock(DockMsg::IconPress(PanelId::Browser));
         let _ = app.on_dock(DockMsg::DragRelease);
-        assert_eq!(app.dock.left[0].tabs, vec![PanelId::BlockPalette]);
-        assert_eq!(
-            app.dock.left[1].tabs,
-            vec![PanelId::Properties, PanelId::Browser]
-        );
-        // A group dropped over the viewport does not float or split up.
-        let before = app.dock.clone();
-        let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 1));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, 300.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(800.0, 400.0)));
-        assert_eq!(app.dock_drag_target, None);
+        assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
+        assert_eq!(app.dock_slot_spans(DockSide::Left), vec![(0, 0.0, 900.0)]);
+        // Each group keeps its own width.
+        app.dock.set_width(PanelId::Browser, 400.0);
+        assert_eq!(app.dock_column_width(DockSide::Left), 400.0);
+        let _ = app.on_dock(DockMsg::IconPress(PanelId::BlockPalette));
         let _ = app.on_dock(DockMsg::DragRelease);
-        assert_eq!(app.dock, before);
-    }
-
-    #[test]
-    fn dock_edge_menu_adds_and_hides_pallets() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::{DockMsg, PanelId};
-        let mut app = dock_app();
-        app.show_browser = false;
-        let _ = app.on_dock(DockMsg::EdgeMenu(Some(DockSide::Left)));
-        // Checking a closed pallet opens it as a new group on this edge.
-        let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
-        assert!(app.show_browser);
-        assert_eq!(app.dock.left.len(), 2);
-        assert_eq!(app.dock.left[1].tabs, vec![PanelId::Browser]);
-        // Unchecking hides it but keeps its place.
-        let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
-        assert!(!app.show_browser);
-        assert_eq!(app.dock.location(PanelId::Browser), Some((DockSide::Left, 1)));
-        // Opening it again from the same edge reuses that place.
-        let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
-        assert_eq!(app.dock.left.len(), 2);
-    }
-
-    #[test]
-    fn dock_divider_resizes_the_whole_column() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::{DockGroup, DockMsg, PanelId};
-        let mut app = dock_app();
-        app.dock.left.push(DockGroup::single(PanelId::BlockPalette, 1.0));
-        app.dock.right.clear();
-        app.dock.set_width(PanelId::BlockPalette, 300.0);
-        let _ = app.on_dock(DockMsg::ResizeGrab(PanelId::Properties));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(330.0, 100.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(350.0, 100.0)));
-        let _ = app.on_dock(DockMsg::DragRelease);
-        // The column was 300 (the widest group); both groups now take 320.
-        assert_eq!(app.dock.settings(PanelId::Properties).width, 320.0);
-        assert_eq!(app.dock.settings(PanelId::BlockPalette).width, 320.0);
-    }
-
-    #[test]
-    fn layers_command_opens_a_floating_pallet_and_toggles_it_closed() {
-        use crate::ui::dock::PanelId;
-        let mut app = dock_app();
-        let _ = app.update(Message::ToggleLayers);
-        assert!(app.show_layers);
-        assert!(app.active_modal.is_none(), "no modal backdrop");
-        let f = app.dock.float_rect(PanelId::Layers).expect("floats on first use");
-        assert!(f.x > 0.0 && f.y >= 0.0);
-        let _ = app.update(Message::ToggleLayers);
-        assert!(!app.show_layers);
-        // Its place is kept for next time.
-        assert!(app.dock.float_rect(PanelId::Layers).is_some());
-    }
-
-    #[test]
-    fn dock_double_clicks_float_and_dock_panels() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::{DockMsg, PanelId};
-        let mut app = dock_app();
-        let _ = app.on_dock(DockMsg::FloatOut(PanelId::Properties));
-        assert!(app.dock.left.is_empty());
-        let f = app.dock.float_rect(PanelId::Properties).expect("floating");
-        assert!(f.x > 0.0, "floats clear of the left edge");
-        let _ = app.on_dock(DockMsg::DockTo(PanelId::Properties, DockSide::Right));
-        assert!(app.dock.floating.is_empty());
-        assert_eq!(app.dock.location(PanelId::Properties), Some((DockSide::Right, 1)));
-    }
-
-    #[test]
-    fn dock_tab_group_resize_applies_to_every_tab() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::{DockMsg, PanelId};
-        let mut app = dock_app();
-        app.dock.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
-        let _ = app.on_dock(DockMsg::ResizeGrab(PanelId::BlockPalette));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(250.0, 100.0)));
-        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(300.0, 100.0)));
-        let _ = app.on_dock(DockMsg::DragRelease);
-        assert_eq!(app.dock.settings(PanelId::Properties).width, 300.0);
-        assert_eq!(app.dock.settings(PanelId::BlockPalette).width, 300.0);
-    }
-
-    #[test]
-    fn dock_drop_in_bottom_quarter_docks_below() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::{DropTarget, PanelId};
-        let mut app = dock_app();
-        let target = drag_panel(
-            &mut app,
-            PanelId::BlockPalette,
-            iced::Point::new(1500.0, 10.0),
-            iced::Point::new(100.0, 880.0),
-        );
-        assert_eq!(target, Some(DropTarget::Edge { side: DockSide::Left, index: 1 }));
-        assert_eq!(app.dock.location(PanelId::BlockPalette), Some((DockSide::Left, 1)));
+        assert_eq!(app.dock_column_width(DockSide::Left), 260.0);
     }
 
     #[test]
@@ -2337,71 +2192,111 @@ mod tests {
     }
 
     #[test]
-    fn dock_drop_on_own_lone_slot_is_a_no_op() {
+    fn dock_dragging_an_icon_along_the_strip_reorders_its_group() {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{DropTarget, PanelId};
+        use crate::ui::dock::{DockMsg, DropTarget, PanelId, STRIP_CELL_H};
         let mut app = dock_app();
-        let before = app.dock.clone();
-        let target = drag_panel(
-            &mut app,
-            PanelId::Properties,
-            iced::Point::new(100.0, 10.0),
-            iced::Point::new(100.0, 450.0),
+        app.dock.join_group(PanelId::BlockPalette, DockSide::Left, 0, 1);
+        let (layout, _) = app.dock_strip_layout(DockSide::Left);
+        let top = layout[0].icons_top;
+        // Drag the Properties icon below the Blocks icon.
+        let _ = app.on_dock(DockMsg::IconPress(PanelId::Properties));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, top + 10.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, top + 2.0 * STRIP_CELL_H)));
+        assert_eq!(
+            app.dock_drag_target,
+            Some(DropTarget::Join {
+                side: DockSide::Left,
+                group: 0,
+                index: 2
+            })
         );
-        assert_eq!(target, Some(DropTarget::Edge { side: DockSide::Left, index: 0 }));
+        let _ = app.on_dock(DockMsg::DragRelease);
+        assert_eq!(
+            app.dock.left[0].panels,
+            vec![PanelId::BlockPalette, PanelId::Properties]
+        );
+    }
+
+    #[test]
+    fn dock_grip_drag_moves_a_whole_group() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockGroup, DockMsg, PanelId};
+        let mut app = dock_app();
+        app.show_browser = true;
+        app.dock.left = vec![
+            DockGroup::stack(vec![PanelId::Properties, PanelId::Browser]),
+            DockGroup::single(PanelId::BlockPalette),
+        ];
+        app.dock.right.clear();
+        let (layout, plus_top) = app.dock_strip_layout(DockSide::Left);
+        let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 0));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, layout[0].grip_top + 2.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, plus_top + 10.0)));
+        let _ = app.on_dock(DockMsg::DragRelease);
+        assert_eq!(app.dock.left[0].panels, vec![PanelId::BlockPalette]);
+        assert_eq!(
+            app.dock.left[1].panels,
+            vec![PanelId::Properties, PanelId::Browser]
+        );
+        // A group dropped over the viewport does not float or split up.
+        let before = app.dock.clone();
+        let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 1));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, 300.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(800.0, 400.0)));
+        assert_eq!(app.dock_drag_target, None);
+        let _ = app.on_dock(DockMsg::DragRelease);
         assert_eq!(app.dock, before);
     }
 
     #[test]
-    fn dock_visible_groups_skip_closed_panels() {
+    fn dock_closed_pallets_take_no_room_and_empty_groups_hide() {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DockGroup, PanelId};
         let mut app = dock_app();
         app.dock.left = vec![
-            DockGroup::single(PanelId::BlockPalette, 1.0),
-            DockGroup::single(PanelId::Properties, 1.0),
+            DockGroup::stack(vec![PanelId::BlockPalette, PanelId::Properties]),
+            DockGroup::single(PanelId::Browser),
         ];
         app.show_block_palette = false;
-        assert_eq!(app.dock_visible_groups(DockSide::Left), vec![1]);
-        // The single visible slot spans the full height, so the drop geometry
-        // never splits around the hidden one.
+        app.show_browser = false;
+        // Only Properties is open: one listed group, full height.
+        assert_eq!(app.dock_visible_groups(DockSide::Left), vec![0]);
         assert_eq!(app.dock_slot_spans(DockSide::Left), vec![(1, 0.0, 900.0)]);
-        app.show_block_palette = true;
-        assert_eq!(app.dock_visible_groups(DockSide::Left), vec![0, 1]);
+        // A shown group with nothing open falls back to one that has.
+        app.dock.show_group(DockSide::Left, 1);
+        assert_eq!(app.dock_shown_group(DockSide::Left), Some(0));
     }
 
     #[test]
-    fn dock_group_shows_a_visible_tab_when_the_active_one_is_closed() {
-        use crate::app::config::DockSide;
-        use crate::ui::dock::PanelId;
-        let mut app = dock_app();
-        app.dock.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
-        assert_eq!(app.dock_group_shown(DockSide::Left, 0), Some(PanelId::BlockPalette));
-        app.show_block_palette = false;
-        assert_eq!(app.dock_group_shown(DockSide::Left, 0), Some(PanelId::Properties));
-        app.show_properties = false;
-        assert_eq!(app.dock_group_shown(DockSide::Left, 0), None);
-    }
-
-    #[test]
-    fn dock_splitter_drag_changes_slot_heights() {
+    fn dock_splitter_drag_changes_pallet_heights() {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DockGroup, DockMsg, PanelId};
         let mut app = dock_app();
-        app.dock.left = vec![
-            DockGroup::single(PanelId::BlockPalette, 1.0),
-            DockGroup::single(PanelId::Properties, 1.0),
-        ];
+        app.dock.left = vec![DockGroup::stack(vec![PanelId::BlockPalette, PanelId::Properties])];
         app.dock.right.clear();
-        let _ = app.on_dock(DockMsg::SplitGrab(DockSide::Left, 0, 1));
+        let _ = app.on_dock(DockMsg::SplitGrab(DockSide::Left, 0, 0, 1));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(100.0, 450.0)));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(100.0, 675.0)));
         let _ = app.on_dock(DockMsg::DragRelease);
         // 225 px of a 900 px edge holding 2 weight units = 0.5 units.
-        assert!((app.dock.left[0].weight - 1.5).abs() < 1e-4);
-        assert!((app.dock.left[1].weight - 0.5).abs() < 1e-4);
-        let _ = app.on_dock(DockMsg::SplitReset(DockSide::Left));
-        assert_eq!(app.dock.left[0].weight, 1.0);
+        let w = &app.dock.left[0].weights;
+        assert!((w[0] - 1.5).abs() < 1e-4 && (w[1] - 0.5).abs() < 1e-4);
+        let _ = app.on_dock(DockMsg::SplitReset(DockSide::Left, 0));
+        assert_eq!(app.dock.left[0].weights, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn dock_auto_hiding_group_shows_while_its_icon_is_hovered() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = dock_app();
+        let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
+        assert!(!app.dock_edge_expanded(DockSide::Left));
+        let _ = app.on_dock(DockMsg::Hover(PanelId::Properties));
+        assert!(app.dock_edge_expanded(DockSide::Left));
+        let _ = app.on_dock(DockMsg::HoverExit);
+        assert!(!app.dock_edge_expanded(DockSide::Left));
     }
 
     #[test]
@@ -2428,6 +2323,78 @@ mod tests {
         let _ = app.on_dock(DockMsg::DragRelease);
         let g = app.dock.float_rect(PanelId::BlockPalette).unwrap();
         assert_eq!((g.x, g.w, g.h), (f.x - 40.0, 340.0, 350.0));
+    }
+
+    #[test]
+    fn dock_edge_menu_adds_and_hides_pallets() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = dock_app();
+        app.show_browser = false;
+        let _ = app.on_dock(DockMsg::EdgeMenu(Some(DockSide::Left)));
+        // Checking a closed pallet opens it as a new, shown group here.
+        let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
+        assert!(app.show_browser);
+        assert_eq!(app.dock.left.len(), 2);
+        assert_eq!(app.dock.left[1].panels, vec![PanelId::Browser]);
+        assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
+        // Unchecking hides it but keeps its place.
+        let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
+        assert!(!app.show_browser);
+        assert_eq!(app.dock.location(PanelId::Browser), Some((DockSide::Left, 1)));
+        // Opening it again from the same edge reuses that place.
+        let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
+        assert_eq!(app.dock.left.len(), 2);
+    }
+
+    #[test]
+    fn dock_divider_resizes_only_its_group() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockGroup, DockMsg, PanelId};
+        let mut app = dock_app();
+        app.dock.left = vec![
+            DockGroup::stack(vec![PanelId::Properties, PanelId::BlockPalette]),
+            DockGroup::single(PanelId::Count),
+        ];
+        app.dock.right.clear();
+        let _ = app.on_dock(DockMsg::ResizeGrab(PanelId::Properties));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(300.0, 100.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(330.0, 100.0)));
+        let _ = app.on_dock(DockMsg::DragRelease);
+        // The group was 260 wide (its widest pallet); both pallets take 290.
+        assert_eq!(app.dock.settings(PanelId::Properties).width, 290.0);
+        assert_eq!(app.dock.settings(PanelId::BlockPalette).width, 290.0);
+        assert_eq!(app.dock.settings(PanelId::Count).width, 280.0);
+        assert_eq!(app.dock_group_width(DockSide::Left, 0), 290.0);
+    }
+
+    #[test]
+    fn layers_command_opens_a_floating_pallet_and_toggles_it_closed() {
+        use crate::ui::dock::PanelId;
+        let mut app = dock_app();
+        let _ = app.update(Message::ToggleLayers);
+        assert!(app.show_layers);
+        assert!(app.active_modal.is_none(), "no modal backdrop");
+        let f = app.dock.float_rect(PanelId::Layers).expect("floats on first use");
+        assert!(f.x > 0.0 && f.y >= 0.0);
+        let _ = app.update(Message::ToggleLayers);
+        assert!(!app.show_layers);
+        // Its place is kept for next time.
+        assert!(app.dock.float_rect(PanelId::Layers).is_some());
+    }
+
+    #[test]
+    fn dock_double_clicks_float_and_dock_panels() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = dock_app();
+        let _ = app.on_dock(DockMsg::FloatOut(PanelId::Properties));
+        assert!(app.dock.left.is_empty());
+        let f = app.dock.float_rect(PanelId::Properties).expect("floating");
+        assert!(f.x > 0.0, "floats clear of the left edge");
+        let _ = app.on_dock(DockMsg::DockTo(PanelId::Properties, DockSide::Right));
+        assert!(app.dock.floating.is_empty());
+        assert_eq!(app.dock.location(PanelId::Properties), Some((DockSide::Right, 1)));
     }
 
     #[test]

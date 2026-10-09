@@ -32,12 +32,14 @@ pub enum DockMsg {
     DragMove(iced::Point),
     /// Pointer released after a drag / resize.
     DragRelease,
-    /// Show `panel`'s tab in its tab group.
-    SelectTab(PanelId),
-    /// Begin dragging the splitter between slots `upper` and `lower` on a side.
-    SplitGrab(DockSide, usize, usize),
-    /// Give every slot on a side the same height again.
-    SplitReset(DockSide),
+    /// A press on `panel`'s strip icon: show its group, and start a possible
+    /// drag of the pallet.
+    IconPress(PanelId),
+    /// Begin dragging the splitter between pallets `upper` and `lower` of a
+    /// group (side, group, upper, lower).
+    SplitGrab(DockSide, usize, usize, usize),
+    /// Give every pallet of a group the same height again (side, group).
+    SplitReset(DockSide, usize),
     /// Begin resizing floating `panel` from its corner grip; `true` for the
     /// bottom-left grip (a panel whose title bar is on the right).
     FloatResizeGrab(PanelId, bool),
@@ -177,79 +179,103 @@ impl DockPanel {
     }
 }
 
-/// One slot of an edge stack: one or more panels sharing the slot as tabs.
-/// A single-panel group renders without a tab strip, exactly like the old
-/// one-panel-per-slot stack. `weight` is the slot's share of the edge height
-/// relative to the other slots on the same edge (equal weights = equal split).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(from = "GroupRepr")]
+/// One group of an edge: pallets shown together, stacked top to bottom, each
+/// with an adjustable share of the edge height. An edge shows one group at a
+/// time; its icon strip lists every group so the user can switch.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DockGroup {
-    /// Panels in tab order.
-    pub tabs: Vec<PanelId>,
-    /// The tab currently shown. Always one of `tabs`.
-    pub active: PanelId,
-    /// Relative share of the edge height.
-    pub weight: f32,
+    /// Pallets top → bottom.
+    pub panels: Vec<PanelId>,
+    /// Relative height of each pallet, parallel to `panels`.
+    pub weights: Vec<f32>,
 }
 
-/// On-disk forms of a [`DockGroup`]: configs written before tab groups stored
-/// each slot as a bare panel id.
+impl DockGroup {
+    pub fn single(id: PanelId) -> Self {
+        Self {
+            panels: vec![id],
+            weights: vec![1.0],
+        }
+    }
+
+    pub fn stack(panels: Vec<PanelId>) -> Self {
+        let weights = vec![1.0; panels.len()];
+        Self { panels, weights }
+    }
+
+    /// Keep one sane weight per pallet (configs edited by hand, or written
+    /// by an older build).
+    fn heal(&mut self) {
+        self.weights.resize(self.panels.len(), 1.0);
+        for w in &mut self.weights {
+            *w = if w.is_finite() && *w > 0.0 {
+                w.clamp(MIN_WEIGHT, MAX_WEIGHT)
+            } else {
+                1.0
+            };
+        }
+    }
+
+    fn insert(&mut self, index: usize, id: PanelId, weight: f32) {
+        let index = index.min(self.panels.len());
+        self.panels.insert(index, id);
+        self.weights.insert(index, weight);
+    }
+
+    fn remove(&mut self, id: PanelId) -> Option<(usize, f32)> {
+        let i = self.panels.iter().position(|p| *p == id)?;
+        self.panels.remove(i);
+        Some((i, self.weights.remove(i)))
+    }
+
+    fn mean_weight(&self) -> f32 {
+        if self.weights.is_empty() {
+            1.0
+        } else {
+            self.weights.iter().sum::<f32>() / self.weights.len() as f32
+        }
+    }
+}
+
+/// On-disk forms of one entry of an edge list. Configs from before groups
+/// stored each stacked pallet as a bare id; this branch's earlier builds
+/// stored tab groups.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum GroupRepr {
     Single(PanelId),
-    Group {
-        tabs: Vec<PanelId>,
+    Stack {
+        panels: Vec<PanelId>,
         #[serde(default)]
-        active: Option<PanelId>,
-        #[serde(default = "default_weight")]
-        weight: f32,
+        weights: Vec<f32>,
     },
+    Tabs { tabs: Vec<PanelId> },
 }
 
-fn default_weight() -> f32 {
-    1.0
-}
-
-impl From<GroupRepr> for DockGroup {
-    fn from(repr: GroupRepr) -> Self {
+/// Read an edge list. Bare ids were pallets stacked on the edge, all shown
+/// at once, so they become one group to keep the old layout.
+fn edge_from_reprs<'de, D>(de: D) -> Result<Vec<DockGroup>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let reprs = Vec::<GroupRepr>::deserialize(de)?;
+    let mut groups = Vec::new();
+    let mut legacy: Vec<PanelId> = Vec::new();
+    for repr in reprs {
         match repr {
-            GroupRepr::Single(id) => DockGroup::single(id, 1.0),
-            GroupRepr::Group {
-                tabs,
-                active,
-                weight,
-            } => {
-                // A hand-edited or corrupt group still yields a usable slot.
-                let tabs = if tabs.is_empty() {
-                    vec![PanelId::Properties]
-                } else {
-                    tabs
-                };
-                let active = active.filter(|a| tabs.contains(a)).unwrap_or(tabs[0]);
-                let weight = if weight.is_finite() && weight > 0.0 {
-                    weight.clamp(MIN_WEIGHT, MAX_WEIGHT)
-                } else {
-                    1.0
-                };
-                DockGroup {
-                    tabs,
-                    active,
-                    weight,
-                }
-            }
+            GroupRepr::Single(id) => legacy.push(id),
+            GroupRepr::Stack { panels, weights } => groups.push(DockGroup { panels, weights }),
+            GroupRepr::Tabs { tabs } => groups.push(DockGroup::stack(tabs)),
         }
     }
-}
-
-impl DockGroup {
-    pub fn single(id: PanelId, weight: f32) -> Self {
-        Self {
-            tabs: vec![id],
-            active: id,
-            weight,
-        }
+    if !legacy.is_empty() {
+        groups.insert(0, DockGroup::stack(legacy));
     }
+    for g in &mut groups {
+        g.heal();
+    }
+    groups.retain(|g| !g.panels.is_empty());
+    Ok(groups)
 }
 
 /// A panel floating over the workspace, in workspace-local pixels.
@@ -264,33 +290,39 @@ pub struct FloatPanel {
 
 /// Smallest floating panel height.
 pub const FLOAT_MIN_H: f32 = 160.0;
-/// Smallest on-screen height of a docked slot while dragging a splitter.
+/// Smallest on-screen height of a stacked pallet while dragging a splitter.
 pub const GROUP_MIN_H: f32 = 80.0;
 const MIN_WEIGHT: f32 = 0.05;
 const MAX_WEIGHT: f32 = 20.0;
 
-/// The whole dock layout: two ordered per-side stacks of tab groups, the
+/// The whole dock layout: per edge its groups and which one shows, the
 /// floating panels, plus per-panel settings. Only the persisted layout lives
 /// here; transient drag/hover state is app state (see `update::mod`) so it is
 /// skipped by serialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DockState {
-    /// Slots anchored to the left edge, top → bottom.
+    /// Groups on the left edge, in icon-strip order.
+    #[serde(deserialize_with = "edge_from_reprs")]
     pub left: Vec<DockGroup>,
-    /// Slots anchored to the right edge, top → bottom.
+    /// Groups on the right edge, in icon-strip order.
+    #[serde(deserialize_with = "edge_from_reprs")]
     pub right: Vec<DockGroup>,
+    /// The group each edge shows (left, right).
+    pub shown: (usize, usize),
     /// Floating panels, back → front.
     pub floating: Vec<FloatPanel>,
-    /// Per-panel width / auto-collapse settings, keyed by `PanelId`.
+    /// Per-panel width / auto-collapse settings, keyed by `PanelId`. A
+    /// group's pallets share one width, so each group keeps its own.
     pub panels: BTreeMap<PanelId, DockPanel>,
 }
 
 impl Default for DockState {
     fn default() -> Self {
         Self {
-            left: vec![DockGroup::single(PanelId::Properties, 1.0)],
-            right: vec![DockGroup::single(PanelId::BlockPalette, 1.0)],
+            left: vec![DockGroup::single(PanelId::Properties)],
+            right: vec![DockGroup::single(PanelId::BlockPalette)],
+            shown: (0, 0),
             floating: Vec::new(),
             panels: BTreeMap::new(),
         }
@@ -298,7 +330,7 @@ impl Default for DockState {
 }
 
 impl DockState {
-    /// The slots stacked on `side`, top → bottom.
+    /// The groups on `side`, in icon-strip order.
     pub fn groups(&self, side: DockSide) -> &[DockGroup] {
         match side {
             DockSide::Left => &self.left,
@@ -310,6 +342,34 @@ impl DockState {
         match side {
             DockSide::Left => &mut self.left,
             DockSide::Right => &mut self.right,
+        }
+    }
+
+    /// The group `side` shows (it may hold no open pallet; see the app's
+    /// `dock_shown_group` for the one actually drawn).
+    pub fn shown(&self, side: DockSide) -> usize {
+        match side {
+            DockSide::Left => self.shown.0,
+            DockSide::Right => self.shown.1,
+        }
+    }
+
+    /// Make group `gi` the one `side` shows. Returns whether it changed.
+    pub fn show_group(&mut self, side: DockSide, gi: usize) -> bool {
+        let slot = match side {
+            DockSide::Left => &mut self.shown.0,
+            DockSide::Right => &mut self.shown.1,
+        };
+        let changed = *slot != gi;
+        *slot = gi;
+        changed
+    }
+
+    /// Show the group holding `id`. Returns whether the shown group changed.
+    pub fn show_group_of(&mut self, id: PanelId) -> bool {
+        match self.location(id) {
+            Some((side, gi)) => self.show_group(side, gi),
+            None => false,
         }
     }
 
@@ -325,22 +385,25 @@ impl DockState {
         for side in [DockSide::Left, DockSide::Right] {
             let groups = self.groups_mut(side);
             for g in groups.iter_mut() {
-                g.tabs.retain(|id| seen.insert(*id));
-                if !g.tabs.contains(&g.active) {
-                    if let Some(first) = g.tabs.first() {
-                        g.active = *first;
-                    }
-                }
+                g.heal();
+                let keep: Vec<bool> = g.panels.iter().map(|id| seen.insert(*id)).collect();
+                let mut k = keep.iter();
+                g.weights.retain(|_| *k.next().expect("parallel"));
+                let mut k = keep.iter();
+                g.panels.retain(|_| *k.next().expect("parallel"));
             }
-            groups.retain(|g| !g.tabs.is_empty());
+            groups.retain(|g| !g.panels.is_empty());
+            let len = groups.len();
+            let shown = self.shown(side).min(len.saturating_sub(1));
+            self.show_group(side, shown);
         }
         self.floating.retain(|f| seen.insert(f.id));
     }
 
-    /// Where (if anywhere) a panel is docked: its side and slot index.
+    /// Where (if anywhere) a panel is docked: its side and group index.
     pub fn location(&self, id: PanelId) -> Option<(DockSide, usize)> {
         for side in [DockSide::Left, DockSide::Right] {
-            if let Some(i) = self.groups(side).iter().position(|g| g.tabs.contains(&id)) {
+            if let Some(i) = self.groups(side).iter().position(|g| g.panels.contains(&id)) {
                 return Some((side, i));
             }
         }
@@ -393,120 +456,99 @@ impl DockState {
         entry.auto_collapse = on;
     }
 
-    /// Take `id` out of the layout. Returns the docked slot it left and
-    /// whether that slot disappeared (it held no other tab).
-    fn detach(&mut self, id: PanelId) -> Option<(DockSide, usize, bool)> {
-        self.floating.retain(|f| f.id != id);
-        let (side, gi) = self.location(id)?;
-        let groups = self.groups_mut(side);
-        let g = &mut groups[gi];
-        g.tabs.retain(|t| *t != id);
-        if g.tabs.is_empty() {
-            groups.remove(gi);
-            return Some((side, gi, true));
-        }
-        if g.active == id {
-            g.active = g.tabs[0];
-        }
-        Some((side, gi, false))
-    }
-
-    /// Dock `id` as its own slot on `side` at insertion `index` (0 = top,
-    /// `len` = bottom), counted in the stack as it is *before* the move.
-    /// Returns whether the layout actually changed.
-    pub fn dock(&mut self, id: PanelId, side: DockSide, index: usize) -> bool {
-        let before = self.clone();
-        let weight = {
-            let groups = self.groups(side);
-            if groups.is_empty() {
-                1.0
-            } else {
-                groups.iter().map(|g| g.weight).sum::<f32>() / groups.len() as f32
-            }
-        };
-        let mut index = index;
-        let mut weight = weight;
-        if let Some((old_side, old_i, removed)) = self.detach(id) {
-            if old_side == side && removed {
-                // Moving within an edge keeps the slot's own height share.
-                weight = before.groups(side)[old_i].weight;
-                if old_i < index {
-                    index -= 1;
-                }
-            }
-        }
-        let groups = self.groups_mut(side);
-        let index = index.min(groups.len());
-        groups.insert(index, DockGroup::single(id, weight));
-        *self != before
-    }
-
-    /// Add `id` as a tab of slot `group` on `side` (slot index counted
-    /// before the move) and show it. `index` is the tab position, counted in
-    /// the slot's tabs before the move; `None` appends a newcomer and leaves
-    /// a tab already in the slot where it is. A joining panel takes on the
-    /// slot's width, so switching tabs never changes the column width.
-    /// Returns whether the layout changed.
-    pub fn add_tab(
-        &mut self,
-        id: PanelId,
-        side: DockSide,
-        group: usize,
-        index: Option<usize>,
-    ) -> bool {
-        if group >= self.groups(side).len() {
-            return false;
-        }
-        let before = self.clone();
-        if let Some(pos) = self.groups(side)[group].tabs.iter().position(|t| *t == id) {
-            // Reordering within the slot.
-            let g = &mut self.groups_mut(side)[group];
-            if let Some(index) = index {
-                g.tabs.remove(pos);
-                let index = if pos < index { index - 1 } else { index };
-                g.tabs.insert(index.min(g.tabs.len()), id);
-            }
-            g.active = id;
-            return *self != before;
-        }
-        let width = self.group_width(side, group);
-        let mut group = group;
-        if let Some((old_side, old_i, removed)) = self.detach(id) {
-            if old_side == side && removed && old_i < group {
-                group -= 1;
-            }
-        }
-        let g = &mut self.groups_mut(side)[group];
-        let index = index.unwrap_or(g.tabs.len()).min(g.tabs.len());
-        g.tabs.insert(index, id);
-        g.active = id;
-        self.set_width(id, width);
-        true
-    }
-
-    /// The saved width a slot's panels share: the widest of its tabs, so a
-    /// slot whose tabs were sized apart (older configs) renders at one width.
+    /// The saved width a group's pallets share: the widest of them, so a
+    /// group whose pallets were sized apart renders at one width.
     pub fn group_width(&self, side: DockSide, group: usize) -> f32 {
         self.groups(side)[group]
-            .tabs
+            .panels
             .iter()
             .map(|id| self.settings(*id).width)
             .fold(DOCK_MIN_W, f32::max)
     }
 
-    /// Set the width of `id` and of every other tab in its slot.
+    /// Set the width of `id` and of every other pallet in its group.
     pub fn set_group_width(&mut self, id: PanelId, width: f32) {
-        let tabs = match self.location(id) {
-            Some((side, gi)) => self.groups(side)[gi].tabs.clone(),
+        let panels = match self.location(id) {
+            Some((side, gi)) => self.groups(side)[gi].panels.clone(),
             None => vec![id],
         };
-        for t in tabs {
-            self.set_width(t, width);
+        for p in panels {
+            self.set_width(p, width);
         }
     }
 
-    /// Move slot `group` on `side` to insertion `index` on `to` (counted
-    /// before the move). Returns whether the layout changed.
+    /// Take `id` out of the layout. Returns the group it left, its position
+    /// and weight there, and whether the group disappeared (it held nothing
+    /// else).
+    fn detach(&mut self, id: PanelId) -> Option<(DockSide, usize, usize, f32, bool)> {
+        self.floating.retain(|f| f.id != id);
+        let (side, gi) = self.location(id)?;
+        let (pos, weight) = self.groups_mut(side)[gi].remove(id).expect("located");
+        if !self.groups(side)[gi].panels.is_empty() {
+            return Some((side, gi, pos, weight, false));
+        }
+        self.groups_mut(side).remove(gi);
+        // Keep showing the same group, or its neighbour when it went away.
+        let shown = self.shown(side);
+        if shown > gi || (shown == gi && shown > 0 && shown >= self.groups(side).len()) {
+            self.show_group(side, shown - 1);
+        }
+        Some((side, gi, pos, weight, true))
+    }
+
+    /// Dock `id` as a new group of its own on `side` at insertion `index`
+    /// (0 = first, `len` = last), counted before the move, and show it.
+    /// Returns whether the layout changed.
+    pub fn dock(&mut self, id: PanelId, side: DockSide, index: usize) -> bool {
+        let before = self.clone();
+        let mut index = index;
+        if let Some((old_side, old_gi, _, _, removed)) = self.detach(id) {
+            if old_side == side && removed && old_gi < index {
+                index -= 1;
+            }
+        }
+        let groups = self.groups_mut(side);
+        let index = index.min(groups.len());
+        groups.insert(index, DockGroup::single(id));
+        self.show_group(side, index);
+        *self != before
+    }
+
+    /// Stack `id` into group `group` on `side` at position `index` (0 = top,
+    /// `len` = bottom), both counted before the move, and show the group. A
+    /// pallet already in the group moves within it. A joining pallet takes on
+    /// the group's width. Returns whether the layout changed.
+    pub fn join_group(&mut self, id: PanelId, side: DockSide, group: usize, index: usize) -> bool {
+        if group >= self.groups(side).len() {
+            return false;
+        }
+        let before = self.clone();
+        let width = self.group_width(side, group);
+        let joining = !self.groups(side)[group].panels.contains(&id);
+        let mut group = group;
+        let mut index = index;
+        let mut weight = self.groups(side)[group].mean_weight();
+        if let Some((old_side, old_gi, pos, w, removed)) = self.detach(id) {
+            if old_side == side && old_gi == group {
+                // Moving within the group keeps the pallet's height.
+                weight = w;
+                if pos < index {
+                    index -= 1;
+                }
+            } else if old_side == side && removed && old_gi < group {
+                group -= 1;
+            }
+        }
+        self.groups_mut(side)[group].insert(index, id, weight);
+        if joining {
+            self.set_width(id, width);
+        }
+        self.show_group(side, group);
+        *self != before
+    }
+
+    /// Move group `group` on `side` to insertion `index` on `to` (counted
+    /// before the move) and show it there. Returns whether the layout changed.
     pub fn move_group(&mut self, side: DockSide, group: usize, to: DockSide, index: usize) -> bool {
         if group >= self.groups(side).len() {
             return false;
@@ -520,10 +562,17 @@ impl DockState {
                 index -= 1;
             }
         }
+        let shown_here = self.shown(side);
         let g = self.groups_mut(side).remove(group);
+        if side != to && shown_here > group {
+            self.show_group(side, shown_here - 1);
+        } else if side != to && shown_here >= self.groups(side).len() && shown_here > 0 {
+            self.show_group(side, shown_here - 1);
+        }
         let dest = self.groups_mut(to);
         let index = index.min(dest.len());
         dest.insert(index, g);
+        self.show_group(to, index);
         true
     }
 
@@ -556,43 +605,36 @@ impl DockState {
         }
     }
 
-    /// Show `id` in its tab group. Returns whether the active tab changed.
-    pub fn select_tab(&mut self, id: PanelId) -> bool {
-        let Some((side, gi)) = self.location(id) else {
-            return false;
-        };
-        let g = &mut self.groups_mut(side)[gi];
-        let changed = g.active != id;
-        g.active = id;
-        changed
-    }
-
-    /// Move the boundary between slots `upper` and `lower` on `side` by
-    /// `delta` weight units, keeping their combined share and each above
-    /// `min_weight`.
+    /// Move the boundary between pallets `upper` and `lower` of group
+    /// `group` on `side` by `delta` weight units, keeping their combined
+    /// share and each above `min_weight`.
     pub fn shift_split(
         &mut self,
         side: DockSide,
+        group: usize,
         upper: usize,
         lower: usize,
         delta: f32,
         min_weight: f32,
     ) {
-        let groups = self.groups_mut(side);
-        if upper >= groups.len() || lower >= groups.len() || upper == lower {
+        let Some(g) = self.groups_mut(side).get_mut(group) else {
+            return;
+        };
+        let w = &mut g.weights;
+        if upper >= w.len() || lower >= w.len() || upper == lower {
             return;
         }
-        let total = groups[upper].weight + groups[lower].weight;
+        let total = w[upper] + w[lower];
         let min = min_weight.clamp(MIN_WEIGHT, total * 0.5);
-        let up = (groups[upper].weight + delta).clamp(min, total - min);
-        groups[upper].weight = up;
-        groups[lower].weight = total - up;
+        let up = (w[upper] + delta).clamp(min, total - min);
+        w[upper] = up;
+        w[lower] = total - up;
     }
 
-    /// Give every slot on `side` the same height again.
-    pub fn reset_splits(&mut self, side: DockSide) {
-        for g in self.groups_mut(side) {
-            g.weight = 1.0;
+    /// Give every pallet of group `group` on `side` the same height again.
+    pub fn reset_splits(&mut self, side: DockSide, group: usize) {
+        if let Some(g) = self.groups_mut(side).get_mut(group) {
+            g.weights.iter_mut().for_each(|w| *w = 1.0);
         }
     }
 }
@@ -600,40 +642,17 @@ impl DockState {
 /// Where a dragged panel lands on release.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DropTarget {
-    /// A new slot on `side` at insertion `index` (0 = top, len = bottom).
+    /// A new group on `side` at insertion `index` (0 = first, len = last).
     Edge { side: DockSide, index: usize },
-    /// A tab in slot `group` on `side`, at position `index` among the
-    /// slot's tabs (before the move), or appended / left in place for `None`.
-    Tab {
+    /// Stacked into group `group` on `side` at position `index` (counted
+    /// before the move; 0 = top).
+    Join {
         side: DockSide,
         group: usize,
-        index: Option<usize>,
+        index: usize,
     },
     /// Floating with its top-left corner at (`x`, `y`).
     Float { x: f32, y: f32 },
-}
-
-/// Which part of a docked slot the pointer is over while dragging: the top
-/// and bottom bands (35 % each) split the slot (dock above / below), the
-/// middle 30 % joins it as a tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SlotZone {
-    Above,
-    Middle,
-    Below,
-}
-
-/// Classify a pointer at `y` within a slot spanning `top..bottom`.
-pub fn slot_zone(y: f32, top: f32, bottom: f32) -> SlotZone {
-    let h = (bottom - top).max(1.0);
-    let band = h * 0.35;
-    if y < top + band {
-        SlotZone::Above
-    } else if y > bottom - band {
-        SlotZone::Below
-    } else {
-        SlotZone::Middle
-    }
 }
 
 /// Split `avail` pixels of height between slots of `weights`, returning each
@@ -983,21 +1002,26 @@ mod tests {
     }
 
     #[test]
-    fn legacy_config_with_bare_panel_ids_loads_as_single_slots() {
+    fn legacy_bare_ids_load_as_one_stacked_group() {
+        // Before groups, every id on an edge was shown stacked; keep that.
         let json = r#"{"left":["properties","block_palette"],"right":[]}"#;
         let state: DockState = serde_json::from_str(json).unwrap();
-        assert_eq!(state.left.len(), 2);
-        assert_eq!(state.left[0], DockGroup::single(PanelId::Properties, 1.0));
-        assert_eq!(state.location(PanelId::BlockPalette), Some((DockSide::Left, 1)));
+        assert_eq!(state.left.len(), 1);
+        assert_eq!(
+            state.left[0].panels,
+            vec![PanelId::Properties, PanelId::BlockPalette]
+        );
+        assert_eq!(state.left[0].weights, vec![1.0, 1.0]);
         assert!(state.floating.is_empty());
     }
 
     #[test]
     fn layout_round_trips_through_serde() {
         let mut state = DockState::default();
-        state.add_tab(PanelId::Browser, DockSide::Left, 0, None);
+        state.join_group(PanelId::Browser, DockSide::Left, 0, 1);
+        state.dock(PanelId::Count, DockSide::Left, 1);
         state.float(FloatPanel {
-            id: PanelId::Count,
+            id: PanelId::SheetSetManager,
             x: 10.0,
             y: 20.0,
             w: 300.0,
@@ -1009,50 +1033,113 @@ mod tests {
     }
 
     #[test]
-    fn add_tab_joins_a_slot_and_shows_the_new_tab() {
-        let mut state = DockState::default();
-        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None));
-        assert!(state.right.is_empty(), "its old slot disappears");
-        assert_eq!(state.left.len(), 1);
-        assert_eq!(
-            state.left[0].tabs,
-            vec![PanelId::Properties, PanelId::BlockPalette]
-        );
-        assert_eq!(state.left[0].active, PanelId::BlockPalette);
-        assert!(state.select_tab(PanelId::Properties));
-        assert_eq!(state.left[0].active, PanelId::Properties);
-    }
-
-    #[test]
-    fn add_tab_reorders_within_a_slot() {
-        let mut state = DockState::default();
-        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
-        state.add_tab(PanelId::Browser, DockSide::Left, 0, None);
-        // Drag the first tab to the end.
-        assert!(state.add_tab(PanelId::Properties, DockSide::Left, 0, Some(3)));
-        assert_eq!(
-            state.left[0].tabs,
-            vec![PanelId::BlockPalette, PanelId::Browser, PanelId::Properties]
-        );
-        // Drag the last tab to the front.
-        assert!(state.add_tab(PanelId::Properties, DockSide::Left, 0, Some(0)));
-        assert_eq!(state.left[0].tabs[0], PanelId::Properties);
-        // A middle drop (None) leaves a member where it is.
-        assert!(!state.add_tab(PanelId::Properties, DockSide::Left, 0, None));
-        // A newcomer can land at a given position.
-        state.add_tab(PanelId::Count, DockSide::Left, 0, Some(1));
-        assert_eq!(state.left[0].tabs[1], PanelId::Count);
-    }
-
-    #[test]
-    fn tabs_share_the_slot_width() {
+    fn join_group_stacks_and_shows_the_group() {
         let mut state = DockState::default();
         state.set_width(PanelId::Properties, 320.0);
-        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
+        // Below Properties in the left group.
+        assert!(state.join_group(PanelId::BlockPalette, DockSide::Left, 0, 1));
+        assert!(state.right.is_empty(), "its old group disappears");
+        assert_eq!(
+            state.left[0].panels,
+            vec![PanelId::Properties, PanelId::BlockPalette]
+        );
+        assert_eq!(state.left[0].weights.len(), 2);
+        // It takes on the group's width.
         assert_eq!(state.settings(PanelId::BlockPalette).width, 320.0);
-        state.set_group_width(PanelId::BlockPalette, 400.0);
-        assert_eq!(state.settings(PanelId::Properties).width, 400.0);
-        assert_eq!(state.group_width(DockSide::Left, 0), 400.0);
+        // Moving it above Properties keeps it in the group.
+        assert!(state.join_group(PanelId::BlockPalette, DockSide::Left, 0, 0));
+        assert_eq!(state.left[0].panels[0], PanelId::BlockPalette);
+        // Dropping it where it already is changes nothing.
+        assert!(!state.join_group(PanelId::BlockPalette, DockSide::Left, 0, 1));
+    }
+
+    #[test]
+    fn join_group_index_counts_groups_before_the_move() {
+        let mut state = DockState::default();
+        state.left = vec![
+            DockGroup::single(PanelId::BlockPalette),
+            DockGroup::single(PanelId::Properties),
+        ];
+        state.right.clear();
+        // Group 1 (Properties) is group 0 once the palette's group is gone.
+        assert!(state.join_group(PanelId::BlockPalette, DockSide::Left, 1, 1));
+        assert_eq!(state.left.len(), 1);
+        assert_eq!(
+            state.left[0].panels,
+            vec![PanelId::Properties, PanelId::BlockPalette]
+        );
+        assert_eq!(state.shown(DockSide::Left), 0);
+    }
+
+    #[test]
+    fn dock_starts_a_new_group_and_shows_it() {
+        let mut state = DockState::default();
+        state.join_group(PanelId::BlockPalette, DockSide::Left, 0, 1);
+        assert!(state.dock(PanelId::BlockPalette, DockSide::Left, 1));
+        assert_eq!(state.left.len(), 2);
+        assert_eq!(state.left[0].panels, vec![PanelId::Properties]);
+        assert_eq!(state.left[1].panels, vec![PanelId::BlockPalette]);
+        assert_eq!(state.shown(DockSide::Left), 1);
+        assert!(state.show_group_of(PanelId::Properties));
+        assert_eq!(state.shown(DockSide::Left), 0);
+    }
+
+    #[test]
+    fn removing_the_shown_group_keeps_a_valid_shown_index() {
+        let mut state = DockState::default();
+        state.dock(PanelId::Browser, DockSide::Left, 1);
+        assert_eq!(state.shown(DockSide::Left), 1);
+        // Floating Browser removes the last group; the edge shows group 0.
+        state.float(FloatPanel {
+            id: PanelId::Browser,
+            x: 0.0,
+            y: 0.0,
+            w: 250.0,
+            h: 300.0,
+        });
+        assert_eq!(state.left.len(), 1);
+        assert_eq!(state.shown(DockSide::Left), 0);
+    }
+
+    #[test]
+    fn move_group_reorders_and_crosses_edges() {
+        let mut state = DockState::default();
+        state.left.push(DockGroup::single(PanelId::Browser));
+        state.left.push(DockGroup::single(PanelId::Count));
+        // Same spot (before itself or after itself) changes nothing.
+        assert!(!state.move_group(DockSide::Left, 1, DockSide::Left, 1));
+        assert!(!state.move_group(DockSide::Left, 1, DockSide::Left, 2));
+        assert!(state.move_group(DockSide::Left, 0, DockSide::Left, 3));
+        assert_eq!(state.left[2].panels, vec![PanelId::Properties]);
+        assert_eq!(state.shown(DockSide::Left), 2, "the moved group shows");
+        assert!(state.move_group(DockSide::Left, 2, DockSide::Right, 0));
+        assert_eq!(state.right[0].panels, vec![PanelId::Properties]);
+        assert_eq!(state.left.len(), 2);
+        assert!(state.shown(DockSide::Left) < 2);
+    }
+
+    #[test]
+    fn shift_split_keeps_combined_share_and_minimum() {
+        let mut state = DockState::default();
+        state.left = vec![DockGroup::stack(vec![PanelId::BlockPalette, PanelId::Properties])];
+        state.shift_split(DockSide::Left, 0, 0, 1, 0.5, 0.1);
+        assert_eq!(state.left[0].weights, vec![1.5, 0.5]);
+        state.shift_split(DockSide::Left, 0, 0, 1, 10.0, 0.1);
+        assert!((state.left[0].weights[1] - 0.1).abs() < 1e-6);
+        assert!((state.left[0].weights.iter().sum::<f32>() - 2.0).abs() < 1e-6);
+        state.reset_splits(DockSide::Left, 0);
+        assert_eq!(state.left[0].weights, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn ensure_settings_drops_duplicates_and_clamps_the_shown_group() {
+        let mut state = DockState::default();
+        state.right.push(DockGroup::single(PanelId::Properties));
+        state.shown = (5, 7);
+        state.ensure_settings();
+        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
+        assert_eq!(state.right.len(), 1);
+        assert_eq!(state.shown, (0, 0));
     }
 
     #[test]
@@ -1075,62 +1162,6 @@ mod tests {
         assert_eq!(strip_hit(g1.grip_top + 1.0, &layout), StripHit::NewGroup(Some(2)));
         // Below everything: a new last group.
         assert_eq!(strip_hit(plus_top + 20.0, &layout), StripHit::NewGroup(None));
-    }
-
-    #[test]
-    fn move_group_reorders_and_crosses_edges() {
-        let mut state = DockState::default();
-        state.left.push(DockGroup::single(PanelId::Browser, 1.0));
-        state.left.push(DockGroup::single(PanelId::Count, 1.0));
-        // Same spot (before itself or after itself) changes nothing.
-        assert!(!state.move_group(DockSide::Left, 1, DockSide::Left, 1));
-        assert!(!state.move_group(DockSide::Left, 1, DockSide::Left, 2));
-        assert!(state.move_group(DockSide::Left, 0, DockSide::Left, 3));
-        assert_eq!(state.left[2].tabs, vec![PanelId::Properties]);
-        assert!(state.move_group(DockSide::Left, 2, DockSide::Right, 0));
-        assert_eq!(state.right[0].tabs, vec![PanelId::Properties]);
-        assert_eq!(state.left.len(), 2);
-    }
-
-    #[test]
-    fn docking_a_tab_out_keeps_the_rest_of_the_group() {
-        let mut state = DockState::default();
-        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0, None);
-        // Pull the shown tab out below the group.
-        assert!(state.dock(PanelId::BlockPalette, DockSide::Left, 1));
-        assert_eq!(state.left.len(), 2);
-        assert_eq!(state.left[0].tabs, vec![PanelId::Properties]);
-        assert_eq!(state.left[0].active, PanelId::Properties);
-        assert_eq!(state.location(PanelId::BlockPalette), Some((DockSide::Left, 1)));
-    }
-
-    #[test]
-    fn add_tab_index_counts_slots_before_the_move() {
-        let mut state = DockState::default();
-        state.left = vec![
-            DockGroup::single(PanelId::BlockPalette, 1.0),
-            DockGroup::single(PanelId::Properties, 1.0),
-        ];
-        state.right.clear();
-        // Slot 1 (Properties) is slot 0 once the palette's slot is gone.
-        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 1, None));
-        assert_eq!(state.left.len(), 1);
-        assert_eq!(
-            state.left[0].tabs,
-            vec![PanelId::Properties, PanelId::BlockPalette]
-        );
-    }
-
-    #[test]
-    fn moving_a_slot_down_keeps_its_height_share() {
-        let mut state = DockState::default();
-        state.left = vec![
-            DockGroup::single(PanelId::BlockPalette, 0.5),
-            DockGroup::single(PanelId::Properties, 1.5),
-        ];
-        assert!(state.dock(PanelId::BlockPalette, DockSide::Left, 2));
-        assert_eq!(state.left[0].tabs, vec![PanelId::Properties]);
-        assert_eq!(state.left[1], DockGroup::single(PanelId::BlockPalette, 0.5));
     }
 
     #[test]
@@ -1189,31 +1220,6 @@ mod tests {
     }
 
     #[test]
-    fn shift_split_keeps_combined_share_and_minimum() {
-        let mut state = DockState::default();
-        state.left = vec![
-            DockGroup::single(PanelId::BlockPalette, 1.0),
-            DockGroup::single(PanelId::Properties, 1.0),
-        ];
-        state.shift_split(DockSide::Left, 0, 1, 0.5, 0.1);
-        assert_eq!((state.left[0].weight, state.left[1].weight), (1.5, 0.5));
-        state.shift_split(DockSide::Left, 0, 1, 10.0, 0.1);
-        assert!((state.left[1].weight - 0.1).abs() < 1e-6);
-        assert!((state.left[0].weight + state.left[1].weight - 2.0).abs() < 1e-6);
-        state.reset_splits(DockSide::Left);
-        assert_eq!((state.left[0].weight, state.left[1].weight), (1.0, 1.0));
-    }
-
-    #[test]
-    fn ensure_settings_drops_duplicate_placements() {
-        let mut state = DockState::default();
-        state.right.push(DockGroup::single(PanelId::Properties, 1.0));
-        state.ensure_settings();
-        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
-        assert_eq!(state.right.len(), 1);
-    }
-
-    #[test]
     fn every_panel_has_its_own_icon() {
         let ids = PanelId::ALL;
         for (i, a) in ids.iter().enumerate() {
@@ -1235,15 +1241,6 @@ mod tests {
             bar.as_widget().size(),
             iced::Size::new(Length::Fixed(0.0), Length::Fixed(0.0))
         );
-    }
-
-    #[test]
-    fn slot_zone_splits_into_stacking_and_tab_bands() {
-        assert_eq!(slot_zone(10.0, 0.0, 400.0), SlotZone::Above);
-        assert_eq!(slot_zone(130.0, 0.0, 400.0), SlotZone::Above);
-        assert_eq!(slot_zone(200.0, 0.0, 400.0), SlotZone::Middle);
-        assert_eq!(slot_zone(270.0, 0.0, 400.0), SlotZone::Below);
-        assert_eq!(slot_zone(390.0, 0.0, 400.0), SlotZone::Below);
     }
 
     #[test]

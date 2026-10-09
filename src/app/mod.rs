@@ -863,8 +863,9 @@ pub(super) struct OpenCADStudio {
     /// Pointer offset from a dragged panel's top-left corner, so a floated
     /// panel lands where it is held rather than jumping to the pointer.
     pub(crate) dock_grab_offset: iced::Vector,
-    /// Splitter being dragged between two slots on a side (upper, lower).
-    pub(crate) dock_split_drag: Option<(crate::app::config::DockSide, usize, usize)>,
+    /// Splitter being dragged between two pallets of a group (side, group,
+    /// upper, lower).
+    pub(crate) dock_split_drag: Option<(crate::app::config::DockSide, usize, usize, usize)>,
     /// Floating panel being resized from its corner grip, and whether from
     /// the bottom-left corner.
     pub(crate) dock_float_resizing: Option<(crate::ui::dock::PanelId, bool)>,

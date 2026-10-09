@@ -580,12 +580,16 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.save_config();
                 iced::Task::none()
             }
-            DockMsg::FloatResizeGrab(id) => {
+            DockMsg::FloatResizeGrab(id, from_left) => {
                 self.dock.raise_float(id);
-                self.dock_float_resizing = Some(id);
+                self.dock_float_resizing = Some((id, from_left));
                 self.dock_dragging = None;
                 self.dock_drag_last = None;
                 self.dock_drag_target = None;
+                iced::Task::none()
+            }
+            DockMsg::TitleHover(id) => {
+                self.dock_title_hover = id;
                 iced::Task::none()
             }
             DockMsg::FloatRaise(id) => {
@@ -707,12 +711,14 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             );
                         }
                     }
-                } else if let Some(id) = self.dock_float_resizing {
+                } else if let Some((id, from_left)) = self.dock_float_resizing {
                     if let (Some(last), Some(f)) = (self.dock_drag_last, self.dock.float_rect(id)) {
+                        let dx = point.x - last.x;
                         self.dock.resize_float(
                             id,
-                            f.w + point.x - last.x,
+                            if from_left { f.w - dx } else { f.w + dx },
                             f.h + point.y - last.y,
+                            from_left,
                         );
                     }
                 } else if let Some(id) = self.dock_resizing {
@@ -2042,12 +2048,19 @@ mod tests {
             w: 260.0,
             h: 300.0,
         });
-        let _ = app.on_dock(DockMsg::FloatResizeGrab(PanelId::BlockPalette));
+        let _ = app.on_dock(DockMsg::FloatResizeGrab(PanelId::BlockPalette, false));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(360.0, 400.0)));
         let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(400.0, 450.0)));
         let _ = app.on_dock(DockMsg::DragRelease);
         let f = app.dock.float_rect(PanelId::BlockPalette).unwrap();
         assert_eq!((f.w, f.h), (300.0, 350.0));
+        // The bottom-left grip grows the panel leftward, keeping its right edge.
+        let _ = app.on_dock(DockMsg::FloatResizeGrab(PanelId::BlockPalette, true));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(100.0, 450.0)));
+        let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(60.0, 450.0)));
+        let _ = app.on_dock(DockMsg::DragRelease);
+        let g = app.dock.float_rect(PanelId::BlockPalette).unwrap();
+        assert_eq!((g.x, g.w, g.h), (f.x - 40.0, 340.0, 350.0));
     }
 
     #[test]

@@ -72,7 +72,11 @@ pub static COPY: &[u8] = include_bytes!("../../assets/icons/ui/copy.svg");
 pub static MENU: &[u8] = include_bytes!("../../assets/icons/ui/menu.svg");
 pub static MOVE: &[u8] = include_bytes!("../../assets/icons/ui/move.svg");
 pub static RESIZE: &[u8] = include_bytes!("../../assets/icons/ui/resize.svg");
+/// `RESIZE` mirrored for a bottom-left corner grip.
+pub static RESIZE_LEFT: &[u8] = include_bytes!("../../assets/icons/ui/resize_left.svg");
 pub static PIN: &[u8] = include_bytes!("../../assets/icons/ui/pin.svg");
+/// `PIN` tilted 30°: the pin while auto-hide is on.
+pub static PIN_ACTIVE: &[u8] = include_bytes!("../../assets/icons/ui/pin_active.svg");
 pub static SPLIT_V: &[u8] = include_bytes!("../../assets/icons/ui/split_v.svg");
 pub static SPLIT_H: &[u8] = include_bytes!("../../assets/icons/ui/split_h.svg");
 pub static GRID: &[u8] = include_bytes!("../../assets/icons/ui/grid.svg");

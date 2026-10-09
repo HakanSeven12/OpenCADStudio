@@ -38,8 +38,11 @@ pub enum DockMsg {
     SplitGrab(DockSide, usize, usize),
     /// Give every slot on a side the same height again.
     SplitReset(DockSide),
-    /// Begin resizing floating `panel` from its corner grip.
-    FloatResizeGrab(PanelId),
+    /// Begin resizing floating `panel` from its corner grip; `true` for the
+    /// bottom-left grip (a panel whose title bar is on the right).
+    FloatResizeGrab(PanelId, bool),
+    /// The pointer entered (`Some`) or left (`None`) a docked title bar.
+    TitleHover(Option<PanelId>),
     /// Bring floating `panel` to the front.
     FloatRaise(PanelId),
     /// The pointer left the edge column; collapse any auto-collapsing panel.
@@ -454,10 +457,15 @@ impl DockState {
         }
     }
 
-    /// Resize a floating panel, keeping it at least a usable size.
-    pub fn resize_float(&mut self, id: PanelId, w: f32, h: f32) {
+    /// Resize a floating panel, keeping it at least a usable size. With
+    /// `keep_right` the right edge stays put (resizing from the left corner).
+    pub fn resize_float(&mut self, id: PanelId, w: f32, h: f32, keep_right: bool) {
         if let Some(f) = self.floating.iter_mut().find(|f| f.id == id) {
-            f.w = w.clamp(DOCK_MIN_W, id.max_width());
+            let new_w = w.clamp(DOCK_MIN_W, id.max_width());
+            if keep_right {
+                f.x += f.w - new_w;
+            }
+            f.w = new_w;
             f.h = h.max(FLOAT_MIN_H);
         }
     }
@@ -582,6 +590,8 @@ pub struct Chrome {
     /// The panel floats; its title lives in the vertical side bar drawn by
     /// the floating frame instead of the horizontal title bar.
     pub floating: bool,
+    /// The pointer is over the title bar, which shows its pin and close.
+    pub title_hovered: bool,
 }
 
 /// The row every docked panel starts with: its title, the auto-collapse pin
@@ -591,48 +601,65 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
     if chrome.floating {
         return Space::new().width(0).height(0).into();
     }
-    let auto_collapse = chrome.auto_collapse;
-    let pin_icon = if auto_collapse {
-        crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
-    } else {
-        crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
-    };
-    let pin = button(pin_icon)
+    // The pin and close only show while the pointer is over the bar; the
+    // fixed height keeps the bar from jumping when they appear.
+    let mut bar = row![text(title).size(12), Space::new().width(Length::Fill)]
+        .spacing(3)
+        .height(Length::Fixed(TITLE_BUTTON_H))
+        .align_y(iced::Center);
+    if chrome.title_hovered {
+        bar = bar
+            .push(pin_button(id, chrome.auto_collapse, tooltip::Position::Bottom))
+            .push(close_button(id, tooltip::Position::Bottom));
+    }
+    mouse_area(
+        container(bar)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.weak.color)),
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .padding([3, 6]),
+    )
+    .on_press(Message::Dock(DockMsg::DockGrab(id)))
+    .on_enter(Message::Dock(DockMsg::TitleHover(Some(id))))
+    .on_exit(Message::Dock(DockMsg::TitleHover(None)))
+    .interaction(iced::mouse::Interaction::Grab)
+    .into()
+}
+
+/// Height of a title bar's button row.
+const TITLE_BUTTON_H: f32 = 20.0;
+
+/// The auto-hide pin. While auto-hide is on the pin is drawn tilted instead
+/// of on a coloured background.
+pub fn pin_button<'a>(id: PanelId, auto_collapse: bool, tip: tooltip::Position) -> Element<'a, Message> {
+    let icon = crate::ui::icons::themed_secondary(
+        if auto_collapse {
+            crate::ui::icons::PIN_ACTIVE
+        } else {
+            crate::ui::icons::PIN
+        },
+        12.0,
+    );
+    let pin = button(icon)
         .on_press(Message::Dock(DockMsg::AutoCollapseToggle(id)))
-        .style(move |theme: &Theme, status| {
-            let mut style = button::subtle(theme, status);
-            if auto_collapse {
-                let palette = theme.palette();
-                style.background = Some(Background::Color(palette.primary.weak.color));
-                style.text_color = palette.primary.weak.text;
-                style.border.color = palette.primary.base.color;
-                style.border.width = 1.0;
-            }
-            style
-        })
+        .style(button::subtle)
         .padding([3, 5]);
-    let pin = tooltip(pin, text(crate::t!("Auto")).size(10), tooltip::Position::Bottom).gap(4);
+    tooltip(pin, text(crate::t!("Auto-hide")).size(10), tip)
+        .gap(4)
+        .into()
+}
+
+/// The close button of a panel's title bar.
+pub fn close_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
     let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
         .on_press(Message::Dock(DockMsg::Close(id)))
         .style(button::subtle)
         .padding([3, 5]);
-    let close = tooltip(close, text(crate::t!("Close")).size(10), tooltip::Position::Bottom).gap(4);
-    mouse_area(
-        container(
-            row![text(title).size(12), Space::new().width(Length::Fill), pin, close]
-                .spacing(3)
-                .align_y(iced::Center),
-        )
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            ..Default::default()
-        })
-        .width(Length::Fill)
-        .padding([3, 6]),
-    )
-    .on_press(Message::Dock(DockMsg::DockGrab(id)))
-    .interaction(iced::mouse::Interaction::Grab)
-    .into()
+    tooltip(close, text(crate::t!("Close")).size(10), tip)
+        .gap(4)
+        .into()
 }
 
 /// Side length of a panel toolbar button's icon.
@@ -901,9 +928,13 @@ mod tests {
             w: 300.0,
             h: 300.0,
         });
-        state.resize_float(PanelId::Count, 10.0, 10.0);
+        state.resize_float(PanelId::Count, 10.0, 10.0, false);
         let f = state.float_rect(PanelId::Count).unwrap();
         assert_eq!((f.w, f.h), (DOCK_MIN_W, FLOAT_MIN_H));
+        // From the left corner the right edge stays where it was.
+        state.resize_float(PanelId::Count, 350.0, 300.0, true);
+        let f = state.float_rect(PanelId::Count).unwrap();
+        assert_eq!((f.x, f.w), (DOCK_MIN_W - 350.0, 350.0));
     }
 
     #[test]
@@ -970,8 +1001,8 @@ mod tests {
     #[test]
     fn floating_title_bar_replaces_the_horizontal_one() {
         let floating = Chrome {
-            auto_collapse: false,
             floating: true,
+            ..Default::default()
         };
         let bar: Element<'_, Message> = title_bar(PanelId::Count, "Count".into(), floating);
         assert_eq!(

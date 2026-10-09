@@ -1930,7 +1930,9 @@ bg={bg_ms:.1}ms n={view_count}"
         // Floating panels sit over the workspace, back to front.
         let mut layers: Vec<Element<'_, Message>> = vec![workspace];
         for f in &self.dock.floating {
-            if self.dock_panel_visible(f.id) {
+            // Once a drag is under way only its preview shows the panel.
+            let dragged = self.dock_dragging == Some(f.id) && self.dock_drag_target.is_some();
+            if self.dock_panel_visible(f.id) && !dragged {
                 layers.push(self.floating_panel(*f, tab));
             }
         }
@@ -1956,8 +1958,12 @@ bg={bg_ms:.1}ms n={view_count}"
             mouse_area(workspace)
                 .on_move(move |p| Message::Dock(crate::ui::dock::DockMsg::DragMove(p)))
                 .on_release(Message::Dock(crate::ui::dock::DockMsg::DragRelease))
-                .interaction(if self.dock_float_resizing.is_some() {
-                    iced::mouse::Interaction::ResizingDiagonallyDown
+                .interaction(if let Some((_, from_left)) = self.dock_float_resizing {
+                    if from_left {
+                        iced::mouse::Interaction::ResizingDiagonallyUp
+                    } else {
+                        iced::mouse::Interaction::ResizingDiagonallyDown
+                    }
                 } else if any_resizing {
                     iced::mouse::Interaction::ResizingHorizontally
                 } else if any_splitting {
@@ -2897,6 +2903,7 @@ impl OpenCADStudio {
         let chrome = crate::ui::dock::Chrome {
             auto_collapse: self.dock.auto_collapse(id),
             floating,
+            title_hovered: self.dock_title_hover == Some(id),
         };
         match id {
             crate::ui::dock::PanelId::Properties => tab.properties.view(width, chrome),
@@ -2978,25 +2985,48 @@ impl OpenCADStudio {
     ) -> Element<'a, Message> {
         use crate::ui::dock::DockMsg;
         let (ww, wh) = self.dock_workspace_size();
-        let bar_left = f.x + (f.w + DOCK_FLOAT_BAR_W) * 0.5 < ww * 0.5;
+        // The bar faces the nearer workspace edge; while resizing, it stays
+        // opposite the grip being dragged so it cannot flip mid-drag.
+        let bar_left = match self.dock_float_resizing {
+            Some((id, from_left)) if id == f.id => !from_left,
+            _ => f.x + (f.w + DOCK_FLOAT_BAR_W) * 0.5 < ww * 0.5,
+        };
         let hidden = self.dock.auto_collapse(f.id) && self.dock_expanded != Some(f.id);
         let bar = floating_title_bar(f.id, self.dock.auto_collapse(f.id), bar_left);
         let content: Element<'_, Message> = if hidden {
             bar
         } else {
+            // The resize grip sits in the bottom corner away from the bar.
+            let grip_left = !bar_left;
+            let grip_icon = crate::ui::icons::themed_secondary(
+                if grip_left {
+                    crate::ui::icons::RESIZE_LEFT
+                } else {
+                    crate::ui::icons::RESIZE
+                },
+                12.0,
+            );
             let grip = mouse_area(
-                container(crate::ui::icons::themed_secondary(crate::ui::icons::RESIZE, 12.0))
+                container(grip_icon)
                     .center_x(Length::Fixed(14.0))
                     .center_y(Length::Fixed(14.0)),
             )
-            .on_press(Message::Dock(DockMsg::FloatResizeGrab(f.id)))
-            .interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
+            .on_press(Message::Dock(DockMsg::FloatResizeGrab(f.id, grip_left)))
+            .interaction(if grip_left {
+                iced::mouse::Interaction::ResizingDiagonallyUp
+            } else {
+                iced::mouse::Interaction::ResizingDiagonallyDown
+            });
             let body = stack![
                 self.panel_body(f.id, f.w, true, tab),
                 container(grip)
                     .width(Fill)
                     .height(Fill)
-                    .align_x(iced::alignment::Horizontal::Right)
+                    .align_x(if grip_left {
+                        iced::alignment::Horizontal::Left
+                    } else {
+                        iced::alignment::Horizontal::Right
+                    })
                     .align_y(iced::alignment::Vertical::Bottom),
             ]
             .width(Length::Fixed(f.w))
@@ -3562,49 +3592,13 @@ fn floating_title_bar(
     on_left: bool,
 ) -> Element<'static, Message> {
     use crate::ui::dock::DockMsg;
-    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-        .on_press(Message::Dock(DockMsg::Close(id)))
-        .style(button::subtle)
-        .padding([3, 5]);
-    let close = iced::widget::tooltip(
-        close,
-        text(t!("Close")).size(10),
-        if on_left {
-            iced::widget::tooltip::Position::Left
-        } else {
-            iced::widget::tooltip::Position::Right
-        },
-    )
-    .gap(4);
-    let pin_icon = if auto_collapse {
-        crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
+    let tip = if on_left {
+        iced::widget::tooltip::Position::Left
     } else {
-        crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
+        iced::widget::tooltip::Position::Right
     };
-    let pin = button(pin_icon)
-        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(id)))
-        .style(move |theme: &Theme, status| {
-            let mut style = button::subtle(theme, status);
-            if auto_collapse {
-                let palette = theme.palette();
-                style.background = Some(Background::Color(palette.primary.weak.color));
-                style.text_color = palette.primary.weak.text;
-                style.border.color = palette.primary.base.color;
-                style.border.width = 1.0;
-            }
-            style
-        })
-        .padding([3, 5]);
-    let pin = iced::widget::tooltip(
-        pin,
-        text(t!("Auto-hide")).size(10),
-        if on_left {
-            iced::widget::tooltip::Position::Left
-        } else {
-            iced::widget::tooltip::Position::Right
-        },
-    )
-    .gap(4);
+    let close = crate::ui::dock::close_button(id, tip);
+    let pin = crate::ui::dock::pin_button(id, auto_collapse, tip);
     let title = canvas(VBarLabel {
         text: id.title().to_string(),
         clockwise: false,

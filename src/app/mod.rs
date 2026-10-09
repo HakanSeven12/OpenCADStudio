@@ -863,8 +863,11 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_grab_offset: iced::Vector,
     /// Splitter being dragged between two slots on a side (upper, lower).
     pub(crate) dock_split_drag: Option<(crate::app::config::DockSide, usize, usize)>,
-    /// Floating panel being resized from its corner grip.
-    pub(crate) dock_float_resizing: Option<crate::ui::dock::PanelId>,
+    /// Floating panel being resized from its corner grip, and whether from
+    /// the bottom-left corner.
+    pub(crate) dock_float_resizing: Option<(crate::ui::dock::PanelId, bool)>,
+    /// Docked panel whose title bar the pointer is over (shows pin / close).
+    pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -4304,6 +4307,7 @@ impl OpenCADStudio {
             dock_grab_offset: iced::Vector::new(0.0, 0.0),
             dock_split_drag: None,
             dock_float_resizing: None,
+            dock_title_hover: None,
             xref_col_drag: None,
             xref_col_last: None,
             xref_split_drag: false,

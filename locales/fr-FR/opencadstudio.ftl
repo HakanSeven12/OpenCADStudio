@@ -2509,6 +2509,12 @@ inquiry =
     .id-specify-point = ID Spécifier le point:
     .list-no-entities-selected-select-entities-firs = LIST : aucune entité sélectionnée. Sélectionnez d'abord les entités.
     .massprop-no-entities-selected-select-entities = MASSPROP : aucune entité sélectionnée. Sélectionnez d'abord les entités.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ n'a aucun corps fermé à mesurer.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Volume=__ocs_fmt_1__  Centre de gravité=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Moments d'inertie  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Produits d'inertie  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Rayons de giration  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Moments principaux au centre de gravité  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE Sélectionnez l'objet à mesurer :
     .measure-specify-segment-length = MEASURE Spécifier la longueur du segment:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM Saisissez une option [Distance/Radius/Angle/ARea] :

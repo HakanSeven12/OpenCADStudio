@@ -15,7 +15,6 @@
 //   offset at once on the cursor's side; a negative one, on the other side.
 
 use crate::entities::curve::{entity_curve, lwpolyline_world_xy};
-use crate::modules::draw::modify::spline_ops::spline_sample_xy;
 use codec::entities::LwVertex;
 use codec::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline,
@@ -24,7 +23,6 @@ use codec::entities::{
 use codec::{EntityType, Handle};
 // Polyline offsetting, and the angle normalisation that goes with it, come
 // from the kernel; only the entity conversion stays here.
-use kernel::geom2d::nurbs::clamped_uniform_knots;
 use kernel::geom2d::{
     offset_polyline, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
 };
@@ -205,111 +203,77 @@ fn offset_lwpolyline(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Option<EntityT
     offset_lwpolylines(p, dist, side_pt).into_iter().next()
 }
 
-// ── Ellipse offset ─────────────────────────────────────────────────────────
+// ── Ellipse and spline offset ──────────────────────────────────────────────
 //
-// A true offset of an ellipse is a Lamé curve, not an ellipse. As an
-// acceptable CAD approximation we scale both semi-axes uniformly and keep
-// the same orientation, center and parameter range.  The sign of the offset
-// is determined by whether side_pt is inside or outside the ellipse.
+// Neither has a parallel of its own kind — an ellipse's is not an ellipse —
+// so both come back as a spline fitted through true offset points, within a
+// millionth of the curve's size, by the kernel. The work happens in the
+// curve's own plane, so a tilted or extruded one offsets in place.
 
 fn offset_ellipse(e: &EllipseEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
-    let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
-    if a < 1e-9 {
-        return None;
-    }
-    let b = a * e.minor_axis_ratio;
-    let nx = e.major_axis.x / a;
-    let ny = e.major_axis.y / a;
-    // Project side_pt onto ellipse local frame and test inside/outside.
-    let rx = side_pt.x as f64 - e.center.x;
-    let ry = side_pt.y as f64 - e.center.y;
-    let xl = rx * nx + ry * ny;
-    let yl = -rx * ny + ry * nx;
-    let inside = (xl / a).powi(2) + (yl / b).powi(2) < 1.0;
-    let sign = if inside { -1.0 } else { 1.0 };
-
-    let new_a = a + sign * dist;
-    let new_b = b + sign * dist;
-    if new_a <= 1e-9 || new_b <= 1e-9 {
-        return None;
-    }
-
-    let mut new_e = e.clone();
-    new_e.common.handle = Handle::NULL;
-    // Scale the major_axis vector proportionally.
-    let scale = new_a / a;
-    new_e.major_axis.x *= scale;
-    new_e.major_axis.y *= scale;
-    new_e.major_axis.z *= scale;
-    new_e.minor_axis_ratio = new_b / new_a;
-    Some(EntityType::Ellipse(new_e))
+    let source = EntityType::Ellipse(e.clone());
+    let mut template = SplineEnt::new();
+    template.common = e.common.clone();
+    offset_curved(&source, template, dist, side_pt)
 }
 
-// ── Spline offset ──────────────────────────────────────────────────────────
-//
-// Strategy: sample the spline into N points, offset each sample point by
-// `dist` along the local perpendicular (based on the finite-difference
-// tangent), then fit a new spline through the offset points.
-
 fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
-    let (ts_knot, pts) = spline_sample_xy(spl, 64);
-    let n = pts.len();
-    if n < 2 {
+    offset_curved(&EntityType::Spline(spl.clone()), spl.clone(), dist, side_pt)
+}
+
+fn offset_curved(
+    source: &EntityType,
+    mut template: SplineEnt,
+    dist: f64,
+    side_pt: Vec3,
+) -> Option<EntityType> {
+    let planar = entity_curve(source)?;
+    let side = planar
+        .plane
+        .project([side_pt.x as f64, side_pt.y as f64, side_pt.z as f64])?;
+    // Left of the curve's direction of travel is the kernel's positive side.
+    let curve = &planar.curve;
+    let at = curve.parameter_at(side);
+    let step = 1e-6;
+    let (before, after) = if curve.is_closed() {
+        (curve.point_at((at - step).rem_euclid(1.0)), curve.point_at((at + step).rem_euclid(1.0)))
+    } else {
+        (curve.point_at((at - step).max(0.0)), curve.point_at((at + step).min(1.0)))
+    };
+    let foot = curve.point_at(at);
+    let along = [after[0] - before[0], after[1] - before[1]];
+    let toward = [side[0] - foot[0], side[1] - foot[1]];
+    let left = along[0] * toward[1] - along[1] * toward[0] > 0.0;
+    let signed = if left { dist.abs() } else { -dist.abs() };
+    let tolerance = (curve.length() * 1e-6).max(1e-9);
+    let kernel::geom2d::Curve::Nurbs(parallel) =
+        kernel::geom2d::offset_curve(curve, signed, tolerance)?
+    else {
         return None;
-    }
-
-    // Determine offset sign from the first non-degenerate tangent.
-    let sign: f64 = (0..n - 1).find_map(|i| {
-        let dx = pts[i + 1][0] - pts[i][0];
-        let dy = pts[i + 1][1] - pts[i][1];
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-12 {
-            return None;
-        }
-        let vx = side_pt.x as f64 - pts[i][0];
-        let vy = side_pt.y as f64 - pts[i][1];
-        let cross = dx * vy - dy * vx;
-        Some(if cross >= 0.0 { 1.0 } else { -1.0 })
-    })?;
-
-    // Offset each sample point along the local normal.
-    let offset_pts: Vec<codec::types::Vector3> = pts
+    };
+    template.common.handle = Handle::NULL;
+    template.degree = parallel.degree() as i32;
+    template.knots = parallel.knots().to_vec();
+    template.control_points = parallel
+        .control_points()
         .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            // Tangent via central / forward / backward difference.
-            let (dx, dy) = if i == 0 {
-                let d = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]];
-                (d[0], d[1])
-            } else if i == n - 1 {
-                let d = [pts[n - 1][0] - pts[n - 2][0], pts[n - 1][1] - pts[n - 2][1]];
-                (d[0], d[1])
-            } else {
-                (
-                    (pts[i + 1][0] - pts[i - 1][0]) * 0.5,
-                    (pts[i + 1][1] - pts[i - 1][1]) * 0.5,
-                )
-            };
-            let len = (dx * dx + dy * dy).sqrt().max(1e-12);
-            let nx = -dy / len; // left perpendicular
-            let ny = dx / len;
-            let z = spl.control_points.first().map(|v| v.z).unwrap_or(0.0);
-            codec::types::Vector3::new(p[0] + sign * nx * dist, p[1] + sign * ny * dist, z)
+        .map(|uv| {
+            let [x, y, z] = planar.plane.point_at(*uv);
+            codec::types::Vector3::new(x, y, z)
         })
         .collect();
-
-    let _ = ts_knot;
-    // Build a new spline from the offset control points (treat sample pts as fit pts → ctrl pts).
-    let degree = spl.degree.max(1) as usize;
-    let new_ctrl: Vec<codec::types::Vector3> = offset_pts;
-    let n_ctrl = new_ctrl.len();
-    let mut new_spl = spl.clone();
-    new_spl.common.handle = Handle::NULL;
-    new_spl.control_points = new_ctrl;
-    new_spl.knots = clamped_uniform_knots(degree, n_ctrl);
-    new_spl.fit_points.clear();
-    new_spl.weights.clear();
-    Some(EntityType::Spline(new_spl))
+    template.weights = if parallel.is_rational() { parallel.weights().to_vec() } else { Vec::new() };
+    template.flags.rational = parallel.is_rational();
+    template.flags.periodic = false;
+    template.flags.closed = curve.is_closed();
+    if let Some([x, y, z]) = planar.plane.normal() {
+        template.normal = codec::types::Vector3::new(x, y, z);
+    }
+    // A parallel is no longer the curve through the source's fit points.
+    template.fit_points.clear();
+    template.begin_tangent = codec::types::Vector3::new(0.0, 0.0, 0.0);
+    template.end_tangent = codec::types::Vector3::new(0.0, 0.0, 0.0);
+    Some(EntityType::Spline(template))
 }
 
 // ── Dispatch ───────────────────────────────────────────────────────────────

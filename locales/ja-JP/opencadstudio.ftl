@@ -2499,6 +2499,12 @@ inquiry =
     .id-specify-point = ID  点を指定:
     .list-no-entities-selected-select-entities-firs = LIST: 図形が選択されていません。先に選択してください。
     .massprop-no-entities-selected-select-entities = MASSPROP: 図形が選択されていません。先に選択してください。
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ には計測できる閉じたボディがありません。
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  体積=__ocs_fmt_1__  重心=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = 慣性モーメント  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = 慣性乗積  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = 回転半径  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = 重心まわりの主慣性モーメント  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE  計測するオブジェクトを選択:
     .measure-specify-segment-length = MEASURE  区間長を指定:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM  オプションを入力 [距離/半径/角度/面積]:

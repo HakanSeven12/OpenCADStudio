@@ -2508,6 +2508,12 @@ inquiry =
     .id-specify-point = ID  Ορίστε σημείο:
     .list-no-entities-selected-select-entities-firs = LIST: δεν έχουν επιλεγεί οντότητες. Επιλέξτε πρώτα οντότητες.
     .massprop-no-entities-selected-select-entities = MASSPROP: δεν έχουν επιλεγεί οντότητες. Επιλέξτε πρώτα οντότητες.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ δεν έχει κλειστό σώμα για μέτρηση.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Όγκος=__ocs_fmt_1__  Κέντρο βάρους=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Ροπές αδράνειας  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Γινόμενα αδράνειας  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Ακτίνες αδράνειας  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Κύριες ροπές ως προς το κέντρο βάρους  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE  Επιλέξτε αντικείμενο προς μέτρηση:
     .measure-specify-segment-length = MEASURE  Ορίστε μήκος τμήματος:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM  Δώστε επιλογή [Απόσταση/Ακτίνα/Γωνία/Εμβαδόν]:

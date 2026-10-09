@@ -34,10 +34,10 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-codec = { package = "opencadcodec", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "c9ffcac", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "99b6b48", features = ["acis", "offset"] }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "99b6b48" }
-graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "7f6aae7" }
+codec = { package = "opencadcodec", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "8189f83", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "0764f79", features = ["acis", "offset"] }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "0764f79" }
+graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "75c30c2" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
@@ -183,5 +183,5 @@ name = "integration"
 path = "tests/integration.rs"
 
 [patch."https://github.com/HakanSeven12/opencadkernel.git"]
-opencadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "3d0f631" }
-opencadkernel-constraints = { git = "https://github.com/ramox81/cadkernel.git", rev = "3d0f631" }
+opencadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "ef96a46" }
+opencadkernel-constraints = { git = "https://github.com/ramox81/cadkernel.git", rev = "ef96a46" }

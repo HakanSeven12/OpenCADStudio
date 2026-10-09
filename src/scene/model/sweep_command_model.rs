@@ -452,7 +452,7 @@ pub fn resweep_from_sources(
 /// parameter: line segment (23: start, vector to the end), arc (11:
 /// centre, normal, reference axis, radius, start and end angle, 0) or a
 /// composite of those (47: count, then each part's type and values).
-pub fn assoc_edge_curve(entity: &EntityType) -> Option<(i32, codec::objects::AssocSubcurveKind, Vec<codec::objects::AssocCurveValue>)> {
+pub fn assoc_edge_curve(entity: &EntityType) -> Option<AssocCurve> {
     use codec::objects::{AssocCurveValue as V, AssocSubcurveKind as K};
     use codec::types::Vector3 as P;
     let point = |p: glam::DVec3| V::Point(P::new(p.x, p.y, p.z));
@@ -564,23 +564,110 @@ pub fn assoc_edge_curve(entity: &EntityType) -> Option<(i32, codec::objects::Ass
             }
             let points = curve.control_points();
             if points.len() < 2 || knots.is_empty() { return None; }
-            let rational = curve.weights().iter().any(|weight| (weight - 1.0).abs() > 1e-12);
-            let header = |values: &mut Vec<V>, count: usize| {
-                values.extend([V::Int(count as i32), V::Int(if count == 0 { 0 } else { count.max(8) } as i32), V::Int(8)]);
-            };
             let tolerance = if spline.knot_tolerance > 0.0 { spline.knot_tolerance } else { 1e-9 };
-            let mut values = vec![V::Bool(rational), V::Bool(false), V::Int(curve.degree() as i32), V::Real(tolerance)];
-            header(&mut values, knots.len());
-            values.extend(knots.iter().map(|knot| V::Real(*knot)));
-            let weights = if rational { curve.weights() } else { &[] };
-            header(&mut values, weights.len());
-            values.extend(weights.iter().map(|weight| V::Real(*weight)));
-            header(&mut values, points.len());
-            values.extend(points.iter().map(|p| V::Point(P::new(p[0], p[1], p[2]))));
-            Some((42, K::Nurb3d, values))
+            let points = points.iter().map(|p| glam::DVec3::from_array(*p)).collect::<Vec<_>>();
+            Some(nurbs_curve(curve.degree(), tolerance, &knots, curve.weights(), &points))
         }
         _ => None,
     }
+}
+
+/// A NURBS curve's edge parameter values (42): rational flag, a second flag
+/// (0), degree, knot tolerance, then knots, weights (empty unless rational)
+/// and control points, each as its length, the length reserved (at least
+/// 8) and the growth step 8, followed by the items.
+fn nurbs_curve(degree: usize, tolerance: f64, knots: &[f64], weights: &[f64], points: &[glam::DVec3]) -> AssocCurve {
+    use codec::objects::{AssocCurveValue as V, AssocSubcurveKind as K};
+    let rational = weights.iter().any(|weight| (weight - 1.0).abs() > 1e-12);
+    let header = |values: &mut Vec<V>, count: usize| {
+        values.extend([V::Int(count as i32), V::Int(if count == 0 { 0 } else { count.max(8) } as i32), V::Int(8)]);
+    };
+    let mut values = vec![V::Bool(rational), V::Bool(false), V::Int(degree as i32), V::Real(tolerance)];
+    header(&mut values, knots.len());
+    values.extend(knots.iter().map(|knot| V::Real(*knot)));
+    let weights = if rational { weights } else { &[] };
+    header(&mut values, weights.len());
+    values.extend(weights.iter().map(|weight| V::Real(*weight)));
+    header(&mut values, points.len());
+    values.extend(points.iter().map(|p| V::Point(codec::types::Vector3::new(p.x, p.y, p.z))));
+    (42, K::Nurb3d, values)
+}
+
+/// An edge parameter's curve: kind, subcurve kind and values.
+pub type AssocCurve = (i32, codec::objects::AssocSubcurveKind, Vec<codec::objects::AssocCurveValue>);
+
+/// A region's edges as an associative action reads them, loop by loop, each
+/// loop from its second edge on as the reference lists them: lines (23),
+/// circles and arcs (11) measured from the arbitrary axis of the region's
+/// normal, elliptical arcs (17) and NURBS curves (42).
+pub fn region_edge_curves(entity: &EntityType) -> Option<Vec<Vec<AssocCurve>>> {
+    use codec::objects::{AssocCurveValue as V, AssocSubcurveKind as K};
+    use kernel::geom2d::Curve;
+    let EntityType::Region(_) = entity else { return None };
+    let Some((plane, loops, true)) = super::presspull_model::profile_geometry(entity) else { return None };
+    let at = |uv: [f64; 2]| glam::DVec3::from_array(plane.point_at(uv));
+    let normal = glam::DVec3::from_array(plane.x_axis).cross(glam::DVec3::from_array(plane.y_axis)).try_normalize()?;
+    let axis = arbitrary_x(normal);
+    let across = normal.cross(axis);
+    let point = |p: glam::DVec3| V::Point(codec::types::Vector3::new(p.x, p.y, p.z));
+    let arc = |centre: glam::DVec3, radius: f64, start: f64, end: f64| (11, K::Arc, vec![
+        point(centre), point(normal), point(axis), V::Real(radius), V::Real(start), V::Real(end), V::Real(0.0),
+    ]);
+    let curve = |piece: &Curve| -> Option<AssocCurve> {
+        match piece {
+            Curve::Line(line) => {
+                let (a, b) = (at(line.start), at(line.end));
+                Some((23, K::LineSegment3d, vec![point(a), point(b - a)]))
+            }
+            Curve::Circle(circle) => Some(arc(at(circle.centre), circle.radius, 0.0, std::f64::consts::TAU)),
+            Curve::Arc(value) => {
+                let centre = at(value.centre);
+                let offset = at([
+                    value.centre[0] + value.start_angle.cos(),
+                    value.centre[1] + value.start_angle.sin(),
+                ]) - centre;
+                let start = offset.dot(across).atan2(offset.dot(axis));
+                Some(arc(centre, value.radius, start, start + value.sweep()))
+            }
+            Curve::Ellipse(value) => {
+                let ellipse = value.ellipse;
+                let centre = at(ellipse.centre);
+                let tip = [ellipse.centre[0] + ellipse.major_axis[0], ellipse.centre[1] + ellipse.major_axis[1]];
+                let major = (at(tip) - centre).try_normalize()?;
+                let end = if value.end_parameter > value.start_parameter {
+                    value.end_parameter
+                } else {
+                    value.end_parameter + std::f64::consts::TAU
+                };
+                Some((17, K::Ellipse, vec![
+                    point(centre), point(major), point(normal.cross(major)),
+                    V::Real(ellipse.major_radius), V::Real(ellipse.minor_radius),
+                    V::Real(value.start_parameter), V::Real(end), V::Real(0.0),
+                ]))
+            }
+            Curve::Nurbs(value) => {
+                let points = value.control_points().iter().map(|p| at(*p)).collect::<Vec<_>>();
+                Some(nurbs_curve(value.degree(), 1e-9, value.knots(), value.weights(), &points))
+            }
+            _ => None,
+        }
+    };
+    loops
+        .iter()
+        .map(|pieces| {
+            let mut curves = pieces.iter().map(curve).collect::<Option<Vec<_>>>()?;
+            if curves.len() > 1 {
+                curves.rotate_left(1);
+            }
+            Some(curves)
+        })
+        .collect()
+}
+
+/// Whether an associative action can read this source: a region's edges
+/// or the entity's own curve.
+pub fn assoc_source_supported(entity: &EntityType) -> bool {
+    region_edge_curves(entity).is_some() || assoc_edge_curve(entity).is_some()
 }
 
 /// The arbitrary-axis X direction of an entity normal.

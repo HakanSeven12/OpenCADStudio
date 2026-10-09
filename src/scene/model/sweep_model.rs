@@ -13,7 +13,7 @@ use codec::EntityType;
 
 use crate::entities::curve::entity_curve;
 pub use super::sweep_command_model::{
-    is_sweep_path, is_sweep_profile, scaled_sweep_path_refusal, spatial_profile, spatial_sweep_record, surface_sweep_record, sweep_expressions, link_sweep_expressions, link_sweep_sources, sweep_sources, SWEEP_SOURCES_APP, resweep_from_sources, surface_associativity, set_surface_associativity, assoc_edge_curve, sweep_record, sweep_refusal_code, sweep_selection_options, swept_surface_entity, swept_with_options,
+    is_sweep_path, is_sweep_profile, scaled_sweep_path_refusal, spatial_profile, spatial_sweep_record, surface_sweep_record, sweep_expressions, link_sweep_expressions, link_sweep_sources, sweep_sources, SWEEP_SOURCES_APP, resweep_from_sources, surface_associativity, set_surface_associativity, assoc_edge_curve, assoc_source_supported, region_edge_curves, AssocCurve, sweep_record, sweep_refusal_code, sweep_selection_options, swept_surface_entity, swept_with_options,
 };
 
 /// A drawn profile, as the kernel wants it: the plane it lies in and the

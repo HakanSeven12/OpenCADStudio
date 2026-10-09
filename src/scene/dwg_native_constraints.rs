@@ -2648,8 +2648,8 @@ fn pending_swept_surfaces(document: &CadDocument) -> Vec<(Handle, Handle, Handle
             let (profile, path) = sweep_model::sweep_sources(entity)?;
             let surface = entity.common().handle;
             (!carried.contains(&surface)
-                && document.get_entity(profile).is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some())
-                && document.get_entity(path).is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some()))
+                && document.get_entity(profile).is_some_and(|e| sweep_model::assoc_source_supported(e))
+                && document.get_entity(path).is_some_and(|e| sweep_model::assoc_source_supported(e)))
                 .then_some((surface, profile, path))
         })
         .collect::<Vec<_>>();
@@ -2676,7 +2676,7 @@ fn pending_source_surfaces(
             let surface = entity.common().handle;
             (!carried.contains(&surface)
                 && sources.handles().iter().all(|handle| {
-                    document.get_entity(*handle).is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some())
+                    document.get_entity(*handle).is_some_and(|e| sweep_model::assoc_source_supported(e))
                 }))
             .then_some((surface, sources))
         })
@@ -2688,6 +2688,191 @@ fn pending_source_surfaces(
 /// Whether the drawing has associative surfaces its network has to carry.
 fn has_pending_surfaces(document: &CadDocument) -> bool {
     !pending_swept_surfaces(document).is_empty() || !pending_source_surfaces(document).is_empty()
+}
+
+/// Named-objects dictionary key of the drawing's persistent subentity manager.
+const SUBENT_MANAGER_KEY: &str = "ACAD_ASSOCPERSSUBENTMANAGER";
+
+/// A read dependency of an action on `dependent_on`.
+fn read_dependency(dependent_on: Handle, id: i32) -> AssocDependency {
+    AssocDependency {
+        class_version: 2,
+        status: 0,
+        is_read_dependency: true,
+        is_write_dependency: false,
+        is_attached_to_object: true,
+        is_delegating_to_owning_action: true,
+        order: 0,
+        dependent_on,
+        name: None,
+        read_dependency: Handle::NULL,
+        node: Handle::NULL,
+        dependency_body: Handle::NULL,
+        dependency_body_id: id,
+    }
+}
+
+/// An edge action parameter reading `curve` through dependency `read`.
+fn edge_action_param(read: Handle, (action_type, subcurve_kind, curve): crate::scene::model::sweep_model::AssocCurve) -> AssociativeData {
+    use codec::objects::{AssocActionParam, AssocEdgeActionParam, AssocSingleDependencyActionParam};
+    AssociativeData::EdgeActionParam(AssocEdgeActionParam {
+        single_dependency: AssocSingleDependencyActionParam {
+            action_param: AssocActionParam { is_r2013: 1, version: 0, name: String::new() },
+            dependency_class_version: 0,
+            dependency: read,
+            class_version: 0,
+        },
+        parameter: Handle::NULL,
+        has_action: true,
+        action_type,
+        subcurve_kind,
+        curve,
+    })
+}
+
+/// The subentity manager's record of a region's edges: one entry per edge
+/// id from `first_id`, in the order the region's dependencies read them,
+/// each naming the edge (and, between edges, its two vertices) by the
+/// region's face and edge numbers. `loops` holds each loop's edge count.
+fn region_subent_entries(loops: &[usize], step: i32, first_id: i32) -> Vec<i32> {
+    const BODY: i32 = 1_000_000_000;
+    const FACE: i32 = 1001;
+    let mut values = Vec::new();
+    let (mut id, mut offset) = (first_id, 0usize);
+    for &count in loops {
+        let edge = |index: usize| 51001 + 100_000 * (offset + index % count) as i32;
+        let vertex = |a: i32, b: i32| [1, 3, 1, BODY, FACE, 1, BODY, a, 1, BODY, b, 0, 0, 0, 900, 0, 900, 0, 0];
+        for read in 0..count {
+            if count == 1 {
+                values.extend([4, 0, 5, id, step, step, 0, 0, 24, 0, 0, 1, BODY, edge(0), 0, 0, 1, 1, BODY, FACE]);
+                values.extend([0; 14]);
+            } else {
+                // The dependencies start at the loop's second edge.
+                let index = read + 1;
+                values.extend([4, 0, 11, id, step, step, 0, 2, 2, 2, 0, 2, 2, 2, 54, 0, 0, 1, BODY, edge(index)]);
+                values.extend([0, 0, 1, 1, BODY, FACE, 0, 0, 0, 0]);
+                values.extend(vertex(edge(index), edge(index + count - 1)));
+                values.extend([0, 0]);
+                values.extend(vertex(edge(index + 1), edge(index)));
+            }
+            id += 1;
+        }
+        offset += count;
+    }
+    values
+}
+
+/// Records a region read by an action in the drawing's persistent
+/// subentity manager (made when the drawing has none): a step for the
+/// action and one for the region, then one id per edge. The manager keeps
+/// the last id given, its edge entries and the list of every id given.
+/// Returns the edges' ids, or `None` when the drawing's manager has a form
+/// this cannot extend.
+fn register_region_subents(document: &mut CadDocument, loops: &[usize]) -> Option<Vec<i32>> {
+    use codec::objects::AssocPersSubentManager;
+    let root = document.header.named_objects_dict_handle;
+    let existing = match document.objects.get(&root) {
+        Some(ObjectType::Dictionary(dictionary)) => dictionary.get(SUBENT_MANAGER_KEY),
+        _ => return None,
+    };
+    let current = existing.and_then(|handle| match document.objects.get(&handle) {
+        Some(ObjectType::Associative(AssociativeObject { data: AssociativeData::PersSubentManager(manager), .. })) => {
+            Some((handle, manager.values.clone()))
+        }
+        _ => None,
+    });
+    let (handle, last, count, mut entries) = match current {
+        Some((handle, values)) => {
+            let last = *values.first()?;
+            if values.len() == 4 && values[1..].iter().all(|value| *value == 0) {
+                (handle, last, 0, Vec::new())
+            } else {
+                let tail = usize::try_from(last).ok()? + 3;
+                if values.len() < tail + 2 || values[values.len() - tail] != last {
+                    return None;
+                }
+                (handle, last, values[1], values[2..values.len() - tail].to_vec())
+            }
+        }
+        None => {
+            let handle = document.allocate_handle();
+            set_dictionary_entry(document, root, SUBENT_MANAGER_KEY, handle);
+            (handle, 0, 0, Vec::new())
+        }
+    };
+    let edges = loops.iter().sum::<usize>() as i32;
+    let first = last + 3;
+    entries.extend(region_subent_entries(loops, last + 2, first));
+    let last = last + 2 + edges;
+    let mut values = vec![last, count + edges];
+    values.extend(entries);
+    values.push(last);
+    values.extend(1..=last);
+    values.extend([0, 0]);
+    document.objects.insert(handle, ObjectType::Associative(AssociativeObject {
+        handle,
+        owner: root,
+        reactors: vec![root],
+        dxf_name: "ACDBASSOCPERSSUBENTMANAGER".to_string(),
+        cpp_class_name: "AcDbAssocPersSubentManager".to_string(),
+        data: AssociativeData::PersSubentManager(AssocPersSubentManager {
+            class_version: 2,
+            markers: [3, 0, 2],
+            values,
+            final_flag: false,
+        }),
+        ..Default::default()
+    }));
+    Some((first..first + edges).collect())
+}
+
+/// How an action reads one source through `parameter`: one read dependency
+/// on a curve; on a region one geometry dependency per edge, naming the
+/// edge by its persistent subentity id and chained on the region. Adds the
+/// dependencies (owned by `action`) and edge parameters to `objects` with
+/// ids from `first_id`; returns (edge parameter, dependency) pairs.
+fn source_reads(
+    document: &mut CadDocument,
+    action: Handle,
+    parameter: Handle,
+    source: Handle,
+    first_id: i32,
+    objects: &mut Vec<(Handle, Handle, &'static str, &'static str, AssociativeData)>,
+) -> Option<Vec<(Handle, Handle)>> {
+    use crate::scene::model::sweep_model;
+    let entity = document.get_entity(source)?;
+    let Some(loops) = sweep_model::region_edge_curves(entity) else {
+        let curve = sweep_model::assoc_edge_curve(entity)?;
+        let (edge, read) = (document.allocate_handle(), document.allocate_handle());
+        objects.push((edge, parameter, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam", edge_action_param(read, curve)));
+        objects.push((read, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency",
+            AssociativeData::Dependency(read_dependency(source, first_id))));
+        return Some(vec![(edge, read)]);
+    };
+    let sizes = loops.iter().map(Vec::len).collect::<Vec<_>>();
+    let ids = register_region_subents(document, &sizes)?;
+    let curves = loops.into_iter().flatten().collect::<Vec<_>>();
+    let pairs = curves.iter().map(|_| (document.allocate_handle(), document.allocate_handle())).collect::<Vec<_>>();
+    for (index, (curve, (edge, read))) in curves.into_iter().zip(pairs.iter().copied()).enumerate() {
+        let mut dependency = read_dependency(source, first_id + index as i32);
+        dependency.read_dependency = index.checked_sub(1).map_or(Handle::NULL, |previous| pairs[previous].1);
+        dependency.node = pairs.get(index + 1).map_or(Handle::NULL, |next| next.1);
+        objects.push((edge, parameter, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam", edge_action_param(read, curve)));
+        objects.push((read, action, "ACDBASSOCGEOMDEPENDENCY", "AcDbAssocGeomDependency",
+            AssociativeData::GeomDependency(AssocGeomDependency {
+                dependency,
+                class_version: 0,
+                enabled: true,
+                persistent_subent: AssocPersistentSubentId {
+                    class_name: "AcDbAssocAsmBasedEntityPersSubentId".to_string(),
+                    dependent_on_compound_object: false,
+                    class_code: 5,
+                    values: vec![0, 2, ids[index]],
+                    leading_flag: false,
+                },
+            })));
+    }
+    Some(pairs)
 }
 
 /// The reference's associative network for each pending extruded, revolved
@@ -2703,7 +2888,6 @@ fn materialize_source_surface_actions(
     first_index: i32,
 ) -> Vec<Handle> {
     use crate::scene::model::surface_sources::SurfaceSources;
-    use crate::scene::model::sweep_model;
     use codec::objects::*;
     let mut added = Vec::new();
     for (surface, sources) in pending.iter() {
@@ -2748,9 +2932,11 @@ fn materialize_source_surface_actions(
                     AssocSurfaceActionKind::Lofted,
                     "AcDbAssocLoftedSurfaceActionBody",
                     "ACDBASSOCLOFTEDSURFACEACTIONBODY",
+                    // One value per cross section: the start and end
+                    // settings at the ends, the defaults between them.
                     vec![
-                        ("Continuity", 0, vec![short(continuity.0), short(continuity.1)], false),
-                        ("Bulge", 0, vec![real(bulge.0), real(bulge.1)], false),
+                        ("Continuity", 0, (0..sections.len()).map(|index| short(if index == 0 { continuity.0 } else if index + 1 == sections.len() { continuity.1 } else { 1 })).collect(), false),
+                        ("Bulge", 0, (0..sections.len()).map(|index| real(if index == 0 { bulge.0 } else if index + 1 == sections.len() { bulge.1 } else { 0.5 })).collect(), false),
                     ],
                     sections.iter().map(|section| ("CrossSection", Some(*section)))
                         .chain(std::iter::once(("PathCurve", None)))
@@ -2758,61 +2944,29 @@ fn materialize_source_surface_actions(
                 )
             }
         };
-        let curves = params
-            .iter()
-            .map(|(_, source)| match source {
-                Some(source) => document.get_entity(*source).and_then(sweep_model::assoc_edge_curve).map(Some),
-                None => Some(None),
-            })
-            .collect::<Option<Vec<_>>>();
-        let Some(curves) = curves else { continue };
         let document = &mut *allocator.document;
         let (action, body, written) = (document.allocate_handle(), document.allocate_handle(), document.allocate_handle());
-        let dependency = |dependent_on: Handle, read: bool, id: i32, order: i32| AssocDependency {
-            class_version: 2,
-            status: 0,
-            is_read_dependency: read,
-            is_write_dependency: !read,
-            is_attached_to_object: true,
-            is_delegating_to_owning_action: true,
-            order,
-            dependent_on,
-            name: None,
-            read_dependency: Handle::NULL,
-            node: Handle::NULL,
-            dependency_body: Handle::NULL,
-            dependency_body_id: id,
-        };
-        let mut objects: Vec<(Handle, Handle, &str, &str, AssociativeData)> = Vec::new();
+        let mut objects: Vec<(Handle, Handle, &'static str, &'static str, AssociativeData)> = Vec::new();
         let mut reactors: Vec<(Handle, Handle)> = vec![(surface, written)];
         let mut dependencies = vec![written];
         let mut owned = Vec::new();
-        objects.push((written, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(surface, false, 1, i32::MIN))));
-        for ((name, source), curve) in params.iter().zip(curves) {
-            let document = &mut *allocator.document;
+        let mut writes = read_dependency(surface, 1);
+        (writes.is_read_dependency, writes.is_write_dependency, writes.order) = (false, true, i32::MIN);
+        objects.push((written, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(writes)));
+        let mut complete = true;
+        for (name, source) in params.iter() {
             let parameter = document.allocate_handle();
             let mut children = Vec::new();
-            if let (Some(source), Some((action_type, subcurve_kind, curve))) = (source, curve) {
-                let (edge, read) = (document.allocate_handle(), document.allocate_handle());
-                objects.push((edge, parameter, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam",
-                    AssociativeData::EdgeActionParam(AssocEdgeActionParam {
-                        single_dependency: AssocSingleDependencyActionParam {
-                            action_param: AssocActionParam { is_r2013: 1, version: 0, name: String::new() },
-                            dependency_class_version: 0,
-                            dependency: read,
-                            class_version: 0,
-                        },
-                        parameter: Handle::NULL,
-                        has_action: true,
-                        action_type,
-                        subcurve_kind,
-                        curve,
-                    })));
-                objects.push((read, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency",
-                    AssociativeData::Dependency(dependency(*source, true, dependencies.len() as i32 + 1, 0))));
-                reactors.push((*source, read));
-                dependencies.push(read);
-                children.push(edge);
+            if let Some(source) = source {
+                let Some(reads) = source_reads(document, action, parameter, *source, dependencies.len() as i32 + 1, &mut objects) else {
+                    complete = false;
+                    break;
+                };
+                for (edge, read) in reads {
+                    reactors.push((*source, read));
+                    dependencies.push(read);
+                    children.push(edge);
+                }
             }
             objects.push((parameter, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam",
                 AssociativeData::PathActionParam(AssocPathActionParam {
@@ -2826,6 +2980,9 @@ fn materialize_source_surface_actions(
                     version: 0,
                 })));
             owned.push(parameter);
+        }
+        if !complete {
+            continue;
         }
         objects.push((action, network, "ACDBASSOCACTION", "AcDbAssocAction", AssociativeData::Action(AssocAction {
             class_version: 2,
@@ -2915,10 +3072,6 @@ fn materialize_swept_surface_actions(
         let codec::entities::SurfaceData::Swept { options, .. } = &surface_value.surface_data else { continue };
         let (rotation, scale, twist) = (options.align_angle, options.scale_factor, options.twist_angle);
         let expressions = sweep_model::sweep_expressions(surface_entity).unwrap_or([None, None]);
-        let (Some(profile_curve), Some(path_curve)) = (
-            document.get_entity(profile).and_then(sweep_model::assoc_edge_curve),
-            document.get_entity(path).and_then(sweep_model::assoc_edge_curve),
-        ) else { continue };
         let evaluate = |expression: &str| {
             let mut table = parameters.clone();
             table.set("sweepExpression", expression).ok()?;
@@ -2926,8 +3079,7 @@ fn materialize_swept_surface_actions(
         };
         let document = &mut *allocator.document;
         let mut next = || document.allocate_handle();
-        let (action, body, written, profile_param, profile_edge, profile_read, path_param, path_edge, path_read) =
-            (next(), next(), next(), next(), next(), next(), next(), next(), next());
+        let (action, body, written, profile_param, path_param) = (next(), next(), next(), next(), next());
         let dependency = |dependent_on: Handle, read: bool, id: i32, order: i32| AssocDependency {
             class_version: 2,
             status: 0,
@@ -2943,9 +3095,15 @@ fn materialize_swept_surface_actions(
             dependency_body: Handle::NULL,
             dependency_body_id: id,
         };
-        let mut objects: Vec<(Handle, Handle, &str, &str, AssociativeData)> = Vec::new();
-        let mut reactors: Vec<(Handle, Handle)> = vec![(surface, written), (profile, profile_read), (path, path_read)];
-        let mut dependencies = vec![written, profile_read, path_read];
+        let mut objects: Vec<(Handle, Handle, &'static str, &'static str, AssociativeData)> = Vec::new();
+        // The profile (a region by its edges) and the path, read in that order.
+        let Some(profile_reads) = source_reads(document, action, profile_param, profile, 2, &mut objects) else { continue };
+        let Some(path_reads) = source_reads(document, action, path_param, path, profile_reads.len() as i32 + 2, &mut objects) else { continue };
+        let mut reactors: Vec<(Handle, Handle)> = vec![(surface, written)];
+        reactors.extend(profile_reads.iter().map(|(_, read)| (profile, *read)));
+        reactors.extend(path_reads.iter().map(|(_, read)| (path, *read)));
+        let mut dependencies = vec![written];
+        dependencies.extend(profile_reads.iter().chain(&path_reads).map(|(_, read)| *read));
         let mut value_handles = [Handle::NULL, Handle::NULL];
         let mut network_actions = vec![action];
         // Scale (slot 0) and twist (slot 1) expressions.
@@ -3029,35 +3187,20 @@ fn materialize_swept_surface_actions(
                 ..Default::default()
             })));
         objects.push((written, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(surface, false, 1, i32::MIN))));
-        let edge_param = |read: Handle, (kind, subcurve, curve): (i32, AssocSubcurveKind, Vec<AssocCurveValue>)| AssociativeData::EdgeActionParam(AssocEdgeActionParam {
-            single_dependency: AssocSingleDependencyActionParam {
-                action_param: AssocActionParam { is_r2013: 1, version: 0, name: String::new() },
-                dependency_class_version: 0,
-                dependency: read,
-                class_version: 0,
-            },
-            parameter: Handle::NULL,
-            has_action: true,
-            action_type: kind,
-            subcurve_kind: subcurve,
-            curve,
-        });
-        let path_parameter = |name: &str, child: Handle| AssociativeData::PathActionParam(AssocPathActionParam {
+        let path_parameter = |name: &str, children: Vec<Handle>| AssociativeData::PathActionParam(AssocPathActionParam {
             compound: AssocCompoundActionParam {
                 action_param: AssocActionParam { is_r2013: 1, version: 0, name: name.to_string() },
                 class_version: 0,
                 status: 0,
-                parameters: vec![child],
+                parameters: children,
                 child_parameter: None,
             },
             version: 0,
         });
-        objects.push((profile_param, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam", path_parameter("SweepProfile", profile_edge)));
-        objects.push((profile_edge, profile_param, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam", edge_param(profile_read, profile_curve)));
-        objects.push((profile_read, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(profile, true, 2, 0))));
-        objects.push((path_param, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam", path_parameter("SweepPath", path_edge)));
-        objects.push((path_edge, path_param, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam", edge_param(path_read, path_curve)));
-        objects.push((path_read, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(path, true, 3, 0))));
+        objects.push((profile_param, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam",
+            path_parameter("SweepProfile", profile_reads.iter().map(|(edge, _)| *edge).collect())));
+        objects.push((path_param, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam",
+            path_parameter("SweepPath", path_reads.iter().map(|(edge, _)| *edge).collect())));
         for (handle, owner, dxf, class, data) in objects {
             allocator.insert_associative_at(handle, owner, dxf, class, data);
         }

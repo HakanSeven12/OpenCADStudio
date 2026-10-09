@@ -286,6 +286,27 @@ pub(crate) fn entity_json(e: &codec::EntityType, detail: &str) -> Value {
             map.insert("start_angle".into(), json!(a.start_angle));
             map.insert("end_angle".into(), json!(a.end_angle));
         }
+        E::Spline(spline) => {
+            map.insert("degree".into(), json!(spline.degree));
+            map.insert("knots".into(), json!(spline.knots));
+            map.insert(
+                "control_points".into(),
+                json!(spline
+                    .control_points
+                    .iter()
+                    .map(|point| v3(*point))
+                    .collect::<Vec<_>>()),
+            );
+            map.insert(
+                "fit_points".into(),
+                json!(spline
+                    .fit_points
+                    .iter()
+                    .map(|point| v3(*point))
+                    .collect::<Vec<_>>()),
+            );
+            map.insert("weights".into(), json!(spline.weights));
+        }
         E::Point(p) => {
             map.insert("location".into(), v3(p.location));
         }

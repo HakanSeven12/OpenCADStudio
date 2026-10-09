@@ -8,19 +8,84 @@ use crate::command::EntityTransform;
 
 type Parsed<T> = Result<T, Value>;
 
-/// `[x,y]` or `[x,y,z]` (missing z = 0) from `req[key]`.
-fn point_field(req: &Value, key: &str) -> Parsed<codec::types::Vector3> {
-    let values = req[key]
-        .as_array()
+/// Parse `[x,y]` or `[x,y,z]` without silently turning a malformed
+/// coordinate into zero.
+fn point_value(value: Option<&Value>, label: &str, code: &str) -> Parsed<codec::types::Vector3> {
+    let values = value
+        .and_then(Value::as_array)
         .filter(|v| (2..=3).contains(&v.len()))
-        .ok_or_else(|| failure("invalid_point", format!("{key} must be [x,y] or [x,y,z]")))?;
+        .ok_or_else(|| failure(code, format!("{label} must be [x,y] or [x,y,z]")))?;
     let coord = |i: usize| {
         values[i]
             .as_f64()
             .filter(|v| v.is_finite())
-            .ok_or_else(|| failure("invalid_point", format!("{key} needs finite coordinates")))
+            .ok_or_else(|| failure(code, format!("{label} needs finite coordinates")))
     };
-    Ok(codec::types::Vector3::new(coord(0)?, coord(1)?, values.get(2).and_then(Value::as_f64).unwrap_or(0.0)))
+    let z = values
+        .get(2)
+        .map(|value| {
+            value
+                .as_f64()
+                .filter(|v| v.is_finite())
+                .ok_or_else(|| failure(code, format!("{label} needs finite coordinates")))
+        })
+        .transpose()?
+        .unwrap_or(0.0);
+    Ok(codec::types::Vector3::new(coord(0)?, coord(1)?, z))
+}
+
+/// `[x,y]` or `[x,y,z]` (missing z = 0) from `req[key]`.
+fn point_field(req: &Value, key: &str) -> Parsed<codec::types::Vector3> {
+    point_value(req.get(key), key, "invalid_point")
+}
+
+fn point_list_field(
+    spec: &Value,
+    key: &str,
+    minimum: usize,
+) -> Parsed<Vec<codec::types::Vector3>> {
+    let points = spec[key]
+        .as_array()
+        .filter(|points| points.len() >= minimum)
+        .ok_or_else(|| {
+            failure(
+                "invalid_spline_points",
+                format!("{key} needs at least {minimum} points"),
+            )
+        })?;
+    points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            point_value(
+                Some(point),
+                &format!("{key}[{index}]"),
+                "invalid_spline_points",
+            )
+        })
+        .collect()
+}
+
+fn finite_number_list_field(spec: &Value, key: &str) -> Parsed<Vec<f64>> {
+    let values = spec[key]
+        .as_array()
+        .filter(|values| !values.is_empty())
+        .ok_or_else(|| failure("invalid_spline_values", format!("{key} needs a non-empty array")))?;
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| {
+                    failure(
+                        "invalid_spline_values",
+                        format!("{key}[{index}] must be finite"),
+                    )
+                })
+        })
+        .collect()
 }
 
 fn deg_field(req: &Value, key: &str) -> f64 {
@@ -119,6 +184,72 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
                 deg_field(spec, "start_angle_deg"),
                 deg_field(spec, "end_angle_deg"),
             ))
+        }
+        "SPLINE" => {
+            let control_points = if spec.get("control_points").is_some() {
+                point_list_field(spec, "control_points", 2)?
+            } else {
+                Vec::new()
+            };
+            let fit_points = if spec.get("fit_points").is_some() {
+                point_list_field(spec, "fit_points", 2)?
+            } else {
+                Vec::new()
+            };
+            if control_points.is_empty() && fit_points.is_empty() {
+                return Err(failure(
+                    "invalid_spline_points",
+                    "spline needs control_points or fit_points (at least 2 points)",
+                ));
+            }
+            let degree = match spec.get("degree") {
+                None | Some(Value::Null) => 3,
+                Some(value) => value.as_i64().unwrap_or(3),
+            };
+            let mut spline = if control_points.is_empty() {
+                Spline::from_fit_points(fit_points.clone())
+            } else {
+                Spline::from_control_points(degree as i32, control_points)
+            };
+            spline.degree = degree as i32;
+            if !fit_points.is_empty() {
+                spline.fit_points = fit_points;
+            }
+            if spec.get("knots").is_some() {
+                if spline.control_points.is_empty() {
+                    return Err(failure(
+                        "invalid_spline_values",
+                        "spline knots require control_points",
+                    ));
+                }
+                spline.knots = finite_number_list_field(spec, "knots")?;
+            }
+            if spec.get("weights").is_some() {
+                if spline.control_points.is_empty() {
+                    return Err(failure(
+                        "invalid_spline_values",
+                        "spline weights require control_points",
+                    ));
+                }
+                spline.weights = finite_number_list_field(spec, "weights")?;
+                spline.flags.rational = true;
+            }
+            if let Some(value) = spec["closed"].as_bool() {
+                spline.flags.closed = value;
+            }
+            if let Some(value) = spec["periodic"].as_bool() {
+                spline.flags.periodic = value;
+            }
+            if let Some(value) = spec["rational"].as_bool() {
+                spline.flags.rational = value;
+            }
+            if let Some(value) = spec["planar"].as_bool() {
+                spline.flags.planar = value;
+            }
+            if let Some(value) = spec["linear"].as_bool() {
+                spline.flags.linear = value;
+            }
+            EntityType::Spline(spline)
         }
         "LWPOLYLINE" | "POLYLINE" => {
             let vertices = spec["vertices"]
@@ -252,7 +383,7 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
             return Err(failure(
                 "unknown_entity_type",
                 format!(
-                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, LwPolyline, Point, Text, MText, Insert, Solid, Hatch"
+                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch"
                 ),
             ))
         }

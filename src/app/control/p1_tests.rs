@@ -126,6 +126,52 @@ fn sysvar_round_trips_and_refuses_unknowns() {
 }
 
 #[test]
+fn sysvar_batches_validate_atomically_and_undo_as_one_step() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let state = app.automation_op(r#"{"protocol":1,"op":"state"}"#);
+    let doc = state["document_id"].as_u64().unwrap();
+    mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"sv-atomic-layer","document_id":{doc},"entities":[{"type":"Point","location":[0,0],"layer":"Walls"}]}"#,
+    );
+    let i = app.active_tab;
+    // Isolate this operation's dirty/history assertions from the layer setup.
+    app.tabs[i].dirty = false;
+    let history_before = app.tabs[i].history.undo_stack.len();
+
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"sysvar","request_id":"sv-atomic-ok","document_id":{doc},"set":{{"ltscale":2.5,"clayer":"Walls"}}}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    assert_eq!(app.tabs[i].scene.document.header.current_layer_name, "Walls");
+    assert_eq!(app.tabs[i].scene.document.header.linetype_scale, 2.5);
+    assert_eq!(app.tabs[i].active_layer, "Walls");
+    assert_eq!(app.tabs[i].layers.current_layer, "Walls");
+    assert_eq!(app.ribbon.active_layer, "Walls");
+    assert!(app.tabs[i].dirty);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), history_before + 1);
+
+    // A bad later value must not leak the valid earlier value or an undo entry.
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"sysvar","request_id":"sv-atomic-bad","document_id":{doc},"set":{{"ltscale":9.0,"clayer":"NOPE"}}}}"#
+    ));
+    assert_eq!(r["ok"], false);
+    assert_eq!(r["code"], "invalid_sysvar_value");
+    assert_eq!(app.tabs[i].scene.document.header.linetype_scale, 2.5);
+    assert_eq!(app.tabs[i].scene.document.header.current_layer_name, "Walls");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), history_before + 1);
+
+    // One undo restores both header variables and all current-layer mirrors.
+    app.automation_op(r#"{"op":"undo"}"#);
+    assert_eq!(app.tabs[i].scene.document.header.linetype_scale, 1.0);
+    assert_eq!(app.tabs[i].scene.document.header.current_layer_name, "0");
+    assert_eq!(app.tabs[i].active_layer, "0");
+    assert_eq!(app.tabs[i].layers.current_layer, "0");
+    assert_eq!(app.ribbon.active_layer, "0");
+}
+
+#[test]
 fn layout_create_and_page_setup_configure_sheets() {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);

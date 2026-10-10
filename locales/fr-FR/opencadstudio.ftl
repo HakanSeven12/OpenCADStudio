@@ -6153,6 +6153,7 @@ count-feature =
     .invalid-point = Point non valide.
 
 dock =
+    .allow-docking = Autoriser l'ancrage
     .auto-hide = Masquage automatique
     .dock-left = Ancrer à gauche
     .dock-right = Ancrer à droite

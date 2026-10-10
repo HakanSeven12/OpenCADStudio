@@ -5755,6 +5755,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Block \"{part}\" cannot be found." => Some(("count-feature", "block-not-found")),
         "Invalid point." => Some(("count-feature", "invalid-point")),
         "Auto-hide" => Some(("dock", "auto-hide")),
+        "Allow docking" => Some(("dock", "allow-docking")),
         "Dock left" => Some(("dock", "dock-left")),
         "Dock right" => Some(("dock", "dock-right")),
         "New group" => Some(("dock", "new-group")),

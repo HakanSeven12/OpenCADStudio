@@ -6152,6 +6152,7 @@ count-feature =
     .invalid-point = Ongeldig punt.
 
 dock =
+    .allow-docking = Koppelen toestaan
     .auto-hide = Automatisch verbergen
     .dock-left = Links koppelen
     .dock-right = Rechts koppelen

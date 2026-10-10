@@ -6149,6 +6149,7 @@ count-feature =
     .invalid-point = 無效的點。
 
 dock =
+    .allow-docking = 允許停駐
     .auto-hide = 自動隱藏
     .dock-left = 停駐到左側
     .dock-right = 停駐到右側

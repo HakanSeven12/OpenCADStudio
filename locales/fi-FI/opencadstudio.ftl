@@ -6151,6 +6151,7 @@ count-feature =
     .invalid-point = Virheellinen piste.
 
 dock =
+    .allow-docking = Salli telakointi
     .auto-hide = Piilota automaattisesti
     .dock-left = Telakoi vasemmalle
     .dock-right = Telakoi oikealle

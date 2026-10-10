@@ -6154,6 +6154,7 @@ count-feature =
     .invalid-point = Punto no válido.
 
 dock =
+    .allow-docking = Permitir acoplar
     .auto-hide = Ocultar automáticamente
     .dock-left = Acoplar a la izquierda
     .dock-right = Acoplar a la derecha

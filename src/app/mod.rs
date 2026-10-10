@@ -869,6 +869,10 @@ pub(super) struct OpenCADStudio {
     /// is open, and whether its Pallets submenu shows.
     pub(crate) dock_float_menu: Option<crate::ui::dock::PanelId>,
     pub(crate) dock_float_menu_pallets: bool,
+    /// Pointer position over a floating title bar (bar-local), and where
+    /// its open menu was asked for.
+    pub(crate) dock_float_pointer: iced::Point,
+    pub(crate) dock_float_menu_at: iced::Point,
     /// Group whose edge band (group grip) the pointer is over.
     pub(crate) dock_grip_hover: Option<(crate::app::config::DockSide, usize)>,
     /// Reference-table column currently being width-resized (column index),
@@ -4303,6 +4307,8 @@ impl OpenCADStudio {
             dock_hover_gen: 0,
             dock_float_menu: None,
             dock_float_menu_pallets: false,
+            dock_float_pointer: iced::Point::ORIGIN,
+            dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,
             dock_drag_last: None,
             dock_title_hover: None,

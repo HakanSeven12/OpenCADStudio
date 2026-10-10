@@ -6152,6 +6152,7 @@ count-feature =
     .invalid-point = Ungültiger Punkt.
 
 dock =
+    .allow-docking = Andocken zulassen
     .auto-hide = Automatisch ausblenden
     .dock-left = Links andocken
     .dock-right = Rechts andocken

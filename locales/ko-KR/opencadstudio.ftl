@@ -6153,6 +6153,7 @@ count-feature =
     .invalid-point = 점이 잘못되었습니다.
 
 dock =
+    .allow-docking = 도킹 허용
     .auto-hide = 자동 숨기기
     .dock-left = 왼쪽에 도킹
     .dock-right = 오른쪽에 도킹

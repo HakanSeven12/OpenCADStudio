@@ -6154,6 +6154,7 @@ count-feature =
     .invalid-point = Μη έγκυρο σημείο.
 
 dock =
+    .allow-docking = Να επιτρέπεται η πρόσδεση
     .auto-hide = Αυτόματη απόκρυψη
     .dock-left = Πρόσδεση αριστερά
     .dock-right = Πρόσδεση δεξιά

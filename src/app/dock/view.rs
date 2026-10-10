@@ -140,6 +140,7 @@ impl OpenCADStudio {
                         .height(Length::FillPortion(crate::ui::dock::portion(
                             group.weights[pos],
                         )))
+                        .clip(true)
                         .into(),
                 );
                 prev = Some(pos);
@@ -474,7 +475,8 @@ impl OpenCADStudio {
         let (x, y, bar_left, hidden) = self.dock_float_frame(f);
         // Messages name the window by its first open pallet.
         let anchor = visible[0];
-        let bar = floating_title_bar(&visible, self.dock.auto_hides(anchor), bar_left);
+        let hovered = self.dock_title_hover.is_some_and(|p| f.contains(p));
+        let bar = floating_title_bar(&visible, self.dock.auto_hides(anchor), bar_left, hovered);
         let content: Element<'_, Message> = if hidden {
             bar
         } else {
@@ -511,6 +513,7 @@ impl OpenCADStudio {
                 pallets.push(
                     container(self.panel_body(*id, f.w, true, tab))
                         .height(Length::FillPortion(crate::ui::dock::portion(weight)))
+                        .clip(true)
                         .into(),
                 );
                 prev = Some(pos);
@@ -535,8 +538,11 @@ impl OpenCADStudio {
                 row![body, bar].into()
             }
         };
+        // Clipped, so a pallet squeezed below its content's height never
+        // draws outside the window.
         let framed = container(content)
             .height(Length::Fixed(f.h))
+            .clip(true)
             .style(|theme: &Theme| container::Style {
                 border: Border {
                     color: theme.palette().background.strong.color,
@@ -561,8 +567,8 @@ impl OpenCADStudio {
     }
 
     /// The open right-click menu of a floating window: Pallets (a submenu
-    /// to add or hide pallets in the window), Dock left and Dock right. It
-    /// hangs beside the title bar, toward the window's inside.
+    /// to add or hide pallets in the window), Allow docking, Dock left and
+    /// Dock right. It opens at the pointer, flipped to stay on screen.
     fn dock_float_menu_overlay(&self) -> Option<Element<'_, Message>> {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DockMsg, PanelId};
@@ -571,17 +577,16 @@ impl OpenCADStudio {
         if self.dock_float_visible(f).is_empty() {
             return None;
         }
-        let (ww, _) = self.dock_workspace_size();
+        let (ww, wh) = self.dock_workspace_size();
         let (x, y, bar_left, hidden) = self.dock_float_frame(f);
         let total_w = if hidden { DOCK_FLOAT_BAR_W } else { f.w + DOCK_FLOAT_BAR_W };
         let bar_x = if bar_left { x } else { x + total_w - DOCK_FLOAT_BAR_W };
+        // Where the right-click happened, in the workspace.
+        let at = iced::Point::new(bar_x + self.dock_float_menu_at.x, y + self.dock_float_menu_at.y);
         let max_x = (ww - DOCK_MENU_W).max(0.0);
-        let menu_x = if bar_left {
-            bar_x + DOCK_FLOAT_BAR_W + 2.0
-        } else {
-            bar_x - DOCK_MENU_W - 2.0
-        }
-        .clamp(0.0, max_x);
+        let menu_x = if at.x + DOCK_MENU_W <= ww { at.x } else { at.x - DOCK_MENU_W };
+        let menu_x = menu_x.clamp(0.0, max_x);
+        let menu_y = at.y.min(wh - FLOAT_MENU_H).max(0.0);
         let open = self.dock_float_menu_pallets;
         // Hovering a row opens (Pallets) or closes (the others) the submenu.
         let item = |label: Element<'static, Message>, press: DockMsg, sub: bool| -> Element<'static, Message> {
@@ -607,9 +612,17 @@ impl OpenCADStudio {
                 background: Some(Background::Color(theme.palette().background.neutral.color)),
                 ..Default::default()
             });
+        let check: Element<'static, Message> = if f.docking {
+            crate::ui::icons::themed(crate::ui::icons::CHECK, 12.0)
+        } else {
+            Space::new().width(12).height(12).into()
+        };
+        let docking = row![text(t!("Allow docking")).size(12).width(Fill), check]
+            .align_y(iced::Center);
         let main = column![
             item(pallets.into(), DockMsg::FloatMenuPallets(!open), true),
             container(separator).padding([3, 4]),
+            item(docking.into(), DockMsg::FloatDockingToggle(anchor), false),
             item(
                 text(t!("Dock left")).size(12).into(),
                 DockMsg::DockTo(anchor, DockSide::Left),
@@ -623,24 +636,22 @@ impl OpenCADStudio {
         ]
         .spacing(1)
         .padding(4);
-        let mut layers = vec![place_at(menu_frame(main.into()), menu_x, y + 4.0)];
+        let mut layers = vec![place_at(menu_frame(main.into()), menu_x, menu_y)];
         if open {
             let checked: Vec<_> = PanelId::ALL
                 .iter()
                 .map(|p| (*p, f.contains(*p) && self.dock_panel_visible(*p)))
                 .collect();
             let toggle = move |id| Message::Dock(DockMsg::FloatMenuToggle(anchor, id));
-            // Beside the menu, on the side it opened toward, unless there is
-            // no room there.
-            let right = menu_x + 2.0 * DOCK_MENU_W + 2.0 <= ww;
-            let left = menu_x - DOCK_MENU_W - 2.0 >= 0.0;
-            let sub_x = if (bar_left && right) || !left {
+            // To the right of the menu, or its left when there is no room.
+            let sub_x = if menu_x + 2.0 * DOCK_MENU_W + 2.0 <= ww {
                 menu_x + DOCK_MENU_W + 2.0
             } else {
                 menu_x - DOCK_MENU_W - 2.0
             }
             .clamp(0.0, max_x);
-            layers.push(place_at(dock_pallet_menu(&checked, toggle), sub_x, y + 4.0));
+            let sub_y = menu_y.min(wh - PALLET_MENU_H).max(0.0);
+            layers.push(place_at(dock_pallet_menu(&checked, toggle), sub_x, sub_y));
         }
         Some(
             iced::widget::Stack::with_children(layers)
@@ -954,6 +965,7 @@ fn floating_title_bar(
     visible: &[crate::ui::dock::PanelId],
     auto_collapse: bool,
     on_left: bool,
+    hovered: bool,
 ) -> Element<'static, Message> {
     use crate::ui::dock::DockMsg;
     let anchor = visible[0];
@@ -962,9 +974,14 @@ fn floating_title_bar(
     } else {
         iced::widget::tooltip::Position::Right
     };
-    let close = crate::ui::dock::close_button(DockMsg::FloatClose(anchor), tip);
-    let pin = crate::ui::dock::pin_button(anchor, auto_collapse, tip);
-    let mut bar = column![close, pin].spacing(2);
+    // Close and pin only show while the pointer is over the bar, as on a
+    // docked title bar.
+    let mut bar = column![].spacing(2);
+    if hovered {
+        bar = bar
+            .push(crate::ui::dock::close_button(DockMsg::FloatClose(anchor), tip))
+            .push(crate::ui::dock::pin_button(anchor, auto_collapse, tip));
+    }
     if let [id] = visible {
         let title = canvas(VBarLabel {
             text: t!(id.title()).into_owned(),
@@ -1000,6 +1017,9 @@ fn floating_title_bar(
     }))
     .on_press(Message::Dock(DockMsg::FloatGrab(anchor)))
     .on_right_press(Message::Dock(DockMsg::FloatMenu(Some(anchor))))
+    .on_enter(Message::Dock(DockMsg::TitleHover(anchor)))
+    .on_move(|p| Message::Dock(DockMsg::FloatBarPointer(p)))
+    .on_exit(Message::Dock(DockMsg::TitleHoverEnd(anchor)))
     // Double-click docks it against the edge its title bar faces.
     .on_double_click(Message::Dock(DockMsg::DockTo(
         anchor,
@@ -1058,6 +1078,10 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
 
 /// Width of the icon strip's pallet menu.
 const DOCK_MENU_W: f32 = 230.0;
+/// Rough heights of a floating window's menu and of a pallet menu, to keep
+/// them on screen.
+const FLOAT_MENU_H: f32 = 150.0;
+const PALLET_MENU_H: f32 = 270.0;
 
 /// A pallet menu (an edge's + button, a floating window's Pallets
 /// submenu), styled like the right-click menu: one row per pallet with its

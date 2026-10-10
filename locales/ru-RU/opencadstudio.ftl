@@ -6155,6 +6155,7 @@ count-feature =
     .invalid-point = Недопустимая точка.
 
 dock =
+    .allow-docking = Разрешить закрепление
     .auto-hide = Автоскрытие
     .dock-left = Закрепить слева
     .dock-right = Закрепить справа

@@ -85,6 +85,12 @@ pub enum DockMsg {
     FloatMenu(Option<PanelId>),
     /// Show (`true`) or hide the floating menu's Pallets submenu.
     FloatMenuPallets(bool),
+    /// Floating menu's Allow docking check: flip it for the window holding
+    /// the pallet.
+    FloatDockingToggle(PanelId),
+    /// The pointer moved over a floating title bar, at this point in it
+    /// (where its right-click menu opens).
+    FloatBarPointer(iced::Point),
     /// Pallets submenu pick (window, pallet): hide the pallet when it shows
     /// in the window, else add it to the window and open it.
     FloatMenuToggle(PanelId, PanelId),
@@ -342,6 +348,9 @@ pub struct FloatPanel {
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    /// Dragging the window (or a pallet out of it) may dock it on an edge;
+    /// off, it only ever floats.
+    pub docking: bool,
 }
 
 /// On-disk form of a floating window. Configs from before floating groups
@@ -358,6 +367,12 @@ struct FloatRepr {
     y: f32,
     w: f32,
     h: f32,
+    #[serde(default = "docking_default")]
+    docking: bool,
+}
+
+fn docking_default() -> bool {
+    true
 }
 
 impl From<FloatRepr> for FloatPanel {
@@ -373,6 +388,7 @@ impl From<FloatRepr> for FloatPanel {
             y: r.y,
             w: r.w,
             h: r.h,
+            docking: r.docking,
         }
     }
 }
@@ -386,6 +402,7 @@ impl FloatPanel {
             y,
             w,
             h,
+            docking: true,
         }
     }
 
@@ -830,7 +847,14 @@ impl DockState {
         }
         let g = self.groups_mut(side).remove(group);
         self.after_group_removed(side, group);
-        let mut f = FloatPanel { group: g, x, y, w, h };
+        let mut f = FloatPanel {
+            group: g,
+            x,
+            y,
+            w,
+            h,
+            docking: true,
+        };
         f.heal();
         self.floating.push(f);
         true
@@ -899,6 +923,15 @@ impl DockState {
         let g = &mut self.floating[i].group;
         let weight = g.mean_weight();
         g.insert(usize::MAX, id, weight);
+        true
+    }
+
+    /// Flip whether dragging the floating window holding `id` may dock it.
+    pub fn toggle_float_docking(&mut self, id: PanelId) -> bool {
+        let Some(i) = self.float_index(id) else {
+            return false;
+        };
+        self.floating[i].docking = !self.floating[i].docking;
         true
     }
 

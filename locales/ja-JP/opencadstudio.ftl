@@ -6142,6 +6142,7 @@ count-feature =
     .invalid-point = 点が無効です。
 
 dock =
+    .allow-docking = ドッキングを許可
     .auto-hide = 自動的に隠す
     .dock-left = 左にドッキング
     .dock-right = 右にドッキング

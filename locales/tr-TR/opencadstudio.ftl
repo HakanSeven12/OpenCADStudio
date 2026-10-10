@@ -6077,6 +6077,7 @@ count-feature =
     .invalid-point = Geçersiz nokta.
 
 dock =
+    .allow-docking = Yerleştirmeye izin ver
     .auto-hide = Otomatik gizle
     .dock-left = Sola yerleştir
     .dock-right = Sağa yerleştir

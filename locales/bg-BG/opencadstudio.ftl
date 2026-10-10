@@ -6154,6 +6154,7 @@ count-feature =
     .invalid-point = Невалидна точка.
 
 dock =
+    .allow-docking = Разреши закачане
     .auto-hide = Автоматично скриване
     .dock-left = Закачи вляво
     .dock-right = Закачи вдясно

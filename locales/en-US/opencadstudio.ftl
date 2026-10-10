@@ -6155,6 +6155,7 @@ count-feature =
     .invalid-point = Invalid point.
 
 dock =
+    .allow-docking = Allow docking
     .auto-hide = Auto-hide
     .dock-left = Dock left
     .dock-right = Dock right

@@ -6154,6 +6154,7 @@ count-feature =
     .invalid-point = Ponto inválido.
 
 dock =
+    .allow-docking = Permitir encaixe
     .auto-hide = Ocultar automaticamente
     .dock-left = Encaixar à esquerda
     .dock-right = Encaixar à direita

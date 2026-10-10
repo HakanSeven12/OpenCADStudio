@@ -6142,6 +6142,7 @@ count-feature =
     .invalid-point = अमान्य बिंदु।
 
 dock =
+    .allow-docking = डॉकिंग की अनुमति दें
     .auto-hide = स्वतः छिपाएँ
     .dock-left = बाएँ डॉक करें
     .dock-right = दाएँ डॉक करें

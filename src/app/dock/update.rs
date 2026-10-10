@@ -149,12 +149,20 @@ impl OpenCADStudio {
             }
             DockMsg::FloatMenu(id) => {
                 self.dock_float_menu = id;
+                self.dock_float_menu_at = self.dock_float_pointer;
                 self.dock_float_menu_pallets = false;
                 if let Some(id) = id {
                     self.dock.raise_float(id);
                 }
             }
             DockMsg::FloatMenuPallets(open) => self.dock_float_menu_pallets = open,
+            DockMsg::FloatBarPointer(p) => self.dock_float_pointer = p,
+            DockMsg::FloatDockingToggle(id) => {
+                self.dock_float_menu = None;
+                if self.dock.toggle_float_docking(id) {
+                    self.save_config();
+                }
+            }
             DockMsg::FloatMenuToggle(window, id) => {
                 // Checked = open in this window: unchecking hides it.
                 // Anything else (closed, docked, in another window) moves
@@ -289,7 +297,13 @@ impl OpenCADStudio {
                             }
                             DropTarget::Float { x, y } => {
                                 let (w, h) = self.dock_float_size(panel);
-                                self.dock.float(FloatPanel::new(panel, x, y, w, h))
+                                // Pulled out of a window, it keeps the
+                                // window's docking choice.
+                                let docking = self.dock.float_rect(panel).is_none_or(|f| f.docking);
+                                self.dock.float(FloatPanel {
+                                    docking,
+                                    ..FloatPanel::new(panel, x, y, w, h)
+                                })
                             }
                         };
                     }
@@ -356,9 +370,18 @@ impl OpenCADStudio {
                     grab
                 };
                 let target = if started {
+                    // A window that may not dock (or a pallet pulled out of
+                    // one) only floats.
+                    let floats_only = group.is_none()
+                        && self.dock.float_rect(panel).is_some_and(|f| !f.docking);
+                    let found = if floats_only {
+                        self.dock_float_target(point, grab)
+                    } else {
+                        self.dock_drop_target(point, grab)
+                    };
                     // A whole docked group moves between group positions or
                     // floats; it cannot join another group.
-                    match (group, self.dock_drop_target(point, grab)) {
+                    match (group, found) {
                         (Some(_), DropTarget::Join { .. }) => None,
                         (_, found) => Some(found),
                     }
@@ -786,7 +809,7 @@ impl OpenCADStudio {
     ) -> crate::ui::dock::DropTarget {
         use crate::app::config::DockSide;
         use crate::ui::dock::{DropTarget, StripHit, DOCK_EDGE_ZONE, DOCK_STRIP_W};
-        let (ww, wh) = self.dock_workspace_size();
+        let (ww, _) = self.dock_workspace_size();
         for side in [DockSide::Left, DockSide::Right] {
             let listed = !self.dock_visible_groups(side).is_empty();
             let from_edge = match side {
@@ -841,8 +864,19 @@ impl OpenCADStudio {
                 }
             }
         }
+        self.dock_float_target(p, grab)
+    }
+
+    /// Floating at workspace point `p`, held at `grab` from its top-left
+    /// corner (kept on the workspace).
+    pub(crate) fn dock_float_target(
+        &self,
+        p: iced::Point,
+        grab: iced::Vector,
+    ) -> crate::ui::dock::DropTarget {
+        let (ww, wh) = self.dock_workspace_size();
         let x = (p.x - grab.x).clamp(0.0, (ww - 60.0).max(0.0));
         let y = (p.y - grab.y).clamp(0.0, (wh - 30.0).max(0.0));
-        DropTarget::Float { x, y }
+        crate::ui::dock::DropTarget::Float { x, y }
     }
 }

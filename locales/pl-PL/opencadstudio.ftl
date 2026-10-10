@@ -6153,6 +6153,7 @@ count-feature =
     .invalid-point = Nieprawidłowy punkt.
 
 dock =
+    .allow-docking = Zezwalaj na dokowanie
     .auto-hide = Autoukrywanie
     .dock-left = Zadokuj po lewej
     .dock-right = Zadokuj po prawej

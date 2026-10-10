@@ -6151,6 +6151,7 @@ count-feature =
     .invalid-point = Neplatný bod.
 
 dock =
+    .allow-docking = Povolit ukotvení
     .auto-hide = Automaticky skrýt
     .dock-left = Ukotvit vlevo
     .dock-right = Ukotvit vpravo

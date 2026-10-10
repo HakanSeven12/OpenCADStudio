@@ -6153,6 +6153,7 @@ count-feature =
     .invalid-point = Érvénytelen pont.
 
 dock =
+    .allow-docking = Dokkolás engedélyezése
     .auto-hide = Automatikus elrejtés
     .dock-left = Dokkolás balra
     .dock-right = Dokkolás jobbra

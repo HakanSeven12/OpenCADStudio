@@ -628,3 +628,20 @@ fn blockpalette_width_reset() {
     let _ = app.on_dock(crate::ui::dock::DockMsg::WidthReset(id));
     assert_eq!(app.dock.group_width(DockSide::Right, 0), 260.0);
 }
+
+#[test]
+fn a_window_without_allow_docking_only_floats_when_dragged() {
+    use crate::ui::dock::{DockMsg, DropTarget, PanelId};
+    let mut app = dock_app();
+    let _ = app.on_dock(DockMsg::FloatOut(PanelId::BlockPalette));
+    let _ = app.on_dock(DockMsg::FloatDockingToggle(PanelId::BlockPalette));
+    assert!(!app.dock.float_rect(PanelId::BlockPalette).unwrap().docking);
+    // Dragged onto the left edge's strip, it stays a floating window.
+    let _ = app.on_dock(DockMsg::FloatGrab(PanelId::BlockPalette));
+    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(500.0, 300.0)));
+    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(10.0, 60.0)));
+    assert!(matches!(drag_target(&app), Some(DropTarget::Float { .. })));
+    let _ = app.on_dock(DockMsg::DragRelease);
+    assert!(app.dock.float_rect(PanelId::BlockPalette).is_some());
+    assert_eq!(app.dock.location(PanelId::BlockPalette), None);
+}

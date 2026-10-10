@@ -5553,19 +5553,19 @@ impl MultiPipeline {
                     || std::sync::Arc::strong_count(&entry.1) > 1
                     || std::sync::Arc::strong_count(&entry.3) > 1
             });
-            self.block_geometry.retain(|_, chunks| {
-                chunks.iter().any(|chunk| std::sync::Arc::strong_count(&chunk.bind_group) > 1)
-            });
+            // Block records are host memory a released slot no longer needs;
+            // the next build re-emits what it still draws.
+            self.block_geometry.clear();
         }
         released
     }
 
     /// Sum across slots, plus the caches held once for all of them.
     pub(crate) fn gpu_live_bytes(&self) -> GpuLiveBytes {
-        let mut total = GpuLiveBytes {
-            block_geometry: wire_gpu::block_geometry_bytes(&self.block_geometry),
-            ..Default::default()
-        };
+        let mut total = GpuLiveBytes::default();
+        // Block arenas belong to the batches, and a cached build hands the same
+        // arenas to several slots, so each one is counted once.
+        let mut counted = rustc_hash::FxHashSet::default();
         for inner in &self.inners {
             let slot = inner.gpu_live_bytes();
             total.slots += slot.slots;
@@ -5573,6 +5573,15 @@ impl MultiPipeline {
             total.render_targets += slot.render_targets;
             total.text_atlas += slot.text_atlas;
             total.wire_arena += slot.wire_arena;
+            total.block_geometry +=
+                wire_gpu::block_arena_bytes(&inner.gpu_block_wires, &mut counted)
+                    + wire_gpu::block_arena_bytes(
+                        &inner.gpu_selected_block_wires,
+                        &mut counted,
+                    );
+        }
+        for entry in self.wire_buffer_cache.values() {
+            total.block_geometry += wire_gpu::block_arena_bytes(&entry.1, &mut counted);
         }
         total
     }
@@ -5584,16 +5593,23 @@ impl MultiPipeline {
 /// the six-per-segment geometry in slot 0 and the placements in slot 1, while
 /// storage has no geometry vertex buffer at all and the placements become slot
 /// 0. Both draw loops go through here so they cannot drift apart.
+/// Many definitions share one arena, so the batch addresses its own slice of
+/// it: a dynamic offset for its constants, `first_vertex` for its segments and
+/// `first_instance` for its placements.
 fn bind_and_draw_block_wire(pass: &mut wgpu::RenderPass<'_>, wire: &wire_gpu::BlockWireGpu) {
-    pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
-    match &wire.vertex_buffer {
+    let arena = wire.arena.as_ref();
+    pass.set_bind_group(1, arena.bind_group.as_ref(), &[wire.const_offset]);
+    match &arena.vertex_buffer {
         Some(vertices) => {
             pass.set_vertex_buffer(0, vertices.slice(..));
-            pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
+            pass.set_vertex_buffer(1, arena.instance_buffer.slice(..));
         }
-        None => pass.set_vertex_buffer(0, wire.instance_buffer.slice(..)),
+        None => pass.set_vertex_buffer(0, arena.instance_buffer.slice(..)),
     }
-    pass.draw(0..wire.vertex_count, 0..wire.instance_count);
+    pass.draw(
+        wire.first_vertex..wire.first_vertex + wire.vertex_count,
+        wire.first_instance..wire.first_instance + wire.instance_count,
+    );
 }
 
 /// A square `Depth32Float` render target for the shadow pass. `side` is 1 for

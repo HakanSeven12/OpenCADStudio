@@ -814,8 +814,25 @@ fn entity_owned_block_uses(
             if let Some(record) = block_record_by_name(document, name)
                 .filter(|record| !record.entity_handles.is_empty())
             {
-                let mut insert = Insert::new(record.name.clone(), Vector3::ZERO);
-                insert.common = dimension.base().common.clone();
+                let base = dimension.base();
+                // The picture block draws the dimension in its own frame, and
+                // the dimension says where that frame sits. Placing it at the
+                // origin instead draws the whole dimension offset by the
+                // insertion point — far off the geometry it measures whenever
+                // the file carries a non-zero one, which is what a dimension
+                // saved inside a block definition usually has.
+                let mut insert = Insert::new(record.name.clone(), base.insertion_point)
+                    .with_scale(
+                        base.insertion_scale.x,
+                        base.insertion_scale.y,
+                        base.insertion_scale.z,
+                    )
+                    .with_rotation(base.insertion_rotation);
+                // The insertion point is in the dimension's own object
+                // coordinates, so the picture follows its extrusion the way
+                // any block reference does.
+                insert.normal = base.normal;
+                insert.common = base.common.clone();
                 let picture = !crate::scene::annotative::is_annotative(document, entity);
                 vec![block_use(
                     document,

@@ -6157,6 +6157,5 @@ dock =
     .dock-left = Links andocken
     .dock-right = Rechts andocken
     .new-group = Neue Gruppe
-    .pallets = Paletten
     .browser = Browser
     .node-graph = Knotengraph

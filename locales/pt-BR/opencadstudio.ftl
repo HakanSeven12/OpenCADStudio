@@ -6159,6 +6159,5 @@ dock =
     .dock-left = Encaixar à esquerda
     .dock-right = Encaixar à direita
     .new-group = Novo grupo
-    .pallets = Paletas
     .browser = Navegador
     .node-graph = Grafo de nós

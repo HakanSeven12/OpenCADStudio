@@ -865,10 +865,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
     /// Edge whose icon-strip pallet menu (+) is open.
     pub(crate) dock_edge_menu: Option<crate::app::config::DockSide>,
-    /// Floating window (named by one of its pallets) whose right-click menu
-    /// is open, and whether its Pallets submenu shows.
+    /// Floating pallet whose title-bar right-click menu is open.
     pub(crate) dock_float_menu: Option<crate::ui::dock::PanelId>,
-    pub(crate) dock_float_menu_pallets: bool,
     /// Pointer position over a floating title bar (bar-local), and where
     /// its open menu was asked for.
     pub(crate) dock_float_pointer: iced::Point,
@@ -4306,7 +4304,6 @@ impl OpenCADStudio {
             dock_hover_pending: None,
             dock_hover_gen: 0,
             dock_float_menu: None,
-            dock_float_menu_pallets: false,
             dock_float_pointer: iced::Point::ORIGIN,
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,

@@ -5759,7 +5759,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Dock left" => Some(("dock", "dock-left")),
         "Dock right" => Some(("dock", "dock-right")),
         "New group" => Some(("dock", "new-group")),
-        "Pallets" => Some(("dock", "pallets")),
         "Browser" => Some(("dock", "browser")),
         "Node Graph" => Some(("dock", "node-graph")),
         _ => None,

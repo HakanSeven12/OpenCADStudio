@@ -205,7 +205,7 @@ fn dock_drop_over_the_viewport_floats_the_panel() {
     );
     assert!(matches!(target, Some(DropTarget::Float { .. })));
     assert!(app.dock.right.is_empty());
-    let f = app.dock.float_rect(PanelId::BlockPalette).expect("floating").clone();
+    let f = app.dock.float_rect(PanelId::BlockPalette).expect("floating");
     assert!(f.x > 600.0 && f.x < 800.0 && f.y > 350.0 && f.y < 400.0);
     // Dragging a floating panel keeps the grab point under the pointer.
     let target = drag_panel(
@@ -275,53 +275,14 @@ fn dock_grip_drag_moves_a_whole_group() {
         app.dock.left[1].panels,
         vec![PanelId::Properties, PanelId::Browser]
     );
-    // A group dropped over the viewport floats as one window.
+    // A group dropped over the viewport does not float or split up.
+    let before = app.dock.clone();
     let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 1));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, 300.0)));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(800.0, 400.0)));
+    assert_eq!(drag_target(&app), None);
     let _ = app.on_dock(DockMsg::DragRelease);
-    assert_eq!(app.dock.left.len(), 1);
-    let f = app.dock.float_rect(PanelId::Browser).expect("floats");
-    assert_eq!(f.group.panels, vec![PanelId::Properties, PanelId::Browser]);
-    // Dragging the window's title bar onto the strip docks it whole again.
-    let _ = app.on_dock(DockMsg::FloatGrab(PanelId::Properties));
-    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(800.0, 400.0)));
-    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, plus_top + 10.0)));
-    let _ = app.on_dock(DockMsg::DragRelease);
-    assert!(app.dock.floating.is_empty());
-    assert_eq!(
-        app.dock.left[1].panels,
-        vec![PanelId::Properties, PanelId::Browser]
-    );
-}
-
-#[test]
-fn floating_menu_adds_pallets_and_docks_the_window() {
-    use crate::app::config::DockSide;
-    use crate::ui::dock::{DockMsg, PanelId};
-    let mut app = dock_app();
-    let _ = app.on_dock(DockMsg::FloatOut(PanelId::BlockPalette));
-    let _ = app.on_dock(DockMsg::FloatMenu(Some(PanelId::BlockPalette)));
-    let _ = app.on_dock(DockMsg::FloatMenuPallets(true));
-    // Picking a pallet adds it to the window, opens it and closes the menu.
-    let _ = app.on_dock(DockMsg::FloatMenuToggle(PanelId::BlockPalette, PanelId::Browser));
-    assert!(app.show_browser);
-    assert_eq!(app.dock_float_menu, None);
-    let f = app.dock.float_rect(PanelId::BlockPalette).unwrap();
-    assert_eq!(f.group.panels, vec![PanelId::BlockPalette, PanelId::Browser]);
-    // Picking a checked one hides it but keeps its place.
-    let _ = app.on_dock(DockMsg::FloatMenuToggle(PanelId::BlockPalette, PanelId::Browser));
-    assert!(!app.show_browser);
-    assert!(app.dock.float_rect(PanelId::Browser).is_some());
-    // Dock left takes the whole window to the left edge.
-    let _ = app.on_dock(DockMsg::DockTo(PanelId::BlockPalette, DockSide::Left));
-    assert!(app.dock.floating.is_empty());
-    let (side, gi) = app.dock.location(PanelId::Browser).unwrap();
-    assert_eq!(side, DockSide::Left);
-    assert_eq!(
-        app.dock.groups(side)[gi].panels,
-        vec![PanelId::BlockPalette, PanelId::Browser]
-    );
+    assert_eq!(app.dock, before);
 }
 
 #[test]
@@ -405,7 +366,7 @@ fn dock_float_resize_grows_the_panel() {
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(360.0, 400.0)));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(400.0, 450.0)));
     let _ = app.on_dock(DockMsg::DragRelease);
-    let f = app.dock.float_rect(PanelId::BlockPalette).unwrap().clone();
+    let f = app.dock.float_rect(PanelId::BlockPalette).unwrap();
     assert_eq!((f.w, f.h), (300.0, 350.0));
     // The bottom-left grip grows the panel leftward, keeping its right edge.
     let _ = app.on_dock(DockMsg::FloatResizeGrab(PanelId::BlockPalette, true));
@@ -630,18 +591,27 @@ fn blockpalette_width_reset() {
 }
 
 #[test]
-fn a_window_without_allow_docking_only_floats_when_dragged() {
+fn floating_menu_docks_and_allow_docking_keeps_a_drag_floating() {
+    use crate::app::config::DockSide;
     use crate::ui::dock::{DockMsg, DropTarget, PanelId};
     let mut app = dock_app();
     let _ = app.on_dock(DockMsg::FloatOut(PanelId::BlockPalette));
+    // With Allow docking off, a drag onto the left edge's strip stays
+    // floating.
+    let _ = app.on_dock(DockMsg::FloatMenu(Some(PanelId::BlockPalette)));
     let _ = app.on_dock(DockMsg::FloatDockingToggle(PanelId::BlockPalette));
+    assert_eq!(app.dock_float_menu, None);
     assert!(!app.dock.float_rect(PanelId::BlockPalette).unwrap().docking);
-    // Dragged onto the left edge's strip, it stays a floating window.
-    let _ = app.on_dock(DockMsg::FloatGrab(PanelId::BlockPalette));
+    let _ = app.on_dock(DockMsg::DockGrab(PanelId::BlockPalette));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(500.0, 300.0)));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(10.0, 60.0)));
     assert!(matches!(drag_target(&app), Some(DropTarget::Float { .. })));
     let _ = app.on_dock(DockMsg::DragRelease);
-    assert!(app.dock.float_rect(PanelId::BlockPalette).is_some());
-    assert_eq!(app.dock.location(PanelId::BlockPalette), None);
+    let f = app.dock.float_rect(PanelId::BlockPalette).expect("still floating");
+    assert!(!f.docking, "moving it keeps the choice");
+    // The menu's Dock left still docks it.
+    let _ = app.on_dock(DockMsg::FloatMenu(Some(PanelId::BlockPalette)));
+    let _ = app.on_dock(DockMsg::DockTo(PanelId::BlockPalette, DockSide::Left));
+    assert_eq!(app.dock_float_menu, None);
+    assert_eq!(app.dock.location(PanelId::BlockPalette).map(|(s, _)| s), Some(DockSide::Left));
 }

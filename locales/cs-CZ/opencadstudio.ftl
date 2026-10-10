@@ -6156,6 +6156,5 @@ dock =
     .dock-left = Ukotvit vlevo
     .dock-right = Ukotvit vpravo
     .new-group = Nová skupina
-    .pallets = Palety
     .browser = Prohlížeč
     .node-graph = Graf uzlů

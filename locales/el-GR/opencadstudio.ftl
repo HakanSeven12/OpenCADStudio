@@ -6159,6 +6159,5 @@ dock =
     .dock-left = Πρόσδεση αριστερά
     .dock-right = Πρόσδεση δεξιά
     .new-group = Νέα ομάδα
-    .pallets = Παλέτες
     .browser = Περιηγητής
     .node-graph = Γράφος κόμβων

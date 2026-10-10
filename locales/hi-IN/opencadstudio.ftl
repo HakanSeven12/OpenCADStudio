@@ -6147,6 +6147,5 @@ dock =
     .dock-left = बाएँ डॉक करें
     .dock-right = दाएँ डॉक करें
     .new-group = नया समूह
-    .pallets = पैलेट
     .browser = ब्राउज़र
     .node-graph = नोड ग्राफ़

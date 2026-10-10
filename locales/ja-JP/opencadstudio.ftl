@@ -6147,6 +6147,5 @@ dock =
     .dock-left = 左にドッキング
     .dock-right = 右にドッキング
     .new-group = 新しいグループ
-    .pallets = パレット
     .browser = ブラウザー
     .node-graph = ノードグラフ

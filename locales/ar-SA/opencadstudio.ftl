@@ -6171,6 +6171,5 @@ dock =
     .dock-left = إرساء إلى اليسار
     .dock-right = إرساء إلى اليمين
     .new-group = مجموعة جديدة
-    .pallets = اللوحات
     .browser = المستعرض
     .node-graph = مخطط العقد

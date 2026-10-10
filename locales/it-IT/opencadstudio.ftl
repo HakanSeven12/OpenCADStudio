@@ -6158,6 +6158,5 @@ dock =
     .dock-left = Ancora a sinistra
     .dock-right = Ancora a destra
     .new-group = Nuovo gruppo
-    .pallets = Tavolozze
     .browser = Browser
     .node-graph = Grafo dei nodi

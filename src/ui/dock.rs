@@ -65,35 +65,17 @@ pub enum DockMsg {
     GripHoverEnd(DockSide, usize),
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
-    /// Double-click on a group's edge band: float the whole group.
-    GroupFloat(DockSide, usize),
     /// Double-click on a floating title bar (or its menu's Dock left /
-    /// right): dock the window holding the panel on that side.
+    /// right): dock the panel on that side.
     DockTo(PanelId, DockSide),
-    /// Begin dragging the floating window holding `panel` by its title bar.
-    FloatGrab(PanelId),
-    /// Close every pallet of the floating window holding `panel`.
-    FloatClose(PanelId),
-    /// Begin dragging the splitter between pallets `upper` and `lower` of
-    /// the floating window holding `panel`.
-    FloatSplitGrab(PanelId, usize, usize),
-    /// Give every pallet of the floating window holding `panel` the same
-    /// height again.
-    FloatSplitReset(PanelId),
-    /// Open (`Some`) the right-click menu of the floating window holding the
-    /// pallet, or close it (`None`).
+    /// Open (`Some`) the right-click menu of a floating title bar, or close
+    /// it (`None`).
     FloatMenu(Option<PanelId>),
-    /// Show (`true`) or hide the floating menu's Pallets submenu.
-    FloatMenuPallets(bool),
-    /// Floating menu's Allow docking check: flip it for the window holding
-    /// the pallet.
+    /// Floating menu's Allow docking check: flip it for the panel.
     FloatDockingToggle(PanelId),
     /// The pointer moved over a floating title bar, at this point in it
     /// (where its right-click menu opens).
     FloatBarPointer(iced::Point),
-    /// Pallets submenu pick (window, pallet): hide the pallet when it shows
-    /// in the window, else add it to the window and open it.
-    FloatMenuToggle(PanelId, PanelId),
     /// Bring floating `panel` to the front.
     FloatRaise(PanelId),
     /// The pointer left the edge column; collapse any auto-collapsing panel.
@@ -335,34 +317,27 @@ where
     Ok(groups)
 }
 
-/// A floating window over the workspace, in workspace-local pixels: one
-/// pallet, or a group of them stacked like a docked group.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(from = "FloatRepr")]
+/// A panel floating over the workspace, in workspace-local pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "FloatRepr")]
 pub struct FloatPanel {
-    /// Pallets top → bottom with their heights (`width` is unused: the
-    /// window has its own).
-    #[serde(flatten)]
-    pub group: DockGroup,
+    pub id: PanelId,
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
-    /// Dragging the window (or a pallet out of it) may dock it on an edge;
-    /// off, it only ever floats.
+    /// Dragging the panel may dock it on an edge; off, it only ever floats.
     pub docking: bool,
 }
 
-/// On-disk form of a floating window. Configs from before floating groups
-/// stored one pallet as `id`.
+/// On-disk form of a floating panel. A short-lived build floated groups,
+/// stored as `panels`: its first pallet keeps floating, so such a config
+/// still loads (a config that fails to load falls back to all defaults).
 #[derive(Deserialize)]
 struct FloatRepr {
-    #[serde(default)]
     id: Option<PanelId>,
     #[serde(default)]
     panels: Vec<PanelId>,
-    #[serde(default)]
-    weights: Vec<f32>,
     x: f32,
     y: f32,
     w: f32,
@@ -375,29 +350,23 @@ fn docking_default() -> bool {
     true
 }
 
-impl From<FloatRepr> for FloatPanel {
-    fn from(r: FloatRepr) -> Self {
-        let mut group = DockGroup::stack(r.id.into_iter().chain(r.panels).collect());
-        if !r.weights.is_empty() {
-            group.weights = r.weights;
-        }
-        group.heal();
-        Self {
-            group,
-            x: r.x,
-            y: r.y,
-            w: r.w,
-            h: r.h,
+impl TryFrom<FloatRepr> for FloatPanel {
+    type Error = &'static str;
+
+    fn try_from(r: FloatRepr) -> Result<Self, Self::Error> {
+        let id = r.id.or(r.panels.first().copied()).ok_or("floating panel without id")?;
+        Ok(Self {
             docking: r.docking,
-        }
+            ..Self::new(id, r.x, r.y, r.w, r.h)
+        })
     }
 }
 
 impl FloatPanel {
-    /// Pallet `id` floating on its own.
+    /// Panel `id` floating at `x`, `y`, sized `w` × `h`, free to dock.
     pub fn new(id: PanelId, x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            group: DockGroup::single(id),
+            id,
             x,
             y,
             w,
@@ -406,33 +375,13 @@ impl FloatPanel {
         }
     }
 
-    /// The window's first pallet, which names it in messages.
-    pub fn id(&self) -> PanelId {
-        self.group.panels[0]
-    }
-
-    pub fn contains(&self, id: PanelId) -> bool {
-        self.group.panels.contains(&id)
-    }
-
-    /// The widest the window may be: the most any of its pallets allows.
-    fn max_width(&self) -> f32 {
-        self.group
-            .panels
-            .iter()
-            .map(|id| id.max_width())
-            .fold(DOCK_MIN_W, f32::max)
-    }
-
     /// Keep a placement read from disk usable: finite, on the workspace's
-    /// positive side, and at least the minimum size. The window holds at
-    /// least one pallet.
+    /// positive side, and at least the minimum size.
     fn heal(&mut self) {
-        self.group.heal();
         let finite_or = |v: f32, fallback: f32| if v.is_finite() { v } else { fallback };
         self.x = finite_or(self.x, 0.0).max(0.0);
         self.y = finite_or(self.y, 0.0).max(0.0);
-        self.w = finite_or(self.w, self.id().default_width()).clamp(DOCK_MIN_W, self.max_width());
+        self.w = finite_or(self.w, self.id.default_width()).clamp(DOCK_MIN_W, self.id.max_width());
         self.h = finite_or(self.h, FLOAT_MIN_H).max(FLOAT_MIN_H);
     }
 }
@@ -462,7 +411,7 @@ pub struct DockState {
     /// Auto-hide per edge (left, right): the edge shows only its icon strip
     /// until an icon is hovered.
     pub auto_hide: (bool, bool),
-    /// Floating windows, back → front.
+    /// Floating panels, back → front.
     pub floating: Vec<FloatPanel>,
     /// Per-panel settings, keyed by `PanelId`: the width a pallet floats at
     /// (and starts a new group with) and its floating auto-hide.
@@ -552,18 +501,7 @@ impl DockState {
             let shown = self.shown(side).min(len.saturating_sub(1));
             self.show_group(side, shown);
         }
-        for f in &mut self.floating {
-            f.group.heal();
-            (f.group.panels, f.group.weights) = f
-                .group
-                .panels
-                .iter()
-                .zip(&f.group.weights)
-                .filter(|(id, _)| seen.insert(**id))
-                .map(|(id, w)| (*id, *w))
-                .unzip();
-        }
-        self.floating.retain(|f| !f.group.panels.is_empty());
+        self.floating.retain(|f| seen.insert(f.id));
         self.floating.iter_mut().for_each(FloatPanel::heal);
     }
 
@@ -577,13 +515,9 @@ impl DockState {
         None
     }
 
-    /// The floating window holding `id`, if it floats.
-    pub fn float_rect(&self, id: PanelId) -> Option<&FloatPanel> {
-        self.floating.iter().find(|f| f.contains(id))
-    }
-
-    fn float_index(&self, id: PanelId) -> Option<usize> {
-        self.floating.iter().position(|f| f.contains(id))
+    /// The floating placement of `id`, if it floats.
+    pub fn float_rect(&self, id: PanelId) -> Option<FloatPanel> {
+        self.floating.iter().find(|f| f.id == id).copied()
     }
 
     /// Whether `id` has a place in the layout (docked or floating). A panel
@@ -605,7 +539,7 @@ impl DockState {
     }
 
     /// The floating auto-hide flag of `id` (a docked pallet follows its
-    /// edge, a floating one its window; see [`Self::auto_hides`]).
+    /// edge instead; see [`Self::auto_hides`]).
     pub fn auto_collapse(&self, id: PanelId) -> bool {
         self.settings(id).auto_collapse
     }
@@ -619,31 +553,22 @@ impl DockState {
     }
 
     /// Whether `id` auto-hides where it is: by its edge's setting when
-    /// docked, by its window's (its first pallet's flag) when floating.
+    /// docked, by its own when floating.
     pub fn auto_hides(&self, id: PanelId) -> bool {
-        match (self.location(id), self.float_rect(id)) {
-            (Some((side, _)), _) => self.edge_auto_hide(side),
-            (None, Some(f)) => self.auto_collapse(f.id()),
-            (None, None) => self.auto_collapse(id),
+        match self.location(id) {
+            Some((side, _)) => self.edge_auto_hide(side),
+            None => self.auto_collapse(id),
         }
     }
 
-    /// Flip auto-hide where `id` is: its whole edge when docked, its whole
-    /// window when floating. Returns the new state.
+    /// Flip auto-hide where `id` is: its whole edge when docked, the pallet
+    /// itself when floating. Returns the new state.
     pub fn toggle_auto_hide(&mut self, id: PanelId) -> bool {
         let on = !self.auto_hides(id);
         match self.location(id) {
             Some((DockSide::Left, _)) => self.auto_hide.0 = on,
             Some((DockSide::Right, _)) => self.auto_hide.1 = on,
-            None => {
-                let panels = match self.float_rect(id) {
-                    Some(f) => f.group.panels.clone(),
-                    None => vec![id],
-                };
-                for p in panels {
-                    self.set_auto_collapse(p, on);
-                }
-            }
+            None => self.set_auto_collapse(id, on),
         }
         on
     }
@@ -725,13 +650,7 @@ impl DockState {
     /// and weight there, and whether the group disappeared (it held nothing
     /// else).
     fn detach(&mut self, id: PanelId) -> Option<(DockSide, usize, usize, f32, bool)> {
-        if let Some(i) = self.float_index(id) {
-            self.floating[i].group.remove(id);
-            if self.floating[i].group.panels.is_empty() {
-                self.floating.remove(i);
-            }
-            return None;
-        }
+        self.floating.retain(|f| f.id != id);
         let (side, gi) = self.location(id)?;
         let (pos, weight) = self.groups_mut(side)[gi].remove(id).expect("located");
         if !self.groups(side)[gi].panels.is_empty() {
@@ -829,127 +748,38 @@ impl DockState {
         true
     }
 
-    /// Float `rect`'s pallets in it, on top of the other floating windows.
+    /// Float `id` at `rect`, on top of the other floating panels.
     pub fn float(&mut self, rect: FloatPanel) -> bool {
         let before = self.clone();
-        for id in &rect.group.panels {
-            self.detach(*id);
-        }
+        self.detach(rect.id);
         self.floating.push(rect);
         *self != before
     }
 
-    /// Float the whole group `group` of `side` as one window at `x`, `y`
-    /// sized `w` × `h`. Returns whether the layout changed.
-    pub fn float_group(&mut self, side: DockSide, group: usize, x: f32, y: f32, w: f32, h: f32) -> bool {
-        if group >= self.groups(side).len() {
-            return false;
-        }
-        let g = self.groups_mut(side).remove(group);
-        self.after_group_removed(side, group);
-        let mut f = FloatPanel {
-            group: g,
-            x,
-            y,
-            w,
-            h,
-            docking: true,
-        };
-        f.heal();
-        self.floating.push(f);
-        true
-    }
-
-    /// Move the floating window holding `id` to `x`, `y`.
-    pub fn move_float(&mut self, id: PanelId, x: f32, y: f32) -> bool {
-        let Some(i) = self.float_index(id) else {
-            return false;
-        };
-        let f = &mut self.floating[i];
-        let changed = (f.x, f.y) != (x, y);
-        (f.x, f.y) = (x, y);
-        changed
-    }
-
-    /// Dock the floating window holding `id` as a new group on `side` at
-    /// insertion `index`, keeping its pallets, their heights and its width,
-    /// and show it. A docked `id` docks alone (see [`Self::dock`]).
-    pub fn dock_window(&mut self, id: PanelId, side: DockSide, index: usize) -> bool {
-        let Some(i) = self.float_index(id) else {
-            return self.dock(id, side, index);
-        };
-        let f = self.floating.remove(i);
-        let mut g = f.group;
-        g.width = f.w;
-        let groups = self.groups_mut(side);
-        let index = index.min(groups.len());
-        groups.insert(index, g);
-        self.show_group(side, index);
-        true
-    }
-
-    /// Stack every pallet of the floating window holding `id` into group
-    /// `group` on `side` from position `index` on, and show the group. A
-    /// docked `id` joins alone (see [`Self::join_group`]).
-    pub fn join_window(&mut self, id: PanelId, side: DockSide, group: usize, index: usize) -> bool {
-        let Some(i) = self.float_index(id) else {
-            return self.join_group(id, side, group, index);
-        };
-        if group >= self.groups(side).len() {
-            return false;
-        }
-        let f = self.floating.remove(i);
-        let target = &mut self.groups_mut(side)[group];
-        let weight = target.mean_weight();
-        for (k, p) in f.group.panels.into_iter().enumerate() {
-            target.insert(index.saturating_add(k), p, weight);
-        }
-        self.show_group(side, group);
-        true
-    }
-
-    /// Add pallet `id` to the bottom of the floating window holding `into`.
-    /// Returns whether the layout changed.
-    pub fn add_to_float(&mut self, id: PanelId, into: PanelId) -> bool {
-        match self.float_rect(into) {
-            Some(f) if !f.contains(id) => {}
-            _ => return false,
-        }
-        self.detach(id);
-        // Detaching may have emptied (and removed) another window.
-        let Some(i) = self.float_index(into) else {
-            return false;
-        };
-        let g = &mut self.floating[i].group;
-        let weight = g.mean_weight();
-        g.insert(usize::MAX, id, weight);
-        true
-    }
-
-    /// Flip whether dragging the floating window holding `id` may dock it.
+    /// Flip whether dragging floating panel `id` may dock it.
     pub fn toggle_float_docking(&mut self, id: PanelId) -> bool {
-        let Some(i) = self.float_index(id) else {
-            return false;
-        };
-        self.floating[i].docking = !self.floating[i].docking;
-        true
+        match self.floating.iter_mut().find(|f| f.id == id) {
+            Some(f) => {
+                f.docking = !f.docking;
+                true
+            }
+            None => false,
+        }
     }
 
-    /// Bring the floating window holding `id` to the front.
+    /// Bring a floating panel to the front.
     pub fn raise_float(&mut self, id: PanelId) {
-        if let Some(i) = self.float_index(id) {
+        if let Some(i) = self.floating.iter().position(|f| f.id == id) {
             let f = self.floating.remove(i);
             self.floating.push(f);
         }
     }
 
-    /// Resize the floating window holding `id`, keeping it at least a usable
-    /// size. With `keep_right` the right edge stays put (resizing from the
-    /// left corner).
+    /// Resize a floating panel, keeping it at least a usable size. With
+    /// `keep_right` the right edge stays put (resizing from the left corner).
     pub fn resize_float(&mut self, id: PanelId, w: f32, h: f32, keep_right: bool) {
-        if let Some(i) = self.float_index(id) {
-            let f = &mut self.floating[i];
-            let new_w = w.clamp(DOCK_MIN_W, f.max_width());
+        if let Some(f) = self.floating.iter_mut().find(|f| f.id == id) {
+            let new_w = w.clamp(DOCK_MIN_W, id.max_width());
             if keep_right {
                 f.x += f.w - new_w;
             }
@@ -970,16 +800,18 @@ impl DockState {
         delta: f32,
         min_weight: f32,
     ) {
-        if let Some(g) = self.groups_mut(side).get_mut(group) {
-            shift_weights(&mut g.weights, upper, lower, delta, min_weight);
+        let Some(g) = self.groups_mut(side).get_mut(group) else {
+            return;
+        };
+        let w = &mut g.weights;
+        if upper >= w.len() || lower >= w.len() || upper == lower {
+            return;
         }
-    }
-
-    /// [`Self::shift_split`] for the floating window holding `id`.
-    pub fn shift_float_split(&mut self, id: PanelId, upper: usize, lower: usize, delta: f32, min_weight: f32) {
-        if let Some(i) = self.float_index(id) {
-            shift_weights(&mut self.floating[i].group.weights, upper, lower, delta, min_weight);
-        }
+        let total = w[upper] + w[lower];
+        let min = min_weight.clamp(MIN_WEIGHT, total * 0.5);
+        let up = (w[upper] + delta).clamp(min, total - min);
+        w[upper] = up;
+        w[lower] = total - up;
     }
 
     /// Give every pallet of group `group` on `side` the same height again.
@@ -988,26 +820,6 @@ impl DockState {
             g.weights.iter_mut().for_each(|w| *w = 1.0);
         }
     }
-
-    /// [`Self::reset_splits`] for the floating window holding `id`.
-    pub fn reset_float_splits(&mut self, id: PanelId) {
-        if let Some(i) = self.float_index(id) {
-            self.floating[i].group.weights.iter_mut().for_each(|w| *w = 1.0);
-        }
-    }
-}
-
-/// Move the boundary between stacked pallets `upper` and `lower` by `delta`
-/// weight units, keeping their combined share and each above `min_weight`.
-fn shift_weights(w: &mut [f32], upper: usize, lower: usize, delta: f32, min_weight: f32) {
-    if upper >= w.len() || lower >= w.len() || upper == lower {
-        return;
-    }
-    let total = w[upper] + w[lower];
-    let min = min_weight.clamp(MIN_WEIGHT, total * 0.5);
-    let up = (w[upper] + delta).clamp(min, total - min);
-    w[upper] = up;
-    w[lower] = total - up;
 }
 
 /// What the pointer is dragging in the dock, if anything.
@@ -1021,8 +833,6 @@ pub enum DockDrag {
     Move {
         panel: PanelId,
         group: Option<(DockSide, usize)>,
-        /// The whole floating window holding `panel` moves.
-        window: bool,
         origin: Option<iced::Point>,
         target: Option<DropTarget>,
         grab: iced::Vector,
@@ -1039,9 +849,6 @@ pub enum DockDrag {
     /// Sizing floating `panel` from its bottom-left (`from_left`) or
     /// bottom-right corner.
     FloatSize { panel: PanelId, from_left: bool },
-    /// Moving the splitter between pallets `upper` and `lower` of the
-    /// floating window holding `panel`.
-    FloatSplit { panel: PanelId, upper: usize, lower: usize },
     /// Sizing the Layer Manager's Name column.
     LayerColumn,
 }
@@ -1052,19 +859,6 @@ impl DockDrag {
         DockDrag::Move {
             panel,
             group,
-            window: false,
-            origin: None,
-            target: None,
-            grab: iced::Vector::new(0.0, 0.0),
-        }
-    }
-
-    /// Start moving the floating window holding `panel`.
-    pub fn moving_window(panel: PanelId) -> Self {
-        DockDrag::Move {
-            panel,
-            group: None,
-            window: true,
             origin: None,
             target: None,
             grab: iced::Vector::new(0.0, 0.0),
@@ -1265,7 +1059,7 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
     if chrome.title_hovered {
         bar = bar
             .push(pin_button(id, chrome.auto_collapse, tooltip::Position::Bottom))
-            .push(close_button(DockMsg::Close(id), tooltip::Position::Bottom));
+            .push(close_button(id, tooltip::Position::Bottom));
     }
     mouse_area(
         container(bar)
@@ -1307,10 +1101,10 @@ pub fn pin_button<'a>(id: PanelId, auto_collapse: bool, tip: tooltip::Position) 
         .into()
 }
 
-/// The close button of a panel's title bar, sending `close`.
-pub fn close_button<'a>(close: DockMsg, tip: tooltip::Position) -> Element<'a, Message> {
+/// The close button of a panel's title bar.
+pub fn close_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
     let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-        .on_press(Message::Dock(close))
+        .on_press(Message::Dock(DockMsg::Close(id)))
         .style(button::subtle)
         .padding([3, 5]);
     tooltip(close, text(crate::t!("Close")).size(10), tip)
@@ -1676,10 +1470,10 @@ mod tests {
     fn float_detaches_and_dock_brings_it_back() {
         let mut state = DockState::default();
         let rect = FloatPanel::new(PanelId::Properties, 100.0, 50.0, 250.0, 300.0);
-        assert!(state.float(rect.clone()));
+        assert!(state.float(rect));
         assert!(state.left.is_empty());
         assert_eq!(state.location(PanelId::Properties), None);
-        assert_eq!(state.float_rect(PanelId::Properties), Some(&rect));
+        assert_eq!(state.float_rect(PanelId::Properties), Some(rect));
         assert!(state.is_placed(PanelId::Properties));
         assert!(state.dock(PanelId::Properties, DockSide::Right, 0));
         assert!(state.floating.is_empty());
@@ -1700,41 +1494,14 @@ mod tests {
     }
 
     #[test]
-    fn legacy_single_float_loads_as_a_one_pallet_window() {
-        let json = r#"{"floating":[{"id":"count","x":1.0,"y":2.0,"w":300.0,"h":400.0}]}"#;
+    fn floating_groups_from_an_older_build_load_as_their_first_pallet() {
+        let json = r#"{"floating":[{"panels":["count","browser"],"weights":[1.0,1.0],"width":0.0,"x":1.0,"y":2.0,"w":300.0,"h":400.0,"docking":false}]}"#;
         let state: DockState = serde_json::from_str(json).unwrap();
-        assert_eq!(state.floating, vec![FloatPanel::new(PanelId::Count, 1.0, 2.0, 300.0, 400.0)]);
-    }
-
-    #[test]
-    fn a_group_floats_docks_and_takes_pallets_as_one_window() {
-        let mut state = DockState::default();
-        state.join_group(PanelId::Browser, DockSide::Left, 0, 1);
-        state.dock(PanelId::Count, DockSide::Left, 1);
-        // Floating group 0 takes both its pallets into one window.
-        assert!(state.float_group(DockSide::Left, 0, 10.0, 20.0, 300.0, 400.0));
-        let f = state.float_rect(PanelId::Browser).unwrap();
-        assert_eq!(f.group.panels, vec![PanelId::Properties, PanelId::Browser]);
-        assert_eq!(state.left.len(), 1);
-        // Adding a pallet stacks it at the bottom; floating one out leaves
-        // the rest together.
-        assert!(state.add_to_float(PanelId::Count, PanelId::Properties));
-        assert!(state.left.is_empty());
-        assert_eq!(state.float_rect(PanelId::Count).unwrap().group.panels.len(), 3);
-        state.float(FloatPanel::new(PanelId::Count, 0.0, 0.0, 250.0, 300.0));
-        assert_eq!(state.floating.len(), 2);
-        assert_eq!(state.float_rect(PanelId::Properties).unwrap().group.panels.len(), 2);
-        // The window docks as one group with its width.
-        assert!(state.dock_window(PanelId::Browser, DockSide::Right, 0));
-        assert_eq!(state.right[0].panels, vec![PanelId::Properties, PanelId::Browser]);
-        assert_eq!(state.right[0].width, 300.0);
-        // And a window joins a docked group as a whole.
-        assert!(state.join_window(PanelId::Count, DockSide::Right, 0, 1));
-        assert_eq!(
-            state.right[0].panels,
-            vec![PanelId::Properties, PanelId::Count, PanelId::Browser]
-        );
-        assert!(state.floating.is_empty());
+        let expected = FloatPanel {
+            docking: false,
+            ..FloatPanel::new(PanelId::Count, 1.0, 2.0, 300.0, 400.0)
+        };
+        assert_eq!(state.floating, vec![expected]);
     }
 
     #[test]

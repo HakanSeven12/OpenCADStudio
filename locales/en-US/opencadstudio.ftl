@@ -6160,6 +6160,5 @@ dock =
     .dock-left = Dock left
     .dock-right = Dock right
     .new-group = New group
-    .pallets = Pallets
     .browser = Browser
     .node-graph = Node Graph

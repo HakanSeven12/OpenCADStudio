@@ -6159,6 +6159,5 @@ dock =
     .dock-left = Acoplar a la izquierda
     .dock-right = Acoplar a la derecha
     .new-group = Nuevo grupo
-    .pallets = Paletas
     .browser = Explorador
     .node-graph = Grafo de nodos

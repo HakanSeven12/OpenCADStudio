@@ -6158,6 +6158,5 @@ dock =
     .dock-left = Zadokuj po lewej
     .dock-right = Zadokuj po prawej
     .new-group = Nowa grupa
-    .pallets = Palety
     .browser = Przeglądarka
     .node-graph = Graf węzłów

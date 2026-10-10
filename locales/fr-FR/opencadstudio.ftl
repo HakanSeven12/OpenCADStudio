@@ -6158,6 +6158,5 @@ dock =
     .dock-left = Ancrer à gauche
     .dock-right = Ancrer à droite
     .new-group = Nouveau groupe
-    .pallets = Palettes
     .browser = Navigateur
     .node-graph = Graphe de nœuds

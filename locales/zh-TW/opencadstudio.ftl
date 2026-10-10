@@ -6154,6 +6154,5 @@ dock =
     .dock-left = 停駐到左側
     .dock-right = 停駐到右側
     .new-group = 新增群組
-    .pallets = 選項板
     .browser = 瀏覽器
     .node-graph = 節點圖

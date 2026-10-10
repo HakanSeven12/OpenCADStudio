@@ -6157,6 +6157,5 @@ dock =
     .dock-left = Links koppelen
     .dock-right = Rechts koppelen
     .new-group = Nieuwe groep
-    .pallets = Paletten
     .browser = Browser
     .node-graph = Knooppuntgrafiek

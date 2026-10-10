@@ -6156,6 +6156,5 @@ dock =
     .dock-left = Telakoi vasemmalle
     .dock-right = Telakoi oikealle
     .new-group = Uusi ryhmä
-    .pallets = Paletit
     .browser = Selain
     .node-graph = Solmukaavio

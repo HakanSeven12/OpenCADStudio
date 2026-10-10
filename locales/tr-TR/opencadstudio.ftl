@@ -6082,6 +6082,5 @@ dock =
     .dock-left = Sola yerleştir
     .dock-right = Sağa yerleştir
     .new-group = Yeni grup
-    .pallets = Paletler
     .browser = Tarayıcı
     .node-graph = Düğüm Grafiği

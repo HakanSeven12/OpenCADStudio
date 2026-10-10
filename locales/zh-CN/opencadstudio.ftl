@@ -6142,6 +6142,5 @@ dock =
     .dock-left = 停靠到左侧
     .dock-right = 停靠到右侧
     .new-group = 新建组
-    .pallets = 选项板
     .browser = 浏览器
     .node-graph = 节点图

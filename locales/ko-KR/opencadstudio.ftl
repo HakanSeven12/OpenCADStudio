@@ -6158,6 +6158,5 @@ dock =
     .dock-left = 왼쪽에 도킹
     .dock-right = 오른쪽에 도킹
     .new-group = 새 그룹
-    .pallets = 팔레트
     .browser = 브라우저
     .node-graph = 노드 그래프

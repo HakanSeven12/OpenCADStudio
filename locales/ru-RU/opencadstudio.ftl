@@ -6160,6 +6160,5 @@ dock =
     .dock-left = Закрепить слева
     .dock-right = Закрепить справа
     .new-group = Новая группа
-    .pallets = Палитры
     .browser = Обозреватель
     .node-graph = Граф узлов

@@ -6159,6 +6159,5 @@ dock =
     .dock-left = Закачи вляво
     .dock-right = Закачи вдясно
     .new-group = Нова група
-    .pallets = Палитри
     .browser = Браузър
     .node-graph = Граф на възлите

@@ -6158,6 +6158,5 @@ dock =
     .dock-left = Dokkolás balra
     .dock-right = Dokkolás jobbra
     .new-group = Új csoport
-    .pallets = Paletták
     .browser = Böngésző
     .node-graph = Csomópontgráf

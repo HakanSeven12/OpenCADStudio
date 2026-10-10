@@ -102,82 +102,26 @@ impl OpenCADStudio {
                     self.save_config();
                 }
             }
-            DockMsg::GroupFloat(side, gi) => {
-                // Float beside the edge it was docked on, near the top.
-                let (ww, _) = self.dock_workspace_size();
-                let w = self.dock_group_width(side, gi);
-                let strip = crate::ui::dock::DOCK_STRIP_W;
-                let x = match side {
-                    DockSide::Right => ww - strip - self.dock_column_width(side) - w - 60.0,
-                    DockSide::Left => strip + self.dock_column_width(side) + 40.0,
-                };
-                self.dock_drag = None;
-                let h = self.dock_default_float_h();
-                if self.dock.float_group(side, gi, x.max(0.0), 40.0, w, h) {
-                    self.save_config();
-                }
-            }
             DockMsg::DockTo(id, side) => {
                 self.dock_drag = None;
                 self.dock_float_menu = None;
-                if self.dock.dock_window(id, side, usize::MAX) {
+                if self.dock.dock(id, side, usize::MAX) {
                     self.save_config();
                 }
-            }
-            DockMsg::FloatGrab(id) => self.dock_begin(DockDrag::moving_window(id), Some(id)),
-            DockMsg::FloatClose(id) => {
-                let panels = self
-                    .dock
-                    .float_rect(id)
-                    .map(|f| f.group.panels.clone())
-                    .unwrap_or_default();
-                let mut tasks = Vec::new();
-                for p in panels {
-                    if self.dock_panel_visible(p) {
-                        tasks.push(self.dock_set_open(p, false));
-                    }
-                }
-                return iced::Task::batch(tasks);
-            }
-            DockMsg::FloatSplitGrab(panel, upper, lower) => {
-                self.dock.raise_float(panel);
-                self.dock_begin(DockDrag::FloatSplit { panel, upper, lower }, None);
-            }
-            DockMsg::FloatSplitReset(id) => {
-                self.dock.reset_float_splits(id);
-                self.save_config();
             }
             DockMsg::FloatMenu(id) => {
                 self.dock_float_menu = id;
                 self.dock_float_menu_at = self.dock_float_pointer;
-                self.dock_float_menu_pallets = false;
                 if let Some(id) = id {
                     self.dock.raise_float(id);
                 }
             }
-            DockMsg::FloatMenuPallets(open) => self.dock_float_menu_pallets = open,
             DockMsg::FloatBarPointer(p) => self.dock_float_pointer = p,
             DockMsg::FloatDockingToggle(id) => {
                 self.dock_float_menu = None;
                 if self.dock.toggle_float_docking(id) {
                     self.save_config();
                 }
-            }
-            DockMsg::FloatMenuToggle(window, id) => {
-                // Checked = open in this window: unchecking hides it.
-                // Anything else (closed, docked, in another window) moves
-                // into the window and opens; adding ends the menu's job.
-                let here = self.dock.float_rect(window).is_some_and(|f| f.contains(id));
-                if here && self.dock_panel_visible(id) {
-                    let task = self.dock_set_open(id, false);
-                    self.save_config();
-                    return task;
-                }
-                self.dock.add_to_float(id, window);
-                self.dock_float_menu = None;
-                let task = self.dock_set_open(id, true);
-                self.save_config();
-                return task;
             }
             DockMsg::EdgeMenu(side) => self.dock_edge_menu = side,
             DockMsg::EdgeMenuToggle(side, id) => {
@@ -260,31 +204,6 @@ impl OpenCADStudio {
                         ..
                     }) => changed = self.dock.move_group(side, gi, to, index),
                     Some(DockDrag::Move {
-                        group: Some((side, gi)),
-                        target: Some(DropTarget::Float { x, y }),
-                        ..
-                    }) => {
-                        let w = self.dock_group_width(side, gi);
-                        let h = self.dock_default_float_h();
-                        changed = self.dock.float_group(side, gi, x, y, w, h);
-                    }
-                    Some(DockDrag::Move {
-                        panel,
-                        window: true,
-                        target: Some(target),
-                        ..
-                    }) => {
-                        changed = match target {
-                            DropTarget::Edge { side, index } => {
-                                self.dock.dock_window(panel, side, index)
-                            }
-                            DropTarget::Join { side, group, index } => {
-                                self.dock.join_window(panel, side, group, index)
-                            }
-                            DropTarget::Float { x, y } => self.dock.move_float(panel, x, y),
-                        };
-                    }
-                    Some(DockDrag::Move {
                         panel,
                         group: None,
                         target: Some(target),
@@ -297,8 +216,7 @@ impl OpenCADStudio {
                             }
                             DropTarget::Float { x, y } => {
                                 let (w, h) = self.dock_float_size(panel);
-                                // Pulled out of a window, it keeps the
-                                // window's docking choice.
+                                // A floating panel keeps its docking choice.
                                 let docking = self.dock.float_rect(panel).is_none_or(|f| f.docking);
                                 self.dock.float(FloatPanel {
                                     docking,
@@ -308,12 +226,7 @@ impl OpenCADStudio {
                         };
                     }
                     Some(DockDrag::Move { .. } | DockDrag::LayerColumn) | None => {}
-                    Some(
-                        DockDrag::Width(_)
-                        | DockDrag::Split { .. }
-                        | DockDrag::FloatSize { .. }
-                        | DockDrag::FloatSplit { .. },
-                    ) => {
+                    Some(DockDrag::Width(_) | DockDrag::Split { .. } | DockDrag::FloatSize { .. }) => {
                         changed = true;
                     }
                 }
@@ -346,7 +259,6 @@ impl OpenCADStudio {
             DockDrag::Move {
                 panel,
                 group,
-                window,
                 origin,
                 target,
                 grab,
@@ -354,12 +266,10 @@ impl OpenCADStudio {
                 let origin = origin.unwrap_or(point);
                 let moved = (point.x - origin.x).hypot(point.y - origin.y);
                 let started = target.is_some() || moved >= DOCK_DRAG_THRESHOLD;
-                // Hold a floating window where it was grabbed; a docked
-                // pallet (or one pulled out of a floating group) by its
-                // title bar.
+                // Hold a floating panel where it was grabbed; a docked one by
+                // its title bar.
                 let grab = if target.is_none() && started {
-                    let whole = |f: &&crate::ui::dock::FloatPanel| window || f.group.panels.len() == 1;
-                    match self.dock.float_rect(panel).filter(whole) {
+                    match self.dock.float_rect(panel) {
                         Some(f) => iced::Vector::new(origin.x - f.x, origin.y - f.y),
                         None => iced::Vector::new(
                             (self.dock.width(panel, self.win_size.0) * 0.5).min(120.0),
@@ -370,20 +280,16 @@ impl OpenCADStudio {
                     grab
                 };
                 let target = if started {
-                    // A window that may not dock (or a pallet pulled out of
-                    // one) only floats.
-                    let floats_only = group.is_none()
-                        && self.dock.float_rect(panel).is_some_and(|f| !f.docking);
-                    let found = if floats_only {
-                        self.dock_float_target(point, grab)
-                    } else {
-                        self.dock_drop_target(point, grab)
+                    // A whole group only moves between group positions: it
+                    // cannot join another group or float.
+                    // A floating panel that may not dock only floats.
+                    let found = match self.dock.float_rect(panel) {
+                        Some(f) if !f.docking => self.dock_float_target(point, grab),
+                        _ => self.dock_drop_target(point, grab),
                     };
-                    // A whole docked group moves between group positions or
-                    // floats; it cannot join another group.
                     match (group, found) {
-                        (Some(_), DropTarget::Join { .. }) => None,
-                        (_, found) => Some(found),
+                        (Some(_), found @ DropTarget::Edge { .. }) | (None, found) => Some(found),
+                        (Some(_), _) => None,
                     }
                 } else {
                     target
@@ -391,7 +297,6 @@ impl OpenCADStudio {
                 self.dock_drag = Some(DockDrag::Move {
                     panel,
                     group,
-                    window,
                     origin: Some(origin),
                     target,
                     grab,
@@ -430,30 +335,12 @@ impl OpenCADStudio {
                     return;
                 };
                 let dx = point.x - last.x;
-                let (w, h) = (if from_left { f.w - dx } else { f.w + dx }, f.h + point.y - last.y);
-                self.dock.resize_float(panel, w, h, from_left);
-            }
-            DockDrag::FloatSplit { panel, upper, lower } => {
-                let (Some(last), Some(f)) = (last, self.dock.float_rect(panel)) else {
-                    return;
-                };
-                let total: f32 = self
-                    .dock_float_visible(f)
-                    .iter()
-                    .filter_map(|p| f.group.panels.iter().position(|q| q == p))
-                    .filter_map(|i| f.group.weights.get(i))
-                    .sum();
-                let avail = f.h;
-                if avail > 0.0 && total > 0.0 {
-                    let per_px = total / avail;
-                    self.dock.shift_float_split(
-                        panel,
-                        upper,
-                        lower,
-                        (point.y - last.y) * per_px,
-                        crate::ui::dock::GROUP_MIN_H * per_px,
-                    );
-                }
+                self.dock.resize_float(
+                    panel,
+                    if from_left { f.w - dx } else { f.w + dx },
+                    f.h + point.y - last.y,
+                    from_left,
+                );
             }
             DockDrag::LayerColumn => {
                 let Some(last) = last else { return };
@@ -494,6 +381,8 @@ impl OpenCADStudio {
         }
     }
 
+    /// Bring `id` into view: show its group on its edge and, where it
+    /// auto-hides, keep it revealed until the pointer leaves.
     /// Arm a delayed reveal (`Some`) or hide (`None`); it applies when its
     /// timer reports back unless a newer hover superseded it.
     fn dock_hover_arm(&mut self, target: Option<crate::ui::dock::PanelId>) -> iced::Task<Message> {
@@ -511,8 +400,6 @@ impl OpenCADStudio {
         self.dock_hover_pending = None;
     }
 
-    /// Bring `id` into view: show its group on its edge and, where it
-    /// auto-hides, keep it revealed until the pointer leaves.
     pub(crate) fn dock_reveal(&mut self, id: crate::ui::dock::PanelId) {
         self.dock.show_group_of(id);
         self.dock_peek = Some(id);
@@ -764,37 +651,11 @@ impl OpenCADStudio {
         if let Some(f) = self.dock.float_rect(id) {
             return (f.w, f.h);
         }
-        (self.dock.width(id, self.win_size.0), self.dock_default_float_h())
-    }
-
-    /// Height a pallet or group floats at first: a comfortable share of the
-    /// workspace height.
-    pub(crate) fn dock_default_float_h(&self) -> f32 {
         let (_, avail) = self.dock_workspace_size();
-        (avail * 0.6).clamp(crate::ui::dock::FLOAT_MIN_H, 520.0)
-    }
-
-    /// The pallets floating window `f` draws, top → bottom: its open ones,
-    /// less one being dragged out of it.
-    pub(crate) fn dock_float_visible(
-        &self,
-        f: &crate::ui::dock::FloatPanel,
-    ) -> Vec<crate::ui::dock::PanelId> {
-        let pulled = match self.dock_drag {
-            Some(crate::ui::dock::DockDrag::Move {
-                panel,
-                window: false,
-                target: Some(_),
-                ..
-            }) => Some(panel),
-            _ => None,
-        };
-        f.group
-            .panels
-            .iter()
-            .copied()
-            .filter(|p| self.dock_panel_visible(*p) && Some(*p) != pulled)
-            .collect()
+        (
+            self.dock.width(id, self.win_size.0),
+            (avail * 0.6).clamp(crate::ui::dock::FLOAT_MIN_H, 520.0),
+        )
     }
 
     /// Where a dragged pallet lands if released at workspace point `p`:

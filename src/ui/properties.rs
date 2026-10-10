@@ -542,11 +542,11 @@ impl PropertiesPanel {
             .unwrap_or_default()
     }
 
-    pub fn view(&self, width: f32, auto_collapse: bool) -> Element<'_, Message> {
+    pub fn view(&self, width: f32, chrome: crate::ui::dock::Chrome) -> Element<'_, Message> {
         use crate::ui::dock::PanelId;
         // ── Header ──────────────────────────────────────────────────────────
         let header =
-            crate::ui::dock::title_bar(PanelId::Properties, t!("Properties").into_owned(), auto_collapse);
+            crate::ui::dock::title_bar(PanelId::Properties, t!("Properties").into_owned(), chrome);
 
         // ── Title bar (entity type / "No Selection") ─────────────────────
         let title_content: Element<'_, Message> = if self.selection_groups.is_empty() {

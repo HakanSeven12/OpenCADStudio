@@ -6144,3 +6144,12 @@ count-feature =
     .invalid-boundary = 无效的计数区域边界对象。请选择由直线段组成且不自交的闭合多段线。
     .block-not-found = 找不到块 "__ocs_fmt_0__"。
     .invalid-point = 无效的点。
+
+dock =
+    .allow-docking = 允许停靠
+    .auto-hide = 自动隐藏
+    .dock-left = 停靠到左侧
+    .dock-right = 停靠到右侧
+    .new-group = 新建组
+    .browser = 浏览器
+    .node-graph = 节点图

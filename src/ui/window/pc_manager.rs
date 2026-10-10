@@ -235,10 +235,10 @@ pub fn view<'a>(
     document: &'a CadDocument,
     selected: &[Handle],
     width: f32,
-    auto_collapse: bool,
+    chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
     let title_bar =
-        crate::ui::dock::title_bar(PanelId::PointCloudManager, crate::t!("Point Cloud Manager").into_owned(), auto_collapse);
+        crate::ui::dock::title_bar(PanelId::PointCloudManager, crate::t!("Point Cloud Manager").into_owned(), chrome);
     let query = state.search.trim().to_lowercase();
     let matches = |label: &str| query.is_empty() || label.to_lowercase().contains(&query);
     // Searching opens every node so the matches show.
@@ -354,5 +354,5 @@ pub fn view<'a>(
         .padding([4, 8])
         .size(12);
 
-    crate::ui::dock::frame(column![title_bar, card, search].spacing(6), width)
+    crate::ui::dock::frame(title_bar, column![card, search].spacing(6), width)
 }

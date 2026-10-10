@@ -6159,3 +6159,12 @@ count-feature =
     .invalid-boundary = Ongeldig grensobject voor het telgebied. Selecteer een gesloten polylijn die uit lijnsegmenten bestaat en zichzelf niet snijdt.
     .block-not-found = Blok "__ocs_fmt_0__" kan niet worden gevonden.
     .invalid-point = Ongeldig punt.
+
+dock =
+    .allow-docking = Koppelen toestaan
+    .auto-hide = Automatisch verbergen
+    .dock-left = Links koppelen
+    .dock-right = Rechts koppelen
+    .new-group = Nieuwe groep
+    .browser = Browser
+    .node-graph = Knooppuntgrafiek

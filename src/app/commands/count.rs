@@ -236,12 +236,9 @@ impl OpenCADStudio {
         self.count_palette.show = open;
         self.ribbon.set_count_palette(open);
         if open {
-            if self.dock.location(id).is_none() {
-                self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
-            }
-            self.dock_expanded = Some(id);
-        } else if self.dock_expanded == Some(id) {
-            self.dock_expanded = None;
+            self.dock_open_at_default(id);
+        } else {
+            self.dock_unpeek(id);
         }
     }
 

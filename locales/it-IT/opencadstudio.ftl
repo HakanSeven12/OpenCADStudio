@@ -6160,3 +6160,12 @@ count-feature =
     .invalid-boundary = Oggetto di contorno dell'area di conteggio non valido. Selezionare una polilinea chiusa composta da segmenti di linea che non si interseca.
     .block-not-found = Impossibile trovare il blocco "__ocs_fmt_0__".
     .invalid-point = Punto non valido.
+
+dock =
+    .allow-docking = Consenti ancoraggio
+    .auto-hide = Nascondi automaticamente
+    .dock-left = Ancora a sinistra
+    .dock-right = Ancora a destra
+    .new-group = Nuovo gruppo
+    .browser = Browser
+    .node-graph = Grafo dei nodi

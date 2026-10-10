@@ -679,15 +679,7 @@ impl OpenCADStudio {
                     // rearrange themselves on upgrade for a panel they have
                     // not asked for.
                     let id = crate::ui::dock::PanelId::Browser;
-                    if self.dock.location(id).is_none() {
-                        // dock() clamps an out-of-range index to the end of
-                        // the edge, so this appends below whatever is there.
-                        self.dock
-                            .dock(id, crate::app::config::DockSide::Right, usize::MAX);
-                    }
-                    // Open expanded so it is usable straight away; the pin
-                    // button still collapses it.
-                    self.dock_expanded = Some(id);
+                    self.dock_open_at_default(id);
                     self.command_line
                         .push_output(crate::t!("Browser opened.").as_ref());
                 } else {

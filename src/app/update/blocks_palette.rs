@@ -124,7 +124,7 @@ impl OpenCADStudio {
     /// BLOCKSPALETTE: open (expanded) on `tab`, or on the tab it was left on.
     pub(crate) fn open_blocks_palette(&mut self, tab: Option<Tab>) {
         self.show_block_palette = true;
-        self.dock_expanded = Some(crate::ui::dock::PanelId::BlockPalette);
+        self.dock_reveal(crate::ui::dock::PanelId::BlockPalette);
         self.show_block_palette_tab(tab.unwrap_or(self.block_palette.tab));
     }
 

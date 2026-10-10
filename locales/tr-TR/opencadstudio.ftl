@@ -6084,3 +6084,12 @@ count-feature =
     .invalid-boundary = Geçersiz sayım alanı sınır nesnesi. Doğru parçalarından oluşan, kendisiyle kesişmeyen kapalı bir çoklu çizgi seçin.
     .block-not-found = "__ocs_fmt_0__" bloğu bulunamadı.
     .invalid-point = Geçersiz nokta.
+
+dock =
+    .allow-docking = Yerleştirmeye izin ver
+    .auto-hide = Otomatik gizle
+    .dock-left = Sola yerleştir
+    .dock-right = Sağa yerleştir
+    .new-group = Yeni grup
+    .browser = Tarayıcı
+    .node-graph = Düğüm Grafiği

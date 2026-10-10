@@ -530,9 +530,9 @@ pub fn view<'a>(
     doc_id: u64,
     epoch: u64,
     width: f32,
-    auto_collapse: bool,
+    chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
-    let title_bar = crate::ui::dock::title_bar(PanelId::Count, crate::t!("Count").into_owned(), auto_collapse);
+    let title_bar = crate::ui::dock::title_bar(PanelId::Count, crate::t!("Count").into_owned(), chrome);
     let body = match mode {
         Some(mode) if mode.target.is_some() => mode_view(palette, mode, doc),
         _ => {
@@ -550,7 +550,7 @@ pub fn view<'a>(
             list_view(palette, &instances)
         }
     };
-    crate::ui::dock::frame(column![title_bar, body].spacing(6), width)
+    crate::ui::dock::frame(title_bar, column![body].spacing(6), width)
 }
 
 fn bar_button<'a>(icon: Element<'a, Message>, tip: String, m: Option<CountMsg>) -> Element<'a, Message> {

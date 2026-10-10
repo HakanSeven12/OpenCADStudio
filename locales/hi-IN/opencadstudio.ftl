@@ -6149,3 +6149,12 @@ count-feature =
     .invalid-boundary = अमान्य गणना क्षेत्र सीमा ऑब्जेक्ट। रेखा खंडों से बनी ऐसी बंद पॉलीलाइन चुनें जो स्वयं को प्रतिच्छेद न करे।
     .block-not-found = ब्लॉक "__ocs_fmt_0__" नहीं मिला।
     .invalid-point = अमान्य बिंदु।
+
+dock =
+    .allow-docking = डॉकिंग की अनुमति दें
+    .auto-hide = स्वतः छिपाएँ
+    .dock-left = बाएँ डॉक करें
+    .dock-right = दाएँ डॉक करें
+    .new-group = नया समूह
+    .browser = ब्राउज़र
+    .node-graph = नोड ग्राफ़

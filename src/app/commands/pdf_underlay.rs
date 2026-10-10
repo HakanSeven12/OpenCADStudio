@@ -374,16 +374,11 @@ impl OpenCADStudio {
             "POINTCLOUDMANAGER" => {
                 let id = crate::ui::dock::PanelId::PointCloudManager;
                 self.pc_manager.show = true;
-                if self.dock.location(id).is_none() {
-                    self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
-                }
-                self.dock_expanded = Some(id);
+                self.dock_open_at_default(id);
             }
             "POINTCLOUDMANAGERCLOSE" => {
                 self.pc_manager.show = false;
-                if self.dock_expanded == Some(crate::ui::dock::PanelId::PointCloudManager) {
-                    self.dock_expanded = None;
-                }
+                self.dock_unpeek(crate::ui::dock::PanelId::PointCloudManager);
             }
             "_PCUNCROP" =>self.edit_selected_point_clouds(i, "POINTCLOUDUNCROP", |data| data.croppings.clear()),
             "_PDFULUNCLIP" => {

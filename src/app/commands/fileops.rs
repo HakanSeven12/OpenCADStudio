@@ -354,7 +354,9 @@ impl OpenCADStudio {
             "ORTHO" => return Some(Task::done(Message::ToggleOrtho)),
             "PARALLEL" => return Some(Task::done(Message::SetProjection(true))),
             "PERSP" => return Some(Task::done(Message::SetProjection(false))),
-            "LAYERS" => return Some(Task::done(Message::ToggleLayers)),
+            // LAYERS opens the Layer Manager pallet (its close button or
+            // the toggle message close it).
+            "LAYERS" => self.open_layers_pallet(),
 
             // SCRIPT <path> — run a command script: each non-comment
             // line is fed through the same command path the `--script` startup

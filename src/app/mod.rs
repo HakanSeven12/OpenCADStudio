@@ -16,6 +16,7 @@ pub(crate) mod dim_viewport;
 mod viewport_dimension_tests;
 #[cfg(test)]
 mod dimension_preview_tests;
+mod dock;
 mod document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
@@ -814,6 +815,8 @@ pub(super) struct OpenCADStudio {
     render_mode_preview: Option<codec::entities::ViewportRenderMode>,
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
+    /// The Layer Manager pallet (LAYERS) is open.
+    pub(crate) show_layers: bool,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
     /// Node graph overlay over the viewport.
@@ -843,17 +846,33 @@ pub(super) struct OpenCADStudio {
     pub(crate) bg_picker: Option<BgTarget>,
     /// General edge-stack dock layout for the side panels.
     pub(crate) dock: crate::ui::dock::DockState,
-    /// Which panel is currently floated at full height (hovered, or a pinned
-    /// panel on top).
-    pub(crate) dock_expanded: Option<crate::ui::dock::PanelId>,
-    /// Panel currently being dragged between sides / reordered.
-    pub(crate) dock_dragging: Option<crate::ui::dock::PanelId>,
-    /// Panel currently being width-resized.
-    pub(crate) dock_resizing: Option<crate::ui::dock::PanelId>,
-    /// Last pointer position during a drag / resize.
+    /// Pallet revealed although it auto-hides (its edge's group, or its
+    /// floating frame): hovered, being dragged, or just opened. Cleared when
+    /// the pointer leaves.
+    pub(crate) dock_peek: Option<crate::ui::dock::PanelId>,
+    /// Reveal or hide waiting out the hover delay, with the generation its
+    /// timer carries; any newer hover supersedes it.
+    pub(crate) dock_hover_pending: Option<crate::ui::dock::HoverPending>,
+    pub(crate) dock_hover_gen: u64,
+    /// What the pointer is dragging in the dock (pallet, group, width,
+    /// splitter, floating size, Layer Manager column).
+    pub(crate) dock_drag: Option<crate::ui::dock::DockDrag>,
+    /// Pallet whose strip icon (or floating frame) the pointer is over.
+    pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
+    /// Last pointer position during a dock drag.
     pub(crate) dock_drag_last: Option<iced::Point>,
-    /// Live drag target (side + index), shown as a highlight while dragging.
-    pub(crate) dock_drag_target: Option<(crate::app::config::DockSide, usize)>,
+    /// Docked panel whose title bar the pointer is over (shows pin / close).
+    pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
+    /// Edge whose icon-strip pallet menu (+) is open.
+    pub(crate) dock_edge_menu: Option<crate::app::config::DockSide>,
+    /// Floating pallet whose title-bar right-click menu is open.
+    pub(crate) dock_float_menu: Option<crate::ui::dock::PanelId>,
+    /// Pointer position over a floating title bar (bar-local), and where
+    /// its open menu was asked for.
+    pub(crate) dock_float_pointer: iced::Point,
+    pub(crate) dock_float_menu_at: iced::Point,
+    /// Group whose edge band (group grip) the pointer is over.
+    pub(crate) dock_grip_hover: Option<(crate::app::config::DockSide, usize)>,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -942,9 +961,6 @@ pub(super) struct OpenCADStudio {
     modal_drag_last: Option<Point>,
     /// True while the modal title bar is held (a drag is in progress).
     modal_dragging: bool,
-    /// Layer Manager: dragging the Name-column divider (width follows the
-    /// shared ModalDragMove flow).
-    layer_col_dragging: bool,
     /// Layer Manager Name column width in px, adjusted by the divider drag.
     layer_name_col_w: f32,
     /// How far the user has dragged the modal's corner resize grip from the
@@ -1955,7 +1971,6 @@ pub enum ModalKind {
     PluginManager,
     UpdateNotice,
     DonationPrompt,
-    Layers,
     LayerStateManager,
     LayerTranslator,
     DrawingUnits,
@@ -4284,6 +4299,7 @@ impl OpenCADStudio {
             render_mode_menu_open: false,
             render_mode_preview: None,
             show_properties: true,
+            show_layers: false,
             show_block_palette: false,
             show_node_graph: false,
             property_target_override: None,
@@ -4299,11 +4315,18 @@ impl OpenCADStudio {
             block_palette: Default::default(),
             xref_manager: Default::default(),
             dock: Default::default(),
-            dock_expanded: None,
-            dock_dragging: None,
-            dock_resizing: None,
+            dock_peek: None,
+            dock_hover_pending: None,
+            dock_hover_gen: 0,
+            dock_float_menu: None,
+            dock_float_pointer: iced::Point::ORIGIN,
+            dock_float_menu_at: iced::Point::ORIGIN,
+            dock_drag: None,
             dock_drag_last: None,
-            dock_drag_target: None,
+            dock_title_hover: None,
+            dock_edge_menu: None,
+            dock_grip_hover: None,
+            dock_icon_hover: None,
             xref_col_drag: None,
             xref_col_last: None,
             xref_split_drag: false,
@@ -4340,7 +4363,6 @@ impl OpenCADStudio {
             modal_offset: iced::Vector::ZERO,
             modal_drag_last: None,
             modal_dragging: false,
-            layer_col_dragging: false,
             layer_name_col_w: 130.0,
             modal_resize: iced::Vector::ZERO,
             modal_content_size: None,

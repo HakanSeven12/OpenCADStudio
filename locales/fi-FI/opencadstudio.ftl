@@ -6158,3 +6158,12 @@ count-feature =
     .invalid-boundary = Virheellinen laskenta-alueen rajaobjekti. Valitse suljettu, janoista koostuva moniviiva, joka ei leikkaa itseään.
     .block-not-found = Lohkoa "__ocs_fmt_0__" ei löydy.
     .invalid-point = Virheellinen piste.
+
+dock =
+    .allow-docking = Salli telakointi
+    .auto-hide = Piilota automaattisesti
+    .dock-left = Telakoi vasemmalle
+    .dock-right = Telakoi oikealle
+    .new-group = Uusi ryhmä
+    .browser = Selain
+    .node-graph = Solmukaavio

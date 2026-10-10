@@ -6160,3 +6160,12 @@ count-feature =
     .invalid-boundary = Objet de contour de zone de comptage non valide. Sélectionnez une polyligne fermée composée de segments de ligne et qui ne se recoupe pas.
     .block-not-found = Le bloc "__ocs_fmt_0__" est introuvable.
     .invalid-point = Point non valide.
+
+dock =
+    .allow-docking = Autoriser l'ancrage
+    .auto-hide = Masquage automatique
+    .dock-left = Ancrer à gauche
+    .dock-right = Ancrer à droite
+    .new-group = Nouveau groupe
+    .browser = Navigateur
+    .node-graph = Graphe de nœuds

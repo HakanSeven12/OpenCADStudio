@@ -911,18 +911,7 @@ impl OpenCADStudio {
                 if self.show_external_references {
                     // Always open expanded so the panel is immediately usable;
                     // dock it on the right if the user closed it from the layout.
-                    if self
-                        .dock
-                        .location(crate::ui::dock::PanelId::ExternalReferences)
-                        .is_none()
-                    {
-                        self.dock.dock(
-                            crate::ui::dock::PanelId::ExternalReferences,
-                            crate::app::config::DockSide::Right,
-                            usize::MAX,
-                        );
-                    }
-                    self.dock_expanded = Some(crate::ui::dock::PanelId::ExternalReferences);
+                    self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);
                     self.refresh_xref_manager();
                 }
             }
@@ -1767,7 +1756,7 @@ mod tests {
         let _ = app.run_command_line("BLOCKPALETTE");
         assert!(app.show_block_palette);
         assert!(
-            app.dock_expanded == Some(crate::ui::dock::PanelId::BlockPalette),
+            app.dock_peek == Some(crate::ui::dock::PanelId::BlockPalette),
             "palette must open expanded, not as the collapsed bar"
         );
         // BLOCKSPALETTE only opens; BLOCKSPALETTECLOSE closes.

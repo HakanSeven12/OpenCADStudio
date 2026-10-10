@@ -97,10 +97,10 @@ pub fn view<'a>(
     document: &'a CadDocument,
     open_sketch: Option<&'a str>,
     width: f32,
-    auto_collapse: bool,
+    chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
     let title_bar =
-        crate::ui::dock::title_bar(PanelId::Browser, crate::t!("Browser").into_owned(), auto_collapse);
+        crate::ui::dock::title_bar(PanelId::Browser, crate::t!("Browser").into_owned(), chrome);
 
     let mut tree = column![].spacing(1);
 
@@ -143,5 +143,5 @@ pub fn view<'a>(
     .width(Fill)
     .height(Fill);
 
-    crate::ui::dock::frame(column![title_bar, body].spacing(6), width)
+    crate::ui::dock::frame(title_bar, column![body].spacing(6), width)
 }

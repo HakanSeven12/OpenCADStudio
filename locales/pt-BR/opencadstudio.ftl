@@ -6161,3 +6161,12 @@ count-feature =
     .invalid-boundary = Objeto de contorno da área de contagem inválido. Selecione uma polilinha fechada composta de segmentos de linha e que não se cruze.
     .block-not-found = O bloco "__ocs_fmt_0__" não foi encontrado.
     .invalid-point = Ponto inválido.
+
+dock =
+    .allow-docking = Permitir encaixe
+    .auto-hide = Ocultar automaticamente
+    .dock-left = Encaixar à esquerda
+    .dock-right = Encaixar à direita
+    .new-group = Novo grupo
+    .browser = Navegador
+    .node-graph = Grafo de nós

@@ -147,6 +147,7 @@ impl OpenCADStudio {
         }
         Some(
             mouse_area(row(children).height(Fill))
+                .on_enter(Message::Dock(crate::ui::dock::DockMsg::HoverStay))
                 .on_exit(Message::Dock(crate::ui::dock::DockMsg::HoverExit))
                 .into(),
         )
@@ -165,7 +166,11 @@ impl OpenCADStudio {
             DockMsg, DropTarget, DOCK_STRIP_W, STRIP_CELL_H, STRIP_DIVIDER_H, STRIP_GRIP_W,
             STRIP_PAD, STRIP_PLUS_GAP,
         };
-        let shown = self.dock_shown_group(side);
+        // Only a group actually on screen is marked as shown: on an
+        // auto-hiding edge nothing is, until a group is revealed.
+        let shown = self
+            .dock_shown_group(side)
+            .filter(|_| self.dock_edge_expanded(side));
         let movement = self.dock_drag.and_then(|d| d.movement());
         let move_target = movement.and_then(|(_, _, target)| target);
         let dragging = move_target.is_some();

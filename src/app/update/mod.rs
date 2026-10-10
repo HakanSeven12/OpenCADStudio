@@ -2552,28 +2552,12 @@ impl OpenCADStudio {
             Message::ScriptLine(line) => self.feed_script_line(&line),
 
             Message::ToggleLayers => {
-                use crate::ui::dock::PanelId;
                 if self.show_layers {
-                    return self.on_dock(crate::ui::dock::DockMsg::Close(PanelId::Layers));
+                    return self.on_dock(crate::ui::dock::DockMsg::Close(
+                        crate::ui::dock::PanelId::Layers,
+                    ));
                 }
-                self.sync_ribbon_layers();
-                self.show_layers = true;
-                if !self.dock.is_placed(PanelId::Layers) {
-                    // First use: float it over the middle of the drawing,
-                    // where the dialog used to open.
-                    let (ww, wh) = self.dock_workspace_size();
-                    let (w, h) = self.dock_float_size(PanelId::Layers);
-                    self.dock.float(crate::ui::dock::FloatPanel {
-                        id: PanelId::Layers,
-                        x: ((ww - w) * 0.5).max(0.0),
-                        y: ((wh - h) * 0.5).max(0.0),
-                        w,
-                        h,
-                    });
-                    self.save_config();
-                }
-                self.dock.raise_float(PanelId::Layers);
-                self.dock_reveal(PanelId::Layers);
+                self.open_layers_pallet();
                 Task::none()
             }
 

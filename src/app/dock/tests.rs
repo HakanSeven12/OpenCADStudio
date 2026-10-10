@@ -336,9 +336,19 @@ fn dock_hover_reveals_groups_only_on_an_auto_hiding_edge() {
     assert!(!app.dock_edge_expanded(DockSide::Left));
     // Hovering an icon flies its group out.
     let _ = app.on_dock(DockMsg::Hover(PanelId::Browser));
+    // ...but only once the pointer rests: the reveal waits for the delay.
+    assert!(!app.dock_edge_expanded(DockSide::Left));
+    let _ = app.on_dock(DockMsg::HoverSettled(app.dock_hover_gen));
     assert!(app.dock_edge_expanded(DockSide::Left));
     assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
+    // Leaving and coming back within the delay keeps it open.
     let _ = app.on_dock(DockMsg::HoverExit);
+    let stale = app.dock_hover_gen;
+    let _ = app.on_dock(DockMsg::HoverStay);
+    let _ = app.on_dock(DockMsg::HoverSettled(stale));
+    assert!(app.dock_edge_expanded(DockSide::Left));
+    let _ = app.on_dock(DockMsg::HoverExit);
+    let _ = app.on_dock(DockMsg::HoverSettled(app.dock_hover_gen));
     assert!(!app.dock_edge_expanded(DockSide::Left));
     // Without auto-hide, hovering does not switch groups (clicks do).
     let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
@@ -539,10 +549,27 @@ fn hovering_a_strip_icon_reveals_an_auto_hiding_edge_in_the_real_view() {
         icon,
         &[iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: icon })],
     );
+    let _ = app.on_dock(DockMsg::HoverSettled(app.dock_hover_gen));
     assert!(
         app.dock_edge_expanded(DockSide::Right),
         "hovering the icon reveals the auto-hiding edge"
     );
+}
+
+#[test]
+fn layers_ribbon_button_opens_the_pallet_without_staying_highlighted() {
+    let mut app = dock_app();
+    // The ribbon's LAYERS button runs the LAYERS command.
+    let click = || Message::RibbonToolClick {
+        tool_id: "LAYERS".to_string(),
+        event: crate::modules::ModuleEvent::Command("LAYERS".to_string()),
+    };
+    let _ = app.update(click());
+    assert!(app.show_layers);
+    assert_eq!(app.ribbon.active_tool(), None);
+    // Pressing it again keeps it open, like the Blocks palette's button.
+    let _ = app.update(click());
+    assert!(app.show_layers);
 }
 
 #[test]

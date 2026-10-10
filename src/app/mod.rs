@@ -850,6 +850,10 @@ pub(super) struct OpenCADStudio {
     /// floating frame): hovered, being dragged, or just opened. Cleared when
     /// the pointer leaves.
     pub(crate) dock_peek: Option<crate::ui::dock::PanelId>,
+    /// Reveal (`Some(pallet)`) or hide (`None`) waiting out the hover delay,
+    /// with the generation its timer carries; any newer hover supersedes it.
+    pub(crate) dock_hover_pending: Option<Option<crate::ui::dock::PanelId>>,
+    pub(crate) dock_hover_gen: u64,
     /// What the pointer is dragging in the dock (pallet, group, width,
     /// splitter, floating size, Layer Manager column).
     pub(crate) dock_drag: Option<crate::ui::dock::DockDrag>,
@@ -4291,6 +4295,8 @@ impl OpenCADStudio {
             xref_manager: Default::default(),
             dock: Default::default(),
             dock_peek: None,
+            dock_hover_pending: None,
+            dock_hover_gen: 0,
             dock_drag: None,
             dock_drag_last: None,
             dock_title_hover: None,

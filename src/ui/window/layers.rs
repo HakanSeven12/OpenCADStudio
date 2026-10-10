@@ -323,8 +323,9 @@ impl LayerPanel {
         self.linetype_items = items;
     }
 
-    /// The Layer Manager as a dock pallet: its title bar, then the table at
-    /// its natural width, scrolling sideways when the pallet is narrower.
+    /// The Layer Manager as a dock pallet: its title bar, the toolbar across
+    /// the pallet (search box on the right), then the table, at least as wide
+    /// as the pallet and scrolling sideways when the pallet is narrower.
     pub fn view_panel(
         &self,
         name_col_w: f32,
@@ -337,19 +338,8 @@ impl LayerPanel {
             crate::tr!("modal", "layer-manager"),
             chrome,
         );
-        let table = self.view_content(
-            name_col_w,
-            crate::ui::modal::ModalSizing {
-                width: Length::Shrink,
-                height: Length::Fill,
-            },
-        );
-        let body = scrollable(table)
-            .direction(iced::widget::scrollable::Direction::Horizontal(
-                iced::widget::scrollable::Scrollbar::new(),
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill);
+        // Inside the pallet's 1 px border on either side.
+        let body = self.view_content(name_col_w, (width - 2.0).max(0.0));
         container(column![title_bar, body])
             .width(Length::Fixed(width))
             .height(Length::Fill)
@@ -365,11 +355,8 @@ impl LayerPanel {
             .into()
     }
 
-    fn view_content(
-        &self,
-        name_col_w: f32,
-        sizing: crate::ui::modal::ModalSizing,
-    ) -> Element<'_, Message> {
+    /// Toolbar and table for a pallet `inner_w` wide.
+    fn view_content(&self, name_col_w: f32, inner_w: f32) -> Element<'_, Message> {
         let has_sel = self.selected.is_some();
         let sel_is_zero = self
             .selected
@@ -396,7 +383,7 @@ impl LayerPanel {
                     Message::LayerSetCurrent,
                     can_set_current,
                 ),
-                iced::widget::Space::new().width(sizing.width),
+                iced::widget::Space::new().width(Length::Fill),
                 // Search box: filters rows by name as the user types (#343).
                 text_input(t!("Search…").as_ref(), &self.filter)
                     .on_input(Message::LayerManagerFilterChanged)
@@ -414,7 +401,7 @@ impl LayerPanel {
             )),
             ..Default::default()
         })
-        .width(sizing.width)
+        .width(Length::Fill)
         .padding([4, 8]);
 
         // ── Column header ─────────────────────────────────────────────────
@@ -452,7 +439,6 @@ impl LayerPanel {
             ),
         ]
         .spacing(4)
-        .width(sizing.width)
         .align_y(iced::Center);
 
         for vp in &self.vp_cols {
@@ -478,7 +464,7 @@ impl LayerPanel {
                 }
             })
             .padding([4, 8])
-            .width(sizing.width);
+            .width(Length::Fill);
 
         // ── Layer rows ────────────────────────────────────────────────────
         let mut rows_col = column![].spacing(0);
@@ -519,19 +505,26 @@ impl LayerPanel {
 
         let table = scrollable(rows_col)
             .id(iced::advanced::widget::Id::new(LAYER_TABLE_SCROLL_ID))
-            .height(sizing.height.min(240.0));
+            .width(Length::Fill)
+            .height(Length::Fill);
 
-        // ── Full-window frame ─────────────────────────────────────────────
-        container(column![toolbar, col_header, table].spacing(0))
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.base.color
-                )),
-                ..Default::default()
-            })
-            .width(sizing.width)
-            .height(sizing.height)
-            .into()
+        // The header and table stretch to the wider of their columns and the
+        // pallet (the zero-height spacer), so the header's grey band and
+        // borders always run to the pallet's edge; a narrower pallet scrolls
+        // the table sideways while the toolbar stays put.
+        let grid = column![
+            col_header,
+            table,
+            iced::widget::Space::new().width(Length::Fixed(inner_w)).height(0),
+        ]
+        .height(Length::Fill);
+        let grid = scrollable(grid)
+            .direction(iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new(),
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        column![toolbar, grid].height(Length::Fill).into()
     }
 }
 

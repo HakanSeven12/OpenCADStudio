@@ -71,7 +71,15 @@ pub enum DockMsg {
     FloatRaise(PanelId),
     /// The pointer left the edge column; collapse any auto-collapsing panel.
     HoverExit,
+    /// The pointer entered the edge column again: keep its group revealed.
+    HoverStay,
+    /// The hover delay of the reveal / hide armed as generation `n` ran out.
+    HoverSettled(u64),
 }
+
+/// How long the pointer must rest before an auto-hiding group reveals or
+/// hides, so passing over the strip doesn't flash groups open.
+pub const DOCK_HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// The dockable panels the application knows about. New palettes add a variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

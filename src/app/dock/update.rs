@@ -7,6 +7,24 @@ use crate::app::{Message, OpenCADStudio};
 /// so a plain click never moves anything.
 const DOCK_DRAG_THRESHOLD: f32 = 5.0;
 
+/// Resolves once the dock hover delay has passed (a sleeping helper thread;
+/// the web build has none and resolves at once).
+fn hover_delay() -> impl std::future::Future<Output = ()> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let rx = {
+        let (tx, rx) = iced::futures::channel::oneshot::channel::<()>();
+        std::thread::spawn(move || {
+            std::thread::sleep(crate::ui::dock::DOCK_HOVER_DELAY);
+            let _ = tx.send(());
+        });
+        rx
+    };
+    async move {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = rx.await;
+    }
+}
+
 impl OpenCADStudio {
     /// Dock chrome interaction (grab / pin / resize / hover / move) applied to
     /// whichever panel the message names.
@@ -126,11 +144,15 @@ impl OpenCADStudio {
             DockMsg::Hover(id) => {
                 self.dock_icon_hover = Some(id);
                 // Only an auto-hiding edge (or floating pallet) reacts to
-                // hover: it reveals the hovered pallet's group. Otherwise
-                // groups switch on click. Ignored mid-drag, when the pointer
-                // is over the preview rather than the strip.
+                // hover: after a short rest it reveals the hovered pallet's
+                // group. Otherwise groups switch on click. Ignored mid-drag,
+                // when the pointer is over the preview rather than the strip.
                 if self.dock_drag.is_none() && self.dock.auto_hides(id) {
-                    self.dock_reveal(id);
+                    if self.dock_peek == Some(id) {
+                        self.dock_hover_cancel();
+                    } else {
+                        return self.dock_hover_arm(Some(id));
+                    }
                 }
             }
             DockMsg::HoverEnd(id) => {
@@ -142,7 +164,25 @@ impl OpenCADStudio {
                 if self.dock_drag.is_none()
                     && self.dock_peek.is_some_and(|id| self.dock.auto_hides(id))
                 {
-                    self.dock_peek = None;
+                    return self.dock_hover_arm(None);
+                }
+                // Left before a pending reveal ran out: it never happens.
+                self.dock_hover_cancel();
+            }
+            DockMsg::HoverStay => {
+                if self.dock_hover_pending == Some(None) {
+                    self.dock_hover_cancel();
+                }
+            }
+            DockMsg::HoverSettled(gen) => {
+                if gen == self.dock_hover_gen && self.dock_drag.is_none() {
+                    match self.dock_hover_pending.take() {
+                        Some(Some(id)) if self.dock.auto_hides(id) => self.dock_reveal(id),
+                        Some(None) if self.dock_peek.is_some_and(|id| self.dock.auto_hides(id)) => {
+                            self.dock_peek = None;
+                        }
+                        _ => {}
+                    }
                 }
             }
             DockMsg::DragMove(point) => self.dock_drag_move(point),
@@ -329,6 +369,23 @@ impl OpenCADStudio {
 
     /// Bring `id` into view: show its group on its edge and, where it
     /// auto-hides, keep it revealed until the pointer leaves.
+    /// Arm a delayed reveal (`Some`) or hide (`None`); it applies when its
+    /// timer reports back unless a newer hover superseded it.
+    fn dock_hover_arm(&mut self, target: Option<crate::ui::dock::PanelId>) -> iced::Task<Message> {
+        self.dock_hover_gen = self.dock_hover_gen.wrapping_add(1);
+        self.dock_hover_pending = Some(target);
+        let gen = self.dock_hover_gen;
+        iced::Task::perform(hover_delay(), move |()| {
+            Message::Dock(crate::ui::dock::DockMsg::HoverSettled(gen))
+        })
+    }
+
+    /// Drop any pending delayed reveal / hide.
+    fn dock_hover_cancel(&mut self) {
+        self.dock_hover_gen = self.dock_hover_gen.wrapping_add(1);
+        self.dock_hover_pending = None;
+    }
+
     pub(crate) fn dock_reveal(&mut self, id: crate::ui::dock::PanelId) {
         self.dock.show_group_of(id);
         self.dock_peek = Some(id);
@@ -417,6 +474,29 @@ impl OpenCADStudio {
             self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
         }
         self.dock_reveal(id);
+    }
+
+    /// Open the Layer Manager pallet (LAYERS). The first time it floats over
+    /// the middle of the drawing, where the dialog it replaced used to open;
+    /// after that it opens wherever the user left it.
+    pub(crate) fn open_layers_pallet(&mut self) {
+        use crate::ui::dock::{FloatPanel, PanelId};
+        self.sync_ribbon_layers();
+        self.show_layers = true;
+        if !self.dock.is_placed(PanelId::Layers) {
+            let (ww, wh) = self.dock_workspace_size();
+            let (w, h) = self.dock_float_size(PanelId::Layers);
+            self.dock.float(FloatPanel {
+                id: PanelId::Layers,
+                x: ((ww - w) * 0.5).max(0.0),
+                y: ((wh - h) * 0.5).max(0.0),
+                w,
+                h,
+            });
+            self.save_config();
+        }
+        self.dock.raise_float(PanelId::Layers);
+        self.dock_reveal(PanelId::Layers);
     }
 
     /// Stop revealing `id` (it closed).

@@ -22,6 +22,7 @@ use std::fmt;
 /// Sentinel entries in the printer dropdown (not real printer names).
 pub const OUT_DEFAULT: &str = "System default printer";
 pub const OUT_PDF: &str = "Save to PDF file…";
+pub const OUT_SVG: &str = "Save to SVG file…";
 
 /// Top-of-list entries: no page setup (defaults + PDF), and the last-used
 /// settings captured when the dialog opened.
@@ -449,8 +450,13 @@ pub struct PlotDialogState {
     pub page_setup_on_new_layout: bool,
     /// Chosen printer name, or `None` for the system default.
     pub printer: Option<String>,
-    /// Output goes to a PDF file instead of a printer.
+    /// Output goes to a file instead of a printer.
     pub to_file: bool,
+    /// File output is SVG instead of PDF (only meaningful when `to_file`).
+    /// Session state, like the printer choice: never written into the
+    /// drawing's page setup, which only knows printers and PDF drivers.
+    #[serde(default)]
+    pub file_svg: bool,
     pub paper: String,
     #[serde(skip)]
     pub paper_width_mm: f64,
@@ -560,6 +566,7 @@ impl Default for PlotDialogState {
             page_setup_on_new_layout: false,
             printer: None,
             to_file: false,
+            file_svg: false,
             paper: paper_catalog::default_paper().canonical.to_string(),
             paper_width_mm: 297.0,
             paper_height_mm: 210.0,
@@ -616,6 +623,7 @@ impl PlotDialogState {
     pub fn copy_settings_from(&mut self, o: &PlotDialogState) {
         self.printer = o.printer.clone();
         self.to_file = o.to_file;
+        self.file_svg = o.file_svg;
         self.paper = o.paper.clone();
         self.paper_width_mm = o.paper_width_mm;
         self.paper_height_mm = o.paper_height_mm;
@@ -1077,7 +1085,11 @@ pub fn view_window(
     let action = if print_all_options {
         t!("Apply")
     } else if s.to_file {
-        t!("Export PDF")
+        if s.file_svg {
+            t!("Export SVG")
+        } else {
+            t!("Export PDF")
+        }
     } else {
         t!("Print")
     };
@@ -1217,8 +1229,9 @@ pub fn view_window(
     let mut printer_opts = vec![default_entry.clone()];
     printer_opts.extend(s.printers.iter().cloned().map(PlotChoice::raw));
     printer_opts.push(PlotChoice::localized(OUT_PDF));
+    printer_opts.push(PlotChoice::localized(OUT_SVG));
     let printer_sel = if s.to_file {
-        Some(PlotChoice::localized(OUT_PDF))
+        Some(PlotChoice::localized(if s.file_svg { OUT_SVG } else { OUT_PDF }))
     } else {
         Some(match &s.printer {
             Some(printer) => PlotChoice::raw(printer.clone()),

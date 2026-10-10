@@ -13,7 +13,6 @@ use crate::scene::model::hatch_model::HatchModel;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::scene::model::hatch_model::HatchPattern;
 use crate::scene::WireModel;
-use crate::scene::model::image_model::ImageModel;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::scene::model::wire_model::SearchableTextRun;
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,27 +24,13 @@ use printpdf::{
 };
 use std::path::Path;
 
-#[derive(Clone, Debug)]
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub struct PlotWire {
-    pub wire: WireModel,
-    pub draw_depth: f32,
-}
-
-impl std::ops::Deref for PlotWire {
-    type Target = WireModel;
-
-    fn deref(&self) -> &Self::Target {
-        &self.wire
-    }
-}
-
-/// Decoded image geometry plus inherited block/viewport clip boundaries.
-#[derive(Clone, Debug)]
-pub struct PlotImage {
-    pub image: ImageModel,
-    pub clips: Vec<Vec<[f64; 2]>>,
-}
+// Shared plot model: `PlotWire`, `PlotImage`, `PlotContent`, `PlotGroupSplits`
+// and friends live in `super::plot`. The `Pdf*` names remain as aliases so
+// the scene, the print pipeline and every other call site keep compiling.
+pub use super::plot::{
+    PlotContent, PlotGroupSplits, PlotImage, PlotOptions as PdfPlotOptions,
+    PlotPage as PdfPageInput, PlotWire,
+};
 
 // The web build has no `printpdf` (it pulls a wasm-incompatible `memchr` via
 // lopdf → nom_locate) and no filesystem, so PDF export is native-only; the web
@@ -65,7 +50,7 @@ pub fn export_pdf_pages(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn pick_pdf_path_owned(_stem: String) -> Option<std::path::PathBuf> {
+pub async fn pick_plot_path_owned(_stem: String) -> Option<std::path::PathBuf> {
     None
 }
 
@@ -81,63 +66,6 @@ const LW_PX_TO_PT: f32 = MM_TO_PT / (96.0 / 25.4);
 
 #[cfg(not(target_arch = "wasm32"))]
 const SCREEN_DOT_MM: f32 = 25.4 / 96.0;
-
-/// Output controls shared by preview, PDF export, and printer rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PdfPlotOptions {
-    pub object_lineweights: bool,
-    pub scale_lineweights: bool,
-    pub transparency: bool,
-    pub stamp: bool,
-    pub merge_lines: bool,
-}
-
-/// End indexes of the first paper/model render group in each flat input list.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PlotGroupSplits {
-    pub wires: usize,
-    pub hatches: usize,
-    pub wipeouts: usize,
-    pub images: usize,
-}
-
-#[derive(Default)]
-pub struct PlotContent {
-    pub wires: std::sync::Arc<Vec<PlotWire>>,
-    pub hatches: Vec<HatchModel>,
-    pub wipeouts: Vec<HatchModel>,
-    pub images: Vec<PlotImage>,
-    pub group_splits: PlotGroupSplits,
-}
-
-/// Owned geometry and settings for one PDF page.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub struct PdfPageInput {
-    pub content: PlotContent,
-    /// Page dimensions in mm, after any 90/270-degree rotation.
-    pub paper_w: f64,
-    pub paper_h: f64,
-    /// Absolute-world offsets stay f64 to preserve local detail at UTM coordinates.
-    pub offset_x: f64,
-    pub offset_y: f64,
-    pub rotation_deg: i32,
-    pub scale: f32,
-    pub clip: Option<(f32, f32, f32, f32)>,
-    pub options: PdfPlotOptions,
-    pub plot_style: Option<PlotStyleTable>,
-}
-
-impl Default for PdfPlotOptions {
-    fn default() -> Self {
-        Self {
-            object_lineweights: true,
-            scale_lineweights: false,
-            transparency: false,
-            stamp: false,
-            merge_lines: false,
-        }
-    }
-}
 
 // ── Public entry point ────────────────────────────────────────────────────
 
@@ -381,21 +309,33 @@ fn image_triangle_matrix(p: [[f32; 2]; 3], uv: [[f32; 2]; 3]) -> Option<[f32; 6]
     ])
 }
 
-/// Show a parented PDF save-file dialog and return the chosen path.
+/// Show a parented plot save-file dialog and return the chosen path.
 ///
 /// The parent comes from `iced::window::run`, keeping the portal request tied
 /// to the visible app window on Wayland instead of silently resolving to
 /// `None` on desktops that reject a parentless save dialog (#537).
+/// `svg` selects the SVG device's defaults (name, title, first filter).
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
-pub fn pick_pdf_path_owned(
+pub fn pick_plot_path_owned(
     stem: String,
     parent: &dyn iced::window::Window,
+    svg: bool,
 ) -> Option<std::path::PathBuf> {
-    let path = crate::sys::blocking_file_dialog()
-        .set_parent(parent)
-        .set_title(crate::t!("Export as PDF").as_ref())
-        .set_file_name(&format!("{stem}.pdf"))
-        .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+    let dialog = crate::sys::blocking_file_dialog().set_parent(parent);
+    let dialog = if svg {
+        dialog
+            .set_title(crate::t!("Export as SVG").as_ref())
+            .set_file_name(&format!("{stem}.svg"))
+            .add_filter(crate::t!("SVG Files").as_ref(), &["svg"])
+            .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+    } else {
+        dialog
+            .set_title(crate::t!("Export as PDF").as_ref())
+            .set_file_name(&format!("{stem}.pdf"))
+            .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+            .add_filter(crate::t!("SVG Files").as_ref(), &["svg"])
+    };
+    let path = dialog
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .save_file()
         ?;
@@ -403,7 +343,7 @@ pub fn pick_pdf_path_owned(
     Some(path)
 }
 
-/// Windows: pick the PDF destination with the async dialog on a worker
+/// Windows: pick the plot destination with the async dialog on a worker
 /// thread. The parented blocking dialog ran `IFileDialog::Show` on the UI
 /// thread inside the window callback, and when the target name already
 /// existed the overwrite-confirmation popup is a second nested modal that
@@ -411,11 +351,22 @@ pub fn pick_pdf_path_owned(
 /// backend runs the dialog off-thread; it is the same pattern the DWG
 /// Save As flow uses, whose confirm popup works.
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
-pub async fn pick_pdf_path_async(stem: String) -> Option<std::path::PathBuf> {
-    let handle = crate::sys::file_dialog()
-        .set_title(crate::t!("Export as PDF").as_ref())
-        .set_file_name(format!("{stem}.pdf"))
-        .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+pub async fn pick_plot_path_async(stem: String, svg: bool) -> Option<std::path::PathBuf> {
+    let dialog = crate::sys::file_dialog();
+    let dialog = if svg {
+        dialog
+            .set_title(crate::t!("Export as SVG").as_ref())
+            .set_file_name(format!("{stem}.svg"))
+            .add_filter(crate::t!("SVG Files").as_ref(), &["svg"])
+            .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+    } else {
+        dialog
+            .set_title(crate::t!("Export as PDF").as_ref())
+            .set_file_name(format!("{stem}.pdf"))
+            .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+            .add_filter(crate::t!("SVG Files").as_ref(), &["svg"])
+    };
+    let handle = dialog
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .save_file()
         .await?;

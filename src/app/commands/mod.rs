@@ -475,6 +475,7 @@ inventory::submit!(crate::command::CommandRegistration {
         // Standard aliases for existing commands.
         "BMAKE",
         "EXPORTPDF",
+        "EXPORTSVG",
         "PRINTALL",
         "DDIM",
         // Inquiry: list the whole drawing database.

@@ -474,8 +474,11 @@ impl OpenCADStudio {
         use crate::io::pdf_export::PdfPageInput;
 
         let path = string(req, "path")?;
-        if !path.to_ascii_lowercase().ends_with(".pdf") {
-            return Err(failure("invalid_path", "plot writes .pdf files"));
+        let lower = path.to_ascii_lowercase();
+        // SVG shares the plot page with PDF: the writer follows the extension.
+        let is_svg = lower.ends_with(".svg");
+        if !is_svg && !lower.ends_with(".pdf") {
+            return Err(failure("invalid_path", "plot writes .pdf or .svg files"));
         }
         self.stamp_plot_fields();
         let i = self.active_tab;
@@ -688,22 +691,37 @@ impl OpenCADStudio {
         self.tabs[i].scene.camera_generation = original_camera_generation;
         let pages = built.map_err(|e| failure("plot_failed", e))?;
         if req["per_page"].as_bool().unwrap_or(false) {
-            // One PDF per layout: <stem>-<Layout>.pdf beside the requested
+            // One file per layout: <stem>-<Layout>.pdf/.svg beside the requested
             // path (sheet-by-sheet delivery).
-            let stem = path.strip_suffix(".pdf").unwrap_or(path).to_owned();
+            let stem = path
+                .strip_suffix(".pdf")
+                .or_else(|| path.strip_suffix(".PDF"))
+                .or_else(|| path.strip_suffix(".svg"))
+                .or_else(|| path.strip_suffix(".SVG"))
+                .unwrap_or(path)
+                .to_owned();
+            let ext = if is_svg { "svg" } else { "pdf" };
             let mut files = Vec::with_capacity(pages.len());
             for (name, page) in targets.iter().zip(&pages) {
                 let safe: String = name
                     .chars()
                     .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
                     .collect();
-                let file = format!("{stem}-{safe}.pdf");
-                crate::io::pdf_export::export_pdf_pages(
-                    std::slice::from_ref(page),
-                    std::path::Path::new(&file),
-                    loaded_style.as_ref(),
-                )
-                .map_err(|e| failure("plot_failed", e))?;
+                let file = format!("{stem}-{safe}.{ext}");
+                let result = if is_svg {
+                    crate::io::svg_export::export_svg_pages(
+                        std::slice::from_ref(page),
+                        std::path::Path::new(&file),
+                        loaded_style.as_ref(),
+                    )
+                } else {
+                    crate::io::pdf_export::export_pdf_pages(
+                        std::slice::from_ref(page),
+                        std::path::Path::new(&file),
+                        loaded_style.as_ref(),
+                    )
+                };
+                result.map_err(|e| failure("plot_failed", e))?;
                 files.push(json!({"layout": name, "path": file}));
             }
             self.set_control_result(json!({ "files": files, "pages": pages.len() }));
@@ -712,12 +730,20 @@ impl OpenCADStudio {
         // Pages may drop the style when a stored page setup overwrites the
         // dialog's style fields, so the explicit request style rides along as
         // the export-level fallback.
-        crate::io::pdf_export::export_pdf_pages(
-            &pages,
-            std::path::Path::new(path),
-            loaded_style.as_ref(),
-        )
-        .map_err(|e| failure("plot_failed", e))?;
+        let result = if is_svg {
+            crate::io::svg_export::export_svg_pages(
+                &pages,
+                std::path::Path::new(path),
+                loaded_style.as_ref(),
+            )
+        } else {
+            crate::io::pdf_export::export_pdf_pages(
+                &pages,
+                std::path::Path::new(path),
+                loaded_style.as_ref(),
+            )
+        };
+        result.map_err(|e| failure("plot_failed", e))?;
         self.set_control_result(json!({
             "path": path,
             "pages": pages.len(),

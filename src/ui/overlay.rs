@@ -639,6 +639,30 @@ pub struct GridCanvasState {
 /// least `MIN_GRID_PX` pixels apart at the camera pivot. Both orthographic and
 /// perspective cameras have the same vertical scale there. Camera rotation is
 /// intentionally absent so orbiting cannot rescale the visible grid or snap.
+/// World → viewport-local screen via relative-to-eye: subtract the f64 eye
+/// first so points near the camera stay precise at UTM-scale coords.
+/// Rejects points on/behind the perspective eye plane before dividing by W —
+/// without this a behind-camera point wraps to a finite mirrored coordinate
+/// (screen centre for on-axis points) and strokes garbage (#46).
+fn project_point(
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: iced::Rectangle,
+    world: glam::DVec3,
+) -> Option<Point> {
+    let rel = (world - eye).as_vec3();
+    let clip = view_rot * rel.extend(1.0);
+    if !clip.is_finite() || clip.w <= 1e-7 {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    let screen = Point::new(
+        (ndc.x + 1.0) * 0.5 * bounds.width,
+        (1.0 - ndc.y) * 0.5 * bounds.height,
+    );
+    (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
+}
+
 /// Clip the screen segment `p0`→`p1` to `bounds` (Liang–Barsky), returning the
 /// visible part, or `None` when it misses entirely.
 ///
@@ -2407,19 +2431,9 @@ pub fn grid_segments(
 
     // World → viewport-local screen via relative-to-eye: subtract the f64 eye
     // first so grid points near the camera stay precise at UTM-scale coords.
-    // Reject points on/behind the perspective eye plane before dividing by W.
+    // Shared eye-plane guard — see project_point (#46).
     let project = |world: glam::DVec3| -> Option<Point> {
-        let rel = (world - eye).as_vec3();
-        let clip = view_rot * rel.extend(1.0);
-        if !clip.is_finite() || clip.w <= 1e-7 {
-            return None;
-        }
-        let ndc = clip.truncate() / clip.w;
-        let screen = Point::new(
-            (ndc.x + 1.0) * 0.5 * bounds.width,
-            (1.0 - ndc.y) * 0.5 * bounds.height,
-        );
-        (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
+        project_point(view_rot, eye, bounds, world)
     };
 
     // Grid is intentionally restricted to the active UCS XY plane.
@@ -2936,6 +2950,7 @@ pub fn grid_segments(
 // ── Coloured UCS axes ──────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn draw_axes(
     frame: &mut canvas::Frame,
     view_rot: Mat4,
@@ -2946,34 +2961,64 @@ fn draw_axes(
     axes: (Vec3, Vec3, Vec3),
     bg_luminance: f32,
 ) {
-    let w2s = |world: glam::DVec3| -> Point {
-        let ndc = view_rot.project_point3((world - eye).as_vec3());
-        Point::new(
-            bounds.x + (ndc.x + 1.0) * 0.5 * bounds.width,
-            bounds.y + (1.0 - ndc.y) * 0.5 * bounds.height,
-        )
-    };
-    let e = extent;
     let (ax, ay, az) = axes;
     let axis_stroke = |r: f32, g: f32, b: f32| canvas::Stroke {
         width: 1.5,
         style: canvas::Style::Solid(Color { r, g, b, a: 0.85 }),
         ..Default::default()
     };
-    // Axes run through the UCS origin along the UCS axis directions.
-    let mut line = |dir: Vec3, r: f32, g: f32, b: f32| {
+    let y_green = if bg_luminance > 0.5 { 0.60 } else { 0.85 };
+    for ((a, b), (r, g, bl)) in axes_segments(view_rot, eye, bounds, extent, origin, axes)
+        .into_iter()
+        .zip([(0.90, 0.20, 0.20), (0.20, y_green, 0.20), (0.20, 0.40, 0.90)])
+    {
         frame.stroke(
             &canvas::Path::new(|p| {
-                p.move_to(w2s(origin - (dir * e).as_dvec3()));
-                p.line_to(w2s(origin + (dir * e).as_dvec3()));
+                p.move_to(a);
+                p.line_to(b);
             }),
-            axis_stroke(r, g, b),
+            axis_stroke(r, g, bl),
         );
+    }
+}
+
+/// Pure geometry for [`draw_axes`]: per-axis canvas-space segments in X/Y/Z
+/// order after the eye-plane guard and frame clip. An axis with either end
+/// behind the eye is absent entirely (#46) — screen-space clipping of a
+/// mirror-wrapped segment would be garbage, same policy as grid lines.
+/// Extracted so the skip/clip/offset contract is unit-testable without a
+/// renderer (iced `Frame` needs one).
+fn axes_segments(
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: iced::Rectangle,
+    extent: f32,
+    origin: glam::DVec3,
+    axes: (Vec3, Vec3, Vec3),
+) -> Vec<(Point, Point)> {
+    // Axes run through the UCS origin along the UCS axis directions. NOTE: the
+    // pane origin offset below reproduces draw_axes' historical canvas placement
+    // verbatim — whether grid geometry as a whole should be pane-local or
+    // canvas-placed is a separate open question (see #60), not this fix.
+    let w2s = |world: glam::DVec3| -> Option<Point> {
+        project_point(view_rot, eye, bounds, world)
+            .map(|p| Point::new(p.x + bounds.x, p.y + bounds.y))
     };
-    let y_green = if bg_luminance > 0.5 { 0.60 } else { 0.85 };
-    line(ax, 0.90, 0.20, 0.20); // X — red
-    line(ay, 0.20, y_green, 0.20); // Y — green
-    line(az, 0.20, 0.40, 0.90); // Z — blue
+    // clip_seg works frame-local: shift, clip, shift back.
+    let local = |p: Point| Point::new(p.x - bounds.x, p.y - bounds.y);
+    let back = |p: Point| Point::new(p.x + bounds.x, p.y + bounds.y);
+    let (ax, ay, az) = axes;
+    [ax, ay, az]
+        .into_iter()
+        .filter_map(|dir| {
+            let (p0, p1) = (
+                w2s(origin - (dir * extent).as_dvec3())?,
+                w2s(origin + (dir * extent).as_dvec3())?,
+            );
+            let (c0, c1) = clip_seg(local(p0), local(p1), bounds)?;
+            Some((back(c0), back(c1)))
+        })
+        .collect()
 }
 
 // ── UCS icon ──────────────────────────────────────────────────────────────
@@ -3946,6 +3991,123 @@ impl canvas::Program<Message> for DynInputCanvas {
 
 #[cfg(test)]
 mod clip_tests {
+    // Shared eye-plane projection shared by grid_segments and draw_axes (#46).
+    // Behind-eye points must project to None, never to a mirrored finite point.
+    #[test]
+    fn project_point_rejects_behind_eye() {
+        use glam::camera::rh::proj::directx;
+        let eye = glam::DVec3::new(0.0, 0.0, 500.0);
+        let view_rot: glam::Mat4 =
+            directx::perspective(60_f32.to_radians(), 800.0 / 600.0, 0.5, 5000.0);
+        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        assert!(
+            project_point(view_rot, eye, bounds, glam::DVec3::new(0.0, 0.0, 600.0)).is_none(),
+            "behind-eye must be rejected"
+        );
+        assert!(
+            project_point(view_rot, eye, bounds, glam::DVec3::new(0.0, 0.0, 400.0)).is_some(),
+            "in-front must project"
+        );
+    }
+
+    fn axes_cam() -> (glam::Mat4, glam::DVec3) {
+        use glam::camera::rh::proj::directx;
+        let eye = glam::DVec3::new(0.0, 0.0, 500.0);
+        let view_rot: glam::Mat4 =
+            directx::perspective(60_f32.to_radians(), 800.0 / 600.0, 0.5, 5000.0);
+        (view_rot, eye)
+    }
+
+    /// draw_axes-level contract without a renderer: all three axes present up
+    /// front, each clipped inside the frame.
+    #[test]
+    fn axes_segments_draws_three_when_in_front() {
+        let (view_rot, eye) = axes_cam();
+        let segs = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            100.0,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert_eq!(segs.len(), 3, "all three axes must survive");
+        for (a, c) in &segs {
+            for p in [a, c] {
+                assert!(
+                    p.x >= -16.0 && p.x <= 816.0 && p.y >= -16.0 && p.y <= 616.0,
+                    "segment must be frame-clipped, got ({}, {})",
+                    p.x,
+                    p.y
+                );
+            }
+        }
+    }
+
+    /// Straddling axis (origin in front, far tip behind the eye) is skipped
+    /// whole — screen-space clipping of a wrapped segment would be garbage.
+    #[test]
+    fn axes_segments_skips_straddling_axis() {
+        let (view_rot, eye) = axes_cam();
+        // Origin 100 in front; Z extent 200 puts the +Z tip 100 behind.
+        let segs = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            200.0,
+            glam::DVec3::new(0.0, 0.0, 400.0),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert_eq!(segs.len(), 2, "straddling Z axis must be skipped, X/Y kept");
+    }
+
+    /// Fully behind-eye origin draws nothing at all.
+    #[test]
+    fn axes_segments_empty_when_behind_eye() {
+        let (view_rot, eye) = axes_cam();
+        let segs = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            100.0,
+            glam::DVec3::new(0.0, 0.0, 600.0),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert!(segs.is_empty(), "nothing projectable, nothing drawn");
+    }
+
+    /// Legacy canvas placement: a pane origin offset shifts every segment by
+    /// exactly that offset (pins the historical draw_axes mapping).
+    #[test]
+    fn axes_segments_preserves_pane_offset() {
+        let (view_rot, eye) = axes_cam();
+        let plain = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            100.0,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        let shifted_bounds = iced::Rectangle { x: 100.0, y: 50.0, width: 800.0, height: 600.0 };
+        let shifted = super::axes_segments(
+            view_rot,
+            eye,
+            shifted_bounds,
+            100.0,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert_eq!(plain.len(), shifted.len());
+        for ((a0, c0), (a1, c1)) in plain.iter().zip(shifted.iter()) {
+            for (p0, p1, dx, dy) in [(a0, a1, 100.0, 50.0), (c0, c1, 100.0, 50.0)] {
+                assert!(
+                    (p1.x - p0.x - dx).abs() < 1e-3 && (p1.y - p0.y - dy).abs() < 1e-3,
+                    "pane offset must carry through exactly"
+                );
+            }
+        }
+    }
     use super::*;
 
     fn b() -> iced::Rectangle {

@@ -2600,8 +2600,11 @@ pub enum Message {
     /// Pop the trailing character off the command-line input — backspace
     /// counterpart to `CommandAppendChar`.
     CommandBackspace,
-    /// TAB pressed: move focus to the next dynamic-input field (wraps).
+    /// TAB pressed: move focus to the next dynamic-input field or
+    /// autocomplete suggestion.
     DynTabNext,
+    /// Shift+TAB: move to the previous contextual autocomplete suggestion.
+    DynTabPrev,
     /// Split the active Model viewport in two. `true` → horizontal divider
     /// (top / bottom); `false` → vertical divider (left / right).
     SplitModelViewport(bool),

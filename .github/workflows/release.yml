@@ -511,6 +511,12 @@ jobs:
           codesign -d --entitlements - --xml OpenCADStudio.app/Contents/PlugIns/DWGThumbnail.appex \
             | python3 -c 'import io, plistlib, sys; ent = plistlib.load(io.BytesIO(sys.stdin.buffer.read())); print("entitlements:", ent); assert ent.get("com.apple.security.app-sandbox") is True'
 
+      # Exercise CFBundleExecutable, not just the inner application: the
+      # Finder launcher must preserve --mcp and the client's stdio pipes.
+      - name: Verify packaged MCP handshake
+        timeout-minutes: 2
+        run: python3 docs/automation/mcp_handshake.py OpenCADStudio.app/Contents/MacOS/OpenCADStudio
+
       - name: Create .dmg
         run: |
           set +e

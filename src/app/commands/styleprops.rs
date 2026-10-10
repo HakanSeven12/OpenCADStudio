@@ -3572,6 +3572,13 @@ fn rename_symbol(doc: &mut codec::CadDocument, ty: &str, old: &str, new: &str) -
             if doc.header.current_text_style_name.eq_ignore_ascii_case(old) {
                 doc.header.current_text_style_name = new.to_string();
             }
+            // Dimension styles name their text style; follow the rename (same
+            // as rename_style_storage — see #42).
+            for ds in doc.dim_styles.iter_mut() {
+                if ds.dimtxsty.eq_ignore_ascii_case(old) {
+                    ds.dimtxsty = new.to_string();
+                }
+            }
             true
         }
         "DIMSTYLE" => {

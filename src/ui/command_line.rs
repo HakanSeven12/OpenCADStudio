@@ -168,6 +168,10 @@ pub struct CommandLine {
     /// means the first match is pre-selected (highlighted) before keyboard
     /// navigation begins. Reset when input changes.
     pub autocomplete_cursor: Option<usize>,
+    /// Suggestions supplied by the active CAD command. When non-empty these
+    /// replace normal command-name autocomplete, allowing commands to offer
+    /// drawing-specific values such as layers, blocks or styles.
+    pub contextual_suggestions: Vec<crate::command::CommandSuggestion>,
     /// Command names contributed by loaded plugins, refreshed whenever the
     /// enabled-plugin set changes. Merged into autocomplete alongside the
     /// compile-time command registry, so runtime plugin commands are typeable
@@ -212,6 +216,7 @@ impl Default for CommandLine {
             history_open: false,
             history_height: 0.0,
             autocomplete_cursor: None,
+            contextual_suggestions: Vec::new(),
             dynamic_commands: Vec::new(),
             command_aliases: rustc_hash::FxHashMap::default(),
             step_prompt: None,
@@ -607,6 +612,34 @@ impl CommandLine {
         self.step_prompt = None;
     }
 
+    /// Replace the active command's context-sensitive suggestions.
+    /// A new result set always resets keyboard navigation to the first item.
+    pub fn set_contextual_suggestions(
+        &mut self,
+        suggestions: Vec<crate::command::CommandSuggestion>,
+    ) {
+        let changed = self
+            .contextual_suggestions
+            .iter()
+            .map(|entry| entry.value.as_str())
+            .ne(suggestions.iter().map(|entry| entry.value.as_str()));
+
+        self.contextual_suggestions = suggestions;
+
+        if changed {
+            self.autocomplete_cursor = None;
+        }
+    }
+
+    pub fn clear_contextual_suggestions(&mut self) {
+        self.contextual_suggestions.clear();
+        self.autocomplete_cursor = None;
+    }
+
+    pub fn has_contextual_suggestions(&self) -> bool {
+        !self.contextual_suggestions.is_empty()
+    }
+
     /// Move the autocomplete highlight up one entry. Wraps to the last match.
     pub fn autocomplete_prev(&mut self) -> bool {
         let len = self.autocomplete_matches().len();
@@ -648,6 +681,14 @@ impl CommandLine {
     /// Autocomplete suggestions for the current input — see
     /// [`ranked_matches`]. Includes loaded plugins' commands (#272).
     pub fn autocomplete_matches(&self) -> Vec<String> {
+        if !self.contextual_suggestions.is_empty() {
+            return self
+                .contextual_suggestions
+                .iter()
+                .map(|entry| entry.value.clone())
+                .collect();
+        }
+
         ranked_matches(
             self.input.trim(),
             &self.dynamic_commands,
@@ -826,15 +867,64 @@ impl CommandLine {
                 let mut col = column![].spacing(0).width(Length::Fill);
                 for (idx, cmd) in matches.iter().enumerate() {
                     let is_selected = idx == cursor;
-                    // Every row keeps the icon's width so names line up.
-                    let icon: Element<'_, Message> =
-                        match crate::modules::registry::command_icon(cmd) {
-                            Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
-                            None => Space::new().width(14.0).into(),
-                        };
-                    let label = row![icon, text(cmd.clone()).size(11)]
-                        .spacing(6)
-                        .align_y(iced::Center);
+                    let details = self.contextual_suggestions.get(idx);
+
+                    let mut label = row![].spacing(6).align_y(iced::Center);
+
+                    if let Some(details) = details {
+                        if let Some(visible) = details.visible {
+                            label = label.push(crate::ui::icons::semantic(
+                                crate::ui::icons::layer_visible(visible),
+                                14.0,
+                            ));
+                        }
+
+                        if let Some(frozen) = details.frozen {
+                            label = label.push(crate::ui::icons::semantic(
+                                crate::ui::icons::layer_freeze(frozen),
+                                14.0,
+                            ));
+                        }
+
+                        if let Some(locked) = details.locked {
+                            label = label.push(crate::ui::icons::semantic(
+                                crate::ui::icons::layer_lock(locked),
+                                14.0,
+                            ));
+                        }
+
+                        if let Some(color) = details.color.clone() {
+                            let swatch_color =
+                                crate::ui::window::layers::iced_color_from_acad(&color);
+
+                            let swatch = container(text(""))
+                                .style(move |theme: &Theme| container::Style {
+                                    background: Some(Background::Color(swatch_color)),
+                                    border: Border {
+                                        color: theme.palette().background.strong.color,
+                                        width: 1.0,
+                                        radius: 1.0.into(),
+                                    },
+                                    ..Default::default()
+                                })
+                                .width(12)
+                                .height(12);
+
+                            label = label.push(swatch);
+                        }
+                    } else {
+                        // Normal command autocomplete keeps its existing command icon.
+                        let icon: Element<'_, Message> =
+                            match crate::modules::registry::command_icon(cmd) {
+                                Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
+                                None => Space::new().width(14.0).into(),
+                            };
+
+                        label = label.push(icon);
+                    }
+
+                    label = label.push(text(cmd.clone()).size(11));
+
                     let row = button(label)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)

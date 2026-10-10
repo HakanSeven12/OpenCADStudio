@@ -628,6 +628,119 @@ impl OpenCADStudio {
                     .push_info(crate::t!("LAYUNISO: all layers restored.").as_ref());
             }
 
+            "QLAYER" => {
+                use crate::modules::draw::layers::quick_layer::{
+                    QuickLayerCommand,
+                    QuickLayerEntry,
+                };
+
+                let layers: Vec<QuickLayerEntry> = self.tabs[i]
+                    .layers
+                    .layers
+                    .iter()
+                    .filter(|layer| !layer.name.starts_with('*'))
+                    .map(|layer| {
+                        QuickLayerEntry::new(
+                            layer.name.clone(),
+                            layer.color.clone(),
+                            layer.visible,
+                            layer.frozen,
+                            layer.locked,
+                        )
+                    })
+                    .collect();
+
+                let selected: Vec<codec::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, _)| handle)
+                    .collect();
+
+                let command = QuickLayerCommand::new_with_entries(layers, selected);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            cmd if cmd.starts_with("QLAYER_APPLY_HEX ") => {
+                use crate::modules::draw::layers::quick_layer::QuickLayerCommand;
+
+                let encoded = cmd.trim_start_matches("QLAYER_APPLY_HEX").trim();
+
+                let Some(requested) = QuickLayerCommand::decode_layer_name(encoded) else {
+                    self.command_line.push_error(
+                        crate::t!("QLAYER: invalid encoded layer name.").as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+
+                let resolved = self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .names()
+                    .find(|name| name.eq_ignore_ascii_case(&requested))
+                    .map(|name| name.to_string());
+
+                let Some(layer) = resolved else {
+                    self.command_line.push_error(
+                        crate::tf!("QLAYER: no layer named \"{requested}\".").as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+
+                let handles: Vec<codec::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, _)| handle)
+                    .collect();
+
+                if handles.is_empty() {
+                    match self.set_current_layer_name(i, &layer) {
+                        Ok(()) => {
+                            self.command_line.push_info(
+                                crate::tf!(
+                                    "QLAYER: current layer set to \"{layer}\"."
+                                )
+                                .as_ref(),
+                            );
+                        }
+                        Err(error) => {
+                            self.command_line.push_error(&error);
+                        }
+                    }
+                } else {
+                    let count = handles.len();
+
+                    self.apply_property_op(
+                        i,
+                        "QLAYER",
+                        &handles,
+                        |app, handle| {
+                            if let Some(entity) =
+                                app.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                crate::scene::view::dispatch::apply_common_prop(
+                                    entity,
+                                    "layer",
+                                    &layer,
+                                );
+                            }
+                        },
+                    );
+
+                    self.ribbon.active_layer = layer.clone();
+
+                    self.command_line.push_info(
+                        crate::tf!(
+                            "QLAYER: moved {count} object(s) to layer \"{layer}\"."
+                        )
+                        .as_ref(),
+                    );
+                }
+            }
+
             "LAYMATCH" | "LAYMCH" => {
                 use crate::modules::draw::layers::match_layer::LayMatchCommand;
                 let dest: Vec<_> = self.tabs[i]

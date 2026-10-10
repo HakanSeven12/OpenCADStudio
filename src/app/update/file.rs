@@ -1359,6 +1359,9 @@ impl OpenCADStudio {
         self.shortcut_bindings
             .entry("F5".to_string())
             .or_insert_with(|| "ISOPLANE".to_string());
+        self.shortcut_bindings
+            .entry("SHIFT+TAB".to_string())
+            .or_insert_with(|| "DYNTABPREV".to_string());
     }
 
     /// Write the config only when it changed since the last write, so a toggle

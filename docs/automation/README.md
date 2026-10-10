@@ -227,6 +227,14 @@ unconsumed, and the command closed rather than left armed for a second line. Geo
 
 `ocs_capture` defaults to the drawing viewport and a longest edge of 1600 pixels. Set `scope` to `window` for the full interface or change `max_dimension` between 256 and 4096.
 
+With `diff: true`, an unchanged comparison returns metadata only, including
+`diff.changed: false`, the hash and resource URI; it does not resend image or
+resource content blocks, regardless of `delivery`. The initial baseline (also
+after `reset_diff_baseline: true`) still uses the requested image delivery.
+Changed captures retain the requested diff mode, including cropped patches.
+Use `diff: false` or read the returned resource URI to retrieve the full image
+when an unchanged comparison omitted it.
+
 Clients using MCP 2026-07-28 can advertise `io.modelcontextprotocol/tasks`. OCS then returns a standard task handle when an operation is still running and accepts `tasks/get`, `tasks/update`, and `tasks/cancel`. Other clients continue to receive the existing operation status and can read it with `ocs_read`.
 
 The source-tree protocol smoke test treats the executable as a black box and uses only the Python standard library. It checks both supported protocol styles, the published schemas, structured errors, and the four-tool surface:

@@ -2028,7 +2028,10 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
 // ── 19. Viewport Navigation & Spatial Candidate Scaling ─────────────────────
 
 fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
-    if !runner.should_run("navigation") && !runner.should_run("nav_") {
+    if !runner.should_run("navigation")
+        && !runner.should_run("nav_")
+        && !runner.should_run("quadtree")
+    {
         return;
     }
 
@@ -2156,6 +2159,40 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
         assemble_samples,
         Some((1_000_000.0 / median_assemble_us, "frames/s")),
         Some(500.0), // Target < 500 µs (0.5 ms) for 5k entities
+    );
+
+    // 4. QuadTree Spatial Index Build
+    let n_tree_items = if runner.quick_mode { 2_000 } else { 100_000 };
+    let tree_items: Vec<(codec::Handle, [f64; 4])> = (0..n_tree_items)
+        .map(|i| {
+            // Clustered distribution: 80% of entities share tight bounding clusters
+            let cluster = (i % 10) as f64 * 50.0;
+            let offset = (i as f64 * 0.05) % 10.0;
+            let x = cluster + offset;
+            let y = cluster + offset;
+            (codec::Handle::from(i as u64), [x, y, x + 5.0, y + 5.0])
+        })
+        .collect();
+    let tree_bounds = [0.0, 0.0, 1000.0, 1000.0];
+
+    let mut inc_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        let mut tree = OpenCADStudio::scene::pick::quadtree::QuadTree::new(tree_bounds);
+        for &(handle, aabb) in &tree_items {
+            tree.insert(handle, aabb);
+        }
+        black_box(tree);
+        inc_samples.push(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    let median_inc_ms = inc_samples[inc_samples.len() / 2];
+    runner.record(
+        "nav_spatial_quadtree_build",
+        "QuadTree spatial index construction across 100k clustered entities",
+        "ms",
+        inc_samples,
+        Some(((n_tree_items as f64) / (median_inc_ms / 1000.0), "items/s")),
+        Some(100.0),
     );
 }
 

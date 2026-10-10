@@ -11,3 +11,4 @@ pub(super) mod make_current;
 pub mod laytrans;
 pub mod match_layer;
 pub(super) mod panel;
+pub mod quick_layer;

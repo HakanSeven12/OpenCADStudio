@@ -2430,6 +2430,32 @@ pub struct PointPickContext {
     pub aperture_px: f32,
 }
 
+/// One context-sensitive command-line autocomplete entry.
+///
+/// Normal command-name autocomplete only needs `value`. Interactive commands
+/// may optionally attach CAD display metadata, allowing the shared suggestion
+/// popup to render richer rows without knowing which command supplied them.
+#[derive(Clone, Debug)]
+pub struct CommandSuggestion {
+    pub value: String,
+    pub color: Option<codec::types::Color>,
+    pub visible: Option<bool>,
+    pub frozen: Option<bool>,
+    pub locked: Option<bool>,
+}
+
+impl CommandSuggestion {
+    pub fn plain(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            color: None,
+            visible: None,
+            frozen: None,
+            locked: None,
+        }
+    }
+}
+
 pub trait CadCommand: Send {
     /// Preserve source appearance for commands that extract existing entities.
     fn preserve_commit_style(&self) -> bool {
@@ -2469,6 +2495,15 @@ pub trait CadCommand: Send {
     /// sorting.
     fn on_live_input(&mut self, _input: &str) -> bool {
         false
+    }
+
+    /// Context-sensitive autocomplete entries for the command line while this
+    /// command is active. Unlike normal command-name completion these entries
+    /// may be drawing data such as layer, block or style names.
+    ///
+    /// Commands that do not provide contextual completion leave this empty.
+    fn text_suggestions(&self, _input: &str) -> Vec<CommandSuggestion> {
+        Vec::new()
     }
 
     /// Push the active coordinate frame in full precision. Geometry commands

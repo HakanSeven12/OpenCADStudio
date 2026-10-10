@@ -2160,14 +2160,7 @@ impl<'a> HostSession<'a> {
                 }
                 self.push_undo("Rename style");
                 self.app.rename_style_storage(kind_of(kind), &from, &to);
-                if kind == TableStyleKind::Text {
-                    // A dimension style names its text style; follow the rename.
-                    for dim in self.document_mut().dim_styles.iter_mut() {
-                        if dim.dimtxsty.eq_ignore_ascii_case(&from) {
-                            dim.dimtxsty = to.clone();
-                        }
-                    }
-                }
+                // dimtxsty follow lives in rename_style_storage (#42).
                 self.finish_style_change(kind_of(kind));
                 Ok(handle)
             }

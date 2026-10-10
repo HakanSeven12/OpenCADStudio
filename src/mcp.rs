@@ -2311,6 +2311,16 @@ pub(crate) fn tool_definitions() -> Value {
 
 fn tool_result(value: Value) -> Value {
     if value.get("$resource").is_some() || value.get("$image").is_some() {
+        // A baseline also reports changed=false, but the client has not seen
+        // that image yet. Only omit media after an actual unchanged comparison.
+        // Keep the capture metadata (hash, URI, spatial data and request id)
+        // so clients can still fetch the stored image explicitly if needed.
+        let meta = &value["metadata"];
+        if meta["diff"]["is_baseline"].as_bool() == Some(false)
+            && meta["diff"]["changed"].as_bool() == Some(false)
+        {
+            return tool_result(meta.clone());
+        }
         let mut content = Vec::new();
         if let Some(res) = value.get("$resource") {
             let uri = res["uri"].as_str().unwrap_or("");
@@ -3776,6 +3786,54 @@ mod tests {
         let both_content = both_res["content"].as_array().unwrap();
         assert!(both_content.iter().any(|c| c["type"] == "resource"));
         assert!(both_content.iter().any(|c| c["type"] == "image"));
+    }
+
+    #[test]
+    fn unchanged_capture_omits_media_but_preserves_metadata() {
+        let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 255, 255, 255]));
+        let diff = crate::app::control::vision::compute_visual_diff(
+            &image, &image, &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        );
+        assert!(!diff.changed);
+        for delivery in ["inline", "resource", "both"] {
+            let metadata = json!({
+                "hash":"unchanged-hash", "uri":"cad://session/s/snapshot/unchanged-hash.png",
+                "request_id":"capture-2", "revision":12,
+                "_spatial":{"crs":"CAD_WCS"},
+                "diff":{"is_baseline":false,"changed":diff.changed}
+            });
+            let mut capture = json!({"metadata":metadata});
+            if delivery != "resource" {
+                capture["$image"] = json!("image-bytes-must-not-be-returned");
+            }
+            if delivery != "inline" {
+                capture["$resource"] = json!({"uri":metadata["uri"],"mimeType":"image/png"});
+            }
+            let result = tool_result(capture);
+            assert_eq!(result["isError"], false);
+            assert_eq!(result["structuredContent"], metadata);
+            let content = result["content"].as_array().unwrap();
+            assert_eq!(content.len(), 1);
+            assert_eq!(content[0]["type"], "text");
+            assert_eq!(serde_json::from_str::<Value>(content[0]["text"].as_str().unwrap()).unwrap(), metadata);
+        }
+    }
+
+    #[test]
+    fn baseline_changed_and_non_diff_captures_keep_images() {
+        for diff in [
+            json!({"is_baseline":true,"changed":false}),
+            json!({"is_baseline":false,"changed":true}),
+            Value::Null,
+        ] {
+            let result = tool_result(json!({
+                "$image":"baseline-or-changed-png",
+                "metadata":{"diff":diff}
+            }));
+            assert!(result["content"].as_array().unwrap().iter().any(|block|
+                block["type"] == "image" && block["data"] == "baseline-or-changed-png"
+            ));
+        }
     }
 
     #[test]

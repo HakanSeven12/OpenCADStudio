@@ -258,6 +258,7 @@ impl OpenCADStudio {
                 }
             },
             Message::DynTabNext => Some(self.on_context_menu_navigate(ContextMenuNav::Down)),
+            Message::DynTabPrev => Some(self.on_context_menu_navigate(ContextMenuNav::Up)),
             Message::CommandFinalize | Message::CommandSpace => {
                 if self.command_line.input.trim().is_empty() {
                     Some(self.on_context_menu_navigate(ContextMenuNav::Enter))

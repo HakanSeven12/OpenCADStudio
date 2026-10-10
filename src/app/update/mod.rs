@@ -24,6 +24,7 @@ fn is_modal_blocked_key_msg(msg: &Message) -> bool {
             | Message::CommandLineArrowProbe { .. }
             | Message::CommandLineArrowResolved { .. }
             | Message::DynTabNext
+            | Message::DynTabPrev
             | Message::MTextCaretMove(_)
             | Message::DeleteSelected
             | Message::ToggleSnapEnabled
@@ -2156,16 +2157,22 @@ impl OpenCADStudio {
                     let i = self.active_tab;
                     // Capture prompt/options while holding cmd borrow, then release before
                     // borrowing command_line to satisfy borrow checker.
-                    let (should_update, opts, prompt) =
+                    let (should_update, opts, prompt, suggestions) =
                         if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                            if cmd.on_live_input(&live_input) {
-                                (true, cmd.options(), cmd.prompt())
+                            let changed = cmd.on_live_input(&live_input);
+                            let suggestions = cmd.text_suggestions(&live_input);
+                            if changed {
+                                (true, cmd.options(), cmd.prompt(), suggestions)
                             } else {
-                                (false, Vec::new(), String::new())
+                                (false, Vec::new(), String::new(), suggestions)
                             }
                         } else {
-                            (false, Vec::new(), String::new())
+                            (false, Vec::new(), String::new(), Vec::new())
                         };
+
+                    self.command_line
+                        .set_contextual_suggestions(suggestions);
+
                     if should_update {
                         self.command_line.set_step_options(opts);
                         // Update pinned prompt text live without pushing new history entry
@@ -2194,6 +2201,12 @@ impl OpenCADStudio {
             }
 
             Message::DynTabNext => {
+                if self.command_line.has_contextual_suggestions()
+                    && self.command_line.autocomplete_next()
+                {
+                    return Task::none();
+                }
+
                 let i = self.active_tab;
                 let n = self.tabs[i].dyn_fields.len();
                 if n > 0 {
@@ -2201,6 +2214,13 @@ impl OpenCADStudio {
                     // TAB locks the value just typed — reshape the rubber-band
                     // to the constrained point now (#356).
                     self.refresh_active_cmd_preview(i);
+                }
+                self.focus_cmd_input()
+            }
+
+            Message::DynTabPrev => {
+                if self.command_line.has_contextual_suggestions() {
+                    self.command_line.autocomplete_prev();
                 }
                 self.focus_cmd_input()
             }
@@ -2241,7 +2261,8 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 if !self.command_line.history_navigation_active()
-                    && self.tabs[i].active_cmd.is_none()
+                    && (self.tabs[i].active_cmd.is_none()
+                        || self.command_line.has_contextual_suggestions())
                     && self.command_line.autocomplete_prev()
                 {
                     return Task::none();
@@ -2267,7 +2288,8 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 if !self.command_line.history_navigation_active()
-                    && self.tabs[i].active_cmd.is_none()
+                    && (self.tabs[i].active_cmd.is_none()
+                        || self.command_line.has_contextual_suggestions())
                     && self.command_line.autocomplete_next()
                 {
                     return Task::none();
@@ -2468,11 +2490,20 @@ impl OpenCADStudio {
                 }
             }
 
-            Message::CommandSuggestionPick(cmd) => {
+            Message::CommandSuggestionPick(value) => {
+                self.command_line.close_history();
+
+                if self.tabs[self.active_tab].active_cmd.is_some()
+                    && self.command_line.has_contextual_suggestions()
+                {
+                    self.command_line.input = value;
+                    self.command_line.autocomplete_cursor = None;
+                    return self.on_command_submit();
+                }
+
                 self.command_line.input.clear();
                 self.command_line.autocomplete_cursor = None;
-                self.command_line.close_history();
-                self.dispatch_command(&cmd)
+                self.dispatch_command(&value)
             }
 
             Message::CommandOptionPick(kw) => {
@@ -3581,10 +3612,8 @@ impl OpenCADStudio {
                 };
                 self.tabs[i].layers.selected = Some(idx);
                 self.tabs[i].layers.selected_multi = vec![idx];
-                if let Some(layer) = self.tabs[i].layers.layers.get(idx) {
-                    self.tabs[i].layers.edit_buf = layer.name.clone();
-                }
-                self.tabs[i].layers.editing = Some(idx);
+                self.tabs[i].layers.edit_buf = name.clone();
+                self.tabs[i].layers.editing = Some(name);
                 Task::none()
             }
 
@@ -3602,11 +3631,11 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 let panel = &mut self.tabs[i].layers;
-                if panel.color_picker_row == Some(idx) {
+                if panel.color_picker_row.as_deref() == Some(name.as_str()) {
                     panel.color_picker_row = None;
                     panel.color_full_palette = false;
                 } else {
-                    panel.color_picker_row = Some(idx);
+                    panel.color_picker_row = Some(name);
                     panel.color_full_palette = false;
                     panel.selected = Some(idx);
                     // Opening the swatch on a row outside the current

@@ -9948,8 +9948,25 @@ impl Scene {
 
     /// Prepare hover indexes after derived geometry is installed during open.
     pub(crate) fn warm_interaction_caches(&self) {
+        let perf = crate::perf::enabled();
+        let t_start = perf.then(iced::time::Instant::now);
+        let t_ei = perf.then(iced::time::Instant::now);
         let _ = self.entity_index();
+        let ei_ms = crate::perf::elapsed_ms(t_ei);
+
+        let t_ihi = perf.then(iced::time::Instant::now);
         let _ = self.interaction_handle_index();
+        let ihi_ms = crate::perf::elapsed_ms(t_ihi);
+        let total_ms = crate::perf::elapsed_ms(t_start);
+
+        if perf {
+            crate::perf_record!(
+                "[perf] warm_interaction_caches total={:.1}ms entity_index={:.1}ms interaction_handle_index={:.1}ms",
+                total_ms,
+                ei_ms,
+                ihi_ms,
+            );
+        }
     }
 
     fn interaction_handle_index(
@@ -12221,6 +12238,8 @@ vis_index={:.1} visible_probe={:.1}",
             }
         }
 
+        let perf = crate::perf::enabled();
+        let t_aabbs_start = perf.then(iced::time::Instant::now);
         let mut items: Vec<(Handle, [f64; 4])> = Vec::new();
         let mut unbounded: Vec<Handle> = Vec::new();
         let mut union: Option<[f64; 4]> = None;
@@ -12244,6 +12263,7 @@ vis_index={:.1} visible_probe={:.1}",
                 None => unbounded.push(e.common().handle),
             }
         }
+        let aabbs_ms = crate::perf::elapsed_ms(t_aabbs_start);
         let root = match union {
             Some(u) => {
                 let w = (u[2] - u[0]).max(1.0);
@@ -12254,9 +12274,21 @@ vis_index={:.1} visible_probe={:.1}",
             }
             None => [-1.0, -1.0, 1.0, 1.0],
         };
+        let t_tree_start = perf.then(iced::time::Instant::now);
         let mut tree = pick::quadtree::QuadTree::new(root);
         for (h, ab) in items {
             tree.insert(h, ab);
+        }
+        let tree_ms = crate::perf::elapsed_ms(t_tree_start);
+
+        if perf {
+            crate::perf_record!(
+                "[perf] entity_index-rebuild aabbs={:.1}ms tree={:.1}ms entities={} root={:?}",
+                aabbs_ms,
+                tree_ms,
+                tree.len(),
+                root,
+            );
         }
 
         *self.entity_index_cache.borrow_mut() = Some((

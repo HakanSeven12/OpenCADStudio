@@ -1924,7 +1924,9 @@ bg={bg_ms:.1}ms n={view_count}"
         // collecting its own input. A pending Lengthen / Radius / Arc Length
         // value is numeric input, not the prefix of a new command (for example,
         // `3` must not open the 3DALIGN / 3DARRAY suggestions).
-        let allow_autocomplete = tab.active_cmd.is_none() && self.grip_pending.is_none();
+        let allow_autocomplete = self.grip_pending.is_none()
+            && (tab.active_cmd.is_none()
+                || self.command_line.has_contextual_suggestions());
         // Dynamic input captures keystrokes when its fields are showing,
         // so the command-line field must release focus / its on_input.
         // The MText preview also captures keystrokes (typing edits it), so the

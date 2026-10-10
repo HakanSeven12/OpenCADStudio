@@ -2356,6 +2356,90 @@ mod tests {
     }
 
     #[test]
+    fn entities_create_rejects_unknown_fields_and_degenerate_arcs() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        let old_field = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-old","document_id":{doc},"entities":[{"type":"Arc","center":[0,0],"radius":5,"start_angle":0,"end_angle":90}]}"#,
+        );
+        assert_eq!(old_field["ok"], false, "{old_field}");
+        assert_eq!(old_field["code"], "unknown_entity_field", "{old_field}");
+
+        let missing_angle = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-missing","document_id":{doc},"entities":[{"type":"Arc","center":[0,0],"radius":5,"end_angle_deg":90}]}"#,
+        );
+        assert_eq!(missing_angle["code"], "invalid_angle", "{missing_angle}");
+
+        let zero_sweep = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-zero","document_id":{doc},"entities":[{"type":"Arc","center":[0,0],"radius":5,"start_angle_deg":45,"end_angle_deg":45}]}"#,
+        );
+        assert_eq!(zero_sweep["code"], "invalid_sweep", "{zero_sweep}");
+
+        let wrapped = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-wrap","document_id":{doc},"entities":[{"type":"Arc","center":[0,0],"radius":5,"start_angle_deg":270,"end_angle_deg":90}]}"#,
+        );
+        assert_eq!(wrapped["ok"], true, "{wrapped}");
+    }
+
+    #[test]
+    fn entities_create_validates_solid_corners_and_mtext_styles() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        let malformed = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-solid-bad","document_id":{doc},"entities":[{"type":"Solid","corners":[[1,2,3],[11,2,3],[11,12,3],[1,12]]}]}"#,
+        );
+        assert_eq!(malformed["code"], "invalid_corners", "{malformed}");
+
+        let triangle = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-solid-good","document_id":{doc},"entities":[{"type":"Solid","corners":[[1,2,3],[11,2,3],[11,12,3]]}]}"#,
+        );
+        assert_eq!(triangle["ok"], true, "{triangle}");
+        let solid = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                codec::EntityType::Solid(solid) => Some(solid),
+                _ => None,
+            })
+            .expect("triangle solid");
+        assert!(solid.is_triangle());
+        assert_eq!(solid.third_corner, solid.fourth_corner);
+        assert_eq!(solid.fourth_corner.z, 3.0);
+
+        let bad_style = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-style-bad","document_id":{doc},"entities":[{"type":"MText","value":"x","position":[0,0],"style":"NO_SUCH_STYLE"}]}"#,
+        );
+        assert_eq!(bad_style["code"], "invalid_text_style", "{bad_style}");
+    }
+
+    #[test]
+    fn entities_create_mtext_accepts_existing_style() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        {
+            let doc = &mut app.tabs[app.active_tab].scene.document;
+            let mut style = codec::tables::TextStyle::new("OCSM_GB");
+            style.handle = doc.allocate_handle();
+            doc.text_styles.add(style).unwrap();
+        }
+        let created = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"d8-style-ok","document_id":{doc},"entities":[{"type":"MText","value":"x","position":[0,0],"style":"OCSM_GB"}]}"#,
+        );
+        assert_eq!(created["ok"], true, "{created}");
+    }
+
+    #[test]
     fn entities_delete_erases_by_handle_and_validates() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

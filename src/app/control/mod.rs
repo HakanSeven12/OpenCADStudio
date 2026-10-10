@@ -1764,6 +1764,30 @@ mod tests {
         assert_eq!(app.control_request(stale).0["code"], "stale_state");
     }
     #[test]
+    fn external_change_modal_actions_are_automatable() {
+        let mut app = OpenCADStudio::new_for_test();
+        let names = crate::app::automation_action_names();
+        for name in [
+            "external_change_reload",
+            "external_change_overwrite",
+            "external_change_save_as",
+            "external_change_cancel",
+        ] {
+            assert!(names.contains(&name), "{name} should be listed");
+        }
+        // No conflict pending: the action is a harmless no-op, not an error.
+        let reply = request(
+            &mut app,
+            json!({
+                "op":"action",
+                "request_id":"external-action-noop",
+                "name":"external_change_reload"
+            }),
+        );
+        assert_eq!(reply["status"], "completed", "{reply}");
+    }
+
+    #[test]
     fn control_errors_and_missing_entities_do_not_report_success() {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));

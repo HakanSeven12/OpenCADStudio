@@ -30,7 +30,7 @@ impl OpenCADStudio {
     /// whichever panel the message names.
     pub(crate) fn on_dock(&mut self, m: crate::ui::dock::DockMsg) -> iced::Task<Message> {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{DockDrag, DockMsg, DropTarget, FloatPanel, HoverPending};
+        use crate::ui::dock::{DockDrag, DockMsg, FloatPanel};
         match m {
             DockMsg::DockGrab(id) => self.dock_begin(DockDrag::moving(id, None), Some(id)),
             DockMsg::IconPress(id) => {
@@ -66,12 +66,11 @@ impl OpenCADStudio {
                 self.save_config();
             }
             DockMsg::WidthReset(id) => {
+                // Only docked pallets have the divider that sends this.
                 if let Some((side, gi)) = self.dock.location(id) {
                     self.dock.reset_group_width(side, gi);
-                } else {
-                    self.dock.reset_width(id);
+                    self.save_config();
                 }
-                self.save_config();
             }
             DockMsg::TitleHover(id) => self.dock_title_hover = Some(id),
             DockMsg::TitleHoverEnd(id) => {
@@ -150,6 +149,22 @@ impl OpenCADStudio {
                 self.save_config();
             }
             DockMsg::Close(id) => return self.dock_set_open(id, false),
+            DockMsg::Hover(_)
+            | DockMsg::HoverEnd(_)
+            | DockMsg::HoverExit
+            | DockMsg::HoverStay
+            | DockMsg::HoverSettled(_) => return self.dock_hover(m),
+            DockMsg::DragMove(point) => self.dock_drag_move(point),
+            DockMsg::DragRelease => self.dock_drag_release(),
+        }
+        iced::Task::none()
+    }
+
+    /// Pointer entering / leaving strip icons, edge columns and floating
+    /// frames, and the delayed auto-hide reveal / hide that follows.
+    fn dock_hover(&mut self, m: crate::ui::dock::DockMsg) -> iced::Task<Message> {
+        use crate::ui::dock::{DockMsg, HoverPending};
+        match m {
             DockMsg::Hover(id) => {
                 self.dock_icon_hover = Some(id);
                 // Only an auto-hiding edge (or floating pallet) reacts to
@@ -198,52 +213,55 @@ impl OpenCADStudio {
                     }
                 }
             }
-            DockMsg::DragMove(point) => self.dock_drag_move(point),
-            DockMsg::DragRelease => {
-                let mut changed = false;
-                match self.dock_drag.take() {
-                    Some(DockDrag::Move {
-                        group: Some((side, gi)),
-                        target: Some(DropTarget::Edge { side: to, index }),
-                        ..
-                    }) => changed = self.dock.move_group(side, gi, to, index),
-                    Some(DockDrag::Move {
-                        panel,
-                        group: None,
-                        target: Some(target),
-                        ..
-                    }) => {
-                        changed = match target {
-                            DropTarget::Edge { side, index } => self.dock.dock(panel, side, index),
-                            DropTarget::Join { side, group, index } => {
-                                self.dock.join_group(panel, side, group, index)
-                            }
-                            DropTarget::Float { x, y } => {
-                                let (w, h) = self.dock_float_size(panel);
-                                // A floating panel keeps its docking choice.
-                                let docking = self.dock.float_rect(panel).is_none_or(|f| f.docking);
-                                self.dock.float(FloatPanel {
-                                    docking,
-                                    ..FloatPanel::new(panel, x, y, w, h)
-                                })
-                            }
-                        };
-                    }
-                    Some(DockDrag::Move { .. } | DockDrag::LayerColumn) | None => {}
-                    Some(DockDrag::Width(_) | DockDrag::Split { .. } | DockDrag::FloatSize { .. }) => {
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.save_config();
-                }
-                self.dock_drag_last = None;
-                self.xref_col_drag = None;
-                self.xref_col_last = None;
-                self.xref_split_drag = false;
-            }
+            _ => {}
         }
         iced::Task::none()
+    }
+
+    /// Pointer released: land what was dragged and save a changed layout.
+    fn dock_drag_release(&mut self) {
+        use crate::ui::dock::{DockDrag, DropTarget, FloatPanel};
+        let mut changed = false;
+        match self.dock_drag.take() {
+            Some(DockDrag::Move {
+                group: Some((side, gi)),
+                target: Some(DropTarget::Edge { side: to, index }),
+                ..
+            }) => changed = self.dock.move_group(side, gi, to, index),
+            Some(DockDrag::Move {
+                panel,
+                group: None,
+                target: Some(target),
+                ..
+            }) => {
+                changed = match target {
+                    DropTarget::Edge { side, index } => self.dock.dock(panel, side, index),
+                    DropTarget::Join { side, group, index } => {
+                        self.dock.join_group(panel, side, group, index)
+                    }
+                    DropTarget::Float { x, y } => {
+                        let (w, h) = self.dock_float_size(panel);
+                        // A floating panel keeps its docking choice.
+                        let docking = self.dock.float_rect(panel).is_none_or(|f| f.docking);
+                        self.dock.float(FloatPanel {
+                            docking,
+                            ..FloatPanel::new(panel, x, y, w, h)
+                        })
+                    }
+                };
+            }
+            Some(DockDrag::Move { .. } | DockDrag::LayerColumn) | None => {}
+            Some(DockDrag::Width(_) | DockDrag::Split { .. } | DockDrag::FloatSize { .. }) => {
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_config();
+        }
+        self.dock_drag_last = None;
+        self.xref_col_drag = None;
+        self.xref_col_last = None;
+        self.xref_split_drag = false;
     }
 
     /// Pointer motion while something in the dock is dragged.
@@ -353,18 +371,12 @@ impl OpenCADStudio {
             }
             DockDrag::Width(id) => {
                 let Some(last) = last else { return };
-                let dx = point.x - last.x;
-                match self.dock.location(id) {
-                    // The divider sizes the panel's group.
-                    Some((side, gi)) => {
-                        let delta = if side == DockSide::Left { dx } else { -dx };
-                        let cur = self.dock_group_width(side, gi) + delta;
-                        self.dock.set_group_width(side, gi, cur);
-                    }
-                    None => {
-                        let cur = self.dock.settings(id).width + dx;
-                        self.dock.set_width(id, cur);
-                    }
+                // The divider sizes the docked pallet's group.
+                if let Some((side, gi)) = self.dock.location(id) {
+                    let dx = point.x - last.x;
+                    let delta = if side == DockSide::Left { dx } else { -dx };
+                    let cur = self.dock_group_width(side, gi) + delta;
+                    self.dock.set_group_width(side, gi, cur);
                 }
             }
         }
@@ -634,13 +646,26 @@ impl OpenCADStudio {
         &self,
         side: crate::app::config::DockSide,
     ) -> Vec<(usize, f32, f32)> {
-        let Some(gi) = self.dock_shown_group(side) else {
-            return Vec::new();
-        };
+        match self.dock_shown_group(side) {
+            Some(gi) => self.dock_open_spans(&self.dock.groups(side)[gi], None),
+            None => Vec::new(),
+        }
+    }
+
+    /// The open pallets of `group` (plus `extra`, a pallet about to land
+    /// there), each as (position in the group, top, bottom) down the
+    /// workspace height.
+    pub(crate) fn dock_open_spans(
+        &self,
+        group: &crate::ui::dock::DockGroup,
+        extra: Option<crate::ui::dock::PanelId>,
+    ) -> Vec<(usize, f32, f32)> {
         let (_, avail) = self.dock_workspace_size();
-        let group = &self.dock.groups(side)[gi];
         let open: Vec<usize> = (0..group.panels.len())
-            .filter(|i| self.dock_panel_visible(group.panels[*i]))
+            .filter(|i| {
+                let id = group.panels[*i];
+                Some(id) == extra || self.dock_panel_visible(id)
+            })
             .collect();
         let weights: Vec<f32> = open.iter().map(|i| group.weights[*i]).collect();
         open.into_iter()

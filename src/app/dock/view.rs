@@ -690,13 +690,10 @@ impl OpenCADStudio {
         }
         let (side, gi) = after.location(id)?;
         let group = &after.groups(side)[gi];
-        let open: Vec<usize> = (0..group.panels.len())
-            .filter(|i| group.panels[*i] == id || self.dock_panel_visible(group.panels[*i]))
-            .collect();
-        let weights: Vec<f32> = open.iter().map(|i| group.weights[*i]).collect();
-        let at = open.iter().position(|i| group.panels[*i] == id)?;
-        let (_, avail) = self.dock_workspace_size();
-        let (top, bottom) = *crate::ui::dock::slot_spans(&weights, avail).get(at)?;
+        let (_, top, bottom) = self
+            .dock_open_spans(group, Some(id))
+            .into_iter()
+            .find(|(i, _, _)| group.panels[*i] == id)?;
         Some((top, bottom, after.group_width_px(side, gi, self.win_size.0)))
     }
 

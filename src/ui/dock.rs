@@ -18,9 +18,9 @@ use std::collections::BTreeMap;
 pub enum DockMsg {
     /// Begin dragging `panel` to another side / position.
     DockGrab(PanelId),
-    /// Begin resizing `panel`'s width.
+    /// Begin resizing the width of docked `panel`'s group.
     ResizeGrab(PanelId),
-    /// Reset `panel`'s width to its default.
+    /// Reset the width of docked `panel`'s group to its default.
     WidthReset(PanelId),
     /// Toggle `panel`'s auto-collapse (pin) behavior.
     AutoCollapseToggle(PanelId),
@@ -582,18 +582,6 @@ impl DockState {
         on
     }
 
-    /// Set the persisted width, clamped.
-    pub fn set_width(&mut self, id: PanelId, width: f32) {
-        let entry = self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
-        entry.width = width.clamp(DOCK_MIN_W, id.max_width());
-    }
-
-    /// Reset width to the panel's default.
-    pub fn reset_width(&mut self, id: PanelId) {
-        let entry = self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
-        entry.width = id.default_width();
-    }
-
     pub fn set_auto_collapse(&mut self, id: PanelId, on: bool) {
         let entry = self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         entry.auto_collapse = on;
@@ -846,7 +834,7 @@ pub enum DockDrag {
         target: Option<DropTarget>,
         grab: iced::Vector,
     },
-    /// Sizing the width of `panel`'s group (or of `panel`, floating).
+    /// Sizing the width of docked `panel`'s group.
     Width(PanelId),
     /// Moving the splitter between pallets `upper` and `lower` of a group.
     Split {
@@ -1192,11 +1180,12 @@ mod tests {
         // Wider default for the column-rich references table, double the maximum.
         // (The 45%-of-window rule still dominates on narrow windows.)
         assert_eq!(state.width(PanelId::ExternalReferences, 3000.0), 460.0);
-        state.set_width(PanelId::ExternalReferences, 5000.0);
-        assert_eq!(state.width(PanelId::ExternalReferences, 3000.0), DOCK_MAX_W * 2.0);
+        state.dock(PanelId::ExternalReferences, DockSide::Right, 1);
+        state.set_group_width(DockSide::Right, 1, 5000.0);
+        assert_eq!(state.group_width_px(DockSide::Right, 1, 3000.0), DOCK_MAX_W * 2.0);
         // Other panels keep the shared maximum.
-        state.set_width(PanelId::BlockPalette, 5000.0);
-        assert_eq!(state.width(PanelId::BlockPalette, 3000.0), DOCK_MAX_W);
+        state.set_group_width(DockSide::Right, 0, 5000.0);
+        assert_eq!(state.group_width_px(DockSide::Right, 0, 3000.0), DOCK_MAX_W);
     }
 
     #[test]
@@ -1248,31 +1237,22 @@ mod tests {
     }
 
     #[test]
-    fn set_width_clamps() {
-        let mut state = DockState::default();
-        state.set_width(PanelId::BlockPalette, 10.0);
-        assert_eq!(state.width(PanelId::BlockPalette, 1600.0), DOCK_MIN_W);
-        state.set_width(PanelId::BlockPalette, 5000.0);
-        assert_eq!(state.width(PanelId::BlockPalette, 1600.0), DOCK_MAX_W);
-    }
-
-    #[test]
     fn width_respects_maximum_window_fraction() {
         let mut state = DockState::default();
-        state.set_width(PanelId::BlockPalette, 500.0);
+        state.set_group_width(DockSide::Right, 0, 500.0);
         // Window too narrow -> capped by the 0.45 fraction, not DOCK_MAX_W.
-        assert_eq!(state.width(PanelId::BlockPalette, 800.0), DOCK_MAX_W.min(360.0));
+        assert_eq!(state.group_width_px(DockSide::Right, 0, 800.0), DOCK_MAX_W.min(360.0));
     }
 
     #[test]
     fn width_does_not_panic_when_window_minimized() {
         let mut state = DockState::default();
-        state.set_width(PanelId::BlockPalette, 500.0);
+        state.set_group_width(DockSide::Right, 0, 500.0);
         // A minimized or not-yet-laid-out window reports width 0; the clamp
         // must fall back to DOCK_MIN_W instead of panicking on min > max.
-        assert_eq!(state.width(PanelId::BlockPalette, 0.0), DOCK_MIN_W);
+        assert_eq!(state.group_width_px(DockSide::Right, 0, 0.0), DOCK_MIN_W);
         // Deleted right below the minimum dock width behaves the same way.
-        assert_eq!(state.width(PanelId::BlockPalette, 100.0), DOCK_MIN_W);
+        assert_eq!(state.group_width_px(DockSide::Right, 0, 100.0), DOCK_MIN_W);
     }
 
     #[test]
@@ -1303,7 +1283,7 @@ mod tests {
     #[test]
     fn join_group_stacks_and_shows_the_group() {
         let mut state = DockState::default();
-        state.set_width(PanelId::Properties, 320.0);
+        state.set_group_width(DockSide::Left, 0, 320.0);
         // Below Properties in the left group.
         assert!(state.join_group(PanelId::BlockPalette, DockSide::Left, 0, 1));
         assert!(state.right.is_empty(), "its old group disappears");
@@ -1412,6 +1392,8 @@ mod tests {
         assert_eq!(state.group_width(DockSide::Right, 0), 260.0);
         state.set_group_width(DockSide::Left, 0, 5000.0);
         assert_eq!(state.group_width(DockSide::Left, 0), DOCK_MAX_W);
+        state.set_group_width(DockSide::Left, 0, 10.0);
+        assert_eq!(state.group_width(DockSide::Left, 0), DOCK_MIN_W);
         state.reset_group_width(DockSide::Left, 0);
         assert_eq!(state.group_width(DockSide::Left, 0), 250.0);
     }

@@ -186,7 +186,7 @@ fn dock_icon_press_switches_the_shown_group() {
     assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
     assert_eq!(app.dock_slot_spans(DockSide::Left), vec![(0, 0.0, 900.0)]);
     // Each group keeps its own width.
-    app.dock.set_width(PanelId::Browser, 400.0);
+    app.dock.set_group_width(DockSide::Left, 1, 400.0);
     assert_eq!(app.dock_column_width(DockSide::Left), 400.0);
     let _ = app.on_dock(DockMsg::IconPress(PanelId::BlockPalette));
     let _ = app.on_dock(DockMsg::DragRelease);

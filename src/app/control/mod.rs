@@ -108,6 +108,9 @@ pub(super) struct State {
     pub enabled: bool,
     serial: u64,
     events: VecDeque<Value>,
+    /// Monotonic counter bumped on every real selection change, so clients
+    /// can detect highlight changes without polling the full selection.
+    selection_revision: u64,
     pub(super) routing: bool,
     /// Session-scoped named handle sets for selection_set_save/load.
     selection_sets: std::collections::BTreeMap<String, Vec<codec::Handle>>,
@@ -423,6 +426,34 @@ impl OpenCADStudio {
         self.control.pending.is_some()
     }
 
+    /// Mirror a real selection change into the automation event stream. The
+    /// plugin host already publishes the V4 selection event; automation clients
+    /// need the same signal instead of polling `state`.
+    pub(super) fn control_record_selection_event(&mut self, handles: &[codec::Handle]) {
+        let (document_id, revision) = {
+            let tab = &self.tabs[self.active_tab];
+            (tab.id, tab.edit_revision)
+        };
+        let selection: Vec<String> = handles
+            .iter()
+            .map(|handle| format!("{:X}", handle.value()))
+            .collect();
+        self.control.selection_revision = self.control.selection_revision.wrapping_add(1);
+        let selection_revision = self.control.selection_revision;
+        self.control.serial += 1;
+        self.control.events.push_back(json!({
+            "sequence": self.control.serial,
+            "kind": "selection",
+            "document_id": document_id,
+            "revision": revision,
+            "selection_revision": selection_revision,
+            "selection": selection,
+        }));
+        while self.control.events.len() > 128 {
+            self.control.events.pop_front();
+        }
+    }
+
     pub(super) fn control_state(&self) -> Value {
         let tab = &self.tabs[self.active_tab];
         let command = tab.active_cmd.as_deref().map(active_command_metadata);
@@ -435,6 +466,7 @@ impl OpenCADStudio {
             "plugins":plugin_ids(),
             "documents":self.tabs.iter().map(|t|json!({"id":t.id,"title":t.tab_title,"path":t.current_path,"dirty":t.dirty,"revision":t.edit_revision,"start":t.is_start})).collect::<Vec<_>>(),
             "selection":tab.scene.selected_handles_in_order().iter().map(|h|format!("{:X}",h.value())).collect::<Vec<_>>(),
+            "selection_revision":self.control.selection_revision,
             "command":command,"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
             "layout":tab.scene.current_layout,
             "ucs":tab.active_ucs.as_ref().map(|u|json!({"name":u.name,"origin":[u.origin.x,u.origin.y,u.origin.z],"x_axis":[u.x_axis.x,u.x_axis.y,u.x_axis.z],"y_axis":[u.y_axis.x,u.y_axis.y,u.y_axis.z],"elevation":u.elevation})),
@@ -1592,6 +1624,40 @@ mod tests {
         request(&mut app, json!({"op":"undo"}));
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 0);
     }
+    #[test]
+    fn selection_changes_are_published_to_the_event_stream() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
+        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let before = app.control_state()["selection_revision"].as_u64().unwrap();
+        let selected = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{handle}"]}}"#
+        ));
+        assert_eq!(selected["ok"], true, "{selected}");
+        let state = app.control_state();
+        assert_eq!(
+            state["selection_revision"].as_u64().unwrap(),
+            before + 1,
+            "selection revision should increment once: {state}"
+        );
+        assert!(
+            state["selection"].as_array().unwrap().contains(&json!(handle)),
+            "{state}"
+        );
+        let events = app.control_request(json!({"op":"events"})).0;
+        let last = events["events"].as_array().unwrap().last().unwrap();
+        assert_eq!(last["kind"], "selection", "{events}");
+        assert_eq!(last["document_id"], state["document_id"], "{events}");
+        assert!(
+            last["selection"].as_array().unwrap().contains(&json!(handle)),
+            "{events}"
+        );
+    }
+
     #[test]
     fn command_discovery_explains_batch_and_interactive_use() {
         let mut app = OpenCADStudio::new_for_test();

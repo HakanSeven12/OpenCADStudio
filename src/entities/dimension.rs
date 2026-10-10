@@ -5342,12 +5342,18 @@ fn append_linear_dimension(
     let text_beyond_d2 = text_span
         .filter(|(lo, _)| *lo > gap as f64 && !hooks_out_horizontally)
         .map(|(lo, _)| (lo - gap as f64) as f32);
-    if (arrows_outside && !params.dimsoxd) || text_beyond_d1.is_some() || text_beyond_d2.is_some() {
-        if !suppress.dim1 && (arrows_outside || text_beyond_d1.is_some()) {
-            add_segment(&mut g.dim_lines, d1 - dir_d1_to_d2 * reach(stub, text_beyond_d1), d1);
+    // DIMTMOVE=2 leaves moved text outside the dimension without a fine
+    // leader or an extension that chases the text. Keep genuine arrow-fit
+    // stubs, but do not turn a user-placed text point into another segment.
+    let chase_text = params.text_movement != 2;
+    let beyond_d1 = chase_text.then_some(text_beyond_d1).flatten();
+    let beyond_d2 = chase_text.then_some(text_beyond_d2).flatten();
+    if (arrows_outside && !params.dimsoxd) || beyond_d1.is_some() || beyond_d2.is_some() {
+        if !suppress.dim1 && (arrows_outside || beyond_d1.is_some()) {
+            add_segment(&mut g.dim_lines, d1 - dir_d1_to_d2 * reach(stub, beyond_d1), d1);
         }
-        if !suppress.dim2 && (arrows_outside || text_beyond_d2.is_some()) {
-            add_segment(&mut g.dim_lines, d2, d2 + dir_d1_to_d2 * reach(stub, text_beyond_d2));
+        if !suppress.dim2 && (arrows_outside || beyond_d2.is_some()) {
+            add_segment(&mut g.dim_lines, d2, d2 + dir_d1_to_d2 * reach(stub, beyond_d2));
         }
     }
 
@@ -5363,7 +5369,11 @@ fn append_linear_dimension(
     // Horizontal text outside the extension lines of a dimension that is not
     // horizontal itself: the dimension line runs on to the text's height and
     // turns a hook one arrow long toward the text, which sits against it.
-    if params.horizontal_text && !params.ticks && dir_d1_to_d2.y.abs() > 1e-3 {
+    if params.text_movement != 2
+        && params.horizontal_text
+        && !params.ticks
+        && dir_d1_to_d2.y.abs() > 1e-3
+    {
         if let Some(text_break) = params.text_break {
             let along = (text_break.center - d1).dot(dir_d1_to_d2);
             let outside = if along < 0.0 {
@@ -9132,6 +9142,43 @@ mod layout_parity_tests {
         assert!(
             points.iter().all(|p| p.y <= top + 0.01 && p.y >= -0.01),
             "centred text leaves the arrows inside"
+        );
+    }
+
+    #[test]
+    fn dimtmove_two_does_not_chase_moved_linear_text() {
+        let make = |movement| {
+            let mut document = document();
+            document.dim_styles.get_mut("Standard").unwrap().dimtmove = movement;
+            let mut d = DimensionLinear::horizontal(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.8, 0.0, 0.0),
+            );
+            d.definition_point = Vector3::new(0.0, 2.0, 0.0);
+            d.base.text_middle_point = Vector3::new(2.5, 2.0, 0.0);
+            drawn(&document, &Dimension::Linear(d)).0
+        };
+        let with_leader = make(1);
+        let without_leader = make(2);
+        assert!(
+            with_leader.len() > without_leader.len(),
+            "DIMTMOVE=1 should add a leader: {} vs {} points",
+            with_leader.len(),
+            without_leader.len()
+        );
+        // DIMTMOVE=1 reaches the moved text; DIMTMOVE=2 keeps only the
+        // legitimate arrow-outside stub and never chases the text.
+        assert!(
+            with_leader
+                .iter()
+                .any(|p| p.x >= 2.0 && (p.y - 2.0).abs() <= 1e-6),
+            "DIMTMOVE=1 should reach the moved text: {with_leader:?}"
+        );
+        assert!(
+            without_leader
+                .iter()
+                .all(|p| p.x <= 1.5 || (p.y - 2.0).abs() > 1e-6),
+            "DIMTMOVE=2 must not reach the moved text: {without_leader:?}"
         );
     }
 

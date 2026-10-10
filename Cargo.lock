@@ -4239,7 +4239,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#0e02c67e1c76b4e8cc054e6c25c53252acfade43"
+source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#d49baf39c74232d13d2b4bcc8601b1d78e460e87"
 dependencies = [
  "cavalier_contours",
  "opencadcodec",
@@ -4250,7 +4250,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#0e02c67e1c76b4e8cc054e6c25c53252acfade43"
+source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#d49baf39c74232d13d2b4bcc8601b1d78e460e87"
 dependencies = [
  "nalgebra",
 ]

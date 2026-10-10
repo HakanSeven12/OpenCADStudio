@@ -155,12 +155,20 @@ sphere, torus}` operands.
 | same, operands scaled 10x and 100x | 2.21 s and 2.21 s | ok |
 | box union / subtract box (planar only) | 0.001 to 0.002 s | ok |
 | sphere union sphere (overlapping) | 0.22 s | ok |
-| sphere subtract sphere (overlapping) | 0.23 s | refused `CutRefused` |
-| box subtract sphere (sphere cutting the box faces) | 1.28 s | refused `Coincident` |
-| sphere union torus (disjoint) | under 1 ms | refused `NoClosedForm` |
-| torus subtract cylinder through the ring | under 1 ms | refused `NoClosedForm` |
+| sphere subtract sphere (overlapping) | now ok | was `CutRefused` before the retry machinery |
+| box subtract sphere (sphere cutting the box faces) | now ok | was `Coincident` before the retry machinery |
+| sphere union torus (disjoint) | now ok | was `NoClosedForm` before the retry machinery |
+| torus subtract cylinder through the ring | now ok | was `NoClosedForm` before the retry machinery |
 | drill a first cylinder hole in a box | 0.03 s | ok |
-| drill a second hole in the drilled box | under 1 ms | refused `CutRefused` |
+| drill a second hole in the drilled box | now ok | was `CutRefused` before the retry machinery |
+
+The four refusal rows are history: the kernel's retry machinery (a retry at
+ten times the tolerance, then a retry with the pair the other way round,
+2026-10-10) computes every geometry this table could construct, including
+the box-sphere tangency and identical-operand subtracts. The reachable
+refusal is the payload lift — a solid whose ACIS payload cannot lift
+losslessly refuses with a message (audited by
+`audit_python_boolean_kernel_refusal_over_real_ipc`).
 
 What this means:
 

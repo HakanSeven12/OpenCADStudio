@@ -7266,11 +7266,17 @@ mod tests {
         assert!(app.tabs[0].scene.document.get_entity(cut).is_none(), "undo removes the boolean result");
     }
 
-    /// Release-only evidence for docs/cadkernel-body-path.md: the kernel's
-    /// refusals reach the script as messages. Curved booleans take about
-    /// 23 s in a debug build, so this is ignored by default.
+    /// Evidence for docs/cadkernel-body-path.md: the refusal channel â€” a
+    /// refused operation reaches the script as a message and changes nothing.
+    /// The boolean kernel's retry machinery (ten-times-tolerance retry plus
+    /// the pair flip, 2026-10-10) now computes every geometry this test
+    /// could construct â€” the doc's classic refusers (box-sphere tangent,
+    /// sphere-sphere overlap, torus-cylinder, identical operands) all
+    /// succeed â€” so the demonstrable refusal is the payload lift: a solid
+    /// whose ACIS payload cannot lift losslessly refuses with a message
+    /// (the doc's own "refusal of a lossy payload" scope line). No curved
+    /// boolean is needed, so this runs in debug CI speed.
     #[test]
-    #[ignore = "curved boolean; slow in debug builds"]
     fn audit_python_boolean_kernel_refusal_over_real_ipc() {
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
@@ -7278,6 +7284,13 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
+        // A solid with an empty payload: the lift refuses it, so the
+        // subtract reaches the script as a refusal message instead of a
+        // broken solid.
+        let unliftable = host
+            .document_mut()
+            .add_entity(EntityType::Solid3D(codec::entities::Solid3D::new()))
+            .unwrap();
         let process = ocs_plugin_api::process::PluginProcess::spawn(
             std::path::Path::new(&plugin_path), &mut host, crate::plugin::v4_support::notification_handler(),
         ).unwrap();
@@ -7285,16 +7298,26 @@ mod tests {
             assert!(process.dispatch(host, command, &mut |_| {}).expect("Python dispatch"));
         };
         let script = std::env::temp_dir().join(format!("ocs_boolean_refusal_{}.py", std::process::id()));
-        std::fs::write(&script, concat!(
+        std::fs::write(&script, format!(concat!(
             "s = ocs.active_document.solids\n",
             "box = s.box(center=(0, 0, 0), size=(10, 6, 4))\n",
-            "sphere = s.sphere(center=(0, 0, 0), radius=3)\n",
-            "s.subtract(box, sphere)\n",
-        )).unwrap();
+            "s.subtract({}, box)\n",
+        ), unliftable.value())).unwrap();
         dispatch(&mut host, &format!("PY_RUN {}", script.display()));
         let _ = std::fs::remove_file(&script);
         let message = host.app.command_line.history.last().unwrap().text.clone();
-        assert!(message.contains("Coincident") && message.contains("nothing was changed"), "{message}");
+        assert!(
+            message.contains("cannot be lifted losslessly") && message.contains("nothing was changed"),
+            "{message}"
+        );
+        // A refusal changes nothing: the operands survive untouched.
+        assert!(matches!(host.document().get_entity(unliftable), Some(EntityType::Solid3D(_))));
+        let solid_count = host
+            .document()
+            .entities()
+            .filter(|entity| matches!(entity, EntityType::Solid3D(_)))
+            .count();
+        assert_eq!(solid_count, 2, "the operands are still exactly the two inputs");
     }
 
     #[test]

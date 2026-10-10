@@ -117,6 +117,13 @@ pub(super) struct State {
     /// Live `getpoint` request — the client asked for one picked point; Some
     /// until the person clicks (answer) or presses Escape (cancel).
     pub(super) get_point: Option<UserPointSession>,
+    /// `capture` request parked until the window has drawn another frame:
+    /// screenshotting in the same batch as the state change used to return the
+    /// previous frame (C11). Cleared by `on_control_capture_frame`.
+    pub(super) capture_frame_pending: bool,
+    /// Whether the parked capture actually waited for a redraw (vs. the
+    /// anti-hang timer). Reported in the capture result as `waited_for_frame`.
+    pub(super) capture_after_redraw: bool,
 }
 
 /// The pending half of an interactive `user_select` operation (`interactive`
@@ -835,7 +842,11 @@ impl OpenCADStudio {
             // Interactive requests hold their slot open on purpose: the
             // counter stays at one so settle keeps returning `running` until
             // the person at the screen answers and the resolver zeroes it.
-            if !matches!(p.request["op"].as_str(), Some("user_select" | "getpoint")) {
+            // `capture` is parked the same way until the next drawn frame.
+            if !matches!(
+                p.request["op"].as_str(),
+                Some("user_select" | "getpoint" | "capture")
+            ) {
                 p.pending -= 1;
             }
         }
@@ -1071,10 +1082,9 @@ impl OpenCADStudio {
                 Task::none()
             }
             "capture" => {
-                let window = self
-                    .main_window
+                self.main_window
                     .ok_or_else(|| failure("gui_required", "Capture requires a GUI window"))?;
-                let path = string(req, "path")?.to_owned();
+                string(req, "path")?;
                 let was_minimized = crate::sys::restore_window_if_minimized();
                 if was_minimized {
                     std::thread::sleep(std::time::Duration::from_millis(60));
@@ -1130,17 +1140,11 @@ impl OpenCADStudio {
                     }
                 }
 
-                // A minimized window has a 0x0 surface and the renderer
-                // panics reading it back, so report instead of capturing.
-                iced::window::size(window).then(move |size| {
-                    let path = path.clone();
-                    if size.width <= 0.0 || size.height <= 0.0 {
-                        Task::done(Message::ControlScreenshot(path, None))
-                    } else {
-                        iced::window::screenshot(window)
-                            .map(move |s| Message::ControlScreenshot(path.clone(), Some(s)))
-                    }
-                })
+                // C11: do not capture in the same batch. Park until the next
+                // rendered frame (or the timer fallback) so geometry changes are
+                // visible rather than returning a stale frame.
+                self.control.capture_frame_pending = true;
+                Task::none()
             }
             "stop" => {
                 self.control.enabled = false;
@@ -1334,6 +1338,7 @@ impl OpenCADStudio {
         path: String,
         screenshot: Option<iced::window::Screenshot>,
     ) {
+        let waited_for_frame = self.control.capture_after_redraw;
         let result = (|| -> Result<Value, String> {
             let s = screenshot
                 .ok_or("The window is minimized or has no size; restore it and capture again")?;
@@ -1465,6 +1470,7 @@ impl OpenCADStudio {
                 "width": image.width(),
                 "height": image.height(),
                 "scale_factor": s.scale_factor,
+                "waited_for_frame": waited_for_frame,
                 "document_id": self.tabs[self.active_tab].id,
                 "revision": self.tabs[self.active_tab].edit_revision,
                 "camera_revision": self.tabs[self.active_tab].scene.camera_generation,
@@ -1486,6 +1492,54 @@ impl OpenCADStudio {
             }
             Err(e) => self.command_line.push_error(&e),
         }
+        // `capture` is parked until this result (or error) arrives, rather
+        // than being settled by the task counter used for ordinary actions.
+        if let Some(p) = self
+            .control
+            .pending
+            .as_mut()
+            .filter(|p| p.request["op"] == "capture")
+        {
+            p.pending = 0;
+        }
+        self.control.capture_after_redraw = false;
+        self.control_settle();
+    }
+
+    /// A frame finished rendering (or the anti-hang timer expired): start the
+    /// screenshot only after the capture request has been parked.
+    pub(super) fn on_control_capture_frame(&mut self, redrew: bool) -> Task<Message> {
+        if !self.control.capture_frame_pending {
+            return Task::none();
+        }
+        let Some(path) = self
+            .control
+            .pending
+            .as_ref()
+            .filter(|p| p.request["op"] == "capture")
+            .and_then(|p| p.request["path"].as_str())
+            .map(str::to_owned)
+        else {
+            self.control.capture_frame_pending = false;
+            return Task::none();
+        };
+        self.control.capture_frame_pending = false;
+        self.control.capture_after_redraw = redrew;
+        let Some(window) = self.main_window else {
+            return Task::done(Message::ControlScreenshot(path, None));
+        };
+        // A minimized window has a 0x0 surface and the renderer panics reading
+        // it back, so report instead of capturing.
+        iced::window::size(window).then(move |size| {
+            let path = path.clone();
+            if size.width <= 0.0 || size.height <= 0.0 {
+                Task::done(Message::ControlScreenshot(path, None))
+            } else {
+                iced::window::screenshot(window).map(move |screenshot| {
+                    Message::ControlScreenshot(path.clone(), Some(screenshot))
+                })
+            }
+        })
     }
 }
 pub(crate) mod vision;
@@ -1528,6 +1582,48 @@ mod tests {
             r
         }
     }
+    #[test]
+    fn capture_parks_for_the_next_frame_then_finishes_with_its_result() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.main_window = Some(iced::window::Id::unique());
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        let path = std::env::temp_dir().join(format!("ocs-capture-frame-{}.png", session_id()));
+        let state = app.control_state();
+        let parked = app
+            .control_request(json!({
+                "protocol":1,
+                "op":"capture",
+                "request_id":"cap-frame",
+                "document_id": state["document_id"],
+                "revision": state["revision"],
+                "path": path.to_string_lossy(),
+            }))
+            .0;
+        assert_eq!(parked["status"], "accepted", "{parked}");
+        assert!(app.control.capture_frame_pending, "capture should wait for a frame");
+        let running = app
+            .control_request(json!({"op":"operation","request_id":"cap-frame"}))
+            .0;
+        assert_eq!(running["status"], "running", "{running}");
+
+        let _frame_task = app.on_control_capture_frame(true);
+        assert!(!app.control.capture_frame_pending);
+        let screenshot = iced::window::Screenshot::new(
+            vec![0u8; 4 * 4 * 4],
+            iced::Size::new(4, 4),
+            1.0,
+        );
+        app.control_screenshot(path.to_string_lossy().into_owned(), Some(screenshot));
+        let done = app
+            .control_request(json!({"op":"operation","request_id":"cap-frame"}))
+            .0;
+        assert_eq!(done["status"], "completed", "{done}");
+        assert_eq!(done["result"]["waited_for_frame"], true, "{done}");
+        assert_eq!(done["result"]["width"], 4, "{done}");
+        assert!(path.exists(), "capture should be written");
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn control_stepwise_drawing_undo_and_properties() {
         let mut app = OpenCADStudio::new_for_test();

@@ -628,15 +628,32 @@ impl OpenCADStudio {
                     if old == &req {
                         result.clone()
                     } else {
-                        failure("request_id_reused", "Request payload changed")
+                        failure(
+                            "request_id_reused",
+                            format!(
+                                "Request payload changed for request_id '{id}'; generate a new unique request_id or resend the original payload",
+                            ),
+                        )
                     },
                     Task::none(),
                 );
             }
             if let Some(p) = &self.control.pending {
-                if p.id == id && p.request == req {
+                // `cancel` is a reference to the pending request, not a
+                // replay of its payload. It must reach the interactive cancel
+                // branch below even when it uses the same request_id.
+                if p.id == id && op != "cancel" {
                     return (
-                        json!({"ok":true,"status":"running","request_id":id}),
+                        if p.request == req {
+                            json!({"ok":true,"status":"running","request_id":id})
+                        } else {
+                            failure(
+                                "request_id_reused",
+                                format!(
+                                    "Request payload changed for request_id '{id}'; generate a new unique request_id or resend the original payload",
+                                ),
+                            )
+                        },
                         Task::none(),
                     );
                 }
@@ -1763,6 +1780,46 @@ mod tests {
         stale["request_id"] = json!("stale");
         assert_eq!(app.control_request(stale).0["code"], "stale_state");
     }
+    #[test]
+    fn pending_request_id_reuse_rejects_changed_payload() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.main_window = Some(iced::window::Id::unique());
+        assert_eq!(request(&mut app, json!({"op":"new"}))["status"], "completed");
+
+        let pending = request(
+            &mut app,
+            json!({
+                "op":"user_select",
+                "request_id":"pending-reuse",
+                "prompt":"pick the first object"
+            }),
+        );
+        assert_eq!(pending["status"], "running", "{pending}");
+
+        let changed = request(
+            &mut app,
+            json!({
+                "op":"user_select",
+                "request_id":"pending-reuse",
+                "prompt":"pick a different object"
+            }),
+        );
+        assert_eq!(changed["code"], "request_id_reused", "{changed}");
+        assert!(
+            changed["error"]
+                .as_str()
+                .unwrap()
+                .contains("pending-reuse"),
+            "{changed}"
+        );
+
+        let cancelled = request(
+            &mut app,
+            json!({"op":"cancel","request_id":"cancel-pending-reuse"}),
+        );
+        assert_eq!(cancelled["status"], "cancelled", "{cancelled}");
+    }
+
     #[test]
     fn control_errors_and_missing_entities_do_not_report_success() {
         let mut app = OpenCADStudio::new_for_test();

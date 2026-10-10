@@ -86,6 +86,15 @@ pub enum DockMsg {
     HoverSettled(u64),
 }
 
+/// An auto-hide change waiting out [`DOCK_HOVER_DELAY`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoverPending {
+    /// Reveal this pallet (its group, or its floating frame).
+    Reveal(PanelId),
+    /// Hide whatever auto-hiding pallet is revealed.
+    Hide,
+}
+
 /// How long the pointer must rest before an auto-hiding group reveals or
 /// hides, so passing over the strip doesn't flash groups open.
 pub const DOCK_HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(150);

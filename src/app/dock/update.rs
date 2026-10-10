@@ -30,7 +30,7 @@ impl OpenCADStudio {
     /// whichever panel the message names.
     pub(crate) fn on_dock(&mut self, m: crate::ui::dock::DockMsg) -> iced::Task<Message> {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{DockDrag, DockMsg, DropTarget, FloatPanel};
+        use crate::ui::dock::{DockDrag, DockMsg, DropTarget, FloatPanel, HoverPending};
         match m {
             DockMsg::DockGrab(id) => self.dock_begin(DockDrag::moving(id, None), Some(id)),
             DockMsg::IconPress(id) => {
@@ -160,7 +160,7 @@ impl OpenCADStudio {
                     if self.dock_peek == Some(id) {
                         self.dock_hover_cancel();
                     } else {
-                        return self.dock_hover_arm(Some(id));
+                        return self.dock_hover_arm(HoverPending::Reveal(id));
                     }
                 }
             }
@@ -173,21 +173,25 @@ impl OpenCADStudio {
                 if self.dock_drag.is_none()
                     && self.dock_peek.is_some_and(|id| self.dock.auto_hides(id))
                 {
-                    return self.dock_hover_arm(None);
+                    return self.dock_hover_arm(HoverPending::Hide);
                 }
                 // Left before a pending reveal ran out: it never happens.
                 self.dock_hover_cancel();
             }
             DockMsg::HoverStay => {
-                if self.dock_hover_pending == Some(None) {
+                if self.dock_hover_pending == Some(HoverPending::Hide) {
                     self.dock_hover_cancel();
                 }
             }
             DockMsg::HoverSettled(gen) => {
                 if gen == self.dock_hover_gen && self.dock_drag.is_none() {
                     match self.dock_hover_pending.take() {
-                        Some(Some(id)) if self.dock.auto_hides(id) => self.dock_reveal(id),
-                        Some(None) if self.dock_peek.is_some_and(|id| self.dock.auto_hides(id)) => {
+                        Some(HoverPending::Reveal(id)) if self.dock.auto_hides(id) => {
+                            self.dock_reveal(id)
+                        }
+                        Some(HoverPending::Hide)
+                            if self.dock_peek.is_some_and(|id| self.dock.auto_hides(id)) =>
+                        {
                             self.dock_peek = None;
                         }
                         _ => {}
@@ -280,13 +284,13 @@ impl OpenCADStudio {
                     grab
                 };
                 let target = if started {
-                    // A whole group only moves between group positions: it
-                    // cannot join another group or float.
                     // A floating panel that may not dock only floats.
                     let found = match self.dock.float_rect(panel) {
                         Some(f) if !f.docking => self.dock_float_target(point, grab),
                         _ => self.dock_drop_target(point, grab),
                     };
+                    // A whole group only moves between group positions: it
+                    // cannot join another group or float.
                     match (group, found) {
                         (Some(_), found @ DropTarget::Edge { .. }) | (None, found) => Some(found),
                         (Some(_), _) => None,
@@ -381,11 +385,9 @@ impl OpenCADStudio {
         }
     }
 
-    /// Bring `id` into view: show its group on its edge and, where it
-    /// auto-hides, keep it revealed until the pointer leaves.
-    /// Arm a delayed reveal (`Some`) or hide (`None`); it applies when its
-    /// timer reports back unless a newer hover superseded it.
-    fn dock_hover_arm(&mut self, target: Option<crate::ui::dock::PanelId>) -> iced::Task<Message> {
+    /// Arm a delayed reveal or hide; it applies when its timer reports back
+    /// unless a newer hover superseded it.
+    fn dock_hover_arm(&mut self, target: crate::ui::dock::HoverPending) -> iced::Task<Message> {
         self.dock_hover_gen = self.dock_hover_gen.wrapping_add(1);
         self.dock_hover_pending = Some(target);
         let gen = self.dock_hover_gen;
@@ -400,6 +402,8 @@ impl OpenCADStudio {
         self.dock_hover_pending = None;
     }
 
+    /// Bring `id` into view: show its group on its edge and, where it
+    /// auto-hides, keep it revealed until the pointer leaves.
     pub(crate) fn dock_reveal(&mut self, id: crate::ui::dock::PanelId) {
         self.dock.show_group_of(id);
         self.dock_peek = Some(id);

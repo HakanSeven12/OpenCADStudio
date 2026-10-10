@@ -444,7 +444,7 @@ impl OpenCADStudio {
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
         use crate::ui::dock::DockMsg;
-        let (x, y, bar_left, hidden) = self.dock_float_frame(f);
+        let FloatFrame { x, y, bar_left, hidden } = self.dock_float_frame(f);
         let hovered = self.dock_title_hover == Some(f.id);
         let bar = floating_title_bar(f.id, self.dock.auto_collapse(f.id), bar_left, hovered);
         let content: Element<'_, Message> = if hidden {
@@ -519,10 +519,8 @@ impl OpenCADStudio {
         place_at(panel.into(), x, y)
     }
 
-    /// Where floating panel `f` draws: its top-left corner, whether its
-    /// title bar is on the left, and whether it is hidden down to that bar
-    /// (auto-hide, not hovered).
-    fn dock_float_frame(&self, f: crate::ui::dock::FloatPanel) -> (f32, f32, bool, bool) {
+    /// Where floating panel `f` draws.
+    fn dock_float_frame(&self, f: crate::ui::dock::FloatPanel) -> FloatFrame {
         let (ww, wh) = self.dock_workspace_size();
         // The bar faces the nearer workspace edge; while resizing, it stays
         // opposite the grip being dragged so it cannot flip mid-drag.
@@ -533,13 +531,15 @@ impl OpenCADStudio {
             _ => f.x + (f.w + DOCK_FLOAT_BAR_W) * 0.5 < ww * 0.5,
         };
         let hidden = self.dock.auto_collapse(f.id) && self.dock_peek != Some(f.id);
-        let total_w = if hidden { DOCK_FLOAT_BAR_W } else { f.w + DOCK_FLOAT_BAR_W };
         // A hidden panel keeps its title bar where it sits when shown.
         let x = if hidden && !bar_left { f.x + f.w } else { f.x };
+        let frame = FloatFrame { x, y: f.y, bar_left, hidden };
         // Keep the panel on screen when the window shrank since it was placed.
-        let x = x.min(ww - total_w).max(0.0);
-        let y = f.y.min(wh - f.h).max(0.0);
-        (x, y, bar_left, hidden)
+        FloatFrame {
+            x: x.min(ww - frame.width(f)).max(0.0),
+            y: f.y.min(wh - f.h).max(0.0),
+            ..frame
+        }
     }
 
     /// The open right-click menu of a floating title bar: Allow docking,
@@ -554,11 +554,12 @@ impl OpenCADStudio {
             return None;
         }
         let (ww, wh) = self.dock_workspace_size();
-        let (x, y, bar_left, hidden) = self.dock_float_frame(f);
-        let total_w = if hidden { DOCK_FLOAT_BAR_W } else { f.w + DOCK_FLOAT_BAR_W };
-        let bar_x = if bar_left { x } else { x + total_w - DOCK_FLOAT_BAR_W };
+        let frame = self.dock_float_frame(f);
         // Where the right-click happened, in the workspace.
-        let at = iced::Point::new(bar_x + self.dock_float_menu_at.x, y + self.dock_float_menu_at.y);
+        let at = iced::Point::new(
+            frame.bar_x(f) + self.dock_float_menu_at.x,
+            frame.y + self.dock_float_menu_at.y,
+        );
         let menu_x = if at.x + DOCK_MENU_W <= ww { at.x } else { at.x - DOCK_MENU_W };
         let menu_x = menu_x.clamp(0.0, (ww - DOCK_MENU_W).max(0.0));
         let menu_y = at.y.min(wh - FLOAT_MENU_H).max(0.0);
@@ -879,6 +880,38 @@ impl canvas::Program<Message> for VBarLabel {
 
 /// Width of a floating panel's vertical title bar.
 const DOCK_FLOAT_BAR_W: f32 = 28.0;
+
+/// Where a floating panel draws: its top-left corner, whether its title bar
+/// is on the left, and whether it is hidden down to that bar (auto-hide, not
+/// hovered).
+#[derive(Debug, Clone, Copy)]
+struct FloatFrame {
+    x: f32,
+    y: f32,
+    bar_left: bool,
+    hidden: bool,
+}
+
+impl FloatFrame {
+    /// On-screen width of panel `f` in this frame: the bar, plus the panel
+    /// unless hidden.
+    fn width(&self, f: crate::ui::dock::FloatPanel) -> f32 {
+        if self.hidden {
+            DOCK_FLOAT_BAR_W
+        } else {
+            f.w + DOCK_FLOAT_BAR_W
+        }
+    }
+
+    /// Left edge of the title bar.
+    fn bar_x(&self, f: crate::ui::dock::FloatPanel) -> f32 {
+        if self.bar_left {
+            self.x
+        } else {
+            self.x + self.width(f) - DOCK_FLOAT_BAR_W
+        }
+    }
+}
 
 /// A floating panel's vertical title bar: close then the hide (auto-collapse)
 /// pin at the top, the panel's icon at the bottom with its title reading

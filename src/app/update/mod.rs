@@ -3590,10 +3590,14 @@ impl OpenCADStudio {
                         panel.selected_multi.push(idx);
                     }
                 } else if shift {
-                    // Shift-click selects the range from the anchor to here.
+                    // Shift-click selects the range from the anchor to here —
+                    // visible rows only, so filtered-out rows between them
+                    // cannot join bulk edits/deletes (#50).
                     let anchor = panel.selected.unwrap_or(idx);
                     let (lo, hi) = (anchor.min(idx), anchor.max(idx));
-                    panel.selected_multi = (lo..=hi).collect();
+                    let visible: std::collections::HashSet<usize> =
+                        panel.visible_indices().into_iter().collect();
+                    panel.selected_multi = (lo..=hi).filter(|r| visible.contains(r)).collect();
                 } else if !panel.selected_multi.contains(&idx) {
                     // Plain click collapses to this row — but NOT when it is
                     // already part of a multi-selection, so clicking a property

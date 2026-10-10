@@ -4788,6 +4788,35 @@ mod layer_name_target_tests {
     }
 
     #[test]
+    fn shift_select_skips_filtered_out_rows() {
+        // #50: rows hidden by the live filter must not join a shift-range.
+        // Sorted panel: A1(0), B9(1), C1(2); filter "1" hides B9.
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        for new in ["C1", "B9", "A1"] {
+            let _ = app.on_layer_new();
+            let fresh = app.tabs[app.active_tab].layers.edit_buf.clone();
+            rename_layer(&mut app, &fresh, new);
+        }
+        let i = app.active_tab;
+        app.tabs[i].layers.filter = "1".to_string();
+        let _ = app.update(Message::LayerSelect("A1".to_string()));
+        app.shift_down = true;
+        let _ = app.update(Message::LayerSelect("C1".to_string()));
+        app.shift_down = false;
+        let multi = app.tabs[i].layers.selected_multi.clone();
+        let names: Vec<String> = multi
+            .iter()
+            .filter_map(|&x| app.tabs[i].layers.layers.get(x).map(|l| l.name.clone()))
+            .collect();
+        assert!(
+            !names.contains(&"B9".to_string()),
+            "hidden row must not join the range, got {names:?}"
+        );
+        assert!(names.contains(&"A1".to_string()) && names.contains(&"C1".to_string()));
+    }
+
+    #[test]
     fn layer_toggle_visible_unknown_name_is_noop() {
         let mut app = app_with_zulu_alpha();
         let i = app.active_tab;

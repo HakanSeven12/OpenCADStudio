@@ -327,6 +327,21 @@ impl LayerPanel {
         self.linetype_items = items;
     }
 
+    /// Row indices passing the live name filter — the rows the view actually
+    /// draws. Index math over "what the user sees" (shift-ranges) must use
+    /// these; raw `selected_multi` ranges would sweep in hidden rows (#50).
+    pub fn visible_indices(&self) -> Vec<usize> {
+        let filter = self.filter.to_lowercase();
+        self.layers
+            .iter()
+            .enumerate()
+            .filter(|(_, layer)| {
+                filter.is_empty() || layer.name.to_lowercase().contains(&filter)
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     /// Render the layer panel as the full content of its own OS window.
     pub fn view_window(
         &self,
@@ -453,11 +468,8 @@ impl LayerPanel {
 
         // ── Layer rows ────────────────────────────────────────────────────
         let mut rows_col = column![].spacing(0);
-        let filter = self.filter.to_lowercase();
-        for (i, layer) in self.layers.iter().enumerate() {
-            if !filter.is_empty() && !layer.name.to_lowercase().contains(&filter) {
-                continue;
-            }
+        for i in self.visible_indices() {
+            let layer = &self.layers[i];
             // Highlight every selected row; show the editable combos only on the
             // anchor (a single shared combo state can't drive several rows).
             let is_anchor = self.selected == Some(i);
@@ -896,7 +908,7 @@ fn layer_row<'a>(
     // Per-viewport freeze columns
     for (vp_idx, _vp_col) in vp_cols.iter().enumerate() {
         let is_vp_frozen = layer.vp_frozen.get(vp_idx).copied().unwrap_or(false);
-        let vp_frz_svg = crate::ui::icons::layer_freeze(is_vp_frozen);
+        let vp_frz_svg = crate::ui::icons::layer_vp_freeze(is_vp_frozen);
         row_content = row_content.push(
             container(svg_btn(
                 vp_frz_svg,

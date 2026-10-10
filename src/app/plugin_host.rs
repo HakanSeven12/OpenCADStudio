@@ -4480,13 +4480,23 @@ mod tests {
             // ByLayer in both formats.
             assert_eq!(leader.override_color, codec::types::Color::ByLayer,
                 "opencadcodec now persists a true-colour Leader.override_color; drop the blocker");
-            assert_eq!(leader.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
+            // The annotation offset is endptproj: DXF group 213 carries it,
+            // the DWG wire only R13c3-R2007 (see the text-height note).
+            if is_dxf {
+                assert_eq!(leader.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
+            }
             assert_eq!(leader.dimension_style, "Standard");
             if is_dxf {
                 assert!((leader.text_height - 4.0).abs() < 1e-12);
                 assert!(leader.hookline_enabled);
+                assert_eq!(leader.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
             } else {
-                assert_eq!(leader.text_height, 2.5, "DWG R2010+ does not store text_height");
+                // The authored R2010+ wire carries box_height/box_width
+                // (gold dwg.spec 3014-3015: unconditional fields); the
+                // hookline pair and endptproj (annotation offset) are the
+                // R2004-R2007 conditionals (2995-3009), so an R2010+ save
+                // reopens without them.
+                assert_eq!(leader.text_height, 4.0);
                 assert!(!leader.hookline_enabled, "DWG R2010+ does not store hookline_enabled");
             }
             assert!(matches!(document.get_entity(text_handle), Some(EntityType::Text(_))));
@@ -6415,8 +6425,8 @@ mod tests {
             // all — neither the version byte nor the lock-position flag the
             // reader looks for after it — so `lock_position` reopens false. Every
             // other field round-trips since opencadcodec dd1d7bf.
-            expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
-            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
+            expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
+            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
         });

@@ -374,6 +374,37 @@ fn plot_per_page_writes_one_pdf_per_layout() {
 }
 
 #[test]
+fn entities_create_supports_control_and_fit_point_splines() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let control = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"spline-control","document_id":{doc},"entities":[
+            {"type":"Spline","degree":2,"knots":[0,0,0,1,1,1],"control_points":[[0,0,0],[5,5,0],[10,0,0]],"weights":[1,2,1],"layer":"CURVES"}
+        ]}"#,
+    );
+    assert_eq!(control["ok"], true, "{control}");
+    let fit = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"spline-fit","document_id":{doc},"entities":[
+            {"type":"Spline","degree":3,"fit_points":[[20,0],[25,5],[30,0]]}
+        ]}"#,
+    );
+    assert_eq!(fit["ok"], true, "{fit}");
+    let query = app.automation_op(r#"{"op":"query","type":"Spline","detail":"geometry"}"#);
+    assert_eq!(query["count"], 2, "{query}");
+    let control_entity = query["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entity| entity["layer"] == "CURVES")
+        .unwrap();
+    assert_eq!(control_entity["degree"], 2, "{control_entity}");
+    assert_eq!(control_entity["control_points"].as_array().unwrap().len(), 3);
+    assert_eq!(control_entity["weights"], json!([1.0, 2.0, 1.0]));
+}
+
+#[test]
 fn hatch_boundary_is_flattened_in_query() {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);

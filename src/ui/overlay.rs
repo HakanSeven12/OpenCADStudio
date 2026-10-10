@@ -2961,7 +2961,6 @@ fn draw_axes(
     axes: (Vec3, Vec3, Vec3),
     bg_luminance: f32,
 ) {
-    let (ax, ay, az) = axes;
     let axis_stroke = |r: f32, g: f32, b: f32| canvas::Stroke {
         width: 1.5,
         style: canvas::Style::Solid(Color { r, g, b, a: 0.85 }),

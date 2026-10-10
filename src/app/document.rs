@@ -206,6 +206,12 @@ pub(super) struct DocumentTab {
     pub(super) dyn_active: usize,
     pub(super) history: HistoryState,
     pub(super) active_layer: String,
+    /// Block references whose properties panel shows per-axis Scale X/Y/Z even
+    /// though the three factors are currently equal — the user unchecked the
+    /// "Uniform scale" box for them (#427). Per-tab: fresh documents restart
+    /// handle numbering, so an app-global set keyed by raw handle leaks one
+    /// tab's opt-out into another tab reusing the value (#47).
+    pub(super) props_asym_scale: std::collections::HashSet<u64>,
     /// Node graph shown by the command line's graph button.
     pub(super) graph: crate::ui::node_graph::Graph,
     /// Currently active UCS. `None` means WCS (identity transform).
@@ -649,6 +655,7 @@ impl DocumentTab {
             dyn_active: 0,
             history: HistoryState::default(),
             active_layer: "0".to_string(),
+            props_asym_scale: std::collections::HashSet::new(),
             graph: Default::default(),
             active_ucs: None,
             sketch_session: None,

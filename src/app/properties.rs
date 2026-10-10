@@ -463,7 +463,7 @@ impl OpenCADStudio {
         if let codec::EntityType::Insert(ins) = entity {
             let eq = (ins.x_scale() - ins.y_scale()).abs() < 1e-12
                 && (ins.x_scale() - ins.z_scale()).abs() < 1e-12;
-            let uniform = eq && !self.props_asym_scale.contains(&handle.value());
+            let uniform = eq && !self.tabs[i].props_asym_scale.contains(&handle.value());
             for section in sections.iter_mut() {
                 let Some(xi) = section.props.iter().position(|p| p.field == "x_scale")
                 else {
@@ -4371,6 +4371,45 @@ fn apply_insert_unit_scale(ins: &mut codec::entities::Insert, ratio: f64) -> boo
     ins.apply_transform(&Transform::from_scale(ratio));
     ins.apply_transform(&Transform::from_translation(origin));
     true
+}
+
+#[cfg(test)]
+mod asym_scale_tests {
+    // #47: the uniform-scale opt-out must be per-tab. Fresh documents restart
+    // handle numbering (seed 1), so two tabs hand out identical handles — an
+    // app-global set leaks one tab's opt-out into the other.
+    use crate::app::OpenCADStudio;
+
+    fn tab_with_insert(app: &mut OpenCADStudio) -> (usize, codec::Handle) {
+        app.tab_counter += 1;
+        let n = app.tab_counter;
+        app.tabs
+            .push(crate::app::document::DocumentTab::new_drawing(n));
+        let idx = app.tabs.len() - 1;
+        app.active_tab = idx;
+        let ins =
+            codec::entities::Insert::new("B", codec::types::Vector3::ZERO);
+        let h = app
+            .commit_entity_handle(codec::EntityType::Insert(ins))
+            .expect("insert commits");
+        (idx, h)
+    }
+
+    #[test]
+    fn asym_scale_opt_out_does_not_leak_across_tabs() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (a, ha) = tab_with_insert(&mut app);
+        let (b, hb) = tab_with_insert(&mut app);
+        assert_eq!(
+            ha, hb,
+            "premise: identically built fresh docs reuse handle values"
+        );
+        app.tabs[a].props_asym_scale.insert(ha.value());
+        assert!(
+            !app.tabs[b].props_asym_scale.contains(&hb.value()),
+            "tab B must not see tab A's opt-out"
+        );
+    }
 }
 
 #[cfg(test)]

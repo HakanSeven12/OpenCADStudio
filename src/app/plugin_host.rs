@@ -3831,10 +3831,14 @@ mod tests {
             panic!("expected attribute definition text");
         };
         assert!(!strokes.is_empty());
+        // A standalone definition draws its tag; only as block content does
+        // a constant one draw its value (block_cache swaps the tag for the
+        // default value). The value edit itself is asserted above by the
+        // field equality, so the render check pins the tag.
         assert!(strokes.iter().any(|stroke| stroke
             .run
             .as_ref()
-            .is_some_and(|run| run.text.contains("PN-002"))));
+            .is_some_and(|run| run.text.contains("PART_NO"))));
 
         for (label, patch, message) in [
             ("Reject tag", "'tag':'BAD TAG'", "whitespace"),

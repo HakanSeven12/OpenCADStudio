@@ -1157,7 +1157,22 @@ impl OpenCADStudio {
     }
 
     pub(super) fn control_track(&mut self, task: Task<Message>) -> Task<Message> {
-        if task.units() == 0 {
+        let track_zero_unit = self.control.pending.as_ref().is_some_and(|p| {
+            p.request["op"] == "run"
+                && p.request["cmd"]
+                    .as_str()
+                    .is_some_and(|cmd| {
+                        matches!(
+                            cmd.trim().to_ascii_uppercase().as_str(),
+                            "SAVE" | "QSAVE"
+                        )
+                    })
+        });
+        // Most zero-unit tasks are `Task::none()` and have already completed
+        // synchronously. SAVE/QSAVE are the deliberate exception: the command
+        // dispatcher returns a zero-unit Task::done(Message::SaveFile), and
+        // the operation must wait for that message before reporting its state.
+        if task.units() == 0 && !track_zero_unit {
             return task;
         }
         let Some(p) = self.control.pending.as_mut() else {
@@ -1528,6 +1543,86 @@ mod tests {
             r
         }
     }
+    #[test]
+    fn qsave_completion_reports_clean_document_state() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}))["status"],
+            "completed"
+        );
+        let path = std::env::temp_dir().join(format!(
+            "ocs_qsave_state_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_file(&path);
+        let saved = request(
+            &mut app,
+            json!({"op":"save","path":path,"overwrite":true}),
+        );
+        assert_eq!(saved["ok"], true, "{saved}");
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,5 10,5"}))["status"],
+            "completed"
+        );
+        let qsave = request(&mut app, json!({"op":"run","cmd":"QSAVE"}));
+        assert_eq!(qsave["status"], "completed", "{qsave}");
+        let document_id = qsave["state"]["document_id"].as_u64().unwrap();
+        let dirty = qsave["state"]["documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|document| document["id"].as_u64() == Some(document_id))
+            .and_then(|document| document["dirty"].as_bool());
+        assert_eq!(dirty, Some(false), "{qsave}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn qsave_save_failure_settles_instead_of_hanging() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}))["status"],
+            "completed"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "ocs_qsave_fail_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("blocked.dwg");
+        let saved = request(
+            &mut app,
+            json!({"op":"save","path":path,"overwrite":true}),
+        );
+        assert_eq!(saved["ok"], true, "{saved}");
+        // A directory at the target path makes the next write fail
+        // deterministically; the operation must settle as failed instead of
+        // waiting forever on its task counter.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,5 10,5"}))["status"],
+            "completed"
+        );
+        let qsave = request(&mut app, json!({"op":"run","cmd":"QSAVE"}));
+        assert_eq!(qsave["status"], "failed", "{qsave}");
+        assert!(
+            qsave["error"].as_str().is_some_and(|error| !error.is_empty()),
+            "{qsave}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn control_stepwise_drawing_undo_and_properties() {
         let mut app = OpenCADStudio::new_for_test();

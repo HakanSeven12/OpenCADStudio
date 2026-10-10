@@ -17,16 +17,19 @@ impl OpenCADStudio {
         workspace: Element<'a, Message>,
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
+        use crate::ui::dock::DockMsg;
         // Floating panels sit over the workspace, back to front.
         let mut layers: Vec<Element<'_, Message>> = vec![workspace];
         for f in &self.dock.floating {
-            // Once a drag is under way only its preview shows the panel.
-            let dragged = self
-                .dock_drag
-                .and_then(|d| d.movement())
-                .is_some_and(|(panel, _, target)| panel == f.id && target.is_some());
-            if self.dock_panel_visible(f.id) && !dragged {
-                layers.push(self.floating_panel(*f, tab));
+            // Once a window drag is under way only its preview shows it.
+            let dragged = matches!(
+                self.dock_drag,
+                Some(crate::ui::dock::DockDrag::Move { panel, window: true, target: Some(_), .. })
+                    if f.contains(panel)
+            );
+            let visible = self.dock_float_visible(f);
+            if !visible.is_empty() && !dragged {
+                layers.push(self.floating_panel(f, visible, tab));
             }
         }
         // An open pallet menu hangs beside its edge's + button, over a
@@ -51,12 +54,22 @@ impl OpenCADStudio {
                 };
                 layers.push(
                     mouse_area(Space::new().width(Fill).height(Fill))
-                        .on_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
-                        .on_right_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
+                        .on_press(Message::Dock(DockMsg::EdgeMenu(None)))
+                        .on_right_press(Message::Dock(DockMsg::EdgeMenu(None)))
                         .into(),
                 );
-                layers.push(place_at(dock_edge_menu(side, &checked), x.max(0.0), plus_top));
+                let toggle = move |id| Message::Dock(DockMsg::EdgeMenuToggle(side, id));
+                layers.push(place_at(dock_pallet_menu(&checked, toggle), x.max(0.0), plus_top));
             }
+        }
+        if let Some(menu) = self.dock_float_menu_overlay() {
+            layers.push(
+                mouse_area(Space::new().width(Fill).height(Fill))
+                    .on_press(Message::Dock(DockMsg::FloatMenu(None)))
+                    .on_right_press(Message::Dock(DockMsg::FloatMenu(None)))
+                    .into(),
+            );
+            layers.push(menu);
         }
         // While a panel is dragged, preview where it lands.
         if let Some((id, _, Some(target))) = self.dock_drag.and_then(|d| d.movement()) {
@@ -274,6 +287,7 @@ impl OpenCADStudio {
                     }),
             )
             .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
+            .on_double_click(Message::Dock(DockMsg::GroupFloat(side, gi)))
             .on_enter(Message::Dock(DockMsg::GripHover(side, gi)))
             .on_exit(Message::Dock(DockMsg::GripHoverEnd(side, gi)))
             .interaction(iced::mouse::Interaction::Grab);
@@ -422,27 +436,45 @@ impl OpenCADStudio {
         }
     }
 
-    /// A floating panel at its saved place: a vertical title bar on the side
-    /// facing the nearer workspace edge, the panel beside it, and a corner
-    /// grip to resize it. With its pin on, the panel hides down to the title
-    /// bar until hovered.
-    fn floating_panel<'a>(
-        &'a self,
-        f: crate::ui::dock::FloatPanel,
-        tab: &'a DocumentTab,
-    ) -> Element<'a, Message> {
-        use crate::ui::dock::DockMsg;
+    /// Where floating window `f` draws: its top-left corner, whether its
+    /// title bar is on the left, and whether it is hidden down to that bar
+    /// (auto-hide, not hovered).
+    fn dock_float_frame(&self, f: &crate::ui::dock::FloatPanel) -> (f32, f32, bool, bool) {
         let (ww, wh) = self.dock_workspace_size();
         // The bar faces the nearer workspace edge; while resizing, it stays
         // opposite the grip being dragged so it cannot flip mid-drag.
         let bar_left = match self.dock_drag {
-            Some(crate::ui::dock::DockDrag::FloatSize { panel, from_left }) if panel == f.id => {
+            Some(crate::ui::dock::DockDrag::FloatSize { panel, from_left }) if f.contains(panel) => {
                 !from_left
             }
             _ => f.x + (f.w + DOCK_FLOAT_BAR_W) * 0.5 < ww * 0.5,
         };
-        let hidden = self.dock.auto_collapse(f.id) && self.dock_peek != Some(f.id);
-        let bar = floating_title_bar(f.id, self.dock.auto_collapse(f.id), bar_left);
+        let hidden = self.dock.auto_hides(f.id()) && !self.dock_peek.is_some_and(|p| f.contains(p));
+        let total_w = if hidden { DOCK_FLOAT_BAR_W } else { f.w + DOCK_FLOAT_BAR_W };
+        // A hidden window keeps its title bar where it sits when shown.
+        let x = if hidden && !bar_left { f.x + f.w } else { f.x };
+        // Keep the window on screen when the workspace shrank since it was
+        // placed.
+        let x = x.min(ww - total_w).max(0.0);
+        let y = f.y.min(wh - f.h).max(0.0);
+        (x, y, bar_left, hidden)
+    }
+
+    /// A floating window at its saved place: a vertical title bar on the
+    /// side facing the nearer workspace edge, its open pallets (`visible`)
+    /// stacked beside it, and a corner grip to resize it. With its pin on,
+    /// the window hides down to the title bar until hovered.
+    fn floating_panel<'a>(
+        &'a self,
+        f: &'a crate::ui::dock::FloatPanel,
+        visible: Vec<crate::ui::dock::PanelId>,
+        tab: &'a DocumentTab,
+    ) -> Element<'a, Message> {
+        use crate::ui::dock::DockMsg;
+        let (x, y, bar_left, hidden) = self.dock_float_frame(f);
+        // Messages name the window by its first open pallet.
+        let anchor = visible[0];
+        let bar = floating_title_bar(&visible, self.dock.auto_hides(anchor), bar_left);
         let content: Element<'_, Message> = if hidden {
             bar
         } else {
@@ -461,14 +493,30 @@ impl OpenCADStudio {
                     .center_x(Length::Fixed(14.0))
                     .center_y(Length::Fixed(14.0)),
             )
-            .on_press(Message::Dock(DockMsg::FloatResizeGrab(f.id, grip_left)))
+            .on_press(Message::Dock(DockMsg::FloatResizeGrab(anchor, grip_left)))
             .interaction(if grip_left {
                 iced::mouse::Interaction::ResizingDiagonallyUp
             } else {
                 iced::mouse::Interaction::ResizingDiagonallyDown
             });
+            // The pallets stack like a docked group, with splitters between.
+            let mut pallets: Vec<Element<'_, Message>> = Vec::new();
+            let mut prev: Option<usize> = None;
+            for id in &visible {
+                let pos = f.group.panels.iter().position(|p| p == id).unwrap_or(0);
+                if let Some(upper) = prev {
+                    pallets.push(float_splitter(anchor, upper, pos, f.w));
+                }
+                let weight = f.group.weights.get(pos).copied().unwrap_or(1.0);
+                pallets.push(
+                    container(self.panel_body(*id, f.w, true, tab))
+                        .height(Length::FillPortion(crate::ui::dock::portion(weight)))
+                        .into(),
+                );
+                prev = Some(pos);
+            }
             let body = stack![
-                self.panel_body(f.id, f.w, true, tab),
+                column(pallets).height(Fill),
                 container(grip)
                     .width(Fill)
                     .height(Fill)
@@ -487,7 +535,6 @@ impl OpenCADStudio {
                 row![body, bar].into()
             }
         };
-        let total_w = if hidden { DOCK_FLOAT_BAR_W } else { f.w + DOCK_FLOAT_BAR_W };
         let framed = container(content)
             .height(Length::Fixed(f.h))
             .style(|theme: &Theme| container::Style {
@@ -503,19 +550,104 @@ impl OpenCADStudio {
                 },
                 ..Default::default()
             });
-        // The idle cursor marks the panel as opaque to the pointer, so clicks
-        // on its empty areas don't fall through to the drawing below.
+        // The idle cursor marks the window as opaque to the pointer, so
+        // clicks on its empty areas don't fall through to the drawing below.
         let panel = mouse_area(framed)
-            .on_press(Message::Dock(DockMsg::FloatRaise(f.id)))
-            .on_enter(Message::Dock(DockMsg::Hover(f.id)))
+            .on_press(Message::Dock(DockMsg::FloatRaise(anchor)))
+            .on_enter(Message::Dock(DockMsg::Hover(anchor)))
             .on_exit(Message::Dock(DockMsg::HoverExit))
             .interaction(iced::mouse::Interaction::Idle);
-        // A hidden panel keeps its title bar where it sits when shown.
-        let x = if hidden && !bar_left { f.x + f.w } else { f.x };
-        // Keep the panel on screen when the window shrank since it was placed.
-        let x = x.min(ww - total_w).max(0.0);
-        let y = f.y.min(wh - f.h).max(0.0);
         place_at(panel.into(), x, y)
+    }
+
+    /// The open right-click menu of a floating window: Pallets (a submenu
+    /// to add or hide pallets in the window), Dock left and Dock right. It
+    /// hangs beside the title bar, toward the window's inside.
+    fn dock_float_menu_overlay(&self) -> Option<Element<'_, Message>> {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let anchor = self.dock_float_menu?;
+        let f = self.dock.float_rect(anchor)?;
+        if self.dock_float_visible(f).is_empty() {
+            return None;
+        }
+        let (ww, _) = self.dock_workspace_size();
+        let (x, y, bar_left, hidden) = self.dock_float_frame(f);
+        let total_w = if hidden { DOCK_FLOAT_BAR_W } else { f.w + DOCK_FLOAT_BAR_W };
+        let bar_x = if bar_left { x } else { x + total_w - DOCK_FLOAT_BAR_W };
+        let max_x = (ww - DOCK_MENU_W).max(0.0);
+        let menu_x = if bar_left {
+            bar_x + DOCK_FLOAT_BAR_W + 2.0
+        } else {
+            bar_x - DOCK_MENU_W - 2.0
+        }
+        .clamp(0.0, max_x);
+        let open = self.dock_float_menu_pallets;
+        // Hovering a row opens (Pallets) or closes (the others) the submenu.
+        let item = |label: Element<'static, Message>, press: DockMsg, sub: bool| -> Element<'static, Message> {
+            mouse_area(
+                button(label)
+                    .on_press(Message::Dock(press))
+                    .style(menu_row_style)
+                    .padding([5, 8])
+                    .width(Fill),
+            )
+            .on_enter(Message::Dock(DockMsg::FloatMenuPallets(sub)))
+            .into()
+        };
+        let pallets = row![
+            text(t!("Pallets")).size(12).width(Fill),
+            text("\u{203A}").size(13),
+        ]
+        .align_y(iced::Center);
+        let separator = container(Space::new())
+            .width(Fill)
+            .height(Length::Fixed(1.0))
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.neutral.color)),
+                ..Default::default()
+            });
+        let main = column![
+            item(pallets.into(), DockMsg::FloatMenuPallets(!open), true),
+            container(separator).padding([3, 4]),
+            item(
+                text(t!("Dock left")).size(12).into(),
+                DockMsg::DockTo(anchor, DockSide::Left),
+                false
+            ),
+            item(
+                text(t!("Dock right")).size(12).into(),
+                DockMsg::DockTo(anchor, DockSide::Right),
+                false
+            ),
+        ]
+        .spacing(1)
+        .padding(4);
+        let mut layers = vec![place_at(menu_frame(main.into()), menu_x, y + 4.0)];
+        if open {
+            let checked: Vec<_> = PanelId::ALL
+                .iter()
+                .map(|p| (*p, f.contains(*p) && self.dock_panel_visible(*p)))
+                .collect();
+            let toggle = move |id| Message::Dock(DockMsg::FloatMenuToggle(anchor, id));
+            // Beside the menu, on the side it opened toward, unless there is
+            // no room there.
+            let right = menu_x + 2.0 * DOCK_MENU_W + 2.0 <= ww;
+            let left = menu_x - DOCK_MENU_W - 2.0 >= 0.0;
+            let sub_x = if (bar_left && right) || !left {
+                menu_x + DOCK_MENU_W + 2.0
+            } else {
+                menu_x - DOCK_MENU_W - 2.0
+            }
+            .clamp(0.0, max_x);
+            layers.push(place_at(dock_pallet_menu(&checked, toggle), sub_x, y + 4.0));
+        }
+        Some(
+            iced::widget::Stack::with_children(layers)
+                .width(Fill)
+                .height(Fill)
+                .into(),
+        )
     }
 
     /// The live drop preview for dragged panel `id`: a tint over the target
@@ -552,18 +684,32 @@ impl OpenCADStudio {
         };
         let mut layers: Vec<Element<'_, Message>> = Vec::new();
         let group_drag = self.dock_drag.and_then(|d| d.movement()).and_then(|(_, g, _)| g);
+        // The pallets that move: a docked group's, a floating window's, or
+        // just `id`.
+        let window_drag = matches!(
+            self.dock_drag,
+            Some(crate::ui::dock::DockDrag::Move { window: true, .. })
+        );
+        let moving = match (group_drag, self.dock.float_rect(id)) {
+            (Some((s, g)), _) => self.dock_group_visible(s, g),
+            (None, Some(f)) if window_drag => self.dock_float_visible(f),
+            _ => vec![id],
+        };
         let marks_side = match target {
             DropTarget::Edge { side, .. } | DropTarget::Join { side, .. } => Some(side),
             DropTarget::Float { x, y } => {
-                let (w, h) = self.dock_float_size(id);
+                let (w, h) = match group_drag {
+                    Some((s, g)) => (self.dock_group_width(s, g), self.dock_default_float_h()),
+                    None => self.dock_float_size(id),
+                };
                 layers.push(place_at(dock_ghost(id, w + DOCK_FLOAT_BAR_W, h), x, y));
                 None
             }
         };
-        // A single pallet also gets a ghost where it lands in the column; a
-        // whole group shows only the strip feedback, as the column keeps
-        // showing what is there.
-        if let (Some(side), None) = (marks_side, group_drag) {
+        // A single pallet also gets a ghost where it lands in the column;
+        // several show only the strip feedback, as the column keeps showing
+        // what is there.
+        if let (Some(side), None, [_]) = (marks_side, group_drag, moving.as_slice()) {
             if let Some((top, bottom, w)) = self.dock_landing(id, target) {
                 let x = match side {
                     DockSide::Left => strip,
@@ -578,11 +724,7 @@ impl OpenCADStudio {
         if let Some(side) = marks_side {
             layers.extend(self.dock_strip_drop_marks(side, target));
             if let Some(p) = self.dock_drag_last {
-                let icons = match group_drag {
-                    Some((s, g)) => self.dock_group_visible(s, g),
-                    None => vec![id],
-                };
-                layers.push(place_at(dock_icon_ghost(&icons), p.x - 16.0, p.y - 15.0));
+                layers.push(place_at(dock_icon_ghost(&moving), p.x - 16.0, p.y - 15.0));
             }
         }
         iced::widget::Stack::with_children(layers)
@@ -803,46 +945,64 @@ impl canvas::Program<Message> for VBarLabel {
 /// Width of a floating panel's vertical title bar.
 const DOCK_FLOAT_BAR_W: f32 = 28.0;
 
-/// A floating panel's vertical title bar: close then the hide (auto-collapse)
-/// pin at the top, the panel's icon at the bottom with its title reading
-/// upward above it. Pressing the bar's free area drags the panel.
+/// A floating window's vertical title bar: close then the hide (auto-hide)
+/// pin at the top; at the bottom the pallet's icon with its title reading
+/// upward, or for a group each pallet's icon (press one to drag that pallet
+/// out). Pressing the bar drags the window, double-clicking docks it against
+/// the edge the bar faces, right-clicking opens its menu.
 fn floating_title_bar(
-    id: crate::ui::dock::PanelId,
+    visible: &[crate::ui::dock::PanelId],
     auto_collapse: bool,
     on_left: bool,
 ) -> Element<'static, Message> {
     use crate::ui::dock::DockMsg;
+    let anchor = visible[0];
     let tip = if on_left {
         iced::widget::tooltip::Position::Left
     } else {
         iced::widget::tooltip::Position::Right
     };
-    let close = crate::ui::dock::close_button(id, tip);
-    let pin = crate::ui::dock::pin_button(id, auto_collapse, tip);
-    let title = canvas(VBarLabel {
-        text: t!(id.title()).into_owned(),
-    })
-    .width(Fill)
-    .height(Fill);
-    let bar = column![
-        close,
-        pin,
-        container(title).width(Fill).height(Fill).padding([6, 0]),
-        container(crate::ui::icons::themed(id.icon(), 16.0)).center_x(Fill),
-    ]
-    .spacing(2)
-    .padding([4, 0])
-    .align_x(iced::Center)
-    .width(Length::Fixed(DOCK_FLOAT_BAR_W))
-    .height(Fill);
+    let close = crate::ui::dock::close_button(DockMsg::FloatClose(anchor), tip);
+    let pin = crate::ui::dock::pin_button(anchor, auto_collapse, tip);
+    let mut bar = column![close, pin].spacing(2);
+    if let [id] = visible {
+        let title = canvas(VBarLabel {
+            text: t!(id.title()).into_owned(),
+        })
+        .width(Fill)
+        .height(Fill);
+        bar = bar
+            .push(container(title).width(Fill).height(Fill).padding([6, 0]))
+            .push(container(crate::ui::icons::themed(id.icon(), 16.0)).center_x(Fill));
+    } else {
+        bar = bar.push(Space::new().height(Fill));
+        for id in visible {
+            let icon = mouse_area(
+                container(crate::ui::icons::themed(id.icon(), 16.0))
+                    .center_x(Fill)
+                    .center_y(Length::Fixed(24.0)),
+            )
+            .on_press(Message::Dock(DockMsg::IconPress(*id)))
+            .interaction(iced::mouse::Interaction::Grab);
+            bar = bar.push(
+                iced::widget::tooltip(icon, text(t!(id.title())).size(10), tip).gap(4),
+            );
+        }
+    }
+    let bar = bar
+        .padding([4, 0])
+        .align_x(iced::Center)
+        .width(Length::Fixed(DOCK_FLOAT_BAR_W))
+        .height(Fill);
     mouse_area(container(bar).style(|theme: &Theme| container::Style {
         background: Some(Background::Color(theme.palette().background.weak.color)),
         ..Default::default()
     }))
-    .on_press(Message::Dock(DockMsg::DockGrab(id)))
+    .on_press(Message::Dock(DockMsg::FloatGrab(anchor)))
+    .on_right_press(Message::Dock(DockMsg::FloatMenu(Some(anchor))))
     // Double-click docks it against the edge its title bar faces.
     .on_double_click(Message::Dock(DockMsg::DockTo(
-        id,
+        anchor,
         if on_left {
             crate::app::config::DockSide::Left
         } else {
@@ -851,6 +1011,29 @@ fn floating_title_bar(
     )))
     .interaction(iced::mouse::Interaction::Grab)
     .into()
+}
+
+/// Draggable bar between floating pallets `upper` and `lower` of the window
+/// holding `anchor`; double-click evens their heights.
+fn float_splitter(
+    anchor: crate::ui::dock::PanelId,
+    upper: usize,
+    lower: usize,
+    w: f32,
+) -> Element<'static, Message> {
+    use crate::ui::dock::DockMsg;
+    let line = container(Space::new())
+        .width(Length::Fixed(w))
+        .height(Length::Fixed(5.0))
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.neutral.color)),
+            ..Default::default()
+        });
+    mouse_area(line)
+        .on_press(Message::Dock(DockMsg::FloatSplitGrab(anchor, upper, lower)))
+        .on_double_click(Message::Dock(DockMsg::FloatSplitReset(anchor)))
+        .interaction(iced::mouse::Interaction::ResizingVertically)
+        .into()
 }
 
 /// Grabbable separator between a docked pallet and the viewport: drag to
@@ -876,14 +1059,14 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
 /// Width of the icon strip's pallet menu.
 const DOCK_MENU_W: f32 = 230.0;
 
-/// The pallet menu of an edge's + button, styled like the right-click menu:
-/// one row per pallet with its icon, its name and a check mark when it is
-/// open on this edge. `checked` holds each pallet with that state.
-fn dock_edge_menu(
-    side: crate::app::config::DockSide,
+/// A pallet menu (an edge's + button, a floating window's Pallets
+/// submenu), styled like the right-click menu: one row per pallet with its
+/// icon, its name and a check mark when it is open there. `checked` holds
+/// each pallet with that state; picking one sends `toggle`.
+fn dock_pallet_menu(
     checked: &[(crate::ui::dock::PanelId, bool)],
+    toggle: impl Fn(crate::ui::dock::PanelId) -> Message,
 ) -> Element<'static, Message> {
-    use crate::ui::dock::DockMsg;
     let rows: Vec<Element<'static, Message>> = checked
         .iter()
         .map(|(id, checked)| {
@@ -902,26 +1085,34 @@ fn dock_edge_menu(
                 .spacing(8)
                 .align_y(iced::Center),
             )
-            .on_press(Message::Dock(DockMsg::EdgeMenuToggle(side, id)))
-            .style(|theme: &Theme, status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-                        .then(|| Background::Color(palette.background.weak.color)),
-                    text_color: palette.background.base.text,
-                    border: Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            })
+            .on_press(toggle(id))
+            .style(menu_row_style)
             .padding([5, 8])
             .width(Fill)
             .into()
         })
         .collect();
-    container(column(rows).spacing(1).padding(4))
+    menu_frame(column(rows).spacing(1).padding(4).into())
+}
+
+/// A menu row button: transparent until hovered.
+fn menu_row_style(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.palette();
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then(|| Background::Color(palette.background.weak.color)),
+        text_color: palette.background.base.text,
+        border: Border {
+            radius: 3.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// The raised box a dock menu sits in.
+fn menu_frame(rows: Element<'static, Message>) -> Element<'static, Message> {
+    container(rows)
         .width(Length::Fixed(DOCK_MENU_W))
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.base.color)),

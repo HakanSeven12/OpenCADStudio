@@ -6151,3 +6151,12 @@ count-feature =
     .invalid-boundary = 개수 영역 경계 객체가 잘못되었습니다. 선분으로 구성되고 자체 교차하지 않는 닫힌 폴리선을 선택하십시오.
     .block-not-found = 블록 "__ocs_fmt_0__"을(를) 찾을 수 없습니다.
     .invalid-point = 점이 잘못되었습니다.
+
+dock =
+    .auto-hide = 자동 숨기기
+    .dock-left = 왼쪽에 도킹
+    .dock-right = 오른쪽에 도킹
+    .new-group = 새 그룹
+    .pallets = 팔레트
+    .browser = 브라우저
+    .node-graph = 노드 그래프

@@ -6147,3 +6147,12 @@ count-feature =
     .invalid-boundary = 無效的計數區域邊界物件。請選取由線段組成且不自我相交的封閉聚合線。
     .block-not-found = 找不到圖塊 "__ocs_fmt_0__"。
     .invalid-point = 無效的點。
+
+dock =
+    .auto-hide = 自動隱藏
+    .dock-left = 停駐到左側
+    .dock-right = 停駐到右側
+    .new-group = 新增群組
+    .pallets = 選項板
+    .browser = 瀏覽器
+    .node-graph = 節點圖

@@ -6153,3 +6153,12 @@ count-feature =
     .invalid-boundary = Invalid count area boundary object. Select a closed polyline consisting of line segments and does not intersect itself.
     .block-not-found = Block "__ocs_fmt_0__" cannot be found.
     .invalid-point = Invalid point.
+
+dock =
+    .auto-hide = Auto-hide
+    .dock-left = Dock left
+    .dock-right = Dock right
+    .new-group = New group
+    .pallets = Pallets
+    .browser = Browser
+    .node-graph = Node Graph

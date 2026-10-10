@@ -6149,3 +6149,12 @@ count-feature =
     .invalid-boundary = Neplatný objekt hranice oblasti počítání. Vyberte uzavřenou křivku složenou z úseček, která neprotíná sama sebe.
     .block-not-found = Blok "__ocs_fmt_0__" nelze najít.
     .invalid-point = Neplatný bod.
+
+dock =
+    .auto-hide = Automaticky skrýt
+    .dock-left = Ukotvit vlevo
+    .dock-right = Ukotvit vpravo
+    .new-group = Nová skupina
+    .pallets = Palety
+    .browser = Prohlížeč
+    .node-graph = Graf uzlů

@@ -6150,3 +6150,12 @@ count-feature =
     .invalid-boundary = Ungültiges Begrenzungsobjekt für den Zählbereich. Wählen Sie eine geschlossene Polylinie aus Liniensegmenten, die sich nicht selbst schneidet.
     .block-not-found = Block "__ocs_fmt_0__" wurde nicht gefunden.
     .invalid-point = Ungültiger Punkt.
+
+dock =
+    .auto-hide = Automatisch ausblenden
+    .dock-left = Links andocken
+    .dock-right = Rechts andocken
+    .new-group = Neue Gruppe
+    .pallets = Paletten
+    .browser = Browser
+    .node-graph = Knotengraph

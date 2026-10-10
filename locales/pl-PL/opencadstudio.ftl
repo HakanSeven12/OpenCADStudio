@@ -6151,3 +6151,12 @@ count-feature =
     .invalid-boundary = Nieprawidłowy obiekt obwiedni obszaru liczenia. Wybierz zamkniętą polilinię złożoną z odcinków, która nie przecina samej siebie.
     .block-not-found = Nie można znaleźć bloku "__ocs_fmt_0__".
     .invalid-point = Nieprawidłowy punkt.
+
+dock =
+    .auto-hide = Autoukrywanie
+    .dock-left = Zadokuj po lewej
+    .dock-right = Zadokuj po prawej
+    .new-group = Nowa grupa
+    .pallets = Palety
+    .browser = Przeglądarka
+    .node-graph = Graf węzłów

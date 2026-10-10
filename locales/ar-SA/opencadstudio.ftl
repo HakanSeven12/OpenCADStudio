@@ -6164,3 +6164,12 @@ count-feature =
     .invalid-boundary = كائن حد منطقة العد غير صالح. حدد خطًا متعددًا مغلقًا يتكون من قطع مستقيمة ولا يتقاطع مع نفسه.
     .block-not-found = تعذر العثور على الكتلة "__ocs_fmt_0__".
     .invalid-point = نقطة غير صالحة.
+
+dock =
+    .auto-hide = إخفاء تلقائي
+    .dock-left = إرساء إلى اليسار
+    .dock-right = إرساء إلى اليمين
+    .new-group = مجموعة جديدة
+    .pallets = اللوحات
+    .browser = المستعرض
+    .node-graph = مخطط العقد

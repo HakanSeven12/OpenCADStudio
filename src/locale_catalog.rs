@@ -5754,6 +5754,13 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Invalid count area boundary object. Select a closed polyline consisting of line segments and does not intersect itself." => Some(("count-feature", "invalid-boundary")),
         "Block \"{part}\" cannot be found." => Some(("count-feature", "block-not-found")),
         "Invalid point." => Some(("count-feature", "invalid-point")),
+        "Auto-hide" => Some(("dock", "auto-hide")),
+        "Dock left" => Some(("dock", "dock-left")),
+        "Dock right" => Some(("dock", "dock-right")),
+        "New group" => Some(("dock", "new-group")),
+        "Pallets" => Some(("dock", "pallets")),
+        "Browser" => Some(("dock", "browser")),
+        "Node Graph" => Some(("dock", "node-graph")),
         _ => None,
     }
 }

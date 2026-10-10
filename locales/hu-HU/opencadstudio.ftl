@@ -6151,3 +6151,12 @@ count-feature =
     .invalid-boundary = Érvénytelen számlálási terület határobjektum. Válasszon egy zárt, vonalszakaszokból álló, önmagát nem metsző vonalláncot.
     .block-not-found = A(z) "__ocs_fmt_0__" blokk nem található.
     .invalid-point = Érvénytelen pont.
+
+dock =
+    .auto-hide = Automatikus elrejtés
+    .dock-left = Dokkolás balra
+    .dock-right = Dokkolás jobbra
+    .new-group = Új csoport
+    .pallets = Paletták
+    .browser = Böngésző
+    .node-graph = Csomópontgráf

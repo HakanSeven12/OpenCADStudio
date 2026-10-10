@@ -865,6 +865,10 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
     /// Edge whose icon-strip pallet menu (+) is open.
     pub(crate) dock_edge_menu: Option<crate::app::config::DockSide>,
+    /// Floating window (named by one of its pallets) whose right-click menu
+    /// is open, and whether its Pallets submenu shows.
+    pub(crate) dock_float_menu: Option<crate::ui::dock::PanelId>,
+    pub(crate) dock_float_menu_pallets: bool,
     /// Group whose edge band (group grip) the pointer is over.
     pub(crate) dock_grip_hover: Option<(crate::app::config::DockSide, usize)>,
     /// Reference-table column currently being width-resized (column index),
@@ -4297,6 +4301,8 @@ impl OpenCADStudio {
             dock_peek: None,
             dock_hover_pending: None,
             dock_hover_gen: 0,
+            dock_float_menu: None,
+            dock_float_menu_pallets: false,
             dock_drag: None,
             dock_drag_last: None,
             dock_title_hover: None,

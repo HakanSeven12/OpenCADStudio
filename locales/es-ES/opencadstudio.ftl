@@ -6152,3 +6152,12 @@ count-feature =
     .invalid-boundary = Objeto de contorno de área de recuento no válido. Seleccione una polilínea cerrada formada por segmentos de línea que no se corte a sí misma.
     .block-not-found = No se encuentra el bloque "__ocs_fmt_0__".
     .invalid-point = Punto no válido.
+
+dock =
+    .auto-hide = Ocultar automáticamente
+    .dock-left = Acoplar a la izquierda
+    .dock-right = Acoplar a la derecha
+    .new-group = Nuevo grupo
+    .pallets = Paletas
+    .browser = Explorador
+    .node-graph = Grafo de nodos

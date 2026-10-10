@@ -6140,3 +6140,12 @@ count-feature =
     .invalid-boundary = カウント領域の境界オブジェクトが無効です。線分で構成され、自己交差しない閉じたポリラインを選択してください。
     .block-not-found = ブロック "__ocs_fmt_0__" が見つかりません。
     .invalid-point = 点が無効です。
+
+dock =
+    .auto-hide = 自動的に隠す
+    .dock-left = 左にドッキング
+    .dock-right = 右にドッキング
+    .new-group = 新しいグループ
+    .pallets = パレット
+    .browser = ブラウザー
+    .node-graph = ノードグラフ

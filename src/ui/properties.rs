@@ -55,6 +55,9 @@ pub fn linetype_display_name(name: &str) -> String {
 
 impl fmt::Display for LinetypeItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.is_empty() && !self.art.is_empty() {
+            return f.write_str(&self.art);
+        }
         let name = linetype_display_name(&self.name);
         if self.art.is_empty() {
             write!(f, "{name}")
@@ -95,6 +98,7 @@ impl fmt::Display for SelectionGroup {
 #[derive(Clone)]
 struct HatchPatternPreview {
     pattern: crate::scene::model::hatch_model::HatchPattern,
+    padding: f32,
 }
 
 impl canvas::Program<Message> for HatchPatternPreview {
@@ -112,7 +116,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
 
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let palette = theme.palette();
-        let pad = 4.0;
+        let pad = self.padding;
         let sample = canvas::Path::rectangle(
             Point::new(pad, pad),
             Size::new(
@@ -201,6 +205,31 @@ fn hatch_preview_scale(pattern: &crate::scene::model::hatch_model::HatchPattern)
     }
 }
 
+fn hatch_pattern_preview(
+    pattern: crate::scene::model::hatch_model::HatchPattern,
+    height: f32,
+) -> Element<'static, Message> {
+    canvas(HatchPatternPreview {
+        pattern,
+        padding: 4.0,
+    })
+    .width(Length::Fill)
+    .height(height)
+    .into()
+}
+
+pub(crate) fn compact_hatch_pattern_preview(
+    pattern: crate::scene::model::hatch_model::HatchPattern,
+) -> Element<'static, Message> {
+    canvas(HatchPatternPreview {
+        pattern,
+        padding: 0.5,
+    })
+    .width(Length::Fill)
+    .height(ROW_H)
+    .into()
+}
+
 fn hatch_pattern_matches(
     entry: &crate::scene::model::hatch_patterns::PatternEntry,
     search: &str,
@@ -218,6 +247,113 @@ pub(crate) fn filtered_hatch_patterns(
         .iter()
         .filter(|entry| hatch_pattern_matches(entry, search))
         .collect()
+}
+
+/// Messages of a hatch pattern picker; the Properties panel and the Graphic
+/// Attributes palette each route them to their own state.
+pub(crate) struct PatternPickerMessages {
+    pub search_id: &'static str,
+    pub on_search: fn(String) -> Message,
+    pub on_confirm: Message,
+    pub on_focus: fn(usize) -> Message,
+    pub on_changed: fn(String) -> Message,
+}
+
+pub(crate) fn hatch_pattern_picker_content<'a>(
+    search_value: &'a str,
+    focus: usize,
+    current: &'a str,
+    messages: PatternPickerMessages,
+) -> Element<'a, Message> {
+    let PatternPickerMessages {
+        search_id,
+        on_search,
+        on_confirm,
+        on_focus,
+        on_changed,
+    } = messages;
+    let search = text_input(t!("Search patterns…").as_ref(), search_value)
+        .id(iced::widget::Id::new(search_id))
+        .on_input(on_search)
+        .on_submit(on_confirm)
+        .size(FONT_SZ)
+        .padding([5, 7])
+        .width(Length::Fill);
+
+    let mut grid = column![].spacing(6);
+    let visible = filtered_hatch_patterns(search_value);
+    for (row_index, pair) in visible.chunks(2).enumerate() {
+        let mut cards = row![].spacing(6);
+        for (column_index, entry) in pair.iter().enumerate() {
+            let index = row_index * 2 + column_index;
+            let selected = current.eq_ignore_ascii_case(&entry.name);
+            let focused = focus == index;
+            let name = entry.name.clone();
+            let preview = hatch_pattern_preview(entry.gpu.clone(), PATTERN_PREVIEW_H);
+            let card = button(
+                column![
+                    preview,
+                    container(text(crate::ui::text_util::elide(&entry.name, 20)).size(FONT_SZ))
+                        .width(Length::Fill)
+                        .align_x(iced::Center),
+                ]
+                .spacing(3),
+            )
+            .on_press(on_changed(name))
+            .style(move |theme: &Theme, status| {
+                let palette = theme.palette();
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                let pair = if selected {
+                    palette.primary.weak
+                } else if hovered || focused {
+                    palette.background.strong
+                } else {
+                    palette.background.weak
+                };
+                button::Style {
+                    background: Some(Background::Color(pair.color)),
+                    text_color: pair.text,
+                    border: Border {
+                        color: if selected || focused {
+                            palette.primary.base.color
+                        } else {
+                            palette.background.neutral.color
+                        },
+                        width: if selected || focused { 2.0 } else { 1.0 },
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+            .padding(5)
+            .width(PATTERN_CARD_W);
+            cards = cards.push(mouse_area(card).on_enter(on_focus(index)));
+        }
+        grid = grid.push(cards);
+    }
+
+    let results: Element<'_, Message> = if visible.is_empty() {
+        container(
+            text(t!("No matching patterns"))
+                .size(FONT_SZ)
+                .style(hint_text_style),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
+    } else {
+        scrollable(grid)
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .into()
+    };
+    container(column![search, results].spacing(7))
+        .style(container::bordered_box)
+        .padding(8)
+        .width(PATTERN_PICKER_W)
+        .height(Length::Fixed(PATTERN_PICKER_H))
+        .into()
 }
 
 /// All standard CAD lineweight options for the combobox.
@@ -1481,100 +1617,24 @@ impl PropertiesPanel {
             return prop_row_widget(label, head.into());
         }
 
-        let search = text_input(t!("Search patterns…").as_ref(), &self.hatch_pattern_search)
-            .id(iced::widget::Id::new("hatch-pattern-search"))
-            .on_input(Message::PropHatchPatternSearchChanged)
-            .on_submit(Message::PropHatchPatternConfirm)
-            .size(FONT_SZ)
-            .padding([5, 7])
-            .width(Length::Fill);
-
-        let mut grid = column![].spacing(6);
-        let visible = filtered_hatch_patterns(&self.hatch_pattern_search);
-        for (row_index, pair) in visible.chunks(2).enumerate() {
-            let mut cards = row![].spacing(6);
-            for (column_index, entry) in pair.iter().enumerate() {
-                let index = row_index * 2 + column_index;
-                let selected = current.eq_ignore_ascii_case(&entry.name);
-                let focused = self.hatch_pattern_focus == index;
-                let name = entry.name.clone();
-                let preview = canvas(HatchPatternPreview {
-                    pattern: entry.gpu.clone(),
-                })
-                .width(Length::Fill)
-                .height(PATTERN_PREVIEW_H);
-                let card = button(
-                    column![
-                        preview,
-                        container(text(crate::ui::text_util::elide(&entry.name, 20)).size(FONT_SZ))
-                            .width(Length::Fill)
-                            .align_x(iced::Center),
-                    ]
-                    .spacing(3),
-                )
-                .on_press(Message::PropHatchPatternChanged(name))
-                .style(move |theme: &Theme, status| {
-                    let palette = theme.palette();
-                    let hovered =
-                        matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    let pair = if selected {
-                        palette.primary.weak
-                    } else if hovered || focused {
-                        palette.background.strong
-                    } else {
-                        palette.background.weak
-                    };
-                    button::Style {
-                        background: Some(Background::Color(pair.color)),
-                        text_color: pair.text,
-                        border: Border {
-                            color: if selected || focused {
-                                palette.primary.base.color
-                            } else {
-                                palette.background.neutral.color
-                            },
-                            width: if selected || focused { 2.0 } else { 1.0 },
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                })
-                .padding(5)
-                .width(PATTERN_CARD_W);
-                cards = cards.push(
-                    mouse_area(card).on_enter(Message::PropHatchPatternFocus(index)),
-                );
-            }
-            grid = grid.push(cards);
-        }
-
-        let results: Element<'_, Message> = if visible.is_empty() {
-            container(
-                text(t!("No matching patterns"))
-                    .size(FONT_SZ)
-                    .style(hint_text_style),
-            )
-            .padding(12)
-            .width(Length::Fill)
-            .center_x(Length::Fill)
-            .into()
-        } else {
-            scrollable(grid)
-                .height(Length::Fill)
-                .width(Length::Fill)
-                .into()
-        };
-        let popup = container(column![search, results].spacing(7))
-            .style(container::bordered_box)
-            .padding(8)
-            .width(PATTERN_PICKER_W)
-            .height(Length::Fixed(PATTERN_PICKER_H));
+        let popup = hatch_pattern_picker_content(
+            &self.hatch_pattern_search,
+            self.hatch_pattern_focus,
+            current,
+            PatternPickerMessages {
+                search_id: "hatch-pattern-search",
+                on_search: Message::PropHatchPatternSearchChanged,
+                on_confirm: Message::PropHatchPatternConfirm,
+                on_focus: Message::PropHatchPatternFocus,
+                on_changed: Message::PropHatchPatternChanged,
+            },
+        );
 
         prop_row_widget(
             label,
             crate::ui::color_select::drop_down_below(
                 head.into(),
-                popup.into(),
+                popup,
                 Some(Length::Fixed(PATTERN_PICKER_W)),
                 Length::Fixed(PATTERN_PICKER_H),
                 Message::PropHatchPatternPickerToggle(current.to_string()),
@@ -2125,7 +2185,7 @@ fn text_input_style(theme: &Theme, status: text_input::Status) -> text_input::St
     }
 }
 
-fn combo_input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+pub(crate) fn combo_input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     text_input_style(theme, status)
 }
 

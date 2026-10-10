@@ -2,6 +2,7 @@
 
 mod cascade;
 mod file_tabs;
+mod graphic_attributes_palette;
 mod layout_tabs;
 pub mod limits;
 mod orbit;
@@ -122,6 +123,7 @@ impl CadModule for ViewModule {
                         RibbonItem::LargeTool(tool_palettes::tool()),
                         RibbonItem::LargeTool(properties_palette::tool()),
                         RibbonItem::LargeTool(count_palette::tool()),
+                        RibbonItem::LargeTool(graphic_attributes_palette::tool()),
                         RibbonItem::LargeTool(sheetset::tool()),
                     ],
                 },

@@ -483,7 +483,11 @@ impl Scene {
                 _ => model.clone(),
             };
             let style = self.render_style(entity);
-            m.color = style.0;
+            if matches!(m.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
+                m.set_alpha(style.0[3]);
+            } else {
+                m.color = style.0;
+            }
             m.aci = style.4;
             m.line_weight_px = style.3;
             if let EntityType::Hatch(dxf) = entity {
@@ -609,7 +613,11 @@ impl Scene {
                 _ => model.clone(),
             };
             let style = self.render_style(entity);
-            hatch.color = style.0;
+            if matches!(hatch.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
+                hatch.set_alpha(style.0[3]);
+            } else {
+                hatch.color = style.0;
+            }
             hatch.aci = style.4;
             hatch.line_weight_px = style.3;
             hatch.draw_depth = depth_map.get(&handle.value()).map_or(0.0, |depth| depth[0]);

@@ -814,6 +814,9 @@ pub(super) struct OpenCADStudio {
     render_mode_preview: Option<codec::entities::ViewportRenderMode>,
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
+    /// Whether the Graphic Attributes palette is shown (GRAPHICATTRIBUTES).
+    show_graphic_attributes: bool,
+    graphic_attributes: crate::ui::window::graphic_attributes::GraphicAttributesState,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
     /// Node graph overlay over the viewport.
@@ -1600,6 +1603,9 @@ pub enum ColorPickerTab {
 /// Where a colour chosen in the standalone palette window should be applied.
 #[derive(Debug, Clone)]
 pub enum ColorPickTarget {
+    Gradient(u8),
+    GraphicAttributesLine,
+    GraphicAttributesSolid,
     DimStyle(DsField),
     MLeader(&'static str),
     Table(u8, &'static str),
@@ -2144,6 +2150,7 @@ pub enum PasteFocus {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    GraphicAttributes(crate::ui::window::graphic_attributes::GraphicAttributesMsg),
     SpaceMouseWake,
     SpaceMouseFrame(iced::time::Instant),
     SpaceMouseFocus(iced::window::Id, bool),
@@ -2868,6 +2875,8 @@ pub enum Message {
     ToggleViewCube,
     /// Toggle the Properties panel visibility (PROPERTIES).
     ToggleProperties,
+    /// Toggle the Graphic Attributes panel visibility (GRAPHICATTRIBUTES).
+    ToggleGraphicAttributes,
     /// Toggle the document file tabs at the top (FILETAB).
     ToggleFileTabs,
     /// Toggle the layout tabs at the bottom (LAYOUTTAB).
@@ -4284,6 +4293,8 @@ impl OpenCADStudio {
             render_mode_menu_open: false,
             render_mode_preview: None,
             show_properties: true,
+            show_graphic_attributes: false,
+            graphic_attributes: Default::default(),
             show_block_palette: false,
             show_node_graph: false,
             property_target_override: None,

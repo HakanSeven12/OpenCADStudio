@@ -8,6 +8,8 @@ pub mod layout_manager;
 pub mod layer_state_manager;
 pub mod drawing_units;
 pub mod geometric_tolerance;
+pub mod gradient_editor;
+pub mod graphic_attributes;
 pub mod drafting_settings;
 pub mod auto_constrain_settings;
 pub mod layer_translator;

@@ -235,18 +235,7 @@ fn color_selector_with_indicator<'a>(
     }
 
     let popup = container(color_list(extras, on_select, on_more))
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
-            }
-        })
+        .style(popup_panel_style)
         .padding(2);
 
     // `DropDown` keeps the popup outside the surrounding form layout and
@@ -260,7 +249,20 @@ fn color_selector_with_indicator<'a>(
         .into()
 }
 
-fn list_row_style(theme: &Theme, status: button::Status) -> button::Style {
+pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
+    let palette = theme.palette();
+    container::Style {
+        background: Some(Background::Color(palette.background.weak.color)),
+        border: Border {
+            color: palette.background.neutral.color,
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+pub(crate) fn list_row_style(theme: &Theme, status: button::Status) -> button::Style {
     let palette = theme.palette();
     let hovered = matches!(status, button::Status::Hovered);
     let text_color = if hovered {

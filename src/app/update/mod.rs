@@ -97,6 +97,7 @@ mod blocks_palette;
 mod dialog;
 mod dynamic;
 mod file;
+mod graphic_attributes;
 pub(in crate::app) use file::background_task;
 mod page_setup_import;
 mod style;
@@ -465,6 +466,10 @@ impl OpenCADStudio {
             }
         }
         self.refresh_gpu_status();
+        if self.graphic_attributes.tracks_selection() {
+            let selected = self.tabs[self.active_tab].scene.selected_handles_in_order();
+            self.graphic_attributes.retain_selection(&selected);
+        }
         self.show_next_startup_modal();
         self.sync_open_command_history();
         // Close the document-level first-touch transaction started by
@@ -478,6 +483,7 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
+            .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
@@ -485,6 +491,14 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.options())
+            .or_else(|| {
+                self.graphic_attributes.pending_fill_close.as_ref().map(|_| {
+                    vec![
+                        crate::command::CmdOption::new("Yes", "Y"),
+                        crate::command::CmdOption::new("No", "N"),
+                    ]
+                })
+            })
             .unwrap_or_default();
         self.command_line.set_step_options(opts);
         // Persist UI preferences whenever a toggle changes them (issue #68).
@@ -2512,6 +2526,9 @@ impl OpenCADStudio {
                 // finishes the step like Enter. (#304)
                 self.command_line.input.clear();
                 self.command_line.close_history();
+                if self.awaiting_fill_close_answer() {
+                    return self.on_graphic_fill_close_input(&kw);
+                }
                 if kw.is_empty() {
                     return self.feed_command(crate::command::StepInput::Enter);
                 }
@@ -3849,6 +3866,7 @@ impl OpenCADStudio {
             }
 
             Message::ViewportLeftPress => {
+                self.graphic_attributes.open_menu = None;
                 let sweep = self.sync_active_field_if_any();
                 Task::batch(vec![sweep, self.on_viewport_left_press()])
             }
@@ -3856,6 +3874,7 @@ impl OpenCADStudio {
             Message::ViewportLeftRelease => self.on_viewport_left_release(),
 
             Message::ViewportRightPress => {
+                self.graphic_attributes.open_menu = None;
                 let i = self.active_tab;
                 self.ribbon.close_dropdown();
                 // Shift+RMB: the one-shot snap override menu at the cursor —
@@ -3957,7 +3976,10 @@ impl OpenCADStudio {
                 self.unfocus_widgets()
             }
 
-            Message::ViewportMiddlePress => self.on_viewport_middle_press(),
+            Message::ViewportMiddlePress => {
+                self.graphic_attributes.open_menu = None;
+                self.on_viewport_middle_press()
+            }
 
             Message::ViewportMiddleRelease => {
                 let i = self.active_tab;
@@ -4286,6 +4308,17 @@ impl OpenCADStudio {
             Message::ToggleProperties => {
                 self.show_properties ^= true;
                 self.ribbon.set_properties(self.show_properties);
+                Task::none()
+            }
+            Message::ToggleGraphicAttributes => {
+                self.show_graphic_attributes ^= true;
+                self.ribbon.set_graphic_attributes(self.show_graphic_attributes);
+                if self.show_graphic_attributes {
+                    self.dock.dock_below_properties(crate::ui::dock::PanelId::GraphicAttributes);
+                } else {
+                    self.graphic_attributes.close_popups();
+                }
+                self.save_config();
                 Task::none()
             }
             Message::ToggleFileTabs => {
@@ -6634,31 +6667,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::RibbonLinetypeChanged(lt) => self.on_ribbon_linetype_changed(lt),
-            Message::RibbonLineweightChanged(lw) => {
-                let i = self.active_tab;
-                self.ribbon.close_dropdown();
-                let handles = self.property_target_handles(i);
-                if handles.is_empty() {
-                    if self.has_property_selection(i) {
-                        return Task::none();
-                    }
-                    // Persist into the tab's header (CELWEIGHT). #21.
-                    self.tabs[i].scene.document.header.current_line_weight = lw.value();
-                    self.tabs[i].dirty = true;
-                    self.ribbon.active_lineweight = lw;
-                } else {
-                    // Lineweight is baked into the cached wire geometry —
-                    // re-tessellate so the change shows immediately (issue #231
-                    // class).
-                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::view::dispatch::apply_line_weight(entity, lw);
-                        }
-                    });
-                    self.ribbon.active_lineweight = lw;
-                }
-                Task::none()
-            }
+            Message::RibbonLineweightChanged(lw) => self.on_ribbon_lineweight_changed(lw),
 
             Message::RibbonStyleChanged { key, name } => self.on_ribbon_style_changed(key, name),
 
@@ -7068,13 +7077,28 @@ impl OpenCADStudio {
             Message::PropAttrCommit(tag) => self.on_prop_attr_commit(tag),
 
             Message::PropPointerPressed => {
-                if !self.dock_panel_visible(crate::ui::dock::PanelId::Properties) {
+                if !self.dock_panel_visible(crate::ui::dock::PanelId::Properties)
+                    && !self.dock_panel_visible(crate::ui::dock::PanelId::GraphicAttributes)
+                {
                     return Task::none();
                 }
                 crate::ui::properties::sync_active_field_task()
             }
 
             Message::PropSyncActive(focused) => {
+                // The Graphic Attributes linetype scale field behaves like a
+                // Properties field: the first click selects its value.
+                let scale_field = iced::widget::Id::new(
+                    crate::ui::window::graphic_attributes::LINETYPE_SCALE_FIELD,
+                );
+                if focused.as_ref() == Some(&scale_field) {
+                    if !std::mem::replace(&mut self.graphic_attributes.linetype_scale_focused, true) {
+                        return iced::widget::operation::select_all(scale_field);
+                    }
+                    return Task::none();
+                }
+                self.graphic_attributes.linetype_scale_focused = false;
+                self.graphic_attributes.linetype_scale_input = None;
                 let panel = &mut self.tabs[self.active_tab].properties;
                 if let Some(id) = focused.as_ref() {
                     if let Some(key) = panel.prop_field_key_for_id(id) {
@@ -9785,6 +9809,7 @@ impl OpenCADStudio {
             Message::PlotDialogOpen => self.on_plot_dialog_open(),
             Message::PlotDlg(m) => self.on_plot_dlg(m),
             Message::BlockPalette(m) => self.on_block_palette(m),
+            Message::GraphicAttributes(m) => self.on_graphic_attributes(m),
             Message::Dock(m) => self.on_dock(m),
             Message::PrintAllOpen => self.on_print_all_open(),
             Message::PrintAllToggle(name) => {
@@ -10943,6 +10968,13 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::OpenColorWindow(target, color) => {
+                if matches!(
+                    target,
+                    crate::app::ColorPickTarget::GraphicAttributesLine
+                        | crate::app::ColorPickTarget::GraphicAttributesSolid
+                ) {
+                    self.graphic_attributes.open_menu = None;
+                }
                 self.color_pick_target = Some((target, color));
 
                 // Always open the shared CAD colour picker on the indexed ACI page.

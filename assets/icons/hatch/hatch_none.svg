@@ -5,7 +5,7 @@
    height="64"
    version="1.1"
    id="svg2"
-   sodipodi:docname="hatch_solid.svg"
+   sodipodi:docname="hatch_none.svg"
    inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -22,9 +22,9 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="18.109375"
-     inkscape:cx="32"
-     inkscape:cy="32"
+     inkscape:zoom="12.805262"
+     inkscape:cx="31.66667"
+     inkscape:cy="32.75997"
      inkscape:window-width="2560"
      inkscape:window-height="1368"
      inkscape:window-x="0"
@@ -32,6 +32,11 @@
      inkscape:window-maximized="1"
      inkscape:current-layer="svg2" />
   <!-- Solid fill -->
+  <path
+     style="fill:none;stroke:#ff0000;stroke-width:1.875;stroke-dasharray:none;stroke-opacity:1"
+     d="M 0,24 24,0"
+     id="path1"
+     sodipodi:nodetypes="cc" />
   <rect
      x="0.9375"
      y="0.9375"
@@ -41,5 +46,5 @@
      stroke-width="2.05714"
      fill="none"
      id="rect2"
-     style="fill:#6db7ed;fill-opacity:1;stroke-width:1.875;stroke-dasharray:none" />
+     style="fill:none;fill-opacity:1;stroke-width:1.875;stroke-dasharray:none" />
 </svg>

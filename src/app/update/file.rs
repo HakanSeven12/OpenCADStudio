@@ -1294,6 +1294,8 @@ impl OpenCADStudio {
                 dock.ensure_settings();
                 dock
             },
+            show_graphic_attributes: self.show_graphic_attributes,
+            graphic_fills_on_current_layer: self.graphic_attributes.fill_on_current_layer,
             annotation_auto_scale: self.annotation_auto_scale,
             ribbon: crate::app::config::RibbonConfig {
                 collapse: self.ribbon.collapse_mode(),
@@ -1352,6 +1354,13 @@ impl OpenCADStudio {
         let mut dock = cfg.dock;
         dock.ensure_settings();
         self.dock = dock;
+        self.show_graphic_attributes = cfg.show_graphic_attributes;
+        self.graphic_attributes.fill_on_current_layer = cfg.graphic_fills_on_current_layer;
+        if self.show_graphic_attributes {
+            self.dock.dock_below_properties(crate::ui::dock::PanelId::GraphicAttributes);
+        }
+        self.ribbon
+            .set_graphic_attributes(self.show_graphic_attributes);
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
         self.ribbon.set_collapse_mode(cfg.ribbon.collapse);
         self.plot_dialog = cfg.plot;

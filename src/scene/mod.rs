@@ -38,6 +38,7 @@ mod dwg_native_constraints;
 mod entity;
 pub use entity::CreateBlockOptions;
 pub use camera_ops::named_view_center;
+pub(crate) use entity::gradient_tint_color;
 #[cfg(test)]
 mod hatch_boundary;
 mod group_layer;

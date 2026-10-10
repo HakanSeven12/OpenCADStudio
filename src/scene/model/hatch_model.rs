@@ -273,6 +273,18 @@ pub struct HatchModel {
 }
 
 impl HatchModel {
+    /// Apply an entity's resolved opacity to every colour stop. Gradient stop
+    /// colours come from the HATCH payload, but transparency remains a common
+    /// entity property and must affect both ends equally.
+    pub(crate) fn set_alpha(&mut self, alpha: f32) {
+        self.color[3] = alpha;
+        if let HatchPattern::Gradient { color2, .. } = &mut self.pattern {
+            color2[3] = alpha;
+        }
+    }
+}
+
+impl HatchModel {
     pub(crate) fn gradient_frame(
         &self,
         angle_deg: f32,

@@ -379,6 +379,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 // dropdown so the dispatched command's new prompt is
                 // immediately visible on the overlay.
                 self.command_line.close_history();
+                if self.awaiting_fill_close_answer() {
+                    let input = std::mem::take(&mut self.command_line.input);
+                    return self.on_graphic_fill_close_input(&input);
+                }
                 // A leading `>` was only a "literal spaces" typing hint (see
                 // CommandSpace) — drop it before the input is interpreted.
                 // Free-form text prompts keep it: there it is content, not a
@@ -1090,6 +1094,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 if !self.command_line.input.trim().is_empty() {
                     return self.update(Message::CommandSubmit);
                 }
+                if self.awaiting_fill_close_answer() {
+                    return self.on_graphic_fill_close_input("");
+                }
                 // A grip edit is not an active CAD command, but its Dynamic Input
                 // fields use the same keyboard path. Route Enter through CommandSubmit,
                 // whose grip branch resolves Distance / Angle and finalizes the edit.
@@ -1145,6 +1152,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
             return Task::none();
         }
         if self.ribbon.escape_extension() {
+            return Task::none();
+        }
+        if self.awaiting_fill_close_answer() {
+            self.graphic_attributes.pending_fill_close = None;
+            self.command_line.push_info(crate::t!("*Cancel*").as_ref());
             return Task::none();
         }
                 // Esc drops an unconsumed one-shot snap override and closes
@@ -2257,6 +2269,32 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 Task::none()
     }
 
+    pub(super) fn on_ribbon_lineweight_changed(&mut self, lw: codec::types::LineWeight) -> Task<Message> {
+        let i = self.active_tab;
+        self.ribbon.close_dropdown();
+        let handles = self.property_target_handles(i);
+        if handles.is_empty() {
+            if self.has_property_selection(i) {
+                return Task::none();
+            }
+            // Persist into the tab's header (CELWEIGHT). #21.
+            self.tabs[i].scene.document.header.current_line_weight = lw.value();
+            self.tabs[i].dirty = true;
+            self.ribbon.active_lineweight = lw;
+        } else {
+            // Lineweight is baked into the cached wire geometry —
+            // re-tessellate so the change shows immediately (issue #231
+            // class).
+            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                    crate::scene::view::dispatch::apply_line_weight(entity, lw);
+                }
+            });
+            self.ribbon.active_lineweight = lw;
+        }
+        Task::none()
+    }
+
     pub(super) fn on_ribbon_linetype_changed(&mut self, lt: String) -> Task<Message> {
                 let i = self.active_tab;
                 self.ribbon.close_dropdown();
@@ -2361,11 +2399,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     pub(super) fn on_prop_hatch_pattern_changed(&mut self, name: String) -> Task<Message> {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
+        self.apply_hatch_pattern(i, &handles, name)
+    }
+
+    pub(super) fn apply_hatch_pattern(
+        &mut self,
+        i: usize,
+        handles: &[codec::Handle],
+        name: String,
+    ) -> Task<Message> {
                 if !handles.is_empty() {
                     use crate::scene::model::hatch_patterns;
                     if let Some(entry) = hatch_patterns::find(&name) {
                         self.push_undo_snapshot(i, "HATCHEDIT");
-                        for &handle in &handles {
+                        for &handle in handles {
                             if let Some(codec::EntityType::Hatch(dxf)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {

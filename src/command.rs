@@ -354,6 +354,46 @@ impl CadCommand for ValuePromptCommand {
     }
 }
 
+/// One-value prompt that preserves spaces and letter casing. This is intended
+/// for symbol names entered through the command line, where a space belongs to
+/// the value instead of submitting the current token.
+pub struct FreeTextValuePromptCommand {
+    name: &'static str,
+    prompt: &'static str,
+}
+
+impl FreeTextValuePromptCommand {
+    pub fn new(name: &'static str, prompt: &'static str) -> Self {
+        Self { name, prompt }
+    }
+}
+
+impl CadCommand for FreeTextValuePromptCommand {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn prompt(&self) -> String {
+        crate::t!(self.prompt).into_owned()
+    }
+
+    fn input_kind(&self) -> InputKind {
+        InputKind::FreeText
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        Some(CmdResult::Dispatch(format!("{} {}", self.name, text.trim())))
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Dispatch(format!("{} ", self.name))
+    }
+}
+
 /// Interactive pick for `UCS FACE` and `UCS OBJECT`.
 ///
 /// Hands the picked entity to the inline `UCS FACE <handle> <x,y,z>` /

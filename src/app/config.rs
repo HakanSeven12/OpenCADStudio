@@ -30,6 +30,11 @@ pub struct AppConfig {
     /// General edge-stack dock layout (which panels are docked, side, order,
     /// width and auto-collapse) for the Properties panel and block palette.
     pub dock: crate::ui::dock::DockState,
+    /// Whether the optional Graphic Attributes palette is visible.
+    pub show_graphic_attributes: bool,
+    /// Graphic Attributes creates fills on the current layer instead of the
+    /// layer of the filled object.
+    pub graphic_fills_on_current_layer: bool,
     /// Add a newly selected annotation scale to existing annotative objects.
     pub annotation_auto_scale: i8,
     /// Ribbon collapse density.
@@ -52,6 +57,8 @@ impl Default for AppConfig {
             start: StartConfig::default(),
             statusbar: StatusBarConfig::default(),
             dock: crate::ui::dock::DockState::default(),
+            show_graphic_attributes: false,
+            graphic_fills_on_current_layer: false,
             annotation_auto_scale: -4,
             ribbon: RibbonConfig::default(),
             plot: PlotDialogState::default(),
@@ -605,6 +612,18 @@ mod tests {
         assert_eq!(deserialized.model_space.grid_opacity, 45);
         assert_eq!(deserialized.model_space.selection_opacity, 35);
         assert_eq!(deserialized.model_space.selection_window_color, 5);
+    }
+
+    #[test]
+    fn graphic_attributes_visibility_defaults_off_and_round_trips() {
+        let missing: AppConfig = serde_json::from_str("{}").expect("deserialize old config");
+        assert!(!missing.show_graphic_attributes);
+
+        let mut original = AppConfig::default();
+        original.show_graphic_attributes = true;
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.show_graphic_attributes);
     }
 
     #[test]

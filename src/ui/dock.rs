@@ -40,6 +40,7 @@ pub enum DockMsg {
 #[serde(rename_all = "snake_case")]
 pub enum PanelId {
     Properties,
+    GraphicAttributes,
     BlockPalette,
     ExternalReferences,
     /// Outline of the drawing's origin planes, open sketch and solid bodies.
@@ -59,6 +60,7 @@ impl PanelId {
     pub fn title(self) -> &'static str {
         match self {
             PanelId::Properties => "Properties",
+            PanelId::GraphicAttributes => "Graphic Attributes",
             PanelId::BlockPalette => "Block Palette",
             PanelId::ExternalReferences => "External References",
             PanelId::Browser => "Browser",
@@ -73,6 +75,7 @@ impl PanelId {
     fn default_width(self) -> f32 {
         match self {
             PanelId::Properties => 250.0,
+            PanelId::GraphicAttributes => 250.0,
             PanelId::BlockPalette => 260.0,
             PanelId::ExternalReferences => 460.0,
             PanelId::Browser => 230.0,
@@ -165,6 +168,7 @@ impl DockState {
     pub fn ensure_settings(&mut self) {
         for id in [
             PanelId::Properties,
+            PanelId::GraphicAttributes,
             PanelId::BlockPalette,
             PanelId::ExternalReferences,
             PanelId::Browser,
@@ -175,6 +179,18 @@ impl DockState {
         ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }
+    }
+
+    /// Dock `id` directly below Properties (or at the end of the left edge)
+    /// unless it already has a place, which is then kept.
+    pub fn dock_below_properties(&mut self, id: PanelId) {
+        if self.location(id).is_some() {
+            return;
+        }
+        let (side, index) = self
+            .location(PanelId::Properties)
+            .map_or((DockSide::Left, usize::MAX), |(side, index)| (side, index + 1));
+        self.dock(id, side, index);
     }
 
     /// Where (if anywhere) a panel is currently docked.
@@ -398,6 +414,7 @@ mod tests {
         let mut state = DockState::default();
         state.ensure_settings();
         assert_eq!(state.width(PanelId::Properties, 1600.0), 250.0);
+        assert_eq!(state.width(PanelId::GraphicAttributes, 1600.0), 250.0);
         assert_eq!(state.width(PanelId::BlockPalette, 1600.0), 260.0);
         assert!(!state.auto_collapse(PanelId::Properties));
     }

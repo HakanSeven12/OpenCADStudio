@@ -602,6 +602,12 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         self.show_properties = false;
                         self.ribbon.set_properties(false);
                     }
+                    PanelId::GraphicAttributes => {
+                        self.show_graphic_attributes = false;
+                        self.ribbon.set_graphic_attributes(false);
+                        self.graphic_attributes.close_popups();
+                        self.save_config();
+                    }
                 }
                 if self.dock_expanded == Some(id) {
                     self.dock_expanded = None;
@@ -698,6 +704,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         }
         match id {
             PanelId::Properties => self.show_properties,
+            PanelId::GraphicAttributes => self.show_graphic_attributes,
             PanelId::BlockPalette => self.show_block_palette,
             PanelId::ExternalReferences => self.show_external_references,
             PanelId::Browser => self.show_browser,

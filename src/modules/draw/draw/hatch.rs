@@ -261,6 +261,13 @@ impl HatchCommand {
 
     pub fn with_origin(mut self, origin: [f64; 2]) -> Self { self.default_origin = origin; self }
 
+    pub fn with_pattern(mut self, name: impl Into<String>, pattern: HatchPattern) -> Self {
+        self.pattern_override = Some((name.into(), pattern));
+        self
+    }
+
+    pub fn finish_selected(mut self) -> CmdResult { self.on_enter() }
+
     fn set_object_selection(&mut self, handles: Vec<Handle>) {
         let mut segments = Vec::new();
         for handle in &handles {

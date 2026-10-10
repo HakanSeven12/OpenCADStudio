@@ -1891,6 +1891,7 @@ bg={bg_ms:.1}ms n={view_count}"
             }
             match id {
                 crate::ui::dock::PanelId::Properties => self.show_properties,
+                crate::ui::dock::PanelId::GraphicAttributes => self.show_graphic_attributes,
                 crate::ui::dock::PanelId::BlockPalette => self.show_block_palette,
                 crate::ui::dock::PanelId::ExternalReferences => self.show_external_references,
                 crate::ui::dock::PanelId::Browser => self.show_browser,
@@ -3030,6 +3031,20 @@ impl OpenCADStudio {
         let auto_collapse = self.dock.auto_collapse(id);
         let panel: Element<'_, Message> = match id {
             crate::ui::dock::PanelId::Properties => tab.properties.view(width, auto_collapse),
+            crate::ui::dock::PanelId::GraphicAttributes => {
+                crate::ui::window::graphic_attributes::view(
+                    &self.graphic_attributes,
+                    &tab.scene,
+                    &tab.properties,
+                    width,
+                    auto_collapse,
+                    side,
+                    matches!(
+                        self.color_pick_target,
+                        Some((crate::app::ColorPickTarget::Gradient(_), _))
+                    ),
+                )
+            }
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, auto_collapse)
             }

@@ -663,7 +663,7 @@ pub fn prepare_xref_definition(
         anonymous: false,
         has_attributes: false,
         is_external: false,
-        // A freshly attached reference is loaded; UNLOAD flips this later.
+        // The reference is being attached now: it is loaded.
         is_xref_unloaded: false,
     };
     br.xref_path = store_path.clone();

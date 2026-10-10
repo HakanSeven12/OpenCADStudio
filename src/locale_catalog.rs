@@ -2309,7 +2309,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Override Center X" => Some(("properties", "override-center-x")),
         "Override Center Y" => Some(("properties", "override-center-y")),
         "Override Center Z" => Some(("properties", "override-center-z")),
-        "Override Option" => Some(("properties", "override-option")),
         "Overwrite" => Some(("common", "overwrite")),
         "PAN ended." => Some(("command", "pan-ended")),
         "PAN: drag with the left mouse button. Press Esc to exit." => Some(("view", "pan-drag-with-the-left-mouse-button-press-esc")),

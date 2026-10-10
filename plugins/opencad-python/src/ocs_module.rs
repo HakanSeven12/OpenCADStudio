@@ -4249,6 +4249,25 @@ mod ocs {
     }
 
     include!(concat!(env!("OUT_DIR"), "/entity_crud.rs"));
+
+/// The fork codec's authored-leader convention (see the coverage
+/// validator): a typed leader always pairs with its annotation, and a bare
+/// constructed leader deliberately defaults to `NoAnnotation` (authored
+/// wires only pair a typed leader with a real annotation slot). A dict
+/// that carries an annotation handle says which kind it means: infer
+/// `WithText` when the caller left `creation_type` at the default.
+fn infer_leader_annotation(built: &mut codec::EntityType) {
+    if let codec::EntityType::Leader(leader) = built {
+        if !leader.annotation_handle.is_null()
+            && matches!(
+                leader.creation_type,
+                codec::entities::LeaderCreationType::NoAnnotation
+            )
+        {
+            leader.creation_type = codec::entities::LeaderCreationType::WithText;
+        }
+    }
+}
     include!("dimension_model.rs.inc");
     include!("patch_helpers.rs.inc");
 
@@ -4504,7 +4523,8 @@ mod ocs {
     #[pyfunction]
     fn add(entity: PyObjectRef, vm: &VirtualMachine) -> PyResult<u64> {
         let dict = entity.try_into_value::<rustpython_vm::builtins::PyDictRef>(vm)?;
-        let built = dict_to_entity(&dict, vm)?;
+        let mut built = dict_to_entity(&dict, vm)?;
+        infer_leader_annotation(&mut built);
         #[cfg(feature = "experimental-host-model")]
         ocs_plugin_api::entity_coverage::validate_new_canvas_entity(&built)
             .map_err(|error| vm.new_value_error(error))?;
@@ -4532,6 +4552,7 @@ mod ocs {
     fn add_to_block(block: String, entity: PyObjectRef, vm: &VirtualMachine) -> PyResult<u64> {
         let dict = entity.try_into_value::<rustpython_vm::builtins::PyDictRef>(vm)?;
         let mut built = dict_to_entity(&dict, vm)?;
+        infer_leader_annotation(&mut built);
         let result = host_ctx::with_host(|host| -> PyResult<Result<Handle, String>> {
             let owner = host
                 .document()
@@ -4565,6 +4586,7 @@ mod ocs {
             };
             #[allow(unused_mut)]
             let mut updated = apply_dict_to_entity(&existing, &dict, vm)?;
+            infer_leader_annotation(&mut updated);
             #[cfg(feature = "experimental-host-model")]
             {
                 ocs_plugin_api::entity_coverage::bind_canvas_entity_references(

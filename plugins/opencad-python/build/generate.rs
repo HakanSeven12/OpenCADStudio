@@ -305,6 +305,14 @@ fn native_rust_type(type_id: &str) -> &'static str {
 fn type_path(name: &str) -> String {
     match name {
         "LineWeight" => "codec::types::LineWeight".to_owned(),
+        // Lives at `codec::types` in every codec generation; the registry
+        // pulls it in through the header/raw-record shapes.
+        "DxfVersion" => "codec::types::DxfVersion".to_owned(),
+        // The fork codec's raw color carrier (the gold header fidelity
+        // work) lives in the document module; the registry only carries it
+        // when the resolved codec defines it, so the mapping is inert
+        // against a codec without the type.
+        "DwgRawCmc" => "codec::document::DwgRawCmc".to_owned(),
         "LeaderLineBreakInfo" => "codec::entities::multileader::LeaderLineBreakInfo".to_owned(),
         _ => format!("codec::entities::{name}"),
     }

@@ -350,6 +350,9 @@ fn register_context_class(doc: &mut CadDocument, dxf_name: &str) {
         is_an_entity: false,
         class_number: 0,
         item_class_id: 0x1F3,
+        // Gold-shadow capture record (§19 H5b): constructed classes carry
+        // no gold-decode record, so this reader's own is_an_entity applies.
+        gold_shadow: None,
         dwg_version: 0,
         maintenance_version: 0,
         unknown1: 0,

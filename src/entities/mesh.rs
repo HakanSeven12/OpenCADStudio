@@ -1406,10 +1406,6 @@ impl PropertyEditable for Mesh {
                         .count()
                         .to_string(),
                 ),
-                ro(t!("Override Option").as_ref(),
-                    "msh_override",
-                    self.override_option.to_string(),
-                ),
                 ro(t!("Number of Grips").as_ref(), "msh_grips", self.vertices.len().to_string()),
                 ro(t!("Watertight").as_ref(),
                     "msh_watertight",

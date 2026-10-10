@@ -3171,6 +3171,618 @@ mod tests {
     }
 
     #[test]
+    fn a_constructed_cylinder_saves_the_authored_vertex_genus() {
+        // Regression for the BricsCAD AUDIT failure ("Modeling operation
+        // error: Data stream is empty" on the committed cylinder): the
+        // SAT kernel appends carries the classic three-token vertex;
+        // the ASM modeler requires the authored four-token form with the
+        // edge-role token. The repair lives in acis_export::solid_to_sat;
+        // this test drives the whole path — CYLINDER command, commit,
+        // DWG save — and re-reads the AcDs SAB blob the way the modeler
+        // does.
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+        let run = app.automation_op(r#"{"op":"run","cmd":"CYLINDER 0,0,0 1,0,0 0,0,1"}"#);
+        assert_eq!(run["ok"], true, "cylinder run failed: {}", run["error"]);
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs_cylinder_genus_{}.dwg",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let p = path.to_string_lossy().replace('\\', "\\\\");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#));
+        assert_eq!(saved["ok"], true, "save failed: {}", saved["error"]);
+        drop(app);
+
+        let mut reader = codec::DwgReader::from_file(&path).unwrap();
+        let outcome = reader.read_with_stats().unwrap();
+        let solids: Vec<_> = outcome
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                codec::entities::EntityType::Solid3D(solid) => Some(solid.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(solids.len(), 1, "the committed cylinder must survive save");
+        let solid = &solids[0];
+        assert!(
+            solid.common.has_ds_data,
+            "R2013+ solids must pair with an AcDs blob"
+        );
+        assert!(!solid.acis_data.sab_data.is_empty());
+        let sat = codec::entities::acis::SabReader::read(&solid.acis_data.sab_data).unwrap();
+        let vertices: Vec<_> = sat
+            .records
+            .iter()
+            .filter(|record| record.entity_type == "vertex")
+            .collect();
+        assert!(!vertices.is_empty(), "the seamed cylinder has seam vertices");
+        for vertex in &vertices {
+            assert_eq!(
+                vertex.tokens.len(),
+                4,
+                "authored vertex genus `vertex $attr $-1 $edge <role> $point`: {:?}",
+                vertex.tokens
+            );
+        }
+
+        let sidecar = path.with_file_name(format!(
+            ".{}.ocs.lock",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The OCS↔AutoCAD geometry agreement, per primitive family: the
+    /// solid AutoCAD regrows from the editable history node — the local
+    /// primitive centred on the frame origin, placed by the node
+    /// transform, the authored `sh_history` genus — must sit exactly
+    /// where OCS placed the B-rep. The node's world-centre convention
+    /// is carried by the codec's write/read centre shift pair, so the
+    /// re-read model frame applied to the family's local centre names
+    /// the regrown solid's centre; it must equal the drawn centre.
+    ///
+    /// Regression for the 2026-10-05 geometry discrepancy: a cylinder
+    /// drawn at base (0,0,0) showed (0,0,-1) in AutoCAD's geometry
+    /// section because the node transform carried the base instead of
+    /// the centre. Every family is drawn at a non-origin placement —
+    /// identity transforms masked the bug.
+    #[test]
+    fn every_family_s_editable_history_sits_on_the_drawn_geometry() {
+        use codec::entities::EntityType;
+        use codec::objects::SolidHistoryOperation;
+
+        // (command, family, drawn world centre)
+        let cases: &[(&str, &str, [f64; 3])] = &[
+            ("CYLINDER 10,5,2 5 10", "Cylinder", [10.0, 5.0, 7.0]),
+            ("BOX 20,0,0 30,10,0 10", "Box", [25.0, 5.0, 5.0]),
+            ("WEDGE 40,0,0 50,10,0 8", "Wedge", [45.0, 5.0, 4.0]),
+            ("CONE 60,0,0 5 12", "Cone", [60.0, 0.0, 6.0]),
+            ("SPHERE 80,0,0 6", "Sphere", [80.0, 0.0, 0.0]),
+            ("TORUS 100,0,0 8 2", "Torus", [100.0, 0.0, 0.0]),
+            ("PYRAMID 120,0,0 6 10", "Pyramid", [120.0, 0.0, 5.0]),
+        ];
+
+        for (command, family, expected) in cases {
+            let mut app = OpenCADStudio::new_for_test();
+            assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+            let run = app.automation_op(&format!(r#"{{"op":"run","cmd":"{command}"}}"#));
+            assert_eq!(run["ok"], true, "{family} run failed: {}", run["error"]);
+
+            let path = std::env::temp_dir().join(format!(
+                "ocs_geom_agreement_{}_{}.dwg",
+                family,
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let p = path.to_string_lossy().replace('\\', "\\\\");
+            let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#));
+            assert_eq!(saved["ok"], true, "{family} save failed: {}", saved["error"]);
+            drop(app);
+
+            let mut reader = codec::DwgReader::from_file(&path).unwrap();
+            let outcome = reader.read_with_stats().unwrap();
+            let document = outcome.document;
+            let solid = document
+                .entities()
+                .find_map(|entity| match entity {
+                    EntityType::Solid3D(solid) => Some(solid.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{family}: no solid survived the save"));
+            let operations = document
+                .solid_history_operations(solid.common.handle)
+                .unwrap_or_else(|| panic!("{family}: the history tree did not survive"));
+            assert_eq!(operations.len(), 1, "{family}: exactly one step");
+
+            // The authored wire carries the solid's world centre in the frame
+            // translation; the hosts anchor Cylinder, Cone and Pyramid
+            // frames at the base centre, so the offset lifts those families
+            // onto the drawn geometry.
+            let local_center = match &operations[0] {
+                SolidHistoryOperation::Box(_) | SolidHistoryOperation::Wedge(_) => [0.0; 3],
+                SolidHistoryOperation::Cylinder(value) => [0.0, 0.0, value.height * 0.5],
+                SolidHistoryOperation::Cone(value) => [0.0, 0.0, value.height * 0.5],
+                SolidHistoryOperation::Pyramid(value) => [0.0, 0.0, value.height * 0.5],
+                SolidHistoryOperation::Sphere(_) | SolidHistoryOperation::Torus(_) => [0.0; 3],
+                other => panic!("{family}: unexpected operation {other:?}"),
+            };
+            let base = operations[0]
+                .base()
+                .unwrap_or_else(|| panic!("{family}: the node carries no base"));
+            let frame = glam::DMat4::from_cols_array(&base.transform);
+            let regrown = frame.transform_point3(glam::DVec3::from(local_center));
+            for axis in 0..3 {
+                assert!(
+                    (regrown[axis] - expected[axis]).abs() < 1e-9,
+                    "{family}: the editable-history interpretation places the solid at \
+                     {regrown}, but it was drawn centred at {expected:?} — OCS and \
+                     AutoCAD would disagree about this solid's geometry"
+                );
+            }
+
+            let sidecar = path.with_file_name(format!(
+                ".{}.ocs.lock",
+                path.file_name().unwrap().to_string_lossy()
+            ));
+            let _ = std::fs::remove_file(sidecar);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    /// The OCS->DWG entity battery: every entity class the application
+    /// can author is drawn through its real command path (or, for the
+    /// editor-gated classes, through the same builder + commit path the
+    /// commands use), saved once, and re-read -- asserting per class
+    /// that it survives the round trip, keeps its class identity, and
+    /// carries its definition wiring and key fields.
+    ///
+    /// The 2026-10-02 manual battery round found three real bugs on
+    /// exactly this surface (unwired AcDbSectionViewStyle / PDF
+    /// definition objects, the OLE synthesis form), so this pins the
+    /// whole authoring surface as a regression guard: a writer change
+    /// that drops or corrupts any class fails here, not in the field.
+    #[test]
+    fn all_supported_entities_write_to_dwg_and_survive_reload() {
+        use codec::entities::EntityType;
+        use codec::objects::ObjectType;
+        use std::collections::BTreeMap;
+
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+
+        // Runs a command and asserts it completed and added entities.
+        let run = |app: &mut OpenCADStudio, cmd: &str| {
+            let r = app.automation_op(&format!(r#"{{"op":"run","cmd":"{cmd}"}}"#));
+            assert_eq!(r["ok"], true, "{cmd}: {}", r["error"]);
+            assert_eq!(
+                r["status"], "completed",
+                "{cmd}: blocked by {:?}",
+                r["blocked_by"]
+            );
+            assert!(r["added"].as_i64().unwrap_or(0) >= 1, "{cmd}: added nothing");
+        };
+
+        // -- the command-authored classes, spread along +X --
+        run(&mut app, "LINE 0,0 10,0");
+        run(&mut app, "CIRCLE 20,5 3");
+        run(&mut app, "ARC C 40,0 45,0 40,5");
+        run(&mut app, "POINT 60,0");
+        run(&mut app, "TEXT 70,0 5 0 Hello");
+        run(&mut app, "PLINE 80,0 90,0 90,10");
+        run(&mut app, "RAY 100,0 105,0");
+        run(&mut app, "XLINE 110,0 115,5");
+        run(&mut app, "MLINE 120,0 130,10");
+        run(&mut app, "SPLINE 140,0 145,5 150,0");
+        run(&mut app, "SOLID 160,0 170,0 160,10 170,10");
+        run(&mut app, "3DPOLY 180,0,0 190,0,0 190,10,0");
+        run(&mut app, "ELLIPSE 200,0 210,0 5");
+        run(&mut app, "DONUT 0 2 220,5");
+        run(&mut app, "WIPEOUT 230,0 240,0 240,10 230,10");
+        run(&mut app, "DIMLINEAR 250,0 260,0 255,5");
+        run(&mut app, "DIMANGULAR 270,0 275,0 270,5 273,3");
+        run(&mut app, "DIMORDINATE 280,0 280,8");
+        run(&mut app, "RECTANG 320,0 330,10");
+        run(&mut app, "HATCH 325,5");
+        run(&mut app, "BOX 400,0,0 410,10,0 10");
+
+        // MLEADER commits its entity and leaves the in-place text editor
+        // open for the content -- the leader geometry is what the round
+        // trip carries.
+        let r = app.automation_op(r#"{"op":"run","cmd":"MLEADER 340,0 345,5"}"#);
+        assert_eq!(r["ok"], true);
+        assert_eq!(r["added"].as_i64(), Some(1), "the leader entity commits");
+
+        // -- the radial dimensions pick the circle by handle --
+        let query = app.automation_op(r#"{"op":"query","type":"Circle"}"#);
+        let circle_handle = query["entities"]
+            .as_array()
+            .and_then(|list| list.first())
+            .and_then(|entry| entry["handle"].as_str())
+            .expect("the circle to dimension")
+            .to_string();
+        run(&mut app, &format!("DIMRADIUS {circle_handle} 300,5"));
+        run(&mut app, &format!("DIMDIAMETER {circle_handle} 310,5"));
+
+        // -- the block flow: definition from a selected line, then a
+        // reference. BLOCK converts its selection into a reference at
+        // the base point (the reference application's own default), so
+        // the flow yields two inserts.
+        run(&mut app, "LINE 350,0 355,0");
+        let query = app.automation_op(r#"{"op":"query","type":"Line"}"#);
+        let bat_line = query["entities"]
+            .as_array()
+            .expect("the line query")
+            .iter()
+            .find_map(|entry| {
+                let at_source = entry["start"]
+                    .as_array()
+                    .and_then(|start| start.first())
+                    .and_then(|x| x.as_f64())
+                    .is_some_and(|x| x == 350.0);
+                if at_source {
+                    entry["handle"].as_str().map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .expect("the block source line");
+        let selected = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{bat_line}"]}}"#
+        ));
+        assert_eq!(selected["ok"], true);
+        run(&mut app, "-BLOCK BAT 352,0");
+        run(&mut app, "-INSERT BAT 360,10 1 1 0");
+
+        // -- the two editor-gated classes, through the same builders and
+        // the same commit path their commands use --
+        let mut mtext = codec::entities::MText::new();
+        mtext.value = "MText programmatic".to_string();
+        mtext.insertion_point = codec::types::Vector3::new(370.0, 0.0, 0.0);
+        mtext.height = 2.5;
+        mtext.rectangle_width = 20.0;
+        mtext.style = "Standard".to_string();
+        let committed = app
+            .commit_entity_handle(EntityType::MText(mtext))
+            .expect("the mtext commits");
+        assert!(!committed.is_null());
+
+        let mut table = codec::entities::TableBuilder::new(2, 2)
+            .at(codec::types::Vector3::new(380.0, 0.0, 0.0))
+            .row_height(8.0)
+            .column_width(40.0)
+            .build();
+        assert!(table.set_cell_text(0, 0, "cell 0-0"));
+        assert!(table.set_cell_text(1, 1, "cell 1-1"));
+        let committed = app
+            .commit_entity_handle(EntityType::Table(Box::new(table)))
+            .expect("the table commits");
+        assert!(!committed.is_null());
+
+        // -- save, and read the file back the way a loader does --
+        // The authored handles, captured before the save: the save path
+        // stamps the template's paper-space frame into the file (the
+        // title block, its lines/solids/texts), so the reload census
+        // scopes to exactly what this test authored.
+        let i = app.active_tab;
+        let authored: std::collections::HashSet<u64> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle.value())
+            .collect();
+        // The upstream block flow keeps the block source entities and
+        // places its insert, so the census counts them too.
+        assert_eq!(authored.len(), 38, "the authored entity census before save");
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs_all_entities_{}.dwg",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let p = path.to_string_lossy().replace('\\', "\\\\");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#));
+        assert_eq!(saved["ok"], true, "save failed: {}", saved["error"]);
+        drop(app);
+
+        let mut reader = codec::DwgReader::from_file(&path).unwrap();
+        let outcome = reader.read_with_stats().unwrap();
+        let document = outcome.document;
+        // Every authored entity must survive with its handle intact.
+        let re_read: std::collections::HashSet<u64> = document
+            .entities()
+            .map(|entity| entity.common().handle.value())
+            .collect();
+        for handle in &authored {
+            assert!(
+                re_read.contains(handle),
+                "entity 0x{handle:X} did not survive the save/reload"
+            );
+        }
+        let entities: Vec<_> = document
+            .entities()
+            .filter(|entity| authored.contains(&entity.common().handle.value()))
+            .collect();
+
+        // The census: every authored class survives, exactly as drawn.
+        // The second Line is the block definition's source, stored in the
+        // definition's local frame; the second Insert is BLOCK's own
+        // conversion of its selection.
+        let mut census: BTreeMap<&'static str, usize> = BTreeMap::new();
+        let mut bump = |name: &'static str, census: &mut BTreeMap<&'static str, usize>| {
+            *census.entry(name).or_default() += 1;
+        };
+        for entity in &entities {
+            match entity {
+                EntityType::Line(_) => bump("Line", &mut census),
+                EntityType::Circle(_) => bump("Circle", &mut census),
+                EntityType::Arc(_) => bump("Arc", &mut census),
+                EntityType::Point(_) => bump("Point", &mut census),
+                EntityType::Text(_) => bump("Text", &mut census),
+                EntityType::MText(_) => bump("MText", &mut census),
+                EntityType::LwPolyline(_) => bump("LwPolyline", &mut census),
+                EntityType::Ray(_) => bump("Ray", &mut census),
+                EntityType::XLine(_) => bump("XLine", &mut census),
+                EntityType::MLine(_) => bump("MLine", &mut census),
+                EntityType::Spline(_) => bump("Spline", &mut census),
+                EntityType::Solid(_) => bump("Solid", &mut census),
+                EntityType::Polyline3D(_) => bump("Polyline3D", &mut census),
+                EntityType::Ellipse(_) => bump("Ellipse", &mut census),
+                EntityType::Wipeout(_) => bump("Wipeout", &mut census),
+                EntityType::Dimension(_) => bump("Dimension", &mut census),
+                EntityType::Hatch(_) => bump("Hatch", &mut census),
+                EntityType::MultiLeader(_) => bump("MultiLeader", &mut census),
+                EntityType::Insert(_) => bump("Insert", &mut census),
+                EntityType::Block(_) => bump("Block", &mut census),
+                EntityType::BlockEnd(_) => bump("BlockEnd", &mut census),
+                EntityType::Table(_) => bump("Table", &mut census),
+                EntityType::Solid3D(_) => bump("Solid3D", &mut census),
+                other => panic!("unexpected entity class: {other:?}"),
+            }
+        }
+        let expected_census: &[(&'static str, usize)] = &[
+            ("Line", 9), // 2 authored + the table borders
+            ("Circle", 1),
+            ("Arc", 1),
+            ("Point", 1),
+            ("Text", 1),
+            ("MText", 3), // 1 authored + the table cell texts
+            ("LwPolyline", 3), // the pline, the donut, the rectangle
+            ("Ray", 1),
+            ("XLine", 1),
+            ("MLine", 1),
+            ("Spline", 1),
+            ("Solid", 1),
+            ("Polyline3D", 1),
+            ("Ellipse", 1),
+            ("Wipeout", 1),
+            ("Dimension", 5),
+            ("Hatch", 1),
+            ("MultiLeader", 1),
+            // BLOCK converts its selection into a reference at the base
+            // point (the reference application's own default), and the
+            // explicit INSERT adds a second one.
+            ("Insert", 2),
+            ("Table", 1),
+            ("Solid3D", 1),
+        ];
+        for (name, count) in expected_census {
+            assert_eq!(
+                census.get(name).copied().unwrap_or(0),
+                *count,
+                "{name}: expected {count} in the re-read file, census is {census:?}"
+            );
+        }
+
+        // The per-class key fields and definition wiring.
+        let mut dimension_types: Vec<(&'static str, f64)> = Vec::new();
+        for entity in &entities {
+            match entity {
+                EntityType::Line(value) if value.start.x == -2.0 => {
+                    // the block definition's source line, in the
+                    // definition's local frame: the base point
+                    // (352,0) is subtracted from the drawn world
+                    // coordinates, exactly as the reference
+                    // application stores block content.
+                    assert_eq!(value.end, codec::types::Vector3::new(3.0, 0.0, 0.0));
+                }
+                EntityType::Line(value) if value.start.x == 0.0 && (value.end.x - 10.0).abs() < 1e-6 => {
+                    // the model-space line, in world coordinates.
+                    assert_eq!(value.start, codec::types::Vector3::new(0.0, 0.0, 0.0));
+                    assert_eq!(value.end, codec::types::Vector3::new(10.0, 0.0, 0.0));
+                }
+                EntityType::Line(_) => {
+                    // The kept block source (world 350..355) and the
+                    // table-commit borders round-trip via the census.
+                }
+                EntityType::Circle(value) => {
+                    assert_eq!(value.center, codec::types::Vector3::new(20.0, 5.0, 0.0));
+                    assert!((value.radius - 3.0).abs() < 1e-9);
+                }
+                EntityType::Arc(value) => {
+                    assert_eq!(value.center, codec::types::Vector3::new(40.0, 0.0, 0.0));
+                    assert!((value.radius - 5.0).abs() < 1e-9);
+                }
+                EntityType::Point(value) => {
+                    assert_eq!(value.location, codec::types::Vector3::new(60.0, 0.0, 0.0));
+                }
+                EntityType::Text(value) => {
+                    assert_eq!(value.value, "Hello");
+                }
+                EntityType::MText(value) if value.insertion_point.x == 370.0 => {
+                // the reload loop checks them via the table itself.
+                    assert_eq!(value.value, "MText programmatic");
+                    assert_eq!(
+                        value.insertion_point,
+                        codec::types::Vector3::new(370.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::LwPolyline(value) => {
+                    // The pline: 3 open vertices; the donut and the
+                    // rectangle: closed.
+                    if value.vertices.len() == 3 {
+                        assert!(!value.is_closed, "the pline is open");
+                    } else {
+                        assert!(value.is_closed, "donut and rectangle are closed");
+                    }
+                }
+                EntityType::Ray(value) => {
+                    assert_eq!(
+                        value.base_point,
+                        codec::types::Vector3::new(100.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::XLine(value) => {
+                    assert_eq!(
+                        value.base_point,
+                        codec::types::Vector3::new(110.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::MLine(value) => {
+                    assert_eq!(
+                        value.start_point,
+                        codec::types::Vector3::new(120.0, 0.0, 0.0)
+                    );
+                    // Definition wiring: the style handle must resolve to
+                    // a real MLineStyle object.
+                    let style = value
+                        .style_handle
+                        .filter(|handle| handle.is_valid())
+                        .expect("the mline carries a style handle");
+                    assert!(document.objects.contains_key(&style));
+                    assert!(matches!(
+                        document.objects.get(&style),
+                        Some(ObjectType::MLineStyle(_))
+                    ));
+                }
+                EntityType::Spline(value) => {
+                    assert!(
+                        value.fit_points.len() >= 3 || value.control_points.len() >= 3,
+                        "the spline carries its defining points"
+                    );
+                }
+                EntityType::Solid(value) => {
+                    assert_eq!(
+                        value.first_corner,
+                        codec::types::Vector3::new(160.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::Polyline3D(value) => {
+                    assert_eq!(value.vertices.len(), 3);
+                }
+                EntityType::Ellipse(value) => {
+                    assert_eq!(value.center, codec::types::Vector3::new(200.0, 0.0, 0.0));
+                    assert!((value.minor_axis_ratio - 0.5).abs() < 1e-9);
+                }
+                EntityType::Dimension(value) => {
+                    let kind = match value {
+                        codec::entities::Dimension::Aligned(_) => "aligned",
+                        codec::entities::Dimension::Linear(_) => "linear",
+                        codec::entities::Dimension::Radius(_) => "radius",
+                        codec::entities::Dimension::Diameter(_) => "diameter",
+                        codec::entities::Dimension::Angular2Ln(_)
+                        | codec::entities::Dimension::Angular3Pt(_) => "angular",
+                        codec::entities::Dimension::Ordinate(_) => "ordinate",
+                        codec::entities::Dimension::Arc(_) => "arc",
+                        codec::entities::Dimension::LargeRadial(_) => "large-radial",
+                    };
+                    dimension_types.push((kind, value.base().actual_measurement));
+                }
+                EntityType::Hatch(value) => {
+                    assert!(
+                        !value.paths.is_empty(),
+                        "the hatch carries its boundary"
+                    );
+                }
+                EntityType::MultiLeader(value) => {
+                    let style = value
+                        .style_handle
+                        .filter(|handle| handle.is_valid())
+                        .expect("the multileader carries a style handle");
+                    assert!(document.objects.contains_key(&style));
+                }
+                EntityType::Insert(value) => {
+                    assert_eq!(
+                        value.block_name, "BAT",
+                        "every reference names the authored definition"
+                    );
+                    assert!(
+                        document.block_records.iter().any(|record| {
+                            record.name.eq_ignore_ascii_case("BAT")
+                        }),
+                        "the referenced block definition exists"
+                    );
+                    // One reference at the block's base point (BLOCK's
+                    // conversion of its selection), one at the drawn
+                    // insertion point.
+                    let at_base =
+                        value.insert_point == codec::types::Vector3::new(352.0, 0.0, 0.0);
+                    let at_drawn =
+                        value.insert_point == codec::types::Vector3::new(360.0, 10.0, 0.0);
+                    assert!(
+                        at_base || at_drawn,
+                        "unexpected reference placement {:?}",
+                        value.insert_point
+                    );
+                }
+                EntityType::Table(value) => {
+                    assert_eq!(value.rows.len(), 2);
+                    assert_eq!(value.cell_text(0, 0), Some("cell 0-0"));
+                    assert_eq!(value.cell_text(1, 1), Some("cell 1-1"));
+                }
+                _ => {}
+            }
+        }
+
+        // The dimension family: one of each authored subtype, with the
+        // measured values the drawn geometry implies.
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "linear").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "radius").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "diameter").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "ordinate").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "angular").count(),
+            1
+        );
+        for (kind, measurement) in &dimension_types {
+            let expected = match *kind {
+                "linear" => Some(10.0),
+                "radius" => Some(3.0),
+                "diameter" => Some(6.0),
+                _ => None,
+            };
+            if let Some(expected) = expected {
+                assert!(
+                    (measurement - expected).abs() < 1e-6,
+                    "{kind} dimension measures {measurement}, expected {expected}"
+                );
+            }
+        }
+
+        let sidecar = path.with_file_name(format!(
+            ".{}.ocs.lock",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn save_then_open_round_trips() {
         let mut app = OpenCADStudio::new_for_test();
         let path =

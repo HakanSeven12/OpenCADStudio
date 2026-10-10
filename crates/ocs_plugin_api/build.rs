@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+﻿use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -53,9 +53,9 @@ fn main() {
     println!("cargo:rerun-if-changed=src/entity_coverage_types.rs");
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Type registry
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 fn generate_type_registry(out_dir: &Path) {
     let mut tracer = Tracer::new(TracerConfig::default());
@@ -170,6 +170,13 @@ fn generate_type_registry(out_dir: &Path) {
             "AssocEvalValue",
             trace_simple::<codec::objects::AssocEvalValue>,
         ),
+        // `AssocCompositeSegment` and `AssocSubcurve` are fork-codec
+        // additions (the H8h raw-capture subcurve model); the upstream
+        // codec carries only `AssocSubcurveKind`, and this branch must
+        // build against both (the fork pins now, upstream after the codec
+        // PR merges). The nested trace from `AssociativeData` records
+        // them on the fork codec; the explicit seeds stay out so the
+        // build script compiles against either codec.
         (
             "AssocSubcurveKind",
             trace_simple::<codec::objects::AssocSubcurveKind>,
@@ -267,6 +274,10 @@ fn generate_type_registry(out_dir: &Path) {
         (
             "DimensionType",
             trace_simple::<codec::entities::DimensionType>,
+        ),
+        (
+            "DxfVersion",
+            trace_simple::<codec::DxfVersion>,
         ),
         (
             "DynamicBlockData",
@@ -1235,9 +1246,9 @@ fn map_variant(discriminant: u32, named: &Named<VariantFormat>) -> EnumVariantIn
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Version info
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 fn generate_version_info(out_dir: &Path) {
     let lock_path = workspace_cargo_lock_path();

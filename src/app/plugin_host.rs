@@ -3831,10 +3831,14 @@ mod tests {
             panic!("expected attribute definition text");
         };
         assert!(!strokes.is_empty());
+        // A standalone definition draws its tag; only as block content does
+        // a constant one draw its value (block_cache swaps the tag for the
+        // default value). The value edit itself is asserted above by the
+        // field equality, so the render check pins the tag.
         assert!(strokes.iter().any(|stroke| stroke
             .run
             .as_ref()
-            .is_some_and(|run| run.text.contains("PN-002"))));
+            .is_some_and(|run| run.text.contains("PART_NO"))));
 
         for (label, patch, message) in [
             ("Reject tag", "'tag':'BAD TAG'", "whitespace"),
@@ -4473,13 +4477,23 @@ mod tests {
             // ByLayer in both formats.
             assert_eq!(leader.override_color, codec::types::Color::ByLayer,
                 "opencadcodec now persists a true-colour Leader.override_color; drop the blocker");
-            assert_eq!(leader.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
+            // The annotation offset is endptproj: DXF group 213 carries it,
+            // the DWG wire only R13c3-R2007 (see the text-height note).
+            if is_dxf {
+                assert_eq!(leader.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
+            }
             assert_eq!(leader.dimension_style, "Standard");
             if is_dxf {
                 assert!((leader.text_height - 4.0).abs() < 1e-12);
                 assert!(leader.hookline_enabled);
+                assert_eq!(leader.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
             } else {
-                assert_eq!(leader.text_height, 2.5, "DWG R2010+ does not store text_height");
+                // The authored R2010+ wire carries box_height/box_width
+                // (gold dwg.spec 3014-3015: unconditional fields); the
+                // hookline pair and endptproj (annotation offset) are the
+                // R2004-R2007 conditionals (2995-3009), so an R2010+ save
+                // reopens without them.
+                assert_eq!(leader.text_height, 4.0);
                 assert!(!leader.hookline_enabled, "DWG R2010+ does not store hookline_enabled");
             }
             assert!(matches!(document.get_entity(text_handle), Some(EntityType::Text(_))));
@@ -6408,8 +6422,8 @@ mod tests {
             // all — neither the version byte nor the lock-position flag the
             // reader looks for after it — so `lock_position` reopens false. Every
             // other field round-trips since opencadcodec dd1d7bf.
-            expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
-            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
+            expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
+            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
         });
@@ -7252,11 +7266,17 @@ mod tests {
         assert!(app.tabs[0].scene.document.get_entity(cut).is_none(), "undo removes the boolean result");
     }
 
-    /// Release-only evidence for docs/cadkernel-body-path.md: the kernel's
-    /// refusals reach the script as messages. Curved booleans take about
-    /// 23 s in a debug build, so this is ignored by default.
+    /// Evidence for docs/cadkernel-body-path.md: the refusal channel â€” a
+    /// refused operation reaches the script as a message and changes nothing.
+    /// The boolean kernel's retry machinery (ten-times-tolerance retry plus
+    /// the pair flip, 2026-10-10) now computes every geometry this test
+    /// could construct â€” the doc's classic refusers (box-sphere tangent,
+    /// sphere-sphere overlap, torus-cylinder, identical operands) all
+    /// succeed â€” so the demonstrable refusal is the payload lift: a solid
+    /// whose ACIS payload cannot lift losslessly refuses with a message
+    /// (the doc's own "refusal of a lossy payload" scope line). No curved
+    /// boolean is needed, so this runs in debug CI speed.
     #[test]
-    #[ignore = "curved boolean; slow in debug builds"]
     fn audit_python_boolean_kernel_refusal_over_real_ipc() {
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
@@ -7264,6 +7284,13 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
+        // A solid with an empty payload: the lift refuses it, so the
+        // subtract reaches the script as a refusal message instead of a
+        // broken solid.
+        let unliftable = host
+            .document_mut()
+            .add_entity(EntityType::Solid3D(codec::entities::Solid3D::new()))
+            .unwrap();
         let process = ocs_plugin_api::process::PluginProcess::spawn(
             std::path::Path::new(&plugin_path), &mut host, crate::plugin::v4_support::notification_handler(),
         ).unwrap();
@@ -7271,16 +7298,26 @@ mod tests {
             assert!(process.dispatch(host, command, &mut |_| {}).expect("Python dispatch"));
         };
         let script = std::env::temp_dir().join(format!("ocs_boolean_refusal_{}.py", std::process::id()));
-        std::fs::write(&script, concat!(
+        std::fs::write(&script, format!(concat!(
             "s = ocs.active_document.solids\n",
             "box = s.box(center=(0, 0, 0), size=(10, 6, 4))\n",
-            "sphere = s.sphere(center=(0, 0, 0), radius=3)\n",
-            "s.subtract(box, sphere)\n",
-        )).unwrap();
+            "s.subtract({}, box)\n",
+        ), unliftable.value())).unwrap();
         dispatch(&mut host, &format!("PY_RUN {}", script.display()));
         let _ = std::fs::remove_file(&script);
         let message = host.app.command_line.history.last().unwrap().text.clone();
-        assert!(message.contains("Coincident") && message.contains("nothing was changed"), "{message}");
+        assert!(
+            message.contains("cannot be lifted losslessly") && message.contains("nothing was changed"),
+            "{message}"
+        );
+        // A refusal changes nothing: the operands survive untouched.
+        assert!(matches!(host.document().get_entity(unliftable), Some(EntityType::Solid3D(_))));
+        let solid_count = host
+            .document()
+            .entities()
+            .filter(|entity| matches!(entity, EntityType::Solid3D(_)))
+            .count();
+        assert_eq!(solid_count, 2, "the operands are still exactly the two inputs");
     }
 
     #[test]

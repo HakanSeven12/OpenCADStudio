@@ -1,4 +1,4 @@
-//! Host-owned coverage generated from the traced entity registry and an
+﻿//! Host-owned coverage generated from the traced entity registry and an
 //! explicit policy. `unmapped` fields remain accessible through the typed
 //! `CadDocument` snapshot but are not promised by the Python document model.
 
@@ -2876,7 +2876,6 @@ mod tests {
                 "Mesh.vertices".to_owned(),
                 "Mesh.faces".to_owned(),
                 "Mesh.edges".to_owned(),
-                "Mesh.override_option".to_owned(),
                 "Helix.axis_base_point".to_owned(),
                 "Helix.start_point".to_owned(),
                 "Helix.axis_vector".to_owned(),
@@ -3018,6 +3017,11 @@ mod tests {
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 5.0, 0.0),
         );
+        // The fork codec defaults leaders to NoAnnotation (authored wires
+        // only pair a typed leader with a real annotation slot; a defaulted
+        // WithText leader with a dangling null association is rejected by
+        // the strict loaders), so the typed-with-text case opts in.
+        leader.creation_type = LeaderCreationType::WithText;
         leader.annotation_handle = text_handle;
         let entity = codec::EntityType::Leader(leader.clone());
         validate_new_canvas_entity(&entity).unwrap();

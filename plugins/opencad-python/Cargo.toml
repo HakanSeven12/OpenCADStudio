@@ -7,6 +7,15 @@ license = "GPL-3.0-only"
 
 [workspace]
 resolver = "2"
+# Gold-vs-silver integration pins (mirrors the root manifest): the V4 IPC
+# serializes codec types (EntityType and friends) between the host and this
+# plugin, so both sides must resolve the same codec or the enum tags
+# desync ("tag for enum is not valid"). Drop this section when the root
+# manifest drops its pins.
+[patch."https://github.com/HakanSeven12/opencadcodec"]
+opencadcodec = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver-clean" }
+
+
 
 # A plugin is a C-ABI dynamic library the host loads at runtime.
 [lib]

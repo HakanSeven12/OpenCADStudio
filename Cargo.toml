@@ -80,12 +80,12 @@ windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Window
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "wayland"] }
 
 # For `src/bin/ocs_launcher.rs` only (the .app's real CFBundleExecutable,
-# see that file for why) — already in the tree transitively via winit, pinned
+# see that file for why) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â already in the tree transitively via winit, pinned
 # here to the same versions Cargo already resolves for it.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 # The `NSEvent`/`block2` features are for the trackpad pinch monitor in
-# `src/input/trackpad.rs` — see that file for why the gesture is read there.
+# `src/input/trackpad.rs` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â see that file for why the gesture is read there.
 objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSResponder", "NSRunningApplication", "NSEvent", "block2"] }
 block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
@@ -93,6 +93,16 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
+
+# Gold-vs-silver integration pins (HakanSeven12/opencadcodec#100 and
+# HakanSeven12/opencadkernel#77). Drop this section once both PRs merge
+# and the upstream rev pins are bumped to their merged heads.
+[patch."https://github.com/HakanSeven12/opencadcodec"]
+opencadcodec = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver-clean" }
+
+[patch."https://github.com/HakanSeven12/opencadkernel"]
+opencadkernel = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver" }
+opencadkernel-constraints = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
@@ -105,7 +115,7 @@ open = "5"
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
 # TrueType subsetting for searchable PDF text (same version printpdf itself
 # uses, so no new binary enters the lockfile). Same feature set as printpdf's
-# own allsorts use (pure-Rust flate backend) — the defaults would drag in the
+# own allsorts use (pure-Rust flate backend) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the defaults would drag in the
 # libz-sys C dependency. Native-only like printpdf.
 allsorts = { version = "0.16", default-features = false, features = ["flate2_rust"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "win-system-proxy"] }

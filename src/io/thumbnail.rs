@@ -73,10 +73,21 @@ fn encode(img: RgbImage, png: bool) -> Option<Preview> {
         let mut buf = Cursor::new(Vec::new());
         img.write_to(&mut buf, ImageFormat::Png).ok()?;
         let data = buf.into_inner();
-        return (!data.is_empty()).then_some(Preview { format: PreviewFormat::Png, data });
+        // `raw` is the whole-container capture (§19 H5c): empty for
+        // constructed previews — the writer builds the container from
+        // `format`/`data` when `raw` is empty.
+        return (!data.is_empty()).then_some(Preview {
+            format: PreviewFormat::Png,
+            data,
+            raw: Vec::new(),
+        });
     }
     let data = rle8_dib(&img).or_else(|| bmp24_dib(&img))?;
-    Some(Preview { format: PreviewFormat::Bmp, data })
+    Some(Preview {
+        format: PreviewFormat::Bmp,
+        data,
+        raw: Vec::new(),
+    })
 }
 
 /// Build an 8-bit palettised, `BI_RLE8`-compressed DIB. `None` when the image

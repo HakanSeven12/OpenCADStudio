@@ -291,7 +291,7 @@ fn region_area_perimeter(region: &Region) -> (f64, f64) {
         };
         let curves = loops.iter().flatten().map(|curve| curve.transformed(&transform))
             .collect::<Option<Vec<_>>>()?;
-        let area = curves.iter().map(|curve| curve.enclosed_area()).sum::<f64>().abs();
+        let area = curves.iter().map(|curve| curve.chain_area()).sum::<f64>().abs();
         let perimeter = curves.iter().map(|curve| curve.length()).sum::<f64>();
         (area.is_finite() && perimeter.is_finite()).then_some((area, perimeter))
     })();

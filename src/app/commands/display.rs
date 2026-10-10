@@ -895,6 +895,13 @@ impl OpenCADStudio {
             "EXPORT" | "EXPORTPDF" => {
                 return Some(Task::done(Message::PlotExport));
             }
+            // EXPORTSVG — the same direct export, but the save dialog
+            // proposes the SVG device's defaults (`stem.svg`).
+            "EXPORTSVG" => {
+                self.plot_dialog.to_file = true;
+                self.plot_dialog.file_svg = true;
+                return Some(Task::done(Message::PlotExport));
+            }
             // PLOTSTYLE — load or clear CTB/STB plot style table
             cmd if cmd == "PLOTSTYLE" || cmd.starts_with("PLOTSTYLE ") => {
                 let sub = cmd

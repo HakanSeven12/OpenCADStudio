@@ -9824,14 +9824,14 @@ impl OpenCADStudio {
                         return Task::done(Message::PrintAllPdfPath(None));
                     };
                     iced::window::run(window_id, move |parent| {
-                        crate::io::pdf_export::pick_pdf_path_owned(stem, parent)
+                        crate::io::pdf_export::pick_plot_path_owned(stem, parent, false)
                     })
                     .map(Message::PrintAllPdfPath)
                 }
                 #[cfg(target_os = "windows")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_pdf_path_async(stem),
+                        crate::io::pdf_export::pick_plot_path_async(stem, false),
                         Message::PrintAllPdfPath,
                     )
                 }
@@ -9870,27 +9870,30 @@ impl OpenCADStudio {
                     .and_then(|p: &std::path::Path| p.file_stem())
                     .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "drawing".into());
+                // The save dialog follows the dialog's file device, so the
+                // SVG choice proposes `stem.svg` up front.
+                let svg = self.plot_dialog.file_svg;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
                 {
                     let Some(window_id) = self.main_window else {
                         return Task::done(Message::PlotExportPath(None));
                     };
                     iced::window::run(window_id, move |parent| {
-                        crate::io::pdf_export::pick_pdf_path_owned(stem, parent)
+                        crate::io::pdf_export::pick_plot_path_owned(stem, parent, svg)
                     })
                     .map(Message::PlotExportPath)
                 }
                 #[cfg(target_os = "windows")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_pdf_path_async(stem),
+                        crate::io::pdf_export::pick_plot_path_async(stem, svg),
                         Message::PlotExportPath,
                     )
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_pdf_path_owned(stem),
+                        crate::io::pdf_export::pick_plot_path_owned(stem),
                         Message::PlotExportPath,
                     )
                 }
@@ -9906,27 +9909,28 @@ impl OpenCADStudio {
                     .and_then(|p: &std::path::Path| p.file_stem())
                     .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "drawing".into());
+                let svg = self.plot_dialog.file_svg;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
                 {
                     let Some(window_id) = self.main_window else {
                         return Task::done(Message::PlotWindowExportPath(None));
                     };
                     iced::window::run(window_id, move |parent| {
-                        crate::io::pdf_export::pick_pdf_path_owned(stem, parent)
+                        crate::io::pdf_export::pick_plot_path_owned(stem, parent, svg)
                     })
                     .map(Message::PlotWindowExportPath)
                 }
                 #[cfg(target_os = "windows")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_pdf_path_async(stem),
+                        crate::io::pdf_export::pick_plot_path_async(stem, svg),
                         Message::PlotWindowExportPath,
                     )
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_pdf_path_owned(stem),
+                        crate::io::pdf_export::pick_plot_path_owned(stem),
                         Message::PlotWindowExportPath,
                     )
                 }

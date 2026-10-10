@@ -12,6 +12,8 @@ pub mod ole_embed;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod single_instance;
 pub mod pdf_export;
+pub mod plot;
+pub mod svg_export;
 pub mod plot_style;
 pub mod print_to_printer;
 pub mod recovery;

@@ -3832,7 +3832,17 @@ impl OpenCADStudio {
         };
         let worker_path = path.clone();
         let work = move || {
-            crate::io::pdf_export::export_pdf(&page, &worker_path)
+            // SVG shares the plot page with PDF: pick the writer from the
+            // chosen extension.
+            let result = if worker_path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
+            {
+                crate::io::svg_export::export_svg(&page, &worker_path)
+            } else {
+                crate::io::pdf_export::export_pdf(&page, &worker_path)
+            };
+            result
                 .map(|_| crate::tf!("Exported: {}", worker_path.display()).into_owned())
                 .map_err(|e| crate::tf!("Export failed: {e}").into_owned())
         };
@@ -3859,7 +3869,15 @@ impl OpenCADStudio {
         let worker_path = path.clone();
         self.close_active_modal();
         let work = move || {
-            crate::io::pdf_export::export_pdf(&page, &worker_path)
+            let result = if worker_path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
+            {
+                crate::io::svg_export::export_svg(&page, &worker_path)
+            } else {
+                crate::io::pdf_export::export_pdf(&page, &worker_path)
+            };
+            result
                 .map(|_| {
                     crate::tf!(
                         "Plotted window to {}",
@@ -4856,7 +4874,7 @@ impl OpenCADStudio {
         msg: crate::ui::window::plot::PlotDlgMsg,
     ) -> Task<Message> {
         use crate::ui::window::plot::{
-            PlotDlgMsg as M, PlotFlag, OUT_DEFAULT, OUT_PDF, STYLE_NONE,
+            PlotDlgMsg as M, PlotFlag, OUT_DEFAULT, OUT_PDF, OUT_SVG, STYLE_NONE,
         };
         match msg {
             M::Close => {
@@ -4872,11 +4890,17 @@ impl OpenCADStudio {
                 self.plot_dialog.printer_editor = None;
                 if s == OUT_PDF {
                     self.plot_dialog.to_file = true;
+                    self.plot_dialog.file_svg = false;
+                } else if s == OUT_SVG {
+                    self.plot_dialog.to_file = true;
+                    self.plot_dialog.file_svg = true;
                 } else if s == OUT_DEFAULT {
                     self.plot_dialog.to_file = false;
+                    self.plot_dialog.file_svg = false;
                     self.plot_dialog.printer = None;
                 } else {
                     self.plot_dialog.to_file = false;
+                    self.plot_dialog.file_svg = false;
                     self.plot_dialog.printer = Some(s);
                 }
                 self.save_config();
@@ -5371,6 +5395,7 @@ impl OpenCADStudio {
             let is_model = self.tabs[self.active_tab].scene.current_layout == "Model";
             let d = &mut self.plot_dialog;
             d.to_file = true;
+            d.file_svg = false;
             let a4 = crate::io::paper_catalog::default_paper();
             d.paper = a4.canonical.to_string();
             d.orientation = "Landscape".into();
@@ -5593,14 +5618,17 @@ impl OpenCADStudio {
         match crate::io::plot_device::PlotDevice::from_stored_name(&ps.printer_name).0 {
             crate::io::plot_device::PlotDevice::Pdf => {
                 d.to_file = true;
+                d.file_svg = false;
                 d.printer = None;
             }
             crate::io::plot_device::PlotDevice::Printer(name) => {
                 d.to_file = false;
+                d.file_svg = false;
                 d.printer = Some(name);
             }
             crate::io::plot_device::PlotDevice::None => {
                 d.to_file = false;
+                d.file_svg = false;
                 d.printer = None;
             }
         }
@@ -6712,6 +6740,26 @@ mod plot_paper_tests {
         assert_eq!(ps.printer_name, "DWG To PDF.pc3");
         // A changed device takes the PDF driver's printable area for the sheet.
         assert_eq!(ps.margins, codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0));
+    }
+
+    #[test]
+    fn svg_device_is_session_state_and_stores_as_pdf() {
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        // The SVG device behaves like file output…
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
+        assert!(app.plot_dialog.to_file);
+        assert!(app.plot_dialog.file_svg);
+        // …but switching back to PDF (or a printer) clears it.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        assert!(app.plot_dialog.to_file);
+        assert!(!app.plot_dialog.file_svg);
+        // The drawing never learns about SVG: page setups only know printers
+        // and PDF drivers, so an SVG plot stores the PDF driver spelling.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        let ps = app.tabs[app.active_tab].scene.plot_settings_for("Layout1").unwrap();
+        assert_eq!(ps.printer_name, "DWG To PDF.pc3");
     }
 
     #[test]

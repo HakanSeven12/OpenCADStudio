@@ -3478,6 +3478,81 @@ mod tests {
     }
 
     #[test]
+    fn test_snap_override_typed_in_line_command() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        {
+            app.tabs[0].scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
+            app.tabs[0].scene.sync_tiles_from_panes(1920.0, 1080.0);
+        }
+
+        // Start LINE
+        let _ = app.update(Message::CommandInput("LINE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(
+            app.tabs[0].active_cmd.as_ref().map(|c| c.name()),
+            Some("LINE")
+        );
+
+        // Turn running osnap off to prove override temporarily enables snapping
+        app.snapper.snap_enabled = false;
+        assert!(!app.snapper.snap_enabled);
+
+        // Type MID at first point prompt
+        let _ = app.update(Message::CommandInput("MID".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+
+        // LINE remains the active command
+        assert_eq!(
+            app.tabs[0].active_cmd.as_ref().map(|c| c.name()),
+            Some("LINE")
+        );
+        // Snapper is now forced on with only Midpoint enabled
+        assert!(app.snapper.snap_enabled);
+        assert_eq!(app.snapper.enabled.len(), 1);
+        assert!(app.snapper.enabled.contains(&crate::snap::SnapType::Midpoint));
+
+        // Submit first point (0,0)
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+
+        // Override is consumed by the point commit, restoring snap_enabled == false
+        assert!(!app.snapper.snap_enabled);
+
+        // At next point prompt, type END
+        let _ = app.update(Message::CommandInput("END".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(app.snapper.snap_enabled);
+        assert!(app.snapper.enabled.contains(&crate::snap::SnapType::Endpoint));
+
+        // Escape cancels LINE and clears unconsumed snap override
+        let _ = app.update(Message::CommandEscape);
+        assert!(app.tabs[0].active_cmd.is_none());
+        assert!(!app.snapper.snap_enabled);
+    }
+
+    #[test]
+    fn test_snap_override_feed_token() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.update(Message::CommandInput("LINE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+
+        app.snapper.snap_enabled = false;
+        let _ = app.feed_active_cmd("CEN");
+        assert!(app.snapper.snap_enabled);
+        assert_eq!(app.snapper.enabled.len(), 1);
+        assert!(app.snapper.enabled.contains(&crate::snap::SnapType::Center));
+
+        let _ = app.feed_active_cmd("5,5");
+        assert!(!app.snapper.snap_enabled);
+
+        let _ = app.update(Message::CommandEscape);
+    }
+
+    #[test]
     fn test_open_color_dropdown() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();

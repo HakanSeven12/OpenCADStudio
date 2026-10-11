@@ -583,6 +583,7 @@ impl OpenCADStudio {
             if !self.record_accepted_snap(i, None, None, *point) {
                 return (Task::none(), true);
             }
+            self.snapper.clear_override();
         }
         if default_start {
             let StepInput::Point(point) = &input else {
@@ -1110,6 +1111,27 @@ impl OpenCADStudio {
                 .unwrap_or(false);
             if is_point_step && not_entity_pick {
                 self.start_mtp_modifier(i);
+                return Task::none();
+            }
+        }
+        if let Some(override_kind) = crate::snap::parse_snap_override(token) {
+            let is_point_step = !self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.input_kind().wants_text())
+                .unwrap_or(true)
+                || self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.point_step_accepts_keywords())
+                    .unwrap_or(false);
+            let not_entity_pick = !self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.needs_entity_pick())
+                .unwrap_or(false);
+            if is_point_step && not_entity_pick {
+                self.apply_snap_override(override_kind);
                 return Task::none();
             }
         }

@@ -50,6 +50,30 @@ impl OpenCADStudio {
         self.accepted_snaps.clear();
     }
 
+    /// Apply a transparent one-shot snap override (from typed input or the context menu).
+    pub(crate) fn apply_snap_override(&mut self, kind: crate::snap::SnapOverrideKind) {
+        match kind {
+            crate::snap::SnapOverrideKind::Mode(t) => {
+                self.snap_override_popup = None;
+                self.snapper.set_override(t);
+                let label = crate::snap::ALL_SNAP_MODES
+                    .iter()
+                    .chain(crate::snap::ALL_3D_SNAP_MODES.iter())
+                    .find(|(m, _, _)| *m == t)
+                    .map(|(_, _, l)| *l)
+                    .unwrap_or("Snap");
+                self.command_line
+                    .push_info(crate::tf!("Snap override: {label} (next pick only).").as_ref());
+            }
+            crate::snap::SnapOverrideKind::None => {
+                self.snap_override_popup = None;
+                self.snapper.set_override_none();
+                self.command_line
+                    .push_info(crate::t!("Snap override: None (next pick only).").as_ref());
+            }
+        }
+    }
+
     /// Record the snap a point step just accepted. `snap` is the displayed snap
     /// result (already in the current space's coordinates) or `None` for a free
     /// / typed point; `committed` is the point the command actually received

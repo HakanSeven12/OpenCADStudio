@@ -820,6 +820,28 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             return self.focus_cmd_input();
                         }
                     }
+                    if let Some(override_kind) = crate::snap::parse_snap_override(&raw) {
+                        let is_point_step = !self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .map(|c| c.input_kind().wants_text())
+                            .unwrap_or(true)
+                            || self.tabs[i]
+                                .active_cmd
+                                .as_ref()
+                                .map(|c| c.point_step_accepts_keywords())
+                                .unwrap_or(false);
+                        let not_entity_pick = !self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .map(|c| c.needs_entity_pick())
+                            .unwrap_or(false);
+                        if is_point_step && not_entity_pick {
+                            self.command_line.input.clear();
+                            self.apply_snap_override(override_kind);
+                            return self.focus_cmd_input();
+                        }
+                    }
                     let text = if free_text {
                         raw
                     } else {
@@ -918,6 +940,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.dyn_coord_absolute = false;
                         self.sync_dyn_fields();
                         self.reset_tracking_after_point();
+                        self.snapper.clear_override();
                         self.push_ucs_to_cmd(i);
                         let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(wcs_pt));
                         if let Some(r) = result {
@@ -1030,6 +1053,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         self.dyn_coord_absolute = false;
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
+        self.snapper.clear_override();
         if let Some((_, dir)) = distance_ray {
             self.snapper.remember_distance_reference(dir);
         }

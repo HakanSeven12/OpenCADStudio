@@ -115,6 +115,76 @@ pub const ALL_3D_SNAP_MODES: &[(SnapType, &str, &str)] = &[
     (SnapType::NearestFace, "✦", "Nearest to face"),
 ];
 
+/// Transparent object snap override kind (single-pick override).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapOverrideKind {
+    Mode(SnapType),
+    None,
+}
+
+/// Parses a transparent object snap override keyword (e.g. `MID`, `END`, `CEN`, `NON`).
+///
+/// Requires at least 3 letters matching a supported snap mode or alias.
+/// Leading underscores (e.g. `_MID`) and case variations are permitted.
+pub fn parse_snap_override(input: &str) -> Option<SnapOverrideKind> {
+    let s = input.trim().trim_start_matches('_').to_ascii_lowercase();
+    if s.len() < 3 {
+        return None;
+    }
+    if s.starts_with("end") && "endpoint".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Endpoint));
+    }
+    if s.starts_with("mid") && "midpoint".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Midpoint));
+    }
+    if s.starts_with("cen") && ("center".starts_with(&s) || "centre".starts_with(&s)) {
+        return Some(SnapOverrideKind::Mode(SnapType::Center));
+    }
+    if (s.starts_with("gce") && "gcen".starts_with(&s))
+        || (s.starts_with("geo") && ("geocenter".starts_with(&s) || "geometriccenter".starts_with(&s)))
+    {
+        return Some(SnapOverrideKind::Mode(SnapType::GeometricCenter));
+    }
+    if s.starts_with("nod") && "node".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Node));
+    }
+    if s.starts_with("qua") && "quadrant".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Quadrant));
+    }
+    if s.starts_with("int") && "intersection".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Intersection));
+    }
+    if s.starts_with("ext") && "extension".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Extension));
+    }
+    if s.starts_with("ins") && ("insertion".starts_with(&s) || "insert".starts_with(&s)) {
+        return Some(SnapOverrideKind::Mode(SnapType::Insertion));
+    }
+    if s.starts_with("per") && "perpendicular".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Perpendicular));
+    }
+    if s.starts_with("tan") && "tangent".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Tangent));
+    }
+    if s.starts_with("nea") && "nearest".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Nearest));
+    }
+    if s.starts_with("app")
+        && ("apparent".starts_with(&s)
+            || "apparentintersection".starts_with(&s)
+            || "appint".starts_with(&s))
+    {
+        return Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection));
+    }
+    if s.starts_with("par") && "parallel".starts_with(&s) {
+        return Some(SnapOverrideKind::Mode(SnapType::Parallel));
+    }
+    if s.starts_with("non") && "none".starts_with(&s) {
+        return Some(SnapOverrideKind::None);
+    }
+    None
+}
+
 // ── Snap result ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy)]
@@ -5196,5 +5266,72 @@ mod ext_tests {
             None,
         );
         assert!(res_break.is_none(), "cursor over ellipse arc break must NOT snap to tangent");
+    }
+
+    #[test]
+    fn test_parse_snap_override() {
+        use super::{parse_snap_override, SnapOverrideKind, SnapType};
+
+        // 3-letter prefixes
+        assert_eq!(parse_snap_override("end"), Some(SnapOverrideKind::Mode(SnapType::Endpoint)));
+        assert_eq!(parse_snap_override("mid"), Some(SnapOverrideKind::Mode(SnapType::Midpoint)));
+        assert_eq!(parse_snap_override("cen"), Some(SnapOverrideKind::Mode(SnapType::Center)));
+        assert_eq!(parse_snap_override("nod"), Some(SnapOverrideKind::Mode(SnapType::Node)));
+        assert_eq!(parse_snap_override("qua"), Some(SnapOverrideKind::Mode(SnapType::Quadrant)));
+        assert_eq!(parse_snap_override("int"), Some(SnapOverrideKind::Mode(SnapType::Intersection)));
+        assert_eq!(parse_snap_override("ext"), Some(SnapOverrideKind::Mode(SnapType::Extension)));
+        assert_eq!(parse_snap_override("ins"), Some(SnapOverrideKind::Mode(SnapType::Insertion)));
+        assert_eq!(parse_snap_override("per"), Some(SnapOverrideKind::Mode(SnapType::Perpendicular)));
+        assert_eq!(parse_snap_override("tan"), Some(SnapOverrideKind::Mode(SnapType::Tangent)));
+        assert_eq!(parse_snap_override("nea"), Some(SnapOverrideKind::Mode(SnapType::Nearest)));
+        assert_eq!(parse_snap_override("app"), Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection)));
+        assert_eq!(parse_snap_override("par"), Some(SnapOverrideKind::Mode(SnapType::Parallel)));
+        assert_eq!(parse_snap_override("non"), Some(SnapOverrideKind::None));
+        assert_eq!(parse_snap_override("geo"), Some(SnapOverrideKind::Mode(SnapType::GeometricCenter)));
+        assert_eq!(parse_snap_override("gce"), Some(SnapOverrideKind::Mode(SnapType::GeometricCenter)));
+
+        // Case insensitivity & leading underscores
+        assert_eq!(parse_snap_override("_MID"), Some(SnapOverrideKind::Mode(SnapType::Midpoint)));
+        assert_eq!(parse_snap_override("_Endpoint"), Some(SnapOverrideKind::Mode(SnapType::Endpoint)));
+        assert_eq!(parse_snap_override("  _NON  "), Some(SnapOverrideKind::None));
+        assert_eq!(parse_snap_override("CEN"), Some(SnapOverrideKind::Mode(SnapType::Center)));
+
+        // Full names and aliases
+        assert_eq!(parse_snap_override("endpoint"), Some(SnapOverrideKind::Mode(SnapType::Endpoint)));
+        assert_eq!(parse_snap_override("midpoint"), Some(SnapOverrideKind::Mode(SnapType::Midpoint)));
+        assert_eq!(parse_snap_override("center"), Some(SnapOverrideKind::Mode(SnapType::Center)));
+        assert_eq!(parse_snap_override("centre"), Some(SnapOverrideKind::Mode(SnapType::Center)));
+        assert_eq!(parse_snap_override("quadrant"), Some(SnapOverrideKind::Mode(SnapType::Quadrant)));
+        assert_eq!(parse_snap_override("intersection"), Some(SnapOverrideKind::Mode(SnapType::Intersection)));
+        assert_eq!(parse_snap_override("perpendicular"), Some(SnapOverrideKind::Mode(SnapType::Perpendicular)));
+        assert_eq!(parse_snap_override("tangent"), Some(SnapOverrideKind::Mode(SnapType::Tangent)));
+        assert_eq!(parse_snap_override("nearest"), Some(SnapOverrideKind::Mode(SnapType::Nearest)));
+        assert_eq!(parse_snap_override("apparent"), Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection)));
+        assert_eq!(parse_snap_override("apparentintersection"), Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection)));
+        assert_eq!(parse_snap_override("appint"), Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection)));
+        assert_eq!(parse_snap_override("parallel"), Some(SnapOverrideKind::Mode(SnapType::Parallel)));
+        assert_eq!(parse_snap_override("insert"), Some(SnapOverrideKind::Mode(SnapType::Insertion)));
+        assert_eq!(parse_snap_override("insertion"), Some(SnapOverrideKind::Mode(SnapType::Insertion)));
+        assert_eq!(parse_snap_override("none"), Some(SnapOverrideKind::None));
+        assert_eq!(parse_snap_override("gcen"), Some(SnapOverrideKind::Mode(SnapType::GeometricCenter)));
+        assert_eq!(parse_snap_override("geometriccenter"), Some(SnapOverrideKind::Mode(SnapType::GeometricCenter)));
+        assert_eq!(parse_snap_override("geocenter"), Some(SnapOverrideKind::Mode(SnapType::GeometricCenter)));
+
+        // Rejection of strings shorter than 3 chars
+        assert_eq!(parse_snap_override("en"), None);
+        assert_eq!(parse_snap_override("mi"), None);
+        assert_eq!(parse_snap_override("ce"), None);
+        assert_eq!(parse_snap_override("p"), None);
+        assert_eq!(parse_snap_override("no"), None);
+        assert_eq!(parse_snap_override("_m"), None);
+        assert_eq!(parse_snap_override(""), None);
+
+        // Non-matching tokens
+        assert_eq!(parse_snap_override("line"), None);
+        assert_eq!(parse_snap_override("circle"), None);
+        assert_eq!(parse_snap_override("10,20"), None);
+        assert_eq!(parse_snap_override("@5<45"), None);
+        assert_eq!(parse_snap_override("undo"), None);
+        assert_eq!(parse_snap_override("close"), None);
     }
 }

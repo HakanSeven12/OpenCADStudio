@@ -1,6 +1,6 @@
-use acadrust::entities::{Dimension, DimensionOrdinate};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionOrdinate};
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::{DVec3, Vec3};
 
 use crate::command::{
@@ -79,7 +79,8 @@ impl OrdinateDimCommand {
             dim.base.text_rotation = angle;
         }
         dim.refresh_measurement();
-        self.plane.place_entity(EntityType::Dimension(Dimension::Ordinate(dim)))
+        self.plane
+            .place_entity(EntityType::Dimension(Dimension::Ordinate(dim)))
     }
 }
 
@@ -94,18 +95,17 @@ impl CadCommand for OrdinateDimCommand {
 
     fn prompt(&self) -> String {
         if self.awaiting_text {
-            return t!("DIMORDINATE  Enter dimension text (blank = measured value):")
-                .into_owned();
+            return t!("DIMORDINATE  Enter dimension text (blank = measured value):").into_owned();
         }
         if self.awaiting_angle {
             return t!("DIMORDINATE  Specify text angle (degrees):").into_owned();
         }
         match self.step {
             Step::FeaturePoint => t!("DIMORDINATE  Specify feature location:").into_owned(),
-            Step::LeaderEndpoint { .. } => t!(
-                "DIMORDINATE  Specify leader endpoint [Xdatum/Ydatum/Mtext/Text/Angle]:"
-            )
-            .into_owned(),
+            Step::LeaderEndpoint { .. } => {
+                t!("DIMORDINATE  Specify leader endpoint [Xdatum/Ydatum/Mtext/Text/Angle]:")
+                    .into_owned()
+            }
         }
     }
 
@@ -115,14 +115,12 @@ impl CadCommand for OrdinateDimCommand {
                 self.step = Step::LeaderEndpoint { feature: pt };
                 CmdResult::NeedPoint
             }
-            Step::LeaderEndpoint { feature } => {
-                CmdResult::CommitDimension {
-                    entity: self.build_dimension(feature, pt),
-                    association: DimensionAssociationInput::Infer(None),
-                    preserve_base_style: false,
-                    continue_command: false,
-                }
-            }
+            Step::LeaderEndpoint { feature } => CmdResult::CommitDimension {
+                entity: self.build_dimension(feature, pt),
+                association: DimensionAssociationInput::Infer(None),
+                preserve_base_style: false,
+                continue_command: false,
+            },
         }
     }
 
@@ -266,7 +264,9 @@ impl CadCommand for OrdinateDimCommand {
         let Step::LeaderEndpoint { feature } = self.step else {
             return None;
         };
-        Some(vec![DimensionPreview::current_style(self.build_dimension(feature, cursor))])
+        Some(vec![DimensionPreview::current_style(
+            self.build_dimension(feature, cursor),
+        )])
     }
 }
 
@@ -289,6 +289,7 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -314,9 +315,12 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
+
+        ..Default::default()
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMORDINATE"] });  // OrdinateDimCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMORDINATE"]
+}); // OrdinateDimCommand

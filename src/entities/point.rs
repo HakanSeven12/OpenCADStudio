@@ -1,15 +1,15 @@
-use acadrust::entities::Point;
-use acadrust::EntityType;
-use cadkernel::geom2d::{Circle, Curve, Line};
-use cadkernel::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
+use codec::entities::Point;
+use codec::EntityType;
+use kernel::geom2d::{Circle, Curve, Line};
+use kernel::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
 
-use crate::t;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::{PointMarker, SnapHint};
+use crate::t;
 
 /// Resolve a positive (absolute) PDSIZE to a world size. Relative/zero PDSIZE
 /// is handled by [`relative_render`].
@@ -51,7 +51,7 @@ fn point_render(pt: &Point, pdmode: i16, s: f64) -> RenderEntity {
             object: RenderObject::Lines(vec![]),
             snap_pts: vec![(snap, SnapHint::Node)],
             tangent_geoms: vec![],
-            key_vertices: vec![[wx, wy, wz]],
+            key_vertices: vec![],
             fill_tris: vec![],
         };
     }
@@ -63,7 +63,8 @@ fn point_render(pt: &Point, pdmode: i16, s: f64) -> RenderEntity {
         key_vertices: if pt.thickness.abs() > 1.0e-10 {
             vec![[wx, wy, wz], [top.x, top.y, top.z]]
         } else {
-            vec![[wx, wy, wz]]
+            // Snaps as a Node only, never as an endpoint.
+            vec![]
         },
         fill_tris: vec![],
     }
@@ -74,7 +75,7 @@ fn point_render(pt: &Point, pdmode: i16, s: f64) -> RenderEntity {
 /// so zooming and resizing do not require retessellation.
 pub fn relative_render(
     entity: &EntityType,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     _wpp: Option<f32>,
 ) -> Option<RenderEntity> {
     let EntityType::Point(pt) = entity else {
@@ -100,7 +101,7 @@ pub fn relative_world_size(pdsize: f64, wpp: f32, viewport_height_px: f32) -> f6
 /// viewport scaling. A zero PDSIZE means the standard five-percent size.
 pub fn relative_marker_spec(
     entity: &EntityType,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
 ) -> Option<PointMarker> {
     let EntityType::Point(pt) = entity else {
         return None;
@@ -137,8 +138,8 @@ fn point_plane(pt: &Point) -> Plane {
     } else {
         Vec3::Z.cross(normal)
     };
-    let base = Plane::orthonormal(origin, x_seed.to_array(), normal.to_array())
-        .unwrap_or(Plane::XY);
+    let base =
+        Plane::orthonormal(origin, x_seed.to_array(), normal.to_array()).unwrap_or(Plane::XY);
     let (sin, cos) = pt.x_axis_angle.sin_cos();
     Plane::from_axes(
         origin,
@@ -202,15 +203,16 @@ fn point_glyph(pt: &Point, pdmode: i16, s_half: f64) -> Vec<[f64; 3]> {
     let nan = [f64::NAN; 3];
     let mut paths: Vec<Vec<[f64; 3]>> = curves
         .iter()
-        .map(|curve| PlanarCurve::new(plane, curve.clone()).tessellate(64.0 / std::f64::consts::TAU))
+        .map(|curve| {
+            PlanarCurve::new(plane, curve.clone()).tessellate(64.0 / std::f64::consts::TAU)
+        })
         .collect();
     if pt.thickness.abs() > 1.0e-10 && !curves.is_empty() {
         let normal = Vec3::from(plane.normal().unwrap_or([0.0, 0.0, 1.0]));
         let top_origin = (Vec3::from(plane.origin) + normal * pt.thickness).to_array();
         let top_plane = Plane::from_axes(top_origin, plane.x_axis, plane.y_axis);
         paths.extend(curves.iter().map(|curve| {
-            PlanarCurve::new(top_plane, curve.clone())
-                .tessellate(64.0 / std::f64::consts::TAU)
+            PlanarCurve::new(top_plane, curve.clone()).tessellate(64.0 / std::f64::consts::TAU)
         }));
         paths.push(bezier_points(&[plane.origin, top_origin], 1));
     }
@@ -238,7 +240,7 @@ fn effective_pdmode(pt: &Point, pdmode: i16) -> i16 {
     }
 }
 
-fn to_render(pt: &Point, document: &acadrust::CadDocument) -> RenderEntity {
+fn to_render(pt: &Point, document: &codec::CadDocument) -> RenderEntity {
     let pdmode = effective_pdmode(pt, document.header.point_display_mode);
     let s = pdsize_world(document.header.point_display_size) * 0.5;
     point_render(pt, pdmode, s)
@@ -299,7 +301,7 @@ fn apply_transform(pt: &mut Point, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Point {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self, document))
     }
 }
@@ -313,13 +315,13 @@ mod tests {
     fn point_on(layer: &str) -> Point {
         let mut pt = Point::default();
         pt.common.layer = layer.to_string();
-        pt.location = acadrust::types::Vector3::new(1.0, 2.0, 0.0);
+        pt.location = codec::types::Vector3::new(1.0, 2.0, 0.0);
         pt
     }
 
     #[test]
     fn definition_points_ignore_the_point_style() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         doc.header.point_display_mode = 34;
         doc.header.point_display_size = 2.0;
 
@@ -340,12 +342,15 @@ mod tests {
 
     #[test]
     fn definition_points_ignore_the_point_style_at_relative_pdsize() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         doc.header.point_display_mode = 34;
         doc.header.point_display_size = -5.0;
 
         let drawn = relative_render(&EntityType::Point(point_on("0")), &doc, Some(0.01));
-        assert!(drawn.is_some(), "a user point still takes the viewport-aware path");
+        assert!(
+            drawn.is_some(),
+            "a user point still takes the viewport-aware path"
+        );
 
         let defpoint = relative_render(
             &EntityType::Point(point_on("xref|Defpoints")),

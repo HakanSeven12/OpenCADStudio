@@ -61,9 +61,21 @@ impl WipeoutPlacement {
             array_stride: std::mem::size_of::<Self>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
-                wgpu::VertexAttribute { offset: 0, shader_location: 1, format: wgpu::VertexFormat::Float32x3 },
-                wgpu::VertexAttribute { offset: 12, shader_location: 2, format: wgpu::VertexFormat::Float32x3 },
-                wgpu::VertexAttribute { offset: 24, shader_location: 3, format: wgpu::VertexFormat::Float32 },
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 24,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32,
+                },
             ],
         }
     }
@@ -80,16 +92,16 @@ impl WipeoutPlacement {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct HatchUniformData {
-    pub color: [f32; 4],     //  0: primary RGBA / gradient start
-    pub color2: [f32; 4],    // 16: gradient end color
-    pub mode: u32,           // 32: 0=pattern, 1=solid, 2=gradient
-    pub vertex_count: u32,   // 36: boundary vertex count
-    pub angle_offset: f32,   // 40: pattern rotation (radians)
-    pub scale: f32,          // 44: pattern scale multiplier
-    pub grad_cos: f32,       // 48: gradient direction cos
-    pub grad_sin: f32,       // 52: gradient direction sin
-    pub grad_min: f32,       // 56: gradient proj_min
-    pub grad_range: f32,     // 60: gradient proj_range
+    pub color: [f32; 4],      //  0: primary RGBA / gradient start
+    pub color2: [f32; 4],     // 16: gradient end color
+    pub mode: u32,            // 32: 0=pattern, 1=solid, 2=gradient
+    pub vertex_count: u32,    // 36: boundary vertex count
+    pub angle_offset: f32,    // 40: pattern rotation (radians)
+    pub scale: f32,           // 44: pattern scale multiplier
+    pub grad_cos: f32,        // 48: gradient direction cos
+    pub grad_sin: f32,        // 52: gradient direction sin
+    pub grad_min: f32,        // 56: gradient proj_min
+    pub grad_range: f32,      // 60: gradient proj_range
     pub origin: [f32; 2],     // 64: reserved pattern origin
     pub origin_low: [f32; 2], // 72: reserved low residual
     pub draw_depth: f32,      // 80: signed (-1,1) draw-order bias
@@ -191,7 +203,9 @@ impl WipeoutGpu {
         let (mode, color2, grad_cos, grad_sin) = match &model.pattern {
             HatchPattern::Solid => (1u32, [0.0f32; 4], 0.0f32, 0.0f32),
             HatchPattern::Pattern(_) => (0u32, [0.0f32; 4], 0.0f32, 0.0f32),
-            HatchPattern::Gradient { angle_deg, color2, .. } => {
+            HatchPattern::Gradient {
+                angle_deg, color2, ..
+            } => {
                 let r = angle_deg.to_radians();
                 (2u32, *color2, r.cos(), r.sin())
             }
@@ -236,12 +250,7 @@ impl WipeoutGpu {
         } else {
             (diag * 0.8 + max_spacing * 2.0 * model.scale).max(1.0)
         };
-        let (x0, x1, y0, y1) = (
-            min_x - pad,
-            max_x + pad,
-            min_y - pad,
-            max_y + pad,
-        );
+        let (x0, x1, y0, y1) = (min_x - pad, max_x + pad, min_y - pad, max_y + pad);
 
         let quad = [
             HatchVertex {
@@ -279,7 +288,8 @@ impl WipeoutGpu {
 
         // ── Gradient: projection range (in snapped-local space) ──────────
         let (grad_min, grad_range) = if mode == 2 {
-            let projs: Vec<f32> = gpu_boundary.iter()
+            let projs: Vec<f32> = gpu_boundary
+                .iter()
                 .filter(|v| v[0].is_finite() && v[1].is_finite())
                 .map(|&[x, y]| x * grad_cos + y * grad_sin)
                 .collect();
@@ -345,7 +355,8 @@ impl WipeoutGpu {
         let mut boundary_data = BoundaryData {
             verts: [[0.0; 4]; MAX_HATCH_BOUNDARY_VERTS],
         };
-        for (i, &[x, y]) in gpu_boundary.iter()
+        for (i, &[x, y]) in gpu_boundary
+            .iter()
             .take(MAX_HATCH_BOUNDARY_VERTS)
             .enumerate()
         {
@@ -461,7 +472,12 @@ impl WipeoutGpu {
         } else if world_bounds[0].is_finite() && world_bounds[1].is_finite() {
             let ox = model.world_origin[0] as f32;
             let oy = model.world_origin[1] as f32;
-            let mut aabb = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+            let mut aabb = [
+                f32::INFINITY,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            ];
             for placement in &placements {
                 aabb[0] = aabb[0].min(world_bounds[0] + ox + placement.translation[0]);
                 aabb[1] = aabb[1].min(world_bounds[1] + oy + placement.translation[1]);

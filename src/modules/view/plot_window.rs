@@ -5,8 +5,8 @@
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::model::wire_model::WireModel;
-use glam::DVec3;
 use crate::t;
+use glam::DVec3;
 
 pub struct PlotWindowCommand {
     p1: Option<DVec3>,
@@ -50,7 +50,8 @@ impl CadCommand for PlotWindowCommand {
         true
     }
 
-    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> { let pt = pt.as_vec3();
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        let pt = pt.as_vec3();
         let p1 = self.p1?.as_vec3();
         // Draw the selection rectangle.
         Some(WireModel {
@@ -61,6 +62,7 @@ impl CadCommand for PlotWindowCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -95,10 +97,13 @@ impl CadCommand for PlotWindowCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
+
+            ..Default::default()
         })
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["PLOTWINDOW"] });  // PlotWindowCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["PLOTWINDOW"]
+}); // PlotWindowCommand

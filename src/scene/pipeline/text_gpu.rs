@@ -66,9 +66,21 @@ pub struct BlockTextInstance {
 impl BlockTextInstance {
     pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         const ATTRS: &[wgpu::VertexAttribute] = &[
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(BlockTextInstance, translation) as u64, shader_location: 5, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(BlockTextInstance, translation_low) as u64, shader_location: 6, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(BlockTextInstance, draw_depth) as u64, shader_location: 7, format: wgpu::VertexFormat::Float32 },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(BlockTextInstance, translation) as u64,
+                shader_location: 5,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(BlockTextInstance, translation_low) as u64,
+                shader_location: 6,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(BlockTextInstance, draw_depth) as u64,
+                shader_location: 7,
+                format: wgpu::VertexFormat::Float32,
+            },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
@@ -537,8 +549,7 @@ pub fn upload_block_vertex_refs(
                 })
             })
             .collect();
-        let max_instances =
-            super::gpu_budget::max_elements::<BlockTextInstance>(device);
+        let max_instances = super::gpu_budget::max_elements::<BlockTextInstance>(device);
         for chunk in instances.chunks(max_instances) {
             let instance_buffer = super::gpu_upload::upload_buffer(
                 device,
@@ -606,7 +617,14 @@ mod tests {
         };
         let mut out = Vec::new();
         // Large origin exercises the double-single precision path.
-        push_glyph_vertices(&mut out, &[q], [1_000_000.0, 2_000_000.0, 0.0], 1.0, [1.0; 4], 0.0);
+        push_glyph_vertices(
+            &mut out,
+            &[q],
+            [1_000_000.0, 2_000_000.0, 0.0],
+            1.0,
+            [1.0; 4],
+            0.0,
+        );
         assert_eq!(out.len(), 6, "two triangles per glyph");
 
         // Vertex 0 = BL corner (0,0) -> world origin, uv = (u_min, v_max).

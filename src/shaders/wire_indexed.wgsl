@@ -33,7 +33,7 @@ struct WireConst {
     align_total:    f32,
     world_half_width: f32,
     is_tapered:     f32,
-    _pad2:          f32,
+    hidden:         f32,
     marker_origin_high: vec4<f32>,
     marker_origin_low: vec4<f32>,
     marker_normal_scale: vec4<f32>,
@@ -55,6 +55,8 @@ struct InstanceIn {
 
 const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
 const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
+// Must match `MITER_LIMIT` in wire_gpu.rs.
+const MITER_LIMIT: f32 = 8.0;
 
 struct VertexOut {
     @builtin(position)              clip_pos:       vec4<f32>,
@@ -168,13 +170,17 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         }
         perp_world = normalize(perp_world);
 
+        // A constant-width band slides each corner along the segment onto
+        // its joint's bisector (miter), so neighbours meet without a notch.
+        let miter = select(in.taper_ratio, vec2<f32>(0.0), is_tapered) * MITER_LIMIT;
+        let along = mix(miter.x, miter.y, which_end) * eff_hw * side;
         let pos_rel = mix(rel_a, rel_b, which_end);
-        let world_pos = pos_rel + perp_world * (eff_hw * side);
+        let world_pos = pos_rel + perp_world * (eff_hw * side) + world_dir * along;
         var clip_pos = u.view_rot * vec4<f32>(world_pos, 1.0);
         clip_pos = apply_draw_order(clip_pos, c.draw_depth);
 
         final_clip = clip_pos;
-        out_dist = mix(in.distance_a, in.distance_b, which_end);
+        out_dist = mix(in.distance_a, in.distance_b, which_end) + along * (in.distance_b - in.distance_a) / max(world_len, 1e-6);
         out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
         out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
     } else {
@@ -238,6 +244,12 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
     out.min_elem       = min_elem;
     out.align_end      = c.align_end * lt_scale;
     out.align_total    = c.align_total;
+    // A hidden entity's arena slab stays resident; collapse it outside the
+    // clip volume and take the tombstone discard.
+    if c.hidden != 0.0 {
+        out.clip_pos = vec4<f32>(0.0, 0.0, -2.0, 1.0);
+        out.pattern_length = -1.0;
+    }
     return out;
 }
 

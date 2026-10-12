@@ -1,6 +1,6 @@
-use acadrust::entities::Insert;
-use acadrust::types::{Matrix3, Transform, Vector3};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::entities::Insert;
+use codec::types::{Matrix3, Transform, Vector3};
+use codec::{CadDocument, EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -23,7 +23,7 @@ const ATTRIBUTE_GRIP_BASE: usize = 1;
 /// attribute belongs to the block definition rather than this insert, and a
 /// locked position cannot be dragged. Visibility is a separate question: an
 /// invisible attribute that ATTMODE 2 displays is grippable while it shows.
-fn attribute_is_movable(att: &acadrust::entities::AttributeEntity) -> bool {
+fn attribute_is_movable(att: &codec::entities::AttributeEntity) -> bool {
     !att.flags.constant && !att.lock_position && !att.flags.locked_position
 }
 
@@ -48,9 +48,15 @@ pub(crate) fn unscale_attribute_grip(
     if (block_scale - 1.0).abs() <= 1.0e-6 {
         return apply;
     }
-    let origin = glam::DVec3::new(insert.insert_point.x, insert.insert_point.y, insert.insert_point.z);
+    let origin = glam::DVec3::new(
+        insert.insert_point.x,
+        insert.insert_point.y,
+        insert.insert_point.z,
+    );
     match apply {
-        GripApply::Absolute(target) => GripApply::Absolute(origin + (target - origin) / block_scale),
+        GripApply::Absolute(target) => {
+            GripApply::Absolute(origin + (target - origin) / block_scale)
+        }
         GripApply::Translate(delta) => GripApply::Translate(delta / block_scale),
     }
 }
@@ -58,7 +64,7 @@ pub(crate) fn unscale_attribute_grip(
 fn attribute_is_render_visible(
     document: &CadDocument,
     visibility: i16,
-    attribute: &acadrust::entities::AttributeEntity,
+    attribute: &codec::entities::AttributeEntity,
 ) -> bool {
     let layer_visible = document
         .layers
@@ -89,7 +95,7 @@ fn insert_attribute_block_scale(
 
 fn scale_attribute_for_insert(
     insert: &Insert,
-    attribute: &mut acadrust::entities::AttributeEntity,
+    attribute: &mut codec::entities::AttributeEntity,
     block_scale: f64,
 ) {
     if (block_scale - 1.0).abs() <= 1.0e-6 {
@@ -241,7 +247,7 @@ fn apply_geom_prop(ins: &mut Insert, field: &str, value: &str) {
             }
             let delta = ocs * ins.insert_point - old_world;
             for att in &mut ins.attributes {
-                acadrust::Entity::translate(att, delta);
+                codec::Entity::translate(att, delta);
             }
         }
         // Single Scale row shown while "Uniform scale" is checked (#427).
@@ -261,7 +267,11 @@ fn apply_geom_prop(ins: &mut Insert, field: &str, value: &str) {
 fn apply_grip(ins: &mut Insert, grip_id: usize, apply: GripApply) {
     // An attribute grip moves that attribute alone; the block stays put.
     if let Some(index) = grip_id.checked_sub(ATTRIBUTE_GRIP_BASE) {
-        if let Some(att) = ins.attributes.get_mut(index).filter(|a| attribute_is_movable(a)) {
+        if let Some(att) = ins
+            .attributes
+            .get_mut(index)
+            .filter(|a| attribute_is_movable(a))
+        {
             Grippable::apply_grip(att, 0, apply);
         }
         return;
@@ -281,7 +291,7 @@ fn apply_grip(ins: &mut Insert, grip_id: usize, apply: GripApply) {
     // world delta — otherwise a grip-drag leaves the attribute text behind (#255).
     let delta = world - old_world;
     for att in &mut ins.attributes {
-        acadrust::Entity::translate(att, delta);
+        codec::Entity::translate(att, delta);
     }
 }
 
@@ -296,7 +306,7 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
 
         let ux = dx / len;
         let uy = dy / len;
-        let mirror = acadrust::types::Matrix4 {
+        let mirror = codec::types::Matrix4 {
             m: [
                 [2.0 * ux * ux - 1.0, 2.0 * ux * uy, 0.0, 0.0],
                 [2.0 * ux * uy, 2.0 * uy * uy - 1.0, 0.0, 0.0],
@@ -311,16 +321,14 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
                 p1.y as f64,
                 0.0,
             )));
-        acadrust::Entity::apply_transform(entity, &t);
+        codec::Entity::apply_transform(entity, &t);
     });
 }
 
 crate::impl_entity_basics!(Insert);
 
 impl crate::entities::traits::FallbackTess for Insert {
-    fn fallback_geometry(
-        &self,
-    ) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
         let (ipx, ipy, ipz) = (
             self.insert_point.x,
             self.insert_point.y,
@@ -343,8 +351,8 @@ impl crate::entities::traits::FallbackTess for Insert {
     }
 }
 pub(crate) fn insert_attribute_entities(
-    document: &acadrust::CadDocument,
-    insert: &acadrust::entities::Insert,
+    document: &codec::CadDocument,
+    insert: &codec::entities::Insert,
     annotation_scale: f32,
     scale_policy: crate::scene::BlockScalePolicy,
 ) -> Vec<EntityType> {
@@ -367,8 +375,8 @@ pub(crate) fn insert_attribute_entities(
 
 pub(crate) fn append_insert_attribute_wires(
     wires: &mut Vec<WireModel>,
-    document: &acadrust::CadDocument,
-    ins: &acadrust::entities::Insert,
+    document: &codec::CadDocument,
+    ins: &codec::entities::Insert,
     insert_handle: Handle,
     sel: bool,
     ins_color: [f32; 4],
@@ -414,7 +422,7 @@ pub(crate) fn append_insert_attribute_wires(
                 );
             let sub_color = render::adapt_to_bg(sub_color, bg_color);
             let sub_color = if is_xref && !sel {
-                block_cache::fade_toward_bg(sub_color, bg_color)
+                block_cache::xref_fade(sub_color, bg_color)
             } else {
                 sub_color
             };
@@ -458,9 +466,9 @@ pub(crate) fn append_insert_attribute_wires(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::AttributeEntity;
-    use acadrust::tables::Layer;
-    use acadrust::xdata::ExtendedDataRecord;
+    use codec::entities::AttributeEntity;
+    use codec::tables::Layer;
+    use codec::xdata::ExtendedDataRecord;
 
     fn attribute(tag: &str, x: f64, y: f64) -> AttributeEntity {
         let mut att = AttributeEntity::new(tag.to_string(), format!("{tag}-value"));
@@ -487,7 +495,10 @@ mod tests {
     /// handle to pick an attribute up by and nowhere to drop it.
     #[test]
     fn each_attribute_offers_its_own_grip() {
-        let ins = block_with(vec![attribute("TAG_A", 3.0, 4.0), attribute("TAG_B", 6.0, 8.0)]);
+        let ins = block_with(vec![
+            attribute("TAG_A", 3.0, 4.0),
+            attribute("TAG_B", 6.0, 8.0),
+        ]);
 
         let g = grips(&ins);
         assert_eq!(g.len(), 3, "insertion point plus one grip per attribute");
@@ -500,15 +511,31 @@ mod tests {
     /// block and its other attributes stay where they were.
     #[test]
     fn attribute_grip_moves_only_that_attribute() {
-        let mut ins = block_with(vec![attribute("TAG_A", 3.0, 4.0), attribute("TAG_B", 6.0, 8.0)]);
+        let mut ins = block_with(vec![
+            attribute("TAG_A", 3.0, 4.0),
+            attribute("TAG_B", 6.0, 8.0),
+        ]);
 
         let moved = grips(&ins)[1].id;
-        apply_grip(&mut ins, moved, GripApply::Absolute(glam::DVec3::new(30.0, 40.0, 0.0)));
+        apply_grip(
+            &mut ins,
+            moved,
+            GripApply::Absolute(glam::DVec3::new(30.0, 40.0, 0.0)),
+        );
 
         assert_eq!(ins.insert_point, Vector3::new(0.0, 0.0, 0.0));
-        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(30.0, 40.0, 0.0));
-        assert_eq!(ins.attributes[0].alignment_point, Vector3::new(30.0, 40.0, 0.0));
-        assert_eq!(ins.attributes[1].insertion_point, Vector3::new(6.0, 8.0, 0.0));
+        assert_eq!(
+            ins.attributes[0].insertion_point,
+            Vector3::new(30.0, 40.0, 0.0)
+        );
+        assert_eq!(
+            ins.attributes[0].alignment_point,
+            Vector3::new(30.0, 40.0, 0.0)
+        );
+        assert_eq!(
+            ins.attributes[1].insertion_point,
+            Vector3::new(6.0, 8.0, 0.0)
+        );
     }
 
     /// The insertion grip keeps carrying the attributes along with the block,
@@ -518,10 +545,17 @@ mod tests {
     fn insertion_grip_still_carries_the_attributes() {
         let mut ins = block_with(vec![attribute("TAG_A", 3.0, 4.0)]);
 
-        apply_grip(&mut ins, 0, GripApply::Translate(glam::DVec3::new(10.0, 0.0, 0.0)));
+        apply_grip(
+            &mut ins,
+            0,
+            GripApply::Translate(glam::DVec3::new(10.0, 0.0, 0.0)),
+        );
 
         assert_eq!(ins.insert_point, Vector3::new(10.0, 0.0, 0.0));
-        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(13.0, 4.0, 0.0));
+        assert_eq!(
+            ins.attributes[0].insertion_point,
+            Vector3::new(13.0, 4.0, 0.0)
+        );
     }
 
     /// A constant attribute belongs to the block definition and an invisible
@@ -535,15 +569,30 @@ mod tests {
         invisible.flags.invisible = true;
         let mut locked = attribute("TAG_LOCKED", 4.0, 4.0);
         locked.lock_position = true;
-        let mut ins = block_with(vec![constant, invisible, locked, attribute("TAG_OK", 5.0, 5.0)]);
+        let mut ins = block_with(vec![
+            constant,
+            invisible,
+            locked,
+            attribute("TAG_OK", 5.0, 5.0),
+        ]);
 
         let g = grips(&ins);
         assert_eq!(g.len(), 2, "only the movable attribute is gripped: {g:?}");
         assert_eq!(g[1].world, glam::DVec3::new(5.0, 5.0, 0.0));
 
-        apply_grip(&mut ins, g[1].id, GripApply::Absolute(glam::DVec3::new(50.0, 50.0, 0.0)));
-        assert_eq!(ins.attributes[3].insertion_point, Vector3::new(50.0, 50.0, 0.0));
-        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(1.0, 1.0, 0.0));
+        apply_grip(
+            &mut ins,
+            g[1].id,
+            GripApply::Absolute(glam::DVec3::new(50.0, 50.0, 0.0)),
+        );
+        assert_eq!(
+            ins.attributes[3].insertion_point,
+            Vector3::new(50.0, 50.0, 0.0)
+        );
+        assert_eq!(
+            ins.attributes[0].insertion_point,
+            Vector3::new(1.0, 1.0, 0.0)
+        );
     }
 
     #[test]

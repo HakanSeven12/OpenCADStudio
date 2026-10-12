@@ -254,7 +254,9 @@ pub fn all_themes() -> Vec<iced::Theme> {
 }
 
 pub fn builtin_theme(name: &str) -> Option<iced::Theme> {
-    all_themes().into_iter().find(|theme| theme.to_string() == name)
+    all_themes()
+        .into_iter()
+        .find(|theme| theme.to_string() == name)
 }
 
 fn color_to_rgb(color: iced::Color) -> [u8; 3] {
@@ -275,14 +277,20 @@ pub(crate) fn rgb_to_hex(rgb: [u8; 3]) -> String {
 
 pub(crate) fn parse_hex(value: &str) -> Option<[u8; 3]> {
     let value = value.trim().strip_prefix('#').unwrap_or(value.trim());
-    if value.len() != 6 {
+    // Walk pairs of hex digits as chars: the old byte-length guard let a
+    // 6-byte multibyte string (`aébé`) through to fixed-offset slices that
+    // split a character. Exactly two digits per channel, or it is not a colour.
+    let mut bytes = [0u8; 3];
+    let mut chars = value.chars();
+    for slot in &mut bytes {
+        let high = chars.next()?.to_digit(16)?;
+        let low = chars.next()?.to_digit(16)?;
+        *slot = ((high << 4) | low) as u8;
+    }
+    if chars.next().is_some() {
         return None;
     }
-    Some([
-        u8::from_str_radix(&value[0..2], 16).ok()?,
-        u8::from_str_radix(&value[2..4], 16).ok()?,
-        u8::from_str_radix(&value[4..6], 16).ok()?,
-    ])
+    Some(bytes)
 }
 
 /// Canvas mode for Model space.
@@ -421,7 +429,9 @@ impl ModelSpaceThemeConfig {
     pub fn resolve_selection_color(&self) -> [f32; 4] {
         if self.selection_highlight_color == 0 {
             crate::scene::model::wire_model::WireModel::SELECTED
-        } else if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_highlight_color) {
+        } else if let Some((r, g, b)) =
+            codec::types::aci_table::aci_to_rgb(self.selection_highlight_color)
+        {
             [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
         } else {
             crate::scene::model::wire_model::WireModel::SELECTED
@@ -676,7 +686,8 @@ mod tests {
         original.model_space.selection_window_color = 5;
 
         let serialized = serde_json::to_string(&original).expect("serialize config");
-        let deserialized: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        let deserialized: AppConfig =
+            serde_json::from_str(&serialized).expect("deserialize config");
 
         assert_eq!(deserialized.model_space.mode, ModelSpaceMode::Custom);
         assert_eq!(deserialized.model_space.custom_bg, Some([12, 34, 56]));
@@ -689,11 +700,40 @@ mod tests {
     fn test_parse_theme_name() {
         assert_eq!(parse_theme_name("light"), Some(iced::Theme::Light));
         assert_eq!(parse_theme_name("DARK"), Some(iced::Theme::Dark));
-        assert_eq!(parse_theme_name("solarized light"), Some(iced::Theme::SolarizedLight));
-        assert_eq!(parse_theme_name("tokyo-night-storm"), Some(iced::Theme::TokyoNightStorm));
-        assert_eq!(parse_theme_name("Kanagawa_Lotus"), Some(iced::Theme::KanagawaLotus));
+        assert_eq!(
+            parse_theme_name("solarized light"),
+            Some(iced::Theme::SolarizedLight)
+        );
+        assert_eq!(
+            parse_theme_name("tokyo-night-storm"),
+            Some(iced::Theme::TokyoNightStorm)
+        );
+        assert_eq!(
+            parse_theme_name("Kanagawa_Lotus"),
+            Some(iced::Theme::KanagawaLotus)
+        );
         assert_eq!(parse_theme_name("1"), None);
         assert_eq!(parse_theme_name("0"), None);
         assert_eq!(parse_theme_name("nonexistent_theme"), None);
+    }
+
+    /// The old guard checked the BYTE length (`value.len() != 6`) but sliced
+    /// at fixed byte offsets — a 6-byte multibyte string like `aébé` passed
+    /// the guard and then split a character:
+    /// `byte index 2 is not a char boundary; it is inside 'é'`. Pasting it
+    /// into any Options colour field killed the process on the keystroke.
+    #[test]
+    fn test_parse_hex_rejects_multibyte_input_without_panicking() {
+        for value in ["aébé", "#aébé", "éééééé", "#ébé#"] {
+            assert_eq!(parse_hex(value), None, "{value} should not parse");
+        }
+        // Non-hex garbage and wrong lengths stay None.
+        for value in ["gggggg", "a1b2c", "a1b2c34", "#GGHHII"] {
+            assert_eq!(parse_hex(value), None, "{value} should not parse");
+        }
+        // Valid input keeps working, with and without '#', with whitespace.
+        assert_eq!(parse_hex("a1b2c3"), Some([0xa1, 0xb2, 0xc3]));
+        assert_eq!(parse_hex("#A1B2C3"), Some([0xa1, 0xb2, 0xc3]));
+        assert_eq!(parse_hex("  000000  "), Some([0, 0, 0]));
     }
 }

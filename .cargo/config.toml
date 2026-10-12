@@ -1,4 +1,4 @@
-# getrandom 0.3 (pulled by ahash via acadrust) needs this cfg to select its
+# getrandom 0.3 (pulled by ahash via opencadcodec) needs this cfg to select its
 # browser backend on wasm32-unknown-unknown, alongside its `wasm_js` feature
 # (enabled in Cargo.toml for the wasm target). Without it the web build fails
 # with "wasm32-unknown-unknown targets are not supported by default".
@@ -29,3 +29,9 @@ rustflags = [
 rustflags = [
     "-Clink-arg=/STACK:16777216",
 ]
+
+# Also sizes rustc's own threads: rustc 1.99 overflows the default 8 MB
+# compiling this crate in release on Windows/macOS.
+[env]
+RUST_MIN_STACK = "67108864"
+

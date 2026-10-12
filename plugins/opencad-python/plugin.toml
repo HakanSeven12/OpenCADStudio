@@ -1,0 +1,22 @@
+[plugin]
+id = "opencad.python"
+name = "Python Scripting"
+version = "0.1.0"
+description = "Embedded Python scripting (RustPython) for Open CAD Studio."
+author = "Felix Riestra"
+license = "GPL-3.0-only"
+repository = "HakanSeven12/OpenCADStudio"
+
+[opencad]
+api_version = 7
+# Both filled by release.yml at build time from the actual compiler and
+# Cargo.lock's resolved opencadcodec source. Declare acadrust_source even though
+# it's optional: the host's compatibility check only runs at all if this
+# field is present, so an omitted field is silently treated as compatible
+# rather than rejected (see OpenCADStudio's plugin-architecture.md,
+# "Build-time ABI metadata").
+rustc_version = "__RUSTC_VERSION__"
+acadrust_source = "__ACADRUST_SOURCE__"
+ribbon_order = 60
+command_prefixes = ["PY_"]
+xdata_apps = []

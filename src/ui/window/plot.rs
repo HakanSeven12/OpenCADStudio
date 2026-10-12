@@ -9,15 +9,14 @@
 use crate::app::Message;
 use crate::io::paper_catalog::{self, CustomPaper, Margins, PaperSize, PaperUnits};
 use crate::io::plot_device::PrinterCapabilities;
+use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form;
 use crate::ui::style::form::{hdivider, vseparator as vsep};
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input,
-    Space,
+    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, Space,
 };
 use iced::{Background, Border, Element, Fit, Length, Theme};
-use crate::t;
 use std::borrow::Cow;
 use std::fmt;
 
@@ -46,11 +45,19 @@ struct PlotChoice {
 
 impl PlotChoice {
     fn raw(value: impl Into<String>) -> Self {
-        Self { raw: value.into(), localized: false, display: None }
+        Self {
+            raw: value.into(),
+            localized: false,
+            display: None,
+        }
     }
 
     fn localized(value: impl Into<String>) -> Self {
-        Self { raw: value.into(), localized: true, display: None }
+        Self {
+            raw: value.into(),
+            localized: true,
+            display: None,
+        }
     }
 
     fn paper(paper: &PaperSize) -> Self {
@@ -98,7 +105,15 @@ mod tests {
         assert_eq!((custom.width, custom.height), (1500.0, 609.6));
         assert_eq!(custom.units, PaperUnits::Millimeters);
         // Blank or unparsable margins mean no margin, never a refusal.
-        assert_eq!(custom.margins, Margins { left: 5.0, bottom: 17.0, right: 0.0, top: 0.0 });
+        assert_eq!(
+            custom.margins,
+            Margins {
+                left: 5.0,
+                bottom: 17.0,
+                right: 0.0,
+                top: 0.0
+            }
+        );
         assert_eq!(custom.canonical(), "Roll_24_(609.60_x_1500.00_MM)");
         draft.width = "0".into();
         assert_eq!(draft.build().unwrap_err(), CustomPaperError::Size);
@@ -115,7 +130,15 @@ mod tests {
         assert!(draft.inches);
         assert_eq!(draft.margins, ["0.25", "0.25", "0.25", "0.25"]);
         let a4 = resolve("ISO_A4_(210.00_x_297.00_MM)").unwrap();
-        let draft = CustomPaperDraft::from_paper(&a4, Margins { left: 5.0, bottom: 17.0, right: 6.0, top: 18.0 });
+        let draft = CustomPaperDraft::from_paper(
+            &a4,
+            Margins {
+                left: 5.0,
+                bottom: 17.0,
+                right: 6.0,
+                top: 18.0,
+            },
+        );
         assert!(!draft.inches);
         assert_eq!(draft.margins, ["5", "17", "6", "18"]);
     }
@@ -126,7 +149,10 @@ mod tests {
         let choice = PlotChoice::localized(format!("View: {name}"));
         assert_eq!(choice.to_string(), crate::tf!("View: {name}").as_ref());
         assert_eq!(choice.raw.strip_prefix("View: "), Some(name));
-        assert_eq!(PlotChoice::raw("View: PDF printer").to_string(), "View: PDF printer");
+        assert_eq!(
+            PlotChoice::raw("View: PDF printer").to_string(),
+            "View: PDF printer"
+        );
     }
 }
 
@@ -160,13 +186,13 @@ pub struct PageSetupImportDraft {
     pub file: String,
     /// Each setup with whether it is ticked for import. The settings are
     /// carried along so the source file is read once.
-    pub setups: Vec<(String, acadrust::objects::PlotSettings, bool)>,
+    pub setups: Vec<(String, codec::objects::PlotSettings, bool)>,
     /// Why the file gave nothing, when it did not.
     pub error: Option<String>,
 }
 
 impl PageSetupImportDraft {
-    pub fn selected(&self) -> impl Iterator<Item = (&str, &acadrust::objects::PlotSettings)> {
+    pub fn selected(&self) -> impl Iterator<Item = (&str, &codec::objects::PlotSettings)> {
         self.setups
             .iter()
             .filter(|(_, _, on)| *on)
@@ -180,7 +206,7 @@ pub enum PageSetupImportMsg {
     /// Ask for the drawing to import from.
     Pick,
     /// The drawing was read (or could not be): its name and page setups.
-    Loaded(Result<(String, Vec<(String, acadrust::objects::PlotSettings)>), String>),
+    Loaded(Result<(String, Vec<(String, codec::objects::PlotSettings)>), String>),
     /// Tick or untick one setup.
     Toggle(String),
     /// Tick or untick every setup.
@@ -201,7 +227,10 @@ pub enum PlotDlgMsg {
     /// The driver options of a printer arrived (or failed to), for the
     /// in-line properties editor; carries the printer's name so a late
     /// answer for a printer the user has since left is ignored.
-    PrinterOptionsLoaded(String, Result<Vec<crate::io::print_to_printer::PrinterOption>, String>),
+    PrinterOptionsLoaded(
+        String,
+        Result<Vec<crate::io::print_to_printer::PrinterOption>, String>,
+    ),
     /// One option of the properties editor was set to a choice keyword.
     PrinterOptionSet(String, String),
     /// Keep the editor's choices for the printer and close it.
@@ -359,7 +388,11 @@ impl CustomPaperDraft {
         if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
             return Err(CustomPaperError::Size);
         }
-        let margin = |text: &str| number(text).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0);
+        let margin = |text: &str| {
+            number(text)
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or(0.0)
+        };
         Ok(CustomPaper {
             name: self.name.trim().to_string(),
             width,
@@ -439,7 +472,8 @@ pub struct PlotDialogState {
     /// Driver options chosen per printer (`printer → key → choice`), the way
     /// a plotter configuration remembers its device settings; applied to
     /// every job sent to that printer and kept across sessions.
-    pub driver_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    pub driver_options:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     /// The in-line printer-properties editor while it is open.
     #[serde(skip)]
     pub printer_editor: Option<PrinterOptionsDraft>,
@@ -650,7 +684,6 @@ impl PlotDialogState {
         self.show_plot_styles = o.show_plot_styles;
         self.style_missing = o.style_missing;
     }
-
 }
 
 fn legacy_fit_to_paper_default() -> bool {
@@ -713,7 +746,13 @@ fn drop_row<'a>(
     ctor: fn(String) -> PlotDlgMsg,
     width: Length,
 ) -> Element<'a, Message> {
-    form::labeled_pick_list(label, options, selected, move |choice| Message::PlotDlg(ctor(choice.raw)), width)
+    form::labeled_pick_list(
+        label,
+        options,
+        selected,
+        move |choice| Message::PlotDlg(ctor(choice.raw)),
+        width,
+    )
 }
 
 fn drop_row_enabled<'a>(
@@ -741,7 +780,12 @@ fn field_row<'a>(
     ctor: fn(String) -> PlotDlgMsg,
     width: u16,
 ) -> Element<'a, Message> {
-    form::labeled_field(label, value, move |s| Message::PlotDlg(ctor(s)), width as f32)
+    form::labeled_field(
+        label,
+        value,
+        move |s| Message::PlotDlg(ctor(s)),
+        width as f32,
+    )
 }
 
 fn field_row_enabled<'a>(
@@ -751,7 +795,13 @@ fn field_row_enabled<'a>(
     width: u16,
     enabled: bool,
 ) -> Element<'a, Message> {
-    form::labeled_field_enabled(label, value, move |s| Message::PlotDlg(ctor(s)), width as f32, enabled)
+    form::labeled_field_enabled(
+        label,
+        value,
+        move |s| Message::PlotDlg(ctor(s)),
+        width as f32,
+        enabled,
+    )
 }
 
 fn check<'a>(label: Cow<'static, str>, on: bool, flag: PlotFlag) -> Element<'a, Message> {
@@ -806,7 +856,9 @@ fn page_setup_import_chooser<'a>(
     }
     let all = !draft.setups.is_empty() && draft.setups.iter().all(|(_, _, on)| *on);
     let any = draft.setups.iter().any(|(_, _, on)| *on);
-    let mut import = button(text(t!("Import")).size(11)).style(btn(true)).padding([4, 8]);
+    let mut import = button(text(t!("Import")).size(11))
+        .style(btn(true))
+        .padding([4, 8]);
     if any {
         import = import.on_press(msg(PageSetupImportMsg::Apply));
     }
@@ -863,21 +915,20 @@ fn custom_scale_row<'a>(s: &'a PlotDialogState, enabled: bool) -> Element<'a, Me
 /// the file's own problem, or where a copy would be found.
 fn style_note<'a>(s: &'a PlotDialogState) -> Element<'a, Message> {
     match &s.style_error {
-        Some(error) if s.style_missing => {
-            text(error.clone()).size(10).style(muted_style).into()
-        }
+        Some(error) if s.style_missing => text(error.clone()).size(10).style(muted_style).into(),
         _ => Space::new().height(0).into(),
     }
 }
 
 fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(content)
-        .width(Length::Fill)
-        .into()
+    container(content).width(Length::Fill).into()
 }
 
 fn choices(items: &[&str]) -> Vec<PlotChoice> {
-    items.iter().map(|&value| PlotChoice::localized(value)).collect()
+    items
+        .iter()
+        .map(|&value| PlotChoice::localized(value))
+        .collect()
 }
 
 /// Entries for the output dropdown. The web build has no system printers, so
@@ -902,11 +953,13 @@ fn output_choices(printers: &[String]) -> Vec<PlotChoice> {
 /// driver option (media type, colour mode, quality, duplex, trays…), with
 /// Reset / Cancel / Apply. Mirrors what LibreOffice's Properties… shows for a
 /// CUPS printer, without leaving the plot dialog.
-fn printer_options_editor<'a>(draft: &'a PrinterOptionsDraft, width: Length) -> Element<'a, Message> {
-    let mut rows = column![section_label(Cow::Owned(crate::tf!(
-        "Printer properties — {printer}",
-        printer = draft.printer
-    ).into_owned()))]
+fn printer_options_editor<'a>(
+    draft: &'a PrinterOptionsDraft,
+    width: Length,
+) -> Element<'a, Message> {
+    let mut rows = column![section_label(Cow::Owned(
+        crate::tf!("Printer properties — {printer}", printer = draft.printer).into_owned()
+    ))]
     .spacing(6);
     match (&draft.options, &draft.error) {
         (Some(options), _) if options.is_empty() => {
@@ -938,7 +991,9 @@ fn printer_options_editor<'a>(draft: &'a PrinterOptionsDraft, width: Length) -> 
                     Cow::Owned(option.label.clone()),
                     choices,
                     selected,
-                    move |choice| Message::PlotDlg(PlotDlgMsg::PrinterOptionSet(key.clone(), choice.raw)),
+                    move |choice| {
+                        Message::PlotDlg(PlotDlgMsg::PrinterOptionSet(key.clone(), choice.raw))
+                    },
                     Length::Fill,
                 ));
             }
@@ -953,7 +1008,11 @@ fn printer_options_editor<'a>(draft: &'a PrinterOptionsDraft, width: Length) -> 
             );
         }
         (None, None) => {
-            rows = rows.push(text(t!("Reading the printer's options…")).size(10).style(muted_style));
+            rows = rows.push(
+                text(t!("Reading the printer's options…"))
+                    .size(10)
+                    .style(muted_style),
+            );
         }
     }
     let mut buttons = row![
@@ -1003,12 +1062,17 @@ fn custom_paper_editor<'a>(draft: &'a CustomPaperDraft, width: Length) -> Elemen
         PlotChoice::localized("Millimeters"),
         PlotChoice::localized("Inches"),
     ];
-    let unit_selected = Some(PlotChoice::localized(if draft.inches { "Inches" } else { "Millimeters" }));
+    let unit_selected = Some(PlotChoice::localized(if draft.inches {
+        "Inches"
+    } else {
+        "Millimeters"
+    }));
     const SIDE_LABEL: f32 = 52.0;
     const NUMBER: f32 = 64.0;
-    let dimension = |label: Cow<'static, str>, value: &'a str, ctor: fn(String) -> CustomPaperMsg| {
-        form::labeled_field_compact(label, value, move |v| msg(ctor(v)), SIDE_LABEL, NUMBER)
-    };
+    let dimension =
+        |label: Cow<'static, str>, value: &'a str, ctor: fn(String) -> CustomPaperMsg| {
+            form::labeled_field_compact(label, value, move |v| msg(ctor(v)), SIDE_LABEL, NUMBER)
+        };
     let margin = |label: Cow<'static, str>, side: MarginSide, index: usize| {
         form::labeled_field_compact(
             label,
@@ -1030,7 +1094,12 @@ fn custom_paper_editor<'a>(draft: &'a CustomPaperDraft, width: Length) -> Elemen
     container(
         column![
             section_label(t!("Custom paper size")),
-            form::labeled_field(t!("Name"), &draft.name, move |v| msg(CustomPaperMsg::Name(v)), 200.0),
+            form::labeled_field(
+                t!("Name"),
+                &draft.name,
+                move |v| msg(CustomPaperMsg::Name(v)),
+                200.0
+            ),
             form::labeled_pick_list(
                 t!("Units"),
                 unit_options,
@@ -1134,30 +1203,29 @@ pub fn view_window(
     } else {
         scrollable(column(rows).spacing(1)).height(height).into()
     };
-    let new_name: Element<'_, Message> =
-        if !s.name_rename && s.name_input.is_some() {
-            row![
-                text_input("", rename_buf)
-                    .on_input(|value| Message::PlotDlg(PlotDlgMsg::NameInput(value)))
-                    .on_submit(Message::PlotDlg(PlotDlgMsg::NameCommit))
-                    .style(form::field_style)
-                    .size(11)
-                    .padding([4, 8])
-                    .width(Length::Fill),
-                button(text(t!("Save")).size(11))
-                    .on_press(Message::PlotDlg(PlotDlgMsg::NameCommit))
-                    .style(btn(true))
-                    .padding([4, 8]),
-                button(text("×").size(11))
-                    .on_press(Message::PlotDlg(PlotDlgMsg::NameCancel))
-                    .style(btn(false))
-                    .padding([4, 8]),
-            ]
-            .spacing(4)
-            .into()
-        } else {
-            Space::new().height(0).into()
-        };
+    let new_name: Element<'_, Message> = if !s.name_rename && s.name_input.is_some() {
+        row![
+            text_input("", rename_buf)
+                .on_input(|value| Message::PlotDlg(PlotDlgMsg::NameInput(value)))
+                .on_submit(Message::PlotDlg(PlotDlgMsg::NameCommit))
+                .style(form::field_style)
+                .size(11)
+                .padding([4, 8])
+                .width(Length::Fill),
+            button(text(t!("Save")).size(11))
+                .on_press(Message::PlotDlg(PlotDlgMsg::NameCommit))
+                .style(btn(true))
+                .padding([4, 8]),
+            button(text("×").size(11))
+                .on_press(Message::PlotDlg(PlotDlgMsg::NameCancel))
+                .style(btn(false))
+                .padding([4, 8]),
+        ]
+        .spacing(4)
+        .into()
+    } else {
+        Space::new().height(0).into()
+    };
     // While an import is being chosen, the list shows the other drawing's
     // setups with a tick each instead of this drawing's.
     let list_body: Element<'_, Message> = match &s.import_draft {
@@ -1219,16 +1287,11 @@ pub fn view_window(
         .style(btn(false))
         .padding([4, 12]);
     if !print_all_options && s.import_draft.is_none() {
-        import_button = import_button
-            .on_press(Message::PlotDlg(PlotDlgMsg::Import(PageSetupImportMsg::Pick)));
+        import_button = import_button.on_press(Message::PlotDlg(PlotDlgMsg::Import(
+            PageSetupImportMsg::Pick,
+        )));
     }
-    let left_bar = row![
-        new_button,
-        copy_button,
-        delete_button,
-        import_button,
-    ]
-    .spacing(4);
+    let left_bar = row![new_button, copy_button, delete_button, import_button,].spacing(4);
 
     // ── Printer / plotter ─────────────────────────────────────────────────
     // The web build has no system printers (PDF is the only output, via
@@ -1269,8 +1332,15 @@ pub fn view_window(
     let selected_paper = paper_catalog::from_drawing(&s.paper, s.paper_width_mm, s.paper_height_mm);
     let printer_sheets = (!s.to_file).then_some(()).and(s.printer_media.as_deref());
     let mut paper_opts: Vec<PlotChoice> = match printer_sheets {
-        Some(caps) => caps.media.iter().map(|media| PlotChoice::paper(&media.paper)).collect(),
-        None => paper_catalog::catalog().iter().map(PlotChoice::paper).collect(),
+        Some(caps) => caps
+            .media
+            .iter()
+            .map(|media| PlotChoice::paper(&media.paper))
+            .collect(),
+        None => paper_catalog::catalog()
+            .iter()
+            .map(PlotChoice::paper)
+            .collect(),
     };
     // User-defined sheets come last, after whatever the device offers.
     for custom in &s.custom_papers {
@@ -1288,20 +1358,24 @@ pub fn view_window(
         .iter()
         .any(|custom| custom.canonical() == selected_paper.canonical);
     let paper_source_note: Element<'_, Message> = if printer_sheets.is_some() {
-        text(t!("Sheet sizes and printable areas reported by the printer."))
-            .size(10)
-            .style(muted_style)
-            .width(width)
-            .into()
+        text(t!(
+            "Sheet sizes and printable areas reported by the printer."
+        ))
+        .size(10)
+        .style(muted_style)
+        .width(width)
+        .into()
     } else {
         Space::new().height(0).into()
     };
     let paper_note: Element<'_, Message> = if s.area == "Layout" {
-        text(t!("Layout plots the current sheet using the selected paper size."))
-            .size(10)
-            .style(muted_style)
-            .width(width)
-            .into()
+        text(t!(
+            "Layout plots the current sheet using the selected paper size."
+        ))
+        .size(10)
+        .style(muted_style)
+        .width(width)
+        .into()
     } else {
         Space::new().height(0).into()
     };
@@ -1309,7 +1383,10 @@ pub fn view_window(
     // announce — and the picker takes the whole row so a long queue name
     // stays readable; the driver's Properties… button sits beneath it.
     let output_field = row![
-        text(t!("Printer / plotter")).size(11).style(muted_style).width(form::LABEL_WIDTH),
+        text(t!("Printer / plotter"))
+            .size(11)
+            .style(muted_style)
+            .width(form::LABEL_WIDTH),
         iced::widget::pick_list(printer_sel, printer_opts, |value| value.to_string())
             .on_select(|choice| Message::PlotDlg(PlotDlgMsg::Printer(choice.raw)))
             .text_size(12)
@@ -1361,7 +1438,13 @@ pub fn view_window(
     // The picker takes the whole row so long media names stay readable; the
     // custom-sheet buttons sit right-aligned beneath it, and the editor
     // unfolds in their place.
-    let size_row = drop_row(t!("Paper size"), paper_opts, Some(paper_sel), PlotDlgMsg::Paper, Length::Fill);
+    let size_row = drop_row(
+        t!("Paper size"),
+        paper_opts,
+        Some(paper_sel),
+        PlotDlgMsg::Paper,
+        Length::Fill,
+    );
     let custom_controls: Element<'_, Message> = match &s.custom_editor {
         Some(draft) => custom_paper_editor(draft, width),
         None => {
@@ -1369,7 +1452,9 @@ pub fn view_window(
             if selected_is_custom {
                 buttons = buttons.push(
                     button(text(t!("Remove")).size(11))
-                        .on_press(Message::PlotDlg(PlotDlgMsg::CustomPaper(CustomPaperMsg::Remove)))
+                        .on_press(Message::PlotDlg(PlotDlgMsg::CustomPaper(
+                            CustomPaperMsg::Remove,
+                        )))
                         .style(btn(false))
                         .padding([4, 10]),
                 );
@@ -1377,7 +1462,9 @@ pub fn view_window(
             buttons
                 .push(
                     button(text(t!("Custom…")).size(11))
-                        .on_press(Message::PlotDlg(PlotDlgMsg::CustomPaper(CustomPaperMsg::Open)))
+                        .on_press(Message::PlotDlg(PlotDlgMsg::CustomPaper(
+                            CustomPaperMsg::Open,
+                        )))
                         .style(btn(false))
                         .padding([4, 10]),
                 )
@@ -1386,12 +1473,8 @@ pub fn view_window(
     };
     // Like the printer row: the section is its one picker, so heading and
     // control share a line.
-    let paper_panel = panel(column![
-        size_row,
-        custom_controls,
-        paper_source_note,
-        paper_note,
-    ].spacing(7));
+    let paper_panel =
+        panel(column![size_row, custom_controls, paper_source_note, paper_note,].spacing(7));
 
     let mut area_options = if print_all_options {
         choices(&["Layout"])
@@ -1409,16 +1492,19 @@ pub fn view_window(
         );
     }
     let mut area_row = row![
-        text(t!("What to plot")).size(11).style(muted_style).width(92),
+        text(t!("What to plot"))
+            .size(11)
+            .style(muted_style)
+            .width(92),
         iced::widget::pick_list(
             Some(PlotChoice::localized(s.area.clone())),
             area_options,
             |value| value.to_string(),
         )
-            .on_select(|choice| Message::PlotDlg(PlotDlgMsg::Area(choice.raw)))
-            .text_size(12)
-            .padding([3, 6])
-            .width(Length::Fill),
+        .on_select(|choice| Message::PlotDlg(PlotDlgMsg::Area(choice.raw)))
+        .text_size(12)
+        .padding([3, 6])
+        .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(iced::Center);
@@ -1437,57 +1523,87 @@ pub fn view_window(
     } else {
         (t!("X (mm)"), t!("Y (mm)"))
     };
-    let area_panel = panel(column![
-        section_label(t!("Plot area")),
-        area_row,
-        section_label(t!("Plot offset")),
+    let area_panel = panel(
         column![
-            field_row_enabled(offset_x_label, &s.offset_x, PlotDlgMsg::OffsetX, 70, common_area && !s.center),
-            field_row_enabled(offset_y_label, &s.offset_y, PlotDlgMsg::OffsetY, 70, common_area && !s.center),
+            section_label(t!("Plot area")),
+            area_row,
+            section_label(t!("Plot offset")),
+            column![
+                field_row_enabled(
+                    offset_x_label,
+                    &s.offset_x,
+                    PlotDlgMsg::OffsetX,
+                    70,
+                    common_area && !s.center
+                ),
+                field_row_enabled(
+                    offset_y_label,
+                    &s.offset_y,
+                    PlotDlgMsg::OffsetY,
+                    70,
+                    common_area && !s.center
+                ),
+            ]
+            .spacing(7),
+            check_enabled(
+                t!("Center the plot"),
+                s.center,
+                PlotFlag::Center,
+                common_area
+            ),
         ]
         .spacing(7),
-        check_enabled(t!("Center the plot"), s.center, PlotFlag::Center, common_area),
-    ].spacing(7));
+    );
     let scale_options = s
         .scales
         .iter()
         .map(|(name, _)| PlotChoice::raw(name.clone()))
         .collect();
-    let scale_panel = panel(column![
-        section_label(t!("Plot scale")),
-        check_enabled(
-            t!("Fit to paper"),
-            s.fit_to_paper,
-            PlotFlag::FitToPaper,
-            common_area,
-        ),
-        // "Scale" intentionally stays untranslated: it would clash with the
-        // ribbon's zoom tool label under the same lookup key.
-        drop_row_enabled(
-            Cow::Borrowed("Scale"),
-            scale_options,
-            Some(PlotChoice::raw(s.scale.clone())),
-            PlotDlgMsg::Scale,
-            width,
-            common_area && !s.fit_to_paper,
-        ),
-        // The custom scale spells the picked ratio in the page-setup unit
-        // and accepts one of its own; the unit picker decides that unit.
-        drop_row(
-            t!("Units"),
-            vec![PlotChoice::localized("Millimeters"), PlotChoice::localized("Inches")],
-            Some(PlotChoice::localized(if inches { "Inches" } else { "Millimeters" })),
-            PlotDlgMsg::PaperUnits,
-            width,
-        ),
-        custom_scale_row(s, common_area && !s.fit_to_paper),
-        check_enabled(
-            t!("Scale lineweights"),
-            s.scale_lw && !s.fit_to_paper,
-            PlotFlag::ScaleLw,
-            !s.fit_to_paper,
-        ),
-    ].spacing(7));
+    let scale_panel = panel(
+        column![
+            section_label(t!("Plot scale")),
+            check_enabled(
+                t!("Fit to paper"),
+                s.fit_to_paper,
+                PlotFlag::FitToPaper,
+                common_area,
+            ),
+            // "Scale" intentionally stays untranslated: it would clash with the
+            // ribbon's zoom tool label under the same lookup key.
+            drop_row_enabled(
+                Cow::Borrowed("Scale"),
+                scale_options,
+                Some(PlotChoice::raw(s.scale.clone())),
+                PlotDlgMsg::Scale,
+                width,
+                common_area && !s.fit_to_paper,
+            ),
+            // The custom scale spells the picked ratio in the page-setup unit
+            // and accepts one of its own; the unit picker decides that unit.
+            drop_row(
+                t!("Units"),
+                vec![
+                    PlotChoice::localized("Millimeters"),
+                    PlotChoice::localized("Inches")
+                ],
+                Some(PlotChoice::localized(if inches {
+                    "Inches"
+                } else {
+                    "Millimeters"
+                })),
+                PlotDlgMsg::PaperUnits,
+                width,
+            ),
+            custom_scale_row(s, common_area && !s.fit_to_paper),
+            check_enabled(
+                t!("Scale lineweights"),
+                s.scale_lw && !s.fit_to_paper,
+                PlotFlag::ScaleLw,
+                !s.fit_to_paper,
+            ),
+        ]
+        .spacing(7),
+    );
 
     // ── Style and shaded viewport settings ───────────────────────────────
     let mut style_options = vec![PlotChoice::localized(STYLE_NONE)];
@@ -1504,111 +1620,147 @@ pub fn view_window(
     } else {
         PlotChoice::raw(s.style_name.clone())
     };
-    let style_panel = panel(column![
-        section_label(t!("Plot style table (pen assignments)")),
-        drop_row(
-            t!("Table"),
-            style_options,
-            Some(style_selected),
-            PlotDlgMsg::Style,
-            width,
-        ),
-        style_note(s),
-        check_enabled(
-            t!("Plot with plot styles"),
-            s.apply_plot_styles,
-            PlotFlag::PlotStyles,
-            !s.style_name.is_empty(),
-        ),
-        check_enabled(
-            t!("Display plot styles"),
-            s.show_plot_styles,
-            PlotFlag::DisplayStyles,
-            s.paper_space && !s.style_name.is_empty(),
-        ),
-        row![
-            button(text(t!("Load…")).size(11))
-                .on_press(Message::PlotDlg(PlotDlgMsg::LoadStyle))
-                .style(btn(false))
-                .padding([4, 10]),
-
-            button(text(t!("Edit…")).size(11))
-                .on_press(Message::PlotStylePanelOpen)
-                .style(btn(false))
-                .padding([4, 10]),
+    let style_panel = panel(
+        column![
+            section_label(t!("Plot style table (pen assignments)")),
+            drop_row(
+                t!("Table"),
+                style_options,
+                Some(style_selected),
+                PlotDlgMsg::Style,
+                width,
+            ),
+            style_note(s),
+            check_enabled(
+                t!("Plot with plot styles"),
+                s.apply_plot_styles,
+                PlotFlag::PlotStyles,
+                !s.style_name.is_empty(),
+            ),
+            check_enabled(
+                t!("Display plot styles"),
+                s.show_plot_styles,
+                PlotFlag::DisplayStyles,
+                s.paper_space && !s.style_name.is_empty(),
+            ),
+            row![
+                button(text(t!("Load…")).size(11))
+                    .on_press(Message::PlotDlg(PlotDlgMsg::LoadStyle))
+                    .style(btn(false))
+                    .padding([4, 10]),
+                button(text(t!("Edit…")).size(11))
+                    .on_press(Message::PlotStylePanelOpen)
+                    .style(btn(false))
+                    .padding([4, 10]),
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
         ]
-        .spacing(6)
-        .align_y(iced::Center),
-    ].spacing(7));
+        .spacing(7),
+    );
 
-    let shaded_panel = panel(column![
-        section_label(t!("Shaded viewport options")),
-        drop_row(
-            t!("Shade plot"),
-            choices(&[
-                "As displayed",
-                "2D Wireframe",
-                "3D Wireframe",
-                "Hidden Line",
-                "Flat Shaded",
-                "Gouraud Shaded",
-                "Flat Shaded + Edges",
-                "Gouraud Shaded + Edges",
-            ]),
-            Some(PlotChoice::localized(s.shade.clone())),
-            PlotDlgMsg::Shade,
-            width,
-        ),
-        drop_row(
-            t!("Quality"),
-            choices(&["Low", "Normal", "High"]),
-            Some(PlotChoice::localized(s.quality.clone())),
-            PlotDlgMsg::Quality,
-            width,
-        ),
-    ].spacing(7));
+    let shaded_panel = panel(
+        column![
+            section_label(t!("Shaded viewport options")),
+            drop_row(
+                t!("Shade plot"),
+                choices(&[
+                    "As displayed",
+                    "2D Wireframe",
+                    "3D Wireframe",
+                    "Hidden Line",
+                    "Flat Shaded",
+                    "Gouraud Shaded",
+                    "Flat Shaded + Edges",
+                    "Gouraud Shaded + Edges",
+                ]),
+                Some(PlotChoice::localized(s.shade.clone())),
+                PlotDlgMsg::Shade,
+                width,
+            ),
+            drop_row(
+                t!("Quality"),
+                choices(&["Low", "Normal", "High"]),
+                Some(PlotChoice::localized(s.quality.clone())),
+                PlotDlgMsg::Quality,
+                width,
+            ),
+        ]
+        .spacing(7),
+    );
 
     // ── Output options and orientation ────────────────────────────────────
-    let paper_space_option = |on: bool, label: Cow<'static, str>, flag: PlotFlag| -> Element<'_, Message> {
-        if s.paper_space {
-            check(label, on, flag)
-        } else {
-            Space::new().height(0).into()
-        }
-    };
-    let options_panel = panel(column![
-        section_label(t!("Plot options")),
-        row![
-            column![
-                check(t!("Plot in background"), s.background, PlotFlag::Background),
-                check(t!("Object lineweights"), s.lineweights, PlotFlag::Lineweights),
-                check(t!("Plot transparency"), s.transparency, PlotFlag::Transparency),
-                paper_space_option(s.hide_paperspace, t!("Hide paperspace objects"), PlotFlag::HidePaperspace),
+    let paper_space_option =
+        |on: bool, label: Cow<'static, str>, flag: PlotFlag| -> Element<'_, Message> {
+            if s.paper_space {
+                check(label, on, flag)
+            } else {
+                Space::new().height(0).into()
+            }
+        };
+    let options_panel = panel(
+        column![
+            section_label(t!("Plot options")),
+            row![
+                column![
+                    check(t!("Plot in background"), s.background, PlotFlag::Background),
+                    check(
+                        t!("Object lineweights"),
+                        s.lineweights,
+                        PlotFlag::Lineweights
+                    ),
+                    check(
+                        t!("Plot transparency"),
+                        s.transparency,
+                        PlotFlag::Transparency
+                    ),
+                    paper_space_option(
+                        s.hide_paperspace,
+                        t!("Hide paperspace objects"),
+                        PlotFlag::HidePaperspace
+                    ),
+                ]
+                .spacing(6)
+                .width(width),
+                column![
+                    paper_space_option(
+                        s.paperspace_last,
+                        t!("Paper space last"),
+                        PlotFlag::PaperspaceLast
+                    ),
+                    check(
+                        t!("Merge overlapping lines"),
+                        s.merge_lines,
+                        PlotFlag::MergeLines
+                    ),
+                    check(t!("Plot stamp"), s.stamp, PlotFlag::Stamp),
+                    check(
+                        t!("Save changes to layout"),
+                        s.save_to_layout,
+                        PlotFlag::SaveToLayout
+                    ),
+                ]
+                .spacing(6)
+                .width(width),
             ]
-            .spacing(6)
-            .width(width),
-            column![
-                paper_space_option(s.paperspace_last, t!("Paper space last"), PlotFlag::PaperspaceLast),
-                check(t!("Merge overlapping lines"), s.merge_lines, PlotFlag::MergeLines),
-                check(t!("Plot stamp"), s.stamp, PlotFlag::Stamp),
-                paper_space_option(s.save_to_layout, t!("Save changes to layout"), PlotFlag::SaveToLayout),
-            ]
-            .spacing(6)
-            .width(width),
+            .spacing(10),
         ]
-        .spacing(10),
-    ].spacing(7));
+        .spacing(7),
+    );
 
-    let orientation_panel = panel(column![
-        drop_row(
-            t!("Orientation"),
-            choices(&["Portrait", "Landscape"]),
-            Some(PlotChoice::localized(s.orientation.clone())),
-            PlotDlgMsg::Orientation,
-            width,
-        ),
-        check(t!("Plot upside-down"), s.upside_down, PlotFlag::UpsideDown),
-    ].spacing(7));
+    let orientation_panel = panel(
+        column![
+            drop_row(
+                t!("Orientation"),
+                choices(&["Portrait", "Landscape"]),
+                Some(PlotChoice::localized(s.orientation.clone())),
+                PlotDlgMsg::Orientation,
+                width,
+            ),
+            check(t!("Plot upside-down"), s.upside_down, PlotFlag::UpsideDown),
+        ]
+        .spacing(7),
+    );
 
     let left = column![
         printer_panel,
@@ -1618,8 +1770,8 @@ pub fn view_window(
         hdivider(width),
         area_panel,
     ]
-        .spacing(9)
-        .width(width);
+    .spacing(9)
+    .width(width);
     let right = column![
         scale_panel,
         hdivider(width),
@@ -1629,32 +1781,30 @@ pub fn view_window(
         hdivider(width),
         options_panel,
     ]
-        .spacing(9)
-        .width(width);
-    let detail = scrollable(
-        container(row![left, right].spacing(18).width(width)).padding(14),
-    )
-    .width(width)
-    .height(height);
+    .spacing(9)
+    .width(width);
+    let detail = scrollable(container(row![left, right].spacing(18).width(width)).padding(14))
+        .width(width)
+        .height(height);
     let body = row![list_panel, vsep(height), detail]
         .width(width)
         .height(height);
     let mut toolbar_row = row![left_bar, Space::new().width(width)]
-    .align_y(iced::Center)
-    .push(
-        button(text(t!("Set current")).size(11))
-            .on_press(Message::PlotDlg(PlotDlgMsg::SetCurrent))
-            .style(btn(false))
-            .padding([4, 12]),
-    )
-    .push(Space::new().width(6))
-    .push(
-        button(text(t!("Preview")).size(11))
-            .on_press(Message::PlotDlg(PlotDlgMsg::Preview))
-            .style(btn(false))
-            .padding([4, 12]),
-    )
-    .push(Space::new().width(6));
+        .align_y(iced::Center)
+        .push(
+            button(text(t!("Set current")).size(11))
+                .on_press(Message::PlotDlg(PlotDlgMsg::SetCurrent))
+                .style(btn(false))
+                .padding([4, 12]),
+        )
+        .push(Space::new().width(6))
+        .push(
+            button(text(t!("Preview")).size(11))
+                .on_press(Message::PlotDlg(PlotDlgMsg::Preview))
+                .style(btn(false))
+                .padding([4, 12]),
+        )
+        .push(Space::new().width(6));
     toolbar_row = toolbar_row.push(
         button(text(action).size(11))
             .on_press(Message::PlotDlg(PlotDlgMsg::Commit))
@@ -1671,9 +1821,7 @@ pub fn view_window(
 
     container(column![toolbar, hdivider(width), body].spacing(0))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(width)

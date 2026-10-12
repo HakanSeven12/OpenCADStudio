@@ -1,8 +1,8 @@
-use acadrust::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
-use acadrust::objects::{ClassObjectData, ObjectType};
-use acadrust::types::{Color, Handle, Vector3};
-use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-use acadrust::EntityType;
+use codec::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
+use codec::objects::{ClassObjectData, ObjectType};
+use codec::types::{Color, Handle, Vector3};
+use codec::xdata::{ExtendedDataRecord, XDataValue};
+use codec::EntityType;
 use OpenCADStudio::scene::Scene;
 
 fn add_slice(scene: &mut Scene) -> Handle {
@@ -14,7 +14,7 @@ fn add_slice(scene: &mut Scene) -> Handle {
     thickness.values = vec![XDataValue::Real(0.75)];
     common.extended_data.add_record(thickness);
 
-    scene.add_entity(EntityType::Extended(ExtendedEntity {
+    scene.add_entity(EntityType::Extended(Box::new(ExtendedEntity {
         common,
         data: ExtendedEntityData::SectionObject(SectionObjectData {
             state: 1,
@@ -29,10 +29,10 @@ fn add_slice(scene: &mut Scene) -> Handle {
             back_line_vertices: Vec::new(),
             settings_handle: Handle::NULL,
         }),
-    }))
+    })))
 }
 
-fn assert_section_graph(document: &acadrust::CadDocument, extension: &str) {
+fn assert_section_graph(document: &codec::CadDocument, extension: &str) {
     let (handle, section) = document
         .entities()
         .find_map(|entity| match entity {

@@ -4,15 +4,12 @@ use iced::widget::{button, row, text};
 use iced::{Element, Fill};
 
 use crate::app::Message;
-use crate::ui::statusbar::status_menu::Entry;
 use crate::t;
+use crate::ui::statusbar::status_menu::Entry;
 
 /// - `has_selection`: enables Isolate / Hide (they act on the selection).
 /// - `isolation_active`: enables End Isolation (something is hidden).
-pub fn menu_entries(
-    has_selection: bool,
-    isolation_active: bool,
-) -> Vec<Entry<'static>> {
+pub fn menu_entries(has_selection: bool, isolation_active: bool) -> Vec<Entry<'static>> {
     vec![
         action_entry(
             "Isolate Objects",

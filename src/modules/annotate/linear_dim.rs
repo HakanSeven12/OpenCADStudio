@@ -1,9 +1,7 @@
-use acadrust::entities::{Dimension, DimensionLinear};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
-use cadkernel::geom2d::{
-    closest_point, Circle as KernelCircle, Curve, Line as KernelLine,
-};
+use codec::entities::{Dimension, DimensionLinear};
+use codec::types::Vector3;
+use codec::EntityType;
+use kernel::geom2d::{closest_point, Circle as KernelCircle, Curve, Line as KernelLine};
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
@@ -11,8 +9,8 @@ use crate::command::{
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
-use glam::DVec3;
 use crate::t;
+use glam::DVec3;
 
 /// Select the measured axis from where the dimension line clears the points.
 pub(crate) fn measure_axis(first: DVec3, second: DVec3, def: DVec3) -> DVec3 {
@@ -87,7 +85,7 @@ pub struct LinearDimensionCommand {
     axis_mode: AxisMode,
     selecting_object: bool,
     picked_entity: Option<EntityType>,
-    source_handle: Option<acadrust::Handle>,
+    source_handle: Option<codec::Handle>,
     mtext_override: bool,
 }
 
@@ -140,6 +138,7 @@ pub(crate) fn linear_dimension_entity(
     dim.base.definition_point = dim.definition_point;
     dim.base.text_middle_point = v3(linear_text_pos(first, second, point, axis));
     dim.base.insertion_point = dim.base.text_middle_point;
+    crate::entities::dimension::reset_automatic_text_position(&mut dim.base);
     dim.base.actual_measurement = dim.measurement();
     crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
     EntityType::Dimension(Dimension::Linear(dim))
@@ -368,7 +367,7 @@ impl CadCommand for LinearDimensionCommand {
         self.picked_entity = Some(entity);
     }
 
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, point: DVec3) -> CmdResult {
         let Some(entity) = self.picked_entity.take() else {
             return CmdResult::NeedPoint;
         };
@@ -445,10 +444,7 @@ fn dimension_line_offset(second: DVec3, point: DVec3, axis: DVec3) -> f64 {
     (point - second).dot(perpendicular)
 }
 
-pub(crate) fn dimension_source_points(
-    entity: &EntityType,
-    click: DVec3,
-) -> Option<(DVec3, DVec3)> {
+pub(crate) fn dimension_source_points(entity: &EntityType, click: DVec3) -> Option<(DVec3, DVec3)> {
     let point = |p: Vector3| DVec3::new(p.x, p.y, p.z);
     match entity {
         EntityType::Line(line) => Some((point(line.start), point(line.end))),
@@ -524,7 +520,11 @@ fn nearest_segment(
     if points.len() < 2 {
         return None;
     }
-    let count = if closed { points.len() } else { points.len() - 1 };
+    let count = if closed {
+        points.len()
+    } else {
+        points.len() - 1
+    };
     (0..count)
         .map(|index| {
             let first = points[index];
@@ -560,15 +560,16 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "dimlinear_preview".to_string(),
         points: points
             .into_iter()
@@ -588,6 +589,8 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
+
+        ..Default::default()
     }
 }
 
@@ -613,11 +616,27 @@ fn linear_dimension_preview(first: DVec3, second: DVec3, def: DVec3, axis: DVec3
     let half_width = ((second - first).length().log10().max(0.0) + 1.0) * 0.18;
     let half_height = 0.16;
     vec![
-        first, d1, nan, second, d2, nan, d1, d2, nan,
-        d1, d1 + axis * arrow + perp * arrow * 0.45, nan,
-        d1, d1 + axis * arrow - perp * arrow * 0.45, nan,
-        d2, d2 - axis * arrow + perp * arrow * 0.45, nan,
-        d2, d2 - axis * arrow - perp * arrow * 0.45, nan,
+        first,
+        d1,
+        nan,
+        second,
+        d2,
+        nan,
+        d1,
+        d2,
+        nan,
+        d1,
+        d1 + axis * arrow + perp * arrow * 0.45,
+        nan,
+        d1,
+        d1 + axis * arrow - perp * arrow * 0.45,
+        nan,
+        d2,
+        d2 - axis * arrow + perp * arrow * 0.45,
+        nan,
+        d2,
+        d2 - axis * arrow - perp * arrow * 0.45,
+        nan,
         text - axis * half_width - perp * half_height,
         text + axis * half_width - perp * half_height,
         text + axis * half_width + perp * half_height,
@@ -632,6 +651,7 @@ fn linear_text_pos(first: DVec3, second: DVec3, def: DVec3, axis: DVec3) -> DVec
     (d1 + d2) * 0.5 + perp * 0.15
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMLINEAR"] });  // LinearDimensionCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMLINEAR"]
+}); // LinearDimensionCommand

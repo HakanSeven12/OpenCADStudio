@@ -1,7 +1,7 @@
 //! Embedded type registry generated at build time.
 //!
 //! The JSON embedded here is produced by tracing every editor record root and
-//! its dependent `acadrust` types with `serde-reflection`, then mapping the
+//! its dependent `opencadcodec` types with `serde-reflection`, then mapping the
 //! result into a stable, language-binding-friendly schema defined in
 //! [`crate::type_registry_types`]. The registry is embedded via
 //! `include_str!(concat!(env!("OUT_DIR"), "/type_registry.json"))` so the
@@ -9,7 +9,7 @@
 //!
 //! The registry covers the complete entity, object, symbol-table, header, and
 //! document-record roots used by the editor. Language bindings and tooling can
-//! inspect every variant without pulling the full `acadrust` dependency tree.
+//! inspect every variant without pulling the full `opencadcodec` dependency tree.
 
 pub use crate::type_registry_types::*;
 

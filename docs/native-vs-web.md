@@ -28,7 +28,7 @@ crates reach `vtkio → xz2 → lzma-sys` — a C library that cannot cross-comp
 to `wasm32` — so the web build dropped a `solid3d` feature and the Model tab,
 solid tessellation and ACIS import all did nothing there.
 
-The kernel is now cadkernel, which is pure Rust and has no C dependency at
+The kernel is now opencadkernel, which is pure Rust and has no C dependency at
 all, so none of that applies and the feature is gone. The web build makes
 primitives, runs booleans, draws ACIS solids read from a file and writes them
 back out as exact geometry, exactly as the desktop build does.

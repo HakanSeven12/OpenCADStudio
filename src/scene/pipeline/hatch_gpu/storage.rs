@@ -30,9 +30,9 @@ pub struct HatchInstance {
     pub family_count: u32,          // 100
     /// Signed draw-order depth (-1,1); 0.0 = neutral. Applied as a clip-z
     /// bias in the vertex shader so this fill orders against other types.
-    pub draw_depth: f32,            // 104
+    pub draw_depth: f32, // 104
     /// Gradient shape (`GradientKind::shader_kind`), bit 4 = inverted stops.
-    pub grad_kind: u32,             // 108
+    pub grad_kind: u32, // 108
 }
 
 const _: () = assert!(std::mem::size_of::<HatchInstance>() == 112);
@@ -43,7 +43,10 @@ const _: () = assert!(std::mem::size_of::<HatchInstance>() == 112);
 fn split_origin_ds(o: [f64; 2]) -> ([f32; 2], [f32; 2]) {
     let hx = o[0] as f32;
     let hy = o[1] as f32;
-    ([hx, hy], [(o[0] - hx as f64) as f32, (o[1] - hy as f64) as f32])
+    (
+        [hx, hy],
+        [(o[0] - hx as f64) as f32, (o[1] - hy as f64) as f32],
+    )
 }
 
 /// Mirrors the per-family struct used by the existing per-hatch shader,
@@ -53,18 +56,18 @@ fn split_origin_ds(o: [f64; 2]) -> ([f32; 2], [f32; 2]) {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LineFamilyGpu {
-    pub cos_a: f32,        //  0
-    pub sin_a: f32,        //  4
-    pub x0: f32,           //  8
-    pub y0: f32,           // 12
-    pub dx: f32,           // 16
-    pub dy: f32,           // 20
-    pub perp_step: f32,    // 24
-    pub along_step: f32,   // 28
-    pub line_width: f32,   // 32
-    pub period: f32,       // 36
-    pub n_dashes: u32,     // 40
-    pub dash_offset: u32,  // 44
+    pub cos_a: f32,       //  0
+    pub sin_a: f32,       //  4
+    pub x0: f32,          //  8
+    pub y0: f32,          // 12
+    pub dx: f32,          // 16
+    pub dy: f32,          // 20
+    pub perp_step: f32,   // 24
+    pub along_step: f32,  // 28
+    pub line_width: f32,  // 32
+    pub period: f32,      // 36
+    pub n_dashes: u32,    // 40
+    pub dash_offset: u32, // 44
 }
 
 const _: () = assert!(std::mem::size_of::<LineFamilyGpu>() == 48);
@@ -113,10 +116,26 @@ impl HatchPlacement {
             array_stride: std::mem::size_of::<Self>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
-                wgpu::VertexAttribute { offset: 0, shader_location: 2, format: wgpu::VertexFormat::Float32x2 },
-                wgpu::VertexAttribute { offset: 8, shader_location: 3, format: wgpu::VertexFormat::Float32x2 },
-                wgpu::VertexAttribute { offset: 16, shader_location: 4, format: wgpu::VertexFormat::Float32 },
-                wgpu::VertexAttribute { offset: 20, shader_location: 5, format: wgpu::VertexFormat::Uint32 },
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: 8,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: 16,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Uint32,
+                },
             ],
         }
     }
@@ -137,18 +156,23 @@ pub(super) struct StorageHatchBatch {
     // dropping them would invalidate it, but the bind group is the
     // only direct consumer. Keep them as fields to keep ownership in
     // one place; `#[allow(dead_code)]` silences the read-never warning.
-    #[allow(dead_code)] pub instance_buffer: wgpu::Buffer,
-    #[allow(dead_code)] pub family_buffer:   wgpu::Buffer,
-    #[allow(dead_code)] pub dash_buffer:     wgpu::Buffer,
+    #[allow(dead_code)]
+    pub instance_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    pub family_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    pub dash_buffer: wgpu::Buffer,
     /// Per-instance visibility flag (1=draw, 0=skip). Stored in its
     /// own small storage buffer so per-frame updates don't have to
     /// touch the large `instance_buffer`. Vertex shader reads
     /// `visibility[instance_index]` — when 0 it emits an out-of-NDC
     /// clip position so the GPU clips the primitive before the
     /// fragment stage runs.
-    #[allow(dead_code)] pub visibility_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    pub visibility_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
-    #[allow(dead_code)] pub instance_count: u32,
+    #[allow(dead_code)]
+    pub instance_count: u32,
     /// CPU mirror — `update_visibility` re-uploads this whole slice
     /// when any flag changes. ~4 B per hatch, so 40 KB / 10 k hatches
     /// per pan tick. Far cheaper than touching the instance data.
@@ -168,7 +192,10 @@ fn hatch_buffer_cost(hatch: &HatchModel) -> [u64; 7] {
     let (families, dashes) = match &hatch.pattern {
         HatchPattern::Pattern(families) => (
             families.len() as u64,
-            families.iter().map(|family| family.dashes.len() as u64).sum(),
+            families
+                .iter()
+                .map(|family| family.dashes.len() as u64)
+                .sum(),
         ),
         _ => (0, 0),
     };
@@ -234,7 +261,6 @@ impl StorageHatchBatch {
         bgl: &wgpu::BindGroupLayout,
         hatches: &[HatchModel],
     ) -> Option<Self> {
-
         let mut instances: Vec<HatchInstance> = Vec::with_capacity(hatches.len());
         let mut families: Vec<LineFamilyGpu> = Vec::new();
         let mut dashes: Vec<f32> = Vec::new();
@@ -332,10 +358,18 @@ impl StorageHatchBatch {
             let mut max_y = f32::NEG_INFINITY;
             for &[x, y] in h.boundary.iter() {
                 if x.is_finite() && y.is_finite() {
-                    if x < min_x { min_x = x; }
-                    if y < min_y { min_y = y; }
-                    if x > max_x { max_x = x; }
-                    if y > max_y { max_y = y; }
+                    if x < min_x {
+                        min_x = x;
+                    }
+                    if y < min_y {
+                        min_y = y;
+                    }
+                    if x > max_x {
+                        max_x = x;
+                    }
+                    if y > max_y {
+                        max_y = y;
+                    }
                 }
             }
             if !min_x.is_finite() {
@@ -435,7 +469,12 @@ impl StorageHatchBatch {
             if end > 0 {
                 draws.push((0..end, 0..1));
             }
-            let mut union = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+            let mut union = [
+                f32::INFINITY,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            ];
             for inst in instances.iter().take(unique_source_count) {
                 union[0] = union[0].min(inst.aabb[0] + inst.world_origin[0]);
                 union[1] = union[1].min(inst.aabb[1] + inst.world_origin[1]);
@@ -576,12 +615,14 @@ impl StorageHatchBatch {
         });
         let source_aabbs = instances
             .iter()
-            .map(|inst| [
-                inst.aabb[0] + inst.world_origin[0],
-                inst.aabb[1] + inst.world_origin[1],
-                inst.aabb[2] + inst.world_origin[0],
-                inst.aabb[3] + inst.world_origin[1],
-            ])
+            .map(|inst| {
+                [
+                    inst.aabb[0] + inst.world_origin[0],
+                    inst.aabb[1] + inst.world_origin[1],
+                    inst.aabb[2] + inst.world_origin[0],
+                    inst.aabb[3] + inst.world_origin[1],
+                ]
+            })
             .collect();
 
         Some(Self {

@@ -1,7 +1,7 @@
-use acadrust::entities::{MLine, MLineFlags, MLineSegment};
-use acadrust::types::Vector3;
-use cadkernel::geom2d::{intersect::line_line, Vec2};
-use cadkernel::space::Plane;
+use codec::entities::{MLine, MLineFlags, MLineSegment};
+use codec::types::Vector3;
+use kernel::geom2d::{intersect::line_line, Vec2};
+use kernel::space::Plane;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop, square_grip};
@@ -14,7 +14,7 @@ use crate::t;
 /// One styled line or cap of a multiline.
 pub struct MLineLine {
     pub points: Vec<[f64; 3]>,
-    pub color: acadrust::types::Color,
+    pub color: codec::types::Color,
     pub linetype: String,
 }
 
@@ -38,19 +38,20 @@ pub(crate) fn rebuild_mline_geometry(mline: &mut MLine) -> bool {
     let axis = points
         .windows(2)
         .find_map(|pair| {
-            (cadkernel::space::Vec3::from(pair[1]) - cadkernel::space::Vec3::from(pair[0]))
+            (kernel::space::Vec3::from(pair[1]) - kernel::space::Vec3::from(pair[0]))
                 .normalize()
-                .map(cadkernel::space::Vec3::to_array)
+                .map(kernel::space::Vec3::to_array)
         })
         .or_else(|| {
-            mline.is_closed()
+            mline
+                .is_closed()
                 .then(|| {
-                    (cadkernel::space::Vec3::from(points[0])
-                        - cadkernel::space::Vec3::from(points[count - 1]))
+                    (kernel::space::Vec3::from(points[0])
+                        - kernel::space::Vec3::from(points[count - 1]))
                     .normalize()
                 })
                 .flatten()
-                .map(cadkernel::space::Vec3::to_array)
+                .map(kernel::space::Vec3::to_array)
         });
     let Some(plane) = axis.and_then(|axis| {
         Plane::orthonormal(
@@ -112,9 +113,7 @@ pub(crate) fn rebuild_mline_geometry(mline: &mut MLine) -> bool {
                     second_offset.to_array(),
                     after.to_array(),
                 )
-                .and_then(|(at, _)| {
-                    (first_offset + before * at - flat[index]).normalize()
-                })
+                .and_then(|(at, _)| (first_offset + before * at - flat[index]).normalize())
                 .unwrap_or_else(|| after.perpendicular())
             }
             (Some(direction), None) | (None, Some(direction)) => direction.perpendicular(),
@@ -130,7 +129,7 @@ pub(crate) fn rebuild_mline_geometry(mline: &mut MLine) -> bool {
 
 fn adjusted_mline_endpoint(
     mline: &MLine,
-    style: &acadrust::objects::MLineStyle,
+    style: &codec::objects::MLineStyle,
     vertex: usize,
     point: [f64; 3],
 ) -> [f64; 3] {
@@ -139,33 +138,32 @@ fn adjusted_mline_endpoint(
     } else {
         style.end_angle
     };
-    let Some(tangent) = cadkernel::space::Vec3::new(
+    let Some(tangent) = kernel::space::Vec3::new(
         mline.vertices[vertex].direction.x,
         mline.vertices[vertex].direction.y,
         mline.vertices[vertex].direction.z,
     )
-    .normalize()
-    else {
+    .normalize() else {
         return point;
     };
     let Some(normal) =
-        cadkernel::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z).normalize()
+        kernel::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z).normalize()
     else {
         return point;
     };
     let Some(transverse) = normal.cross(tangent).normalize() else {
         return point;
     };
-    let base = cadkernel::space::Vec3::new(
+    let base = kernel::space::Vec3::new(
         mline.vertices[vertex].position.x,
         mline.vertices[vertex].position.y,
         mline.vertices[vertex].position.z,
     );
-    let current = cadkernel::space::Vec3::from(point);
+    let current = kernel::space::Vec3::from(point);
     let tangent = if angle.tan().abs() > 1.0e-9 {
         tangent * ((current - base).dot(transverse) / angle.tan())
     } else {
-        cadkernel::space::Vec3::ZERO
+        kernel::space::Vec3::ZERO
     };
     (current + tangent).to_array()
 }
@@ -252,10 +250,7 @@ pub(crate) fn store_mline_drawn_ranges(
     );
     if ranges.is_empty() {
         parameters.extend([0.0, 0.0]);
-    } else if ranges.len() == 1
-        && ranges[0].0 <= 1.0e-9
-        && ranges[0].1 >= length - 1.0e-9
-    {
+    } else if ranges.len() == 1 && ranges[0].0 <= 1.0e-9 && ranges[0].1 >= length - 1.0e-9 {
         parameters.push(0.0);
     } else {
         parameters.push(ranges[0].0);
@@ -344,7 +339,7 @@ fn mline_element_endpoints(
     mline: &MLine,
     vertex: usize,
     element: usize,
-) -> Option<(cadkernel::space::Vec3, cadkernel::space::Vec3)> {
+) -> Option<(kernel::space::Vec3, kernel::space::Vec3)> {
     let next = if vertex + 1 < mline.vertices.len() {
         vertex + 1
     } else if mline.is_closed() {
@@ -355,12 +350,9 @@ fn mline_element_endpoints(
     let point = |index: usize| {
         let vertex = mline.vertices.get(index)?;
         let offset = vertex.segments.get(element)?.parameters.first().copied()?;
-        let position = cadkernel::space::Vec3::new(
-            vertex.position.x,
-            vertex.position.y,
-            vertex.position.z,
-        );
-        let miter = cadkernel::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z);
+        let position =
+            kernel::space::Vec3::new(vertex.position.x, vertex.position.y, vertex.position.z);
+        let miter = kernel::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z);
         Some(position + miter * offset)
     };
     Some((point(vertex)?, point(next)?))
@@ -418,12 +410,61 @@ fn restore_shifted_mline_segment(
     }
 }
 
+/// Recompute the derived MLine state after a scripted create or edit:
+/// vertex direction/miter, element segment layout and the per-element miter
+/// offsets. Dash/cut parameters survive an edit unless a vertex moved.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn normalize_scripted_mline(
+    old: Option<&MLine>,
+    new: &mut MLine,
+    document: &codec::CadDocument,
+) -> Result<(), String> {
+    let style = resolved_mline_style(new, document)
+        .ok_or_else(|| format!("MLine style {:?} does not exist", new.style_name))?;
+    let unchanged = old.is_some_and(|old| {
+        old.vertices == new.vertices
+            && old.normal == new.normal
+            && old.flags == new.flags
+            && old.justification == new.justification
+            && old.scale_factor.to_bits() == new.scale_factor.to_bits()
+            && old.style_name == new.style_name
+            && old.style_handle == new.style_handle
+    });
+    if unchanged {
+        return Ok(());
+    }
+    let moved = old.is_none_or(|old| {
+        old.vertices.len() != new.vertices.len()
+            || old
+                .vertices
+                .iter()
+                .zip(&new.vertices)
+                .any(|(a, b)| a.position != b.position)
+    });
+    let elements = style.elements.len().max(1);
+    for vertex in &mut new.vertices {
+        if vertex.segments.is_empty() {
+            vertex.init_segments(elements);
+        } else if moved {
+            for segment in &mut vertex.segments {
+                segment.parameters.truncate(1);
+                segment.area_fill_parameters.clear();
+            }
+        }
+    }
+    if !rebuild_mline_geometry(new) {
+        return Err("MLine vertices are degenerate".into());
+    }
+    crate::modules::draw::draw::mline::sync_mline_element_parameters(new, style);
+    Ok(())
+}
+
 /// Resolve a multiline into styled parallel lines in WCS.
 pub fn resolved_mline_style<'a>(
     m: &MLine,
-    document: &'a acadrust::CadDocument,
-) -> Option<&'a acadrust::objects::MLineStyle> {
-    use acadrust::objects::ObjectType;
+    document: &'a codec::CadDocument,
+) -> Option<&'a codec::objects::MLineStyle> {
+    use codec::objects::ObjectType;
 
     m.style_handle
         .and_then(|handle| match document.objects.get(&handle) {
@@ -432,9 +473,7 @@ pub fn resolved_mline_style<'a>(
         })
         .or_else(|| {
             document.objects.values().find_map(|object| match object {
-                ObjectType::MLineStyle(style)
-                    if style.name.eq_ignore_ascii_case(&m.style_name) =>
-                {
+                ObjectType::MLineStyle(style) if style.name.eq_ignore_ascii_case(&m.style_name) => {
                     Some(style)
                 }
                 _ => None,
@@ -442,23 +481,17 @@ pub fn resolved_mline_style<'a>(
         })
 }
 
-pub fn mline_lines(m: &MLine, document: &acadrust::CadDocument) -> Vec<MLineLine> {
+pub fn mline_lines(m: &MLine, document: &codec::CadDocument) -> Vec<MLineLine> {
     mline_lines_resolved(m, resolved_mline_style(m, document))
 }
 
-pub fn mline_lines_with_style(
-    m: &MLine,
-    style: &acadrust::objects::MLineStyle,
-) -> Vec<MLineLine> {
+pub fn mline_lines_with_style(m: &MLine, style: &codec::objects::MLineStyle) -> Vec<MLineLine> {
     mline_lines_resolved(m, Some(style))
 }
 
-fn mline_lines_resolved(
-    m: &MLine,
-    style: Option<&acadrust::objects::MLineStyle>,
-) -> Vec<MLineLine> {
-    use acadrust::entities::{MLineFlags, MLineJustification};
-    use acadrust::types::Color;
+fn mline_lines_resolved(m: &MLine, style: Option<&codec::objects::MLineStyle>) -> Vec<MLineLine> {
+    use codec::entities::{MLineFlags, MLineJustification};
+    use codec::types::Color;
 
     if m.vertices.is_empty() {
         return Vec::new();
@@ -504,8 +537,8 @@ fn mline_lines_resolved(
     };
     let off_pt = |vi: usize, d: f64| -> [f64; 3] {
         let v = &m.vertices[vi];
-        (cadkernel::space::Vec3::new(v.position.x, v.position.y, v.position.z)
-            + cadkernel::space::Vec3::new(v.miter.x, v.miter.y, v.miter.z) * d)
+        (kernel::space::Vec3::new(v.position.x, v.position.y, v.position.z)
+            + kernel::space::Vec3::new(v.miter.x, v.miter.y, v.miter.z) * d)
             .to_array()
     };
     let endpoint_pt = |vi: usize, ei: usize| -> [f64; 3] {
@@ -538,16 +571,15 @@ fn mline_lines_resolved(
             } else {
                 off_pt(wi, elem_off(wi, ei))
             };
-            let a = cadkernel::space::Vec3::from(a);
-            let b = cadkernel::space::Vec3::from(b);
+            let a = kernel::space::Vec3::from(a);
+            let b = kernel::space::Vec3::from(b);
             let segment = b - a;
             let len = segment.length();
             let Some(direction) = segment.normalize() else {
                 continue;
             };
             let at = |t: f64| (a + direction * t).to_array();
-            let parameters: &[f64] = m
-                .vertices[vi]
+            let parameters: &[f64] = m.vertices[vi]
                 .segments
                 .get(ei)
                 .map(|segment| segment.parameters.as_slice())
@@ -686,55 +718,56 @@ fn semicircle_cap(
     direction: [f64; 3],
     start: bool,
 ) -> Vec<[f64; 3]> {
-    let first = cadkernel::space::Vec3::from(first);
-    let second = cadkernel::space::Vec3::from(second);
+    let first = kernel::space::Vec3::from(first);
+    let second = kernel::space::Vec3::from(second);
     let center = (first + second) * 0.5;
     let transverse = (first - second) * 0.5;
     let radius = transverse.length();
     let Some(x_axis) = transverse.normalize() else {
         return Vec::new();
     };
-    let Some(direction) = cadkernel::space::Vec3::from(direction).normalize() else {
+    let Some(direction) = kernel::space::Vec3::from(direction).normalize() else {
         return Vec::new();
     };
     let y_axis = if start { -direction } else { direction };
-    cadkernel::space::PlanarCurve::new(
+    kernel::space::PlanarCurve::new(
         Plane::from_axes(center.to_array(), x_axis.to_array(), y_axis.to_array()),
-        cadkernel::geom2d::Curve::Arc(cadkernel::geom2d::Arc {
+        kernel::geom2d::Curve::Arc(kernel::geom2d::Arc {
             centre: [0.0, 0.0],
             radius,
             start_angle: 0.0,
             end_angle: std::f64::consts::PI,
         }),
     )
-    .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
 }
 
 pub fn mline_fill_triangles_with_style(
     m: &MLine,
-    style: &acadrust::objects::MLineStyle,
+    style: &codec::objects::MLineStyle,
 ) -> Vec<[f64; 3]> {
     if !style.flags.fill_on || m.vertices.len() < 2 || style.elements.len() < 2 {
         return Vec::new();
     }
-    let (low_index, high_index) = style
-        .elements
-        .iter()
-        .enumerate()
-        .fold((0, 0), |(low, high), (index, element)| {
-            let offset = element.offset * m.scale_factor;
-            let low = if offset < style.elements[low].offset * m.scale_factor {
-                index
-            } else {
-                low
-            };
-            let high = if offset > style.elements[high].offset * m.scale_factor {
-                index
-            } else {
-                high
-            };
-            (low, high)
-        });
+    let (low_index, high_index) =
+        style
+            .elements
+            .iter()
+            .enumerate()
+            .fold((0, 0), |(low, high), (index, element)| {
+                let offset = element.offset * m.scale_factor;
+                let low = if offset < style.elements[low].offset * m.scale_factor {
+                    index
+                } else {
+                    low
+                };
+                let high = if offset > style.elements[high].offset * m.scale_factor {
+                    index
+                } else {
+                    high
+                };
+                (low, high)
+            });
     let minimum = style
         .elements
         .iter()
@@ -746,9 +779,9 @@ pub fn mline_fill_triangles_with_style(
         .map(|element| element.offset)
         .fold(f64::NEG_INFINITY, f64::max);
     let shift = match m.justification {
-        acadrust::entities::MLineJustification::Top => -maximum,
-        acadrust::entities::MLineJustification::Zero => 0.0,
-        acadrust::entities::MLineJustification::Bottom => -minimum,
+        codec::entities::MLineJustification::Top => -maximum,
+        codec::entities::MLineJustification::Zero => 0.0,
+        codec::entities::MLineJustification::Bottom => -minimum,
     };
     let offset_point = |vertex: usize, element: usize, endpoint: bool| -> [f64; 3] {
         let item = &m.vertices[vertex];
@@ -758,11 +791,8 @@ pub fn mline_fill_triangles_with_style(
             .and_then(|segment| segment.parameters.first())
             .copied()
             .unwrap_or((style.elements[element].offset + shift) * m.scale_factor);
-        let point = (cadkernel::space::Vec3::new(
-            item.position.x,
-            item.position.y,
-            item.position.z,
-        ) + cadkernel::space::Vec3::new(item.miter.x, item.miter.y, item.miter.z) * distance)
+        let point = (kernel::space::Vec3::new(item.position.x, item.position.y, item.position.z)
+            + kernel::space::Vec3::new(item.miter.x, item.miter.y, item.miter.z) * distance)
             .to_array();
         if endpoint {
             adjusted_mline_endpoint(m, style, vertex, point)
@@ -781,18 +811,11 @@ pub fn mline_fill_triangles_with_style(
         let next = (vertex + 1) % m.vertices.len();
         let start_endpoint = !closed && vertex == 0;
         let end_endpoint = !closed && next + 1 == m.vertices.len();
-        let low_start = cadkernel::space::Vec3::from(offset_point(
-            vertex,
-            low_index,
-            start_endpoint,
-        ));
-        let low_end = cadkernel::space::Vec3::from(offset_point(next, low_index, end_endpoint));
-        let high_start = cadkernel::space::Vec3::from(offset_point(
-            vertex,
-            high_index,
-            start_endpoint,
-        ));
-        let high_end = cadkernel::space::Vec3::from(offset_point(next, high_index, end_endpoint));
+        let low_start = kernel::space::Vec3::from(offset_point(vertex, low_index, start_endpoint));
+        let low_end = kernel::space::Vec3::from(offset_point(next, low_index, end_endpoint));
+        let high_start =
+            kernel::space::Vec3::from(offset_point(vertex, high_index, start_endpoint));
+        let high_end = kernel::space::Vec3::from(offset_point(next, high_index, end_endpoint));
         let low_length = low_start.distance(low_end);
         let high_length = high_start.distance(high_end);
         if low_length <= 1.0e-12 || high_length <= 1.0e-12 {
@@ -830,7 +853,7 @@ pub fn mline_fill_triangles_with_style(
 }
 
 impl RenderConvertible for MLine {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
@@ -892,13 +915,13 @@ impl Grippable for MLine {
             return;
         };
         let position = match apply {
-            GripApply::Translate(delta) => acadrust::types::Vector3::new(
+            GripApply::Translate(delta) => codec::types::Vector3::new(
                 vertex.position.x + delta.x as f64,
                 vertex.position.y + delta.y as f64,
                 vertex.position.z + delta.z as f64,
             ),
             GripApply::Absolute(point) => {
-                acadrust::types::Vector3::new(point.x as f64, point.y as f64, point.z as f64)
+                codec::types::Vector3::new(point.x as f64, point.y as f64, point.z as f64)
             }
         };
         let count = self.vertices.len();
@@ -933,9 +956,7 @@ impl Grippable for MLine {
         };
         for (segment, moved_start) in candidates {
             if segment >= segment_count
-                || affected
-                    .iter()
-                    .any(|(existing, _, _)| *existing == segment)
+                || affected.iter().any(|(existing, _, _)| *existing == segment)
             {
                 continue;
             }
@@ -971,7 +992,11 @@ impl Grippable for MLine {
         ]
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) {
         use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
@@ -990,11 +1015,8 @@ impl Grippable for MLine {
                 new_v.position.x = (v0.position.x + v1.position.x) * 0.5;
                 new_v.position.y = (v0.position.y + v1.position.y) * 0.5;
                 new_v.position.z = (v0.position.z + v1.position.z) * 0.5;
-                let point = cadkernel::space::Vec3::new(
-                    new_v.position.x,
-                    new_v.position.y,
-                    new_v.position.z,
-                );
+                let point =
+                    kernel::space::Vec3::new(new_v.position.x, new_v.position.y, new_v.position.z);
                 let source: Option<Vec<_>> = (0..self.style_element_count)
                     .map(|element| {
                         let endpoints = mline_element_endpoints(self, grip_id, element)?;
@@ -1037,22 +1059,14 @@ impl Grippable for MLine {
                     let second_cuts =
                         remap_mline_ranges(&cuts, split, source_length, second_length);
                     let first = &mut self.vertices[grip_id].segments[element];
-                    store_mline_drawn_ranges(
-                        &mut first.parameters,
-                        first_length,
-                        &first_drawn,
-                    );
+                    store_mline_drawn_ranges(&mut first.parameters, first_length, &first_drawn);
                     store_mline_cut_ranges(
                         &mut first.area_fill_parameters,
                         first_length,
                         &first_cuts,
                     );
                     let second = &mut self.vertices[insert].segments[element];
-                    store_mline_drawn_ranges(
-                        &mut second.parameters,
-                        second_length,
-                        &second_drawn,
-                    );
+                    store_mline_drawn_ranges(&mut second.parameters, second_length, &second_drawn);
                     store_mline_cut_ranges(
                         &mut second.area_fill_parameters,
                         second_length,
@@ -1060,9 +1074,7 @@ impl Grippable for MLine {
                     );
                 }
             }
-            A::RemoveVertex
-                if grip_id < n && n > 2 && (!self.is_closed() || n > 3) =>
-            {
+            A::RemoveVertex if grip_id < n && n > 2 && (!self.is_closed() || n > 3) => {
                 let merge = self.is_closed() || (grip_id > 0 && grip_id + 1 < n);
                 let previous = if grip_id == 0 { n - 1 } else { grip_id - 1 };
                 let source = merge.then(|| {
@@ -1077,10 +1089,7 @@ impl Grippable for MLine {
                 };
                 let mut peripheral = Vec::new();
                 let candidates = if self.is_closed() {
-                    vec![
-                        ((previous + n - 1) % n, false),
-                        ((grip_id + 1) % n, true),
-                    ]
+                    vec![((previous + n - 1) % n, false), ((grip_id + 1) % n, true)]
                 } else {
                     let mut candidates = Vec::new();
                     if grip_id >= 2 {
@@ -1137,18 +1146,13 @@ impl Grippable for MLine {
                         drawn.extend(
                             mline_drawn_ranges(&second.parameters, second_length)
                                 .into_iter()
-                                .map(|range| {
-                                    (range.0 + first_length, range.1 + first_length)
-                                }),
+                                .map(|range| (range.0 + first_length, range.1 + first_length)),
                         );
-                        let mut cuts =
-                            mline_cut_ranges(&first.area_fill_parameters, first_length);
+                        let mut cuts = mline_cut_ranges(&first.area_fill_parameters, first_length);
                         cuts.extend(
                             mline_cut_ranges(&second.area_fill_parameters, second_length)
                                 .into_iter()
-                                .map(|range| {
-                                    (range.0 + first_length, range.1 + first_length)
-                                }),
+                                .map(|range| (range.0 + first_length, range.1 + first_length)),
                         );
                         let drawn = merge_mline_ranges(remap_mline_ranges(
                             &drawn,
@@ -1163,11 +1167,7 @@ impl Grippable for MLine {
                             target_length,
                         ));
                         let target = &mut self.vertices[previous].segments[element];
-                        store_mline_drawn_ranges(
-                            &mut target.parameters,
-                            target_length,
-                            &drawn,
-                        );
+                        store_mline_drawn_ranges(&mut target.parameters, target_length, &drawn);
                         store_mline_cut_ranges(
                             &mut target.area_fill_parameters,
                             target_length,
@@ -1184,9 +1184,9 @@ impl Grippable for MLine {
 impl PropertyEditable for MLine {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let just_str = match self.justification {
-            acadrust::entities::MLineJustification::Top => "Top",
-            acadrust::entities::MLineJustification::Zero => "Zero",
-            acadrust::entities::MLineJustification::Bottom => "Bottom",
+            codec::entities::MLineJustification::Top => "Top",
+            codec::entities::MLineJustification::Zero => "Zero",
+            codec::entities::MLineJustification::Bottom => "Bottom",
         };
         vec![PropSection {
             title: t!("Misc").into_owned(),
@@ -1212,13 +1212,13 @@ impl PropertyEditable for MLine {
         match field {
             "ml_closed" => {
                 let closed = if value == "toggle" {
-                    !self.flags.contains(acadrust::entities::MLineFlags::CLOSED)
+                    !self.flags.contains(codec::entities::MLineFlags::CLOSED)
                 } else {
                     value == "true"
                 };
                 let offsets = mline_perpendicular_offsets(self);
                 self.flags.set(
-                    acadrust::entities::MLineFlags::CLOSED,
+                    codec::entities::MLineFlags::CLOSED,
                     closed && self.vertices.len() >= 3,
                 );
                 rebuild_mline_geometry(self);
@@ -1227,9 +1227,9 @@ impl PropertyEditable for MLine {
             }
             "ml_justification" => {
                 self.justification = match value {
-                    "Top" => acadrust::entities::MLineJustification::Top,
-                    "Bottom" => acadrust::entities::MLineJustification::Bottom,
-                    _ => acadrust::entities::MLineJustification::Zero,
+                    "Top" => codec::entities::MLineJustification::Top,
+                    "Bottom" => codec::entities::MLineJustification::Bottom,
+                    _ => codec::entities::MLineJustification::Zero,
                 };
                 return;
             }
@@ -1280,16 +1280,16 @@ fn set_mline_scale(mline: &mut MLine, scale: f64) {
 
 fn mline_vertex_factor(mline: &MLine, index: usize) -> f64 {
     let vertex = &mline.vertices[index];
-    let normal = cadkernel::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z)
+    let normal = kernel::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z)
         .normalize()
-        .unwrap_or(cadkernel::space::Vec3::Z);
+        .unwrap_or(kernel::space::Vec3::Z);
     let direction =
-        cadkernel::space::Vec3::new(vertex.direction.x, vertex.direction.y, vertex.direction.z)
+        kernel::space::Vec3::new(vertex.direction.x, vertex.direction.y, vertex.direction.z)
             .normalize()
-            .unwrap_or(cadkernel::space::Vec3::X);
-    let miter = cadkernel::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z)
+            .unwrap_or(kernel::space::Vec3::X);
+    let miter = kernel::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z)
         .normalize()
-        .unwrap_or(cadkernel::space::Vec3::Y);
+        .unwrap_or(kernel::space::Vec3::Y);
     miter.dot(normal.cross(direction)).abs().max(1.0e-9)
 }
 
@@ -1328,21 +1328,25 @@ fn restore_mline_offsets(mline: &mut MLine, offsets: &[Vec<Option<f64>>]) {
 
 impl Transformable for MLine {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for v in &mut entity.vertices {
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for v in &mut entity.vertices {
+                    crate::scene::view::transform::reflect_xy_point(
+                        &mut v.position.x,
+                        &mut v.position.y,
+                        p1,
+                        p2,
+                    );
+                }
                 crate::scene::view::transform::reflect_xy_point(
-                    &mut v.position.x,
-                    &mut v.position.y,
+                    &mut entity.start_point.x,
+                    &mut entity.start_point.y,
                     p1,
                     p2,
                 );
-            }
-            crate::scene::view::transform::reflect_xy_point(
-                &mut entity.start_point.x,
-                &mut entity.start_point.y,
-                p1,
-                p2,
-            );
-        });
+            },
+        );
     }
 }

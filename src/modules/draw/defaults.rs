@@ -32,6 +32,7 @@ thread_local! {
     static HELIX_HEIGHT: Cell<f64> = Cell::new(1.0);
     static HELIX_TURNS: Cell<f64> = Cell::new(3.0);
     static HELIX_COUNTER_CLOCKWISE: Cell<bool> = Cell::new(true);
+    static FILLET_TRIM:     Cell<bool> = Cell::new(true);   // TRIMMODE
 }
 
 macro_rules! accessors {
@@ -75,7 +76,11 @@ accessors!(get_rect_rotation, set_rect_rotation, RECT_ROTATION);
 accessors!(get_rect_chamfer1, set_rect_chamfer1, RECT_CHAMFER1);
 accessors!(get_rect_chamfer2, set_rect_chamfer2, RECT_CHAMFER2);
 accessors!(get_rect_fillet, set_rect_fillet, RECT_FILLET);
-accessors!(get_helix_base_radius, set_helix_base_radius, HELIX_BASE_RADIUS);
+accessors!(
+    get_helix_base_radius,
+    set_helix_base_radius,
+    HELIX_BASE_RADIUS
+);
 accessors!(get_helix_height, set_helix_height, HELIX_HEIGHT);
 accessors!(get_helix_turns, set_helix_turns, HELIX_TURNS);
 pub fn get_helix_counter_clockwise() -> bool {
@@ -84,6 +89,13 @@ pub fn get_helix_counter_clockwise() -> bool {
 
 pub fn set_helix_counter_clockwise(value: bool) {
     HELIX_COUNTER_CLOCKWISE.with(|current| current.set(value));
+}
+pub fn get_fillet_trim() -> bool {
+    FILLET_TRIM.with(|value| value.get())
+}
+
+pub fn set_fillet_trim(value: bool) {
+    FILLET_TRIM.with(|current| current.set(value));
 }
 accessors!(
     get_donut_inner_diameter,

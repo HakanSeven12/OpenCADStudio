@@ -34,7 +34,7 @@ impl UnitContext {
     /// The settings as this drawing holds them. Every place that formats or
     /// reads a number seeds the context from here, so none of them can be
     /// working from a different idea of the drawing's conventions.
-    pub fn from_header(header: &acadrust::document::HeaderVariables) -> Self {
+    pub fn from_header(header: &codec::document::HeaderVariables) -> Self {
         Self {
             lunits: header.linear_unit_format,
             luprec: header.linear_unit_precision,
@@ -68,10 +68,14 @@ thread_local! {
     /// the same place.
     static FIXED_TEXT_HEIGHTS: std::cell::RefCell<rustc_hash::FxHashMap<String, f64>> =
         std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+    /// Resolved font of every text style, for text measured without the
+    /// document at hand (justification changes, attribute placement).
+    static STYLE_FONTS: std::cell::RefCell<rustc_hash::FxHashMap<String, String>> =
+        std::cell::RefCell::new(rustc_hash::FxHashMap::default());
 }
 
 /// Record which text styles fix their height, from the drawing's style table.
-pub fn set_fixed_text_heights(document: &acadrust::CadDocument) {
+pub fn set_fixed_text_heights(document: &codec::CadDocument) {
     FIXED_TEXT_HEIGHTS.with(|cell| {
         let mut map = cell.borrow_mut();
         map.clear();
@@ -81,6 +85,24 @@ pub fn set_fixed_text_heights(document: &acadrust::CadDocument) {
             }
         }
     });
+    STYLE_FONTS.with(|cell| {
+        let mut map = cell.borrow_mut();
+        map.clear();
+        for style in document.text_styles.iter() {
+            let font =
+                crate::entities::text_support::resolve_text_style(&style.name, document).font_name;
+            map.insert(style.name.to_ascii_lowercase(), font);
+        }
+    });
+}
+
+/// The resolved font of `style` (Standard when unnamed); empty when unknown.
+pub fn style_font(style: &str) -> String {
+    let key = match style.trim() {
+        "" => "standard".to_string(),
+        name => name.to_ascii_lowercase(),
+    };
+    STYLE_FONTS.with(|cell| cell.borrow().get(&key).cloned().unwrap_or_default())
 }
 
 /// The height `style` fixes, or `None` when it leaves the height to the entity.
@@ -108,7 +130,7 @@ pub fn format_length(value: f64) -> String {
 
 /// Drop the sign from a formatted number whose digits all rounded to zero. A
 /// rotation leaves coordinates like -1e-15 behind, which read as `-0.0000`.
-fn without_negative_zero(text: String) -> String {
+pub fn without_negative_zero(text: String) -> String {
     match text.strip_prefix('-') {
         Some(rest)
             if rest.chars().any(|c| c.is_ascii_digit())
@@ -122,7 +144,7 @@ fn without_negative_zero(text: String) -> String {
 
 fn format_signed_length(value: f64) -> String {
     let ctx = unit_context();
-    let prec = ctx.luprec.max(0) as usize;
+    let prec = ctx.luprec.max(0).min(15) as usize;
     match ctx.lunits {
         1 => format!("{:.*e}", prec, value),
         3 => {
@@ -196,7 +218,7 @@ pub fn format_angle(value_rad: f64) -> String {
 
 fn format_signed_angle(value_rad: f64) -> String {
     let ctx = unit_context();
-    let prec = ctx.auprec.max(0) as usize;
+    let prec = ctx.auprec.max(0).min(15) as usize;
     match ctx.aunits {
         1 => dms(value_rad.to_degrees(), prec),
         2 => {
@@ -632,8 +654,8 @@ pub fn lineweight_options() -> Vec<String> {
         "Default".to_string(),
     ];
     for value in [
-        0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120,
-        140, 158, 200, 211,
+        0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158,
+        200, 211,
     ] {
         options.push(format!("{:.2} mm", value as f64 / 100.0));
     }
@@ -673,11 +695,7 @@ pub fn num_prop(label: &str, field: &'static str, value: f64, editable: bool) ->
 
 /// A ◀ / ▶ index navigator row (e.g. a polyline's Current Vertex). `display` is
 /// the label shown between the arrows (e.g. "2 / 7").
-pub fn stepper_prop(
-    label: &str,
-    field: &'static str,
-    display: impl Into<String>,
-) -> Property {
+pub fn stepper_prop(label: &str, field: &'static str, display: impl Into<String>) -> Property {
     Property {
         label: label.into(),
         field,
@@ -730,9 +748,7 @@ fn parse_angle_deg_unbounded(value: &str) -> Option<f64> {
     let i = rest.find(['°', 'd', 'D'])?;
     let d: f64 = rest[..i].trim().parse().ok()?;
     let mut total = d;
-    let tail = rest[i..]
-        .trim_start_matches(['°', 'd', 'D'])
-        .trim();
+    let tail = rest[i..].trim_start_matches(['°', 'd', 'D']).trim();
     if !tail.is_empty() {
         let (mpart, spart) = match tail.find('\'') {
             Some(j) => (&tail[..j], &tail[j + 1..]),
@@ -754,7 +770,7 @@ fn parse_angle_deg_unbounded(value: &str) -> Option<f64> {
 /// Re-exported rather than imported at each call site so the twelve modules
 /// that already reach for `entities::common::BulgeArc` keep working, and so
 /// there is one obvious place to see that the maths moved out.
-pub use cadkernel::geom2d::BulgeArc;
+pub use kernel::geom2d::BulgeArc;
 
 /// Convert a 2D BulgeArc into a 3D TangentGeom::Arc with its world center,
 /// plane axes, radius, and counter-clockwise start/end sweep angles.
@@ -818,6 +834,9 @@ pub(crate) fn triangulate_band_ring(ring: &[[f64; 3]]) -> Vec<[f64; 3]> {
 }
 
 pub(crate) fn wide_band_tris(origin: [f64; 2], fills: &[Vec<[f32; 2]>]) -> Vec<[f64; 3]> {
+    if fills.is_empty() {
+        return Vec::new();
+    }
     let mut total_verts = 0;
     for poly in fills {
         let n = poly.len();
@@ -925,27 +944,36 @@ pub(crate) fn tapered_band_points(
 ) -> (Vec<[f64; 3]>, Vec<f32>) {
     let n = verts.len();
     let seg_count = if is_closed { n } else { n.saturating_sub(1) };
-    let mut pts: Vec<[f64; 3]> = Vec::new();
-    let mut widths: Vec<f32> = Vec::new();
-    let mut push = |x: f64, y: f64, w: f32| {
-        let (wx, wy, wz) = to_wcs(x, y);
-        pts.push([wx, wy, wz]);
+    let mut pts: Vec<[f64; 3]> = Vec::with_capacity(seg_count + 1);
+    let mut widths: Vec<f32> = Vec::with_capacity(seg_count + 1);
+    let mut push = |xy: Option<(f64, f64)>, w: f32| {
+        // `None` is the NaN separator that breaks the band.
+        pts.push(xy.map_or([f64::NAN; 3], |(x, y)| to_wcs(x, y).into()));
         widths.push(w);
     };
+    let mut prev_end_width: Option<f64> = None;
     for i in 0..seg_count {
         let (p0, bulge, sw0, ew0) = verts[i];
         let (p1, _, _, _) = verts[(i + 1) % n];
-        if i == 0 {
-            push(p0[0], p0[1], sw0 as f32);
+        match prev_end_width {
+            None => push(Some((p0[0], p0[1])), sw0 as f32),
+            // A segment starting at another width than the last one ended
+            // steps there: break the band and restart it (#1628).
+            Some(prev) if (prev - sw0).abs() > 1e-9 => {
+                push(None, 0.0);
+                push(Some((p0[0], p0[1])), sw0 as f32);
+            }
+            Some(_) => {}
         }
+        prev_end_width = Some(ew0);
         if bulge.abs() < 1e-9 {
-            push(p1[0], p1[1], ew0 as f32);
+            push(Some((p1[0], p1[1])), ew0 as f32);
         } else if let Some(arc) = BulgeArc::from_bulge(p0, p1, bulge) {
-            let samples = arc.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE);
+            let samples = arc.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
             let segments = samples.len().saturating_sub(1).max(1);
             for (index, s) in samples.into_iter().enumerate().skip(1) {
                 let t = index as f64 / segments as f64;
-                push(s[0], s[1], (sw0 + (ew0 - sw0) * t) as f32);
+                push(Some((s[0], s[1])), (sw0 + (ew0 - sw0) * t) as f32);
             }
         }
     }
@@ -967,10 +995,10 @@ pub(crate) fn wide_band_outline(
     restart_per_segment: bool,
     to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
 ) -> WideBandOutline {
-    let source = cadkernel::geom2d::Polyline {
+    let source = kernel::geom2d::Polyline {
         vertices: verts
             .iter()
-            .map(|(position, bulge, _, _)| cadkernel::geom2d::PolylineVertex {
+            .map(|(position, bulge, _, _)| kernel::geom2d::PolylineVertex {
                 position: *position,
                 bulge: *bulge,
             })
@@ -987,10 +1015,10 @@ pub(crate) fn wide_band_outline(
         .take(segment_count)
         .map(|(_, _, start, end)| [*start, *end])
         .collect();
-    let boundary = cadkernel::geom2d::polyline_band_boundary(
+    let boundary = kernel::geom2d::polyline_band_boundary(
         &source,
         &widths,
-        cadkernel::tessellation::DEFAULT_ANGLE,
+        kernel::tessellation::DEFAULT_ANGLE,
     );
     let mut points = Vec::new();
     let mut stations = Vec::new();
@@ -1070,10 +1098,7 @@ pub(crate) fn extrude_wide_band_outline(
     point_segments.extend_from_slice(&base_segments);
 
     let mut emitted = HashSet::new();
-    for ((&point, &station), &segment) in base_points
-        .iter()
-        .zip(&base_stations)
-        .zip(&base_segments)
+    for ((&point, &station), &segment) in base_points.iter().zip(&base_stations).zip(&base_segments)
     {
         if !point[0].is_finite() {
             continue;
@@ -1253,14 +1278,44 @@ mod length_format_tests {
         for lunits in [3, 4, 5] {
             for value in [0.995f64, 5.995, 11.999, 23.999, 66.5, 9.25] {
                 let shown = with_units(lunits, if lunits == 3 { 4 } else { 4 }, value);
-                let read = parse_length(&shown)
-                    .unwrap_or_else(|| panic!("lunits {lunits} wrote {shown:?}, which does not read back"));
+                let read = parse_length(&shown).unwrap_or_else(|| {
+                    panic!("lunits {lunits} wrote {shown:?}, which does not read back")
+                });
                 assert!(
                     (read - value).abs() < 0.02,
                     "lunits {lunits}: {value} wrote {shown:?}, read back as {read}"
                 );
             }
         }
+    }
+
+    /// LUPREC / AUPREC reach the formatters straight from the header, where
+    /// `SETVAR` or a carried file can hold any `i16`. `format_area` already
+    /// caps itself at 15; `format_length` and `format_angle` printed the raw
+    /// count on every call, so precision 30_000 bloated each formatted value
+    /// to ~30 KB on the properties hot path.
+    #[test]
+    fn huge_precision_cannot_bloat_formatting_output() {
+        let original = unit_context();
+        let length = with_units(2, 30_000, 12.3456);
+        let mut ctx = unit_context();
+        ctx.aunits = 0;
+        ctx.auprec = 30_000;
+        set_unit_context(ctx);
+        let angle = format_angle(1.0);
+        let area = format_area(12.3456);
+        set_unit_context(original);
+        assert!(
+            length.len() < 64,
+            "format_length produced {} chars",
+            length.len()
+        );
+        assert!(
+            angle.len() < 64,
+            "format_angle produced {} chars",
+            angle.len()
+        );
+        assert!(area.len() < 64, "format_area produced {} chars", area.len());
     }
 }
 
@@ -1294,7 +1349,9 @@ mod angle_format_tests {
         assert_eq!(shown(4, 0, 180.0), "W");
         assert_ne!(shown(4, 8, 0.0000000005), "E");
         for prec in [0, 2] {
-            for deg in [0.99999f64, 45.9999, 89.99999, 179.99999, 269.99999, 359.99999] {
+            for deg in [
+                0.99999f64, 45.9999, 89.99999, 179.99999, 269.99999, 359.99999,
+            ] {
                 let text = shown(4, prec, deg);
                 assert!(
                     !text.contains("90d"),
@@ -1311,7 +1368,9 @@ mod angle_format_tests {
                 for deg in [0.99999f64, 45.5, 45.9999, 89.99999, 200.25, 359.99999] {
                     let text = shown(aunits, prec, deg);
                     let read = parse_angle(&text).unwrap_or_else(|| {
-                        panic!("aunits {aunits} prec {prec} wrote {text:?}, which does not read back")
+                        panic!(
+                            "aunits {aunits} prec {prec} wrote {text:?}, which does not read back"
+                        )
                     });
                     let delta = (read.to_degrees().rem_euclid(360.0) - deg.rem_euclid(360.0))
                         .rem_euclid(360.0);

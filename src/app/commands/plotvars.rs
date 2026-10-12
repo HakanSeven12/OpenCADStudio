@@ -69,9 +69,8 @@ impl OpenCADStudio {
                 task
             }
             Ok(Outcome::Current(current)) => {
-                self.command_line.push_output(
-                    crate::tf!("Enter new value for {name} <{current}>:").as_ref(),
-                );
+                self.command_line
+                    .push_output(crate::tf!("Enter new value for {name} <{current}>:").as_ref());
                 self.pending_setvar = Some(name);
                 Task::none()
             }
@@ -199,7 +198,11 @@ mod tests {
     }
 
     fn last_line(app: &OpenCADStudio) -> String {
-        app.command_line.history.last().map(|line| line.text.clone()).unwrap_or_default()
+        app.command_line
+            .history
+            .last()
+            .map(|line| line.text.clone())
+            .unwrap_or_default()
     }
 
     #[test]

@@ -2,18 +2,12 @@
 use super::*;
 
 impl Scene {
-    pub(super) fn paper_viewport_handles(
-        &self,
-    ) -> (Handle, Handle, Arc<Vec<Handle>>) {
+    pub(super) fn paper_viewport_handles(&self) -> (Handle, Handle, Arc<Vec<Handle>>) {
         {
             let cache = self.paper_viewport_cache.borrow();
             if let Some(cache) = cache.get(&self.current_layout) {
                 if cache.epoch == self.geometry_epoch && cache.layout == self.current_layout {
-                    return (
-                        cache.layout_block,
-                        cache.sheet,
-                        Arc::clone(&cache.content),
-                    );
+                    return (cache.layout_block, cache.sheet, Arc::clone(&cache.content));
                 }
             }
         }
@@ -99,7 +93,7 @@ impl Scene {
         if !self.any_viewport_grid_on() {
             return Vec::new();
         }
-        self.active_viewports(vw, vh, acadrust::entities::ViewportRenderMode::Wireframe2D)
+        self.active_viewports(vw, vh, codec::entities::ViewportRenderMode::Wireframe2D)
             .into_iter()
             .filter(|inst| inst.grid_on)
             .map(|inst| (inst.screen_rect, inst.camera, inst.handle))
@@ -119,11 +113,14 @@ impl Scene {
         &self,
         canvas_w: f32,
         canvas_h: f32,
-        model_mode: acadrust::entities::ViewportRenderMode,
+        model_mode: codec::entities::ViewportRenderMode,
     ) -> Vec<ViewportInstance> {
         if self.current_layout == "Model" {
             let tiles = self.model_tiles.borrow();
-            let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+            let active = self
+                .active_model_tile
+                .get()
+                .min(tiles.len().saturating_sub(1));
             return tiles
                 .iter()
                 .enumerate()
@@ -148,7 +145,11 @@ impl Scene {
                         // The active tile shows the live mode the picker
                         // drives; every other tile keeps its own stored
                         // style so editing one never disturbs the rest.
-                        render_mode: if i == active { model_mode } else { tile.render_mode },
+                        render_mode: if i == active {
+                            model_mode
+                        } else {
+                            tile.render_mode
+                        },
                         active: i == active,
                         grid_on: tile.grid_on,
                         paper_sheet: false,
@@ -168,10 +169,7 @@ impl Scene {
         sheet_cam.pitch = std::f32::consts::FRAC_PI_2;
         sheet_cam.rotation = view::camera::yaw_pitch_to_quat(0.0, std::f32::consts::FRAC_PI_2, 0.0);
         sheet_cam.projection = view::camera::Projection::Orthographic;
-        let sheet_grid_on = match self
-            .document
-            .get_entity(sheet_handle)
-        {
+        let sheet_grid_on = match self.document.get_entity(sheet_handle) {
             Some(EntityType::Viewport(vp)) => vp.status.grid_on,
             _ => false,
         };
@@ -185,7 +183,7 @@ impl Scene {
                 height: canvas_h,
             },
             camera: sheet_cam,
-            render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
+            render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
             active: false,
             grid_on: sheet_grid_on,
             paper_sheet: true,
@@ -194,9 +192,7 @@ impl Scene {
             let Some(EntityType::Viewport(vp)) = self.document.get_entity(handle) else {
                 continue;
             };
-            if !vp.status.is_on
-                || self.entity_temporarily_hidden(handle)
-            {
+            if !vp.is_on() || self.entity_temporarily_hidden(handle) {
                 continue;
             }
             let h = vp.common.handle;
@@ -242,7 +238,11 @@ impl Scene {
         Arc<Vec<HatchModel>>,
         Arc<Vec<ImageModel>>,
     ) {
-        let selected = if tint_selected { self.selected_hatch_sig() } else { 0 };
+        let selected = if tint_selected {
+            self.selected_hatch_sig()
+        } else {
+            0
+        };
         let reuse = {
             let cache = self.paper_sheet_render_cache.borrow();
             if let Some(cache) = cache.get(&self.current_layout) {
@@ -297,11 +297,7 @@ impl Scene {
         if let Some(sheet) = self.paper_sheet_fill() {
             hatches.push(sheet);
         }
-        hatches.extend(
-            self.paper_canvas_hatches(tint_selected)
-                .iter()
-                .cloned(),
-        );
+        hatches.extend(self.paper_canvas_hatches(tint_selected).iter().cloned());
         let hatches = Arc::new(hatches);
         let wipeouts = self.paper_canvas_wipeouts();
         let images = self.paper_sheet_images();
@@ -377,10 +373,7 @@ impl Scene {
 
     /// Physical sheet bounds in canvas pixels. Uses the same forced top-down
     /// paper transform as the GPU sheet viewport, ignoring stored camera twist.
-    pub fn paper_sheet_screen_rect(
-        &self,
-        canvas_px: (f32, f32),
-    ) -> Option<iced::Rectangle> {
+    pub fn paper_sheet_screen_rect(&self, canvas_px: (f32, f32)) -> Option<iced::Rectangle> {
         let ((x0, y0), (x1, y1)) = self.paper_limits()?;
         let (canvas_w, canvas_h) = canvas_px;
         if canvas_w < 1.0 || canvas_h < 1.0 {
@@ -477,8 +470,7 @@ impl Scene {
                     )
                     .is_some() =>
                 {
-                    Self::hatch_model_from_dxf(dxf, model.color)
-                        .unwrap_or_else(|| model.clone())
+                    Self::hatch_model_from_dxf(dxf, model.color).unwrap_or_else(|| model.clone())
                 }
                 _ => model.clone(),
             };
@@ -561,6 +553,9 @@ impl Scene {
                 .map(|l| l.is_plottable)
                 .unwrap_or(true)
         };
+        // Plot items are stacked by draw depth; a fill left at 0 lands above
+        // or below lines by chance instead of where DRAWORDER put it. (#1345)
+        let depth_map = self.draw_depth_map();
         let mut models = Vec::new();
         // Cached hatch models bake `draw_depth: 0.0` at document load; the
         // canvas path re-reads the label per frame but this plot path used to
@@ -606,8 +601,7 @@ impl Scene {
                     )
                     .is_some() =>
                 {
-                    Self::hatch_model_from_dxf(dxf, model.color)
-                        .unwrap_or_else(|| model.clone())
+                    Self::hatch_model_from_dxf(dxf, model.color).unwrap_or_else(|| model.clone())
                 }
                 _ => model.clone(),
             };
@@ -616,6 +610,7 @@ impl Scene {
             hatch.aci = style.4;
             hatch.line_weight_px = style.3;
             hatch.draw_depth = depths.get(&handle.value()).map_or(0.0, |d| d[0]);
+            hatch.draw_depth = depth_map.get(&handle.value()).map_or(0.0, |depth| depth[0]);
             if let EntityType::Hatch(dxf) = entity {
                 if let model::hatch_model::HatchPattern::Pattern(_) = &hatch.pattern {
                     if dxf.pattern.lines.is_empty() {
@@ -722,9 +717,9 @@ impl Scene {
         // from a big symbol library) has viewports legitimately aimed at that
         // second cluster; testing only the dense one wrongly auto-fits them onto
         // the library. Fall back to the cluster box when no extents are known.
-        let full_bounds = self.model_space_extents().map(|(mn, mx)| {
-            (mn.x as f64, mn.y as f64, mx.x as f64, mx.y as f64)
-        });
+        let full_bounds = self
+            .model_space_extents()
+            .map(|(mn, mx)| (mn.x as f64, mn.y as f64, mx.x as f64, mx.y as f64));
         // Absolute drawing centre. Geometry now reaches the scene at absolute
         // (UTM) coordinates — the old code centred the overlap test and the
         // auto-fit on the origin, which was right only while world_offset
@@ -741,9 +736,7 @@ impl Scene {
             (self.local_center[0], self.local_center[1])
         } else {
             self.model_space_extents()
-                .map(|(mn, mx)| {
-                    (((mn.x + mx.x) * 0.5) as f64, ((mn.y + mx.y) * 0.5) as f64)
-                })
+                .map(|(mn, mx)| (((mn.x + mx.x) * 0.5) as f64, ((mn.y + mx.y) * 0.5) as f64))
                 .unwrap_or((0.0, 0.0))
         };
 
@@ -755,21 +748,19 @@ impl Scene {
         // sits at UTM. Guarding on the target avoids the tight median cluster
         // (which collapses onto the densest sub-cluster) wrongly rejecting a
         // valid view that frames a smaller, off-centre sub-cluster.
-        let target_set =
-            vp.view_target.x.abs() > 1e-6 || vp.view_target.y.abs() > 1e-6;
+        let target_set = vp.view_target.x.abs() > 1e-6 || vp.view_target.y.abs() > 1e-6;
         // A fully-uninitialised view (target AND centre both zero) is a stale
         // placeholder viewport — frame its saved view (the origin) and leave it
         // empty rather than auto-fitting the whole model into it. The auto-fit
         // rescue is meant only for a stale target=(0,0,0) paired with a NON-zero
         // (pre-georeference) view_centre that points at empty WCS while the model
         // sits far away — that case still falls through to the overlap test.
-        let center_set =
-            vp.view_center.x.abs() > 1e-6 || vp.view_center.y.abs() > 1e-6;
+        let center_set = vp.view_center.x.abs() > 1e-6 || vp.view_center.y.abs() > 1e-6;
 
         if let Some(cam) = self.camera_from_view_mode(
             vp.view_direction,
             vp.view_target,
-            acadrust::types::Vector2 {
+            codec::types::Vector2 {
                 x: vp.view_center.x,
                 y: vp.view_center.y,
             },
@@ -802,7 +793,7 @@ impl Scene {
 
         // Auto-fit: aim at the content cluster centre, drop the stale view_center.
         let fit_h = cluster_half * 2.0 * 1.05;
-        let tgt = acadrust::types::Vector3 {
+        let tgt = codec::types::Vector3 {
             x: cx,
             y: cy,
             z: vp.view_target.z,
@@ -810,7 +801,7 @@ impl Scene {
         self.camera_from_view_mode(
             vp.view_direction,
             tgt,
-            acadrust::types::Vector2::ZERO,
+            codec::types::Vector2::ZERO,
             fit_h,
             vp.twist_angle,
             vp.status.perspective,
@@ -835,13 +826,7 @@ impl Scene {
         // wheel tick whenever the drawing contained one annotative object.
         // Explicit viewport annotation-scale changes still rebuild the resident
         // set; PSLTSCALE is a viewport GPU uniform.
-        let frozen = match self.document.get_entity(vp_handle) {
-            Some(EntityType::Viewport(vp)) => {
-                let f: HSet<Handle> = vp.frozen_layers.iter().cloned().collect();
-                f
-            }
-            _ => HSet::default(),
-        };
+        let frozen: HSet<Handle> = self.viewport_hidden_handles(vp_handle);
 
         let scale_handle = self.viewport_scale_handle(vp_handle);
         self.resident_wires_for(

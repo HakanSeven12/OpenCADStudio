@@ -1,15 +1,15 @@
-use acadrust::entities::{
+use codec::entities::{
     Dimension, DimensionAngular2Ln, DimensionAngular3Pt, DimensionBase, DimensionLinear,
     DimensionOrdinate,
 };
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use glam::DVec3;
+use kernel::geom2d::{
     arc_span, closest_point, intersect, nearest_of, Arc, Curve, Ray, Tolerance, Transform, Vec2,
     XLine,
 };
-use cadkernel::space::Plane;
-use glam::DVec3;
+use kernel::space::Plane;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview,
@@ -199,7 +199,10 @@ impl DimContinueCommand {
 
     fn build_dimension(&self, point_world: DVec3) -> Option<Dimension> {
         let state = self.base.as_ref()?;
-        let point = state.plane.project(point_world.to_array()).map(Vec2::from)?;
+        let point = state
+            .plane
+            .project(point_world.to_array())
+            .map(Vec2::from)?;
         let mut dimension = match &state.kind {
             ContinueKind::Linear {
                 current,
@@ -332,7 +335,8 @@ impl CadCommand for DimContinueCommand {
         {
             crate::t!("DIMCONTINUE  Specify feature location [Undo/Select] <Select>:").into_owned()
         } else {
-            crate::t!("DIMCONTINUE  Specify second extension line origin [Select/Undo] <Select>:").into_owned()
+            crate::t!("DIMCONTINUE  Specify second extension line origin [Select/Undo] <Select>:")
+                .into_owned()
         }
     }
 
@@ -427,13 +431,12 @@ impl CadCommand for DimContinueCommand {
     }
 
     fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
-        self.build_dimension(cursor)
-            .map(|dimension| {
-                vec![DimensionPreview {
-                    entity: EntityType::Dimension(dimension),
-                    preserve_base_style: self.preserve_base_style,
-                }]
-            })
+        self.build_dimension(cursor).map(|dimension| {
+            vec![DimensionPreview {
+                entity: EntityType::Dimension(dimension),
+                preserve_base_style: self.preserve_base_style,
+            }]
+        })
     }
 }
 
@@ -453,6 +456,7 @@ fn build_linear(
     result.base.definition_point = result.definition_point;
     result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
     result.base.insertion_point = result.base.text_middle_point;
+    crate::entities::dimension::reset_automatic_text_position(&mut result.base);
     Dimension::Linear(result)
 }
 
@@ -520,12 +524,11 @@ fn angular_arc(vertex: Vec2, first: Vec2, second: Vec2, radius: f64) -> Option<C
     }
     let first_angle = first.angle();
     let second_angle = second.angle();
-    let (start_angle, end_angle) =
-        if arc_span(first_angle, second_angle) <= std::f64::consts::PI {
-            (first_angle, second_angle)
-        } else {
-            (second_angle, first_angle)
-        };
+    let (start_angle, end_angle) = if arc_span(first_angle, second_angle) <= std::f64::consts::PI {
+        (first_angle, second_angle)
+    } else {
+        (second_angle, first_angle)
+    };
     Some(Curve::Arc(Arc {
         centre: vertex.into(),
         radius,
@@ -542,12 +545,8 @@ fn refresh_measurement(dimension: &mut Dimension, plane: Plane) {
             let axis = Vec2::new(value.rotation.cos(), value.rotation.sin());
             value.base.actual_measurement = (second - first).dot(axis).abs();
         }
-        Dimension::Angular2Ln(value) => {
-            value.base.actual_measurement = value.measurement_degrees()
-        }
-        Dimension::Angular3Pt(value) => {
-            value.base.actual_measurement = value.measurement_degrees()
-        }
+        Dimension::Angular2Ln(value) => value.base.actual_measurement = value.measurement_degrees(),
+        Dimension::Angular3Pt(value) => value.base.actual_measurement = value.measurement_degrees(),
         Dimension::Ordinate(value) => value.refresh_measurement(),
         _ => {}
     }
@@ -565,7 +564,8 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
                 project(&plane, value.second_point),
                 value.rotation,
                 project(&plane, value.definition_point),
-                project(&plane, value.base.text_middle_point),
+                (value.base.text_middle_point != Vector3::ZERO)
+                    .then(|| project(&plane, value.base.text_middle_point)),
                 value.base.actual_measurement,
             );
         }
@@ -634,7 +634,7 @@ fn linear_preview(
     second: Vec2,
     rotation: f64,
     definition: Vec2,
-    text: Vec2,
+    text: Option<Vec2>,
     measurement: f64,
 ) {
     let axis = Vec2::new(rotation.cos(), rotation.sin());
@@ -642,6 +642,8 @@ fn linear_preview(
     let coordinate = definition.dot(perpendicular);
     let first_line = project_to_line(first, perpendicular, coordinate);
     let second_line = project_to_line(second, perpendicular, coordinate);
+    // Automatic text stores no point; mark the middle of the dimension line.
+    let text = text.unwrap_or_else(|| first_line.lerp(second_line, 0.5));
     segment(points, plane, first, first_line);
     segment(points, plane, second, second_line);
     segment(points, plane, first_line, second_line);
@@ -706,7 +708,9 @@ fn angular_preview(
         points,
         plane,
         end,
-        (end_previous - end).normalize().unwrap_or(-second_direction),
+        (end_previous - end)
+            .normalize()
+            .unwrap_or(-second_direction),
         second_direction,
         radius,
     );
@@ -745,14 +749,7 @@ fn ordinate_preview(
         perpendicular,
         feature.distance(leader),
     );
-    text_box(
-        points,
-        plane,
-        leader,
-        perpendicular,
-        axis,
-        measurement,
-    );
+    text_box(points, plane, leader, perpendicular, axis, measurement);
 }
 
 fn arrow(
@@ -764,23 +761,11 @@ fn arrow(
     span: f64,
 ) {
     let inward = inward.normalize().unwrap_or(Vec2::new(1.0, 0.0));
-    let perpendicular = perpendicular
-        .normalize()
-        .unwrap_or(Vec2::new(0.0, 1.0));
+    let perpendicular = perpendicular.normalize().unwrap_or(Vec2::new(0.0, 1.0));
     let size = span.clamp(1.0, 100.0) * 0.035;
     let back = tip + inward * size;
-    segment(
-        points,
-        plane,
-        tip,
-        back + perpendicular * size * 0.4,
-    );
-    segment(
-        points,
-        plane,
-        tip,
-        back - perpendicular * size * 0.4,
-    );
+    segment(points, plane, tip, back + perpendicular * size * 0.4);
+    segment(points, plane, tip, back - perpendicular * size * 0.4);
 }
 
 fn text_box(
@@ -817,8 +802,7 @@ fn project_to_line(point: Vec2, perpendicular: Vec2, coordinate: f64) -> Vec2 {
 }
 
 fn plane_from_normal(origin: Vector3, normal: Vector3) -> Plane {
-    let (x_axis, y_axis) =
-        crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
+    let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
     Plane::from_axes(
         point(origin),
         [x_axis.0, x_axis.1, x_axis.2],
@@ -849,4 +833,6 @@ fn push_local(points: &mut Vec<[f64; 3]>, plane: Plane, point: Vec2) {
     points.push(plane.point_at(point.into()));
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMCONTINUE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMCONTINUE"]
+});

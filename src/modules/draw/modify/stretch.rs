@@ -15,9 +15,9 @@
 //     Insert      : move the whole entity if its insertion point is inside.
 //     All others  : move the whole entity if any point is inside.
 
-use acadrust::Handle;
-use glam::DVec3;
 use crate::t;
+use codec::Handle;
+use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -44,9 +44,7 @@ enum Step {
     /// Selection is complete; waiting for the displacement base point.
     Base,
     /// Waiting for the displacement target.
-    Target {
-        base: DVec3,
-    },
+    Target { base: DVec3 },
 }
 
 pub struct StretchCommand {
@@ -64,6 +62,21 @@ impl StretchCommand {
             wire_models,
             windows: Vec::new(),
             step: Step::WindowCorner1,
+        }
+    }
+
+    /// A selection made by a crossing window before the command: that window
+    /// marks what moves, so the command goes straight to the base point.
+    pub fn preselected(
+        handles: Vec<Handle>,
+        wire_models: Vec<WireModel>,
+        window: (DVec3, DVec3),
+    ) -> Self {
+        Self {
+            handles,
+            wire_models,
+            windows: vec![window],
+            step: Step::Base,
         }
     }
 
@@ -135,12 +148,8 @@ impl CadCommand for StretchCommand {
                     .into_owned()
                 }
             }
-            Step::WindowCorner2(_) => {
-                t!("STRETCH  Specify opposite corner:").into_owned()
-            }
-            Step::Base => {
-                t!("STRETCH  Specify base point:").into_owned()
-            }
+            Step::WindowCorner2(_) => t!("STRETCH  Specify opposite corner:").into_owned(),
+            Step::Base => t!("STRETCH  Specify base point:").into_owned(),
             Step::Target { base } => {
                 let bx = format!("{:.3}", base.x);
                 let bz = format!("{:.3}", base.z);
@@ -223,6 +232,12 @@ impl CadCommand for StretchCommand {
         matches!(self.step, Step::WindowCorner1 | Step::WindowCorner2(_))
     }
 
+    fn selects_by_window(&self) -> bool {
+        // Crossing windows select what stretches; dynamic input has nothing
+        // to enter there (#657).
+        self.window_corner_pick()
+    }
+
     fn window_first_corner(&self) -> Option<DVec3> {
         // Expose the first corner so the host draws a filled crossing marquee to
         // the cursor, matching a normal box selection instead of a bare outline.
@@ -244,17 +259,13 @@ impl CadCommand for StretchCommand {
                 let windows: Vec<_> = self
                     .windows
                     .iter()
-                    .map(|(win_min, win_max)| {
-                        (win_min.as_vec3(), win_max.as_vec3())
-                    })
+                    .map(|(win_min, win_max)| (win_min.as_vec3(), win_max.as_vec3()))
                     .collect();
 
                 let mut out: Vec<WireModel> = self
                     .wire_models
                     .iter()
-                    .map(|wire| {
-                        wire.stretched_windows(&windows, delta.as_vec3())
-                    })
+                    .map(|wire| wire.stretched_windows(&windows, delta.as_vec3()))
                     .collect();
 
                 out.push(WireModel::solid(

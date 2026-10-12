@@ -6,9 +6,9 @@
 use super::viewport_dimension_tests::preview_text as text;
 use super::OpenCADStudio;
 use crate::command::StepInput;
-use acadrust::entities::{Arc, Circle, Line};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Arc, Circle, Line};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
 use glam::DVec3;
 
 fn app() -> (OpenCADStudio, usize) {
@@ -63,7 +63,9 @@ fn ordinate_preview_matches_commit() {
     assert!(app.dimension_preview_entities(i, DVec3::ZERO).is_none());
     let _ = app.feed_command(StepInput::Point(DVec3::new(12.5, 40.0, 0.0)));
     let entity = commit_and_compare(&mut app, i, DVec3::new(12.5, 90.0, 0.0));
-    assert_eq!(text(&app, &entity), "12.5");
+    // A new drawing is metric and current on ISO-25, whose decimal separator
+    // is a comma and whose trailing zeros are suppressed.
+    assert_eq!(text(&app, &entity), "12,5");
 }
 
 #[test]
@@ -149,7 +151,7 @@ fn continue_and_baseline_previews_follow_style_inheritance() {
         .header
         .current_dimstyle_name
         .clone();
-    let mut style = acadrust::tables::DimStyle::new("Inherit");
+    let mut style = codec::tables::DimStyle::new("Inherit");
     style.dimlfac = 2.0;
     app.tabs[i].scene.document.dim_styles.add(style).unwrap();
     app.tabs[i].scene.document.header.current_dimstyle_name = "Inherit".into();

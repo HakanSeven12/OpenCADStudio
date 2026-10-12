@@ -1,8 +1,8 @@
 //! Polar-tracking angle status menu.
 
+use crate::t;
 use iced::widget::{button, container, row, text, text_input};
 use iced::{Element, Fill, Length};
-use crate::t;
 
 use crate::app::Message;
 use crate::ui::statusbar::status_menu::Entry;
@@ -20,10 +20,7 @@ pub fn angle_label(deg: f32) -> String {
     }
 }
 
-pub fn menu_entries<'a>(
-    current: f32,
-    custom: &'a str,
-) -> Vec<Entry<'a>> {
+pub fn menu_entries<'a>(current: f32, custom: &'a str) -> Vec<Entry<'a>> {
     let mut entries: Vec<Entry<'a>> = PRESETS
         .iter()
         .map(|&deg| {
@@ -40,12 +37,9 @@ pub fn menu_entries<'a>(
         .padding([2, 6])
         .width(Length::Fixed(58.0));
     let custom_row = container(
-        row![
-            custom_field,
-            text("°").size(11),
-        ]
-        .spacing(4)
-        .align_y(iced::Center),
+        row![custom_field, text("°").size(11),]
+            .spacing(4)
+            .align_y(iced::Center),
     )
     .padding([5, 10]);
     entries.push(Entry::stay(custom_row));

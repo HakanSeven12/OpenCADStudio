@@ -1,7 +1,7 @@
 //! Bottom status bar — Model/Layout tabs + OSNAP toggle + status info
 
-pub mod status_menu;
 pub(crate) mod spacemouse;
+pub mod status_menu;
 pub mod statusbar_config;
 pub mod statusbar_menu;
 
@@ -575,8 +575,7 @@ impl StatusBar {
         if show_layout_tabs {
             // Paper layouts only: `layouts[0]` is always "Model". Derived once
             // from the shared `Arc` and cloned (cheap refcount bump) per tab.
-            let reorderable_layouts: Arc<[String]> =
-                Arc::from(layouts.get(1..).unwrap_or(&[]));
+            let reorderable_layouts: Arc<[String]> = Arc::from(layouts.get(1..).unwrap_or(&[]));
             // Shared once per frame: block tabs carry no reorder set, so reuse
             // one empty Arc (refcount bump) instead of allocating per tab.
             let empty_reorderable: Arc<[String]> = Arc::from([] as [String; 0]);

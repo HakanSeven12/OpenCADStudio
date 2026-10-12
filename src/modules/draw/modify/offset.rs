@@ -9,23 +9,23 @@
 //     2. Pick object to offset (Line, Arc, Circle, LwPolyline)
 //     3. Pick a point on the side to offset toward, or choose Multiple
 //        to keep offsetting the newly created result at the same distance
+//
+//   With objects already selected, the command opens at step 3 instead, the
+//   preview following the cursor. At step 3 a typed distance places the
+//   offset at once on the cursor's side; a negative one, on the other side.
 
 use crate::entities::curve::{entity_curve, lwpolyline_world_xy};
-use crate::modules::draw::modify::spline_ops::spline_sample_xy;
-use acadrust::entities::LwVertex;
-use acadrust::entities::{
+use codec::entities::LwVertex;
+use codec::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline,
     Spline as SplineEnt, XLine as XLineEnt,
 };
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 // Polyline offsetting, and the angle normalisation that goes with it, come
 // from the kernel; only the entity conversion stays here.
-use cadkernel::geom2d::nurbs::clamped_uniform_knots;
-use cadkernel::geom2d::{
-    offset_polyline, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
-};
-use glam::{DVec3, Vec3};
 use crate::t;
+use glam::{DVec3, Vec3};
+use kernel::geom2d::{offset_polyline, Polyline as KernelPolyline, PolylineVertex as KernelVertex};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::draw::defaults;
@@ -185,8 +185,7 @@ fn offset_lwpolylines(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Vec<EntityTyp
                 .vertices
                 .iter()
                 .map(|vertex| {
-                    let mut output =
-                        LwVertex::from_coords(vertex.position[0], vertex.position[1]);
+                    let mut output = LwVertex::from_coords(vertex.position[0], vertex.position[1]);
                     output.bulge = vertex.bulge;
                     output
                 })
@@ -201,111 +200,87 @@ fn offset_lwpolyline(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Option<EntityT
     offset_lwpolylines(p, dist, side_pt).into_iter().next()
 }
 
-// ── Ellipse offset ─────────────────────────────────────────────────────────
+// ── Ellipse and spline offset ──────────────────────────────────────────────
 //
-// A true offset of an ellipse is a Lamé curve, not an ellipse. As an
-// acceptable CAD approximation we scale both semi-axes uniformly and keep
-// the same orientation, center and parameter range.  The sign of the offset
-// is determined by whether side_pt is inside or outside the ellipse.
+// Neither has a parallel of its own kind — an ellipse's is not an ellipse —
+// so both come back as a spline fitted through true offset points, within a
+// millionth of the curve's size, by the kernel. The work happens in the
+// curve's own plane, so a tilted or extruded one offsets in place.
 
 fn offset_ellipse(e: &EllipseEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
-    let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
-    if a < 1e-9 {
-        return None;
-    }
-    let b = a * e.minor_axis_ratio;
-    let nx = e.major_axis.x / a;
-    let ny = e.major_axis.y / a;
-    // Project side_pt onto ellipse local frame and test inside/outside.
-    let rx = side_pt.x as f64 - e.center.x;
-    let ry = side_pt.y as f64 - e.center.y;
-    let xl = rx * nx + ry * ny;
-    let yl = -rx * ny + ry * nx;
-    let inside = (xl / a).powi(2) + (yl / b).powi(2) < 1.0;
-    let sign = if inside { -1.0 } else { 1.0 };
-
-    let new_a = a + sign * dist;
-    let new_b = b + sign * dist;
-    if new_a <= 1e-9 || new_b <= 1e-9 {
-        return None;
-    }
-
-    let mut new_e = e.clone();
-    new_e.common.handle = Handle::NULL;
-    // Scale the major_axis vector proportionally.
-    let scale = new_a / a;
-    new_e.major_axis.x *= scale;
-    new_e.major_axis.y *= scale;
-    new_e.major_axis.z *= scale;
-    new_e.minor_axis_ratio = new_b / new_a;
-    Some(EntityType::Ellipse(new_e))
+    let source = EntityType::Ellipse(e.clone());
+    let mut template = SplineEnt::new();
+    template.common = e.common.clone();
+    offset_curved(&source, template, dist, side_pt)
 }
 
-// ── Spline offset ──────────────────────────────────────────────────────────
-//
-// Strategy: sample the spline into N points, offset each sample point by
-// `dist` along the local perpendicular (based on the finite-difference
-// tangent), then fit a new spline through the offset points.
-
 fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
-    let (ts_knot, pts) = spline_sample_xy(spl, 64);
-    let n = pts.len();
-    if n < 2 {
+    offset_curved(&EntityType::Spline(spl.clone()), spl.clone(), dist, side_pt)
+}
+
+fn offset_curved(
+    source: &EntityType,
+    mut template: SplineEnt,
+    dist: f64,
+    side_pt: Vec3,
+) -> Option<EntityType> {
+    let planar = entity_curve(source)?;
+    let side = planar
+        .plane
+        .project([side_pt.x as f64, side_pt.y as f64, side_pt.z as f64])?;
+    // Left of the curve's direction of travel is the kernel's positive side.
+    let curve = &planar.curve;
+    let at = curve.parameter_at(side);
+    let step = 1e-6;
+    let (before, after) = if curve.is_closed() {
+        (
+            curve.point_at((at - step).rem_euclid(1.0)),
+            curve.point_at((at + step).rem_euclid(1.0)),
+        )
+    } else {
+        (
+            curve.point_at((at - step).max(0.0)),
+            curve.point_at((at + step).min(1.0)),
+        )
+    };
+    let foot = curve.point_at(at);
+    let along = [after[0] - before[0], after[1] - before[1]];
+    let toward = [side[0] - foot[0], side[1] - foot[1]];
+    let left = along[0] * toward[1] - along[1] * toward[0] > 0.0;
+    let signed = if left { dist.abs() } else { -dist.abs() };
+    let tolerance = (curve.length() * 1e-6).max(1e-9);
+    let kernel::geom2d::Curve::Nurbs(parallel) =
+        kernel::geom2d::offset_curve(curve, signed, tolerance)?
+    else {
         return None;
-    }
-
-    // Determine offset sign from the first non-degenerate tangent.
-    let sign: f64 = (0..n - 1).find_map(|i| {
-        let dx = pts[i + 1][0] - pts[i][0];
-        let dy = pts[i + 1][1] - pts[i][1];
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-12 {
-            return None;
-        }
-        let vx = side_pt.x as f64 - pts[i][0];
-        let vy = side_pt.y as f64 - pts[i][1];
-        let cross = dx * vy - dy * vx;
-        Some(if cross >= 0.0 { 1.0 } else { -1.0 })
-    })?;
-
-    // Offset each sample point along the local normal.
-    let offset_pts: Vec<acadrust::types::Vector3> = pts
+    };
+    template.common.handle = Handle::NULL;
+    template.degree = parallel.degree() as i32;
+    template.knots = parallel.knots().to_vec();
+    template.control_points = parallel
+        .control_points()
         .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            // Tangent via central / forward / backward difference.
-            let (dx, dy) = if i == 0 {
-                let d = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]];
-                (d[0], d[1])
-            } else if i == n - 1 {
-                let d = [pts[n - 1][0] - pts[n - 2][0], pts[n - 1][1] - pts[n - 2][1]];
-                (d[0], d[1])
-            } else {
-                (
-                    (pts[i + 1][0] - pts[i - 1][0]) * 0.5,
-                    (pts[i + 1][1] - pts[i - 1][1]) * 0.5,
-                )
-            };
-            let len = (dx * dx + dy * dy).sqrt().max(1e-12);
-            let nx = -dy / len; // left perpendicular
-            let ny = dx / len;
-            let z = spl.control_points.first().map(|v| v.z).unwrap_or(0.0);
-            acadrust::types::Vector3::new(p[0] + sign * nx * dist, p[1] + sign * ny * dist, z)
+        .map(|uv| {
+            let [x, y, z] = planar.plane.point_at(*uv);
+            codec::types::Vector3::new(x, y, z)
         })
         .collect();
-
-    let _ = ts_knot;
-    // Build a new spline from the offset control points (treat sample pts as fit pts → ctrl pts).
-    let degree = spl.degree.max(1) as usize;
-    let new_ctrl: Vec<acadrust::types::Vector3> = offset_pts;
-    let n_ctrl = new_ctrl.len();
-    let mut new_spl = spl.clone();
-    new_spl.common.handle = Handle::NULL;
-    new_spl.control_points = new_ctrl;
-    new_spl.knots = clamped_uniform_knots(degree, n_ctrl);
-    new_spl.fit_points.clear();
-    new_spl.weights.clear();
-    Some(EntityType::Spline(new_spl))
+    template.weights = if parallel.is_rational() {
+        parallel.weights().to_vec()
+    } else {
+        Vec::new()
+    };
+    template.flags.rational = parallel.is_rational();
+    template.flags.periodic = false;
+    template.flags.closed = curve.is_closed();
+    if let Some([x, y, z]) = planar.plane.normal() {
+        template.normal = codec::types::Vector3::new(x, y, z);
+    }
+    // A parallel is no longer the curve through the source's fit points.
+    template.fit_points.clear();
+    template.begin_tangent = codec::types::Vector3::new(0.0, 0.0, 0.0);
+    template.end_tangent = codec::types::Vector3::new(0.0, 0.0, 0.0);
+    Some(EntityType::Spline(template))
 }
 
 // ── Dispatch ───────────────────────────────────────────────────────────────
@@ -331,13 +306,18 @@ fn compute_offsets(entity: &EntityType, dist: f64, side_pt: Vec3) -> Vec<EntityT
 // distance for every supported entity type.
 
 fn perp_distance(entity: &EntityType, pt: Vec3) -> f64 {
+    closest_on_wire(entity, pt).map_or(0.0, |(_, d)| d)
+}
+
+/// Nearest point of the entity outline to `pt`, and its distance.
+fn closest_on_wire(entity: &EntityType, pt: Vec3) -> Option<([f64; 2], f64)> {
     let pts = entity_wire_pts(entity);
     if pts.len() < 2 {
-        return 0.0;
+        return None;
     }
     let px = pt.x as f64;
     let py = pt.y as f64;
-    let mut best = f64::INFINITY;
+    let mut best = ([px, py], f64::INFINITY);
     for w in pts.windows(2) {
         let ax = w[0][0] as f64;
         let ay = w[0][1] as f64;
@@ -354,17 +334,41 @@ fn perp_distance(entity: &EntityType, pt: Vec3) -> f64 {
         let cx = ax + t * dx;
         let cy = ay + t * dy;
         let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
-        if d < best {
-            best = d;
+        if d < best.1 {
+            best = ([cx, cy], d);
         }
     }
-    best
+    Some(best)
+}
+
+// ── Opposite side ─────────────────────────────────────────────────────────
+//
+// A negative typed distance offsets away from the cursor. Rather than teach
+// every offset function a sign, the cursor is mirrored through its nearest
+// point on the outline, which puts it on the other side for every type: the
+// other half-plane of a line, inside instead of outside a circle or closed
+// loop. The mirror stops at half the offset distance so that, in a narrow
+// part of a shape, it cannot cross the far wall and come back to the
+// cursor's own side.
+
+fn far_side(entity: &EntityType, pt: Vec3, dist: f64) -> Option<Vec3> {
+    let ([qx, qy], d) = closest_on_wire(entity, pt)?;
+    if d < 1e-9 {
+        // On the outline itself: there is no side to be opposite to.
+        return None;
+    }
+    let step = d.min(dist * 0.5) / d;
+    Some(Vec3::new(
+        (qx + (qx - pt.x as f64) * step) as f32,
+        (qy + (qy - pt.y as f64) * step) as f32,
+        pt.z,
+    ))
 }
 
 // ── Wire preview points ─────────────────────────────────────────────────────
 
 /// Preview density, matching the figure the drawn wires use.
-const PREVIEW_SEGMENTS_PER_RADIAN: f64 = cadkernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
+const PREVIEW_SEGMENTS_PER_RADIAN: f64 = kernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
 
 /// Preview points for an entity, from its own curve.
 ///
@@ -411,7 +415,6 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
         .collect::<Vec<[f32; 3]>>()
 }
 
-
 // ── Command implementation ─────────────────────────────────────────────────
 
 enum Step {
@@ -421,9 +424,13 @@ enum Step {
 
     /// First reference point has been picked; the second point defines
     /// the offset distance.
-    ReferenceSecond { first: DVec3 },
+    ReferenceSecond {
+        first: DVec3,
+    },
 
-    SelectObject { locked: Option<f64> },
+    SelectObject {
+        locked: Option<f64>,
+    },
 
     PickSide {
         targets: Vec<EntityType>,
@@ -440,9 +447,13 @@ pub struct OffsetCommand {
     /// Unlike the command's opening snapshot, this also includes objects
     /// created by earlier offsets while the command remains active.
     picked: Option<EntityType>,
-    /// Pre-selected offsettable objects (pick-first, #422); consumed when the
-    /// distance step resolves.
-    preselected: Vec<EntityType>,
+    /// Last cursor position the preview saw. A distance typed at the side
+    /// step places the offset relative to it.
+    cursor: Option<DVec3>,
+    /// The command opened on pre-selected objects (#422) and has made nothing
+    /// yet: Enter takes the last distance, and Erase / Layer, which the
+    /// skipped distance step would have offered, are offered here.
+    drag_start: bool,
     /// A Yes/No or Current/Source answer is being collected for this option.
     awaiting: Option<Await>,
     /// Erase option: replace the source object with its offset.
@@ -485,7 +496,8 @@ impl OffsetCommand {
             all_entities,
             entity_index,
             picked: None,
-            preselected: Vec::new(),
+            cursor: None,
+            drag_start: false,
             awaiting: None,
             erase_source: false,
             layer_current: false,
@@ -494,38 +506,28 @@ impl OffsetCommand {
         }
     }
 
-    /// Pick-first flow (#422): the distance step still comes first, then the
-    /// pre-selected objects go straight to the side step.
+    /// Pick-first flow (#422): the objects are already chosen, so the command
+    /// opens at the side step with the preview following the cursor. Clicking
+    /// offsets through the cursor; typing a distance places it at that
+    /// distance; Enter repeats the last distance (#418).
     pub fn with_selection(all_entities: Vec<EntityType>, targets: Vec<EntityType>) -> Self {
-        let entity_index = ModifyEntityIndex::build(&all_entities);
-        Self {
-            step: Step::Distance,
-            all_entities,
-            entity_index,
-            picked: None,
-            preselected: targets,
-            awaiting: None,
-            erase_source: false,
-            layer_current: false,
-            targets_are_sources: false,
-            made: 0,
+        let mut cmd = Self::new(all_entities);
+        if !targets.is_empty() {
+            cmd.step = Step::PickSide {
+                targets,
+                locked: None,
+                multiple: false,
+            };
+            cmd.targets_are_sources = true;
+            cmd.drag_start = true;
         }
+        cmd
     }
 
     /// Leave the distance step with the given mode (Some = locked distance,
-    /// None = through): pre-selected objects jump to the side step, otherwise
-    /// the object-pick loop starts.
+    /// None = through) for the object-pick loop.
     fn advance_from_distance(&mut self, locked: Option<f64>) -> CmdResult {
-        if self.preselected.is_empty() {
-            self.step = Step::SelectObject { locked };
-        } else {
-            self.step = Step::PickSide {
-                targets: std::mem::take(&mut self.preselected),
-                locked,
-                multiple: false,
-            };
-            self.targets_are_sources = true;
-        }
+        self.step = Step::SelectObject { locked };
         CmdResult::NeedPoint
     }
 
@@ -550,9 +552,74 @@ impl OffsetCommand {
 
         let d = format!("{:.4}", distance);
 
-        CmdResult::ReportMeasurement(
-            t!("OFFSET distance = %{d}", d = d).into_owned()
-        )
+        CmdResult::ReportMeasurement(t!("OFFSET distance = %{d}", d = d).into_owned())
+    }
+
+    /// Offset the side step's targets with `pt` choosing the side: toward it,
+    /// or away from it when `flip` is set. Each target offsets by its own
+    /// through-distance, or by the locked magnitude.
+    fn place(&mut self, pt: DVec3, flip: bool) -> CmdResult {
+        let (locked, targets, multiple) = match &self.step {
+            Step::PickSide {
+                locked,
+                targets,
+                multiple,
+            } => (*locked, targets.clone(), *multiple),
+
+            _ => return CmdResult::NeedPoint,
+        };
+        let per_target: Vec<(Handle, Vec<EntityType>)> = targets
+            .iter()
+            .filter_map(|entity| {
+                let mag = locked.unwrap_or_else(|| perp_distance(entity, pt.as_vec3()));
+                if mag < 1e-9 {
+                    return None;
+                }
+                let side = if flip {
+                    far_side(entity, pt.as_vec3(), mag)?
+                } else {
+                    pt.as_vec3()
+                };
+                let offsets = compute_offsets(entity, mag, side);
+                (!offsets.is_empty()).then(|| (entity.common().handle, offsets))
+            })
+            .collect();
+        let mut news: Vec<EntityType> = per_target
+            .iter()
+            .flat_map(|(_, offsets)| offsets.iter().cloned())
+            .collect();
+        if news.is_empty() {
+            return CmdResult::NeedPoint;
+        }
+        self.made += 1;
+        self.drag_start = false;
+        // Erase option: the offset replaces its source object. Only the
+        // objects picked from the drawing qualify — a Multiple chain's
+        // targets are the offsets just made, which are not replaced again.
+        let erase = self.erase_source && self.targets_are_sources;
+        self.targets_are_sources = false;
+        if multiple {
+            // Multiple mode chains from the result just created, matching
+            // OFFSET's repeated fixed-distance behavior (parallel/concentric
+            // series instead of duplicate copies at the first offset).
+            self.step = Step::PickSide {
+                targets: news.clone(),
+                locked,
+                multiple: true,
+            };
+        } else {
+            // Classic loop (#418): commit this offset and go back to the object
+            // pick at the same distance, until Enter / Esc finishes.
+            self.step = Step::SelectObject { locked };
+        }
+        if erase {
+            return CmdResult::ReplaceManyContinue(per_target);
+        }
+        if news.len() == 1 {
+            CmdResult::CommitEntity(news.pop().unwrap())
+        } else {
+            CmdResult::CommitEntities(news)
+        }
     }
 }
 
@@ -567,11 +634,14 @@ impl CadCommand for OffsetCommand {
     fn prompt(&self) -> String {
         match self.awaiting {
             Some(Await::Erase) => {
-                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <No>:").into_owned()
+                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <No>:")
+                    .into_owned()
             }
             Some(Await::Layer) => {
-                return t!("OFFSET  Enter layer option for offset objects [Current/Source] <Source>:")
-                    .into_owned()
+                return t!(
+                    "OFFSET  Enter layer option for offset objects [Current/Source] <Source>:"
+                )
+                .into_owned()
             }
             None => {}
         }
@@ -602,6 +672,23 @@ impl CadCommand for OffsetCommand {
                 } else {
                     std::borrow::Cow::Borrowed("")
                 };
+                if self.drag_start {
+                    let d = format!("{:.4}", defaults::get_offset_dist());
+                    return if *multiple {
+                        t!(
+                            "OFFSET%{n} Multiple  Click through point or type distance, negative for the other side [Erase/Layer] <%{d}>:",
+                            n = n,
+                            d = d
+                        )
+                    } else {
+                        t!(
+                            "OFFSET%{n}  Click through point or type distance, negative for the other side [Multiple/Erase/Layer] <%{d}>:",
+                            n = n,
+                            d = d
+                        )
+                    }
+                    .into_owned();
+                }
                 match (locked, multiple) {
                     (Some(d), false) => {
                         let d = format!("{:.4}", d);
@@ -639,7 +726,10 @@ impl CadCommand for OffsetCommand {
                 return vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")]
             }
             Some(Await::Layer) => {
-                return vec![CmdOption::new("Current", "C"), CmdOption::new("Source", "S")]
+                return vec![
+                    CmdOption::new("Current", "C"),
+                    CmdOption::new("Source", "S"),
+                ]
             }
             None => {}
         }
@@ -656,6 +746,19 @@ impl CadCommand for OffsetCommand {
                     opts.push(CmdOption::new("Undo", "U"));
                 }
                 opts.push(CmdOption::enter("Exit"));
+                opts
+            }
+            Step::PickSide { multiple, .. } if self.drag_start => {
+                let mut opts = Vec::new();
+                if !multiple {
+                    opts.push(CmdOption::new("Multiple", "M"));
+                }
+                opts.push(CmdOption::new("Erase", "E"));
+                opts.push(CmdOption::new("Layer", "L"));
+                opts.push(CmdOption::enter(&format!(
+                    "{:.4}",
+                    defaults::get_offset_dist()
+                )));
                 opts
             }
             Step::PickSide { multiple, .. } => {
@@ -698,11 +801,10 @@ impl CadCommand for OffsetCommand {
             return CmdResult::NeedPoint;
         }
 
-        let entity = self.picked.take().or_else(|| {
-            self.entity_index
-                .get(&self.all_entities, handle)
-                .cloned()
-        });
+        let entity = self
+            .picked
+            .take()
+            .or_else(|| self.entity_index.get(&self.all_entities, handle).cloned());
 
         // Accept every type compute_offsets can offset — including XLine (#296),
         // and Ellipse/Spline whose offset functions existed but weren't reachable.
@@ -730,15 +832,18 @@ impl CadCommand for OffsetCommand {
         match self.step {
             Step::Distance | Step::PickSide { .. } => crate::command::DynField::Scalar,
 
-            Step::ReferenceSecond { .. }
-            | Step::SelectObject { .. } => crate::command::DynField::Point,
+            Step::ReferenceSecond { .. } | Step::SelectObject { .. } => {
+                crate::command::DynField::Point
+            }
         }
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         match &self.step {
             Step::Distance => Some(defaults::get_offset_dist()),
-            Step::PickSide { targets, locked, .. } => Some(locked.unwrap_or_else(|| {
+            Step::PickSide {
+                targets, locked, ..
+            } => Some(locked.unwrap_or_else(|| {
                 targets
                     .first()
                     .map(|e| perp_distance(e, cursor.as_vec3()))
@@ -777,18 +882,22 @@ impl CadCommand for OffsetCommand {
         {
             return self.undo_last();
         }
+        // Erase / Layer belong to the distance step, or to the side step when
+        // a pre-selection skipped the distance step.
+        if matches!(self.step, Step::Distance) || self.drag_start {
+            if upper == "E" || upper == "ERASE" {
+                self.awaiting = Some(Await::Erase);
+                return Some(CmdResult::NeedPoint);
+            }
+            if upper == "L" || upper == "LAYER" {
+                self.awaiting = Some(Await::Layer);
+                return Some(CmdResult::NeedPoint);
+            }
+        }
         match &mut self.step {
             Step::Distance => {
                 if t.eq_ignore_ascii_case("t") || t.eq_ignore_ascii_case("through") {
                     return Some(self.advance_from_distance(None));
-                }
-                if upper == "E" || upper == "ERASE" {
-                    self.awaiting = Some(Await::Erase);
-                    return Some(CmdResult::NeedPoint);
-                }
-                if upper == "L" || upper == "LAYER" {
-                    self.awaiting = Some(Await::Layer);
-                    return Some(CmdResult::NeedPoint);
                 }
                 if let Some(d) = crate::entities::common::parse_typed_length(&t) {
                     return Some(self.accept_distance(d));
@@ -796,35 +905,41 @@ impl CadCommand for OffsetCommand {
                 Some(CmdResult::NeedPoint)
             }
             Step::PickSide {
-                locked,
-                multiple,
-                ..
+                locked, multiple, ..
             } => {
                 if t.eq_ignore_ascii_case("m") || t.eq_ignore_ascii_case("multiple") {
                     *multiple = true;
                     return Some(CmdResult::NeedPoint);
                 }
-                if !t.is_empty() {
-                    if let Some(d) = crate::entities::common::parse_typed_length(&t) {
-                        let d = d.abs().max(1e-9);
-                        defaults::set_offset_dist(d);
-                        *locked = Some(d);
-                    }
+                let Some(d) = crate::entities::common::parse_typed_length(&t) else {
+                    return Some(CmdResult::NeedPoint);
+                };
+                let mag = d.abs().max(1e-9);
+                defaults::set_offset_dist(mag);
+                *locked = Some(mag);
+                // The cursor has already chosen the side, so the value places
+                // the offset now: on the cursor's side, or the other side when
+                // negative. Before the cursor has been seen, the click still
+                // chooses.
+                match self.cursor {
+                    Some(cursor) => Some(self.place(cursor, d < 0.0)),
+                    None => Some(CmdResult::NeedPoint),
                 }
-                // Stay on the side step — the click chooses which side.
-                Some(CmdResult::NeedPoint)
             }
             _ => None,
         }
+    }
+
+    fn on_entities_committed(&mut self, entities: &[EntityType]) {
+        self.all_entities.extend(entities.iter().cloned());
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
     }
 
     fn on_hover_entity(&mut self, handle: Handle, _pt: DVec3) -> Vec<WireModel> {
         if handle.is_null() || !matches!(self.step, Step::SelectObject { .. }) {
             return vec![];
         }
-        if let Some(entity) = self
-            .entity_index.get(&self.all_entities, handle)
-        {
+        if let Some(entity) = self.entity_index.get(&self.all_entities, handle) {
             let pts = entity_wire_pts(entity);
             if !pts.is_empty() {
                 return vec![WireModel::solid(
@@ -858,80 +973,17 @@ impl CadCommand for OffsetCommand {
             _ => {}
         }
 
-        let (locked, targets, multiple) = match &self.step {
-            Step::PickSide {
-                locked,
-                targets,
-                multiple,
-            } => (*locked, targets.clone(), *multiple),
-
-            _ => return CmdResult::NeedPoint,
-        };
-        // Each target offsets by its own through-distance (or the locked
-        // magnitude), toward the clicked side.
-        let per_target: Vec<(Handle, Vec<EntityType>)> = targets
-            .iter()
-            .filter_map(|entity| {
-                let mag = locked.unwrap_or_else(|| perp_distance(entity, pt.as_vec3()));
-                if mag < 1e-9 {
-                    return None;
-                }
-                let offsets = compute_offsets(entity, mag, pt.as_vec3());
-                (!offsets.is_empty()).then(|| (entity.common().handle, offsets))
-            })
-            .collect();
-        let mut news: Vec<EntityType> = per_target
-            .iter()
-            .flat_map(|(_, offsets)| offsets.iter().cloned())
-            .collect();
-        if news.is_empty() {
-            return CmdResult::NeedPoint;
-        }
-        self.made += 1;
-        // Erase option: the offset replaces its source object. Only the
-        // objects picked from the drawing qualify — a Multiple chain's
-        // targets are the offsets just made, which are not replaced again.
-        let erase = self.erase_source && self.targets_are_sources;
-        self.targets_are_sources = false;
-        if multiple {
-            // Multiple mode chains from the result just created, matching
-            // OFFSET's repeated fixed-distance behavior (parallel/concentric
-            // series instead of duplicate copies at the first offset).
-            self.step = Step::PickSide {
-                targets: news.clone(),
-                locked,
-                multiple: true,
-            };
-        } else {
-            // Classic loop (#418): commit this offset and go back to the object
-            // pick at the same distance, until Enter / Esc finishes.
-            self.step = Step::SelectObject { locked };
-        }
-        if erase {
-            return CmdResult::ReplaceManyContinue(per_target);
-        }
-        if news.len() == 1 {
-            CmdResult::CommitEntity(news.pop().unwrap())
-        } else {
-            CmdResult::CommitEntities(news)
-        }
+        self.place(pt, false)
     }
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        self.cursor = Some(pt);
         if let Step::ReferenceSecond { first } = &self.step {
             return vec![WireModel::solid(
                 "offset_reference_distance".into(),
                 vec![
-                    [
-                        first.x as f32,
-                        first.y as f32,
-                        first.z as f32,
-                    ],
-                    [
-                        pt.x as f32,
-                        pt.y as f32,
-                        pt.z as f32,
-                    ],
+                    [first.x as f32, first.y as f32, first.z as f32],
+                    [pt.x as f32, pt.y as f32, pt.z as f32],
                 ],
                 WireModel::CYAN,
                 false,
@@ -939,7 +991,9 @@ impl CadCommand for OffsetCommand {
         }
 
         let (locked, targets) = match &self.step {
-            Step::PickSide { locked, targets, .. } => (*locked, targets.clone()),
+            Step::PickSide {
+                locked, targets, ..
+            } => (*locked, targets.clone()),
             _ => return vec![],
         };
         let mut wires = Vec::new();
@@ -974,6 +1028,17 @@ impl CadCommand for OffsetCommand {
                 let d = defaults::get_offset_dist();
                 self.accept_distance(d)
             }
+            // Opened on a pre-selection, the same Enter offsets by the last
+            // distance on the cursor's side.
+            Step::PickSide { .. } if self.drag_start => {
+                let Some(cursor) = self.cursor else {
+                    return CmdResult::NeedPoint;
+                };
+                if let Step::PickSide { locked, .. } = &mut self.step {
+                    *locked = Some(defaults::get_offset_dist());
+                }
+                self.place(cursor, false)
+            }
             _ => CmdResult::Cancel,
         }
     }
@@ -982,14 +1047,13 @@ impl CadCommand for OffsetCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["OFFSET"] });  // OffsetCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["OFFSET"] }); // OffsetCommand
 
 #[cfg(test)]
 mod offset_tests {
     use super::*;
-    use acadrust::types::Vector2;
+    use codec::types::Vector2;
 
     fn rect(corners: &[[f64; 2]]) -> LwPolyline {
         LwPolyline {
@@ -1008,8 +1072,12 @@ mod offset_tests {
         let Some(EntityType::LwPolyline(r)) = out else {
             panic!("offset did not return an lwpolyline");
         };
-        let (mut minx, mut miny, mut maxx, mut maxy) =
-            (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let (mut minx, mut miny, mut maxx, mut maxy) = (
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
         for v in &r.vertices {
             minx = minx.min(v.location.x);
             miny = miny.min(v.location.y);
@@ -1049,7 +1117,7 @@ mod option_tests {
     use super::*;
 
     fn line(x1: f64, y1: f64, x2: f64, y2: f64, handle: u64) -> EntityType {
-        let mut line = acadrust::entities::Line::from_coords(x1, y1, 0.0, x2, y2, 0.0);
+        let mut line = codec::entities::Line::from_coords(x1, y1, 0.0, x2, y2, 0.0);
         line.common.handle = Handle::new(handle);
         EntityType::Line(line)
     }
@@ -1065,8 +1133,14 @@ mod option_tests {
         assert!(matches!(cmd.on_text_input("E"), Some(CmdResult::NeedPoint)));
         assert_eq!(keywords(&cmd), ["Y", "N"]);
         assert!(matches!(cmd.on_text_input("Y"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(cmd.on_text_input("2"), Some(CmdResult::ReportMeasurement(_))));
-        assert!(matches!(cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            cmd.on_text_input("2"),
+            Some(CmdResult::ReportMeasurement(_))
+        ));
+        assert!(matches!(
+            cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
         match cmd.on_point(DVec3::new(5.0, 5.0, 0.0)) {
             CmdResult::ReplaceManyContinue(replacements) => {
                 assert_eq!(replacements.len(), 1);
@@ -1077,7 +1151,10 @@ mod option_tests {
         }
         // Back at the object pick, with Undo now available.
         assert_eq!(keywords(&cmd), ["U", ""]);
-        assert!(matches!(cmd.on_text_input("U"), Some(CmdResult::UndoDocument)));
+        assert!(matches!(
+            cmd.on_text_input("U"),
+            Some(CmdResult::UndoDocument)
+        ));
         assert_eq!(keywords(&cmd), [""]);
     }
 
@@ -1092,6 +1169,162 @@ mod option_tests {
         assert!(matches!(cmd.step, Step::Distance));
         cmd.on_text_input("2");
         cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
-        assert!(matches!(cmd.on_point(DVec3::new(5.0, 5.0, 0.0)), CmdResult::CommitEntity(_)));
+        assert!(matches!(
+            cmd.on_point(DVec3::new(5.0, 5.0, 0.0)),
+            CmdResult::CommitEntity(_)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+    use codec::types::Vector2;
+
+    fn line_y0() -> EntityType {
+        let mut line = codec::entities::Line::from_coords(0.0, 0.0, 0.0, 10.0, 0.0, 0.0);
+        line.common.handle = Handle::new(1);
+        EntityType::Line(line)
+    }
+
+    /// OFFSET opened on `target`, with the cursor hovering at `cursor`.
+    fn dragging(target: EntityType, cursor: [f64; 2]) -> OffsetCommand {
+        let mut cmd = OffsetCommand::with_selection(vec![target.clone()], vec![target]);
+        cmd.on_preview_wires(DVec3::new(cursor[0], cursor[1], 0.0));
+        cmd
+    }
+
+    fn committed_line_y(result: Option<CmdResult>) -> f64 {
+        match result {
+            Some(CmdResult::CommitEntity(EntityType::Line(l))) => l.start.y,
+            _ => panic!("expected one committed line"),
+        }
+    }
+
+    #[test]
+    fn preselection_opens_on_the_live_preview() {
+        let mut cmd = OffsetCommand::with_selection(vec![line_y0()], vec![line_y0()]);
+        assert!(matches!(cmd.step, Step::PickSide { locked: None, .. }));
+        assert_eq!(
+            cmd.options()
+                .into_iter()
+                .map(|o| o.keyword)
+                .collect::<Vec<_>>(),
+            ["M", "E", "L", ""]
+        );
+        // The preview passes through the cursor before anything is typed.
+        assert_eq!(cmd.on_preview_wires(DVec3::new(5.0, 3.0, 0.0)).len(), 1);
+        assert_eq!(cmd.dyn_live_value(DVec3::new(5.0, 3.0, 0.0)), Some(3.0));
+        // A click still offsets through the cursor.
+        assert!(matches!(
+            cmd.on_point(DVec3::new(5.0, 3.0, 0.0)),
+            CmdResult::CommitEntity(_)
+        ));
+    }
+
+    #[test]
+    fn typed_distance_places_on_the_cursor_side() {
+        let mut cmd = dragging(line_y0(), [5.0, 3.0]);
+        assert!((committed_line_y(cmd.on_text_input("2")) - 2.0).abs() < 1e-9);
+        // The loop continues at the typed distance.
+        assert!(matches!(cmd.step, Step::SelectObject { locked: Some(d) } if d == 2.0));
+    }
+
+    #[test]
+    fn negative_distance_places_on_the_other_side() {
+        let mut cmd = dragging(line_y0(), [5.0, 3.0]);
+        assert!((committed_line_y(cmd.on_text_input("-2")) + 2.0).abs() < 1e-9);
+        assert_eq!(defaults::get_offset_dist(), 2.0);
+    }
+
+    #[test]
+    fn negative_distance_inside_a_circle_grows_it() {
+        let circle = EntityType::Circle(CircleEnt {
+            center: codec::types::Vector3::new(0.0, 0.0, 0.0),
+            radius: 10.0,
+            ..Default::default()
+        });
+        let mut cmd = dragging(circle.clone(), [3.0, 0.0]);
+        match cmd.on_text_input("-1") {
+            Some(CmdResult::CommitEntity(EntityType::Circle(c))) => {
+                assert!((c.radius - 11.0).abs() < 1e-9)
+            }
+            _ => panic!("expected one committed circle"),
+        }
+        let mut cmd = dragging(circle, [3.0, 0.0]);
+        match cmd.on_text_input("1") {
+            Some(CmdResult::CommitEntity(EntityType::Circle(c))) => {
+                assert!((c.radius - 9.0).abs() < 1e-9)
+            }
+            _ => panic!("expected one committed circle"),
+        }
+    }
+
+    // A U whose arms sit 1 apart. From inside the left arm the nearest wall
+    // faces the gap; mirroring the cursor its full 1.9 across would land in
+    // the right arm, back inside the loop. -0.25 must still go outward.
+    #[test]
+    fn negative_distance_does_not_mirror_across_a_gap() {
+        let u = EntityType::LwPolyline(LwPolyline {
+            vertices: [
+                [0.0, 0.0],
+                [9.0, 0.0],
+                [9.0, 10.0],
+                [5.0, 10.0],
+                [5.0, 2.0],
+                [4.0, 2.0],
+                [4.0, 10.0],
+                [0.0, 10.0],
+            ]
+            .iter()
+            .map(|&[x, y]| LwVertex::new(Vector2::new(x, y)))
+            .collect(),
+            is_closed: true,
+            ..Default::default()
+        });
+        let mut cmd = dragging(u, [2.1, 6.0]);
+        match cmd.on_text_input("-0.25") {
+            Some(CmdResult::CommitEntity(EntityType::LwPolyline(p))) => {
+                let min_x = p
+                    .vertices
+                    .iter()
+                    .map(|v| v.location.x)
+                    .fold(f64::INFINITY, f64::min);
+                assert!(
+                    (min_x + 0.25).abs() < 1e-6,
+                    "offset went inward: min x {min_x}"
+                );
+            }
+            _ => panic!("expected one committed polyline"),
+        }
+    }
+
+    #[test]
+    fn enter_repeats_the_last_distance_on_the_cursor_side() {
+        defaults::set_offset_dist(4.0);
+        let mut cmd = dragging(line_y0(), [5.0, -1.0]);
+        match cmd.on_enter() {
+            CmdResult::CommitEntity(EntityType::Line(l)) => assert!((l.start.y + 4.0).abs() < 1e-9),
+            _ => panic!("expected one committed line"),
+        }
+        // After that, Enter finishes as before.
+        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
+    }
+
+    #[test]
+    fn erase_is_offered_without_the_distance_step() {
+        let mut cmd = dragging(line_y0(), [5.0, 3.0]);
+        cmd.on_text_input("E");
+        cmd.on_text_input("Y");
+        assert!(matches!(
+            cmd.on_text_input("2"),
+            Some(CmdResult::ReplaceManyContinue(_))
+        ));
+    }
+
+    #[test]
+    fn without_preselection_the_distance_comes_first() {
+        let cmd = OffsetCommand::new(vec![line_y0()]);
+        assert!(matches!(cmd.step, Step::Distance));
     }
 }

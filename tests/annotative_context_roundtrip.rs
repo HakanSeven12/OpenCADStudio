@@ -1,27 +1,30 @@
 // Faz 4c-0 preserve-verify (risk #10): an *untouched* annotative file must
 // round-trip every per-object annotation-context leaf without dropping or
-// mutating it. acadrust does not model `AcDb*ObjectContextData` — it keeps each
+// mutating it. opencadcodec does not model `AcDb*ObjectContextData` — it keeps each
 // leaf verbatim as `Unknown{raw_dwg_data}` and re-emits it on same-version save,
 // while side-mapping the leaf's `340` annotation-scale handle into
 // `context_scales`. This certifies that passthrough is intact at the current
-// acadrust HEAD before any encoder work touches the save path.
+// opencadcodec HEAD before any encoder work touches the save path.
 //
 // Uses the golden reference `~/Downloads/0718-mbmdmc.dwg` (AC1032/R2018). The
 // test skips (does not fail) when that file is absent so it never breaks CI.
 
+use codec::objects::ObjectType;
 use OpenCADStudio::io;
-use acadrust::objects::ObjectType;
 
 const GOLDEN: &str = "/home/hakanseven/Downloads/0718-mbmdmc.dwg";
 
 /// Raw bytes of every annotation-context leaf, sorted so the comparison is
 /// independent of handle ordering/renumbering across the round-trip.
-fn leaf_blobs(doc: &acadrust::CadDocument) -> Vec<Vec<u8>> {
+fn leaf_blobs(doc: &codec::CadDocument) -> Vec<Vec<u8>> {
     let mut blobs: Vec<Vec<u8>> = doc
         .context_scales
         .keys()
         .filter_map(|h| match doc.objects.get(h) {
-            Some(ObjectType::Unknown { raw_dwg_data: Some(raw), .. }) => Some(raw.clone()),
+            Some(ObjectType::Unknown {
+                raw_dwg_data: Some(raw),
+                ..
+            }) => Some(raw.clone()),
             _ => None,
         })
         .collect();
@@ -45,16 +48,26 @@ fn annotative_leaf_contexts_survive_dwg_roundtrip() {
         n0,
         leaves0.len()
     );
-    assert!(n0 > 0, "golden file must carry per-object annotation contexts");
+    assert!(
+        n0 > 0,
+        "golden file must carry per-object annotation contexts"
+    );
 
     // Same-version DWG round-trip (AC1032 -> AC1032).
     let out = io::save_to_bytes(&doc, "dwg", doc.version).expect("save dwg bytes");
     let doc2 = io::load_bytes("roundtrip.dwg", out).expect("reload dwg bytes");
     let n1 = doc2.context_scales.len();
     let leaves1 = leaf_blobs(&doc2);
-    eprintln!("reloaded: context_scales={} preserved_leaf_blobs={}", n1, leaves1.len());
+    eprintln!(
+        "reloaded: context_scales={} preserved_leaf_blobs={}",
+        n1,
+        leaves1.len()
+    );
 
-    assert_eq!(n0, n1, "annotation-context leaf COUNT changed across round-trip");
+    assert_eq!(
+        n0, n1,
+        "annotation-context leaf COUNT changed across round-trip"
+    );
     assert_eq!(
         leaves0.len(),
         leaves1.len(),
@@ -79,7 +92,12 @@ fn annotative_leaf_type_breakdown() {
     let mut tally: std::collections::BTreeMap<String, usize> = Default::default();
     let mut sizes: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
     for h in doc.context_scales.keys() {
-        if let Some(ObjectType::Unknown { type_name, raw_dwg_data, .. }) = doc.objects.get(h) {
+        if let Some(ObjectType::Unknown {
+            type_name,
+            raw_dwg_data,
+            ..
+        }) = doc.objects.get(h)
+        {
             // type_name is "DWG_OBJ_<type_code>"; resolve the code to a class name.
             let name = type_name
                 .rsplit('_')
@@ -95,7 +113,10 @@ fn annotative_leaf_type_breakdown() {
             e.1 = e.1.max(len);
         }
     }
-    eprintln!("=== context-leaf type breakdown ({} total) ===", doc.context_scales.len());
+    eprintln!(
+        "=== context-leaf type breakdown ({} total) ===",
+        doc.context_scales.len()
+    );
     for (name, n) in &tally {
         let (lo, hi) = sizes[name];
         eprintln!("  {n:>4}  {name}   raw_bytes {lo}..{hi}");
@@ -147,5 +168,8 @@ fn dump_one_blkref_leaf() {
 }
 
 fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ")
+    b.iter()
+        .map(|x| format!("{x:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }

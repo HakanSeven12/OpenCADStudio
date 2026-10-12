@@ -4,7 +4,7 @@ use super::*;
 impl Scene {
     // ── Group helpers ──────────────────────────────────────────────────────
 
-    pub fn groups(&self) -> impl Iterator<Item = &acadrust::objects::Group> {
+    pub fn groups(&self) -> impl Iterator<Item = &codec::objects::Group> {
         self.document.objects.values().filter_map(|obj| match obj {
             ObjectType::Group(g) => Some(g),
             _ => None,
@@ -22,7 +22,7 @@ impl Scene {
     /// Creates a named group from the given handles and registers it in the group dictionary.
     pub fn create_group(&mut self, name: String, handles: Vec<Handle>) -> Handle {
         let group_dict_handle = self.document.header.acad_group_dict_handle;
-        let mut group = acadrust::objects::Group::new(&name);
+        let mut group = codec::objects::Group::new(&name);
         group.handle = self.document.allocate_handle();
         group.owner = group_dict_handle;
         group.add_entities(handles);
@@ -84,7 +84,7 @@ impl Scene {
     /// the copy lands in the same drawing or a different file.
     pub fn recreate_groups(
         &mut self,
-        sources: Vec<acadrust::objects::Group>,
+        sources: Vec<codec::objects::Group>,
         handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
     ) -> usize {
         let group_dict_handle = self.document.header.acad_group_dict_handle;
@@ -113,6 +113,13 @@ impl Scene {
                     dictionary_recorded = true;
                 }
                 self.record_undo_object_before(gh, None);
+            }
+            for member in group.entities.clone() {
+                if let Some(entity) = self.document.get_entity_mut(member) {
+                    if !entity.common().reactors.contains(&gh) {
+                        entity.common_mut().reactors.push(gh);
+                    }
+                }
             }
             self.document.objects.insert(gh, ObjectType::Group(group));
             if let Some(ObjectType::Dictionary(dict)) =
@@ -178,10 +185,7 @@ impl Scene {
     /// Return `handles` plus every member of a selectable group containing one
     /// of them. Selection and rollover highlighting share this expansion so the
     /// preview matches what a click will select.
-    pub fn handles_expanded_for_selectable_groups(
-        &self,
-        handles: &[Handle],
-    ) -> HashSet<Handle> {
+    pub fn handles_expanded_for_selectable_groups(&self, handles: &[Handle]) -> HashSet<Handle> {
         let mut expanded: HashSet<Handle> = handles.iter().copied().collect();
         let wanted: HashSet<Handle> = handles.iter().copied().collect();
         for obj in self.document.objects.values() {
@@ -248,8 +252,8 @@ mod group_expansion_tests {
 
     #[test]
     fn group_expansion_pulls_in_siblings_and_nothing_else() {
-        use acadrust::entities::{EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{EntityType, Line};
+        use codec::types::Vector3;
 
         let mut scene = Scene::new();
         let mut line = |x: f64| {
@@ -292,8 +296,8 @@ mod group_expansion_tests {
     /// each other.
     #[test]
     fn selected_object_units_keep_a_complete_group_together() {
-        use acadrust::entities::{EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{EntityType, Line};
+        use codec::types::Vector3;
 
         let mut scene = Scene::new();
         let mut line = |x: f64| {

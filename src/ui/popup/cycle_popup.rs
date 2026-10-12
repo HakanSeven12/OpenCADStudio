@@ -11,7 +11,7 @@ use crate::app::Message;
 
 /// Row content for one overlapping candidate.
 pub struct CycleCandidate {
-    pub handle: acadrust::Handle,
+    pub handle: codec::Handle,
     pub type_name: String,
     pub layer: String,
     /// The color the object is drawn with (layer-inherited when ByLayer).
@@ -26,9 +26,18 @@ pub fn cycle_popup_overlay(
 ) -> Element<'static, Message> {
     // The type column and the layer column get one shared width each (the
     // widest entry of their kind, clamped) so the separators line up.
-    let type_w = clamp_col_width(items.iter().map(|c| c.type_name.chars().count()), 11.0, 40.0, 96.0);
-    let layer_w =
-        clamp_col_width(items.iter().map(|c| c.layer.chars().count()), 10.0, 28.0, 84.0);
+    let type_w = clamp_col_width(
+        items.iter().map(|c| c.type_name.chars().count()),
+        11.0,
+        40.0,
+        96.0,
+    );
+    let layer_w = clamp_col_width(
+        items.iter().map(|c| c.layer.chars().count()),
+        10.0,
+        28.0,
+        84.0,
+    );
 
     let rows: Vec<Element<'static, Message>> = items
         .into_iter()
@@ -53,7 +62,7 @@ fn clamp_col_width(labels: impl Iterator<Item = usize>, glyph_w: f32, min: f32, 
 }
 
 fn item_row(
-    handle: acadrust::Handle,
+    handle: codec::Handle,
     type_name: String,
     layer: String,
     color: [f32; 4],

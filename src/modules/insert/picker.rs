@@ -28,7 +28,11 @@ impl BlockPicker {
     /// Create a picker. `available` is the full block name list (unsorted).
     /// `usage_rank` is `UPPER -> (freq, mru_idx)`. `limit` is capped to
     /// `MAX_SUGGESTIONS` by caller (or passed as `MAX_SUGGESTIONS` directly).
-    pub fn new(mut available: Vec<String>, usage_rank: FxHashMap<String, (u32, usize)>, limit: usize) -> Self {
+    pub fn new(
+        mut available: Vec<String>,
+        usage_rank: FxHashMap<String, (u32, usize)>,
+        limit: usize,
+    ) -> Self {
         let limit = limit.clamp(0, MAX_SUGGESTIONS);
         // Rank `available` for the empty-needle view. Use partial sort when
         // the list is large to avoid O(n log n) when we only need top `limit`.
@@ -41,7 +45,9 @@ impl BlockPicker {
                 let (fa, ma) = usage_rank.get(&up_a).copied().unwrap_or((0, usize::MAX));
                 let (fb, mb) = usage_rank.get(&up_b).copied().unwrap_or((0, usize::MAX));
                 // higher freq first, smaller mru first, then alpha
-                fb.cmp(&fa).then_with(|| ma.cmp(&mb)).then_with(|| available[a].cmp(&available[b]))
+                fb.cmp(&fa)
+                    .then_with(|| ma.cmp(&mb))
+                    .then_with(|| available[a].cmp(&available[b]))
             });
             indices.truncate(limit);
             indices.sort_by(|&a, &b| {
@@ -49,15 +55,21 @@ impl BlockPicker {
                 let up_b = available[b].to_ascii_uppercase();
                 let (fa, ma) = usage_rank.get(&up_a).copied().unwrap_or((0, usize::MAX));
                 let (fb, mb) = usage_rank.get(&up_b).copied().unwrap_or((0, usize::MAX));
-                fb.cmp(&fa).then_with(|| ma.cmp(&mb)).then_with(|| available[a].cmp(&available[b]))
+                fb.cmp(&fa)
+                    .then_with(|| ma.cmp(&mb))
+                    .then_with(|| available[a].cmp(&available[b]))
             });
-            let mut ranked: Vec<String> = indices.into_iter().map(|i| available[i].clone()).collect();
+            let mut ranked: Vec<String> =
+                indices.into_iter().map(|i| available[i].clone()).collect();
             // Append the rest unsorted — they are only needed when filtering.
             // To keep `available` complete for filtering, retain all names but
             // move the ranked top to front. Simpler: sort fully if limit==available.len().
             // For large n, we still want the rest available for substring search.
             // So rebuild: ranked top + remaining in arbitrary order.
-            let mut remaining: Vec<String> = available.into_iter().filter(|name| !ranked.contains(name)).collect();
+            let mut remaining: Vec<String> = available
+                .into_iter()
+                .filter(|name| !ranked.contains(name))
+                .collect();
             ranked.append(&mut remaining);
             available = ranked;
         } else if available.len() > 1 {
@@ -77,7 +89,14 @@ impl BlockPicker {
 
         let lower_cache: Vec<String> = available.iter().map(|s| s.to_ascii_lowercase()).collect();
         let upper_cache: Vec<String> = available.iter().map(|s| s.to_ascii_uppercase()).collect();
-        let filtered = Self::filter_ranked_inner(&available, &lower_cache, &upper_cache, "", &usage_rank, limit);
+        let filtered = Self::filter_ranked_inner(
+            &available,
+            &lower_cache,
+            &upper_cache,
+            "",
+            &usage_rank,
+            limit,
+        );
         Self {
             available,
             lower_cache,
@@ -111,7 +130,10 @@ impl BlockPicker {
 
     /// Does `available` contain `name` case-insensitively?
     pub fn contains_name(&self, name: &str) -> Option<String> {
-        self.available.iter().find(|c| c.eq_ignore_ascii_case(name)).cloned()
+        self.available
+            .iter()
+            .find(|c| c.eq_ignore_ascii_case(name))
+            .cloned()
     }
 
     /// Update needle and recompute `filtered`. Pass trimmed `needle`.
@@ -170,7 +192,10 @@ impl BlockPicker {
             scored.truncate(limit);
         }
         scored.sort_by(comparator);
-        scored.into_iter().map(|(i, _, _, _)| available[i].clone()).collect()
+        scored
+            .into_iter()
+            .map(|(i, _, _, _)| available[i].clone())
+            .collect()
     }
 }
 
@@ -181,21 +206,27 @@ mod tests {
 
     fn picker(names: &[&str], usage: Vec<(&str, u32, usize)>, limit: usize) -> BlockPicker {
         let mut map = FxHashMap::default();
-        for (name, freq, idx) in usage { map.insert(name.to_ascii_uppercase(), (freq, idx)); }
+        for (name, freq, idx) in usage {
+            map.insert(name.to_ascii_uppercase(), (freq, idx));
+        }
         BlockPicker::new(names.iter().map(|s| s.to_string()).collect(), map, limit)
     }
 
     #[test]
     fn empty_needle_shows_ranked_top() {
-        let mut p = picker(&["Gamma","Alpha","Beta"], vec![("Beta",5,0),("Alpha",2,1)], 2);
-        assert_eq!(p.filtered(), &["Beta","Alpha"]);
+        let mut p = picker(
+            &["Gamma", "Alpha", "Beta"],
+            vec![("Beta", 5, 0), ("Alpha", 2, 1)],
+            2,
+        );
+        assert_eq!(p.filtered(), &["Beta", "Alpha"]);
         p.set_needle("".into());
-        assert_eq!(p.filtered(), &["Beta","Alpha"]);
+        assert_eq!(p.filtered(), &["Beta", "Alpha"]);
     }
 
     #[test]
     fn substring_filter_prefix_first() {
-        let mut p = picker(&["Alpha","Alphabet","Beta","Alpine"], vec![], 8);
+        let mut p = picker(&["Alpha", "Alphabet", "Beta", "Alpine"], vec![], 8);
         p.set_needle("Al".into());
         let f = p.filtered();
         assert!(f.iter().all(|n| n.to_lowercase().contains("al")));
@@ -205,7 +236,7 @@ mod tests {
 
     #[test]
     fn empty_input_resets_to_default() {
-        let mut p = picker(&["A","B","C"], vec![], 2);
+        let mut p = picker(&["A", "B", "C"], vec![], 2);
         p.set_needle("B".into());
         assert_eq!(p.filtered(), &["B"]);
         p.set_needle("".into());
@@ -217,7 +248,7 @@ mod tests {
         let names: Vec<String> = (0..1000).map(|i| format!("Block_{:04}", i)).collect();
         let mut p = BlockPicker::new(names, FxHashMap::default(), 8);
         let start = std::time::Instant::now();
-        for needle in ["B","Bl","Block_0","Block_00","a"] {
+        for needle in ["B", "Bl", "Block_0", "Block_00", "a"] {
             p.set_needle(needle.into());
             assert!(p.filtered().len() <= 8);
         }

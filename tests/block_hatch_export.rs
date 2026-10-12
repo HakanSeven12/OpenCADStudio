@@ -6,12 +6,12 @@
 // plot printed the block as bare monochrome outlines. `synced_hatch_models`
 // (the viewport) explodes visible INSERTs and materializes their fills; both
 // paths now share `exploded_insert_hatch_models`.
-use acadrust::entities::hatch::{
+use codec::entities::hatch::{
     BoundaryEdge, BoundaryPath, BoundaryPathFlags, HatchPatternLine, LineEdge,
 };
-use acadrust::entities::Hatch;
-use acadrust::types::{Color as AcadColor, Vector2};
-use acadrust::EntityType;
+use codec::entities::Hatch;
+use codec::types::{Color as AcadColor, Vector2};
+use codec::EntityType;
 use OpenCADStudio::scene::model::hatch_model::HatchPattern;
 use OpenCADStudio::scene::Scene;
 
@@ -76,7 +76,7 @@ fn block_internal_hatch_reaches_export() {
     // A blue hatch, wrapped into a block and inserted in model space — the
     // minimal shape of "coloured fill nested in a block".
     let h = scene.add_entity(EntityType::Hatch(square_hatch(5)));
-    let identity = acadrust::types::Transform::identity();
+    let identity = codec::types::Transform::identity();
     scene
         .create_block_from_entities(&[h], "LOGO", &identity, &identity)
         .expect("wrap hatch into a block + insert");
@@ -109,7 +109,9 @@ fn pattern_hatch_uses_stored_line_spacing() {
         .find(|m| matches!(m.pattern, HatchPattern::Pattern(_)))
         .expect("pattern hatch present in export set");
 
-    let HatchPattern::Pattern(fams) = &m.pattern else { unreachable!() };
+    let HatchPattern::Pattern(fams) = &m.pattern else {
+        unreachable!()
+    };
     // Effective perpendicular spacing = family.dy * model.scale.
     let dy = fams[0].dy.abs();
     let spacing = dy * m.scale;
@@ -250,7 +252,7 @@ fn app_created_hatch_roundtrips_catalog_spacing() {
         boundary_exterior: None,
         boundary_sources: None,
         boundary_paths: None,
-        style: acadrust::entities::HatchStyleType::Normal,
+        style: codec::entities::HatchStyleType::Normal,
         pattern: entry.gpu.clone(),
         name: "ANSI31".into(),
         color: [0.75, 0.75, 0.75, 0.85],
@@ -268,7 +270,9 @@ fn app_created_hatch_roundtrips_catalog_spacing() {
         .iter()
         .find(|m| matches!(m.pattern, HatchPattern::Pattern(_)))
         .expect("pattern hatch present after round-trip");
-    let HatchPattern::Pattern(fams) = &m.pattern else { unreachable!() };
+    let HatchPattern::Pattern(fams) = &m.pattern else {
+        unreachable!()
+    };
     let got = perp_spacing(&fams[0], m.scale);
     assert!(
         (got - expected).abs() < expected * 0.02,
@@ -309,7 +313,7 @@ fn nested_hatch_serializes_only_outer_as_external() {
         boundary_exterior: None,
         boundary_sources: None,
         boundary_paths: None,
-        style: acadrust::entities::HatchStyleType::Normal,
+        style: codec::entities::HatchStyleType::Normal,
         pattern: HatchPattern::Solid,
         name: "SOLID".into(),
         color: [0.45, 0.45, 0.45, 0.60],
@@ -326,7 +330,13 @@ fn nested_hatch_serializes_only_outer_as_external() {
     let dxf = scene
         .document
         .entities()
-        .find_map(|e| if let EntityType::Hatch(h) = e { Some(h) } else { None })
+        .find_map(|e| {
+            if let EntityType::Hatch(h) = e {
+                Some(h)
+            } else {
+                None
+            }
+        })
         .expect("nested hatch written to document");
 
     assert_eq!(dxf.paths.len(), 2, "outer boundary + one hole path");
@@ -334,8 +344,20 @@ fn nested_hatch_serializes_only_outer_as_external() {
     let ex = BoundaryPathFlags::EXTERNAL.bits();
     let out = BoundaryPathFlags::OUTERMOST.bits();
 
-    assert!(dxf.paths[0].flags.bits() & ex != 0, "outer path must be flagged external");
-    assert!(dxf.paths[0].flags.bits() & out != 0, "outer path must be flagged outermost");
-    assert!(dxf.paths[1].flags.bits() & ex == 0, "hole path must NOT be flagged external");
-    assert!(dxf.paths[1].flags.bits() & out == 0, "hole path must NOT be flagged outermost");
+    assert!(
+        dxf.paths[0].flags.bits() & ex != 0,
+        "outer path must be flagged external"
+    );
+    assert!(
+        dxf.paths[0].flags.bits() & out != 0,
+        "outer path must be flagged outermost"
+    );
+    assert!(
+        dxf.paths[1].flags.bits() & ex == 0,
+        "hole path must NOT be flagged external"
+    );
+    assert!(
+        dxf.paths[1].flags.bits() & out == 0,
+        "hole path must NOT be flagged outermost"
+    );
 }

@@ -1,0 +1,89 @@
+name: MCP conformance
+
+# Strict third-party proof for the MCP bridge (src/mcp.rs): run the official
+# MCP Inspector CLI against a fresh release build and assert the stable
+# surface. Headless-safe methods only — anything touching the drawing needs
+# a live desktop GUI and stays in unit tests plus the pinned schema digest.
+#
+# Two deliberate limits, both documented:
+# - The server is addressed through a --config file (array-form command).
+#   Passing the command positionally breaks on Windows shells and can launch
+#   the GUI instead of the --mcp bridge.
+# - Assertions cover fields the Inspector preserves (names, titles,
+#   templates, handshake purity). Freshness hints (ttlMs/cacheScope) are
+#   asserted at unit level (legacy_list_results_carry_sep2549_ttl) and by
+#   direct stdio probes: this CLI normalizes result envelopes on output.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inspector:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same libraries the Linux release build needs to start.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      - name: Inspector config
+        run: |
+          printf '{"mcpServers":{"ocs":{"command":"%s/target/release/OpenCADStudio","args":["--mcp"]}}}' \
+            "${{ github.workspace }}" > "${{ runner.temp }}/mcp-inspector.json"
+
+      - name: initialize (pure serverInfo, experimental build)
+        run: |
+          npx -y @modelcontextprotocol/inspector --cli \
+            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+            --method initialize --format json 2>/dev/null | jq -e '
+            .result.serverInfo.name == "OpenCADStudio"
+            and ((.result.serverInfo | keys_unsorted | sort) == ["name","title","version"])
+            and (.result.capabilities.experimental["opencadstudio.build"].build_rev | type == "string")'
+
+      - name: tools/list (four tools with titles)
+        run: |
+          npx -y @modelcontextprotocol/inspector --cli \
+            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+            --method tools/list --format json 2>/dev/null | jq -e '
+            ([.result.tools[].name] | sort) == ["ocs_capture","ocs_execute","ocs_read","ocs_sessions"]
+            and ([.result.tools[].title] | length == 4)'
+
+      - name: resources/list (reachable headless)
+        run: |
+          npx -y @modelcontextprotocol/inspector --cli \
+            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+            --method resources/list --format json 2>/dev/null | jq -e '
+            (.result.resources | type == "array")'
+
+      - name: resources/templates/list (tile and snapshot templates)
+        run: |
+          npx -y @modelcontextprotocol/inspector --cli \
+            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+            --method resources/templates/list --format json 2>/dev/null | jq -e '
+            ([.result.resourceTemplates[].uriTemplate] | sort) == [
+              "cad://session/{session_id}/snapshot/{hash}.png",
+              "cad://session/{session_id}/tile/{level}/{x}/{y}.png"
+            ]'

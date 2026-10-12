@@ -9,8 +9,8 @@
 // truly can't be found, synthesises a fresh one so registration sticks. These
 // guards exercise that repair through the page-setup and CTAB write paths.
 
-use acadrust::objects::{ObjectType, PlotSettings};
-use acadrust::Handle;
+use codec::objects::{ObjectType, PlotSettings};
+use codec::Handle;
 use OpenCADStudio::scene::Scene;
 
 /// Break a document the way a foreign DWG does: dangle the header root pointer
@@ -133,7 +133,10 @@ fn ctab_is_created_against_a_repaired_root() {
         panic!("variable dictionary must resolve");
     };
     assert!(
-        variable_dictionary.entries.iter().any(|(key, _)| key == "CTAB"),
+        variable_dictionary
+            .entries
+            .iter()
+            .any(|(key, _)| key == "CTAB"),
         "CTAB must be registered in the variable dictionary"
     );
 }

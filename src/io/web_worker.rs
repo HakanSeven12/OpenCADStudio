@@ -17,14 +17,14 @@ pub(super) async fn parse_document(
     bytes: &[u8],
     recovery_mode: bool,
     initial_error: &str,
-) -> Result<(acadrust::ReadOutcome, Option<String>), super::OpenLoadError> {
+) -> Result<(codec::ReadOutcome, Option<String>), super::OpenLoadError> {
     let options = WorkerOptions::new();
     options.set_type(WorkerType::Module);
     let worker = Worker::new_with_options(WORKER_URL, &options)
         .map_err(|error| super::OpenLoadError::from(js_error(error)))?;
 
     let (sender, receiver) = iced::futures::channel::oneshot::channel::<
-        Result<(acadrust::ReadOutcome, Option<String>), super::OpenLoadError>,
+        Result<(codec::ReadOutcome, Option<String>), super::OpenLoadError>,
     >();
     let sender = Rc::new(RefCell::new(Some(sender)));
     let message_sender = sender.clone();
@@ -41,10 +41,7 @@ pub(super) async fn parse_document(
                     let bytes = Uint8Array::new(&value).to_vec();
                     let payload: (
                         u16,
-                        Result<
-                            acadrust::ReadOutcome,
-                            (String, Option<acadrust::ReadStats>),
-                        >,
+                        Result<codec::ReadOutcome, (String, Option<codec::ReadStats>)>,
                         Option<String>,
                         bool,
                         Vec<ocs_save::EntityRuntimeFields>,
@@ -128,15 +125,16 @@ pub(super) async fn parse_document(
     result
 }
 
+
+
 pub(super) async fn sha256_document(bytes: &[u8]) -> Result<String, super::OpenLoadError> {
     let options = WorkerOptions::new();
     options.set_type(WorkerType::Module);
     let worker = Worker::new_with_options(WORKER_URL, &options)
         .map_err(|error| super::OpenLoadError::from(js_error(error)))?;
 
-    let (sender, receiver) = iced::futures::channel::oneshot::channel::<
-        Result<String, super::OpenLoadError>,
-    >();
+    let (sender, receiver) =
+        iced::futures::channel::oneshot::channel::<Result<String, super::OpenLoadError>>();
     let sender = Rc::new(RefCell::new(Some(sender)));
     let message_sender = sender.clone();
     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {

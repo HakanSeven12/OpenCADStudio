@@ -1,5 +1,5 @@
-use acadrust::entities::Arc;
 use crate::t;
+use codec::entities::Arc;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -105,11 +105,7 @@ fn control_points(arc: &Arc) -> [glam::DVec3; 3] {
     ]
 }
 
-pub(crate) fn refit_grips(
-    arc: &mut Arc,
-    original: &Arc,
-    edits: &[(usize, glam::DVec3)],
-) -> bool {
+pub(crate) fn refit_grips(arc: &mut Arc, original: &Arc, edits: &[(usize, glam::DVec3)]) -> bool {
     let mut points = control_points(original);
     let mut changed = false;
     for &(grip_id, point) in edits {
@@ -136,7 +132,7 @@ pub(crate) fn refit_grips(
     let Some(c) = plane.project(points[2].to_array()) else {
         return false;
     };
-    let Some(fit) = cadkernel::geom2d::arc_through_points(a, b, c) else {
+    let Some(fit) = kernel::geom2d::arc_through_points(a, b, c) else {
         return false;
     };
 
@@ -209,8 +205,16 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
             edit(t!("Radius").as_ref(), "radius", arc.radius),
             edit_angle(t!("Start angle").as_ref(), "start_angle", sa.to_degrees()),
             edit_angle(t!("End angle").as_ref(), "end_angle", ea.to_degrees()),
-            ro(t!("Total angle").as_ref(), "total_angle", format_angle(total_angle.to_radians())),
-            ro(t!("Arc length").as_ref(), "arc_length", format_length(arc_length)),
+            ro(
+                t!("Total angle").as_ref(),
+                "total_angle",
+                format_angle(total_angle.to_radians()),
+            ),
+            ro(
+                t!("Arc length").as_ref(),
+                "arc_length",
+                format_length(arc_length),
+            ),
             ro(t!("Area").as_ref(), "area", format_area(area)),
             edit(t!("Normal X").as_ref(), "normal_x", arc.normal.x),
             edit(t!("Normal Y").as_ref(), "normal_y", arc.normal.y),
@@ -246,7 +250,7 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
         "end_angle" => arc.end_angle = v.to_radians(),
         "normal_x" | "normal_y" | "normal_z" => {
             let center = arc.center_wcs();
-            let mut normal = cadkernel::space::Vec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
+            let mut normal = kernel::space::Vec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
             match field {
                 "normal_x" => normal.x = v,
                 "normal_y" => normal.y = v,
@@ -254,12 +258,12 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
                 _ => {}
             }
             if let Some(normal) = normal.normalize() {
-                arc.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                arc.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
                 let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
                     (center.x, center.y, center.z),
                     (normal.x, normal.y, normal.z),
                 );
-                arc.center = acadrust::types::Vector3::new(x, y, z);
+                arc.center = codec::types::Vector3::new(x, y, z);
             }
         }
         _ => {}
@@ -312,7 +316,7 @@ fn apply_transform(arc: &mut Arc, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Arc {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
@@ -357,7 +361,11 @@ impl crate::entities::traits::Grippable for Arc {
             ],
         }
     }
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        _grip_id: usize,
+        _action: crate::scene::model::object::GripMenuAction,
+    ) {
         // Radius / Arc Length / Lengthen all need a follow-up prompt;
         // the actual edit happens in `apply_grip_menu_value`.
     }
@@ -382,8 +390,8 @@ impl crate::entities::traits::Grippable for Arc {
         action: crate::scene::model::object::GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64> {
-        use cadkernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
         use crate::scene::model::object::GripMenuAction as A;
+        use kernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
         if self.radius <= 1.0e-9 {
             return None;
         }
@@ -484,7 +492,7 @@ impl crate::entities::traits::Transformable for Arc {
     }
 }
 
-impl crate::entities::traits::MassPropsCalc for acadrust::entities::Arc {
+impl crate::entities::traits::MassPropsCalc for codec::entities::Arc {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         let curve = crate::entities::curve::arc_curve(self);
         let area = curve.curve.chord_closed_area().unwrap_or(0.0).abs();
@@ -511,8 +519,8 @@ mod tests {
     #[test]
     fn midpoint_grip_drives_radius_and_arc_length_in_entity_plane() {
         let mut arc = Arc::default();
-        arc.center = acadrust::types::Vector3::new(1.0, 2.0, 3.0);
-        arc.normal = acadrust::types::Vector3::new(0.0, 1.0, 0.0);
+        arc.center = codec::types::Vector3::new(1.0, 2.0, 3.0);
+        arc.normal = codec::types::Vector3::new(0.0, 1.0, 0.0);
         arc.radius = 2.0;
         arc.start_angle = 0.0;
         arc.end_angle = std::f64::consts::FRAC_PI_2;
@@ -532,17 +540,11 @@ mod tests {
         let tangent = glam::DVec3::from_array(curve.tangent_at(0.5)).normalize();
         let wanted_length = curve.length() + 1.25;
         let arc_length = arc
-            .grip_menu_point_value(
-                3,
-                GripMenuAction::ArcLength,
-                middle + tangent * 1.25,
-            )
+            .grip_menu_point_value(3, GripMenuAction::ArcLength, middle + tangent * 1.25)
             .expect("arc length value");
         assert!((arc_length - wanted_length).abs() < 1.0e-9);
 
         arc.apply_grip_menu_value(3, GripMenuAction::ArcLength, arc_length);
-        assert!(
-            (crate::entities::curve::arc_curve(&arc).length() - wanted_length).abs() < 1.0e-9
-        );
+        assert!((crate::entities::curve::arc_curve(&arc).length() - wanted_length).abs() < 1.0e-9);
     }
 }

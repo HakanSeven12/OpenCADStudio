@@ -3,11 +3,11 @@
 use iced::widget::{button, checkbox, column, container, row, text};
 use iced::{Background, Element, Fill, Length, Theme};
 
-use crate::app::Message;
 use crate::app::settings::IsoPlane;
+use crate::app::Message;
 use crate::snap::{SnapType, Snapper, ALL_SNAP_MODES};
-use crate::ui::statusbar::status_menu::Entry;
 use crate::t;
+use crate::ui::statusbar::status_menu::Entry;
 
 pub fn menu_entries<'a>(
     snapper: &'a Snapper,
@@ -27,9 +27,7 @@ pub fn menu_entries<'a>(
     // Divider
     let divider = container(iced::widget::Space::new().height(1))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.weak.color,
-            )),
+            background: Some(Background::Color(theme.palette().background.weak.color)),
             ..Default::default()
         })
         .width(Fill)
@@ -64,9 +62,7 @@ pub fn menu_entries<'a>(
     .padding([5, 8]);
     let drafting_divider = container(iced::widget::Space::new().height(1))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.weak.color,
-            )),
+            background: Some(Background::Color(theme.palette().background.weak.color)),
             ..Default::default()
         })
         .width(Fill)
@@ -119,7 +115,5 @@ fn snap_row<'a>(snap_type: SnapType, label: &'a str, active: bool) -> Element<'a
 fn header_btn(label: &str, msg: Message, enabled: bool) -> Element<'_, Message> {
     let b = button(text(t!(label)).size(10));
     let b = if enabled { b.on_press(msg) } else { b };
-    b.style(button::secondary)
-    .padding([3, 8])
-    .into()
+    b.style(button::secondary).padding([3, 8]).into()
 }

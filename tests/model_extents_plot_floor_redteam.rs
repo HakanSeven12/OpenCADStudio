@@ -11,9 +11,9 @@
 //! for NaN and the "normal" branch would emit a NaN-sized `Mm(paper_w)`?
 #![cfg(not(target_arch = "wasm32"))]
 
-use acadrust::entities::Line;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::Line;
+use codec::types::Vector3;
+use codec::EntityType;
 use OpenCADStudio::scene::Scene;
 
 fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> EntityType {

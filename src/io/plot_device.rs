@@ -202,7 +202,12 @@ fn capability_cache() -> &'static Mutex<CapabilityCache> {
 
 /// The cached capabilities of `printer`, if they were queried already.
 pub fn cached_printer_capabilities(printer: &str) -> Option<Arc<PrinterCapabilities>> {
-    capability_cache().lock().ok()?.get(printer).cloned().flatten()
+    capability_cache()
+        .lock()
+        .ok()?
+        .get(printer)
+        .cloned()
+        .flatten()
 }
 
 /// Query `printer` for its media (blocking: a process spawn or a driver

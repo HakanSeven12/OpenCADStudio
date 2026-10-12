@@ -1,7 +1,5 @@
-use acadrust::objects::{
-    ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue,
-};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::{ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue};
+use codec::{CadDocument, EntityType, Handle};
 
 #[derive(Clone, Debug)]
 pub struct MeshVisualStyle {
@@ -102,7 +100,7 @@ fn property_color(style: &VisualStyle, index: usize) -> Option<[f32; 4]> {
     };
     if matches!(
         color,
-        acadrust::types::Color::ByLayer | acadrust::types::Color::ByBlock
+        codec::types::Color::ByLayer | codec::types::Color::ByBlock
     ) {
         return None;
     }
@@ -240,10 +238,7 @@ pub(crate) fn resolve_visual_style_handle(
         .map(|(handle, style)| MeshVisualStyle::from_dwg(handle, style))
 }
 
-fn visual_style(
-    document: &CadDocument,
-    handle: Option<Handle>,
-) -> Option<(Handle, &VisualStyle)> {
+fn visual_style(document: &CadDocument, handle: Option<Handle>) -> Option<(Handle, &VisualStyle)> {
     let handle = handle.filter(|handle| handle.is_valid())?;
     match document.objects.get(&handle) {
         Some(ObjectType::VisualStyle(style)) => Some((handle, style)),

@@ -29,7 +29,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::{CadDocument, EntityType, Handle};
 use memmap2::{Mmap, MmapMut, MmapOptions};
 use rkyv::{check_archived_root, to_bytes, Archive, Deserialize, Serialize};
 
@@ -83,13 +83,19 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
     /// page.
     pub fn new(tab_id: u64, segment_size: usize) -> io::Result<Self> {
         let segment_size = segment_size.checked_next_multiple_of(4096).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "snapshot segment size overflow")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "snapshot segment size overflow",
+            )
         })?;
         let total = segment_size
             .checked_mul(2)
             .and_then(|segments| CONTROL_SIZE.checked_add(segments))
             .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "snapshot mapping size overflow")
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "snapshot mapping size overflow",
+                )
             })?;
         if total > MAX_SNAPSHOT_SIZE {
             return Err(io::Error::new(
@@ -245,7 +251,10 @@ impl<T: SnapshotData> SharedDocumentReader<T> {
             ));
         }
         let file_len = usize::try_from(file_len).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "snapshot file size is unsupported")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "snapshot file size is unsupported",
+            )
         })?;
         let mmap = unsafe { MmapOptions::new().len(file_len).map(&file)? };
         let segment_size = (file_len - CONTROL_SIZE) / 2;
@@ -435,8 +444,8 @@ pub struct LayerView {
     pub name: String,
 }
 
-impl From<&acadrust::tables::Layer> for LayerView {
-    fn from(layer: &acadrust::tables::Layer) -> Self {
+impl From<&codec::tables::Layer> for LayerView {
+    fn from(layer: &codec::tables::Layer) -> Self {
         Self {
             handle: layer.handle.value(),
             name: layer.name.clone(),
@@ -451,8 +460,8 @@ pub struct AppIdView {
     pub name: String,
 }
 
-impl From<&acadrust::tables::AppId> for AppIdView {
-    fn from(app_id: &acadrust::tables::AppId) -> Self {
+impl From<&codec::tables::AppId> for AppIdView {
+    fn from(app_id: &codec::tables::AppId) -> Self {
         Self {
             handle: app_id.handle.value(),
             name: app_id.name.clone(),
@@ -530,8 +539,8 @@ impl ReaderEntityKind {
 // ── V4 full-entity document view ────────────────────────────────────────────
 
 /// Serializable V4 document view. The outer structure is rkyv; each entity's
-/// `data` is a bincode-encoded `acadrust::EntityType` so that the plugin can
-/// reconstruct the full typed entity without relying on acadrust's own rkyv
+/// `data` is a bincode-encoded `codec::EntityType` so that the plugin can
+/// reconstruct the full typed entity without relying on opencadcodec's own rkyv
 /// support.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone)]
 #[archive(check_bytes)]
@@ -543,10 +552,22 @@ pub struct DocumentViewDataV4 {
 
 impl From<&CadDocument> for DocumentViewDataV4 {
     fn from(doc: &CadDocument) -> Self {
+        let mut entities: Vec<_> = doc.entities().map(EntityViewV4::from).collect();
+        // ATTRIB records live inside their owning INSERT in CadDocument rather
+        // than in the flat entity index. Flatten them into the plugin snapshot
+        // as addressable entities while keeping the INSERT's canonical nested
+        // copy intact for rendering and file serialization.
+        for entity in doc.entities() {
+            if let EntityType::Insert(insert) = entity {
+                entities.extend(insert.attributes.iter().map(|attribute| {
+                    EntityViewV4::from(&EntityType::AttributeEntity(attribute.clone()))
+                }));
+            }
+        }
         Self {
             layers: doc.layers.iter().map(LayerView::from).collect(),
             app_ids: doc.app_ids.iter().map(AppIdView::from).collect(),
-            entities: doc.entities().map(EntityViewV4::from).collect(),
+            entities,
         }
     }
 }
@@ -584,9 +605,9 @@ impl From<&EntityType> for EntityViewV4 {
 mod tests {
     use super::*;
     use crate::host::{DocumentReader, ReaderEntityKind};
-    use acadrust::entities::Point;
-    use acadrust::tables::Layer;
-    use acadrust::{CadDocument, EntityType};
+    use codec::entities::Point;
+    use codec::tables::Layer;
+    use codec::{CadDocument, EntityType};
 
     fn unique_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -721,7 +742,10 @@ mod tests {
 
         let archived = reader.archived().unwrap();
         let entity = &archived.entities[0];
-        assert_eq!(entity.handle, doc.entities().next().unwrap().common().handle.value());
+        assert_eq!(
+            entity.handle,
+            doc.entities().next().unwrap().common().handle.value()
+        );
         let decoded: EntityType = bincode::deserialize(&entity.data).expect("bincode decode");
         assert!(matches!(decoded, EntityType::Point(_)));
     }

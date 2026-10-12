@@ -5,7 +5,7 @@
 
 use iced::Point;
 
-use acadrust::types::Handle;
+use codec::types::Handle;
 
 use crate::app::OpenCADStudio;
 use crate::scene::viewport_ref::{AcceptedSnap, ViewportFrame};
@@ -48,6 +48,59 @@ impl OpenCADStudio {
     /// Forget the accepted snaps of a finished / abandoned command.
     pub(crate) fn clear_accepted_snaps(&mut self) {
         self.accepted_snaps.clear();
+    }
+
+    /// The active command is at a point prompt (keywords allowed) and not
+    /// picking an object: where MTP and typed snap overrides apply.
+    pub(crate) fn point_modifier_step(&self, i: usize) -> bool {
+        self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
+            (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
+                && !c.needs_entity_pick()
+        })
+    }
+
+    /// A snap override typed at a point prompt (`MID`, `END`, `NON`, ...). An
+    /// option the prompt offers wins, so `CEN` where Center is offered picks
+    /// Center.
+    pub(crate) fn typed_snap_override(
+        &self,
+        i: usize,
+        token: &str,
+    ) -> Option<crate::snap::SnapOverrideKind> {
+        let kind = crate::snap::parse_snap_override(token)?;
+        if !self.point_modifier_step(i) {
+            return None;
+        }
+        let typed = token.trim().trim_start_matches('_').to_uppercase();
+        let offered = self.tabs[i].active_cmd.as_ref()?.options().iter().any(|option| {
+            option.keyword.eq_ignore_ascii_case(&typed)
+                || option.label.to_uppercase().replace(' ', "").starts_with(&typed)
+        });
+        (!offered).then_some(kind)
+    }
+
+    /// Apply a transparent one-shot snap override (from typed input or the context menu).
+    pub(crate) fn apply_snap_override(&mut self, kind: crate::snap::SnapOverrideKind) {
+        match kind {
+            crate::snap::SnapOverrideKind::Mode(t) => {
+                self.snap_override_popup = None;
+                self.snapper.set_override(t);
+                let label = crate::snap::ALL_SNAP_MODES
+                    .iter()
+                    .chain(crate::snap::ALL_3D_SNAP_MODES.iter())
+                    .find(|(m, _, _)| *m == t)
+                    .map(|(_, _, l)| *l)
+                    .unwrap_or("Snap");
+                self.command_line
+                    .push_info(crate::tf!("Snap override: {label} (next pick only).").as_ref());
+            }
+            crate::snap::SnapOverrideKind::None => {
+                self.snap_override_popup = None;
+                self.snapper.set_override_none();
+                self.command_line
+                    .push_info(crate::t!("Snap override: None (next pick only).").as_ref());
+            }
+        }
     }
 
     /// Record the snap a point step just accepted. `snap` is the displayed snap
@@ -104,12 +157,12 @@ impl OpenCADStudio {
                     .scene
                     .document
                     .get_entity(source.source.handle),
-                Some(acadrust::EntityType::Insert(_))
+                Some(codec::EntityType::Insert(_))
             ) {
                 return true;
             }
             if source.snap_type == SnapType::Insertion {
-                let Some(acadrust::EntityType::Insert(insert)) = self.tabs[tab]
+                let Some(codec::EntityType::Insert(insert)) = self.tabs[tab]
                     .scene
                     .document
                     .get_entity(source.source.handle)
@@ -233,8 +286,7 @@ impl OpenCADStudio {
             let saved_grid = self.snapper.grid_snap_on;
             let saved_from = self.snapper.from_point;
             self.snapper.grid_snap_on = false;
-            self.snapper.from_point =
-                saved_from.map(|p| frame.paper_to_model(p.as_dvec3()).as_vec3());
+            self.snapper.from_point = saved_from.map(|p| frame.paper_to_model(p));
             let hit = self.snapper.snap(
                 model_cursor,
                 local,

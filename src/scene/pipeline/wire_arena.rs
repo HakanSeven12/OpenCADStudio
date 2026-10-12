@@ -40,7 +40,7 @@ use super::wire_gpu::{
 };
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::ChangeKind;
-use acadrust::Handle;
+use codec::Handle;
 use iced::wgpu;
 use rustc_hash::FxHashMap;
 
@@ -63,11 +63,16 @@ struct Slab {
     /// the whole slab by the base-depth delta instead of flattening those
     /// offsets.
     base_depth: f32,
+    /// `slab_content` of what the slab holds, so re-showing a hidden entity
+    /// with unchanged geometry only clears its `hidden` flag. Unused (0) by
+    /// the packed arena.
+    content: u64,
 }
 
 struct PreparedPatchRun {
     insts: Vec<WireInstance>,
     csts: Vec<WireConst>,
+    content: u64,
     base_depth: f32,
     aabb: [f32; 4],
     order_sensitive: bool,
@@ -149,10 +154,10 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
         && !wire.fill_is_3d
         && wire.text_verts.is_empty()
     {
-        if super::circle_gpu::extract_circle_instances(wire, 0.0).is_some() {
+        if super::circle_gpu::can_extract_circle_instances(wire) {
             return WireKind::Circle;
         }
-        if super::ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_some() {
+        if super::ellipse_gpu::can_extract_ellipse_instances(wire) {
             return WireKind::Ellipse;
         }
     }
@@ -195,24 +200,23 @@ pub fn partition_wires<'a>(
     wires: &'a [WireModel],
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
 ) -> PartitionedWires<'a> {
-    let mut regular = Vec::new();
+    let cap = wires.len();
+    let mut regular = Vec::with_capacity(cap);
     let mut mesh = Vec::new();
     let mut instanced = Vec::new();
-    let mut circle_instances = Vec::new();
+    let mut circle_instances = Vec::with_capacity(cap);
     let mut ellipse_instances = Vec::new();
     let mut contributors: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
-    let note = |wire: &WireModel, set: &mut rustc_hash::FxHashSet<Handle>| {
-        if let Some(handle) = handle_of(wire) {
-            set.insert(handle);
-        }
-    };
+    contributors.reserve(cap.min(1024));
 
     for wire in wires {
         if !wire.display_visible {
             continue;
         }
         if wire.render_instance.is_some() {
-            note(wire, &mut contributors);
+            if let Some(handle) = handle_of(wire) {
+                contributors.insert(handle);
+            }
             instanced.push(wire);
             continue;
         }
@@ -223,14 +227,21 @@ pub fn partition_wires<'a>(
             && wire.text_verts.is_empty()
         {
             let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
-                note(wire, &mut contributors);
-                circle_instances.extend(insts);
+            if super::circle_gpu::extract_circle_instances_into(wire, depth, &mut circle_instances)
+            {
+                if let Some(handle) = handle_of(wire) {
+                    contributors.insert(handle);
+                }
                 continue;
             }
-            if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
-                note(wire, &mut contributors);
-                ellipse_instances.extend(insts);
+            if super::ellipse_gpu::extract_ellipse_instances_into(
+                wire,
+                depth,
+                &mut ellipse_instances,
+            ) {
+                if let Some(handle) = handle_of(wire) {
+                    contributors.insert(handle);
+                }
                 continue;
             }
         }
@@ -278,8 +289,7 @@ pub fn split_wires(wires: &[WireModel]) -> (Vec<&WireModel>, Vec<&WireModel>) {
 ///     resolve by submission order, which a tail relocation would flip.
 fn order_sensitive(wires: &[&WireModel], depth_map: &FxHashMap<u64, [f32; 2]>) -> bool {
     wires.iter().any(|w| {
-        w.color[3] < 0.999
-            || handle_of(w).map_or(true, |h| !depth_map.contains_key(&h.value()))
+        w.color[3] < 0.999 || handle_of(w).map_or(true, |h| !depth_map.contains_key(&h.value()))
     })
 }
 
@@ -289,7 +299,7 @@ pub fn build_handle_index(wires: &[WireModel]) -> std::sync::Arc<FxHashMap<u64, 
     let mut index: FxHashMap<u64, Vec<u32>> = FxHashMap::default();
     index.reserve(wires.len());
     for (idx, w) in wires.iter().enumerate() {
-        if let Ok(h) = w.name.parse::<u64>() {
+        if let Some(h) = crate::scene::pipeline::wire_gpu::fast_parse_u64(&w.name) {
             index.entry(h).or_default().push(idx as u32);
         }
     }
@@ -430,6 +440,38 @@ fn blank_const() -> WireConst {
     blank
 }
 
+/// Position-independent id of an emitted slab: its instances with slab-local
+/// wire ids, then its consts with the visibility flag cleared.
+fn slab_content(insts: &[WireInstance], const_off: u32, csts: &[WireConst]) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for inst in insts {
+        let mut local = *inst;
+        local.wire_id -= const_off;
+        hasher.write(bytemuck::bytes_of(&local));
+    }
+    for cst in csts {
+        let mut shown = *cst;
+        shown.hidden = 0.0;
+        hasher.write(bytemuck::bytes_of(&shown));
+    }
+    hasher.finish()
+}
+
+/// Merge const index ranges whose gap is small enough that one write beats two.
+fn merge_const_ranges(mut ranges: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+    const GAP: u32 = 256;
+    ranges.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 + GAP => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
 /// A tombstoned instance. Const slot 0 carries the shader discard sentinel.
 fn blank_instance() -> WireInstance {
     WireInstance {
@@ -456,8 +498,7 @@ impl WireArena {
         const_bgl: &wgpu::BindGroupLayout,
         mesh_edge: bool,
     ) -> Option<Self> {
-        let instance_limit =
-            super::gpu_budget::max_arena_elements::<WireInstance>(device) as u64;
+        let instance_limit = super::gpu_budget::max_arena_elements::<WireInstance>(device) as u64;
         let constant_limit =
             super::gpu_budget::max_arena_storage_elements::<WireConst>(device) as u64;
         let ranges = handle_ranges(wires)?;
@@ -484,6 +525,7 @@ impl WireArena {
             const_off: u32,
             base_depth: f32,
             aabb: [f32; 4],
+            content: u64,
             instances: Vec<WireInstance>,
             consts: Vec<WireConst>,
         }
@@ -518,10 +560,7 @@ impl WireArena {
             .par_iter()
             .map(|plan| {
                 let run = &wires[plan.start..plan.end];
-                let capacity: usize = run
-                    .iter()
-                    .map(|w| w.points.len().saturating_sub(1))
-                    .sum();
+                let capacity: usize = run.iter().map(|w| w.points.len().saturating_sub(1)).sum();
                 let mut instances: Vec<WireInstance> = Vec::with_capacity(capacity);
                 let mut consts: Vec<WireConst> = Vec::with_capacity(run.len());
                 for (local, &w) in run.iter().enumerate() {
@@ -529,7 +568,11 @@ impl WireArena {
                     // 3D mesh outline edges are occluded by true depth and must NOT
                     // take the draw-order z-bias (or hidden back edges peek through
                     // the shaded fill) — matching WireGpu::from_run.
-                    let dd = if mesh_edge { 0.0 } else { wire_draw_depth(w, depth_map) };
+                    let dd = if mesh_edge {
+                        0.0
+                    } else {
+                        wire_draw_depth(w, depth_map)
+                    };
                     let (mut emitted, cst) = emit_wire_native(w, wire_id, w.color, dd);
                     instances.append(&mut emitted);
                     consts.push(cst);
@@ -539,6 +582,7 @@ impl WireArena {
                     const_off: plan.const_off,
                     base_depth: plan.base_depth,
                     aabb: run_aabb(run),
+                    content: slab_content(&instances, plan.const_off, &consts),
                     instances,
                     consts,
                 }
@@ -573,6 +617,7 @@ impl WireArena {
                     const_len,
                     aabb: packed_slab.aabb,
                     base_depth: packed_slab.base_depth,
+                    content: packed_slab.content,
                 },
             );
         }
@@ -697,11 +742,13 @@ impl WireArena {
                 }
             }
 
+            let content = slab_content(&insts, 0, &csts);
             prepared.insert(
                 h,
                 PreparedPatchRun {
                     insts,
                     csts,
+                    content,
                     base_depth: if self.mesh_edge {
                         0.0
                     } else {
@@ -713,16 +760,25 @@ impl WireArena {
             );
         }
 
+        // Const edits are mirrored on the CPU and uploaded once at the end in
+        // merged spans: a layer toggle touches ~10^5 slabs, and a write per
+        // slab cost more than the change itself.
+        let mut dirty_consts: Vec<(u32, u32)> = Vec::new();
         for &(h, kind) in changes {
             let run = runs.get(&h).map(Vec::as_slice).unwrap_or(&[]);
 
-            // Removed / now-hidden ⇒ tombstone the slab. A handle not in THIS
-            // arena's subset (it belongs to the other batch) simply isn't in its
-            // slabs, so this is a no-op for it.
+            // Removed / now-hidden ⇒ tombstone the slab by flagging its consts
+            // hidden; the instances stay put for an unchanged re-show. A handle
+            // not in THIS arena's subset (it belongs to the other batch) simply
+            // isn't in its slabs, so this is a no-op for it.
             if matches!(kind, ChangeKind::Removed) || run.is_empty() {
                 if let Some(slab) = self.slabs.remove(&h) {
-                    let blanks = vec![blank_instance(); slab.inst_len as usize];
-                    self.write_insts(queue, slab.inst_off, &blanks);
+                    let start = slab.const_off as usize;
+                    let end = start + slab.const_len as usize;
+                    for cst in &mut self.consts_cpu[start..end] {
+                        cst.hidden = 1.0;
+                    }
+                    dirty_consts.push((slab.const_off, slab.const_off + slab.const_len));
                     self.tombstoned += slab.inst_len;
                     if matches!(kind, ChangeKind::Modified) {
                         self.vacant.insert(h, slab);
@@ -737,6 +793,7 @@ impl WireArena {
             let PreparedPatchRun {
                 mut insts,
                 csts,
+                content,
                 base_depth,
                 aabb,
                 order_sensitive: run_order_sensitive,
@@ -763,29 +820,27 @@ impl WireArena {
                 .unwrap_or(false);
 
             if in_place {
-                let (inst_off, const_off) = {
+                let (inst_off, const_off, same_content) = {
                     let s = self.slabs.get(&h).unwrap();
-                    (s.inst_off, s.const_off)
+                    (s.inst_off, s.const_off, s.content == content)
                 };
-                for w in insts.iter_mut() {
-                    w.wire_id += const_off;
+                if !same_content {
+                    for w in insts.iter_mut() {
+                        w.wire_id += const_off;
+                    }
+                    self.write_insts(queue, inst_off, &insts);
                 }
-                self.write_insts(queue, inst_off, &insts);
                 for (k, c) in csts.iter().enumerate() {
                     self.consts_cpu[const_off as usize + k] = *c;
                 }
-                // Push the entity's consts to the GPU too — an in-place edit is
-                // NOT structural, so the whole-buffer refresh below won't run and
-                // a colour change would otherwise never reach the shader.
-                let csz = std::mem::size_of::<WireConst>() as u64;
-                queue.write_buffer(
-                    &self.const_buf,
-                    const_off as u64 * csz,
-                    bytemuck::cast_slice(&csts),
-                );
+                // The consts reach the GPU in the merged upload below — an
+                // in-place edit is NOT structural, so without it a colour change
+                // or a re-show would never reach the shader.
+                dirty_consts.push((const_off, const_off + const_len));
                 let slab = self.slabs.get_mut(&h).unwrap();
                 slab.base_depth = base_depth;
                 slab.aabb = aabb;
+                slab.content = content;
                 continue;
             }
 
@@ -829,6 +884,7 @@ impl WireArena {
                 slab.const_len = const_len;
                 slab.base_depth = base_depth;
                 slab.aabb = aabb;
+                slab.content = content;
                 self.order_sensitive |= run_order_sensitive;
                 continue;
             }
@@ -886,11 +942,20 @@ impl WireArena {
                     const_len,
                     aabb,
                     base_depth,
+                    content,
                 },
             );
             self.order_sensitive |= run_order_sensitive;
         }
 
+        for (start, end) in merge_const_ranges(dirty_consts) {
+            let size = std::mem::size_of::<WireConst>() as u64;
+            queue.write_buffer(
+                &self.const_buf,
+                start as u64 * size,
+                bytemuck::cast_slice(&self.consts_cpu[start as usize..end as usize]),
+            );
+        }
         if self.tombstoned > self.inst_tail / 2 {
             return false;
         }
@@ -979,10 +1044,7 @@ impl WireArena {
         }
 
         if perf {
-            let submitted: u64 = ranges
-                .iter()
-                .map(|(start, end)| (end - start) as u64)
-                .sum();
+            let submitted: u64 = ranges.iter().map(|(start, end)| (end - start) as u64).sum();
             let elapsed_ms = perf_started
                 .map(|started| started.elapsed().as_secs_f64() * 1000.0)
                 .unwrap_or_default();
@@ -1078,8 +1140,7 @@ fn visible_ranges(
     let mut ranges: Vec<(u32, u32)> = slabs
         .values()
         .filter(|slab| {
-            slab.inst_len > 0
-                && !super::aabb_offscreen(slab.aabb, view_rot, eye, clip_w, clip_h)
+            slab.inst_len > 0 && !super::aabb_offscreen(slab.aabb, view_rot, eye, clip_w, clip_h)
         })
         .map(|slab| (slab.inst_off, slab.inst_off + slab.inst_len))
         .collect();
@@ -1171,8 +1232,7 @@ impl PackedWireArena {
             return None;
         }
         let mut instances = Vec::with_capacity(inst_count);
-        let mut slabs =
-            FxHashMap::with_capacity_and_hasher(packed.len(), Default::default());
+        let mut slabs = FxHashMap::with_capacity_and_hasher(packed.len(), Default::default());
         for mut packed_slab in packed {
             let inst_off = instances.len() as u32;
             let inst_len = packed_slab.instances.len() as u32;
@@ -1186,6 +1246,7 @@ impl PackedWireArena {
                     const_len: 0,
                     aabb: packed_slab.aabb,
                     base_depth: packed_slab.base_depth,
+                    content: 0,
                 },
             );
         }
@@ -1228,8 +1289,7 @@ impl PackedWireArena {
         new_handles_are_suffix: bool,
         depth_map: &FxHashMap<u64, [f32; 2]>,
     ) -> bool {
-        let mut prepared: FxHashMap<Handle, PreparedPackedPatchRun> =
-            FxHashMap::default();
+        let mut prepared: FxHashMap<Handle, PreparedPackedPatchRun> = FxHashMap::default();
         for &(handle, kind) in changes {
             let run = runs.get(&handle).map(Vec::as_slice).unwrap_or(&[]);
             if matches!(kind, ChangeKind::Removed) || run.is_empty() {
@@ -1246,12 +1306,8 @@ impl PackedWireArena {
             }
             let inst_len = insts.len() as u32;
             if matches!(kind, ChangeKind::Modified) {
-                let known = self
-                    .slabs
-                    .get(&handle)
-                    .or_else(|| self.vacant.get(&handle));
-                let shape_changed =
-                    known.is_some_and(|slab| slab.inst_len != inst_len);
+                let known = self.slabs.get(&handle).or_else(|| self.vacant.get(&handle));
+                let shape_changed = known.is_some_and(|slab| slab.inst_len != inst_len);
                 let can_resize_tail = self.slabs.get(&handle).is_some_and(|slab| {
                     can_resize_packed_terminal_slab(
                         slab,
@@ -1272,9 +1328,7 @@ impl PackedWireArena {
                     base_depth: if self.mesh_edge {
                         0.0
                     } else {
-                        depth_map
-                            .get(&handle.value())
-                            .map_or(0.0, |depth| depth[0])
+                        depth_map.get(&handle.value()).map_or(0.0, |depth| depth[0])
                     },
                     aabb: run_aabb(run),
                     order_sensitive: order_sensitive(run, depth_map),
@@ -1286,8 +1340,7 @@ impl PackedWireArena {
             let run = runs.get(&handle).map(Vec::as_slice).unwrap_or(&[]);
             if matches!(kind, ChangeKind::Removed) || run.is_empty() {
                 if let Some(slab) = self.slabs.remove(&handle) {
-                    let blanks =
-                        vec![blank_packed_instance(); slab.inst_len as usize];
+                    let blanks = vec![blank_packed_instance(); slab.inst_len as usize];
                     self.write_insts(queue, slab.inst_off, &blanks);
                     self.tombstoned += slab.inst_len;
                     if matches!(kind, ChangeKind::Modified) {
@@ -1317,8 +1370,7 @@ impl PackedWireArena {
                     .is_some_and(|slab| slab.inst_len == inst_len)
             {
                 let slab = self.vacant.remove(&handle).unwrap();
-                self.tombstoned =
-                    self.tombstoned.saturating_sub(slab.inst_len);
+                self.tombstoned = self.tombstoned.saturating_sub(slab.inst_len);
                 self.slabs.insert(handle, slab);
             }
 
@@ -1368,8 +1420,7 @@ impl PackedWireArena {
             }
             self.vacant.remove(&handle);
             if let Some(slab) = self.slabs.remove(&handle) {
-                let blanks =
-                    vec![blank_packed_instance(); slab.inst_len as usize];
+                let blanks = vec![blank_packed_instance(); slab.inst_len as usize];
                 self.write_insts(queue, slab.inst_off, &blanks);
                 self.tombstoned += slab.inst_len;
             }
@@ -1385,6 +1436,7 @@ impl PackedWireArena {
                     const_len: 0,
                     aabb,
                     base_depth,
+                    content: 0,
                 },
             );
             self.order_sensitive |= run_order_sensitive;
@@ -1482,20 +1534,12 @@ impl PersistentWireArena {
         depth_map: &FxHashMap<u64, [f32; 2]>,
     ) -> bool {
         match &mut self.inner {
-            PersistentWireArenaKind::Indexed(arena) => arena.patch(
-                queue,
-                changes,
-                runs,
-                new_handles_are_suffix,
-                depth_map,
-            ),
-            PersistentWireArenaKind::Packed(arena) => arena.patch(
-                queue,
-                changes,
-                runs,
-                new_handles_are_suffix,
-                depth_map,
-            ),
+            PersistentWireArenaKind::Indexed(arena) => {
+                arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map)
+            }
+            PersistentWireArenaKind::Packed(arena) => {
+                arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map)
+            }
         }
     }
 
@@ -1587,6 +1631,7 @@ mod tests {
             const_len: 2,
             aabb: [0.0; 4],
             base_depth: 0.0,
+            content: 0,
         }
     }
 
@@ -1630,34 +1675,10 @@ mod tests {
 
     #[test]
     fn packed_terminal_resize_obeys_order_and_capacity() {
-        assert!(can_resize_packed_terminal_slab(
-            &slab(),
-            110,
-            1000,
-            18,
-            1,
-        ));
-        assert!(!can_resize_packed_terminal_slab(
-            &slab(),
-            111,
-            1000,
-            18,
-            1,
-        ));
-        assert!(!can_resize_packed_terminal_slab(
-            &slab(),
-            110,
-            117,
-            18,
-            1,
-        ));
-        assert!(!can_resize_packed_terminal_slab(
-            &slab(),
-            110,
-            1000,
-            18,
-            2,
-        ));
+        assert!(can_resize_packed_terminal_slab(&slab(), 110, 1000, 18, 1,));
+        assert!(!can_resize_packed_terminal_slab(&slab(), 111, 1000, 18, 1,));
+        assert!(!can_resize_packed_terminal_slab(&slab(), 110, 117, 18, 1,));
+        assert!(!can_resize_packed_terminal_slab(&slab(), 110, 1000, 18, 2,));
     }
 
     #[test]
@@ -1670,12 +1691,14 @@ mod tests {
     fn partition_wires_partitions_preview_analytical_curves() {
         use crate::scene::model::wire_model::TangentGeom;
         let mut circle_preview = WireModel::default();
-        circle_preview.tangent_geoms.push(TangentGeom::PlanarCircle {
-            center: [1.0, 2.0, 3.0],
-            axis_x: [1.0, 0.0, 0.0],
-            axis_y: [0.0, 1.0, 0.0],
-            radius: 10.0,
-        });
+        circle_preview
+            .tangent_geoms
+            .push(TangentGeom::PlanarCircle {
+                center: [1.0, 2.0, 3.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 10.0,
+            });
 
         let mut arc_preview = WireModel::default();
         arc_preview.tangent_geoms.push(TangentGeom::Arc {
@@ -1688,14 +1711,16 @@ mod tests {
         });
 
         let mut ellipse_preview = WireModel::default();
-        ellipse_preview.tangent_geoms.push(TangentGeom::PlanarEllipse {
-            center: [7.0, 8.0, 9.0],
-            major_axis: [5.0, 0.0, 0.0],
-            normal: [0.0, 0.0, 1.0],
-            minor_axis_ratio: 0.6,
-            start_param: 0.0,
-            end_param: std::f64::consts::TAU,
-        });
+        ellipse_preview
+            .tangent_geoms
+            .push(TangentGeom::PlanarEllipse {
+                center: [7.0, 8.0, 9.0],
+                major_axis: [5.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.6,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            });
 
         let mut regular_line = WireModel::default();
         regular_line.points.push([0.0, 0.0, 0.0]);
@@ -1708,6 +1733,50 @@ mod tests {
         assert_eq!(partitioned.circle_instances.len(), 2);
         assert_eq!(partitioned.ellipse_instances.len(), 1);
         assert_eq!(partitioned.regular.len(), 1);
+    }
+
+    #[test]
+    fn patterned_circle_and_arc_stay_in_regular_wire_pipeline() {
+        use crate::scene::model::wire_model::TangentGeom;
+
+        let mut circle = WireModel::default();
+        circle.points = vec![[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [-10.0, 0.0, 0.0]];
+        circle.tangent_geoms.push(TangentGeom::PlanarCircle {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+        });
+        circle.pattern_length = 1.0;
+        circle.pattern = [0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+        let mut arc = WireModel::default();
+        arc.points = vec![[10.0, 0.0, 0.0], [7.0, 7.0, 0.0], [0.0, 10.0, 0.0]];
+        arc.tangent_geoms.push(TangentGeom::Arc {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+        });
+        arc.pattern_length = 1.0;
+        arc.pattern = [0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+        let wires = vec![circle, arc];
+        let depth_map = rustc_hash::FxHashMap::default();
+        let partitioned = partition_wires(&wires, &depth_map);
+
+        assert_eq!(
+            partitioned.circle_instances.len(),
+            0,
+            "patterned circular curves must not use the analytical circle path"
+        );
+        assert_eq!(
+            partitioned.regular.len(),
+            2,
+            "patterned circle and arc must fall back to the regular dashed-wire path"
+        );
     }
 
     #[test]

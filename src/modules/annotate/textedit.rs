@@ -7,7 +7,7 @@
 //      and when closed, resumes the command loop.
 //   4. In Single mode, editing an object exits the command immediately.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -275,4 +275,6 @@ impl CadCommand for TexteditmodeCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["TEXTEDIT", "TEDIT", "TEXTEDITMODE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["TEXTEDIT", "TEDIT", "TEXTEDITMODE"]
+});

@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -24,11 +24,11 @@ impl SmoothConstraintCommand {
         }
     }
 
-    fn point(point: acadrust::types::Vector3) -> DVec3 {
+    fn point(point: codec::types::Vector3) -> DVec3 {
         DVec3::new(point.x, point.y, point.z)
     }
 
-    fn nearest_marker(points: &[acadrust::types::Vector3], point: DVec3) -> Option<i32> {
+    fn nearest_marker(points: &[codec::types::Vector3], point: DVec3) -> Option<i32> {
         points
             .iter()
             .enumerate()
@@ -40,7 +40,11 @@ impl SmoothConstraintCommand {
             .map(|(index, _)| index as i32)
     }
 
-    fn source_reference(entity: &EntityType, handle: Handle, point: DVec3) -> Option<ParametricRef> {
+    fn source_reference(
+        entity: &EntityType,
+        handle: Handle,
+        point: DVec3,
+    ) -> Option<ParametricRef> {
         let EntityType::Spline(spline) = entity else {
             return None;
         };
@@ -77,7 +81,7 @@ impl SmoothConstraintCommand {
                 let planar = crate::entities::curve::entity_curve(entity)?;
                 let local = planar.plane.project(point.to_array())?;
                 let segments = planar.curve.segments();
-                let (segment, _) = cadkernel::geom2d::nearest_of(segments.iter(), local)?;
+                let (segment, _) = kernel::geom2d::nearest_of(segments.iter(), local)?;
                 let points = crate::scene::dimension_assoc::source_points(entity);
                 let closed = match entity {
                     EntityType::LwPolyline(polyline) => polyline.is_closed,
@@ -109,32 +113,24 @@ impl SmoothConstraintCommand {
     ) -> Option<Vec<ParametricRef>> {
         let source_points = crate::scene::dimension_assoc::source_points(first.0);
         let source_ends = [*source_points.first()?, *source_points.last()?];
-        let source_point = source_ends
-            .iter()
-            .copied()
-            .min_by(|left, right| {
-                let target_points = crate::scene::dimension_assoc::source_points(second.0);
-                let distance = |source: acadrust::types::Vector3| {
-                    target_points
-                        .iter()
-                        .map(|target| (source - *target).length_squared())
-                        .fold(f64::INFINITY, f64::min)
-                };
-                distance(*left).total_cmp(&distance(*right))
-            })?;
+        let source_point = source_ends.iter().copied().min_by(|left, right| {
+            let target_points = crate::scene::dimension_assoc::source_points(second.0);
+            let distance = |source: codec::types::Vector3| {
+                target_points
+                    .iter()
+                    .map(|target| (source - *target).length_squared())
+                    .fold(f64::INFINITY, f64::min)
+            };
+            distance(*left).total_cmp(&distance(*right))
+        })?;
         let source = Self::source_reference(first.0, first.1, Self::point(source_point))?;
 
         let target_points = crate::scene::dimension_assoc::source_points(second.0);
-        let target_point = target_points
-            .iter()
-            .copied()
-            .min_by(|left, right| {
-                (Self::point(*left) - Self::point(source_point))
-                    .length_squared()
-                    .total_cmp(
-                        &(Self::point(*right) - Self::point(source_point)).length_squared(),
-                    )
-            })?;
+        let target_point = target_points.iter().copied().min_by(|left, right| {
+            (Self::point(*left) - Self::point(source_point))
+                .length_squared()
+                .total_cmp(&(Self::point(*right) - Self::point(source_point)).length_squared())
+        })?;
         let target = Self::target_reference(second.0, second.1, Self::point(target_point))?;
         let mut refs = vec![source, target.endpoint];
         if target.curve.marker.is_some() {
@@ -239,14 +235,11 @@ mod tests {
     #[test]
     fn polyline_target_keeps_the_picked_arc_segment_and_endpoint() {
         let handle = Handle::new(7);
-        let mut polyline = acadrust::entities::LwPolyline::new();
+        let mut polyline = codec::entities::LwPolyline::new();
         polyline.vertices = vec![
-            acadrust::entities::LwVertex::from_coords(0.0, 0.0),
-            acadrust::entities::LwVertex::with_bulge(
-                acadrust::types::Vector2::new(5.0, 0.0),
-                1.0,
-            ),
-            acadrust::entities::LwVertex::from_coords(10.0, 0.0),
+            codec::entities::LwVertex::from_coords(0.0, 0.0),
+            codec::entities::LwVertex::with_bulge(codec::types::Vector2::new(5.0, 0.0), 1.0),
+            codec::entities::LwVertex::from_coords(10.0, 0.0),
         ];
 
         let target = SmoothConstraintCommand::target_reference(

@@ -44,6 +44,14 @@ pub enum PanelId {
     ExternalReferences,
     /// Outline of the drawing's origin planes, open sketch and solid bodies.
     Browser,
+    /// Node library of the node graph overlay.
+    NodeGraph,
+    /// Regions and scans of the drawing's point clouds.
+    PointCloudManager,
+    /// Block counts (COUNTLIST).
+    Count,
+    /// The open sheet sets: subsets and sheets.
+    SheetSetManager,
 }
 
 impl PanelId {
@@ -54,6 +62,10 @@ impl PanelId {
             PanelId::BlockPalette => "Block Palette",
             PanelId::ExternalReferences => "External References",
             PanelId::Browser => "Browser",
+            PanelId::NodeGraph => "Node Graph",
+            PanelId::PointCloudManager => "Point Cloud Manager",
+            PanelId::Count => "Count",
+            PanelId::SheetSetManager => "Sheet Set Manager",
         }
     }
 
@@ -64,6 +76,10 @@ impl PanelId {
             PanelId::BlockPalette => 260.0,
             PanelId::ExternalReferences => 460.0,
             PanelId::Browser => 230.0,
+            PanelId::NodeGraph => 220.0,
+            PanelId::PointCloudManager => 280.0,
+            PanelId::Count => 280.0,
+            PanelId::SheetSetManager => 280.0,
         }
     }
 
@@ -152,8 +168,14 @@ impl DockState {
             PanelId::BlockPalette,
             PanelId::ExternalReferences,
             PanelId::Browser,
+            PanelId::NodeGraph,
+            PanelId::PointCloudManager,
+            PanelId::Count,
+            PanelId::SheetSetManager,
         ] {
-            self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
+            self.panels
+                .entry(id)
+                .or_insert_with(|| DockPanel::for_id(id));
         }
     }
 
@@ -187,18 +209,27 @@ impl DockState {
 
     /// Set the persisted width, clamped.
     pub fn set_width(&mut self, id: PanelId, width: f32) {
-        let entry = self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
+        let entry = self
+            .panels
+            .entry(id)
+            .or_insert_with(|| DockPanel::for_id(id));
         entry.width = width.clamp(DOCK_MIN_W, id.max_width());
     }
 
     /// Reset width to the panel's default.
     pub fn reset_width(&mut self, id: PanelId) {
-        let entry = self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
+        let entry = self
+            .panels
+            .entry(id)
+            .or_insert_with(|| DockPanel::for_id(id));
         entry.width = id.default_width();
     }
 
     pub fn set_auto_collapse(&mut self, id: PanelId, on: bool) {
-        let entry = self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
+        let entry = self
+            .panels
+            .entry(id)
+            .or_insert_with(|| DockPanel::for_id(id));
         entry.auto_collapse = on;
     }
 
@@ -240,6 +271,129 @@ pub const DOCK_MIN_W: f32 = 200.0;
 /// Largest docked width a panel may be dragged or sized to.
 pub const DOCK_MAX_W: f32 = 600.0;
 
+// ── Shared panel chrome ─────────────────────────────────────────────────
+
+use crate::app::Message;
+use iced::widget::{button, container, mouse_area, row, text, tooltip, Space};
+use iced::{Background, Border, Color, Element, Length, Theme};
+
+/// The row every docked panel starts with: its title, the auto-collapse pin
+/// and close. Pressing the row starts re-docking the panel.
+pub fn title_bar<'a>(id: PanelId, title: String, auto_collapse: bool) -> Element<'a, Message> {
+    let pin_icon = if auto_collapse {
+        crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
+    } else {
+        crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
+    };
+    let pin = button(pin_icon)
+        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(id)))
+        .style(move |theme: &Theme, status| {
+            let mut style = button::subtle(theme, status);
+            if auto_collapse {
+                let palette = theme.palette();
+                style.background = Some(Background::Color(palette.primary.weak.color));
+                style.text_color = palette.primary.weak.text;
+                style.border.color = palette.primary.base.color;
+                style.border.width = 1.0;
+            }
+            style
+        })
+        .padding([3, 5]);
+    let pin = tooltip(
+        pin,
+        text(crate::t!("Auto")).size(10),
+        tooltip::Position::Bottom,
+    )
+    .gap(4);
+    let close = button(crate::ui::icons::themed_secondary(
+        crate::ui::icons::CLOSE,
+        12.0,
+    ))
+    .on_press(Message::Dock(DockMsg::Close(id)))
+    .style(button::subtle)
+    .padding([3, 5]);
+    let close = tooltip(
+        close,
+        text(crate::t!("Close")).size(10),
+        tooltip::Position::Bottom,
+    )
+    .gap(4);
+    mouse_area(
+        container(
+            row![
+                text(title).size(12),
+                Space::new().width(Length::Fill),
+                pin,
+                close
+            ]
+            .spacing(3)
+            .align_y(iced::Center),
+        )
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.weak.color)),
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .padding([3, 6]),
+    )
+    .on_press(Message::Dock(DockMsg::DockGrab(id)))
+    .interaction(iced::mouse::Interaction::Grab)
+    .into()
+}
+
+/// Side length of a panel toolbar button's icon.
+pub const TOOL_H: f32 = 22.0;
+
+/// A panel toolbar icon button, placed on the row under the title bar.
+pub fn tool_button<'a>(
+    icon: Element<'a, Message>,
+    tip: String,
+    message: Message,
+) -> Element<'a, Message> {
+    let button = button(icon)
+        .on_press(message)
+        .width(Length::Fixed(TOOL_H + 8.0))
+        .height(Length::Fixed(TOOL_H + 8.0))
+        .style(|theme: &Theme, status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    theme.palette().background.strong.color
+                }
+                _ => Color::TRANSPARENT,
+            })),
+            border: Border {
+                radius: 3.0.into(),
+                ..Default::default()
+            },
+            text_color: crate::ui::window::block_palette::block_icon_button_text_color(
+                theme, status,
+            ),
+            ..Default::default()
+        });
+    tooltip(button, text(tip).size(10), tooltip::Position::Bottom)
+        .gap(4)
+        .into()
+}
+
+/// A docked panel's body: fixed width, full height, padded, on the base
+/// background with a neutral edge.
+pub fn frame<'a>(content: impl Into<Element<'a, Message>>, width: f32) -> Element<'a, Message> {
+    container(content)
+        .padding(6)
+        .width(Length::Fixed(width))
+        .height(Length::Fill)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.base.color)),
+            border: Border {
+                color: theme.palette().background.neutral.color,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,7 +406,10 @@ mod tests {
         // (The 45%-of-window rule still dominates on narrow windows.)
         assert_eq!(state.width(PanelId::ExternalReferences, 3000.0), 460.0);
         state.set_width(PanelId::ExternalReferences, 5000.0);
-        assert_eq!(state.width(PanelId::ExternalReferences, 3000.0), DOCK_MAX_W * 2.0);
+        assert_eq!(
+            state.width(PanelId::ExternalReferences, 3000.0),
+            DOCK_MAX_W * 2.0
+        );
         // Other panels keep the shared maximum.
         state.set_width(PanelId::BlockPalette, 5000.0);
         assert_eq!(state.width(PanelId::BlockPalette, 3000.0), DOCK_MAX_W);
@@ -261,7 +418,10 @@ mod tests {
     #[test]
     fn default_docks_each_known_panel_on_an_edge() {
         let state = DockState::default();
-        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
+        assert_eq!(
+            state.location(PanelId::Properties),
+            Some((DockSide::Left, 0))
+        );
         assert_eq!(
             state.location(PanelId::BlockPalette),
             Some((DockSide::Right, 0))
@@ -320,7 +480,10 @@ mod tests {
         let mut state = DockState::default();
         state.set_width(PanelId::BlockPalette, 500.0);
         // Window too narrow -> capped by the 0.45 fraction, not DOCK_MAX_W.
-        assert_eq!(state.width(PanelId::BlockPalette, 800.0), DOCK_MAX_W.min(360.0));
+        assert_eq!(
+            state.width(PanelId::BlockPalette, 800.0),
+            DOCK_MAX_W.min(360.0)
+        );
     }
 
     #[test]

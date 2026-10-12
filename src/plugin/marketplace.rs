@@ -228,19 +228,18 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
             );
             let rustc_version = manifest.rustc_version.clone();
             let rustc_declared = manifest.rustc_declared;
-            let rustc_compatible = if !ocs_plugin_api::version_info::uses_acadrust_gate(
-                manifest.api_version,
-            ) {
-                true
-            } else {
-                match rustc_version.as_deref() {
-                    None | Some("") => false,
-                    Some(version) => ocs_plugin_api::version_info::rustc_versions_compatible(
-                        version,
-                        ocs_plugin_api::version_info::host_rustc_version(),
-                    ),
-                }
-            };
+            let rustc_compatible =
+                if !ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
+                    true
+                } else {
+                    match rustc_version.as_deref() {
+                        None | Some("") => false,
+                        Some(version) => ocs_plugin_api::version_info::rustc_versions_compatible(
+                            version,
+                            ocs_plugin_api::version_info::host_rustc_version(),
+                        ),
+                    }
+                };
             Ok::<_, String>(ReleaseInfo {
                 tag: release.tag,
                 api_version: manifest.api_version,
@@ -312,7 +311,7 @@ fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Download and install a release's package into the plugins folder. Verifies
-/// the API version and, when present, the `acadrust` fingerprint from the
+/// the API version and, when present, the `opencadcodec` fingerprint from the
 /// package's `plugin.toml` first. Returns the plugin id on success.
 pub fn install(release: &Release, repository: &str) -> Result<String, String> {
     let lib = release.lib_asset().ok_or("no library for this platform")?;
@@ -331,32 +330,40 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
 
     if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
         let Some(source) = manifest.acadrust_source.as_deref() else {
-            return Err("Release has no acadrust source; cannot verify ABI compatibility".to_string());
+            return Err(
+                "Release has no opencadcodec source; cannot verify ABI compatibility".to_string(),
+            );
         };
         if source.is_empty() {
-            return Err("Release has no acadrust source; cannot verify ABI compatibility".to_string());
+            return Err(
+                "Release has no opencadcodec source; cannot verify ABI compatibility".to_string(),
+            );
         }
         if !ocs_plugin_api::version_info::acadrust_sources_compatible(
             source,
             ocs_plugin_api::version_info::host_acadrust_source(),
         ) {
             let host_src = ocs_plugin_api::version_info::host_acadrust_source();
-            let plugin_hash = ocs_plugin_api::version_info::acadrust_source_hash(source)
-                .unwrap_or("unknown");
-            let host_hash = ocs_plugin_api::version_info::acadrust_source_hash(host_src)
-                .unwrap_or("unknown");
+            let plugin_hash =
+                ocs_plugin_api::version_info::acadrust_source_hash(source).unwrap_or("unknown");
+            let host_hash =
+                ocs_plugin_api::version_info::acadrust_source_hash(host_src).unwrap_or("unknown");
             return Err(format!(
-                "Plugin built for acadrust @{plugin_hash}, but this host uses @{host_hash}"
+                "Plugin built for opencadcodec @{plugin_hash}, but this host uses @{host_hash}"
             ));
         }
     }
 
     if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
         let Some(version) = manifest.rustc_version.as_deref() else {
-            return Err("Release has no rustc version; cannot verify ABI compatibility".to_string());
+            return Err(
+                "Release has no rustc version; cannot verify ABI compatibility".to_string(),
+            );
         };
         if version.is_empty() {
-            return Err("Release has no rustc version; cannot verify ABI compatibility".to_string());
+            return Err(
+                "Release has no rustc version; cannot verify ABI compatibility".to_string(),
+            );
         }
         if !ocs_plugin_api::version_info::rustc_versions_compatible(
             version,

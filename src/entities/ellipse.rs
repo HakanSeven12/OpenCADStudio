@@ -1,8 +1,8 @@
-use acadrust::entities::Ellipse;
-use cadkernel::geom2d::{
+use codec::entities::Ellipse;
+use kernel::geom2d::{
     Curve as KernelCurve, EllipseArc as KernelEllipseArc, Tolerance, Vec2 as KernelVec2,
 };
-use cadkernel::space::PlanarCurve;
+use kernel::space::PlanarCurve;
 
 use crate::entities::curve::CurveSnap;
 use crate::t;
@@ -30,13 +30,28 @@ fn to_render(ell: &Ellipse) -> RenderEntity {
         .map(crate::entities::curve::snap_from)
         .unwrap_or_default();
 
+    let is_full = ell.is_full()
+        || (ell.end_parameter - ell.start_parameter).abs() >= std::f64::consts::TAU - 1e-9;
+    let (start_param, end_param) = if is_full {
+        (0.0, std::f64::consts::TAU)
+    } else {
+        let s = ell.start_parameter.rem_euclid(std::f64::consts::TAU);
+        let raw = ell.end_parameter - ell.start_parameter;
+        let sweep = if raw <= 0.0 {
+            raw.rem_euclid(std::f64::consts::TAU)
+        } else {
+            raw
+        };
+        (s, s + sweep)
+    };
+
     let tangent = TangentGeom::PlanarEllipse {
         center: [ell.center.x, ell.center.y, ell.center.z],
         major_axis: [ell.major_axis.x, ell.major_axis.y, ell.major_axis.z],
         normal: [ell.normal.x, ell.normal.y, ell.normal.z],
         minor_axis_ratio: ell.minor_axis_ratio,
-        start_param: ell.start_parameter,
-        end_param: ell.end_parameter,
+        start_param,
+        end_param,
     };
 
     // The points come from the entity's own kernel curve and angular policy.
@@ -177,16 +192,52 @@ fn properties(ell: &Ellipse) -> Vec<PropSection> {
             edit(t!("Radius ratio").as_ref(), "ratio", ell.minor_axis_ratio),
             edit(t!("Start angle").as_ref(), "start_angle", start_angle),
             edit(t!("End angle").as_ref(), "end_angle", end_angle),
-            ro(t!("Major axis vector X").as_ref(), "major_x", format_length(major_vec.x)),
-            ro(t!("Major axis vector Y").as_ref(), "major_y", format_length(major_vec.y)),
-            ro(t!("Major axis vector Z").as_ref(), "major_z", format_length(major_vec.z)),
-            ro(t!("Minor axis vector X").as_ref(), "minor_x", format_length(minor_vec.x)),
-            ro(t!("Minor axis vector Y").as_ref(), "minor_y", format_length(minor_vec.y)),
-            ro(t!("Minor axis vector Z").as_ref(), "minor_z", format_length(minor_vec.z)),
+            ro(
+                t!("Major axis vector X").as_ref(),
+                "major_x",
+                format_length(major_vec.x),
+            ),
+            ro(
+                t!("Major axis vector Y").as_ref(),
+                "major_y",
+                format_length(major_vec.y),
+            ),
+            ro(
+                t!("Major axis vector Z").as_ref(),
+                "major_z",
+                format_length(major_vec.z),
+            ),
+            ro(
+                t!("Minor axis vector X").as_ref(),
+                "minor_x",
+                format_length(minor_vec.x),
+            ),
+            ro(
+                t!("Minor axis vector Y").as_ref(),
+                "minor_y",
+                format_length(minor_vec.y),
+            ),
+            ro(
+                t!("Minor axis vector Z").as_ref(),
+                "minor_z",
+                format_length(minor_vec.z),
+            ),
             ro(t!("Area").as_ref(), "area", format_area(props.area)),
-            ro(t!("Start parameter").as_ref(), "start_param", format!("{:.4}", ell.start_parameter)),
-            ro(t!("End parameter").as_ref(), "end_param", format!("{:.4}", ell.end_parameter)),
-            ro(t!("Length").as_ref(), "length", format_length(props.perimeter)),
+            ro(
+                t!("Start parameter").as_ref(),
+                "start_param",
+                format!("{:.4}", ell.start_parameter),
+            ),
+            ro(
+                t!("End parameter").as_ref(),
+                "end_param",
+                format!("{:.4}", ell.end_parameter),
+            ),
+            ro(
+                t!("Length").as_ref(),
+                "length",
+                format_length(props.perimeter),
+            ),
             edit(t!("Normal X").as_ref(), "normal_x", ell.normal.x),
             edit(t!("Normal Y").as_ref(), "normal_y", ell.normal.y),
             edit(t!("Normal Z").as_ref(), "normal_z", ell.normal.z),
@@ -228,17 +279,17 @@ fn apply_geom_prop(ell: &mut Ellipse, field: &str, value: &str) {
                 "normal_z" => normal[2] = v,
                 _ => {}
             }
-            let Some(normal) = cadkernel::space::Vec3::from(normal).normalize() else {
+            let Some(normal) = kernel::space::Vec3::from(normal).normalize() else {
                 return;
             };
-            let Some(major) = cadkernel::space::reorient_axis_to_plane(
+            let Some(major) = kernel::space::reorient_axis_to_plane(
                 [ell.major_axis.x, ell.major_axis.y, ell.major_axis.z],
                 normal.to_array(),
             ) else {
                 return;
             };
-            ell.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
-            ell.major_axis = acadrust::types::Vector3::new(major[0], major[1], major[2]);
+            ell.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
+            ell.major_axis = codec::types::Vector3::new(major[0], major[1], major[2]);
         }
         _ => {}
     }
@@ -339,31 +390,25 @@ fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
+    // The codec maps the whole ellipse — ratio, principal axes and arc
+    // parameters — under rotate, scale, affine and mirror alike.
     crate::scene::view::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
-            &mut entity.center.x,
-            &mut entity.center.y,
-            p1,
-            p2,
-        );
-        crate::scene::view::transform::reflect_xy_point(
-            &mut entity.major_axis.x,
-            &mut entity.major_axis.y,
-            p1,
-            p2,
+        codec::Entity::apply_mirror(
+            entity,
+            &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
         );
     });
 }
 
 impl RenderConvertible for Ellipse {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
 
 crate::impl_entity_basics!(Ellipse);
 
-impl crate::entities::traits::MassPropsCalc for acadrust::entities::Ellipse {
+impl crate::entities::traits::MassPropsCalc for codec::entities::Ellipse {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         use std::f64::consts::{PI, TAU};
         let e = self;
@@ -440,7 +485,7 @@ mod grip_tests {
         e.minor_axis_ratio = ratio;
         e
     }
-    fn xy_len(v: &acadrust::entities::Ellipse) -> f64 {
+    fn xy_len(v: &codec::entities::Ellipse) -> f64 {
         (v.major_axis.x * v.major_axis.x + v.major_axis.y * v.major_axis.y).sqrt()
     }
 
@@ -470,8 +515,14 @@ mod grip_tests {
         // major=10 (+X), minor=5 (+Y). Drag the minor grip to (0,11), past major.
         let mut e = ell(10.0, 0.5);
         apply_grip(&mut e, 2, GripApply::Absolute(DVec3::new(0.0, 11.0, 0.0)));
-        assert!((xy_len(&e) - 11.0).abs() < 1e-9, "major follows the drag to 11");
-        assert!(e.major_axis.x.abs() < 1e-9, "major points +Y after the swap");
+        assert!(
+            (xy_len(&e) - 11.0).abs() < 1e-9,
+            "major follows the drag to 11"
+        );
+        assert!(
+            e.major_axis.x.abs() < 1e-9,
+            "major points +Y after the swap"
+        );
         assert!(
             (xy_len(&e) * e.minor_axis_ratio - 10.0).abs() < 1e-9,
             "minor holds the old major length (10)"
@@ -486,5 +537,54 @@ mod grip_tests {
             (xy_len(&e) * e.minor_axis_ratio - 10.0).abs() < 1e-6,
             "minor still 10 — no ballooning"
         );
+    }
+
+    #[test]
+    fn test_apply_transform_negative_scale_and_rotation() {
+        let mut e = ell(10.0, 0.5);
+        e.start_parameter = 0.0;
+        e.end_parameter = std::f64::consts::FRAC_PI_2;
+
+        let rot = EntityTransform::Rotate {
+            center: DVec3::ZERO,
+            axis: DVec3::Z,
+            angle_rad: -std::f64::consts::FRAC_PI_4,
+        };
+        apply_transform(&mut e, &rot);
+
+        let scale = EntityTransform::Scale {
+            center: DVec3::ZERO,
+            factor: -1.0,
+        };
+        apply_transform(&mut e, &scale);
+
+        assert!((xy_len(&e) - 10.0).abs() < 1e-9);
+        assert!((e.minor_axis_ratio - 0.5).abs() < 1e-9);
+        assert!((e.normal.z - 1.0).abs() < 1e-9);
+        // Start parameter was 0, rotated by -45 then scaled by -1 (180 rotation) -> net effect
+        assert!(e.start_parameter >= 0.0 && e.start_parameter < std::f64::consts::TAU);
+    }
+
+    #[test]
+    fn test_apply_transform_mirror() {
+        let mut e = ell(10.0, 0.5);
+        e.start_parameter = 0.1;
+        e.end_parameter = 1.5;
+
+        // Mirror across Y axis (p1=(0,0,0), p2=(0,1,0))
+        let mirror = EntityTransform::Mirror {
+            p1: DVec3::ZERO,
+            p2: DVec3::Y,
+            working_normal: DVec3::Z,
+        };
+        apply_transform(&mut e, &mirror);
+
+        // Major axis reflected to (-10, 0, 0); MIRROR keeps the normal facing
+        // the mirrored plane and negates the parameters instead.
+        assert!((e.major_axis.x - (-10.0)).abs() < 1e-9);
+        assert!((e.normal.z - 1.0).abs() < 1e-9);
+        let (s, end) = (e.start_parameter, e.end_parameter);
+        assert!((s - (std::f64::consts::TAU - 1.5)).abs() < 1e-9, "{s}");
+        assert!((end - s - 1.4).abs() < 1e-9, "{end}");
     }
 }

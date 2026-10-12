@@ -8,10 +8,10 @@
 //! toolbar, list, inline-rename wiring and chrome live here once.
 
 use crate::app::{Message, StyleKind};
+use crate::t;
 use iced::widget::button::{Status, Style};
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Length, Theme};
-use crate::t;
 use std::borrow::Cow;
 
 /// Everything the shared frame needs. The per-manager `editor` element is the
@@ -67,9 +67,7 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
     .align_y(iced::Center);
     let toolbar = container(bar)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.weak.color
-            )),
+            background: Some(Background::Color(theme.palette().background.weak.color)),
             ..Default::default()
         })
         .width(width)
@@ -102,13 +100,13 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
                     container::Style {
-                    background: Some(Background::Color(palette.background.weak.color)),
-                    border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
-                        radius: 3.0.into()
-                    },
-                    ..Default::default()
+                        background: Some(Background::Color(palette.background.weak.color)),
+                        border: Border {
+                            color: palette.background.neutral.color,
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
                     }
                 })
                 .width(width)
@@ -131,9 +129,7 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
 
     container(column![toolbar, hdivider(width), body])
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(width)
@@ -181,11 +177,8 @@ pub fn editor_shell<'a>(shell: EditorShell<'a>) -> Element<'a, Message> {
     let comparison: Element<'a, Message> = match shell.comparison {
         Some(comparison) if !comparison.options.is_empty() => row![
             text(t!("Compare with")).size(10).style(muted_text_style),
-            iced::widget::pick_list(
-                Some(comparison.selected),
-                comparison.options,
-                |value| value.to_string(),
-            )
+            iced::widget::pick_list(Some(comparison.selected), comparison.options, |value| value
+                .to_string(),)
             .on_select(comparison.on_select)
             .text_size(11)
             .width(150),
@@ -219,9 +212,13 @@ pub fn editor_shell<'a>(shell: EditorShell<'a>) -> Element<'a, Message> {
             comparison,
             row(tabs).spacing(2),
             hdivider(Length::Fill),
-            scrollable(container(shell.content).padding([12, 12]).width(Length::Fill))
-                .width(Length::Fill)
-                .height(Length::Fill),
+            scrollable(
+                container(shell.content)
+                    .padding([12, 12])
+                    .width(Length::Fill)
+            )
+            .width(Length::Fill)
+            .height(Length::Fill),
         ]
         .spacing(6)
         .height(shell.sizing.height),
@@ -307,18 +304,18 @@ fn btn_s(accent: bool) -> impl Fn(&Theme, Status) -> Style {
             _ => palette.background.weak,
         };
         Style {
-        background: Some(Background::Color(pair.color)),
-        text_color: if st == Status::Disabled {
-            pair.text.scale_alpha(0.45)
-        } else {
-            pair.text
-        },
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
+            background: Some(Background::Color(pair.color)),
+            text_color: if st == Status::Disabled {
+                pair.text.scale_alpha(0.45)
+            } else {
+                pair.text
+            },
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
         }
     }
 }

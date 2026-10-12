@@ -12,9 +12,7 @@ pub fn all_ribbon_modules() -> Vec<Box<dyn CadModule>> {
 
 /// Core ribbon tabs plus the tabs of loaded external plugins whose id is **not**
 /// in `disabled` (sorted by `manifest.ribbon_order`).
-pub fn ribbon_modules_enabled(
-    disabled: &rustc_hash::FxHashSet<String>,
-) -> Vec<Box<dyn CadModule>> {
+pub fn ribbon_modules_enabled(disabled: &rustc_hash::FxHashSet<String>) -> Vec<Box<dyn CadModule>> {
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut core = core_registry::all_modules();
     // Dynamically-loaded external plugins contribute tabs via the crate manager.
@@ -22,9 +20,11 @@ pub fn ribbon_modules_enabled(
     {
         crate::plugin::external::with_manager(|manager| {
             let addons = manager.ribbon_modules(|id| disabled.contains(id));
-            core.extend(addons.into_iter().map(|(_, module)| {
-                Box::new(module) as Box<dyn CadModule>
-            }));
+            core.extend(
+                addons
+                    .into_iter()
+                    .map(|(_, module)| Box::new(module) as Box<dyn CadModule>),
+            );
         });
     }
     let _ = disabled;
@@ -71,10 +71,11 @@ pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bo
         if let Some((process, command_id)) = result.started {
             app.set_active_command(
                 tab,
-                Box::new(crate::app::plugin_host::PluginProcessInteractiveAdapter::new(
-                    process,
-                    command_id,
-                )),
+                Box::new(
+                    crate::app::plugin_host::PluginProcessInteractiveAdapter::new(
+                        process, command_id,
+                    ),
+                ),
             );
         }
         return result.handled;

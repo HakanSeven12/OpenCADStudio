@@ -1,4 +1,4 @@
-use acadrust::entities::{Viewport, ViewportRenderMode};
+use codec::entities::{Viewport, ViewportRenderMode};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -23,7 +23,6 @@ const STANDARD_SCALES: &[(&str, f64)] = &[
     ("5:1", 5.0),
     ("10:1", 10.0),
 ];
-
 
 fn scale_label(scale: f64) -> String {
     for (label, val) in STANDARD_SCALES {
@@ -113,13 +112,13 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
                     field: "vp_on",
                     value: PropValue::BoolToggle {
                         field: "vp_on",
-                        value: vp.status.is_on,
+                        value: vp.is_on(),
                     },
                 },
                 ro(
                     "Clipped",
                     "vp_clipped",
-                    if vp.clip_boundary_handle.is_null() { "No" } else { "Yes" },
+                    if is_clipped(vp) { "Yes" } else { "No" },
                 ),
                 Property {
                     label: "Display locked".into(),
@@ -180,7 +179,7 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
 }
 
 fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
-    use acadrust::types::Vector3;
+    use codec::types::Vector3;
 
     // Boolean / toggle fields handled first (value = "toggle" or "true"/"false").
     match field {
@@ -193,11 +192,18 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
             return;
         }
         "vp_on" => {
-            vp.status.is_on = if value == "toggle" {
-                !vp.status.is_on
+            // turn_on/turn_off keep the explicit-off bit in step, so a
+            // viewport the file marked off can be turned back on.
+            let on = if value == "toggle" {
+                !vp.is_on()
             } else {
                 value == "true"
             };
+            if on {
+                vp.turn_on();
+            } else {
+                vp.turn_off();
+            }
             return;
         }
         "vp_perspective" => {
@@ -342,6 +348,13 @@ fn apply_grip(vp: &mut Viewport, grip_id: usize, apply: GripApply) {
 
 /// Stretch a rectangular paper-space viewport by the corners captured by a
 /// crossing window. Bounds that have no captured corner stay anchored.
+/// A viewport clipped by its boundary object: the boundary is linked and
+/// non-rectangular clipping is on. A stored boundary with clipping off draws
+/// the rectangular viewport.
+pub(crate) fn is_clipped(vp: &Viewport) -> bool {
+    !vp.clip_boundary_handle.is_null() && vp.status.non_rectangular_clipping
+}
+
 pub fn stretch(
     vp: &mut Viewport,
     win_min: glam::DVec3,
@@ -429,13 +442,11 @@ fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
 crate::impl_entity_basics!(Viewport);
 
 impl crate::entities::traits::FallbackTess for Viewport {
-    fn fallback_geometry(
-        &self,
-    ) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
         // A clipped viewport uses its linked boundary entity as its visible
         // frame. Drawing the viewport's rectangular extents as well leaves an
         // incorrect box around polygonal/Object MVIEW results.
-        if !self.clip_boundary_handle.is_null() {
+        if is_clipped(self) {
             return (vec![], vec![], vec![], vec![]);
         }
         let cx = self.center.x;

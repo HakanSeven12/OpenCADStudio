@@ -6,7 +6,8 @@
 
 use crate::app::Message;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, column, container, row, text, Space};
+use crate::ui::style::form::dialog_button;
+use iced::widget::{column, container, row, text, Space};
 use iced::{Background, Element, Fill, Length, Theme};
 
 /// GitHub issues page linked from the help window, so web users can report
@@ -17,9 +18,8 @@ pub fn view_window(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Me
     // Fixed window width: paragraphs wrap against this instead of the
     // toolbar, which is what made the dropdown unreadable.
     let body_w = Length::Fixed(460.0);
-    let para = |label: String| -> Element<'static, Message> {
-        text(label).size(12).width(Fill).into()
-    };
+    let para =
+        |label: String| -> Element<'static, Message> { text(label).size(12).width(Fill).into() };
 
     let intro = para(crate::t!("How the Reference Manager works on web").into_owned());
     let list = para(
@@ -41,26 +41,20 @@ pub fn view_window(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Me
         .into_owned(),
     );
 
-    let report_button = button(text(crate::t!("Report an issue")).size(12))
-        .on_press(Message::OpenUrl(XREF_ISSUES_URL.to_string()))
-        .style(button::primary)
-        .padding([6, 18]);
-    let close_button = button(text(crate::t!("Close")).size(12))
-        .on_press(Message::CloseModal)
-        .style(button::secondary)
-        .padding([6, 18]);
-    let action_row: Element<'static, Message> = row![
-        Space::new().width(Fill),
-        report_button,
-        close_button,
-    ]
-    .spacing(8)
-    .align_y(iced::Center)
-    .into();
+    let report_button = dialog_button(
+        crate::t!("Report an issue"),
+        Message::OpenUrl(XREF_ISSUES_URL.to_string()),
+        true,
+    );
+    let close_button = dialog_button(crate::t!("Close"), Message::CloseModal, false);
+    let action_row: Element<'static, Message> =
+        row![Space::new().width(Fill), report_button, close_button,]
+            .spacing(8)
+            .align_y(iced::Center)
+            .into();
 
     let content = column![
-        text(crate::t!("Reference Manager — Web").into_owned())
-            .size(14),
+        text(crate::t!("Reference Manager — Web").into_owned()).size(14),
         text(crate::t!("EXTERNALREFERENCES on the web build").into_owned())
             .size(11)
             .style(muted_style),
@@ -79,9 +73,7 @@ pub fn view_window(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Me
         .width(sizing.width)
         .height(sizing.height)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color,
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .into()

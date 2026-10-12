@@ -15,7 +15,7 @@ pub fn tool() -> ToolDef {
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -80,6 +80,7 @@ impl CadCommand for LayMatchCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["LAYMATCH", "LAYMCH"] });  // LayMatchCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["LAYMATCH", "LAYMCH"]
+}); // LayMatchCommand

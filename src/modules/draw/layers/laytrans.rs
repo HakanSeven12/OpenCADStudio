@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use acadrust::tables::Layer;
+use codec::tables::Layer;
 
 use crate::scene::Scene;
 
@@ -78,7 +78,7 @@ pub fn load_targets(path: &Path) -> Result<Vec<TargetLayer>, String> {
 /// Extract the translation targets from an already-parsed drawing — the
 /// tail of [`load_targets`], reused by the web flow, which parses the
 /// picked file's bytes before it gets here.
-pub fn targets_from_document(document: &acadrust::CadDocument) -> Result<Vec<TargetLayer>, String> {
+pub fn targets_from_document(document: &codec::CadDocument) -> Result<Vec<TargetLayer>, String> {
     let mut targets: Vec<TargetLayer> = document
         .layers
         .iter()
@@ -189,7 +189,7 @@ pub fn translate(
             // Whatever reference the target drawing held it through does not
             // come with it.
             layer.flags.xref_dependent = false;
-            layer.xref_block_record_handle = acadrust::Handle::NULL;
+            layer.xref_block_record_handle = codec::Handle::NULL;
             let _ = scene.document.layers.add(layer);
         }
         let moved = merge_layer(scene, &mapping.from, &mapping.to, options.force_bylayer);
@@ -224,12 +224,12 @@ pub fn merge_layer(scene: &mut Scene, from: &str, to: &str, force_bylayer: bool)
         let common = entity.common_mut();
         common.layer = to.to_string();
         if force_bylayer {
-            common.color = acadrust::Color::ByLayer;
+            common.color = codec::Color::ByLayer;
             common.color_name = None;
             common.color_book_handle = None;
             common.linetype = String::new();
             common.linetype_handle = None;
-            common.line_weight = acadrust::LineWeight::ByLayer;
+            common.line_weight = codec::LineWeight::ByLayer;
         }
         moved += 1;
     }

@@ -1,0 +1,1018 @@
+{
+  "type_filter": [
+    "Point",
+    "Line",
+    "Circle",
+    "Arc",
+    "Ellipse",
+    "Polyline",
+    "Polyline2D",
+    "Polyline3D",
+    "LwPolyline",
+    "Spline",
+    "Text",
+    "MText",
+    "Ray",
+    "XLine",
+    "Solid",
+    "Face3D",
+    "Insert",
+    "Tolerance",
+    "Shape",
+    "AttributeDefinition",
+    "AttributeEntity",
+    "Hatch",
+    "Leader",
+    "MLine",
+    "Dimension",
+    "MultiLeader",
+    "Table",
+    "PolygonMesh",
+    "PolyfaceMesh",
+    "Mesh",
+    "Helix",
+    "RasterImage",
+    "Wipeout",
+    "Underlay",
+    "Viewport",
+    "ViewBorder",
+    "Light",
+    "Ole2Frame",
+    "Solid3D",
+    "Body",
+    "Region",
+    "Surface",
+    "SectionSymbol"
+  ],
+  "manual_kinds": [
+    "Dimension"
+  ],
+  "base_fields": [
+    "handle",
+    "layer",
+    "owner_handle"
+  ],
+  "overrides": {
+    "Point": {
+      "fields": {
+        "location": {
+          "required": true
+        }
+      }
+    },
+    "Line": {
+      "fields": {
+        "start": {
+          "required": true
+        },
+        "end": {
+          "required": true
+        }
+      }
+    },
+    "Circle": {
+      "fields": {
+        "center": {
+          "required": true
+        },
+        "radius": {
+          "required": true
+        }
+      }
+    },
+    "Arc": {
+      "fields": {
+        "center": {
+          "required": true
+        },
+        "radius": {
+          "required": true
+        },
+        "start_angle": {
+          "required": true
+        },
+        "end_angle": {
+          "required": true
+        }
+      }
+    },
+    "Ellipse": {
+      "fields": {
+        "center": {
+          "required": true
+        },
+        "major_axis": {
+          "required": true
+        },
+        "minor_axis_ratio": {
+          "required": true
+        }
+      }
+    },
+    "Polyline": {
+      "fields": {
+        "vertices": {
+          "required": true
+        },
+        "flags": {
+          "python_name": "closed",
+          "rust_getter": "VAR.flags.is_closed()",
+          "rust_setter": "VAR.flags.set_closed(get_opt_bool(dict, \"closed\", vm)?);"
+        }
+      },
+      "update_only": true,
+      "update_only_message": "Polyline is the legacy 3-D-vertex polyline and both file formats save it as Polyline3D; create a Polyline2D or Polyline3D instead (existing Polyline entities can still be edited)"
+    },
+    "Polyline2D": {
+      "fields": {
+        "vertices": {
+          "required": true
+        },
+        "flags": {
+          "python_name": "closed",
+          "rust_getter": "VAR.flags.is_closed()",
+          "rust_setter": "VAR.flags.set_closed(get_opt_bool(dict, \"closed\", vm)?);"
+        }
+      }
+    },
+    "Polyline3D": {
+      "fields": {
+        "vertices": {
+          "required": true
+        },
+        "smooth_type": {
+          "exclude": true,
+          "_comment": "opencadcodec defines two distinct SmoothSurfaceType enums with the same name (polyline.rs, used by Polyline2D's smooth_surface \u2014 and a separate one private to polyline3d.rs, used here); the type registry's tracer keys purely by name and collapses them, so the generically generated conversion resolves to the wrong one. Needs a hand-written override with the fully qualified opencadcodec::entities::polyline3d::SmoothSurfaceType path to support, not just a rename."
+        }
+      }
+    },
+    "LwPolyline": {
+      "fields": {
+        "vertices": {
+          "required": true
+        }
+      }
+    },
+    "Spline": {
+      "fields": {
+        "control_points": {
+          "required": true
+        }
+      }
+    },
+    "Text": {
+      "fields": {
+        "value": {
+          "python_name": "text",
+          "required": true
+        },
+        "insertion_point": {
+          "python_name": "insertion",
+          "required": true
+        }
+      }
+    },
+    "MText": {
+      "fields": {
+        "value": {
+          "python_name": "text",
+          "required": true
+        },
+        "insertion_point": {
+          "python_name": "insertion",
+          "required": true
+        },
+        "background_color": {
+          "exclude": true,
+          "_comment": "Color is a tagged enum (Index(u8)/Rgb{r,g,b} carry data, not just unit variants) \u2014 this generator only handles C-like unit enums generically; EntityCommon's own color/line_weight/transparency fields are out of scope for the same reason (see base_fields)."
+        }
+      }
+    },
+    "Ray": {
+      "fields": {
+        "base_point": {
+          "required": true
+        },
+        "direction": {
+          "required": true
+        }
+      }
+    },
+    "XLine": {
+      "fields": {
+        "base_point": {
+          "required": true
+        },
+        "direction": {
+          "required": true
+        }
+      }
+    },
+    "Solid": {
+      "rust_constructor": "codec::entities::Solid::new(codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO)",
+      "fields": {
+        "first_corner": {
+          "required": true
+        },
+        "second_corner": {
+          "required": true
+        },
+        "third_corner": {
+          "required": true
+        },
+        "fourth_corner": {
+          "required": true
+        }
+      }
+    },
+    "Face3D": {
+      "rust_constructor": "codec::entities::Face3D::new(codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO)",
+      "fields": {
+        "first_corner": {
+          "required": true
+        },
+        "second_corner": {
+          "required": true
+        },
+        "third_corner": {
+          "required": true
+        },
+        "fourth_corner": {
+          "required": true
+        }
+      }
+    },
+    "Insert": {
+      "fields": {
+        "block_name": {
+          "required": true
+        },
+        "x_scale": {
+          "rust_getter": "VAR.x_scale()",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"x_scale\", vm)? { let scale = py_number_to_f64(v, vm)?; if !scale.is_finite() || scale.abs() < 1e-12 { return Err(vm.new_value_error(\"Insert.x_scale must be finite and nonzero\".to_owned())); } VAR.set_x_scale(scale); }"
+        },
+        "y_scale": {
+          "rust_getter": "VAR.y_scale()",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"y_scale\", vm)? { let scale = py_number_to_f64(v, vm)?; if !scale.is_finite() || scale.abs() < 1e-12 { return Err(vm.new_value_error(\"Insert.y_scale must be finite and nonzero\".to_owned())); } VAR.set_y_scale(scale); }"
+        },
+        "z_scale": {
+          "rust_getter": "VAR.z_scale()",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"z_scale\", vm)? { let scale = py_number_to_f64(v, vm)?; if !scale.is_finite() || scale.abs() < 1e-12 { return Err(vm.new_value_error(\"Insert.z_scale must be finite and nonzero\".to_owned())); } VAR.set_z_scale(scale); }"
+        },
+        "dwg_minsert": {
+          "exclude": true
+        },
+        "attributes": {
+          "exclude": true
+        },
+        "view_rep_handle": {
+          "exclude": true
+        },
+        "seqend_handle": {
+          "exclude": true
+        },
+        "insert_point": {
+          "required": true
+        }
+      },
+      "rust_constructor": "codec::entities::Insert::new(String::new(), codec::types::Vector3::ZERO)"
+    },
+    "Tolerance": {
+      "fields": {
+        "insertion_point": {
+          "required": true
+        },
+        "text": {
+          "required": true
+        },
+        "dimension_style_name": {
+          "rust_getter": "VAR.dimension_style_name.clone()",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"dimension_style_name\", vm)? { VAR.dimension_style_name = v.try_into_value::<String>(vm)?; VAR.dimension_style_handle = None; }"
+        },
+        "dimension_style_handle": {
+          "read_only": true
+        },
+        "dwg_unknown_short": {
+          "exclude": true
+        }
+      }
+    },
+    "Shape": {
+      "fields": {
+        "insertion_point": {
+          "required": true
+        },
+        "size": {
+          "required": true
+        },
+        "shape_name": {
+          "required": true
+        },
+        "shape_number": {
+          "required": true
+        },
+        "style_name": {
+          "rust_getter": "VAR.style_name.clone()",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"style_name\", vm)? { VAR.style_name = v.try_into_value::<String>(vm)?; VAR.style_handle = None; }"
+        },
+        "style_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "AttributeDefinition": {
+      "fields": {
+        "tag": {
+          "required": true
+        },
+        "insertion_point": {
+          "required": true
+        },
+        "height": {
+          "required": true
+        },
+        "embedded_mtext": {
+          "exclude": true,
+          "_comment": "Embedded R2018+ MTEXT carries linked layout state. It remains snapshot-readable but is preserved untouched by Python edits until linked-payload mutation has dedicated validation."
+        }
+      }
+    },
+    "AttributeEntity": {
+      "fields": {
+        "tag": {
+          "required": true
+        },
+        "value": {
+          "required": true
+        },
+        "insertion_point": {
+          "required": true
+        },
+        "height": {
+          "required": true
+        },
+        "attdef_handle": {
+          "read_only": true
+        },
+        "embedded_mtext": {
+          "exclude": true,
+          "_comment": "The embedded R2018+ MTEXT payload remains snapshot-readable and is preserved by partial edits."
+        }
+      }
+    },
+    "Hatch": {
+      "fields": {
+        "paths": {
+          "required": true
+        },
+        "is_mpolygon": {
+          "exclude": true,
+          "_comment": "MPOLYGON is a distinct class-backed record and is preserved without exposing Hatch creation semantics."
+        },
+        "gradient_color": {
+          "exclude": true,
+          "_comment": "Gradient payload mutation requires a separate validated model; partial Hatch edits preserve it."
+        },
+        "mpolygon_hatch_color": {
+          "exclude": true
+        },
+        "mpolygon_x_direction": {
+          "exclude": true
+        },
+        "mpolygon_boundary_handle_count": {
+          "exclude": true
+        }
+      }
+    },
+    "MLine": {
+      "fields": {
+        "vertices": {
+          "required": true
+        },
+        "flags": {
+          "rust_getter": "(VAR.flags.bits() as i64)",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"flags\", vm)? { let bits = v.try_into_value::<i64>(vm)?; VAR.flags = i16::try_from(bits).ok().and_then(codec::entities::MLineFlags::from_bits).ok_or_else(|| vm.new_value_error(\"MLine.flags has unknown bits\".to_owned()))?; }"
+        },
+        "start_point": {
+          "read_only": true
+        },
+        "style_handle": {
+          "read_only": true
+        },
+        "style_element_count": {
+          "read_only": true
+        },
+        "style_name": {
+          "rust_getter": "VAR.style_name.clone()",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"style_name\", vm)? { VAR.style_name = v.try_into_value::<String>(vm)?; VAR.style_handle = None; }"
+        }
+      }
+    },
+    "Leader": {
+      "fields": {
+        "vertices": {
+          "required": true
+        },
+        "origin": {
+          "read_only": true
+        },
+        "dimension_gap": {
+          "read_only": true
+        },
+        "arrowhead_type": {
+          "read_only": true
+        },
+        "arrow_size": {
+          "read_only": true
+        },
+        "byblock_color": {
+          "read_only": true
+        },
+        "dwg_unknown_bit1": {
+          "exclude": true
+        },
+        "dwg_unknown_bit2": {
+          "exclude": true
+        },
+        "dwg_unknown_bit3": {
+          "exclude": true
+        },
+        "dwg_unknown_bit4": {
+          "exclude": true
+        },
+        "dwg_unknown_bit5": {
+          "exclude": true
+        },
+        "dwg_unknown_short1": {
+          "exclude": true
+        }
+      }
+    },
+    "MultiLeader": {
+      "fields": {
+        "arrowhead_overrides": {
+          "exclude": true,
+          "_comment": "Per-arrow override records carry linked block handles; preserved untouched until dedicated validation exists."
+        },
+        "block_attributes": {
+          "exclude": true,
+          "_comment": "Block attribute records carry attribute-definition handles; preserved untouched."
+        },
+        "dwg_version": {
+          "read_only": true
+        },
+        "text_height": {
+          "read_only": true,
+          "_comment": "Neither writer stores the entity-level text height; scripts set the persisted context.text_height."
+        },
+        "property_override_flags": {
+          "read_only": true
+        },
+        "text_align_in_ipe": {
+          "read_only": true
+        },
+        "context": {
+          "keep_types": true,
+          "rust_getter": "multi_leader_annot_context_to_dict(vm, &VAR.context)?",
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"context\", vm)? { VAR.context = merge_multileader_context(&VAR.context, v, vm)?; }"
+        }
+      }
+    },
+    "Table": {
+      "fields": {
+        "insertion_point": {
+          "required": true
+        },
+        "block_name": {
+          "read_only": true
+        },
+        "block_record_handle": {
+          "read_only": true
+        },
+        "data_version": {
+          "read_only": true
+        },
+        "value_flags": {
+          "read_only": true
+        },
+        "override_flag": {
+          "read_only": true
+        },
+        "override_border_color": {
+          "read_only": true
+        },
+        "override_border_line_weight": {
+          "read_only": true
+        },
+        "override_border_visibility": {
+          "read_only": true
+        },
+        "legacy_style_override": {
+          "read_only": true
+        },
+        "name": {
+          "read_only": true
+        },
+        "description": {
+          "read_only": true
+        },
+        "field_handles": {
+          "read_only": true
+        },
+        "base_style": {
+          "read_only": true
+        },
+        "break_data": {
+          "read_only": true
+        },
+        "break_ranges": {
+          "read_only": true
+        },
+        "dwg_unknown_byte": {
+          "exclude": true
+        },
+        "dwg_unknown_handle": {
+          "exclude": true
+        },
+        "dwg_unknown_long1": {
+          "exclude": true
+        },
+        "dwg_r2010_unknown_bit": {
+          "exclude": true
+        },
+        "dwg_unknown_long2": {
+          "exclude": true
+        },
+        "dwg_unknown_short": {
+          "exclude": true
+        },
+        "legacy_border_colors": {
+          "exclude": true,
+          "_comment": "Generic LegacyBorderOverrides<T> is not expressible by the generator; legacy R13-R2000 border overrides are preserved untouched."
+        },
+        "legacy_border_line_weights": {
+          "exclude": true
+        },
+        "legacy_border_visibility": {
+          "exclude": true
+        }
+      }
+    },
+    "PolygonMesh": {
+      "rust_constructor": "codec::entities::PolygonMeshEntity::default()",
+      "fields": {
+        "vertices": {
+          "required": true
+        }
+      }
+    },
+    "PolyfaceMesh": {
+      "fields": {
+        "vertices": {
+          "required": true
+        },
+        "faces": {
+          "required": true
+        },
+        "seqend_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "Mesh": {
+      "fields": {
+        "vertices": {
+          "required": true
+        },
+        "faces": {
+          "required": true
+        },
+        "version": {
+          "read_only": true
+        }
+      }
+    },
+    "Helix": {
+      "fields": {
+        "start_point": {
+          "required": true
+        },
+        "spline": {
+          "read_only": true,
+          "_comment": "Derived by the host from the generating parameters."
+        },
+        "major_version": {
+          "read_only": true
+        },
+        "maintenance_version": {
+          "read_only": true
+        }
+      }
+    },
+    "RasterImage": {
+      "fields": {
+        "insertion_point": {
+          "required": true
+        },
+        "file_path": {
+          "required": true
+        },
+        "class_version": {
+          "read_only": true
+        },
+        "size": {
+          "read_only": true,
+          "_comment": "Pixel size of the image; the host takes it from the file."
+        },
+        "definition_handle": {
+          "read_only": true
+        },
+        "definition_reactor_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "Wipeout": {
+      "fields": {
+        "insertion_point": {
+          "required": true
+        },
+        "class_version": {
+          "read_only": true
+        },
+        "definition_handle": {
+          "read_only": true
+        },
+        "definition_reactor_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "Underlay": {
+      "fields": {
+        "definition_handle": {
+          "required": true
+        },
+        "insertion_point": {
+          "required": true
+        }
+      }
+    },
+    "Viewport": {
+      "fields": {
+        "id": {
+          "read_only": true
+        },
+        "snap_base": {
+          "read_only": true
+        },
+        "snap_spacing": {
+          "read_only": true
+        },
+        "grid_spacing": {
+          "read_only": true
+        },
+        "snap_angle": {
+          "read_only": true
+        },
+        "clip_boundary_handle": {
+          "read_only": true
+        },
+        "style_sheet": {
+          "read_only": true
+        },
+        "ucs_at_origin": {
+          "read_only": true
+        },
+        "ucs_per_viewport": {
+          "read_only": true
+        },
+        "ucs_origin": {
+          "read_only": true
+        },
+        "ucs_x_axis": {
+          "read_only": true
+        },
+        "ucs_y_axis": {
+          "read_only": true
+        },
+        "ucs_handle": {
+          "read_only": true
+        },
+        "base_ucs_handle": {
+          "read_only": true
+        },
+        "ucs_ortho_type": {
+          "read_only": true
+        },
+        "elevation": {
+          "read_only": true
+        },
+        "shade_plot_mode": {
+          "read_only": true
+        },
+        "grid_flags": {
+          "read_only": true
+        },
+        "grid_major": {
+          "read_only": true
+        },
+        "background_handle": {
+          "read_only": true
+        },
+        "shade_plot_handle": {
+          "read_only": true
+        },
+        "visual_style_handle": {
+          "read_only": true
+        },
+        "sun_handle": {
+          "read_only": true
+        },
+        "default_lighting": {
+          "read_only": true
+        },
+        "default_lighting_type": {
+          "read_only": true
+        },
+        "brightness": {
+          "read_only": true
+        },
+        "contrast": {
+          "read_only": true
+        },
+        "ambient_color": {
+          "read_only": true
+        },
+        "center": {
+          "required": true
+        },
+        "width": {
+          "required": true
+        },
+        "height": {
+          "required": true
+        },
+        "custom_scale": {
+          "read_only": true,
+          "_comment": "Derived by the host as height / view_height, like MVIEW."
+        }
+      }
+    },
+    "ViewBorder": {
+      "fields": {
+        "version": {
+          "read_only": true
+        },
+        "min": {
+          "required": true
+        },
+        "max": {
+          "required": true
+        },
+        "active_viewport": {
+          "required": true
+        },
+        "scale_handle": {
+          "required": true
+        }
+      }
+    },
+    "Light": {
+      "fields": {
+        "class_version": {
+          "read_only": true
+        },
+        "position": {
+          "required": true
+        },
+        "name": {
+          "required": true
+        }
+      }
+    },
+    "Ole2Frame": {
+      "update_only": true,
+      "update_only_message": "create an Ole2Frame with doc.embed_picture(path, origin, width); existing frames can be moved, resized and aspect-locked, and the stored object is preserved untouched",
+      "fields": {
+        "storage": {
+          "exclude": true,
+          "_comment": "Opaque compound-file payload; snapshot-readable and preserved untouched."
+        },
+        "envelope": {
+          "exclude": true,
+          "_comment": "Opaque frame envelope; preserved untouched."
+        },
+        "version": {
+          "read_only": true
+        },
+        "source_application": {
+          "read_only": true
+        },
+        "ole_object_type": {
+          "read_only": true
+        },
+        "dwg_mode": {
+          "read_only": true
+        }
+      }
+    },
+    "Solid3D": {
+      "update_only": true,
+      "update_only_message": "Solid3D is built and edited by the geometry kernel: use doc.solids to create solids and move them; a script never writes the ACIS payload",
+      "fields": {
+        "acis_data": {
+          "exclude": true,
+          "_comment": "Opaque ACIS payload; snapshot-readable and never rewritten by a script."
+        },
+        "wires": {
+          "exclude": true,
+          "_comment": "Derived edge wires; regenerated by the host."
+        },
+        "silhouettes": {
+          "exclude": true,
+          "_comment": "Derived; regenerated by the host."
+        },
+        "uid": {
+          "read_only": true
+        },
+        "point_of_reference": {
+          "read_only": true
+        },
+        "history_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "Body": {
+      "update_only": true,
+      "update_only_message": "Body is built and edited by the geometry kernel: use doc.solids to create solids and move them; a script never writes the ACIS payload",
+      "fields": {
+        "acis_data": {
+          "exclude": true,
+          "_comment": "Opaque ACIS payload; snapshot-readable and never rewritten by a script."
+        },
+        "wires": {
+          "exclude": true,
+          "_comment": "Derived edge wires; regenerated by the host."
+        },
+        "silhouettes": {
+          "exclude": true,
+          "_comment": "Derived; regenerated by the host."
+        },
+        "uid": {
+          "read_only": true
+        },
+        "point_of_reference": {
+          "read_only": true
+        },
+        "history_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "Region": {
+      "update_only": true,
+      "update_only_message": "Region is built and edited by the geometry kernel: use doc.solids to create solids and move them; a script never writes the ACIS payload",
+      "fields": {
+        "acis_data": {
+          "exclude": true,
+          "_comment": "Opaque ACIS payload; snapshot-readable and never rewritten by a script."
+        },
+        "wires": {
+          "exclude": true,
+          "_comment": "Derived edge wires; regenerated by the host."
+        },
+        "silhouettes": {
+          "exclude": true,
+          "_comment": "Derived; regenerated by the host."
+        },
+        "uid": {
+          "read_only": true
+        },
+        "point_of_reference": {
+          "read_only": true
+        },
+        "history_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "Surface": {
+      "update_only": true,
+      "update_only_message": "Surface is built by the geometry kernel: use doc.solids.surface(profile) for a plane surface or doc.solids.extrude(open_profile, direction) for an extruded one; a script never writes the ACIS payload",
+      "fields": {
+        "acis_data": {
+          "exclude": true,
+          "_comment": "Opaque ACIS payload; never rewritten by a script."
+        },
+        "surface_data": {
+          "exclude": true,
+          "_comment": "Kind-specific sweep/loft parameters and embedded profiles; preserved untouched."
+        },
+        "wires": {
+          "exclude": true
+        },
+        "silhouettes": {
+          "exclude": true
+        },
+        "kind": {
+          "read_only": true,
+          "python_name": "surface_kind",
+          "_comment": "Renamed: a bare `kind` key names the entity type in every Python dict."
+        },
+        "modeler_format_version": {
+          "read_only": true
+        },
+        "point_of_reference": {
+          "read_only": true
+        },
+        "history_handle": {
+          "read_only": true
+        }
+      }
+    },
+    "SectionSymbol": {
+      "fields": {
+        "points": {
+          "required": true
+        },
+        "view_symbol_version": {
+          "read_only": true
+        },
+        "raw_view_symbol_70": {
+          "read_only": true
+        },
+        "version": {
+          "read_only": true
+        },
+        "raw_point_count_90": {
+          "read_only": true
+        },
+        "raw_flags_90": {
+          "read_only": true,
+          "_comment": "Semantics unknown in opencadcodec; preserved as read, 0 for a new symbol."
+        },
+        "raw_point_record_count": {
+          "read_only": true
+        },
+        "end_a": {
+          "read_only": true
+        },
+        "end_b": {
+          "read_only": true
+        },
+        "tick_a": {
+          "read_only": true
+        },
+        "tick_b": {
+          "read_only": true
+        },
+        "label": {
+          "read_only": true
+        }
+      }
+    }
+  },
+  "required_struct_fields": {
+    "LwVertex": [
+      "location"
+    ],
+    "Vertex2D": [
+      "location"
+    ],
+    "Vertex3D": [
+      "location"
+    ],
+    "Vertex3DPolyline": [
+      "position"
+    ],
+    "PolygonMeshVertex": [
+      "location"
+    ],
+    "PolyfaceVertex": [
+      "location"
+    ],
+    "MLineVertex": [
+      "position"
+    ],
+    "LineEdge": [
+      "start",
+      "end"
+    ],
+    "CircularArcEdge": [
+      "center",
+      "radius"
+    ],
+    "EllipticArcEdge": [
+      "center",
+      "major_axis_endpoint"
+    ],
+    "PolylineEdge": [
+      "vertices"
+    ],
+    "SectionSymbolPoint": [
+      "point"
+    ]
+  }
+}

@@ -110,11 +110,18 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `STRETCH` |  | current selection or prompt |
 | `TRIM` |  | command-driven |
 
-## Other (531)
+## Other (626)
 
 | Command | Default shortcut | Selection |
 |---|---|---|
+| `-ATTDEF` |  | command-driven |
+| `-DGNATTACH` |  | command-driven |
+| `-DWFATTACH` |  | command-driven |
+| `-INSERT` |  | command-driven |
 | `-PARAMETERS` |  | command-driven |
+| `-PCEXTRACTSECTION` |  | command-driven |
+| `-PDFATTACH` |  | command-driven |
+| `-POINTCLOUDATTACH` |  | command-driven |
 | `-PSETUPIN` |  | command-driven |
 | `-SETBYLAYER` |  | command-driven |
 | `-XREF` |  | command-driven |
@@ -132,6 +139,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `ADCENTER` |  | command-driven |
 | `ADDSELECTED` |  | command-driven |
 | `ADJUST` |  | command-driven |
+| `AFLAGS` |  | command-driven |
 | `ALIASEDIT` |  | command-driven |
 | `ALIGN3D` |  | command-driven |
 | `ALIGNBOTTOM` |  | command-driven |
@@ -164,6 +172,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `ARRAYPATH` |  | current selection or prompt |
 | `ARRAYPOLAR` |  | current selection or prompt |
 | `ARRAYRECT` |  | current selection or prompt |
+| `ATTACH` |  | command-driven |
 | `ATTDEF` |  | command-driven |
 | `ATTDIA` |  | command-driven |
 | `ATTDISP` |  | command-driven |
@@ -171,6 +180,9 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `ATTEXT` |  | command-driven |
 | `ATTMAN` |  | command-driven |
 | `ATTMODE` |  | command-driven |
+| `ATTMODE0` |  | command-driven |
+| `ATTMODE1` |  | command-driven |
+| `ATTMODE2` |  | command-driven |
 | `ATTREQ` |  | command-driven |
 | `ATTSYNC` |  | command-driven |
 | `AUDIT` |  | command-driven |
@@ -188,8 +200,13 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `BLEND` |  | command-driven |
 | `BLIPMODE` |  | command-driven |
 | `BLOCK` |  | current selection or prompt |
+| `BLOCKMRULIST` |  | command-driven |
+| `BLOCKNAVIGATE` |  | command-driven |
 | `BLOCKPALETTE` |  | command-driven |
+| `BLOCKREDEFINEMODE` |  | command-driven |
 | `BLOCKSPALETTE` |  | command-driven |
+| `BLOCKSPALETTECLOSE` |  | command-driven |
+| `BLOCKSTATE` |  | command-driven |
 | `BMAKE` |  | command-driven |
 | `BOUNDARY` |  | command-driven |
 | `BREAKATPOINT` |  | command-driven |
@@ -211,6 +228,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `CHAMFEREDGE` |  | command-driven |
 | `CHANGELOG` |  | command-driven |
 | `CHPROP` |  | command-driven |
+| `CHSPACE` |  | command-driven |
 | `CIRCLE_2P` |  | command-driven |
 | `CIRCLE_3P` |  | command-driven |
 | `CIRCLE_CD` |  | command-driven |
@@ -219,6 +237,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `CLAYER` |  | command-driven |
 | `CLEANSCREEN` | Ctrl+0 | command-driven |
 | `CLEAR` |  | command-driven |
+| `CLIP` |  | command-driven |
 | `CLIPROMPTLINES` |  | command-driven |
 | `CLOSE` |  | command-driven |
 | `CLR` |  | command-driven |
@@ -239,6 +258,12 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `COPYBASE` | Ctrl+SHIFT+C | command-driven |
 | `COPYCLIP` | Ctrl+C | current selection or prompt |
 | `COUNT` |  | command-driven |
+| `COUNTAREA` |  | command-driven |
+| `COUNTCLOSE` |  | command-driven |
+| `COUNTFIELD` |  | command-driven |
+| `COUNTLIST` |  | command-driven |
+| `COUNTLISTCLOSE` |  | command-driven |
+| `COUNTTABLE` |  | command-driven |
 | `CPCONSTRAINT` |  | command-driven |
 | `CREATESKETCH` |  | command-driven |
 | `CROSSINGAREACOLOR` |  | command-driven |
@@ -278,6 +303,9 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `DELOBJ` |  | command-driven |
 | `DESELALL` |  | command-driven |
 | `DESELECT` |  | command-driven |
+| `DGNATTACH` |  | command-driven |
+| `DGNCLIP` |  | command-driven |
+| `DGNFRAME` |  | command-driven |
 | `DISPSILH` |  | command-driven |
 | `DIVIDE` |  | command-driven |
 | `DJO` |  | command-driven |
@@ -291,6 +319,9 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `DRAWORDER_UNDER` |  | command-driven |
 | `DSETTINGS` |  | command-driven |
 | `DSPACE` |  | command-driven |
+| `DWFATTACH` |  | command-driven |
+| `DWFCLIP` |  | command-driven |
+| `DWFFRAME` |  | command-driven |
 | `DWGPROP` |  | command-driven |
 | `DWGPROPS` |  | command-driven |
 | `DWGUNITS` |  | command-driven |
@@ -302,6 +333,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `ELLIPSE_AXIS` |  | command-driven |
 | `ETRANSMIT` |  | command-driven |
 | `EXIT` |  | command-driven |
+| `EXPLMODE` |  | command-driven |
 | `EXPORT` |  | command-driven |
 | `EXPORTPDF` |  | command-driven |
 | `EXPORTSTEP` |  | command-driven |
@@ -309,6 +341,9 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `EXTERNALREFERENCES` |  | command-driven |
 | `EXTRIM` |  | command-driven |
 | `FI` |  | command-driven |
+| `FIELD` |  | command-driven |
+| `FIELDDISPLAY` |  | command-driven |
+| `FIELDEVAL` |  | command-driven |
 | `FILEASSOC` |  | command-driven |
 | `FILETAB` |  | command-driven |
 | `FILLETEDGE` |  | command-driven |
@@ -323,6 +358,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `FRAMES0` |  | command-driven |
 | `FRAMES1` |  | command-driven |
 | `FRAMES2` |  | command-driven |
+| `FRAMES3` |  | command-driven |
 | `FXCONSTRAINT` |  | command-driven |
 | `GCFIX` |  | command-driven |
 | `GCHIDE` |  | command-driven |
@@ -334,6 +370,8 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `GCVERTICAL` |  | command-driven |
 | `GRADIENT` |  | command-driven |
 | `GRID` | F7 | command-driven |
+| `GRIDMODE` |  | command-driven |
+| `GRIDUNIT` |  | command-driven |
 | `GRIPCOLOR` |  | command-driven |
 | `GRIPHOT` |  | command-driven |
 | `GRIPHOVER` |  | command-driven |
@@ -354,11 +392,13 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `IM` |  | command-driven |
 | `IMAGE` |  | command-driven |
 | `IMAGEATTACH` |  | command-driven |
+| `IMAGECLIP` |  | command-driven |
 | `IMAGEEMBED` |  | command-driven |
 | `IMAGEFRAME` |  | command-driven |
 | `IMPORTOBJ` |  | command-driven |
 | `INF` |  | command-driven |
 | `INSERT` |  | command-driven |
+| `INSNAME` |  | command-driven |
 | `INSUNITS` |  | command-driven |
 | `INTERFERE` |  | command-driven |
 | `ISAVEBAK` |  | command-driven |
@@ -425,13 +465,15 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `NAVVCUBE` |  | command-driven |
 | `NCOPY` |  | command-driven |
 | `NCOPYALL` |  | command-driven |
-| `NEW` | Ctrl+N | command-driven |
+| `NEW` |  | command-driven |
+| `NEWSHEETSET` |  | command-driven |
 | `OBJECTSCALE` |  | command-driven |
 | `OBJIMPORT` |  | command-driven |
 | `OCCONSTRAINT` |  | command-driven |
 | `OOPS` |  | command-driven |
 | `OP` |  | command-driven |
 | `OPEN` | Ctrl+O | command-driven |
+| `OPENSHEETSET` |  | command-driven |
 | `OPTIONS` |  | command-driven |
 | `ORTHO` | F8 | command-driven |
 | `OSMODE` |  | command-driven |
@@ -445,12 +487,24 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `PASTEBLOCK` | Ctrl+SHIFT+V | command-driven |
 | `PASTECLIP` | Ctrl+V | command-driven |
 | `PASTEORIG` |  | command-driven |
+| `PCEXTRACTCENTERLINE` |  | command-driven |
+| `PCEXTRACTCORNER` |  | command-driven |
+| `PCEXTRACTEDGE` |  | command-driven |
+| `PCEXTRACTSECTION` |  | command-driven |
 | `PDFATTACH` |  | command-driven |
+| `PDFCLIP` |  | command-driven |
 | `PDFFRAME` |  | command-driven |
+| `PDFIMPORT` |  | command-driven |
+| `PDFIMPORTFILTER` |  | command-driven |
+| `PDFIMPORTIMAGEPATH` |  | command-driven |
+| `PDFIMPORTLAYERS` |  | command-driven |
+| `PDFIMPORTMODE` |  | command-driven |
+| `PDFOSNAP` |  | command-driven |
 | `PDMODE` |  | command-driven |
 | `PDSIZE` |  | command-driven |
 | `PERF` |  | command-driven |
 | `PERSP` |  | command-driven |
+| `PERSPECTIVE` |  | command-driven |
 | `PICKADD` |  | command-driven |
 | `PICKBOX` |  | command-driven |
 | `PICKDRAG` |  | command-driven |
@@ -467,7 +521,29 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `PLOTWINDOW` |  | command-driven |
 | `PLUGINMANAGER` |  | command-driven |
 | `PLUGINS` |  | command-driven |
+| `POINTCLOUD2DVSDISPLAY` |  | command-driven |
+| `POINTCLOUDATTACH` |  | command-driven |
+| `POINTCLOUDAUTOUPDATE` |  | command-driven |
+| `POINTCLOUDBOUNDARY` |  | command-driven |
+| `POINTCLOUDCACHESIZE` |  | command-driven |
 | `POINTCLOUDCLIPFRAME` |  | command-driven |
+| `POINTCLOUDCOLORMAP` |  | command-driven |
+| `POINTCLOUDCROP` |  | command-driven |
+| `POINTCLOUDDENSITY` |  | command-driven |
+| `POINTCLOUDLIGHTING` |  | command-driven |
+| `POINTCLOUDLIGHTSOURCE` |  | command-driven |
+| `POINTCLOUDLOCK` |  | command-driven |
+| `POINTCLOUDLOD` |  | command-driven |
+| `POINTCLOUDMANAGER` |  | command-driven |
+| `POINTCLOUDMANAGERCLOSE` |  | command-driven |
+| `POINTCLOUDPOINTMAX` |  | command-driven |
+| `POINTCLOUDPOINTMAXLEGACY` |  | command-driven |
+| `POINTCLOUDPOINTSIZE` |  | command-driven |
+| `POINTCLOUDRTDENSITY` |  | command-driven |
+| `POINTCLOUDSHADING` |  | command-driven |
+| `POINTCLOUDSTYLIZE` |  | command-driven |
+| `POINTCLOUDUNCROP` |  | command-driven |
+| `POINTCLOUDVISRETAIN` |  | command-driven |
 | `POLAR` | F10 | command-driven |
 | `POLY` |  | command-driven |
 | `POLYSOLID` |  | command-driven |
@@ -482,13 +558,16 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `PSETUPIN` |  | command-driven |
 | `PSLTSCALE` |  | command-driven |
 | `PSPACE` |  | command-driven |
+| `PTYPE` |  | command-driven |
 | `PURGE` |  | command-driven |
 | `PYR` |  | command-driven |
 | `PYRAMID` |  | command-driven |
 | `QC` |  | command-driven |
 | `QDIM` |  | command-driven |
 | `QL` |  | command-driven |
+| `QLAYER` |  | command-driven |
 | `QLEADER` |  | command-driven |
+| `QNEW` | Ctrl+N | command-driven |
 | `QP` |  | command-driven |
 | `QS` |  | command-driven |
 | `QSAVE` |  | command-driven |
@@ -542,6 +621,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `SHADEDGE` |  | command-driven |
 | `SHADEMODE` |  | command-driven |
 | `SHEETSET` |  | command-driven |
+| `SHEETSETHIDE` |  | command-driven |
 | `SHELL` |  | command-driven |
 | `SHORTCUTMENU` |  | command-driven |
 | `SHORTCUTMENUDURATION` |  | command-driven |
@@ -572,12 +652,19 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `SPLINEFIT` |  | command-driven |
 | `SPLINESEGS` |  | command-driven |
 | `SPLINETYPE` |  | command-driven |
+| `SSFOUND` |  | command-driven |
+| `SSLOCATE` |  | command-driven |
 | `SSM` |  | command-driven |
+| `SSMAUTOOPEN` |  | command-driven |
+| `SSMPOLLTIME` |  | command-driven |
+| `SSMSHEETSTATUS` |  | command-driven |
+| `SSMSTATE` |  | command-driven |
 | `STEPOUT` |  | command-driven |
 | `STLOUT` |  | command-driven |
 | `STPOUT` |  | command-driven |
 | `STYLE` |  | command-driven |
 | `STYLESMANAGER` |  | command-driven |
+| `SURFACEASSOCIATIVITY` |  | command-driven |
 | `SURFTYPE` |  | command-driven |
 | `SURFU` |  | command-driven |
 | `SURFV` |  | command-driven |
@@ -604,6 +691,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `TP` |  | command-driven |
 | `TRACE` |  | command-driven |
 | `TRACEWID` |  | command-driven |
+| `TRANSPARENCY` |  | command-driven |
 | `TS` |  | command-driven |
 | `U` |  | command-driven |
 | `UCSICON` |  | command-driven |
@@ -613,6 +701,10 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `UNGROUP` |  | command-driven |
 | `UNISOLATEOBJECTS` |  | command-driven |
 | `UNITS` |  | command-driven |
+| `UOSNAP` |  | command-driven |
+| `UOSNAP0` |  | command-driven |
+| `UOSNAP1` |  | command-driven |
+| `UPDATEFIELD` |  | command-driven |
 | `USERI` |  | command-driven |
 | `USERR` |  | command-driven |
 | `USRTIMER` |  | command-driven |
@@ -620,6 +712,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `VIEW` |  | command-driven |
 | `VISRETAIN` |  | command-driven |
 | `VISUALSTYLES` |  | command-driven |
+| `VPCLIP` |  | command-driven |
 | `VPJOIN` |  | command-driven |
 | `VPLAYER` |  | command-driven |
 | `VPSYNC` |  | command-driven |
@@ -636,8 +729,10 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `WORLDVIEW` |  | command-driven |
 | `XA` |  | command-driven |
 | `XATTACH` |  | command-driven |
+| `XCLIP` |  | command-driven |
 | `XCLIPFRAME` |  | command-driven |
 | `XDATA` |  | command-driven |
+| `XDWGFADECTL` |  | command-driven |
 | `XOPEN` |  | command-driven |
 | `XR` |  | command-driven |
 | `XREF` |  | command-driven |
@@ -676,4 +771,4 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `VPORTS` |  | command-driven |
 | `ZOOM` |  | command-driven |
 
-_634 commands across 8 categories._
+_729 commands across 8 categories._

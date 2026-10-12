@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
@@ -198,11 +198,14 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::types::Vector3;
+    use codec::entities::Line;
+    use codec::types::Vector3;
 
     fn line() -> EntityType {
-        EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(10.0, 0.0, 0.0)))
+        EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+        ))
     }
 
     #[test]
@@ -231,7 +234,10 @@ mod tests {
     #[test]
     fn multiple_applies_each_pick_and_ends_on_enter() {
         let mut command = EqualConstraintCommand::new();
-        assert!(matches!(command.on_text_input("M"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("M"),
+            Some(CmdResult::NeedPoint)
+        ));
         command.inject_picked_entity(line());
         command.on_entity_pick(Handle::new(7), DVec3::ZERO);
         command.inject_picked_entity(line());

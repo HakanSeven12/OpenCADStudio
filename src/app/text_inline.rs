@@ -8,8 +8,8 @@
 // text-bearing entity, plus the field read/write helpers both editors use to
 // commit back to the correct entity slot.
 
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle, Text};
+use codec::types::Vector3;
+use codec::{EntityType, Handle, Text};
 use glam::DVec3;
 
 /// Which text slot of which entity an editor session reads from and writes to.
@@ -101,10 +101,10 @@ pub struct TextInlineState {
     /// Canvas-space anchor where the field is drawn (the insertion-point click).
     pub screen_anchor: iced::Point,
 }
-pub(super) fn can_edit_text(mut handle: Handle, document: &acadrust::CadDocument) -> bool {
+pub(super) fn can_edit_text(mut handle: Handle, document: &codec::CadDocument) -> bool {
     for _ in 0..8 {
         match document.get_entity(handle) {
-            Some(acadrust::EntityType::Leader(l)) => {
+            Some(codec::EntityType::Leader(l)) => {
                 let ann = l.annotation_handle;
                 if ann.is_null() || ann == handle {
                     return false;
@@ -155,6 +155,13 @@ impl super::OpenCADStudio {
             self.open_tolerance_dialog(Some(target));
             return iced::Task::none();
         }
+        if matches!(
+            self.tabs[i].scene.document.get_entity(target),
+            Some(EntityType::AttributeDefinition(_))
+        ) {
+            self.open_attdef_edit(target);
+            return iced::Task::none();
+        }
         // Snapshot what we need before borrowing `self` mutably to open.
         let Some(entity) = self.tabs[i].scene.document.get_entity(target) else {
             return iced::Task::none();
@@ -169,9 +176,7 @@ impl super::OpenCADStudio {
             EntityType::AttributeEntity(a) => (vec3(a.insertion_point), a.height),
             EntityType::Dimension(d) => (vec3(d.base().insertion_point), 0.25),
             EntityType::Tolerance(t) => (vec3(t.insertion_point), t.text_height),
-            EntityType::MultiLeader(ml) => {
-                (vec3(ml.context.text_location), ml.context.text_height)
-            }
+            EntityType::MultiLeader(ml) => (vec3(ml.context.text_location), ml.context.text_height),
             _ => (DVec3::ZERO, 0.25),
         };
 
@@ -207,7 +212,13 @@ impl super::OpenCADStudio {
             creation,
             screen_anchor: iced::Point::new(60.0, 90.0),
         };
-        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().last_move_pos {
+        if let Some(p) = self.tabs[self.active_tab]
+            .scene
+            .selection
+            .borrow()
+            .input
+            .last_move_pos
+        {
             state.screen_anchor = p;
         }
         self.text_inline = Some(state);
@@ -217,7 +228,9 @@ impl super::OpenCADStudio {
     /// Empty content drops a new entity and leaves an edited one untouched.
     pub(super) fn text_inline_commit(&mut self) -> bool {
         let i = self.active_tab;
-        let Some(ed) = self.text_inline.take() else { return false };
+        let Some(ed) = self.text_inline.take() else {
+            return false;
+        };
         if ed.value.trim().is_empty() && ed.editing.is_none() {
             self.refresh_properties();
             return false;
@@ -247,11 +260,8 @@ impl super::OpenCADStudio {
                 prepared
             } else {
                 let position = plane.to_local(ed.pos);
-                Text::with_value(
-                    &ed.value,
-                    Vector3::new(position.x, position.y, position.z),
-                )
-                .with_height(ed.height)
+                Text::with_value(&ed.value, Vector3::new(position.x, position.y, position.z))
+                    .with_height(ed.height)
             };
             // New text inherits the document's current text style (STYLE), not
             // the entity default. See #92.
@@ -298,7 +308,7 @@ impl super::OpenCADStudio {
             if variable_height
                 && !matches!(
                     t.horizontal_alignment,
-                    acadrust::entities::TextHorizontalAlignment::Aligned
+                    codec::entities::TextHorizontalAlignment::Aligned
                 )
             {
                 self.tabs[i].scene.document.header.text_height = t.height;

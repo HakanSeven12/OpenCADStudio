@@ -9,10 +9,10 @@
 //   two points. The new absolute angle is then typed or picked from the center;
 //   the applied rotation is new-angle - reference-angle.
 
-use acadrust::Handle;
-use cadkernel::geom2d::{self, Curve as KernelCurve};
-use glam::DVec3;
 use crate::t;
+use codec::Handle;
+use glam::DVec3;
+use kernel::geom2d::{self, Curve as KernelCurve};
 
 use crate::command::{CadCommand, CmdResult, DynField, EntityTransform, WorkingPlane};
 use crate::modules::draw::defaults;
@@ -36,10 +36,24 @@ pub fn tool() -> ToolDef {
 
 enum Step {
     Center,
-    Angle { center: DVec3 },
-    RefFirst { center: DVec3 },
-    RefSecond { center: DVec3, first: DVec3 },
-    RefNew { center: DVec3, ref_angle: f64 },
+    /// 3DROTATE: the axis through the base point.
+    Axis {
+        center: DVec3,
+    },
+    Angle {
+        center: DVec3,
+    },
+    RefFirst {
+        center: DVec3,
+    },
+    RefSecond {
+        center: DVec3,
+        first: DVec3,
+    },
+    RefNew {
+        center: DVec3,
+        ref_angle: f64,
+    },
 }
 
 pub struct RotateCommand {
@@ -48,6 +62,11 @@ pub struct RotateCommand {
     step: Step,
     default_angle: f64, // degrees
     plane: WorkingPlane,
+    /// 3DROTATE: ask for the axis, then measure the angle in the plane square
+    /// to it.
+    spatial: bool,
+    /// The plane is the one square to the chosen axis, not the UCS.
+    axis_chosen: bool,
 }
 
 impl RotateCommand {
@@ -58,7 +77,36 @@ impl RotateCommand {
             step: Step::Center,
             default_angle: defaults::get_rotate_angle(),
             plane: WorkingPlane::default(),
+            spatial: false,
+            axis_chosen: false,
         }
+    }
+
+    /// 3DROTATE: any objects, about any axis through a base point.
+    pub fn new_3d(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        Self {
+            spatial: true,
+            ..Self::new(handles, wire_models)
+        }
+    }
+
+    /// Turn about `axis` through `center`: the angle is then read in the plane
+    /// square to it, so every later step works as in a plain rotation.
+    fn choose_axis(&mut self, center: DVec3, axis: DVec3) -> CmdResult {
+        let Some(axis) = axis.try_normalize() else {
+            return CmdResult::NeedPoint;
+        };
+        // The UCS X laid into that plane, or Y when X runs along the axis.
+        let reference = [self.plane.x, self.plane.y]
+            .into_iter()
+            .map(|direction| direction - axis * direction.dot(axis))
+            .find(|direction| direction.length() > 1e-6)
+            .unwrap_or(DVec3::X);
+        let x = reference.normalize();
+        self.plane = WorkingPlane::new(center, x, axis.cross(x));
+        self.axis_chosen = true;
+        self.step = Step::Angle { center };
+        CmdResult::NeedPoint
     }
 
     fn commit(&self, center: DVec3, angle_rad: f64) -> CmdResult {
@@ -73,11 +121,7 @@ impl RotateCommand {
         )
     }
 
-    fn angle_arc(
-        center: [f64; 2],
-        radius: f64,
-        angle: f64,
-    ) -> Option<(geom2d::Arc, bool)> {
+    fn angle_arc(center: [f64; 2], radius: f64, angle: f64) -> Option<(geom2d::Arc, bool)> {
         let (start, end, reverse) = if angle > 0.0 {
             (0.0, angle, false)
         } else {
@@ -108,11 +152,8 @@ impl RotateCommand {
             return guides;
         }
 
-        let Some((arc, reverse)) = Self::angle_arc(
-            [center_local.x, center_local.y],
-            radius,
-            angle,
-        ) else {
+        let Some((arc, reverse)) = Self::angle_arc([center_local.x, center_local.y], radius, angle)
+        else {
             return guides;
         };
         let mut points = KernelCurve::Arc(arc).tessellate_angle(TAU / 64.0);
@@ -138,20 +179,39 @@ impl RotateCommand {
 
 impl CadCommand for RotateCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
-        self.plane = plane;
+        if !self.axis_chosen {
+            self.plane = plane;
+        }
     }
 
     fn name(&self) -> &'static str {
-        "ROTATE"
+        if self.spatial {
+            "3DROTATE"
+        } else {
+            "ROTATE"
+        }
     }
 
     fn prompt(&self) -> String {
         match &self.step {
+            Step::Center if self.spatial => t!(
+                "3DROTATE  Specify base point  [%{count} objects]:",
+                count = self.handles.len()
+            )
+            .into_owned(),
             Step::Center => t!(
                 "ROTATE  Specify rotation center  [%{count} objects]:",
                 count = self.handles.len()
             )
             .into_owned(),
+            Step::Axis { .. } => {
+                t!("3DROTATE  Specify rotation axis [X/Y/Z] or a second point on it <Z>:")
+                    .into_owned()
+            }
+            Step::Angle { .. } if self.spatial => {
+                let a = format!("{:.4}", self.default_angle);
+                t!("3DROTATE  Specify rotation angle  <%{a}>:", a = a).into_owned()
+            }
             Step::Angle { .. } => {
                 let a = format!("{:.4}", self.default_angle);
                 t!("ROTATE  Specify rotation angle  <%{a}>:", a = a).into_owned()
@@ -159,9 +219,7 @@ impl CadCommand for RotateCommand {
             Step::RefFirst { .. } => {
                 t!("ROTATE  Specify first reference point or type reference angle:").into_owned()
             }
-            Step::RefSecond { .. } => {
-                t!("ROTATE  Specify second reference point:").into_owned()
-            }
+            Step::RefSecond { .. } => t!("ROTATE  Specify second reference point:").into_owned(),
             Step::RefNew { ref_angle, .. } => {
                 let a = format!("{:.1}°", ref_angle.to_degrees());
                 t!("ROTATE  Specify new absolute angle  [ref=%{a}]:", a = a).into_owned()
@@ -172,6 +230,9 @@ impl CadCommand for RotateCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
+            Step::Axis { .. } => ["X", "Y", "Z"]
+                .map(|axis| CmdOption::new(axis, axis))
+                .to_vec(),
             Step::Angle { .. } => vec![CmdOption::new(t!("Reference").as_ref(), "R")],
             _ => vec![],
         }
@@ -179,9 +240,17 @@ impl CadCommand for RotateCommand {
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
+            Step::Center if self.spatial => {
+                self.step = Step::Axis { center: pt };
+                CmdResult::NeedPoint
+            }
             Step::Center => {
                 self.step = Step::Angle { center: pt };
                 CmdResult::NeedPoint
+            }
+            Step::Axis { center } => {
+                let center = *center;
+                self.choose_axis(center, pt - center)
             }
             Step::Angle { center } => {
                 let center = *center;
@@ -214,6 +283,11 @@ impl CadCommand for RotateCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        // The axis defaults to the UCS Z.
+        if let Step::Axis { center } = &self.step {
+            let center = *center;
+            return self.choose_axis(center, self.plane.z);
+        }
         // At the normal angle step, Enter uses the stored default angle.
         if let Step::Angle { center } = &self.step {
             let center = *center;
@@ -228,6 +302,16 @@ impl CadCommand for RotateCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let t = text.trim();
         match &self.step {
+            Step::Axis { center } => {
+                let center = *center;
+                let axis = match t.to_ascii_uppercase().as_str() {
+                    "X" => self.plane.x,
+                    "Y" => self.plane.y,
+                    "Z" => self.plane.z,
+                    _ => return None,
+                };
+                Some(self.choose_axis(center, axis))
+            }
             Step::Angle { center } => {
                 let center = *center;
                 let low = t.to_ascii_lowercase();
@@ -243,10 +327,7 @@ impl CadCommand for RotateCommand {
             Step::RefFirst { center } => {
                 let center = *center;
                 let ref_angle = crate::entities::common::parse_typed_angle(t)?;
-                self.step = Step::RefNew {
-                    center,
-                    ref_angle,
-                };
+                self.step = Step::RefNew { center, ref_angle };
                 Some(CmdResult::NeedPoint)
             }
             Step::RefNew { center, ref_angle } => {
@@ -260,6 +341,14 @@ impl CadCommand for RotateCommand {
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
         let (center, angle_rad, guide_angle) = match &self.step {
+            Step::Axis { center } => {
+                return vec![WireModel::solid_f64(
+                    "rotate_axis".into(),
+                    vec![center.to_array(), pt.to_array()],
+                    WireModel::CYAN,
+                    false,
+                )];
+            }
             Step::Angle { center } => {
                 let Some(angle) = self.plane.angle(*center, pt) else {
                     return vec![];
@@ -289,11 +378,7 @@ impl CadCommand for RotateCommand {
             .wire_models
             .iter()
             .map(|w| {
-                w.rotated_about_axis(
-                    center.as_vec3(),
-                    self.plane.z.as_vec3(),
-                    angle_rad as f32,
-                )
+                w.rotated_about_axis(center.as_vec3(), self.plane.z.as_vec3(), angle_rad as f32)
             })
             .collect();
         let radius = self.plane.vector_to_local(pt - center).truncate().length();
@@ -354,11 +439,7 @@ impl CadCommand for RotateCommand {
         let point = if angle.abs() <= f64::EPSILON {
             [center_local.x + radius, center_local.y]
         } else {
-            let (arc, _) = Self::angle_arc(
-                [center_local.x, center_local.y],
-                radius,
-                angle,
-            )?;
+            let (arc, _) = Self::angle_arc([center_local.x, center_local.y], radius, angle)?;
             KernelCurve::Arc(arc).point_at(0.5)
         };
         Some(

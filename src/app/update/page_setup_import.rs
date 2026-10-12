@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 /// The result names the file the way the chooser shows it.
 fn read_page_setups_task(path: PathBuf) -> Task<Message> {
     super::file::background_task(
+        crate::t!("Page setup import"),
         move || {
             let file = path
                 .file_name()
@@ -47,7 +48,10 @@ impl OpenCADStudio {
                 self.plot_dialog.import_draft = Some(match result {
                     Ok((file, setups)) => PageSetupImportDraft {
                         file,
-                        setups: setups.into_iter().map(|(name, ps)| (name, ps, true)).collect(),
+                        setups: setups
+                            .into_iter()
+                            .map(|(name, ps)| (name, ps, true))
+                            .collect(),
                         error: None,
                     },
                     Err(error) => PageSetupImportDraft {
@@ -78,7 +82,7 @@ impl OpenCADStudio {
                 let Some(draft) = self.plot_dialog.import_draft.take() else {
                     return Task::none();
                 };
-                let chosen: Vec<(String, acadrust::objects::PlotSettings)> = draft
+                let chosen: Vec<(String, codec::objects::PlotSettings)> = draft
                     .selected()
                     .map(|(name, ps)| (name.to_string(), ps.clone()))
                     .collect();
@@ -113,7 +117,7 @@ impl OpenCADStudio {
     /// as one undoable step. Returns the names imported.
     pub(super) fn import_page_setups(
         &mut self,
-        setups: Vec<(String, acadrust::objects::PlotSettings)>,
+        setups: Vec<(String, codec::objects::PlotSettings)>,
     ) -> Vec<String> {
         if setups.is_empty() {
             return Vec::new();
@@ -169,7 +173,7 @@ impl OpenCADStudio {
                 return Task::none();
             }
         };
-        let chosen: Vec<(String, acadrust::objects::PlotSettings)> = if names == "*" {
+        let chosen: Vec<(String, codec::objects::PlotSettings)> = if names == "*" {
             available
         } else {
             let wanted: Vec<&str> = names.split(',').map(str::trim).collect();
@@ -178,8 +182,7 @@ impl OpenCADStudio {
                 match available.iter().find(|(n, _)| n.eq_ignore_ascii_case(want)) {
                     Some(found) => chosen.push(found.clone()),
                     None => self.command_line.push_error(
-                        crate::tf!("PSETUPIN: no page setup named \"{want}\" in {file}.")
-                            .as_ref(),
+                        crate::tf!("PSETUPIN: no page setup named \"{want}\" in {file}.").as_ref(),
                     ),
                 }
             }
@@ -213,12 +216,16 @@ mod tests {
     }
 
     fn last_line(app: &OpenCADStudio) -> String {
-        app.command_line.history.last().map(|line| line.text.clone()).unwrap_or_default()
+        app.command_line
+            .history
+            .last()
+            .map(|line| line.text.clone())
+            .unwrap_or_default()
     }
 
     /// The fixture's page setups as the chooser would hold them, read
     /// through the same document reader the command uses.
-    fn fixture_setups() -> Vec<(String, acadrust::objects::PlotSettings)> {
+    fn fixture_setups() -> Vec<(String, codec::objects::PlotSettings)> {
         let document = crate::io::load_file(std::path::Path::new(FIXTURE)).unwrap();
         crate::scene::document_page_setups(&document)
     }
@@ -242,7 +249,7 @@ mod tests {
 
     #[test]
     fn psetupin_imports_named_setups_from_a_saved_drawing() {
-        use acadrust::objects::PlotRotation;
+        use codec::objects::PlotRotation;
         // Author a source drawing with two named setups and save it.
         let dir = std::env::temp_dir().join(format!("ocs-psetupin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -256,14 +263,11 @@ mod tests {
             ps.paper_width = 297.0;
             ps.paper_height = 420.0;
             ps.rotation = PlotRotation::Degrees90;
-            ps.plot_view_handle = acadrust::Handle::new(0xBEEF);
+            ps.plot_view_handle = codec::Handle::new(0xBEEF);
             app.tabs[i].scene.page_setup_save("Site", ps.clone());
             ps.paper_size = "ISO_A2_(420.00_x_594.00_MM)".into();
             app.tabs[i].scene.page_setup_save("Overview", ps);
-            // JSON rejects raw backslashes, and Windows temp paths are full
-            // of them; forward slashes name the same file and need no escapes.
-            let source_json = source.display().to_string().replace('\\', "/");
-            let save = format!(r#"{{"op":"save","path":"{}"}}"#, source_json);
+            let save = serde_json::json!({"op":"save","path":source}).to_string();
             let reply = app.automation_op(&save);
             assert_eq!(reply["ok"], true, "{reply}");
         }
@@ -283,7 +287,10 @@ mod tests {
         let site = app.tabs[i].scene.page_setup_get("Site").unwrap();
         assert_eq!(site.paper_size, "ISO_A3_(297.00_x_420.00_MM)");
         assert_eq!(site.rotation, PlotRotation::Degrees90);
-        assert!(site.plot_view_handle.is_null(), "foreign handles are dropped");
+        assert!(
+            site.plot_view_handle.is_null(),
+            "foreign handles are dropped"
+        );
         assert!(app.tabs[i].dirty);
         // Undo takes the whole import back.
         let _ = app.update(Message::Undo);
@@ -316,20 +323,40 @@ mod tests {
         let _ = app.on_plot_dlg(PlotDlgMsg::Import(I::Loaded(loaded)));
         let draft = app.plot_dialog.import_draft.as_ref().expect("chooser open");
         assert_eq!(draft.file, "other.dwg");
-        assert_eq!(draft.selected().count(), 3, "everything ticked to start with");
+        assert_eq!(
+            draft.selected().count(),
+            3,
+            "everything ticked to start with"
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::Import(I::All(false)));
-        assert_eq!(app.plot_dialog.import_draft.as_ref().unwrap().selected().count(), 0);
+        assert_eq!(
+            app.plot_dialog
+                .import_draft
+                .as_ref()
+                .unwrap()
+                .selected()
+                .count(),
+            0
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::Import(I::Toggle("B".into())));
         let _ = app.on_plot_dlg(PlotDlgMsg::Import(I::Toggle("C".into())));
         let _ = app.on_plot_dlg(PlotDlgMsg::Import(I::Apply));
-        assert!(app.plot_dialog.import_draft.is_none(), "Apply closes the chooser");
+        assert!(
+            app.plot_dialog.import_draft.is_none(),
+            "Apply closes the chooser"
+        );
         assert_eq!(app.tabs[i].scene.page_setup_names(), ["B", "C"]);
         assert_eq!(app.plot_dialog.selected_setup, "B");
         assert!(app.plot_dialog.page_setups.iter().any(|name| name == "C"));
         // A failed read shows its reason in the chooser; Cancel closes it.
         let _ = app.on_plot_dlg(PlotDlgMsg::Import(I::Loaded(Err("unreadable".into()))));
         assert_eq!(
-            app.plot_dialog.import_draft.as_ref().unwrap().error.as_deref(),
+            app.plot_dialog
+                .import_draft
+                .as_ref()
+                .unwrap()
+                .error
+                .as_deref(),
             Some("unreadable")
         );
         let _ = app.on_plot_dlg(PlotDlgMsg::Import(I::Cancel));
@@ -342,7 +369,10 @@ mod tests {
         let _ = app.update(Message::LayoutCreate);
         assert_ne!(app.active_modal, Some(crate::app::ModalKind::Plot));
         let _ = app.update(Message::PageSetupOnNewLayoutChanged(true));
-        assert!(app.current_config().plot.page_setup_on_new_layout, "persisted");
+        assert!(
+            app.current_config().plot.page_setup_on_new_layout,
+            "persisted"
+        );
         let _ = app.update(Message::LayoutCreate);
         assert_eq!(app.active_modal, Some(crate::app::ModalKind::Plot));
         assert_eq!(app.plot_dialog.selected_setup, "*Layout3*");

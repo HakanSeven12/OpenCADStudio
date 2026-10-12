@@ -1,14 +1,13 @@
 // ZOOM WINDOW command — pick two corners to define the zoom area.
 
-use glam::{DVec3, Vec3};
 use crate::t;
+use glam::{DVec3, Vec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
-pub const ICON: IconKind =
-    IconKind::Svg(include_bytes!("../../../assets/icons/zoom_window.svg"));
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/zoom_window.svg"));
 
 /// Ribbon button: zoom into a rectangle picked by two corners.
 pub fn tool() -> ToolDef {
@@ -97,6 +96,14 @@ impl CadCommand for ZoomWindowCommand {
                 self.scale_prompt = true;
                 return Some(CmdResult::NeedPoint);
             }
+            // A scale factor straight at the first prompt: n, nX or nXP.
+            upper
+                if upper.ends_with('X')
+                    || upper.ends_with("XP")
+                    || crate::app::expr_eval::eval_number(&upper).is_some() =>
+            {
+                return Some(CmdResult::Dispatch(format!("ZOOM SCALE {text}")));
+            }
             _ => return None,
         };
         Some(CmdResult::Dispatch(command.to_string()))
@@ -108,7 +115,10 @@ impl CadCommand for ZoomWindowCommand {
         }
         let pt = pt.as_vec3();
         if let Some(p1) = self.first {
-            CmdResult::ZoomToWindow { p1: p1.as_dvec3(), p2: pt.as_dvec3() }
+            CmdResult::ZoomToWindow {
+                p1: p1.as_dvec3(),
+                p2: pt.as_dvec3(),
+            }
         } else {
             self.first = Some(pt);
             CmdResult::NeedPoint
@@ -130,7 +140,8 @@ impl CadCommand for ZoomWindowCommand {
         true
     }
 
-    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> { let pt = pt.as_vec3();
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        let pt = pt.as_vec3();
         let p1 = self.first?;
         let min = p1.min(pt);
         let max = p1.max(pt);
@@ -143,6 +154,7 @@ impl CadCommand for ZoomWindowCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -174,6 +186,8 @@ impl CadCommand for ZoomWindowCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
+
+            ..Default::default()
         })
     }
 }

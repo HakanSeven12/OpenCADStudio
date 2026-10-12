@@ -7,12 +7,13 @@
 
 use std::fmt;
 
-use acadrust::Handle;
+use codec::Handle;
 use iced::widget::{button, checkbox, column, container, row, text, text_input, Space};
 use iced::{Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
 
 const EMPTY: &str = "";
 
@@ -151,9 +152,7 @@ fn remove_escape(input: &str, code: &str) -> Option<String> {
             break;
         };
         let end = start + 1 + relative_end;
-        if crate::entities::tolerance::symbol_font_switch(&input[start + 1..end])
-            == Some(target)
-        {
+        if crate::entities::tolerance::symbol_font_switch(&input[start + 1..end]) == Some(target) {
             let mut remaining = String::with_capacity(input.len() - (end + 1 - start));
             remaining.push_str(&input[..start]);
             remaining.push_str(&input[end + 1..]);
@@ -313,8 +312,14 @@ impl State {
     pub fn is_valid(&self) -> bool {
         !self.symbol.is_empty()
             || !self.symbol_tail.is_empty()
-            || self.tolerances.iter().any(|entry| !entry.value.trim().is_empty())
-            || self.datums.iter().any(|entry| !entry.value.trim().is_empty())
+            || self
+                .tolerances
+                .iter()
+                .any(|entry| !entry.value.trim().is_empty())
+            || self
+                .datums
+                .iter()
+                .any(|entry| !entry.value.trim().is_empty())
             || !self.projected_height.trim().is_empty()
             || !self.datum_identifier.trim().is_empty()
             || self.extra_rows.iter().any(|row| !row.trim().is_empty())
@@ -331,7 +336,10 @@ impl State {
             && self.symbol.is_empty()
             && self.symbol_tail.is_empty()
             && self.tolerances[1] == ToleranceEntry::default()
-            && self.datums.iter().all(|entry| *entry == DatumEntry::default());
+            && self
+                .datums
+                .iter()
+                .all(|entry| *entry == DatumEntry::default());
         let frame = if only_plain_value {
             self.tolerances[0].value.clone()
         } else {
@@ -406,10 +414,7 @@ fn material_picker<'a>(index: usize, datum: bool, code: &str) -> Element<'a, Mes
     iced::widget::pick_list(selected, options, |choice| choice.to_string())
         .on_select(move |choice| {
             if datum {
-                Message::ToleranceDialogField(Field::DatumMaterial(
-                    index,
-                    choice.code.to_string(),
-                ))
+                Message::ToleranceDialogField(Field::DatumMaterial(index, choice.code.to_string()))
             } else {
                 Message::ToleranceDialogField(Field::ToleranceMaterial(
                     index,
@@ -441,60 +446,64 @@ pub fn view_window<'a>(
             .into(),
     );
 
-    let tolerance_rows = state.tolerances.iter().enumerate().fold(
-        column![].spacing(6),
-        |column, (index, entry)| {
-            column.push(
-                row![
-                    text(format!("{} {}", t!("Tolerance"), index + 1))
-                        .size(11)
-                        .style(muted)
-                        .width(Length::Fixed(82.0)),
-                    checkbox(entry.diameter)
-                        .on_toggle(move |value| Message::ToleranceDialogToggle(
-                            Toggle::Diameter(index, value)
-                        ))
-                        .size(14),
-                    text(t!("Diameter")).size(11).width(Length::Fixed(62.0)),
-                    text_input(EMPTY, &entry.value)
-                        .on_input(move |value| Message::ToleranceDialogField(
-                            Field::ToleranceValue(index, value)
-                        ))
-                        .size(12)
-                        .padding([3, 6])
-                        .width(Length::Fixed(125.0)),
-                    material_picker(index, false, &entry.material),
-                ]
-                .spacing(6)
-                .align_y(iced::Center),
-            )
-        },
-    );
+    let tolerance_rows =
+        state
+            .tolerances
+            .iter()
+            .enumerate()
+            .fold(column![].spacing(6), |column, (index, entry)| {
+                column.push(
+                    row![
+                        text(format!("{} {}", t!("Tolerance"), index + 1))
+                            .size(11)
+                            .style(muted)
+                            .width(Length::Fixed(82.0)),
+                        checkbox(entry.diameter)
+                            .on_toggle(move |value| Message::ToleranceDialogToggle(
+                                Toggle::Diameter(index, value)
+                            ))
+                            .size(14),
+                        text(t!("Diameter")).size(11).width(Length::Fixed(62.0)),
+                        text_input(EMPTY, &entry.value)
+                            .on_input(move |value| Message::ToleranceDialogField(
+                                Field::ToleranceValue(index, value)
+                            ))
+                            .size(12)
+                            .padding([3, 6])
+                            .width(Length::Fixed(125.0)),
+                        material_picker(index, false, &entry.material),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Center),
+                )
+            });
     let tolerances = panel(t!("Tolerance values").into_owned(), tolerance_rows.into());
 
-    let datum_rows = state.datums.iter().enumerate().fold(
-        column![].spacing(6),
-        |column, (index, entry)| {
-            column.push(
-                row![
-                    text(format!("{} {}", t!("Datum"), index + 1))
-                        .size(11)
-                        .style(muted)
-                        .width(Length::Fixed(82.0)),
-                    text_input(EMPTY, &entry.value)
-                        .on_input(move |value| Message::ToleranceDialogField(
-                            Field::DatumValue(index, value)
-                        ))
-                        .size(12)
-                        .padding([3, 6])
-                        .width(Length::Fixed(212.0)),
-                    material_picker(index, true, &entry.material),
-                ]
-                .spacing(6)
-                .align_y(iced::Center),
-            )
-        },
-    );
+    let datum_rows =
+        state
+            .datums
+            .iter()
+            .enumerate()
+            .fold(column![].spacing(6), |column, (index, entry)| {
+                column.push(
+                    row![
+                        text(format!("{} {}", t!("Datum"), index + 1))
+                            .size(11)
+                            .style(muted)
+                            .width(Length::Fixed(82.0)),
+                        text_input(EMPTY, &entry.value)
+                            .on_input(move |value| Message::ToleranceDialogField(
+                                Field::DatumValue(index, value)
+                            ))
+                            .size(12)
+                            .padding([3, 6])
+                            .width(Length::Fixed(212.0)),
+                        material_picker(index, true, &entry.material),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Center),
+                )
+            });
     let datums = panel(t!("Datum references").into_owned(), datum_rows.into());
 
     let additions = panel(
@@ -511,9 +520,7 @@ pub fn view_window<'a>(
                     .padding([3, 6])
                     .width(Length::Fixed(125.0)),
                 checkbox(state.projected_zone)
-                    .on_toggle(|value| Message::ToleranceDialogToggle(
-                        Toggle::ProjectedZone(value)
-                    ))
+                    .on_toggle(|value| Message::ToleranceDialogToggle(Toggle::ProjectedZone(value)))
                     .size(14),
                 text(t!("Projected tolerance zone")).size(11),
             ]
@@ -539,25 +546,22 @@ pub fn view_window<'a>(
 
     let mut actions = row![
         Space::new().width(Fill),
-        button(text(t!("Cancel")).size(12))
-            .on_press(Message::CloseModal)
-            .padding([4, 12]),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
     ]
     .spacing(6)
     .align_y(iced::Center);
     if state.editing.is_some() {
-        actions = actions.push(
-            button(text(t!("Apply")).size(12))
-                .on_press_maybe(state.is_valid().then_some(Message::ToleranceDialogApply))
-                .padding([4, 12]),
-        );
+        actions = actions.push(dialog_button_styled_opt(
+            t!("Apply"),
+            state.is_valid().then_some(Message::ToleranceDialogApply),
+            button::secondary,
+        ));
     }
-    actions = actions.push(
-        button(text(t!("OK")).size(12))
-            .on_press_maybe(state.is_valid().then_some(Message::ToleranceDialogOk))
-            .style(button::primary)
-            .padding([4, 12]),
-    );
+    actions = actions.push(dialog_button_styled_opt(
+        t!("OK"),
+        state.is_valid().then_some(Message::ToleranceDialogOk),
+        button::primary,
+    ));
 
     column![symbol, tolerances, datums, additions, actions]
         .spacing(8)

@@ -151,6 +151,28 @@ impl Delegate {
 
 #[cfg(target_os = "macos")]
 fn main() {
+    // Explicit CLI invocations must reach the real argument parser before
+    // AppKit starts. In particular, --mcp needs this process's stdin/stdout,
+    // and --serve, --export, --help and --version must not launch a bare GUI.
+    // Keep arguments as OsString so file names need not be valid UTF-8.
+    // Finder may supply only its legacy process serial number; that still
+    // belongs to the persistent document-open relay below.
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let finder_launch =
+        args.is_empty() || (args.len() == 1 && args[0].as_encoded_bytes().starts_with(b"-psn_"));
+    if !finder_launch {
+        use std::os::unix::process::CommandExt;
+
+        // Replacing the process preserves stdio, PID, signals and exit status.
+        // Do not exec on a normal Finder launch: its AppKit delegate must stay
+        // alive to receive subsequent document-open events.
+        let error = std::process::Command::new(real_binary_path())
+            .args(args)
+            .exec();
+        eprintln!("OpenCADStudio launcher: failed to execute the application: {error}");
+        std::process::exit(1);
+    }
+
     let mtm = MainThreadMarker::new().expect("the launcher must run on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     // No window, no Dock icon, no menu bar — this process only relays.

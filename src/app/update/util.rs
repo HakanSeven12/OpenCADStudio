@@ -15,8 +15,7 @@ pub(in crate::app) fn sync_annotation_scale_header(scene: &mut Scene) {
     };
     let current = scene.document.header.current_annotation_scale.clone();
     let current_matches = scene.scale_list().into_iter().any(|(name, factor, _)| {
-        name.eq_ignore_ascii_case(&current)
-            && (factor - anno).abs() < 0.001 * anno.max(0.001)
+        name.eq_ignore_ascii_case(&current) && (factor - anno).abs() < 0.001 * anno.max(0.001)
     });
     let name = if current_matches {
         current
@@ -62,7 +61,7 @@ pub(super) fn layout_entry_name(s: &str) -> &str {
     s.trim_start_matches('*').trim_end_matches('*')
 }
 
-pub(super) fn parse_plot_scale(s: &str) -> (f64, f64) {
+pub(in crate::app) fn parse_plot_scale(s: &str) -> (f64, f64) {
     if s == "Fit" {
         return (1.0, 1.0);
     }

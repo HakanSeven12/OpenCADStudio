@@ -3,10 +3,10 @@
 //! Displays the file name, size, current phase, measured progress, and a
 //! Cancel button.
 
+use crate::t;
 use iced::time::Instant;
 use iced::widget::{button, column, container, row, stack, text, Space};
 use iced::{Background, Border, Element, Fill, Length, Theme};
-use crate::t;
 use std::borrow::Cow;
 use std::sync::atomic::Ordering;
 
@@ -62,17 +62,15 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
             .width(Length::Fixed(fill_width))
             .height(Length::Fixed(BAR_TRACK_HEIGHT)),
     )
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().primary.base.color
-            )),
-            border: Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().primary.base.color)),
+        border: Border {
+            radius: 3.0.into(),
             ..Default::default()
-        })
-        .into();
+        },
+        ..Default::default()
+    })
+    .into();
 
     let bar_value: Element<'_, Message> = row![
         bar_fill,
@@ -84,17 +82,19 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
 
     let bar_track: Element<'_, Message> = container(
         stack![
-            container(Space::new().width(Length::Fixed(BAR_TRACK_WIDTH)).height(Length::Fixed(BAR_TRACK_HEIGHT)))
-                .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(
-                        theme.palette().background.strong.color
-                    )),
-                    border: Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
+            container(
+                Space::new()
+                    .width(Length::Fixed(BAR_TRACK_WIDTH))
+                    .height(Length::Fixed(BAR_TRACK_HEIGHT))
+            )
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.strong.color)),
+                border: Border {
+                    radius: 3.0.into(),
                     ..Default::default()
-                }),
+                },
+                ..Default::default()
+            }),
             bar_value,
         ]
         .width(Length::Fixed(BAR_TRACK_WIDTH))
@@ -120,10 +120,10 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
         phase_label(phase),
         basis_points as f32 / 100.0
     ))
-        .size(12)
-        .style(|theme: &Theme| iced::widget::text::Style {
-            color: Some(theme.palette().primary.base.color),
-        });
+    .size(12)
+    .style(|theme: &Theme| iced::widget::text::Style {
+        color: Some(theme.palette().primary.base.color),
+    });
 
     let cancel_btn: Element<'_, Message> = button(text(t!("Cancel")).size(12))
         .on_press(Message::OpenCancel)
@@ -142,13 +142,13 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
     .style(|theme: &Theme| {
         let palette = theme.palette();
         container::Style {
-        background: Some(Background::Color(palette.background.weak.color)),
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        ..Default::default()
+            background: Some(Background::Color(palette.background.weak.color)),
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
         }
     });
 
@@ -156,7 +156,7 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
     let backdrop: Element<'_, Message> = container(Space::new().width(Fill).height(Fill))
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(
-                theme.palette().background.strong.color.scale_alpha(0.72)
+                theme.palette().background.strong.color.scale_alpha(0.72),
             )),
             ..Default::default()
         })

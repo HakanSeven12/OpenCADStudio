@@ -4,10 +4,10 @@
 // data rows. The command remembers its previous settings and supports either a
 // fixed insertion point or a two-corner sizing window.
 
-use acadrust::entities::table::{CellStyle, CellStylePropertyFlags};
-use acadrust::entities::TableBuilder;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::table::{CellStyle, CellStylePropertyFlags};
+use codec::entities::TableBuilder;
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 use std::sync::{Mutex, OnceLock};
 
@@ -67,8 +67,13 @@ fn saved_defaults() -> &'static Mutex<TableDefaults> {
 #[derive(Clone, Copy)]
 enum Step {
     Columns,
-    DataRows { columns: usize },
-    ColumnWidth { columns: usize, data_rows: usize },
+    DataRows {
+        columns: usize,
+    },
+    ColumnWidth {
+        columns: usize,
+        data_rows: usize,
+    },
     RowHeight {
         columns: usize,
         data_rows: usize,
@@ -86,7 +91,10 @@ enum Step {
         column_width: f64,
         row_height: f64,
     },
-    WindowFirst { columns: usize, data_rows: usize },
+    WindowFirst {
+        columns: usize,
+        data_rows: usize,
+    },
     WindowSecond {
         columns: usize,
         data_rows: usize,
@@ -96,7 +104,7 @@ enum Step {
 
 pub struct TableCommand {
     step: Step,
-    style_handle: Option<acadrust::Handle>,
+    style_handle: Option<codec::Handle>,
     suggested_column_width: f64,
     suggested_row_height: f64,
     preview_scale: f64,
@@ -107,7 +115,7 @@ pub struct TableCommand {
     plane: WorkingPlane,
 }
 
-fn cell_style_from_row(style: &acadrust::objects::RowCellStyle) -> CellStyle {
+fn cell_style_from_row(style: &codec::objects::RowCellStyle) -> CellStyle {
     let mut result = CellStyle::new();
     result.property_flags = CellStylePropertyFlags::DATA_TYPE
         | CellStylePropertyFlags::DATA_FORMAT
@@ -129,10 +137,7 @@ fn cell_style_from_row(style: &acadrust::objects::RowCellStyle) -> CellStyle {
     result
 }
 
-fn selected_row_style(
-    table_style: &acadrust::objects::TableStyle,
-    name: &str,
-) -> CellStyle {
+fn selected_row_style(table_style: &codec::objects::TableStyle, name: &str) -> CellStyle {
     let style = if name.eq_ignore_ascii_case("Title") {
         &table_style.title_row_style
     } else if name.eq_ignore_ascii_case("Header") {
@@ -160,8 +165,8 @@ impl TableCommand {
     }
 
     pub fn with_style(
-        style_handle: acadrust::Handle,
-        style: &acadrust::objects::TableStyle,
+        style_handle: codec::Handle,
+        style: &codec::objects::TableStyle,
         annotation_multiplier: f64,
     ) -> Self {
         let text_height = style
@@ -192,7 +197,7 @@ impl TableCommand {
     /// Table dialog. The dialog owns validation, so the command starts at the
     /// point/window placement step instead of asking for the same values again.
     pub fn configured(
-        style: Option<(acadrust::Handle, &acadrust::objects::TableStyle)>,
+        style: Option<(codec::Handle, &codec::objects::TableStyle)>,
         annotation_multiplier: f64,
         columns: usize,
         data_rows: usize,
@@ -237,7 +242,10 @@ impl TableCommand {
     }
 
     fn defaults(&self) -> TableDefaults {
-        let mut defaults = saved_defaults().lock().map(|value| *value).unwrap_or_default();
+        let mut defaults = saved_defaults()
+            .lock()
+            .map(|value| *value)
+            .unwrap_or_default();
         if (defaults.column_width - DEFAULT_COL_WIDTH).abs() < 1.0e-9 {
             defaults.column_width = self.suggested_column_width;
         }
@@ -271,7 +279,7 @@ impl TableCommand {
                 row.style = Some(styles[row_index.min(2)].clone());
             }
         }
-        self.plane.place_entity(EntityType::Table(table))
+        self.plane.place_entity(EntityType::Table(Box::new(table)))
     }
 
     fn preview_grid(
@@ -289,7 +297,12 @@ impl TableCommand {
         let mut points = Vec::with_capacity((rows + columns + 2) * 2);
         for column in 0..=columns {
             let x = column as f64 * column_width * scale;
-            points.push(self.plane.to_world(point + DVec3::X * x).as_vec3().to_array());
+            points.push(
+                self.plane
+                    .to_world(point + DVec3::X * x)
+                    .as_vec3()
+                    .to_array(),
+            );
             points.push(
                 self.plane
                     .to_world(point + DVec3::new(x, -height, 0.0))
@@ -299,7 +312,12 @@ impl TableCommand {
         }
         for row in 0..=rows {
             let y = -(row as f64 * row_height * scale);
-            points.push(self.plane.to_world(point + DVec3::Y * y).as_vec3().to_array());
+            points.push(
+                self.plane
+                    .to_world(point + DVec3::Y * y)
+                    .as_vec3()
+                    .to_array(),
+            );
             points.push(
                 self.plane
                     .to_world(point + DVec3::new(width, y, 0.0))
@@ -315,6 +333,7 @@ impl TableCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -340,6 +359,8 @@ impl TableCommand {
             plinegen: true,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
+
+            ..Default::default()
         }
     }
 }
@@ -385,15 +406,15 @@ impl CadCommand for TableCommand {
                 }
             )
             .into_owned(),
-            Step::Insertion { columns, data_rows, .. } => t!(
+            Step::Insertion {
+                columns, data_rows, ..
+            } => t!(
                 "TABLE  Specify insertion point  [%{cols}×%{rows}]:",
                 cols = columns,
                 rows = self.total_rows(*data_rows)
             )
             .into_owned(),
-            Step::WindowFirst { .. } => {
-                t!("%{n}  Specify first corner:", n = "TABLE").into_owned()
-            }
+            Step::WindowFirst { .. } => t!("%{n}  Specify first corner:", n = "TABLE").into_owned(),
             Step::WindowSecond { .. } => {
                 t!("%{n}  Specify opposite corner:", n = "TABLE").into_owned()
             }
@@ -447,7 +468,11 @@ impl CadCommand for TableCommand {
                     column_width,
                 };
             }
-            Step::RowHeight { columns, data_rows, column_width } => {
+            Step::RowHeight {
+                columns,
+                data_rows,
+                column_width,
+            } => {
                 let row_height = if input.is_empty() {
                     defaults.row_height
                 } else {
@@ -460,7 +485,12 @@ impl CadCommand for TableCommand {
                     row_height,
                 };
             }
-            Step::InsertionMode { columns, data_rows, column_width, row_height } => {
+            Step::InsertionMode {
+                columns,
+                data_rows,
+                column_width,
+                row_height,
+            } => {
                 let mode = if input.is_empty() {
                     defaults.insertion_mode
                 } else if "POINT".starts_with(&input.to_ascii_uppercase()) {
@@ -523,7 +553,11 @@ impl CadCommand for TableCommand {
                 };
                 CmdResult::NeedPoint
             }
-            Step::WindowSecond { columns, data_rows, first } => {
+            Step::WindowSecond {
+                columns,
+                data_rows,
+                first,
+            } => {
                 let first = self.plane.to_local(first);
                 let second = self.plane.to_local(point);
                 let rows = self.total_rows(data_rows);
@@ -560,7 +594,11 @@ impl CadCommand for TableCommand {
                 row_height,
                 self.preview_scale,
             )),
-            Step::WindowSecond { columns, data_rows, first } => {
+            Step::WindowSecond {
+                columns,
+                data_rows,
+                first,
+            } => {
                 let first = self.plane.to_local(first);
                 let second = self.plane.to_local(point);
                 let rows = self.total_rows(data_rows);
@@ -609,7 +647,7 @@ pub(crate) enum TableCellEditStart {
 
 impl TableCellHit {
     /// Flat cell index, matching the Properties palette ordering.
-    pub fn index(&self, table: &acadrust::entities::Table) -> usize {
+    pub fn index(&self, table: &codec::entities::Table) -> usize {
         self.row * table.column_count() + self.column
     }
 }
@@ -620,8 +658,8 @@ impl TableCellHit {
 /// object the table references, when the caller has the document at hand;
 /// the table's embedded base style covers the common fallbacks.
 pub(crate) fn table_cell_at(
-    table: &acadrust::entities::Table,
-    table_style: Option<&acadrust::objects::TableStyle>,
+    table: &codec::entities::Table,
+    table_style: Option<&codec::objects::TableStyle>,
     click_world: DVec3,
 ) -> Option<TableCellHit> {
     let horizontal = glam::DVec3::new(
@@ -671,8 +709,8 @@ pub(crate) fn table_cell_at(
 }
 
 /// True when the cell's content may not be edited (locked or read-only).
-pub(crate) fn cell_locked(table: &acadrust::entities::Table, row: usize, column: usize) -> bool {
-    use acadrust::entities::table::CellStateFlags;
+pub(crate) fn cell_locked(table: &codec::entities::Table, row: usize, column: usize) -> bool {
+    use codec::entities::table::CellStateFlags;
     table.cell(row, column).is_some_and(|cell| {
         cell.state
             .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
@@ -708,7 +746,7 @@ impl CadCommand for TableditCommand {
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         CmdResult::EditTableCell {
-            handle: acadrust::Handle::NULL,
+            handle: codec::Handle::NULL,
             point,
         }
     }
@@ -725,16 +763,16 @@ inventory::submit!(crate::command::CommandRegistration {
 });
 
 pub struct TableCellEditCommand {
-    handle: acadrust::Handle,
-    table: acadrust::entities::Table,
+    handle: codec::Handle,
+    table: codec::entities::Table,
     row: usize,
     column: usize,
 }
 
 impl TableCellEditCommand {
     pub fn new(
-        handle: acadrust::Handle,
-        table: &acadrust::entities::Table,
+        handle: codec::Handle,
+        table: &codec::entities::Table,
         row: usize,
         column: usize,
     ) -> Self {
@@ -779,7 +817,7 @@ impl CadCommand for TableCellEditCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        use acadrust::entities::table::CellStateFlags;
+        use codec::entities::table::CellStateFlags;
         let cell = self.table.cell_mut(self.row, self.column)?;
         if cell
             .state
@@ -794,7 +832,10 @@ impl CadCommand for TableCellEditCommand {
         cell.set_text(&formatted);
         self.table.block_record_handle = None;
         Some(CmdResult::ReplaceMany(
-            vec![(self.handle, vec![EntityType::Table(self.table.clone())])],
+            vec![(
+                self.handle,
+                vec![EntityType::Table(Box::new(self.table.clone()))],
+            )],
             Vec::new(),
         ))
     }
@@ -815,9 +856,9 @@ mod tabledit_tests {
     //! default orientation (horizontal +X, flow down).
     use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableditCommand};
     use crate::command::{CadCommand, CmdResult};
-    use acadrust::entities::Table;
-    use acadrust::entities::table::CellStateFlags;
-    use acadrust::types::Vector3;
+    use codec::entities::table::CellStateFlags;
+    use codec::entities::Table;
+    use codec::types::Vector3;
     use glam::DVec3;
 
     fn table_2x2() -> Table {
@@ -863,8 +904,14 @@ mod tabledit_tests {
             table_cell_at(&table, None, DVec3::new(-0.1, -0.1, 0.0)),
             None
         );
-        assert_eq!(table_cell_at(&table, None, DVec3::new(6.0, -0.1, 0.0)), None);
-        assert_eq!(table_cell_at(&table, None, DVec3::new(1.0, -9.0, 0.0)), None);
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(6.0, -0.1, 0.0)),
+            None
+        );
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(1.0, -9.0, 0.0)),
+            None
+        );
         assert_eq!(table_cell_at(&table, None, DVec3::new(1.0, 1.0, 0.0)), None);
     }
 
@@ -878,9 +925,11 @@ mod tabledit_tests {
             .expect("locked cell still resolves");
         assert!(hit.locked);
         // Its neighbour stays editable through the same pick path.
-        assert!(!table_cell_at(&table, None, DVec3::new(1.25, -0.125, 0.0))
-            .expect("neighbour resolves")
-            .locked);
+        assert!(
+            !table_cell_at(&table, None, DVec3::new(1.25, -0.125, 0.0))
+                .expect("neighbour resolves")
+                .locked
+        );
     }
 
     #[test]
@@ -888,11 +937,8 @@ mod tabledit_tests {
         let mut cmd = TableditCommand::new();
         assert!(!cmd.needs_entity_pick());
         match cmd.on_point(DVec3::new(1.0, 2.0, 0.0)) {
-            CmdResult::EditTableCell {
-                handle,
-                point,
-            } => {
-                assert_eq!(handle, acadrust::Handle::NULL);
+            CmdResult::EditTableCell { handle, point } => {
+                assert_eq!(handle, codec::Handle::NULL);
                 assert_eq!(point, DVec3::new(1.0, 2.0, 0.0));
             }
             _ => panic!("expected EditTableCell"),
@@ -904,7 +950,7 @@ mod tabledit_tests {
     #[test]
     fn table_cell_edit_formats_newlines() {
         let table = table_2x2();
-        let handle = acadrust::Handle::new(42);
+        let handle = codec::Handle::new(42);
         let mut edit_cmd = TableCellEditCommand::new(handle, &table, 0, 0);
         let result = edit_cmd
             .on_text_input("Line1/nLine2\\nLine3\nLine4")
@@ -912,7 +958,7 @@ mod tabledit_tests {
         match result {
             CmdResult::ReplaceMany(repl, _) => {
                 assert_eq!(repl.len(), 1);
-                if let acadrust::EntityType::Table(t) = &repl[0].1[0] {
+                if let codec::EntityType::Table(t) = &repl[0].1[0] {
                     assert_eq!(t.cell_text(0, 0).unwrap(), "Line1\\PLine2\\PLine3\\PLine4");
                 } else {
                     panic!("expected Table entity");

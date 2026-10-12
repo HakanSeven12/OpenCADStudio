@@ -1,6 +1,6 @@
-use acadrust::objects::ObjectType;
-use acadrust::tables::{DimStyle, TextStyle};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::ObjectType;
+use codec::tables::{DimStyle, TextStyle};
+use codec::{CadDocument, EntityType, Handle};
 
 #[derive(Debug, Clone)]
 pub struct TextCreationDefaults {
@@ -33,6 +33,60 @@ fn named_text_style(doc: &CadDocument, name: &str) -> Option<TextStyle> {
                 .find(|style| style.name.eq_ignore_ascii_case("Standard"))
         })
         .cloned()
+}
+
+/// Adds the reference's ISO-25 dimension style (the current style of its
+/// metric template) when the drawing has none of that name, and hands back its
+/// handle: the header records the current dimension style by handle as well as
+/// by name, and a DWG carries only the handle.
+pub fn ensure_iso_dim_style(doc: &mut CadDocument) -> Handle {
+    if let Some(style) = doc
+        .dim_styles
+        .iter()
+        .find(|style| style.name.eq_ignore_ascii_case("ISO-25"))
+    {
+        return style.handle;
+    }
+    let mut style = DimStyle::new("ISO-25");
+    style.handle = doc.allocate_handle();
+    style.dimtxt = 2.5;
+    style.dimasz = 2.5;
+    style.dimcen = 2.5;
+    style.dimexe = 1.25;
+    style.dimexo = 0.625;
+    style.dimgap = 0.625;
+    style.dimdli = 3.75;
+    style.dimtad = 1;
+    style.dimtih = false;
+    style.dimtoh = false;
+    style.dimtofl = true;
+    style.dimtix = false;
+    style.dimsoxd = false;
+    style.dimdsep = i16::from(b',');
+    style.dimlunit = 2;
+    style.dimdec = 2;
+    style.dimtdec = 2;
+    style.dimaunit = 0;
+    style.dimadec = 0;
+    style.dimazin = 0;
+    style.dimzin = 8;
+    style.dimtzin = 8;
+    style.dimatfit = 3;
+    style.dimtmove = 0;
+    style.dimscale = 1.0;
+    style.dimlfac = 1.0;
+    style.dimtfac = 1.0;
+    style.dimaltf = 0.03937007874016;
+    style.dimaltd = 3;
+    style.dimalttd = 3;
+    style.dimaltu = 2;
+    style.dimfxl = 1.0;
+    style.dimjogang = std::f64::consts::FRAC_PI_2;
+    style.dimmzf = 100.0;
+    style.dimaltmzf = 100.0;
+    let handle = style.handle;
+    let _ = doc.dim_styles.add(style);
+    handle
 }
 
 fn named_dim_style(doc: &CadDocument, name: &str) -> Option<DimStyle> {
@@ -125,8 +179,8 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
     if style_name.trim().is_empty() {
         style_name.clone_from(&active.style_name);
     }
-    let resolved = named_text_style(doc, style_name)
-        .unwrap_or_else(|| TextStyle::new(style_name.clone()));
+    let resolved =
+        named_text_style(doc, style_name).unwrap_or_else(|| TextStyle::new(style_name.clone()));
     match entity {
         EntityType::Text(text) => {
             if resolved.height > 1.0e-9 {
@@ -155,9 +209,8 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
                 attribute.oblique_angle = resolved.oblique_angle;
             }
             if attribute.text_generation_flags == 0 {
-                attribute.text_generation_flags =
-                    (if resolved.flags.backward { 2 } else { 0 })
-                        | (if resolved.flags.upside_down { 4 } else { 0 });
+                attribute.text_generation_flags = (if resolved.flags.backward { 2 } else { 0 })
+                    | (if resolved.flags.upside_down { 4 } else { 0 });
             }
         }
         EntityType::AttributeDefinition(attribute) => {
@@ -171,9 +224,8 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
                 attribute.oblique_angle = resolved.oblique_angle;
             }
             if attribute.text_generation_flags == 0 {
-                attribute.text_generation_flags =
-                    (if resolved.flags.backward { 2 } else { 0 })
-                        | (if resolved.flags.upside_down { 4 } else { 0 });
+                attribute.text_generation_flags = (if resolved.flags.backward { 2 } else { 0 })
+                    | (if resolved.flags.upside_down { 4 } else { 0 });
             }
         }
         _ => {}
@@ -185,7 +237,10 @@ fn apply_dimension_defaults(doc: &CadDocument, entity: &mut EntityType) {
     match entity {
         EntityType::Dimension(dimension) => {
             if entity_uses_default_style(&dimension.base().style_name) {
-                dimension.base_mut().style_name.clone_from(&active.style_name);
+                dimension
+                    .base_mut()
+                    .style_name
+                    .clone_from(&active.style_name);
             }
         }
         EntityType::Leader(leader) => {
@@ -198,9 +253,11 @@ fn apply_dimension_defaults(doc: &CadDocument, entity: &mut EntityType) {
         }
         EntityType::Tolerance(tolerance) => {
             if entity_uses_default_style(&tolerance.dimension_style_name) {
-                tolerance.dimension_style_name.clone_from(&active.style_name);
-                tolerance.dimension_style_handle = (!active.style_handle.is_null())
-                    .then_some(active.style_handle);
+                tolerance
+                    .dimension_style_name
+                    .clone_from(&active.style_name);
+                tolerance.dimension_style_handle =
+                    (!active.style_handle.is_null()).then_some(active.style_handle);
                 tolerance.text_height = active.text_height;
                 tolerance.dimension_gap = active.gap;
             }
@@ -213,35 +270,46 @@ fn apply_object_defaults(doc: &CadDocument, entity: &mut EntityType) {
     match entity {
         EntityType::MultiLeader(leader) if leader.style_handle.is_none() => {
             let name = doc.header.current_mleader_style_name.trim();
-            if let Some(style) = doc.objects.iter().find_map(|(handle, object)| match object {
-                ObjectType::MultiLeaderStyle(style) if style.name.eq_ignore_ascii_case(name) => {
-                    let mut style = style.clone();
-                    style.handle = *handle;
-                    Some(style)
-                }
-                _ => None,
-            }) {
+            if let Some(style) = doc
+                .objects
+                .iter()
+                .find_map(|(handle, object)| match object {
+                    ObjectType::MultiLeaderStyle(style)
+                        if style.name.eq_ignore_ascii_case(name) =>
+                    {
+                        let mut style = style.clone();
+                        style.handle = *handle;
+                        Some(style)
+                    }
+                    _ => None,
+                })
+            {
                 crate::scene::annotative::apply_mleader_style(leader, &style);
             }
         }
         EntityType::Table(table) if table.table_style_handle.is_none() => {
             let name = doc.header.current_table_style_name.trim();
-            table.table_style_handle = doc.objects.iter().find_map(|(handle, object)| match object {
-                ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => {
-                    Some(*handle)
-                }
-                _ => None,
-            });
+            table.table_style_handle =
+                doc.objects
+                    .iter()
+                    .find_map(|(handle, object)| match object {
+                        ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => {
+                            Some(*handle)
+                        }
+                        _ => None,
+                    });
         }
         EntityType::MLine(mline) if mline.style_handle.is_none() => {
             let name = doc.header.multiline_style.trim();
             if let Some((handle, style_name)) =
-                doc.objects.iter().find_map(|(handle, object)| match object {
-                    ObjectType::MLineStyle(style) if style.name.eq_ignore_ascii_case(name) => {
-                        Some((*handle, style.name.clone()))
-                    }
-                    _ => None,
-                })
+                doc.objects
+                    .iter()
+                    .find_map(|(handle, object)| match object {
+                        ObjectType::MLineStyle(style) if style.name.eq_ignore_ascii_case(name) => {
+                            Some((*handle, style.name.clone()))
+                        }
+                        _ => None,
+                    })
             {
                 mline.style_handle = Some(handle);
                 mline.style_name = style_name;
@@ -258,18 +326,21 @@ pub fn apply_current_creation_styles(doc: &CadDocument, entity: &mut EntityType)
     apply_object_defaults(doc, entity);
 }
 
-pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types::Transparency> {
-    use acadrust::types::Transparency;
+pub(crate) fn parse_current_transparency(value: &str) -> Option<codec::types::Transparency> {
+    use codec::types::Transparency;
     match value.trim().to_ascii_uppercase().as_str() {
         "BYLAYER" | "-1" => Some(Transparency::ByLayer),
         "BYBLOCK" | "-2" => Some(Transparency::ByBlock),
-        value => value.parse::<u8>().ok().filter(|value| *value <= 90)
+        value => value
+            .parse::<u8>()
+            .ok()
+            .filter(|value| *value <= 90)
             .map(|value| Transparency::from_percent(value as f64 / 100.0)),
     }
 }
 
-pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -> String {
-    use acadrust::types::Transparency;
+pub(crate) fn current_transparency_label(value: codec::types::Transparency) -> String {
+    use codec::types::Transparency;
     match value {
         Transparency::ByLayer => "ByLayer".into(),
         Transparency::ByBlock => "ByBlock".into(),
@@ -280,15 +351,30 @@ pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -
 #[cfg(test)]
 mod transparency_tests {
     use super::*;
-    use acadrust::types::Transparency;
+    use codec::types::Transparency;
 
     #[test]
     fn parses_supported_current_transparency_values() {
-        assert_eq!(parse_current_transparency("ByLayer"), Some(Transparency::ByLayer));
-        assert_eq!(parse_current_transparency("-1"), Some(Transparency::ByLayer));
-        assert_eq!(parse_current_transparency("ByBlock"), Some(Transparency::ByBlock));
-        assert_eq!(parse_current_transparency("-2"), Some(Transparency::ByBlock));
-        assert_eq!(parse_current_transparency("25"), Some(Transparency::Explicit(64)));
+        assert_eq!(
+            parse_current_transparency("ByLayer"),
+            Some(Transparency::ByLayer)
+        );
+        assert_eq!(
+            parse_current_transparency("-1"),
+            Some(Transparency::ByLayer)
+        );
+        assert_eq!(
+            parse_current_transparency("ByBlock"),
+            Some(Transparency::ByBlock)
+        );
+        assert_eq!(
+            parse_current_transparency("-2"),
+            Some(Transparency::ByBlock)
+        );
+        assert_eq!(
+            parse_current_transparency("25"),
+            Some(Transparency::Explicit(64))
+        );
         assert!(parse_current_transparency("91").is_none());
         assert!(parse_current_transparency("25.5").is_none());
         assert!(parse_current_transparency("invalid").is_none());

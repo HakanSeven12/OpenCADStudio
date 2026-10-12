@@ -263,7 +263,10 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
     if in.pattern_length > 0.0 {
         let pat_len = in.pattern_length * u.linetype_scale;
         if in.min_elem * u.linetype_scale >= u.world_per_pixel && pat_len > 0.0 {
-            if !in_dash(arc_dist, pat_len, in.pat0, in.pat1) {
+            // The elements scale with the pattern length (PSLTSCALE,
+            // annotation scale), or the dashes fall out of step with it.
+            let lt = u.linetype_scale;
+            if !in_dash(arc_dist, pat_len, in.pat0 * lt, in.pat1 * lt) {
                 discard;
             }
         }

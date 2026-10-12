@@ -3,9 +3,9 @@
 //! Demonstrates read/write round-trips between the plugin and the host using
 //! the zero-copy `DocumentReader` API and the validated `HostApi` RPCs.
 
-use acadrust::entities::Point;
-use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-use acadrust::{EntityType, Handle};
+use codec::entities::Point;
+use codec::xdata::{ExtendedDataRecord, XDataValue};
+use codec::{EntityType, Handle};
 use ocs_plugin_api::export_plugin;
 use ocs_plugin_api::host::{BuiltinPlugin, HostApi, ReaderEntityKind};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};

@@ -235,7 +235,7 @@ pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff
     let mut buf = [0u8; 4];
     let s = ch.encode_utf8(&mut buf);
     for page in bigfont_code_pages(path) {
-        let Some(enc) = acadrust::io::dxf::code_page::encoding_from_code_page(page) else {
+        let Some(enc) = codec::io::dxf::code_page::encoding_from_code_page(page) else {
             continue;
         };
         let (bytes, _, unmappable) = enc.encode(s);
@@ -329,9 +329,8 @@ pub fn font_metrics(path: &str) -> Option<(f64, f64)> {
 
 fn glyph_cache(
 ) -> &'static Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>> {
-    static C: OnceLock<
-        Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>>,
-    > = OnceLock::new();
+    static C: OnceLock<Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>>> =
+        OnceLock::new();
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -544,16 +543,26 @@ fn interpret(
                 }
             }
             7 => {
-                let mut sub = *b.get(i).unwrap_or(&0) as u16;
-                i += 1;
-                // A big font references subshapes by a two-byte code:
-                // `7, 0, hi, lo`.
-                if file.kind == ShxKind::Bigfont && sub == 0 {
-                    let hi = *b.get(i).unwrap_or(&0) as u16;
-                    let lo = *b.get(i + 1).unwrap_or(&0) as u16;
+                let two_bytes = |i: usize| {
+                    ((*b.get(i).unwrap_or(&0) as u16) << 8) | *b.get(i + 1).unwrap_or(&0) as u16
+                };
+                // A unifont names its subshape by a two-byte code point
+                // (`7, hi, lo`); read as one byte, the low byte ran on as an
+                // opcode and the glyph came out mangled (ISOCP's `9`, #1556).
+                // A big font uses `7, 0, hi, lo`; a shape file one byte.
+                let sub = if file.kind == ShxKind::Unifont {
                     i += 2;
-                    sub = (hi << 8) | lo;
-                }
+                    two_bytes(i - 2)
+                } else {
+                    let sub = *b.get(i).unwrap_or(&0) as u16;
+                    i += 1;
+                    if file.kind == ShxKind::Bigfont && sub == 0 {
+                        i += 2;
+                        two_bytes(i - 2)
+                    } else {
+                        sub
+                    }
+                };
                 if !skipping && sub != 0 && sub != shape_number {
                     interpret(file, sub, st, cur, out, depth + 1);
                 }
@@ -653,7 +662,6 @@ fn interpret(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -727,7 +735,10 @@ mod tests {
         assert!((g.advance - 1.125).abs() < 1e-4, "advance {}", g.advance);
         assert_eq!(g.strokes.len(), 1);
         assert!(bigfont_glyph(&path, 'A').is_none());
-        assert!(bigfont_glyph(&path, '國').is_none(), "unknown code must miss, not alias");
+        assert!(
+            bigfont_glyph(&path, '國').is_none(),
+            "unknown code must miss, not alias"
+        );
     }
 
     #[test]
@@ -736,7 +747,11 @@ mod tests {
         assert!(!is_bigfont(&path));
         assert_eq!(font_metrics(&path), Some((6.0, 2.0)));
         let g = font_glyph(&path, 'A' as u16).expect("glyph for A");
-        assert!((g.advance - 9.0).abs() < 1e-4, "6 units at above 6 → 9: {}", g.advance);
+        assert!(
+            (g.advance - 9.0).abs() < 1e-4,
+            "6 units at above 6 → 9: {}",
+            g.advance
+        );
         assert!(font_glyph(&path, 'B' as u16).is_none());
     }
 }

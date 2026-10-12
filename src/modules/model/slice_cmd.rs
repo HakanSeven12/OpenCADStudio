@@ -1,6 +1,6 @@
-use acadrust::{EntityType, Handle};
-use cadkernel::space::Plane;
+use codec::{EntityType, Handle};
 use glam::DVec3;
+use kernel::space::Plane;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, SelectionEntity, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
@@ -38,7 +38,7 @@ pub struct SliceCommand {
     preview_center: DVec3,
     preview_radius: f64,
     picked: Option<EntityType>,
-    surface_tool: Option<cadkernel::brep::Body>,
+    surface_tool: Option<kernel::brep::Body>,
     notice: Option<&'static str>,
 }
 
@@ -49,7 +49,11 @@ impl SliceCommand {
         preview_center: DVec3,
         preview_radius: f64,
     ) -> Self {
-        let step = if targets.is_empty() { Step::Targets } else { Step::FirstPoint };
+        let step = if targets.is_empty() {
+            Step::Targets
+        } else {
+            Step::FirstPoint
+        };
         Self {
             step,
             targets,
@@ -98,8 +102,7 @@ impl SliceCommand {
         ) {
             return None;
         }
-        crate::scene::model::presspull_model::profile_geometry(entity)
-            .map(|(plane, _, _)| plane)
+        crate::scene::model::presspull_model::profile_geometry(entity).map(|(plane, _, _)| plane)
     }
 
     fn finish_surface(&mut self, keep_point: Option<DVec3>) -> CmdResult {
@@ -314,7 +317,10 @@ impl CadCommand for SliceCommand {
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        matches!(self.step, Step::FirstPoint | Step::Side(_) | Step::SurfaceSide)
+        matches!(
+            self.step,
+            Step::FirstPoint | Step::Side(_) | Step::SurfaceSide
+        )
     }
 
     fn is_selection_gathering(&self) -> bool {
@@ -438,24 +444,20 @@ impl CadCommand for SliceCommand {
             _ => None,
         };
         if let Some(plane) = plane {
-            wires.extend(plane_grid(
-                plane,
-                self.preview_center,
-                self.preview_radius,
-            ));
+            wires.extend(plane_grid(plane, self.preview_center, self.preview_radius));
         }
         wires
     }
 }
 
-fn planar_body_plane(body: &cadkernel::brep::Body) -> Option<Plane> {
+fn planar_body_plane(body: &kernel::brep::Body) -> Option<Plane> {
     let mut faces = body.face_keys();
-    let first = cadkernel::brep::planar_face_profile(body, faces.next()?)?.plane;
+    let first = kernel::brep::planar_face_profile(body, faces.next()?)?.plane;
     let normal = DVec3::from_array(first.normal()?);
-    let tolerance = cadkernel::brep::operation_tolerance(&[body]);
+    let tolerance = kernel::brep::operation_tolerance(&[body]);
     faces
         .all(|face| {
-            let Some(profile) = cadkernel::brep::planar_face_profile(body, face) else {
+            let Some(profile) = kernel::brep::planar_face_profile(body, face) else {
                 return false;
             };
             profile.plane.normal().is_some_and(|other| {
@@ -470,11 +472,7 @@ fn planar_body_plane(body: &cadkernel::brep::Body) -> Option<Plane> {
 
 fn plane_grid(plane: Plane, centre: DVec3, radius: f64) -> Vec<WireModel> {
     let normal = DVec3::from_array(plane.normal().unwrap_or([0.0, 0.0, 1.0]));
-    let projected = centre
-        - normal
-            * plane
-                .distance_to(centre.to_array())
-                .unwrap_or_default();
+    let projected = centre - normal * plane.distance_to(centre.to_array()).unwrap_or_default();
     let x = DVec3::from_array(plane.x_axis);
     let y = DVec3::from_array(plane.y_axis);
     let color = [0.2, 0.55, 1.0, 1.0];

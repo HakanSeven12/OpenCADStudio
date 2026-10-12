@@ -4,6 +4,7 @@
 // mismatched substitute.
 
 use crate::app::Message;
+use crate::ui::style::form::dialog_button_styled_opt;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Element, Fill, Length, Shrink, Theme};
 
@@ -17,6 +18,7 @@ fn muted_style(theme: &Theme) -> text::Style {
 pub fn view_window<'a>(
     fonts: &'a [String],
     font_source: &'a str,
+    downloading: bool,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let content_width = if matches!(sizing.width, Length::Fill) {
@@ -33,16 +35,23 @@ pub fn view_window<'a>(
         .iter()
         .map(|name| text(format!("  {name}")).size(12).into())
         .collect();
+    let download = dialog_button_styled_opt(
+        if downloading {
+            crate::t!("Downloading...")
+        } else {
+            crate::t!("Download available")
+        },
+        (!downloading).then_some(Message::MissingFontsDownload),
+        button::primary,
+    );
     let actions = row![
         Space::new().width(content_width),
-        button(text(crate::t!("Skip")).size(12))
-            .on_press(Message::MissingFontsDismiss)
-            .style(button::secondary)
-            .padding([6, 14]),
-        button(text(crate::t!("Download")).size(12))
-            .on_press(Message::MissingFontsDownload)
-            .style(button::primary)
-            .padding([6, 14]),
+        dialog_button_styled_opt(
+            crate::t!("Skip"),
+            (!downloading).then_some(Message::MissingFontsDismiss),
+            button::secondary,
+        ),
+        download,
     ]
     .spacing(8);
 
@@ -50,7 +59,7 @@ pub fn view_window<'a>(
         column![
             text(crate::t!("Missing fonts")).size(20),
             text(crate::t!(
-                "This drawing uses fonts that are not installed on this machine. Download them from the OpenCADStudio community font repository?"
+                "This drawing uses fonts that are not installed on this machine. OpenCADStudio can download any redistributable fonts that exist in the selected repository; unavailable fonts will keep using a substitute."
             ))
             .size(11)
             .style(muted_style),

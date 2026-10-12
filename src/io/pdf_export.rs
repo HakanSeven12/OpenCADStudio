@@ -1297,7 +1297,7 @@ fn emit_wire_fills(
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: acadrust::entities::HatchStyleType::Normal,
+                    style: codec::entities::HatchStyleType::Normal,
                     pattern: pattern.clone(),
                     name: "PLOTSTYLE".to_string(),
                     color: wire.color,
@@ -2142,6 +2142,37 @@ fn color_differs(a: [f32; 3], b: [f32; 3]) -> bool {
     (a[0] - b[0]).abs() > 0.01 || (a[1] - b[1]).abs() > 0.01 || (a[2] - b[2]).abs() > 0.01
 }
 
+/// Everything searchable in an exported file: the raw bytes (printpdf
+/// leaves small content streams uncompressed) plus any zlib streams that
+/// decode to mostly-printable text, so the assertions hold either way.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn pdf_stream_text(bytes: &[u8]) -> String {
+    use std::io::Read as _;
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    for start in 0..bytes.len().saturating_sub(2) {
+        // zlib streams start with a 2-byte header: deflate method, valid check.
+        let (cmf, flg) = (bytes[start], bytes[start + 1]);
+        if cmf & 0x0f != 8 || ((cmf as u16) << 8 | flg as u16) % 31 != 0 {
+            continue;
+        }
+        let mut decoded = Vec::new();
+        if flate2::read::ZlibDecoder::new(&bytes[start..])
+            .read_to_end(&mut decoded)
+            .is_ok()
+            && decoded.len() > 32
+        {
+            let printable = decoded
+                .iter()
+                .filter(|&&b| matches!(b, b'\n' | b'\r' | b'\t' | 32..=126))
+                .count();
+            if printable * 10 >= decoded.len() * 9 {
+                text.push_str(&String::from_utf8_lossy(&decoded));
+            }
+        }
+    }
+    text
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -2298,6 +2329,8 @@ mod tests {
                 corners_low: [[0.0; 3]; 4],
                 draw_depth: 0.5,
                 verts,
+                pixelated: false,
+                use_alpha: true,
             },
             clips: Vec::new(),
         }
@@ -2346,9 +2379,9 @@ mod tests {
         let reference = "memory://plot-registered-image.png";
         crate::scene::model::image_model::register_source(reference, std::sync::Arc::new(png));
 
-        let entity = acadrust::entities::RasterImage::with_size(
+        let entity = codec::entities::RasterImage::with_size(
             reference,
-            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            codec::types::Vector3::new(0.0, 0.0, 0.0),
             f64::from(w),
             f64::from(h),
             50.0,
@@ -2408,7 +2441,7 @@ mod tests {
             boundary_exterior: None,
             boundary_sources: None,
             boundary_paths: None,
-            style: acadrust::entities::HatchStyleType::Normal,
+            style: codec::entities::HatchStyleType::Normal,
             pattern: crate::scene::model::hatch_model::HatchPattern::Solid,
             name: name.into(),
             color,
@@ -2735,7 +2768,7 @@ mod tests {
     fn text_wire(text: &str, origin: [f64; 3]) -> PlotWire {
         use crate::scene::pipeline::text_gpu::push_glyph_vertices;
         use crate::scene::text::{glyph_quads::layout_glyph_quads, sdf_atlas};
-        let quads = {
+        let (quads, _) = {
             let mut atlas = sdf_atlas::text_atlas().lock().unwrap();
             layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, text)
         };

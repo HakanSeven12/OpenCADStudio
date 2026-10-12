@@ -5,9 +5,9 @@ use super::OpenCADStudio;
 use crate::command::{DimensionAssociationSource, DimensionPreview};
 use crate::entities::dim_override;
 use crate::scene::viewport_ref::{AcceptedSnap, MeasurementScale, SnapSourceRef, ViewportFrame};
-use acadrust::entities::Dimension;
-use acadrust::types::Handle;
-use acadrust::EntityType;
+use codec::entities::Dimension;
+use codec::types::Handle;
+use codec::EntityType;
 use glam::DVec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -20,10 +20,7 @@ pub(crate) enum DimensionMeasureSpace {
 impl OpenCADStudio {
     pub(crate) fn finish_command_click(&mut self, i: usize) {
         let mut selection = self.tabs[i].scene.selection.borrow_mut();
-        selection.left_down = false;
-        selection.left_press_pos = None;
-        selection.left_press_time = None;
-        selection.left_dragging = false;
+        selection.input.clear_left_buttons();
     }
 
     pub(crate) fn dimension_measure_space(&self, i: usize) -> DimensionMeasureSpace {

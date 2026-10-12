@@ -1,11 +1,11 @@
 // SOLID geometry comes from the kernel; entity coordinates stay in WCS here.
 
-use acadrust::entities::Solid;
 use crate::t;
+use codec::entities::Solid;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;
@@ -30,7 +30,7 @@ fn dvec3(v: [f64; 3]) -> glam::DVec3 {
 
 pub(crate) fn wcs_corners(solid: &Solid) -> [[f64; 3]; 4] {
     let n = normal_tuple(solid);
-    let w = |v: &acadrust::types::Vector3| {
+    let w = |v: &codec::types::Vector3| {
         let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs((v.x, v.y, v.z), n);
         [x, y, z]
     };
@@ -44,10 +44,7 @@ pub(crate) fn wcs_corners(solid: &Solid) -> [[f64; 3]; 4] {
 
 fn set_wcs_corner(solid: &mut Solid, index: usize, point: glam::DVec3) {
     let n = normal_tuple(solid);
-    let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
-        (point.x, point.y, point.z),
-        n,
-    );
+    let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs((point.x, point.y, point.z), n);
     let corner = match index {
         0 => &mut solid.first_corner,
         1 => &mut solid.second_corner,
@@ -80,7 +77,7 @@ fn boundary_edges(points: &[[f64; 3]]) -> Vec<Edge> {
 }
 
 fn kernel_tolerance(points: &[[f64; 3]]) -> f64 {
-    let tolerance = cadkernel::space::coplanarity_tolerance(points);
+    let tolerance = kernel::space::coplanarity_tolerance(points);
     // Corners whose extent overflows f64 give an infinite tolerance, which
     // `Tolerance::new` rejects by panicking.
     if tolerance.is_finite() {
@@ -95,7 +92,7 @@ fn extrusion_body(
     base: &[[f64; 3]],
     tolerance: f64,
     profile_valid: bool,
-) -> Option<cadkernel::brep::Body> {
+) -> Option<kernel::brep::Body> {
     if solid.thickness.abs() <= 1.0e-10 || !profile_valid {
         return None;
     }
@@ -107,15 +104,8 @@ fn extrusion_body(
         .skip(1)
         .map(|point| glam::DVec3::from_array(*point) - origin)
         .find(|axis| axis.length() > tolerance)?;
-    let plane = cadkernel::space::Plane::orthonormal(
-        base[0],
-        axis.to_array(),
-        normal.to_array(),
-    )?;
-    if base
-        .iter()
-        .any(|point| !plane.contains(*point, tolerance))
-    {
+    let plane = kernel::space::Plane::orthonormal(base[0], axis.to_array(), normal.to_array())?;
+    if base.iter().any(|point| !plane.contains(*point, tolerance)) {
         return None;
     }
     let projected = base
@@ -124,26 +114,20 @@ fn extrusion_body(
         .collect::<Option<Vec<_>>>()?;
     let profile = (0..projected.len())
         .map(|index| {
-            cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+            kernel::geom2d::Curve::Line(kernel::geom2d::Line {
                 start: projected[index],
                 end: projected[(index + 1) % projected.len()],
             })
         })
         .collect::<Vec<_>>();
-    cadkernel::brep::extrude(
-        plane,
-        &profile,
-        (normal * solid.thickness).to_array(),
-    )
+    kernel::brep::extrude(plane, &profile, (normal * solid.thickness).to_array())
 }
 
 fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
     let base = boundary(solid);
     let tolerance = kernel_tolerance(&base);
-    let fill_tris = cadkernel::space::polygon::triangulate(
-        &base,
-        cadkernel::geom2d::Tolerance::new(tolerance),
-    );
+    let fill_tris =
+        kernel::space::polygon::triangulate(&base, kernel::geom2d::Tolerance::new(tolerance));
     if solid.thickness.abs() <= 1.0e-10 {
         return Some(SolidGeometry {
             edges: boundary_edges(&base),
@@ -158,10 +142,10 @@ fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
             extruded: false,
         });
     };
-    let mesh = cadkernel::brep::mesh::tessellate(
+    let mesh = kernel::brep::mesh::tessellate(
         &body,
-        cadkernel::brep::mesh::TessellationTolerance::new(
-            cadkernel::tessellation::DEFAULT_ANGLE,
+        kernel::brep::mesh::TessellationTolerance::new(
+            kernel::tessellation::DEFAULT_ANGLE,
             tolerance,
         ),
     );
@@ -188,21 +172,19 @@ fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
     })
 }
 
-pub(crate) fn wcs_bounds(solid: &Solid) -> Option<cadkernel::brep::Aabb> {
+pub(crate) fn wcs_bounds(solid: &Solid) -> Option<kernel::brep::Aabb> {
     let base = boundary(solid);
     let tolerance = kernel_tolerance(&base);
-    let profile_valid = !cadkernel::space::polygon::triangulate(
-        &base,
-        cadkernel::geom2d::Tolerance::new(tolerance),
-    )
-    .is_empty();
+    let profile_valid =
+        !kernel::space::polygon::triangulate(&base, kernel::geom2d::Tolerance::new(tolerance))
+            .is_empty();
     extrusion_body(solid, &base, tolerance, profile_valid)
-        .and_then(|body| cadkernel::brep::body_bounds(&body))
-        .or_else(|| cadkernel::brep::Aabb::around(base))
+        .and_then(|body| kernel::brep::body_bounds(&body))
+        .or_else(|| kernel::brep::Aabb::around(base))
 }
 
 impl RenderConvertible for Solid {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let geometry = solid_geometry(self)?;
         let mut lines = Vec::new();
         for &(start, end) in &geometry.edges {
@@ -221,9 +203,12 @@ impl RenderConvertible for Solid {
             snap.push((dvec3(point), SnapHint::Node));
             snap.push((dvec3(point), SnapHint::Endpoint));
         }
-        snap.extend(geometry.edges.iter().map(|(start, end)| {
-            ((dvec3(*start) + dvec3(*end)) * 0.5, SnapHint::Midpoint)
-        }));
+        snap.extend(
+            geometry
+                .edges
+                .iter()
+                .map(|(start, end)| ((dvec3(*start) + dvec3(*end)) * 0.5, SnapHint::Midpoint)),
+        );
         let pick_tris = geometry
             .extruded
             .then(|| geometry.fill_tris.clone())
@@ -377,7 +362,7 @@ impl Transformable for Solid {
 #[cfg(test)]
 mod overflow_tests {
     use super::*;
-    use acadrust::types::Vector3;
+    use codec::types::Vector3;
 
     /// Corners 1e308 apart overflow the coplanarity tolerance to infinity,
     /// which the kernel's `Tolerance::new` rejects by panicking.

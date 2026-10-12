@@ -262,11 +262,17 @@ pub async fn pick_step_path_owned(stem: String) -> Option<std::path::PathBuf> {
 /// Returns an ISO 8601-like timestamp string for the STEP file header.
 fn chrono_timestamp() -> String {
     // Use seconds since Unix epoch for a simple timestamp without chrono dep.
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    // `SystemTime::now` panics in the browser; ask the page's clock there. (#761)
+    #[cfg(target_arch = "wasm32")]
+    let secs = (js_sys::Date::now() / 1000.0) as u64;
+    #[cfg(not(target_arch = "wasm32"))]
+    let secs = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    };
     // Format: YYYY-MM-DDTHH:MM:SS (approximate UTC from epoch seconds).
     let s = secs;
     let mins = s / 60;

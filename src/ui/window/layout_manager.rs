@@ -1,11 +1,11 @@
 //! Layout Manager window — fills the entire OS window.
 
 use crate::app::Message;
+use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{hdivider, vsep};
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Element, Theme};
-use crate::t;
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
@@ -91,9 +91,7 @@ pub fn view_window<'a>(
         .align_y(iced::Center),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.weakest.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.weakest.color)),
         ..Default::default()
     })
     .width(sizing.width)
@@ -200,9 +198,7 @@ pub fn view_window<'a>(
 
     container(column![toolbar, hdivider(sizing.width), body].spacing(0))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color,
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(sizing.width)

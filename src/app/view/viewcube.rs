@@ -1,8 +1,6 @@
 use super::super::Message;
 use crate::scene::{VIEWCUBE_PX, VIEWCUBE_REGION_PX};
-use iced::widget::{
-    button, container, mouse_area, stack, Space,
-};
+use iced::widget::{button, container, mouse_area, stack, Space};
 use iced::{Background, Border, Element, Theme};
 
 // ── Render-mode picker ──────────────────────────────────────────────────────
@@ -37,9 +35,7 @@ fn vc_btn<'a>(content: Element<'a, Message>, size: f32, msg: Message) -> Element
             status,
             iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
         )
-        .then_some(Background::Color(
-            theme.palette().primary.weak.color
-        )),
+        .then_some(Background::Color(theme.palette().primary.weak.color)),
         border: Border {
             radius: 3.0.into(),
             ..Default::default()
@@ -52,9 +48,7 @@ fn vc_btn<'a>(content: Element<'a, Message>, size: f32, msg: Message) -> Element
 
 /// Overlay of home / roll / nudge controls sized to the whole nav region, so
 /// the caller can position it exactly like the cube hit area.
-pub(super) fn viewcube_nav_controls<'a>(
-    viewport: Option<acadrust::Handle>,
-) -> Element<'a, Message> {
+pub(super) fn viewcube_nav_controls<'a>(viewport: Option<codec::Handle>) -> Element<'a, Message> {
     use crate::scene::NudgeDir;
     use crate::ui::icons;
     let r = VIEWCUBE_REGION_PX;
@@ -96,12 +90,20 @@ pub(super) fn viewcube_nav_controls<'a>(
         vc_place(
             rax,
             ray,
-            vc_btn(icons::themed_undo(12.0, true), BTN, Message::ViewCubeRoll(false))
+            vc_btn(
+                icons::themed_undo(12.0, true),
+                BTN,
+                Message::ViewCubeRoll(false)
+            )
         ),
         vc_place(
             rbx,
             rby,
-            vc_btn(icons::themed_redo(12.0, true), BTN, Message::ViewCubeRoll(true))
+            vc_btn(
+                icons::themed_redo(12.0, true),
+                BTN,
+                Message::ViewCubeRoll(true)
+            )
         ),
         vc_place(
             tux,
@@ -150,10 +152,15 @@ pub(super) fn viewcube_nav_controls<'a>(
 /// Fixed width of the UCS picker, so it can be centred under the cube.
 pub(super) const UCS_PICKER_W: f32 = 84.0;
 
-/// The WCS / named-UCS selector shown under the cube.
-pub(super) fn viewcube_ucs_picker<'a>(current: String, names: Vec<String>) -> Element<'a, Message> {
+/// The WCS / named-UCS selector shown under the cube. `names` is the
+/// epoch-memoised `Scene::cached_ucs_names` Arc (#34) — a refcount bump per
+/// frame instead of N String clones.
+pub(super) fn viewcube_ucs_picker<'a>(
+    current: String,
+    names: std::sync::Arc<[String]>,
+) -> Element<'a, Message> {
     let mut options = vec!["WCS".to_string()];
-    options.extend(names);
+    options.extend(names.iter().cloned());
     let selected = if current.is_empty() {
         "WCS".to_string()
     } else {
@@ -169,16 +176,16 @@ pub(super) fn viewcube_ucs_picker<'a>(current: String, names: Vec<String>) -> El
         .style(move |theme: &Theme, _| {
             let palette = theme.palette();
             iced::widget::pick_list::Style {
-            background: Background::Color(palette.background.weak.color),
-            border: Border {
-                radius: 3.0.into(),
-                color: palette.background.neutral.color,
-                width: 1.0,
-                ..Default::default()
-            },
-            text_color: palette.background.base.text,
-            placeholder_color: palette.background.base.text.scale_alpha(0.68),
-            handle_color: palette.background.base.text,
+                background: Background::Color(palette.background.weak.color),
+                border: Border {
+                    radius: 3.0.into(),
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    ..Default::default()
+                },
+                text_color: palette.background.base.text,
+                placeholder_color: palette.background.base.text.scale_alpha(0.68),
+                handle_color: palette.background.base.text,
             }
         })
         .into()

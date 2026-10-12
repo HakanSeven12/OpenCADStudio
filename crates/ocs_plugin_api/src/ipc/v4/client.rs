@@ -9,15 +9,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use acadrust::xdata::ExtendedDataRecord;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::xdata::ExtendedDataRecord;
+use codec::{CadDocument, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 use interprocess::TryClone;
 
 use crate::host::{
-    DocumentReader, ExecutionResult, HostApi, HostNotification, InteractiveCommand,
-    PluginNotification, PluginRequestSender, PluginRequestError, ReaderEntity,
+    DocumentReader, ExecutionResult, HostApi, HostNotification, HostSettingValue,
+    InteractiveCommand, PluginNotification, PluginRequestError, PluginRequestSender, ReaderEntity,
 };
 use crate::ipc::protocol::{
     HostRequest, HostResponse, PluginRequest, PluginResponse, RunnerHandshake,
@@ -26,7 +26,7 @@ use crate::ipc::transport::{recv, send, TransportError};
 use crate::ipc::v4::protocol::{
     HostToPluginV4, NotificationEnvelope, PluginToHostV4, V4_PROTOCOL_VERSION,
 };
-use crate::shm::{DocumentViewInfo, SharedDocumentReader, DocumentViewData};
+use crate::shm::{DocumentViewData, DocumentViewInfo, SharedDocumentReader};
 
 /// Default capacity of the bounded host→plugin notification queue.
 const DEFAULT_NOTIFY_QUEUE_SIZE: usize = 1024;
@@ -89,8 +89,7 @@ impl V4Client {
             )))
         })?;
 
-        let (notify_tx, notify_rx) =
-            mpsc::sync_channel(notify_queue_size());
+        let (notify_tx, notify_rx) = mpsc::sync_channel(notify_queue_size());
         let (runner_tx, runner_rx) = mpsc::channel();
 
         let shared = Arc::new(Shared {
@@ -101,14 +100,7 @@ impl V4Client {
 
         let shared_for_reader = Arc::clone(&shared);
         let notifications = Arc::new(Mutex::new(notify_rx));
-        std::thread::spawn(move || {
-            reader_thread(
-                reader,
-                shared_for_reader,
-                notify_tx,
-                runner_tx,
-            )
-        });
+        std::thread::spawn(move || reader_thread(reader, shared_for_reader, notify_tx, runner_tx));
 
         Ok(Self {
             shared,
@@ -133,7 +125,11 @@ impl V4Client {
 
     /// Non-blocking poll for host-to-plugin notifications.
     pub fn try_recv_notification(&self) -> Option<(Option<u64>, HostNotification)> {
-        self.notifications.lock().unwrap_or_else(|e| e.into_inner()).try_recv().ok()
+        self.notifications
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .try_recv()
+            .ok()
     }
 
     /// Send a plugin response for a host request.
@@ -143,18 +139,11 @@ impl V4Client {
         resp: HostResponse,
     ) -> Result<(), crate::ipc::transport::TransportError> {
         let mut writer = self.shared.writer.lock().unwrap_or_else(|e| e.into_inner());
-        send(
-            &mut writer,
-            &PluginToHostV4::Response { id, payload: resp },
-        )
+        send(&mut writer, &PluginToHostV4::Response { id, payload: resp })
     }
 
     /// Send a plugin-to-host notification.
-    pub fn notify_plugin(
-        &self,
-        command_id: Option<u64>,
-        notification: PluginNotification,
-    ) {
+    pub fn notify_plugin(&self, command_id: Option<u64>, notification: PluginNotification) {
         let envelope = NotificationEnvelope {
             command_id,
             payload: notification,
@@ -168,10 +157,7 @@ impl V4Client {
     /// Build a callback that sends a delayed `CodeExecutionResult` response for
     /// the given request id. Used by `start_execute_code` implementations that
     /// run REPL code on a background thread.
-    pub fn execute_code_responder(
-        &self,
-        id: u64,
-    ) -> Box<dyn FnOnce(ExecutionResult) + Send> {
+    pub fn execute_code_responder(&self, id: u64) -> Box<dyn FnOnce(ExecutionResult) + Send> {
         let shared = Arc::clone(&self.shared);
         Box::new(move |result| {
             let mut writer = shared.writer.lock().unwrap_or_else(|e| e.into_inner());
@@ -235,7 +221,10 @@ fn reader_thread(
                     }
                 }
                 Ok(HostToPluginV4::Notification(envelope)) => {
-                    if notify_tx.try_send((envelope.command_id, envelope.payload)).is_err() {
+                    if notify_tx
+                        .try_send((envelope.command_id, envelope.payload))
+                        .is_err()
+                    {
                         let now = Instant::now();
                         let should_log = last_drop_log
                             .map(|t| now.duration_since(t) >= DROP_LOG_INTERVAL)
@@ -247,7 +236,10 @@ fn reader_thread(
                     }
                 }
                 Ok(HostToPluginV4::Request { id, payload }) => {
-                    if runner_tx.send(RunnerFrame::Request { id, payload }).is_err() {
+                    if runner_tx
+                        .send(RunnerFrame::Request { id, payload })
+                        .is_err()
+                    {
                         // Runner loop has exited; stop reading.
                         break;
                     }
@@ -510,9 +502,7 @@ impl HostApi for V4PluginHostApi {
 
     fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool {
         let app = record.application_name.clone();
-        match self
-            .request(PluginRequest::WriteRecord { handle, record })
-        {
+        match self.request(PluginRequest::WriteRecord { handle, record }) {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
                     self.record_cache.borrow_mut().remove(&(handle, app));
@@ -607,8 +597,10 @@ impl HostApi for V4PluginHostApi {
         &mut self,
         _plugin_id: &'static str,
         _init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync) {
-        panic!("ensure_plugin_state is not supported for out-of-process plugins; keep state in the plugin crate")
+    ) -> Option<&mut (dyn Any + Send + Sync)> {
+        // Same limitation as `plugin_state_any`; degrade to `None` so the
+        // plugin keeps running instead of dying on its own helper call.
+        None
     }
 
     fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
@@ -629,16 +621,18 @@ impl HostApi for V4PluginHostApi {
             }
         }
         match self.doc_view.borrow().as_ref() {
-            Some(info) => match SharedDocumentReader::<DocumentViewData>::open(Path::new(&info.path)) {
-                Ok(reader) => Box::new(reader),
-                Err(e) => {
-                    eprintln!(
-                        "[plugin] failed to open document view at {}: {e}",
-                        info.path
-                    );
-                    Box::new(EmptyDocumentReader)
+            Some(info) => {
+                match SharedDocumentReader::<DocumentViewData>::open(Path::new(&info.path)) {
+                    Ok(reader) => Box::new(reader),
+                    Err(e) => {
+                        eprintln!(
+                            "[plugin] failed to open document view at {}: {e}",
+                            info.path
+                        );
+                        Box::new(EmptyDocumentReader)
+                    }
                 }
-            },
+            }
             None => Box::new(EmptyDocumentReader),
         }
     }
@@ -655,7 +649,11 @@ impl HostApi for V4PluginHostApi {
     }
 
     fn try_recv_notification(&mut self) -> Option<(Option<u64>, HostNotification)> {
-        self.notifications.lock().unwrap_or_else(|e| e.into_inner()).try_recv().ok()
+        self.notifications
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .try_recv()
+            .ok()
     }
 
     fn plugin_request_sender(&self) -> Option<Box<dyn PluginRequestSender>> {
@@ -731,9 +729,132 @@ impl HostApi for V4PluginHostApi {
         }
     }
 
+    fn system_variable(&self, name: &str) -> Option<HostSettingValue> {
+        match self.request(PluginRequest::GetSystemVariable {
+            name: name.to_owned(),
+        }) {
+            Ok(PluginResponse::SystemVariable(value)) => value,
+            _ => None,
+        }
+    }
+
+    fn set_system_variable(
+        &mut self,
+        name: &str,
+        value: HostSettingValue,
+    ) -> Result<HostSettingValue, String> {
+        match self.request(PluginRequest::SetSystemVariable {
+            name: name.to_owned(),
+            value,
+        }) {
+            Ok(PluginResponse::SystemVariableResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected system variable response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn update_entities_transaction(
+        &mut self,
+        label: &str,
+        entities: Vec<EntityType>,
+    ) -> Result<(), String> {
+        match self.request(PluginRequest::UpdateEntitiesTransaction {
+            label: label.to_owned(),
+            entities,
+        }) {
+            Ok(PluginResponse::EntityTransactionResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected entity transaction response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn selection(&self) -> Vec<Handle> {
+        match self.request(PluginRequest::GetSelection) {
+            Ok(PluginResponse::Selection(handles)) => handles,
+            _ => Vec::new(),
+        }
+    }
+
+    fn solid_operation(
+        &mut self,
+        operation: crate::host::SolidOperation,
+    ) -> Result<Handle, String> {
+        match self.request(PluginRequest::SolidOperation { operation }) {
+            Ok(PluginResponse::SolidResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected solid operation response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn run_command(
+        &mut self,
+        request: crate::host::CommandRequest,
+    ) -> Result<crate::host::CommandOutcome, String> {
+        match self.request(PluginRequest::RunCommand { request }) {
+            Ok(PluginResponse::CommandResult(result)) => {
+                self.document_cache = OnceCell::new();
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected command response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn table_operation(
+        &mut self,
+        operation: crate::host::TableOperation,
+    ) -> Result<Handle, String> {
+        match self.request(PluginRequest::TableOperation { operation }) {
+            Ok(PluginResponse::TableResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected table operation response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn set_selection(&mut self, handles: &[Handle]) -> Result<(), String> {
+        match self.request(PluginRequest::SetSelection {
+            handles: handles.to_vec(),
+        }) {
+            Ok(PluginResponse::SelectionResult(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected selection response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     fn add_layer(&mut self, config: crate::host::LayerConfig) -> Option<Handle> {
         match self.request(PluginRequest::AddLayer(config)) {
-            Ok(PluginResponse::OptHandle(h)) => h,
+            Ok(PluginResponse::OptHandle(h)) => {
+                if h.is_some() {
+                    self.document_cache = OnceCell::new();
+                }
+                h
+            }
             Ok(other) => {
                 eprintln!("[plugin] unexpected AddLayer response: {other:?}");
                 None
@@ -747,13 +868,32 @@ impl HostApi for V4PluginHostApi {
 
     fn modify_layer(&mut self, config: crate::host::LayerConfig) -> bool {
         match self.request(PluginRequest::ModifyLayer(config)) {
-            Ok(PluginResponse::Bool(b)) => b,
+            Ok(PluginResponse::Bool(b)) => {
+                if b {
+                    self.document_cache = OnceCell::new();
+                }
+                b
+            }
             Ok(other) => {
                 eprintln!("[plugin] unexpected ModifyLayer response: {other:?}");
                 false
             }
             Err(e) => {
                 eprintln!("[plugin] ModifyLayer request failed: {e}");
+                false
+            }
+        }
+    }
+
+    fn execute_command(&mut self, cmd: &str) -> bool {
+        match self.request(PluginRequest::ExecuteCommand(cmd.to_string())) {
+            Ok(PluginResponse::Bool(b)) => b,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected ExecuteCommand response: {other:?}");
+                false
+            }
+            Err(e) => {
+                eprintln!("[plugin] ExecuteCommand failed: {e}");
                 false
             }
         }
@@ -775,9 +915,7 @@ impl V4Client {
         });
         let shared_for_reader = Arc::clone(&shared);
         let notifications = Arc::new(Mutex::new(notify_rx));
-        std::thread::spawn(move || {
-            reader_thread(reader, shared_for_reader, notify_tx, runner_tx)
-        });
+        std::thread::spawn(move || reader_thread(reader, shared_for_reader, notify_tx, runner_tx));
         Self {
             shared,
             notifications,
@@ -815,7 +953,7 @@ mod tests {
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
     use crate::test_lock::ENV_LOCK;
-    use acadrust::entities::Point;
+    use codec::entities::Point;
 
     fn unique_socket_name() -> String {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -957,7 +1095,10 @@ mod tests {
         });
 
         assert!(matches!(first.join().unwrap(), PluginResponse::Bool(true)));
-        assert!(matches!(second.join().unwrap(), PluginResponse::Bool(false)));
+        assert!(matches!(
+            second.join().unwrap(),
+            PluginResponse::Bool(false)
+        ));
         runner.join().unwrap();
     }
 

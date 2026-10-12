@@ -1,7 +1,7 @@
 //! Application language selection and embedded Fluent resources.
 
 use i18n_embed::fluent::{fluent_language_loader, FluentLanguageLoader};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 use i18n_embed::DesktopLanguageRequester;
 use i18n_embed::LanguageLoader;
 #[cfg(target_arch = "wasm32")]
@@ -53,6 +53,8 @@ pub enum Language {
     JaJp,
     #[serde(rename = "ko-KR")]
     KoKr,
+    #[serde(rename = "lo-LA")]
+    LoLa,
     #[serde(rename = "cs-CZ")]
     CsCz,
     #[serde(rename = "it-IT")]
@@ -70,7 +72,7 @@ pub enum Language {
 }
 
 impl Language {
-    pub const ALL: [Language; 22] = [
+    pub const ALL: [Language; 23] = [
         Language::System,
         Language::EnUs,
         Language::BgBg,
@@ -85,6 +87,7 @@ impl Language {
         Language::ItIt,
         Language::JaJp,
         Language::KoKr,
+        Language::LoLa,
         Language::PlPl,
         Language::RuRu,
         Language::ZhCn,
@@ -112,6 +115,7 @@ impl Language {
             Language::ArSa => vec!["ar-SA".parse().expect("valid locale")],
             Language::JaJp => vec!["ja-JP".parse().expect("valid locale")],
             Language::KoKr => vec!["ko-KR".parse().expect("valid locale")],
+            Language::LoLa => vec!["lo-LA".parse().expect("valid locale")],
             Language::CsCz => vec!["cs-CZ".parse().expect("valid locale")],
             Language::ItIt => vec!["it-IT".parse().expect("valid locale")],
             Language::FiFi => vec!["fi-FI".parse().expect("valid locale")],
@@ -139,6 +143,7 @@ impl Language {
             Language::ArSa => crate::tr!("language", "arabic"),
             Language::JaJp => crate::tr!("language", "japanese"),
             Language::KoKr => crate::tr!("language", "korean"),
+            Language::LoLa => crate::tr!("language", "lao"),
             Language::CsCz => crate::tr!("language", "czech"),
             Language::ItIt => crate::tr!("language", "italian"),
             Language::FiFi => crate::tr!("language", "finnish"),
@@ -163,27 +168,34 @@ fn system_languages() -> Vec<i18n_embed::unic_langid::LanguageIdentifier> {
     // for the system language, so the machine's locale must never reach
     // them — not even from a test that runs in parallel.
     #[cfg(test)]
-    return vec!["en-US".parse().expect("en-US is a valid language identifier")];
-
-    #[cfg(target_arch = "wasm32")]
-    let mut requested = WebLanguageRequester::requested_languages();
-    #[cfg(not(target_arch = "wasm32"))]
-    let requested = DesktopLanguageRequester::requested_languages();
-
-    // `navigator.languages` may be empty in privacy-restricted browser
-    // contexts. The singular preference is still exposed by mainstream
-    // browsers, so keep it as the first fallback before English.
-    #[cfg(target_arch = "wasm32")]
-    if requested.is_empty() {
-        if let Some(language) = web_sys::window()
-            .and_then(|window| window.navigator().language())
-            .and_then(|language| language.parse().ok())
-        {
-            requested.push(language);
-        }
+    {
+        vec!["en-US"
+            .parse()
+            .expect("en-US is a valid language identifier")]
     }
 
-    requested
+    #[cfg(not(test))]
+    {
+        #[cfg(target_arch = "wasm32")]
+        let mut requested = WebLanguageRequester::requested_languages();
+        #[cfg(not(target_arch = "wasm32"))]
+        let requested = DesktopLanguageRequester::requested_languages();
+
+        // `navigator.languages` may be empty in privacy-restricted browser
+        // contexts. The singular preference is still exposed by mainstream
+        // browsers, so keep it as the first fallback before English.
+        #[cfg(target_arch = "wasm32")]
+        if requested.is_empty() {
+            if let Some(language) = web_sys::window()
+                .and_then(|window| window.navigator().language())
+                .and_then(|language| language.parse().ok())
+            {
+                requested.push(language);
+            }
+        }
+
+        requested
+    }
 }
 
 fn load_language(

@@ -1,11 +1,11 @@
 //! Plot Style Table Editor window — fills the entire OS window.
 
 use crate::app::Message;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Background, Border, Element, Theme};
+use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{hdivider, vsep};
-use crate::t;
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::{Background, Border, Element, Theme};
 use std::borrow::Cow;
 use std::fmt;
 
@@ -45,21 +45,19 @@ fn btn_s(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
         let palette = theme.palette();
         let pair = match (accent, st) {
             (true, button::Status::Hovered | button::Status::Pressed) => palette.primary.strong,
-            (false, button::Status::Hovered | button::Status::Pressed) => {
-                palette.background.strong
-            }
+            (false, button::Status::Hovered | button::Status::Pressed) => palette.background.strong,
             (true, _) => palette.primary.base,
             _ => palette.background.weak,
         };
         button::Style {
-        background: Some(Background::Color(pair.color)),
-        text_color: pair.text,
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
+            background: Some(Background::Color(pair.color)),
+            text_color: pair.text,
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
         }
     }
 }
@@ -92,11 +90,11 @@ fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
 /// unit-tested and benched without building widgets. `pub` (not
 /// `pub(crate)`) so the `cargo bench` harness (`benches/`, an external
 /// crate) can measure it as `ui_plotstyle_layer_usage`.
-pub fn build_layer_usage(document: &acadrust::CadDocument) -> Vec<Vec<String>> {
+pub fn build_layer_usage(document: &codec::CadDocument) -> Vec<Vec<String>> {
     let mut layer_usage = vec![Vec::<String>::new(); 256];
 
     for layer in document.layers.iter() {
-        if let acadrust::types::Color::Index(aci) = &layer.color {
+        if let codec::types::Color::Index(aci) = &layer.color {
             let index = *aci as usize;
 
             if index > 0 && index < layer_usage.len() {
@@ -114,7 +112,7 @@ pub fn build_layer_usage(document: &acadrust::CadDocument) -> Vec<Vec<String>> {
 }
 
 pub fn view_window<'a>(
-    document: &'a acadrust::CadDocument,
+    document: &'a codec::CadDocument,
     table: Option<&'a crate::io::plot_style::PlotStyleTable>,
     selected_aci: u8,
     color_buf: &'a str,
@@ -159,9 +157,7 @@ pub fn view_window<'a>(
         .align_y(iced::Center),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.weak.color
-        )),
+        background: Some(Background::Color(theme.palette().background.weak.color)),
         ..Default::default()
     })
     .width(sizing.width)
@@ -171,19 +167,15 @@ pub fn view_window<'a>(
     let aci_items: Vec<Element<'_, Message>> = (1u8..=255)
         .map(|aci| {
             let is_sel = aci == selected_aci;
-            let usage_count = layer_usage
-                .get(aci as usize)
-                .map(Vec::len)
-                .unwrap_or(0);
+            let usage_count = layer_usage.get(aci as usize).map(Vec::len).unwrap_or(0);
 
             let usage_label = if show_layer_usage && usage_count > 0 {
                 format!("● {usage_count}")
             } else {
                 String::new()
             };
-            let (aci_color, _) = crate::ui::properties::acad_color_display(
-                acadrust::types::Color::Index(aci),
-            );
+            let (aci_color, _) =
+                crate::ui::properties::acad_color_display(codec::types::Color::Index(aci));
             let has_override = table
                 .and_then(|t| t.aci_entries.get(aci as usize))
                 .map(|e| e.color.is_some() || e.lineweight != 255 || e.screening != 100)
@@ -212,12 +204,10 @@ pub fn view_window<'a>(
             button(
                 row![
                     crate::ui::color_select::swatch(aci_color),
-
                     text(label)
                         .size(10)
                         .font(iced::Font::MONOSPACE)
                         .width(iced::Length::Fill),
-
                     text(usage_label)
                         .size(10)
                         .font(iced::Font::MONOSPACE)
@@ -227,26 +217,24 @@ pub fn view_window<'a>(
                 .align_y(iced::Center),
             )
             .on_press(Message::PlotStylePanelSelectAci(aci))
-                .style(move |theme: &Theme, st| {
-                    let palette = theme.palette();
-                    let pair = match (is_sel, st) {
-                        (true, _) => Some(palette.primary.strong),
-                        (false, button::Status::Hovered | button::Status::Pressed) => {
-                            Some(palette.background.strong)
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                    background: pair.map(|p| Background::Color(p.color)),
-                    text_color: pair
-                        .map(|p| p.text)
-                        .unwrap_or(palette.background.base.text),
-                    ..Default::default()
+            .style(move |theme: &Theme, st| {
+                let palette = theme.palette();
+                let pair = match (is_sel, st) {
+                    (true, _) => Some(palette.primary.strong),
+                    (false, button::Status::Hovered | button::Status::Pressed) => {
+                        Some(palette.background.strong)
                     }
-                })
-                .padding([2, 8])
-                .width(sizing.width)
-                .into()
+                    _ => None,
+                };
+                button::Style {
+                    background: pair.map(|p| Background::Color(p.color)),
+                    text_color: pair.map(|p| p.text).unwrap_or(palette.background.base.text),
+                    ..Default::default()
+                }
+            })
+            .padding([2, 8])
+            .width(sizing.width)
+            .into()
         })
         .collect();
 
@@ -257,24 +245,20 @@ pub fn view_window<'a>(
                     .size(10)
                     .style(muted_style)
                     .width(iced::Length::Fill),
-
-                text(t!("Layers"))
-                    .size(10)
-                    .style(muted_style)
-                    .width(42),
+                text(t!("Layers")).size(10).style(muted_style).width(42),
             ]
             .align_y(iced::Center),
             container(scrollable(column(aci_items).spacing(1)).height(sizing.height))
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
                     container::Style {
-                    background: Some(Background::Color(palette.background.weak.color)),
-                    border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
-                        radius: 3.0.into()
-                    },
-                    ..Default::default()
+                        background: Some(Background::Color(palette.background.weak.color)),
+                        border: Border {
+                            color: palette.background.neutral.color,
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
                     }
                 })
                 .width(sizing.width)
@@ -327,10 +311,7 @@ pub fn view_window<'a>(
     let lbl = |s: Cow<'static, str>| text(s).size(11).style(muted_style);
     let lw_items = plot_lineweight_options();
 
-    let current_lw_index = lw_buf
-        .trim()
-        .parse::<u8>()
-        .unwrap_or(255);
+    let current_lw_index = lw_buf.trim().parse::<u8>().unwrap_or(255);
 
     let current_lw = lw_items
         .iter()
@@ -341,10 +322,7 @@ pub fn view_window<'a>(
     let edit_panel = container(
         column![
             row![
-                text(t!("ACI:"))
-                    .size(11)
-                    .style(muted_style)
-                    .width(100),
+                text(t!("ACI:")).size(11).style(muted_style).width(100),
                 text(format!("{selected_aci}")).size(11),
             ]
             .spacing(8)
@@ -352,14 +330,9 @@ pub fn view_window<'a>(
             if show_layer_usage {
                 container(
                     column![
-                        text(format!(
-                            "{}: {}",
-                            t!("Layers"),
-                            selected_layers.len()
-                        ))
-                        .size(10)
-                        .style(muted_style),
-
+                        text(format!("{}: {}", t!("Layers"), selected_layers.len()))
+                            .size(10)
+                            .style(muted_style),
                         text(selected_layers_text)
                             .size(10)
                             .width(iced::Length::Fill),
@@ -371,7 +344,6 @@ pub fn view_window<'a>(
             } else {
                 container(Space::new().height(0))
             },
-
             // ── Plot color ───────────────────────────────────────────────────
             lbl(t!("Plot color:")),
             {
@@ -379,17 +351,16 @@ pub fn view_window<'a>(
                     .strip_prefix('#')
                     .filter(|hex| hex.len() == 6)
                     .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-                    .map(|rgb| acadrust::types::Color::Rgb {
+                    .map(|rgb| codec::types::Color::Rgb {
                         r: ((rgb >> 16) & 0xFF) as u8,
                         g: ((rgb >> 8) & 0xFF) as u8,
                         b: (rgb & 0xFF) as u8,
                     });
 
-                let display_color = selected_color
-                    .unwrap_or(acadrust::types::Color::Index(selected_aci));
+                let display_color =
+                    selected_color.unwrap_or(codec::types::Color::Index(selected_aci));
 
-                let (swatch_color, _) =
-                    crate::ui::properties::acad_color_display(display_color);
+                let (swatch_color, _) = crate::ui::properties::acad_color_display(display_color);
 
                 let display_text = if color_buf.is_empty() {
                     t!("Use object color").into_owned()
@@ -408,7 +379,6 @@ pub fn view_window<'a>(
                     )
                     .padding([4, 8])
                     .width(iced::Length::Fill),
-
                     button(text(t!("Choose color…")).size(11))
                         .on_press(Message::OpenColorWindow(
                             crate::app::ColorPickTarget::PlotStyle,
@@ -416,7 +386,6 @@ pub fn view_window<'a>(
                         ))
                         .style(btn_s(false))
                         .padding([4, 10]),
-
                     button(text(t!("Reset")).size(11))
                         .on_press(Message::PlotStylePanelColorBuf(String::new()))
                         .style(btn_s(false))
@@ -425,21 +394,13 @@ pub fn view_window<'a>(
                 .spacing(6)
                 .align_y(iced::Center)
             },
-
             // ── Lineweight ───────────────────────────────────────────────────
             lbl(t!("Lineweight:")),
-                iced::widget::pick_list(
-                    Some(current_lw),
-                    lw_items,
-                    |item| item.to_string(),
-                )
-                .on_select(|item: PlotLineweightItem| {
-                    Message::PlotStylePanelLwSet(item.index)
-                })
+            iced::widget::pick_list(Some(current_lw), lw_items, |item| item.to_string(),)
+                .on_select(|item: PlotLineweightItem| { Message::PlotStylePanelLwSet(item.index) })
                 .text_size(11)
                 .padding([3, 5])
                 .width(iced::Length::Fill),
-
             // ── Screening ────────────────────────────────────────────────────
             lbl(t!("Screening (0-100):")),
             text_input("100", screen_buf)
@@ -447,47 +408,21 @@ pub fn view_window<'a>(
                 .style(field_style)
                 .size(11)
                 .padding([4, 8]),
-
             Space::new().height(8),
-
             // ── Current values ───────────────────────────────────────────────
-            text(t!("Current values:"))
-                .size(10)
-                .style(muted_style),
-
-            text(t!(
-                "  Color: %{cur_color}",
-                cur_color = cur_color
-            ))
-            .size(10),
-
-            text(t!(
-                "  Lineweight: %{cur_lw}",
-                cur_lw = cur_lw
-            ))
-            .size(10),
-
-            text(t!(
-                "  Screening: %{cur_scr}",
-                cur_scr = cur_scr
-            ))
-            .size(10),
-
+            text(t!("Current values:")).size(10).style(muted_style),
+            text(t!("  Color: %{cur_color}", cur_color = cur_color)).size(10),
+            text(t!("  Lineweight: %{cur_lw}", cur_lw = cur_lw)).size(10),
+            text(t!("  Screening: %{cur_scr}", cur_scr = cur_scr)).size(10),
             Space::new().height(12),
-
             hdivider(iced::Length::Fill),
-
             Space::new().height(8),
-
             if show_layer_usage {
                 container(
                     column![
                         row![
-                            text(crate::tf!("Layers using ACI {selected_aci}"))
-                                .size(11),
-
+                            text(crate::tf!("Layers using ACI {selected_aci}")).size(11),
                             Space::new().width(iced::Length::Fill),
-
                             text(format!(
                                 "{} {}",
                                 selected_layers.len(),
@@ -501,23 +436,16 @@ pub fn view_window<'a>(
                             .style(muted_style),
                         ]
                         .align_y(iced::Center),
-
                         if selected_layers.is_empty() {
-                            column![
-                                text(t!("No layers use this ACI in the current drawing."))
-                                    .size(10)
-                                    .style(muted_style)
-                            ]
+                            column![text(t!("No layers use this ACI in the current drawing."))
+                                .size(10)
+                                .style(muted_style)]
                         } else {
                             column(
                                 selected_layers
                                     .iter()
-                                    .map(|name| {
-                                        text(format!("• {name}"))
-                                            .size(10)
-                                            .into()
-                                    })
-                                    .collect::<Vec<Element<'_, Message>>>()
+                                    .map(|name| text(format!("• {name}")).size(10).into())
+                                    .collect::<Vec<Element<'_, Message>>>(),
                             )
                             .spacing(4)
                         },
@@ -529,9 +457,7 @@ pub fn view_window<'a>(
             } else {
                 container(Space::new().height(0))
             },
-
             Space::new().height(sizing.height),
-
         ]
         .spacing(8)
         .height(sizing.height),
@@ -544,9 +470,7 @@ pub fn view_window<'a>(
 
     container(column![toolbar, hdivider(sizing.width), body].spacing(0))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(sizing.width)
@@ -558,20 +482,16 @@ pub fn view_window<'a>(
 mod layer_usage_tests {
     use super::*;
 
-    fn indexed_layer(
-        doc: &mut acadrust::CadDocument,
-        name: &str,
-        aci: u8,
-    ) -> acadrust::tables::Layer {
-        let mut layer = acadrust::tables::Layer::new(name);
+    fn indexed_layer(doc: &mut codec::CadDocument, name: &str, aci: u8) -> codec::tables::Layer {
+        let mut layer = codec::tables::Layer::new(name);
         layer.handle = doc.allocate_handle();
-        layer.color = acadrust::types::Color::Index(aci);
+        layer.color = codec::types::Color::Index(aci);
         layer
     }
 
     #[test]
     fn build_layer_usage_buckets_index_colors() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let a = indexed_layer(&mut doc, "WALLS", 1);
         let b = indexed_layer(&mut doc, "doors", 1);
         let c = indexed_layer(&mut doc, "ROOF", 3);
@@ -589,10 +509,10 @@ mod layer_usage_tests {
 
     #[test]
     fn build_layer_usage_ignores_non_index_colors() {
-        let mut doc = acadrust::CadDocument::new();
-        let mut truecolor = acadrust::tables::Layer::new("TRUECOLOR");
+        let mut doc = codec::CadDocument::new();
+        let mut truecolor = codec::tables::Layer::new("TRUECOLOR");
         truecolor.handle = doc.allocate_handle();
-        truecolor.color = acadrust::types::Color::Rgb {
+        truecolor.color = codec::types::Color::Rgb {
             r: 10,
             g: 20,
             b: 30,
@@ -602,9 +522,10 @@ mod layer_usage_tests {
         let usage = build_layer_usage(&doc);
 
         assert!(
-            usage.iter().all(|bucket| !bucket.iter().any(|n| n == "TRUECOLOR")),
+            usage
+                .iter()
+                .all(|bucket| !bucket.iter().any(|n| n == "TRUECOLOR")),
             "truecolor layer must not appear in any ACI bucket"
         );
     }
-
 }

@@ -23,13 +23,13 @@ fn viewport_tooltip<'a>(
 }
 
 pub(super) fn viewport_controls<'a>(
-    render_mode: acadrust::entities::ViewportRenderMode,
+    render_mode: codec::entities::ViewportRenderMode,
     show_grid: bool,
     snap_on: bool,
     include_split: bool,
     tile_count: usize,
     render_mode_menu_open: bool,
-    render_mode_preview: Option<acadrust::entities::ViewportRenderMode>,
+    render_mode_preview: Option<codec::entities::ViewportRenderMode>,
 ) -> Element<'a, Message> {
     let render_modes: Vec<RenderModeChoice> = crate::modules::view::visual_style::VISUAL_STYLES
         .iter()
@@ -346,26 +346,26 @@ pub(super) fn dyn_component_value(
     ) && relative
         && !comma_cartesian;
     match f.component {
-        DynComponent::X if relative => crate::entities::common::format_length(if wh { dx.abs() } else { dx }),
-        DynComponent::Y if relative => crate::entities::common::format_length(if wh { dy.abs() } else { dy }),
+        DynComponent::X if relative => {
+            crate::entities::common::format_length(if wh { dx.abs() } else { dx })
+        }
+        DynComponent::Y if relative => {
+            crate::entities::common::format_length(if wh { dy.abs() } else { dy })
+        }
         DynComponent::Z if relative => crate::entities::common::format_length(0.0),
         DynComponent::X => crate::entities::common::format_length(p.x),
         DynComponent::Y => crate::entities::common::format_length(p.y),
         DynComponent::Z => crate::entities::common::format_length(p.z),
         // Scaled by the role so a diameter box reads twice the radius.
-        DynComponent::Distance => {
-            crate::entities::common::format_length(
-                (dx * dx + dy * dy).sqrt() * f.role.value_scale() as f64,
-            )
-        }
+        DynComponent::Distance => crate::entities::common::format_length(
+            (dx * dx + dy * dy).sqrt() * f.role.value_scale() as f64,
+        ),
         // Shared rule: unsigned magnitude of the short angle, so CW (below the
         // reference axis) reads positive (e.g. 30°, not -30°/330°). The
         // committed value stays signed (see dyn_resolve_point).
-        DynComponent::Angle => {
-            crate::entities::common::format_angle(
-                (crate::command::dyn_display_angle_deg(dy.atan2(dx) as f32) as f64).to_radians(),
-            )
-        }
+        DynComponent::Angle => crate::entities::common::format_angle(
+            (crate::command::dyn_display_angle_deg(dy.atan2(dx) as f32) as f64).to_radians(),
+        ),
         // Typed-only scalar — no geometric value to track when empty.
         DynComponent::Scalar => String::new(),
     }
@@ -374,7 +374,7 @@ pub(super) fn dyn_component_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::ViewportRenderMode as M;
+    use codec::entities::ViewportRenderMode as M;
 
     #[test]
     fn test_viewport_controls_construction() {

@@ -7,6 +7,7 @@ pub mod command_line;
 pub mod dock;
 pub mod icons;
 pub mod modal;
+pub mod node_graph;
 pub mod overlay;
 pub mod popup;
 pub mod properties;

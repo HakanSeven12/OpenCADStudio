@@ -3,8 +3,8 @@
 // The command only collects the base point; the host performs the copy when it
 // receives the dispatched `COPYBASE_AT <x> <y> <z>` token.
 
-use glam::DVec3;
 use crate::t;
+use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
 

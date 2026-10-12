@@ -13,11 +13,11 @@
 // Bulge is stored per vertex (segment i→i+1); positive = CCW, negative = CW.
 // Widths are stored per segment as (start, end).
 
-use acadrust::entities::LwVertex;
-use acadrust::types::Vector2;
-use acadrust::{EntityType, Handle, LwPolyline};
-use glam::{DVec2, DVec3, Vec2, Vec3};
 use crate::t;
+use codec::entities::LwVertex;
+use codec::types::Vector2;
+use codec::{EntityType, Handle, LwPolyline};
+use glam::{DVec2, DVec3, Vec2, Vec3};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -47,41 +47,72 @@ enum SegMode {
 /// sub-step returns to `None` once it has produced a vertex, or when Undo /
 /// Enter / Escape backs out of it.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Sub {
+pub(crate) enum Sub {
     None,
     /// Width / Halfwidth: starting width, then ending width. `half` scales the
     /// prompt and the typed value by two.
-    WidthStart { half: bool },
-    WidthEnd { half: bool, start: f64 },
+    WidthStart {
+        half: bool,
+    },
+    WidthEnd {
+        half: bool,
+        start: f64,
+    },
     /// Length: a line segment of the typed length along the last tangent.
     Length,
     /// Arc → Angle: typed included angle, then an endpoint [CEnter/Radius].
     ArcAngle,
-    ArcAngleEnd { angle: f64 },
-    ArcAngleCenter { angle: f64 },
-    ArcAngleRadius { angle: f64 },
-    ArcAngleRadiusDir { angle: f64, r: f64 },
+    ArcAngleEnd {
+        angle: f64,
+    },
+    ArcAngleCenter {
+        angle: f64,
+    },
+    ArcAngleRadius {
+        angle: f64,
+    },
+    ArcAngleRadiusDir {
+        angle: f64,
+        r: f64,
+    },
     /// Arc → CEnter: centre pick, then an endpoint [Angle/Length].
     ArcCenter,
-    ArcCenterEnd { c: DVec2 },
-    ArcCenterAngle { c: DVec2 },
-    ArcCenterLength { c: DVec2 },
+    ArcCenterEnd {
+        c: DVec2,
+    },
+    ArcCenterAngle {
+        c: DVec2,
+    },
+    ArcCenterLength {
+        c: DVec2,
+    },
     /// Arc → Direction: a tangent-direction pick, then the endpoint.
     ArcDirection,
-    ArcDirectionEnd { dir: DVec2 },
+    ArcDirectionEnd {
+        dir: DVec2,
+    },
     /// Arc → Radius: typed radius, then an endpoint [Angle].
     ArcRadius,
-    ArcRadiusEnd { r: f64 },
-    ArcRadiusAngle { r: f64 },
-    ArcRadiusAngleDir { r: f64, angle: f64 },
+    ArcRadiusEnd {
+        r: f64,
+    },
+    ArcRadiusAngle {
+        r: f64,
+    },
+    ArcRadiusAngleDir {
+        r: f64,
+        angle: f64,
+    },
     /// Arc → Second pt: a point on the arc, then the endpoint (3-point arc).
     ArcSecond,
-    ArcSecondEnd { s: DVec2 },
+    ArcSecondEnd {
+        s: DVec2,
+    },
 }
 
 impl Sub {
     /// The step reads a single typed value (width, length, angle, radius).
-    fn is_scalar(self) -> bool {
+    pub(crate) fn is_scalar(self) -> bool {
         matches!(
             self,
             Sub::WidthStart { .. }
@@ -97,7 +128,7 @@ impl Sub {
     }
 
     /// The typed value is an angle (degrees) rather than a length.
-    fn is_angle(self) -> bool {
+    pub(crate) fn is_angle(self) -> bool {
         matches!(
             self,
             Sub::ArcAngle | Sub::ArcCenterAngle { .. } | Sub::ArcRadiusAngle { .. }
@@ -249,149 +280,8 @@ impl PlineCommand {
             .unwrap_or(DVec2::X)
     }
 
-    /// Sign for an arc whose direction is not fixed by its definition
-    /// (CEnter / Radius endpoints, chord length): bend the way the previous
-    /// segment was heading so the polyline flows on, else counter-clockwise.
-    fn free_arc_sign(&self, a: DVec2, e: DVec2) -> f64 {
-        let chord = e - a;
-        let cross = match self.last_tangent {
-            Some(t) => t.as_dvec2().perp_dot(chord),
-            None => 1.0,
-        };
-        if cross < 0.0 {
-            -1.0
-        } else {
-            1.0
-        }
-    }
-
-    /// Bulge of the arc from `a` to `e` through `s` (3-point arc). `None` when
-    /// the points are collinear or coincident.
-    fn bulge_through(a: DVec2, s: DVec2, e: DVec2) -> Option<f64> {
-        let d = 2.0 * (a.x * (s.y - e.y) + s.x * (e.y - a.y) + e.x * (a.y - s.y));
-        if d.abs() < 1e-12 {
-            return None;
-        }
-        let a2 = a.length_squared();
-        let s2 = s.length_squared();
-        let e2 = e.length_squared();
-        let cx = (a2 * (s.y - e.y) + s2 * (e.y - a.y) + e2 * (a.y - s.y)) / d;
-        let cy = (a2 * (e.x - s.x) + s2 * (a.x - e.x) + e2 * (s.x - a.x)) / d;
-        let c = DVec2::new(cx, cy);
-        let start = (a - c).y.atan2((a - c).x);
-        let end = (e - c).y.atan2((e - c).x);
-        // The arc bends towards `s`: with `s` right of the chord a → e the
-        // arc runs counter-clockwise, left of it clockwise.
-        let ccw = (e - a).perp_dot(s - a) < 0.0;
-        let mut sweep = end - start;
-        if ccw {
-            if sweep <= 0.0 {
-                sweep += std::f64::consts::TAU;
-            }
-        } else if sweep >= 0.0 {
-            sweep -= std::f64::consts::TAU;
-        }
-        Some((sweep / 4.0).tan())
-    }
-
-    /// Endpoint of the arc about `c` starting at `a` with signed `sweep`.
-    fn rotate_about(c: DVec2, a: DVec2, sweep: f64) -> DVec2 {
-        let (sn, cs) = sweep.sin_cos();
-        let v = a - c;
-        c + DVec2::new(v.x * cs - v.y * sn, v.x * sn + v.y * cs)
-    }
-
-    /// Resolve the arc a sub-step describes for a candidate `cursor`/point:
-    /// `(endpoint, bulge)`. `None` when the geometry is degenerate for that
-    /// input (e.g. a chord longer than the diameter).
     fn arc_for(&self, sub: Sub, a: DVec2, p: DVec2) -> Option<(DVec2, f64)> {
-        let sweep_ok = |s: f64| s.abs() > 1e-9 && s.abs() < std::f64::consts::TAU;
-        match sub {
-            Sub::ArcAngleEnd { angle } if sweep_ok(angle) => {
-                if (p - a).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((p, (angle / 4.0).tan()))
-            }
-            Sub::ArcAngleCenter { angle } if sweep_ok(angle) => {
-                if (a - p).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((Self::rotate_about(p, a, angle), (angle / 4.0).tan()))
-            }
-            Sub::ArcAngleRadiusDir { angle, r } if sweep_ok(angle) && r > 0.0 => {
-                let dir = (p - a).try_normalize()?;
-                let chord = 2.0 * r * (angle.abs() * 0.5).sin();
-                Some((a + dir * chord, (angle / 4.0).tan()))
-            }
-            Sub::ArcCenterEnd { c } => {
-                let r = (a - c).length();
-                if r < 1e-9 {
-                    return None;
-                }
-                let dir = (p - c).try_normalize()?;
-                let e = c + dir * r;
-                let start = (a - c).y.atan2((a - c).x);
-                let end = (e - c).y.atan2((e - c).x);
-                let sign = self.free_arc_sign(a, e);
-                let mut sweep = (end - start).rem_euclid(std::f64::consts::TAU);
-                if sign < 0.0 {
-                    sweep -= std::f64::consts::TAU;
-                }
-                if !sweep_ok(sweep) {
-                    return None;
-                }
-                Some((e, (sweep / 4.0).tan()))
-            }
-            Sub::ArcCenterAngle { c } => {
-                // `p` carries the typed angle in `x`.
-                let angle = p.x;
-                if (a - c).length_squared() < 1e-12 || !sweep_ok(angle) {
-                    return None;
-                }
-                Some((Self::rotate_about(c, a, angle), (angle / 4.0).tan()))
-            }
-            Sub::ArcCenterLength { c } => {
-                // `p` carries the typed chord length in `x`.
-                let len = p.x;
-                let r = (a - c).length();
-                if r < 1e-9 || len <= 0.0 || len > 2.0 * r {
-                    return None;
-                }
-                let sweep = 2.0 * (len / (2.0 * r)).asin();
-                // Minor arc; bend on the side the previous segment favours.
-                let e_ccw = Self::rotate_about(c, a, sweep);
-                let sign = self.free_arc_sign(a, e_ccw);
-                let sweep = sweep * sign;
-                Some((Self::rotate_about(c, a, sweep), (sweep / 4.0).tan()))
-            }
-            Sub::ArcDirectionEnd { dir } => {
-                if (p - a).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((p, compute_bulge(a, dir, p)))
-            }
-            Sub::ArcRadiusEnd { r } if r > 0.0 => {
-                let chord = (p - a).length();
-                if chord < 1e-9 || chord > 2.0 * r {
-                    return None;
-                }
-                let sweep = 2.0 * (chord / (2.0 * r)).asin() * self.free_arc_sign(a, p);
-                Some((p, (sweep / 4.0).tan()))
-            }
-            Sub::ArcRadiusAngleDir { r, angle } if r > 0.0 && sweep_ok(angle) => {
-                let dir = (p - a).try_normalize()?;
-                let chord = 2.0 * r * (angle.abs() * 0.5).sin();
-                Some((a + dir * chord, (angle / 4.0).tan()))
-            }
-            Sub::ArcSecondEnd { s } => {
-                if (p - a).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((p, Self::bulge_through(a, s, p)?))
-            }
-            _ => None,
-        }
+        arc_for(sub, a, p, self.last_tangent)
     }
 
     /// Land a segment ending at local `e` with `bulge`, publish it, and
@@ -400,11 +290,8 @@ impl PlineCommand {
         let last_idx = self.vertices.len() - 1;
         let a = self.local2(self.vertices[last_idx]);
         self.bulges[last_idx] = bulge;
-        self.last_tangent = seg_exit_tangent(
-            DVec3::new(a.x, a.y, z),
-            DVec3::new(e.x, e.y, z),
-            bulge,
-        );
+        self.last_tangent =
+            seg_exit_tangent(DVec3::new(a.x, a.y, z), DVec3::new(e.x, e.y, z), bulge);
         self.sub = Sub::None;
         self.push_vertex(self.plane.to_world(DVec3::new(e.x, e.y, z)))
     }
@@ -480,12 +367,16 @@ impl PlineCommand {
                 Some(CmdResult::NeedPoint)
             }
             Sub::ArcCenterAngle { c } => {
-                let (e, bulge) =
-                    self.arc_for(Sub::ArcCenterAngle { c }, a, DVec2::new(value.to_radians(), 0.0))?;
+                let (e, bulge) = self.arc_for(
+                    Sub::ArcCenterAngle { c },
+                    a,
+                    DVec2::new(value.to_radians(), 0.0),
+                )?;
                 Some(self.push_segment(e, z, bulge))
             }
             Sub::ArcCenterLength { c } => {
-                let (e, bulge) = self.arc_for(Sub::ArcCenterLength { c }, a, DVec2::new(value, 0.0))?;
+                let (e, bulge) =
+                    self.arc_for(Sub::ArcCenterLength { c }, a, DVec2::new(value, 0.0))?;
                 Some(self.push_segment(e, z, bulge))
             }
             Sub::ArcRadius => {
@@ -559,7 +450,12 @@ impl PlineCommand {
         }
         let world_points = pts
             .into_iter()
-            .map(|point| self.plane.to_world(Vec3::from_array(point).as_dvec3()).as_vec3().to_array())
+            .map(|point| {
+                self.plane
+                    .to_world(Vec3::from_array(point).as_dvec3())
+                    .as_vec3()
+                    .to_array()
+            })
             .collect();
         let mut wire = WireModel::solid("rubber_band".into(), world_points, WireModel::CYAN, false);
         if let Some(tg) = tangent_geom {
@@ -581,6 +477,157 @@ impl PlineCommand {
 }
 
 // ── Arc geometry helpers ───────────────────────────────────────────────────
+
+/// Sign for an arc whose direction is not fixed by its definition
+/// (CEnter / Radius endpoints, chord length): bend the way the previous
+/// segment was heading so the polyline flows on, else counter-clockwise.
+fn free_arc_sign(last_tangent: Option<Vec2>, a: DVec2, e: DVec2) -> f64 {
+    let chord = e - a;
+    let cross = match last_tangent {
+        Some(t) => t.as_dvec2().perp_dot(chord),
+        None => 1.0,
+    };
+    if cross < 0.0 {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// Bulge of the arc from `a` to `e` through `s` (3-point arc). `None` when
+/// the points are collinear or coincident.
+fn bulge_through(a: DVec2, s: DVec2, e: DVec2) -> Option<f64> {
+    let d = 2.0 * (a.x * (s.y - e.y) + s.x * (e.y - a.y) + e.x * (a.y - s.y));
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let a2 = a.length_squared();
+    let s2 = s.length_squared();
+    let e2 = e.length_squared();
+    let cx = (a2 * (s.y - e.y) + s2 * (e.y - a.y) + e2 * (a.y - s.y)) / d;
+    let cy = (a2 * (e.x - s.x) + s2 * (a.x - e.x) + e2 * (s.x - a.x)) / d;
+    let c = DVec2::new(cx, cy);
+    let start = (a - c).y.atan2((a - c).x);
+    let end = (e - c).y.atan2((e - c).x);
+    // The arc bends towards `s`: with `s` right of the chord a → e the
+    // arc runs counter-clockwise, left of it clockwise.
+    let ccw = (e - a).perp_dot(s - a) < 0.0;
+    let mut sweep = end - start;
+    if ccw {
+        if sweep <= 0.0 {
+            sweep += std::f64::consts::TAU;
+        }
+    } else if sweep >= 0.0 {
+        sweep -= std::f64::consts::TAU;
+    }
+    Some((sweep / 4.0).tan())
+}
+
+/// Endpoint of the arc about `c` starting at `a` with signed `sweep`.
+fn rotate_about(c: DVec2, a: DVec2, sweep: f64) -> DVec2 {
+    let (sn, cs) = sweep.sin_cos();
+    let v = a - c;
+    c + DVec2::new(v.x * cs - v.y * sn, v.x * sn + v.y * cs)
+}
+
+/// Resolve the arc an arc sub-step describes (PLINE, VPCLIP) from `a` for a
+/// candidate `cursor`/point `p`, after a segment leaving along
+/// `last_tangent`: `(endpoint, bulge)`. `None` when the geometry is
+/// degenerate for that input (e.g. a chord longer than the diameter).
+pub(crate) fn arc_for(
+    sub: Sub,
+    a: DVec2,
+    p: DVec2,
+    last_tangent: Option<Vec2>,
+) -> Option<(DVec2, f64)> {
+    let sweep_ok = |s: f64| s.abs() > 1e-9 && s.abs() < std::f64::consts::TAU;
+    match sub {
+        Sub::ArcAngleEnd { angle } if sweep_ok(angle) => {
+            if (p - a).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((p, (angle / 4.0).tan()))
+        }
+        Sub::ArcAngleCenter { angle } if sweep_ok(angle) => {
+            if (a - p).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((rotate_about(p, a, angle), (angle / 4.0).tan()))
+        }
+        Sub::ArcAngleRadiusDir { angle, r } if sweep_ok(angle) && r > 0.0 => {
+            let dir = (p - a).try_normalize()?;
+            let chord = 2.0 * r * (angle.abs() * 0.5).sin();
+            Some((a + dir * chord, (angle / 4.0).tan()))
+        }
+        Sub::ArcCenterEnd { c } => {
+            let r = (a - c).length();
+            if r < 1e-9 {
+                return None;
+            }
+            let dir = (p - c).try_normalize()?;
+            let e = c + dir * r;
+            let start = (a - c).y.atan2((a - c).x);
+            let end = (e - c).y.atan2((e - c).x);
+            let sign = free_arc_sign(last_tangent, a, e);
+            let mut sweep = (end - start).rem_euclid(std::f64::consts::TAU);
+            if sign < 0.0 {
+                sweep -= std::f64::consts::TAU;
+            }
+            if !sweep_ok(sweep) {
+                return None;
+            }
+            Some((e, (sweep / 4.0).tan()))
+        }
+        Sub::ArcCenterAngle { c } => {
+            // `p` carries the typed angle in `x`.
+            let angle = p.x;
+            if (a - c).length_squared() < 1e-12 || !sweep_ok(angle) {
+                return None;
+            }
+            Some((rotate_about(c, a, angle), (angle / 4.0).tan()))
+        }
+        Sub::ArcCenterLength { c } => {
+            // `p` carries the typed chord length in `x`.
+            let len = p.x;
+            let r = (a - c).length();
+            if r < 1e-9 || len <= 0.0 || len > 2.0 * r {
+                return None;
+            }
+            let sweep = 2.0 * (len / (2.0 * r)).asin();
+            // Minor arc; bend on the side the previous segment favours.
+            let e_ccw = rotate_about(c, a, sweep);
+            let sign = free_arc_sign(last_tangent, a, e_ccw);
+            let sweep = sweep * sign;
+            Some((rotate_about(c, a, sweep), (sweep / 4.0).tan()))
+        }
+        Sub::ArcDirectionEnd { dir } => {
+            if (p - a).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((p, compute_bulge(a, dir, p)))
+        }
+        Sub::ArcRadiusEnd { r } if r > 0.0 => {
+            let chord = (p - a).length();
+            if chord < 1e-9 || chord > 2.0 * r {
+                return None;
+            }
+            let sweep = 2.0 * (chord / (2.0 * r)).asin() * free_arc_sign(last_tangent, a, p);
+            Some((p, (sweep / 4.0).tan()))
+        }
+        Sub::ArcRadiusAngleDir { r, angle } if r > 0.0 && sweep_ok(angle) => {
+            let dir = (p - a).try_normalize()?;
+            let chord = 2.0 * r * (angle.abs() * 0.5).sin();
+            Some((a + dir * chord, (angle / 4.0).tan()))
+        }
+        Sub::ArcSecondEnd { s } => {
+            if (p - a).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((p, bulge_through(a, s, p)?))
+        }
+        _ => None,
+    }
+}
 
 /// Compute the bulge for the arc from `a` to `b` that is tangent to `tangent` at `a`.
 /// Returns 0.0 if the points are coincident or the tangent is parallel to the chord.
@@ -714,7 +761,8 @@ impl PlineCommand {
     }
 
     fn width_prompt(&self, half: bool, ending: bool, default: f64) -> String {
-        let shown = crate::entities::common::format_length(if half { default * 0.5 } else { default });
+        let shown =
+            crate::entities::common::format_length(if half { default * 0.5 } else { default });
         match (half, ending) {
             (false, false) => t!("PLINE  Specify starting width <%{w}>:", w = shown),
             (false, true) => t!("PLINE  Specify ending width <%{w}>:", w = shown),
@@ -796,10 +844,8 @@ impl CadCommand for PlineCommand {
                     opts
                 }
                 SegMode::Arc => {
-                    let mut opts = vec![
-                        CmdOption::new("Angle", "A"),
-                        CmdOption::new("CEnter", "CE"),
-                    ];
+                    let mut opts =
+                        vec![CmdOption::new("Angle", "A"), CmdOption::new("CEnter", "CE")];
                     if can_close {
                         opts.push(CmdOption::new("CLose", "CL"));
                     }
@@ -817,21 +863,30 @@ impl CadCommand for PlineCommand {
                 }
             },
             Sub::WidthStart { half } => {
-                let d = if half { self.cur_width.0 * 0.5 } else { self.cur_width.0 };
-                vec![CmdOption::enter(&format!("<{}>", crate::entities::common::format_length(d)))]
+                let d = if half {
+                    self.cur_width.0 * 0.5
+                } else {
+                    self.cur_width.0
+                };
+                vec![CmdOption::enter(&format!(
+                    "<{}>",
+                    crate::entities::common::format_length(d)
+                ))]
             }
             Sub::WidthEnd { half, start } => {
                 let d = if half { start * 0.5 } else { start };
-                vec![CmdOption::enter(&format!("<{}>", crate::entities::common::format_length(d)))]
+                vec![CmdOption::enter(&format!(
+                    "<{}>",
+                    crate::entities::common::format_length(d)
+                ))]
             }
             Sub::ArcAngleEnd { .. } => vec![
                 CmdOption::new("CEnter", "CE"),
                 CmdOption::new("Radius", "R"),
             ],
-            Sub::ArcCenterEnd { .. } => vec![
-                CmdOption::new("Angle", "A"),
-                CmdOption::new("Length", "L"),
-            ],
+            Sub::ArcCenterEnd { .. } => {
+                vec![CmdOption::new("Angle", "A"), CmdOption::new("Length", "L")]
+            }
             Sub::ArcRadiusEnd { .. } => vec![CmdOption::new("Angle", "A")],
             _ => Vec::new(),
         }
@@ -995,9 +1050,10 @@ impl CadCommand for PlineCommand {
         use crate::command::DynField;
         match self.sub {
             Sub::WidthStart { .. } | Sub::WidthEnd { .. } => DynField::Scalar,
-            Sub::Length | Sub::ArcRadius | Sub::ArcAngleRadius { .. } | Sub::ArcCenterLength { .. } => {
-                DynField::Distance
-            }
+            Sub::Length
+            | Sub::ArcRadius
+            | Sub::ArcAngleRadius { .. }
+            | Sub::ArcCenterLength { .. } => DynField::Distance,
             sub if sub.is_angle() => DynField::Angle,
             _ => DynField::Point,
         }
@@ -1174,7 +1230,7 @@ impl CadCommand for PlineCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["PLINE"] });  // PlineCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["PLINE"] }); // PlineCommand
 
 #[cfg(test)]
 mod tests {
@@ -1191,10 +1247,7 @@ mod tests {
             .on_mouse_move(DVec3::new(15.0, 5.0, 0.0))
             .expect("polyline with vertices should have a preview");
 
-        assert_eq!(
-            preview.points,
-            vec![[10.0, 5.0, 0.0], [15.0, 5.0, 0.0]]
-        );
+        assert_eq!(preview.points, vec![[10.0, 5.0, 0.0], [15.0, 5.0, 0.0]]);
     }
 
     #[test]
@@ -1263,7 +1316,10 @@ mod tests {
                 ..
             }
             | CmdResult::CommitLiveEntity(EntityType::LwPolyline(p)) => p,
-            other => panic!("expected a polyline result, got {}", std::any::type_name_of_val(&other)),
+            other => panic!(
+                "expected a polyline result, got {}",
+                std::any::type_name_of_val(&other)
+            ),
         }
     }
 
@@ -1283,7 +1339,10 @@ mod tests {
             ["A", "CE", "CL", "D", "H", "L", "R", "S", "U", "W", ""]
         );
         cmd.on_text_input("A");
-        assert!(keywords(&cmd).is_empty(), "typed-angle prompt has no keywords");
+        assert!(
+            keywords(&cmd).is_empty(),
+            "typed-angle prompt has no keywords"
+        );
         cmd.on_text_input("90");
         assert_eq!(keywords(&cmd), ["CE", "R"]);
         cmd.on_text_input("CE");
@@ -1300,10 +1359,16 @@ mod tests {
         assert!(matches!(cmd.on_text_input("2"), Some(CmdResult::NeedPoint)));
         assert!(matches!(cmd.sub, Sub::None));
         let e = entity_of(cmd.on_point(DVec3::new(10.0, 0.0, 0.0)));
-        assert_eq!((e.vertices[0].start_width, e.vertices[0].end_width), (1.0, 2.0));
+        assert_eq!(
+            (e.vertices[0].start_width, e.vertices[0].end_width),
+            (1.0, 2.0)
+        );
         // The end width carries over as the next segment's start width.
         let e = entity_of(cmd.on_point(DVec3::new(20.0, 0.0, 0.0)));
-        assert_eq!((e.vertices[1].start_width, e.vertices[1].end_width), (2.0, 2.0));
+        assert_eq!(
+            (e.vertices[1].start_width, e.vertices[1].end_width),
+            (2.0, 2.0)
+        );
         assert_eq!(super::super::super::defaults::get_pline_width(), 2.0);
         super::super::super::defaults::set_pline_width(0.0);
     }
@@ -1340,7 +1405,11 @@ mod tests {
         cmd.on_text_input("L"); // back to Line mode
         cmd.on_text_input("L"); // Length
         let e = entity_of(cmd.on_text_input("5").expect("length consumed"));
-        assert!((e.vertices[3].location.x - 5.0).abs() < 1e-6, "{:?}", e.vertices[3].location);
+        assert!(
+            (e.vertices[3].location.x - 5.0).abs() < 1e-6,
+            "{:?}",
+            e.vertices[3].location
+        );
         assert!((e.vertices[3].location.y - 10.0).abs() < 1e-6);
     }
 
@@ -1350,10 +1419,17 @@ mod tests {
         cmd.on_text_input("A");
         let res = cmd.on_text_input("CL").expect("CLose consumed");
         match res {
-            CmdResult::UpdateLiveEntity { entity: EntityType::LwPolyline(p), finish, .. } => {
+            CmdResult::UpdateLiveEntity {
+                entity: EntityType::LwPolyline(p),
+                finish,
+                ..
+            } => {
                 assert!(finish);
                 assert!(p.is_closed);
-                assert!(p.vertices[2].bulge.abs() > 1e-6, "closing segment should be an arc");
+                assert!(
+                    p.vertices[2].bulge.abs() > 1e-6,
+                    "closing segment should be an arc"
+                );
             }
             _ => panic!("expected a finishing update"),
         }
@@ -1381,9 +1457,15 @@ mod tests {
         assert_eq!(keywords(&cmd), ["A", "L"]);
         let e = entity_of(cmd.on_point(DVec3::new(20.0, 5.0, 0.0)));
         let v = e.vertices[2].location;
-        assert!((v.x - 15.0).abs() < 1e-9 && (v.y - 5.0).abs() < 1e-9, "{v:?}");
+        assert!(
+            (v.x - 15.0).abs() < 1e-9 && (v.y - 5.0).abs() < 1e-9,
+            "{v:?}"
+        );
         let expect = (std::f64::consts::FRAC_PI_2 / 4.0).tan();
-        assert!((e.vertices[1].bulge - expect).abs() < 1e-9, "quarter turn CCW");
+        assert!(
+            (e.vertices[1].bulge - expect).abs() < 1e-9,
+            "quarter turn CCW"
+        );
     }
 
     #[test]
@@ -1396,7 +1478,10 @@ mod tests {
         // Chord 10 on a radius 5 circle: a semicircle ending at (10,10).
         let e = entity_of(cmd.on_text_input("10").expect("chord length"));
         let v = e.vertices[2].location;
-        assert!((v.x - 10.0).abs() < 1e-6 && (v.y - 10.0).abs() < 1e-6, "{v:?}");
+        assert!(
+            (v.x - 10.0).abs() < 1e-6 && (v.y - 10.0).abs() < 1e-6,
+            "{v:?}"
+        );
     }
 
     #[test]
@@ -1405,8 +1490,15 @@ mod tests {
         cmd.on_text_input("A");
         cmd.on_text_input("R");
         cmd.on_text_input("3");
-        assert!(matches!(cmd.on_point(DVec3::new(20.0, 0.0, 0.0)), CmdResult::NeedPoint));
-        assert_eq!(cmd.vertices.len(), 2, "chord longer than the diameter is refused");
+        assert!(matches!(
+            cmd.on_point(DVec3::new(20.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            cmd.vertices.len(),
+            2,
+            "chord longer than the diameter is refused"
+        );
         let e = entity_of(cmd.on_point(DVec3::new(16.0, 0.0, 0.0)));
         assert_eq!(e.vertices.len(), 3);
         assert!(e.vertices[1].bulge.abs() > 0.0);
@@ -1420,7 +1512,11 @@ mod tests {
         cmd.on_point(DVec3::new(15.0, 5.0, 0.0));
         let e = entity_of(cmd.on_point(DVec3::new(20.0, 0.0, 0.0)));
         // Semicircle over the chord, running clockwise (bulge -1).
-        assert!((e.vertices[1].bulge + 1.0).abs() < 1e-9, "{}", e.vertices[1].bulge);
+        assert!(
+            (e.vertices[1].bulge + 1.0).abs() < 1e-9,
+            "{}",
+            e.vertices[1].bulge
+        );
     }
 
     #[test]
@@ -1430,7 +1526,11 @@ mod tests {
         cmd.on_text_input("D");
         cmd.on_point(DVec3::new(10.0, 10.0, 0.0)); // tangent +Y
         let e = entity_of(cmd.on_point(DVec3::new(20.0, 0.0, 0.0)));
-        assert!((e.vertices[1].bulge + 1.0).abs() < 1e-9, "{}", e.vertices[1].bulge);
+        assert!(
+            (e.vertices[1].bulge + 1.0).abs() < 1e-9,
+            "{}",
+            e.vertices[1].bulge
+        );
     }
 
     #[test]
@@ -1458,7 +1558,9 @@ mod tests {
         assert!(matches!(res, CmdResult::CommitLiveEntity(_)));
         cmd.set_live_handle(Handle::new(1));
         cmd.on_text_input("A");
-        let wire = cmd.on_mouse_move(DVec3::new(10.0, 5.0, 0.0)).expect("arc wire");
+        let wire = cmd
+            .on_mouse_move(DVec3::new(10.0, 5.0, 0.0))
+            .expect("arc wire");
         assert_eq!(wire.tangent_geoms.len(), 1);
         assert!(matches!(wire.tangent_geoms[0], TangentGeom::Arc { .. }));
         assert!(wire.points.len() >= 16);

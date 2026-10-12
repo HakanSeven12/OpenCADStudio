@@ -1,8 +1,8 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use acadrust::io::dwg::DwgReader;
-use acadrust::{DwgReadOptions, DxfReader, DxfReaderConfiguration};
+use codec::io::dwg::DwgReader;
+use codec::{DwgReadOptions, DxfReader, DxfReaderConfiguration};
 use js_sys::{Function, Uint8Array};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
@@ -42,26 +42,24 @@ pub fn parse_document(
         "dwg" => {
             if recovery_mode {
                 DwgReader::from_stream_with_options(
-                        Cursor::new(Arc::clone(&bytes)),
-                        DwgReadOptions::failsafe(),
-                    )
-                    .read_with_stats()
+                    Cursor::new(Arc::clone(&bytes)),
+                    DwgReadOptions::failsafe(),
+                )
+                .read_with_stats()
             } else {
-                DwgReader::from_stream(Cursor::new(Arc::clone(&bytes)))
-                    .read_with_stats()
+                DwgReader::from_stream(Cursor::new(Arc::clone(&bytes))).read_with_stats()
             }
         }
         "dxf" => {
             if recovery_mode {
-                DxfReader::from_reader(Cursor::new(Arc::clone(&bytes)))
-                    .and_then(|reader| {
-                        reader
-                            .with_configuration(DxfReaderConfiguration {
-                                failsafe: true,
-                                ..DxfReaderConfiguration::default()
-                            })
-                            .read_with_stats()
-                    })
+                DxfReader::from_reader(Cursor::new(Arc::clone(&bytes))).and_then(|reader| {
+                    reader
+                        .with_configuration(DxfReaderConfiguration {
+                            failsafe: true,
+                            ..DxfReaderConfiguration::default()
+                        })
+                        .read_with_stats()
+                })
             } else {
                 DxfReader::from_reader(Cursor::new(Arc::clone(&bytes)))
                     .and_then(|reader| reader.read_with_stats())
@@ -84,9 +82,7 @@ pub fn parse_document(
     };
     if !outcome.stats.has_usable_drawing_data() {
         let error = if recovery_mode {
-            format!(
-                "initial read failed: {initial_error}; recovery found no usable drawing data"
-            )
+            format!("initial read failed: {initial_error}; recovery found no usable drawing data")
         } else {
             "initial read returned no source drawing records".to_string()
         };
@@ -109,21 +105,21 @@ pub fn parse_document(
     }
     if recovery_mode {
         outcome.document.notifications.notify(
-            acadrust::notification::NotificationType::Error,
+            codec::notification::NotificationType::Error,
             format!("Initial read failed; recovery mode continued: {initial_error}"),
         );
-        acadrust::push_read_diagnostic(
+        codec::push_read_diagnostic(
             &mut outcome.stats.diagnostics,
-            acadrust::ReadDiagnostic::new(
+            codec::ReadDiagnostic::new(
                 "strict-read-failed",
-                acadrust::ReadStage::RecordStream,
+                codec::ReadStage::RecordStream,
                 initial_error,
             ),
         );
         outcome.stats.recovered_errors = outcome.stats.recovered_errors.saturating_add(1);
     }
-    let source_sha256 = report_fingerprint_needed(&outcome.stats)
-        .then(|| sha256_document_bytes(&bytes));
+    let source_sha256 =
+        report_fingerprint_needed(&outcome.stats).then(|| sha256_document_bytes(&bytes));
     report_stage.call1(&JsValue::NULL, &JsValue::from_str("serialize document"))?;
     let encoded = encode_result(Ok(outcome), source_sha256, false, &bytes)?;
     report_stage.call1(&JsValue::NULL, &JsValue::from_str("copy output"))?;
@@ -157,30 +153,31 @@ pub fn serialize_document(
     Ok(Uint8Array::from(encoded.as_slice()))
 }
 
-fn report_fingerprint_needed(stats: &acadrust::ReadStats) -> bool {
+fn report_fingerprint_needed(stats: &codec::ReadStats) -> bool {
+fn report_fingerprint_needed(stats: &codec::ReadStats) -> bool {
     stats.recovered() || stats.skipped_source_records > 0 || !stats.stream_completed
 }
 
-fn recoverable_reader_error(error: &acadrust::DxfError) -> bool {
+fn recoverable_reader_error(error: &codec::DxfError) -> bool {
     matches!(
         error,
-        acadrust::DxfError::Compression(_)
-            | acadrust::DxfError::Parse(_)
-            | acadrust::DxfError::InvalidDxfCode(_)
-            | acadrust::DxfError::InvalidHandle(_)
-            | acadrust::DxfError::ObjectNotFound(_)
-            | acadrust::DxfError::InvalidEntityType(_)
-            | acadrust::DxfError::ChecksumMismatch { .. }
-            | acadrust::DxfError::InvalidHeader(_)
-            | acadrust::DxfError::InvalidFormat(_)
-            | acadrust::DxfError::InvalidSentinel(_)
-            | acadrust::DxfError::Decompression(_)
-            | acadrust::DxfError::Encoding(_)
+        codec::DxfError::Compression(_)
+            | codec::DxfError::Parse(_)
+            | codec::DxfError::InvalidDxfCode(_)
+            | codec::DxfError::InvalidHandle(_)
+            | codec::DxfError::ObjectNotFound(_)
+            | codec::DxfError::InvalidEntityType(_)
+            | codec::DxfError::ChecksumMismatch { .. }
+            | codec::DxfError::InvalidHeader(_)
+            | codec::DxfError::InvalidFormat(_)
+            | codec::DxfError::InvalidSentinel(_)
+            | codec::DxfError::Decompression(_)
+            | codec::DxfError::Encoding(_)
     )
 }
 
 fn encode_result(
-    result: Result<acadrust::ReadOutcome, (String, Option<acadrust::ReadStats>)>,
+    result: Result<codec::ReadOutcome, (String, Option<codec::ReadStats>)>,
     source_sha256: Option<String>,
     recoverable_parse_error: bool,
     bytes: &[u8],
@@ -197,7 +194,7 @@ fn encode_result(
         recoverable_parse_error,
         runtime_fields,
     ))
-        .map_err(|error| worker_error(error.to_string(), bytes, true))?;
+    .map_err(|error| worker_error(error.to_string(), bytes, true))?;
     Ok(Uint8Array::from(encoded.as_slice()))
 }
 

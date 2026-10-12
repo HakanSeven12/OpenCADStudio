@@ -4,17 +4,17 @@
 
 mod coincident;
 mod concentric;
-mod dim_constraint;
-mod parameters_cli;
 mod constraint_bar;
-mod equal_distance;
+mod dim_constraint;
 #[path = "equal.rs"]
 mod equal_command;
+mod equal_distance;
 #[path = "fixed.rs"]
 mod fixed_command;
 mod geom_constraint;
 #[path = "horizontal.rs"]
 mod horizontal_command;
+mod parameters_cli;
 #[path = "perpendicular.rs"]
 mod perpendicular_command;
 mod point_on_entity;
@@ -27,17 +27,17 @@ mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use concentric::ConcentricConstraintCommand;
+pub use constraint_bar::ConstraintBarOptionCommand;
 pub use dim_constraint::{
     ConstraintFormCommand, DimConstraintAxis, DimConstraintCommand, DimConstraintMenuCommand,
     DimensionValueCommand,
 };
-pub use parameters_cli::ParametersCliCommand;
-pub use constraint_bar::ConstraintBarOptionCommand;
 pub use equal_command::EqualConstraintCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use fixed_command::FixConstraintCommand;
 pub use geom_constraint::GeomConstraintCommand;
 pub use horizontal_command::HorizontalConstraintCommand;
+pub use parameters_cli::ParametersCliCommand;
 pub use perpendicular_command::{PerpendicularConstraintCommand, PerpendicularPick};
 pub use point_on_entity::{
     center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand,
@@ -50,8 +50,7 @@ pub use tools::{
     perpendicular, symmetric, tangent, vertical,
 };
 pub use value::{
-    angle_tool, dimensional_tools, distance_tool, AngleConstraintCommand,
-    DistanceConstraintCommand, DistanceMode,
+    angle_tool, dimensional_tools, distance_tool, DistanceConstraintCommand, DistanceMode,
 };
 
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
@@ -71,14 +70,18 @@ impl CadModule for ParametricModule {
         static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
         GROUPS.get_or_init(|| {
             let command = |id: &'static str, label: &'static str, icon: &'static [u8]| ToolDef {
-                id, label, icon: IconKind::Svg(icon), event: ModuleEvent::Command(id.to_string()),
+                id,
+                label,
+                icon: IconKind::Svg(icon),
+                event: ModuleEvent::Command(id.to_string()),
             };
             vec![
                 RibbonGroup {
                     title: "Geometric",
                     tools: vec![
                         RibbonItem::LargeTool(command(
-                            "AUTOCONSTRAIN", "Auto Constrain",
+                            "AUTOCONSTRAIN",
+                            "Auto Constrain",
                             include_bytes!("../../../assets/icons/constrain/auto.svg"),
                         )),
                         RibbonItem::LargeTool(coincident_tool::tool()),
@@ -87,7 +90,8 @@ impl CadModule for ParametricModule {
                         RibbonItem::LargeTool(colinear::tool()),
                         RibbonItem::LargeTool(perpendicular::tool()),
                         RibbonItem::LargeTool(command(
-                            "GCSMOOTH", "Smooth",
+                            "GCSMOOTH",
+                            "Smooth",
                             include_bytes!("../../../assets/icons/constrain/smooth.svg"),
                         )),
                         RibbonItem::LargeTool(concentric_tool::tool()),
@@ -97,19 +101,45 @@ impl CadModule for ParametricModule {
                         RibbonItem::LargeTool(vertical::tool()),
                         RibbonItem::LargeTool(equal::tool()),
                         RibbonItem::LabeledDropdown {
-                            id: "GCVISIBILITY", label: "Show/Hide",
-                            icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg")),
+                            id: "GCVISIBILITY",
+                            label: "Show/Hide",
+                            icon: IconKind::Svg(include_bytes!(
+                                "../../../assets/icons/constrain/show.svg"
+                            )),
                             items: vec![
-                                ("GCSHOW", "Show", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                                ("GCHIDE", "Hide", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/hide_all.svg"))),
-                                ("GCRESET", "Reset", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                            ], default: "GCSHOW",
+                                (
+                                    "GCSHOW",
+                                    "Show",
+                                    IconKind::Svg(include_bytes!(
+                                        "../../../assets/icons/constrain/show.svg"
+                                    )),
+                                ),
+                                (
+                                    "GCHIDE",
+                                    "Hide",
+                                    IconKind::Svg(include_bytes!(
+                                        "../../../assets/icons/constrain/hide_all.svg"
+                                    )),
+                                ),
+                                (
+                                    "GCRESET",
+                                    "Reset",
+                                    IconKind::Svg(include_bytes!(
+                                        "../../../assets/icons/constrain/show.svg"
+                                    )),
+                                ),
+                            ],
+                            default: "GCSHOW",
                         },
                         RibbonItem::LabeledTool(command(
-                            "GCSHOWALL", "Show All", include_bytes!("../../../assets/icons/constrain/show_all.svg"),
+                            "GCSHOWALL",
+                            "Show All",
+                            include_bytes!("../../../assets/icons/constrain/show_all.svg"),
                         )),
                         RibbonItem::LabeledTool(command(
-                            "GCHIDEALL", "Hide All", include_bytes!("../../../assets/icons/constrain/hide_all.svg"),
+                            "GCHIDEALL",
+                            "Hide All",
+                            include_bytes!("../../../assets/icons/constrain/hide_all.svg"),
                         )),
                     ],
                 },
@@ -117,29 +147,61 @@ impl CadModule for ParametricModule {
                     title: "Dimensional",
                     tools: vec![
                         RibbonItem::LargeDropdown {
-                            id: "DC_LINEAR_MENU", label: "Linear", icon: dimensional_tools::linear().icon,
-                            items: [dimensional_tools::linear(), dimensional_tools::horizontal(), dimensional_tools::vertical()]
-                                .iter().map(|tool| (tool.id, tool.label, tool.icon)).collect(),
+                            id: "DC_LINEAR_MENU",
+                            label: "Linear",
+                            icon: dimensional_tools::linear().icon,
+                            items: [
+                                dimensional_tools::linear(),
+                                dimensional_tools::horizontal(),
+                                dimensional_tools::vertical(),
+                            ]
+                            .iter()
+                            .map(|tool| (tool.id, tool.label, tool.icon))
+                            .collect(),
                             default: "DCLINEAR",
                         },
                         RibbonItem::LargeTool(dimensional_tools::aligned()),
-                        RibbonItem::LargeTool(dimensional_tools::angular()),
-                        RibbonItem::LargeTool(dimensional_tools::diameter()),
-                        RibbonItem::LargeTool(dimensional_tools::radius()),
-                        RibbonItem::LargeTool(dimensional_tools::convert()),
+                        // Two rows of small icon-only buttons, as in the
+                        // reference: Radius, Diameter / Angular, Convert.
+                        RibbonItem::ToolGrid {
+                            columns: vec![
+                                vec![dimensional_tools::radius(), dimensional_tools::angular()],
+                                vec![dimensional_tools::diameter(), dimensional_tools::convert()],
+                            ],
+                        },
                         RibbonItem::LabeledDropdown {
-                            id: "DCVISIBILITY", label: "Show/Hide",
-                            icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg")),
+                            id: "DCVISIBILITY",
+                            label: "Show/Hide",
+                            icon: IconKind::Svg(include_bytes!(
+                                "../../../assets/icons/constrain/show.svg"
+                            )),
                             items: vec![
-                                ("DCSHOW", "Show", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                                ("DCHIDE", "Hide", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/hide_all.svg"))),
-                            ], default: "DCSHOW",
+                                (
+                                    "DCSHOW",
+                                    "Show",
+                                    IconKind::Svg(include_bytes!(
+                                        "../../../assets/icons/constrain/show.svg"
+                                    )),
+                                ),
+                                (
+                                    "DCHIDE",
+                                    "Hide",
+                                    IconKind::Svg(include_bytes!(
+                                        "../../../assets/icons/constrain/hide_all.svg"
+                                    )),
+                                ),
+                            ],
+                            default: "DCSHOW",
                         },
                         RibbonItem::LabeledTool(command(
-                            "DCSHOWALL", "Show All", include_bytes!("../../../assets/icons/constrain/show_all.svg"),
+                            "DCSHOWALL",
+                            "Show All",
+                            include_bytes!("../../../assets/icons/constrain/show_all.svg"),
                         )),
                         RibbonItem::LabeledTool(command(
-                            "DCHIDEALL", "Hide All", include_bytes!("../../../assets/icons/constrain/hide_all.svg"),
+                            "DCHIDEALL",
+                            "Hide All",
+                            include_bytes!("../../../assets/icons/constrain/hide_all.svg"),
                         )),
                     ],
                 },
@@ -147,10 +209,14 @@ impl CadModule for ParametricModule {
                     title: "Manage",
                     tools: vec![
                         RibbonItem::LargeTool(command(
-                            "DELCONSTRAINT", "Delete Constraints", include_bytes!("../../../assets/icons/constrain/delete.svg"),
+                            "DELCONSTRAINT",
+                            "Delete Constraints",
+                            include_bytes!("../../../assets/icons/constrain/delete.svg"),
                         )),
                         RibbonItem::LargeTool(command(
-                            "PARAMETERS", "Parameters Manager", include_bytes!("../../../assets/icons/constrain/parameters.svg"),
+                            "PARAMETERS",
+                            "Parameters Manager",
+                            include_bytes!("../../../assets/icons/constrain/parameters.svg"),
                         )),
                     ],
                 },
@@ -161,9 +227,23 @@ impl CadModule for ParametricModule {
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
-        "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "GCSMOOTH", "GCSHOW", "GCHIDE", "GCRESET",
-        "GCSHOWALL", "GCHIDEALL", "DCSHOW", "DCHIDE", "DCSHOWALL", "DCHIDEALL",
-        "DCCONVERT", "DELCONSTRAINT", "DIMCONSTRAINT", "DCFORM", "-PARAMETERS",
+        "AUTOCONSTRAIN",
+        "CONSTRAINTSETTINGS",
+        "GCSMOOTH",
+        "GCSHOW",
+        "GCHIDE",
+        "GCRESET",
+        "GCSHOWALL",
+        "GCHIDEALL",
+        "DCSHOW",
+        "DCHIDE",
+        "DCSHOWALL",
+        "DCHIDEALL",
+        "DCCONVERT",
+        "DELCONSTRAINT",
+        "DIMCONSTRAINT",
+        "DCFORM",
+        "-PARAMETERS",
     ]
 });
 
@@ -173,8 +253,11 @@ mod tests {
 
     fn item_id(item: &RibbonItem) -> &'static str {
         match item {
-            RibbonItem::Tool(tool) | RibbonItem::LabeledTool(tool) | RibbonItem::LargeTool(tool) => tool.id,
-            RibbonItem::Dropdown { id, .. } | RibbonItem::LabeledDropdown { id, .. }
+            RibbonItem::Tool(tool)
+            | RibbonItem::LabeledTool(tool)
+            | RibbonItem::LargeTool(tool) => tool.id,
+            RibbonItem::Dropdown { id, .. }
+            | RibbonItem::LabeledDropdown { id, .. }
             | RibbonItem::LargeDropdown { id, .. } => id,
             RibbonItem::ToolGrid { .. } => "GRID",
             _ => panic!("unexpected composite ribbon item"),
@@ -192,20 +275,49 @@ mod tests {
         assert_eq!(
             groups[0].tools.iter().map(item_id).collect::<Vec<_>>(),
             [
-                "AUTOCONSTRAIN", "CCONSTRAINT", "PCONSTRAINT", "TCONSTRAINT",
-                "LCONSTRAINT", "QCONSTRAINT", "GCSMOOTH", "GCCONCENTRIC",
-                "GCHORIZONTAL", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
-                "ECONSTRAINT", "GCVISIBILITY", "GCSHOWALL", "GCHIDEALL",
+                "AUTOCONSTRAIN",
+                "CCONSTRAINT",
+                "PCONSTRAINT",
+                "TCONSTRAINT",
+                "LCONSTRAINT",
+                "QCONSTRAINT",
+                "GCSMOOTH",
+                "GCCONCENTRIC",
+                "GCHORIZONTAL",
+                "SYCONSTRAINT",
+                "FXCONSTRAINT",
+                "VCONSTRAINT",
+                "ECONSTRAINT",
+                "GCVISIBILITY",
+                "GCSHOWALL",
+                "GCHIDEALL",
             ]
         );
         assert_eq!(
             groups[1].tools.iter().map(item_id).collect::<Vec<_>>(),
             [
-                "DC_LINEAR_MENU", "DCALIGNED", "DCANGULAR", "DCDIAMETER",
-                "DCRADIUS", "DCCONVERT", "DCVISIBILITY", "DCSHOWALL", "DCHIDEALL",
+                "DC_LINEAR_MENU",
+                "DCALIGNED",
+                "GRID",
+                "DCVISIBILITY",
+                "DCSHOWALL",
+                "DCHIDEALL"
             ]
         );
-        assert_eq!(groups[2].tools.iter().map(item_id).collect::<Vec<_>>(), ["DELCONSTRAINT", "PARAMETERS"]);
+        let RibbonItem::ToolGrid { columns } = &groups[1].tools[2] else {
+            panic!("radius, diameter, angular and convert must be a small-button grid");
+        };
+        assert_eq!(
+            columns
+                .iter()
+                .map(|column| column.iter().map(|tool| tool.id).collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            [["DCRADIUS", "DCANGULAR"], ["DCDIAMETER", "DCCONVERT"]]
+        );
+        assert_eq!(
+            groups[2].tools.iter().map(item_id).collect::<Vec<_>>(),
+            ["DELCONSTRAINT", "PARAMETERS"]
+        );
 
         let RibbonItem::LargeDropdown { items, default, .. } = &groups[1].tools[0] else {
             panic!("linear dimensional constraint must be a split dropdown");
@@ -218,8 +330,6 @@ mod tests {
         assert!(groups[0].tools[1..13]
             .iter()
             .all(|item| matches!(item, RibbonItem::LargeTool(_))));
-        assert!(groups[1].tools[2..6]
-            .iter()
-            .all(|item| matches!(item, RibbonItem::LargeTool(_))));
+        assert!(matches!(groups[1].tools[1], RibbonItem::LargeTool(_)));
     }
 }

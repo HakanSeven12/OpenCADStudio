@@ -10,10 +10,10 @@
 // The scene mirrors the real-world shape of the bug: a block whose children
 // are [wipeout, line, text], inserted into a drawing big enough that the
 // insert's child band is as fine-grained as a real one.
-use acadrust::entities::{Insert, Text, Wipeout};
-use acadrust::tables::BlockRecord;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{Insert, Text, Wipeout};
+use codec::tables::BlockRecord;
+use codec::types::Vector3;
+use codec::EntityType;
 use OpenCADStudio::scene::cache::block_cache::{expand_insert, BlockCache};
 use OpenCADStudio::scene::view::render::InheritStyle;
 use OpenCADStudio::scene::Scene;
@@ -26,7 +26,7 @@ const DEPTH_QUANTA: f32 = 16_777_216.0; // 2^24 (Depth24Plus)
 fn block_text_depth_composes_through_the_instance_path() {
     let mut scene = Scene::new();
 
-    let br_h = acadrust::Handle::new(scene.document.next_handle());
+    let br_h = codec::Handle::new(scene.document.next_handle());
     let mut br = BlockRecord::new("MARK");
     br.handle = br_h;
     scene.document.block_records.add(br).unwrap();
@@ -42,7 +42,7 @@ fn block_text_depth_composes_through_the_instance_path() {
 
     // Child 1: a spacer so the text sits two sibling steps above the wipe,
     // the same gap as the real BS33-11 mark blocks.
-    let mut spacer = acadrust::entities::Line::default();
+    let mut spacer = codec::entities::Line::default();
     spacer.start = Vector3::new(-10.0, -10.0, 0.0);
     spacer.end = Vector3::new(10.0, 10.0, 0.0);
     let mut spacer_e = EntityType::Line(spacer);
@@ -63,7 +63,7 @@ fn block_text_depth_composes_through_the_instance_path() {
     // per-sibling spacing at a handful of 24-bit quanta, where an oversized
     // wipeout depth bias would swallow it).
     for i in 0..600 {
-        let mut line = acadrust::entities::Line::default();
+        let mut line = codec::entities::Line::default();
         line.start = Vector3::new(f64::from(i) * 10.0 - 3000.0, -50.0, 0.0);
         line.end = Vector3::new(f64::from(i) * 10.0 - 3000.0, 50.0, 0.0);
         let _ = scene.document.add_entity(EntityType::Line(line));
@@ -87,20 +87,45 @@ fn block_text_depth_composes_through_the_instance_path() {
     );
 
     let cache = BlockCache::build(
-        &scene.document, 1.0, None, true, [0.0, 0.0, 0.0, 1.0], None, &depths,
+        &scene.document,
+        1.0,
+        None,
+        true,
+        [0.0, 0.0, 0.0, 1.0],
+        None,
+        &depths,
     );
     let wires = expand_insert(
-        &scene.document, &cache, &Insert::new("MARK", Vector3::new(0.0, 0.0, 0.0)),
+        &scene.document,
+        &cache,
+        &Insert::new("MARK", Vector3::new(0.0, 0.0, 0.0)),
         ins_handle,
-        [1.0, 1.0, 1.0, 1.0], 0, 0.0, [0.0; 8], 1.0,
-        InheritStyle { color: [1.0, 1.0, 1.0, 1.0], pat_len: 0.0, pat: [0.0; 8], lw_px: 1.0 },
-        0, false, false, 1.0, None, None, false, [0.0, 0.0, 0.0, 1.0], 1.0,
-        OpenCADStudio::scene::BlockScalePolicy::FromInsert, false,
+        [1.0, 1.0, 1.0, 1.0],
+        0,
+        0.0,
+        [0.0; 8],
+        1.0,
+        InheritStyle {
+            color: [1.0, 1.0, 1.0, 1.0],
+            pat_len: 0.0,
+            pat: [0.0; 8],
+            lw_px: 1.0,
+        },
+        0,
+        false,
+        false,
+        1.0,
+        None,
+        None,
+        false,
+        [0.0, 0.0, 0.0, 1.0],
+        1.0,
+        OpenCADStudio::scene::BlockScalePolicy::FromInsert,
+        false,
     )
     .expect("block defn cached");
 
-    let text_wires: Vec<&WireModel> =
-        wires.iter().filter(|w| !w.text_verts.is_empty()).collect();
+    let text_wires: Vec<&WireModel> = wires.iter().filter(|w| !w.text_verts.is_empty()).collect();
     assert!(
         !text_wires.is_empty(),
         "block TEXT must tessellate into glyph quads"
@@ -137,8 +162,7 @@ fn block_text_depth_composes_through_the_instance_path() {
 
         // The wipeout mask, composed the same way the scene graph does it.
         let mask = ins_d + wipe_label * ins_half;
-        let margin_quanta =
-            (instance - mask) * DRAW_ORDER_BIAS * DEPTH_QUANTA;
+        let margin_quanta = (instance - mask) * DRAW_ORDER_BIAS * DEPTH_QUANTA;
         let bias = OpenCADStudio::scene::pipeline::WIPEOUT_DEPTH_BIAS_QUANTA as f32;
         assert!(
             margin_quanta > bias + 2.0,

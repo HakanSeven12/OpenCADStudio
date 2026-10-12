@@ -67,7 +67,10 @@ pub fn paper_names(names_utf16: &[u16], count: usize) -> Vec<String> {
         .chunks(PAPER_NAME_CHARS)
         .take(count)
         .map(|slot| {
-            let end = slot.iter().position(|&unit| unit == 0).unwrap_or(slot.len());
+            let end = slot
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(slot.len());
             String::from_utf16_lossy(&slot[..end]).trim().to_string()
         })
         .collect()
@@ -127,13 +130,15 @@ pub fn printer_media(raw: &RawPrinterMedia) -> Option<PrinterCapabilities> {
             sheet_of_id.push((raw.ids[index], position));
             continue;
         }
-        let paper = paper_catalog::match_dimensions_mm(pw, ph).cloned().unwrap_or_else(|| {
-            if name.is_empty() {
-                PaperSize::custom(pw, ph, PaperUnits::Millimeters)
-            } else {
-                PaperSize::custom_named(&name, pw, ph, PaperUnits::Millimeters)
-            }
-        });
+        let paper = paper_catalog::match_dimensions_mm(pw, ph)
+            .cloned()
+            .unwrap_or_else(|| {
+                if name.is_empty() {
+                    PaperSize::custom(pw, ph, PaperUnits::Millimeters)
+                } else {
+                    PaperSize::custom_named(&name, pw, ph, PaperUnits::Millimeters)
+                }
+            });
         sheet_of_id.push((raw.ids[index], media.len()));
         media.push(PrinterMedia {
             paper,
@@ -229,7 +234,11 @@ mod tests {
         assert_eq!(names[0], "A4");
         assert_eq!(names[1].len(), PAPER_NAME_CHARS);
         assert!(names[2].starts_with("Letter"));
-        assert_eq!(paper_names(&buffer, 1).len(), 1, "count caps the slots read");
+        assert_eq!(
+            paper_names(&buffer, 1).len(),
+            1,
+            "count caps the slots read"
+        );
     }
 
     #[test]
@@ -245,10 +254,22 @@ mod tests {
         .expect("usable sheets");
         assert_eq!(caps.media.len(), 3);
         assert_eq!(caps.media[0].paper.canonical, "ISO_A4_(210.00_x_297.00_MM)");
-        assert!(caps.media[0].borderless, "the borderless twin marks the sheet");
-        assert_eq!(caps.media[1].paper.canonical, "ANSI_A_(8.50_x_11.00_Inches)");
-        assert_eq!(caps.media[2].paper.label, "Photo 10x15", "the driver's name is kept");
-        assert_eq!(caps.media[2].margins.left, 3.0, "the device margins go on every sheet");
+        assert!(
+            caps.media[0].borderless,
+            "the borderless twin marks the sheet"
+        );
+        assert_eq!(
+            caps.media[1].paper.canonical,
+            "ANSI_A_(8.50_x_11.00_Inches)"
+        );
+        assert_eq!(
+            caps.media[2].paper.label, "Photo 10x15",
+            "the driver's name is kept"
+        );
+        assert_eq!(
+            caps.media[2].margins.left, 3.0,
+            "the device margins go on every sheet"
+        );
         assert!(caps.default_paper.is_none());
     }
 
@@ -275,7 +296,10 @@ mod tests {
         );
         media.default_id = Some(999);
         assert!(printer_media(&media).unwrap().default_paper.is_none());
-        assert!(printer_media(&RawPrinterMedia::default()).is_none(), "nothing listed → catalogue");
+        assert!(
+            printer_media(&RawPrinterMedia::default()).is_none(),
+            "nothing listed → catalogue"
+        );
     }
 
     #[test]
@@ -297,8 +321,14 @@ mod tests {
         assert!(close(margins.top, 100.0 / 600.0 * 25.4));
         assert!(close(margins.bottom, 200.0 / 600.0 * 25.4));
         assert!(device_margins_mm(&DeviceCapsSample::default()).is_none());
-        let inverted = DeviceCapsSample { horz_res: 9000, ..sample };
-        assert!(device_margins_mm(&inverted).is_none(), "printable area wider than the sheet");
+        let inverted = DeviceCapsSample {
+            horz_res: 9000,
+            ..sample
+        };
+        assert!(
+            device_margins_mm(&inverted).is_none(),
+            "printable area wider than the sheet"
+        );
     }
 
     #[test]

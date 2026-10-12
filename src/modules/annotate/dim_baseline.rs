@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use acadrust::entities::{
+use codec::entities::{
     Dimension, DimensionAligned, DimensionAngular2Ln, DimensionAngular3Pt, DimensionBase,
     DimensionLinear, DimensionOrdinate,
 };
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use glam::DVec3;
+use kernel::geom2d::{
     arc_span, intersect, nearest_of, Arc, Curve, Line, Tolerance, Transform, Vec2, XLine,
 };
-use cadkernel::space::Plane;
-use glam::DVec3;
+use kernel::space::Plane;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview,
@@ -214,10 +214,7 @@ impl DimBaselineCommand {
                     project(&plane, source.first_point),
                     project(&plane, source.second_point),
                 ];
-                let fixed_index = nearest_line(
-                    [[vertex, points[0]], [vertex, points[1]]],
-                    pick,
-                );
+                let fixed_index = nearest_line([[vertex, points[0]], [vertex, points[1]]], pick);
                 let fixed_point = points[fixed_index];
                 let radius = project(&plane, source.definition_point)
                     .distance(vertex)
@@ -244,7 +241,10 @@ impl DimBaselineCommand {
 
     fn build_dimension(&self, point_world: DVec3) -> Option<Dimension> {
         let state = self.base.as_ref()?;
-        let point = state.plane.project(point_world.to_array()).map(Vec2::from)?;
+        let point = state
+            .plane
+            .project(point_world.to_array())
+            .map(Vec2::from)?;
         let mut dimension = match &state.kind {
             BaselineKind::Linear {
                 fixed,
@@ -395,7 +395,8 @@ impl CadCommand for DimBaselineCommand {
         {
             crate::t!("DIMBASELINE  Specify feature location [Undo/Select] <Select>:").into_owned()
         } else {
-            crate::t!("DIMBASELINE  Specify second extension line origin [Select/Undo] <Select>:").into_owned()
+            crate::t!("DIMBASELINE  Specify second extension line origin [Select/Undo] <Select>:")
+                .into_owned()
         }
     }
 
@@ -486,13 +487,12 @@ impl CadCommand for DimBaselineCommand {
     }
 
     fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
-        self.build_dimension(cursor)
-            .map(|dimension| {
-                vec![DimensionPreview {
-                    entity: EntityType::Dimension(dimension),
-                    preserve_base_style: self.preserve_base_style,
-                }]
-            })
+        self.build_dimension(cursor).map(|dimension| {
+            vec![DimensionPreview {
+                entity: EntityType::Dimension(dimension),
+                preserve_base_style: self.preserve_base_style,
+            }]
+        })
     }
 }
 
@@ -532,7 +532,10 @@ fn build_linear(
             perpendicular = -perpendicular;
         }
         let distance = offset.abs();
-        (fixed + perpendicular * distance, point + perpendicular * distance)
+        (
+            fixed + perpendicular * distance,
+            point + perpendicular * distance,
+        )
     } else {
         let target = fixed.dot(source_perpendicular) + offset;
         (
@@ -546,6 +549,7 @@ fn build_linear(
         result.base.definition_point = result.definition_point;
         result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
         result.base.insertion_point = result.base.text_middle_point;
+        crate::entities::dimension::reset_automatic_text_position(&mut result.base);
         Some(Dimension::Aligned(result))
     } else {
         let mut result = DimensionLinear::new(world(plane, fixed), world(plane, point));
@@ -554,6 +558,7 @@ fn build_linear(
         result.base.definition_point = result.definition_point;
         result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
         result.base.insertion_point = result.base.text_middle_point;
+        crate::entities::dimension::reset_automatic_text_position(&mut result.base);
         Some(Dimension::Linear(result))
     }
 }
@@ -640,12 +645,8 @@ fn refresh_measurement(dimension: &mut Dimension, plane: Plane) {
             value.base.actual_measurement = (second - first).dot(axis).abs();
         }
         Dimension::Aligned(value) => value.base.actual_measurement = value.measurement(),
-        Dimension::Angular2Ln(value) => {
-            value.base.actual_measurement = value.measurement_degrees()
-        }
-        Dimension::Angular3Pt(value) => {
-            value.base.actual_measurement = value.measurement_degrees()
-        }
+        Dimension::Angular2Ln(value) => value.base.actual_measurement = value.measurement_degrees(),
+        Dimension::Angular3Pt(value) => value.base.actual_measurement = value.measurement_degrees(),
         Dimension::Ordinate(value) => value.refresh_measurement(),
         _ => {}
     }
@@ -727,6 +728,7 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -752,6 +754,8 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
         plinegen: true,
         fill_tris: Vec::new(),
         fill_tris_low: Vec::new(),
+
+        ..Default::default()
     }
 }
 
@@ -816,8 +820,7 @@ fn project_to_line(point: Vec2, perpendicular: Vec2, offset: f64) -> Vec2 {
 }
 
 fn plane_from_normal(origin: Vector3, normal: Vector3) -> Plane {
-    let (x_axis, y_axis) =
-        crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
+    let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
     Plane::from_axes(
         point(origin),
         [x_axis.0, x_axis.1, x_axis.2],
@@ -839,7 +842,11 @@ fn point(value: Vector3) -> [f64; 3] {
 }
 
 fn segment_local(points: &mut Vec<[f32; 3]>, plane: Plane, first: Vec2, second: Vec2) {
-    segment_world(points, plane.point_at(first.into()), plane.point_at(second.into()));
+    segment_world(
+        points,
+        plane.point_at(first.into()),
+        plane.point_at(second.into()),
+    );
 }
 
 fn segment_world(points: &mut Vec<[f32; 3]>, first: [f64; 3], second: [f64; 3]) {
@@ -856,4 +863,6 @@ fn float3(value: [f64; 3]) -> [f32; 3] {
     [value[0] as f32, value[1] as f32, value[2] as f32]
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMBASELINE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMBASELINE"]
+});

@@ -5,7 +5,7 @@
 //! as TRIM, to nearby boundary entities. Keeping this compact command-local
 //! index avoids cloning/scanning the complete drawing on every mouse move.
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::scene::convert::tess::entity_world_aabb_f64;

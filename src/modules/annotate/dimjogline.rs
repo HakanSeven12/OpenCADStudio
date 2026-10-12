@@ -1,7 +1,7 @@
 // DIMJOGLINE — add or remove a jog on a linear/aligned dimension.
 
-use acadrust::entities::Dimension;
-use acadrust::{EntityType, Handle};
+use codec::entities::Dimension;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
@@ -58,8 +58,16 @@ impl DimJogLineCommand {
                 DVec3::new(value.rotation.cos(), value.rotation.sin(), 0.0),
             ),
             Dimension::Aligned(value) => {
-                let first = DVec3::new(value.first_point.x, value.first_point.y, value.first_point.z);
-                let second = DVec3::new(value.second_point.x, value.second_point.y, value.second_point.z);
+                let first = DVec3::new(
+                    value.first_point.x,
+                    value.first_point.y,
+                    value.first_point.z,
+                );
+                let second = DVec3::new(
+                    value.second_point.x,
+                    value.second_point.y,
+                    value.second_point.z,
+                );
                 (
                     value.first_point,
                     value.second_point,
@@ -77,7 +85,7 @@ impl DimJogLineCommand {
         } else {
             [f64::NAN; 3]
         };
-        cadkernel::space::default_dimension_jog_position(
+        kernel::space::default_dimension_jog_position(
             [first.x, first.y, first.z],
             [second.x, second.y, second.z],
             [definition.x, definition.y, definition.z],
@@ -192,19 +200,35 @@ impl CadCommand for DimJogLineCommand {
                 let axis = DVec3::new(value.rotation.cos(), value.rotation.sin(), 0.0);
                 (
                     [(point - axis).to_array(), (point + axis).to_array()],
-                    [value.base.normal.x, value.base.normal.y, value.base.normal.z],
+                    [
+                        value.base.normal.x,
+                        value.base.normal.y,
+                        value.base.normal.z,
+                    ],
                 )
             }
             Dimension::Aligned(value) => (
                 [
-                    [value.first_point.x, value.first_point.y, value.first_point.z],
-                    [value.second_point.x, value.second_point.y, value.second_point.z],
+                    [
+                        value.first_point.x,
+                        value.first_point.y,
+                        value.first_point.z,
+                    ],
+                    [
+                        value.second_point.x,
+                        value.second_point.y,
+                        value.second_point.z,
+                    ],
                 ],
-                [value.base.normal.x, value.base.normal.y, value.base.normal.z],
+                [
+                    value.base.normal.x,
+                    value.base.normal.y,
+                    value.base.normal.z,
+                ],
             ),
             _ => return None,
         };
-        let points = cadkernel::space::dimension_jog_points(
+        let points = kernel::space::dimension_jog_points(
             segment,
             point.to_array(),
             normal,
@@ -223,7 +247,9 @@ impl CadCommand for DimJogLineCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMJOGLINE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMJOGLINE"]
+});
 
 #[cfg(test)]
 mod tests {

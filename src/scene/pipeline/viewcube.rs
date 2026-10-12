@@ -9,12 +9,12 @@
 // This eliminates gimbal lock at top/bottom views and keeps the cube in sync
 // with arcball orbit at all angles.
 
+use crate::t;
 use bytemuck::{Pod, Zeroable};
 use glam::camera::rh::proj::directx::orthographic;
 use glam::{Mat4, Vec3, Vec4};
 use iced::wgpu;
 use iced::{Rectangle, Size};
-use crate::t;
 
 #[path = "viewcube_text_atlas.rs"]
 mod viewcube_text_atlas;
@@ -1133,14 +1133,13 @@ impl ViewCubePipeline {
             &ring_idxs,
             wgpu::BufferUsages::INDEX,
         );
-        let ring_line_vertex_buffer =
-            super::gpu_upload::upload_buffer(
-                device,
-                queue,
-                "vc.ring_line_vb",
-                &ring_line_verts,
-                wgpu::BufferUsages::VERTEX,
-            );
+        let ring_line_vertex_buffer = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "vc.ring_line_vb",
+            &ring_line_verts,
+            wgpu::BufferUsages::VERTEX,
+        );
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vc.ub"),
             size: std::mem::size_of::<CubeUniforms>() as u64,
@@ -1316,14 +1315,13 @@ impl ViewCubePipeline {
                     },
                 ],
             });
-        let composite_uniform_buffer =
-            super::gpu_upload::upload_buffer(
-                device,
-                queue,
-                "vc.composite_uniform",
-                &[1.0f32, 1.0, 0.0, 0.0],
-                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            );
+        let composite_uniform_buffer = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "vc.composite_uniform",
+            &[1.0f32, 1.0, 0.0, 0.0],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        );
         let composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vc.composite_sampler"),
             mag_filter: wgpu::FilterMode::Nearest,
@@ -1460,16 +1458,15 @@ impl ViewCubePipeline {
                 0.0,
             ]),
         );
-        self.text
-            .update(
-                queue,
-                cam_rotation,
-                compass_rotation,
-                render_size,
-                render_size,
-                self.cube_px,
-                text_color,
-            );
+        self.text.update(
+            queue,
+            cam_rotation,
+            compass_rotation,
+            render_size,
+            render_size,
+            self.cube_px,
+            text_color,
+        );
     }
 
     pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {
@@ -1508,6 +1505,44 @@ impl ViewCubePipeline {
         }
     }
 
+    /// Check whether the ViewCube can be cleanly displayed inside `surface_clip`.
+    ///
+    /// The ViewCube anchors to the top-right corner of the viewport. It should
+    /// render whenever:
+    /// 1. Its top-right corner is on-canvas (not scrolled or clipped off the top
+    ///    or right of the canvas / parent clip).
+    /// 2. The visible surface area (`surface_clip`) has sufficient width and
+    ///    height to display the cube without distorted scaling.
+    pub fn should_render(
+        &self,
+        surface_dest: Rectangle<u32>,
+        surface_clip: Rectangle<u32>,
+        clip: &Rectangle<u32>,
+    ) -> bool {
+        let min_size = self
+            .depth_texture_size
+            .width
+            .min(self.depth_texture_size.height)
+            .max(1);
+        viewcube_should_render(surface_dest, surface_clip, clip, min_size)
+    }
+}
+
+/// Check whether the ViewCube can be cleanly displayed inside `surface_clip`.
+pub fn viewcube_should_render(
+    surface_dest: Rectangle<u32>,
+    surface_clip: Rectangle<u32>,
+    clip: &Rectangle<u32>,
+    min_size: u32,
+) -> bool {
+    let clip_right = clip.x + clip.width;
+    // Allow 1px subpixel tolerance between float ceil/floor and integer clip rounding.
+    let top_right_visible = surface_dest.y >= clip.y.saturating_sub(1)
+        && surface_dest.x + surface_dest.width <= clip_right + 1;
+    top_right_visible && surface_clip.width >= min_size && surface_clip.height >= min_size
+}
+
+impl ViewCubePipeline {
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1539,7 +1574,14 @@ impl ViewCubePipeline {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_viewport(0.0, 0.0, render_width as f32, render_height as f32, 0.0, 1.0);
+        pass.set_viewport(
+            0.0,
+            0.0,
+            render_width as f32,
+            render_height as f32,
+            0.0,
+            1.0,
+        );
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.uniform_bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -1547,10 +1589,7 @@ impl ViewCubePipeline {
         pass.draw_indexed(0..self.index_count, 0, 0..1);
         pass.set_bind_group(0, &self.ring_uniform_bind_group, &[]);
         pass.set_vertex_buffer(0, self.ring_vertex_buffer.slice(..));
-        pass.set_index_buffer(
-            self.ring_index_buffer.slice(..),
-            wgpu::IndexFormat::Uint32,
-        );
+        pass.set_index_buffer(self.ring_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.ring_index_count, 0, 0..1);
         pass.set_pipeline(&self.line_pipeline);
         pass.set_bind_group(0, &self.uniform_bind_group, &[]);

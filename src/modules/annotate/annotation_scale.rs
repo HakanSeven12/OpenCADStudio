@@ -1,4 +1,4 @@
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -47,4 +47,3 @@ impl CadCommand for AnnotationScaleSelectionCommand {
         CmdResult::Cancel
     }
 }
-

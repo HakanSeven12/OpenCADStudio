@@ -1,7 +1,7 @@
 // Spatial index for 2D entities. Each leaf holds up to `LEAF_CAPACITY`
 // items; on overflow the node splits into 4 children and re-distributes.
 //
-// Items are keyed by `acadrust::Handle`. AABBs are stored in WCS f64
+// Items are keyed by `codec::Handle`. AABBs are stored in WCS f64
 // (NOT world_offset-subtracted) so changing `world_offset` doesn't
 // invalidate the index.
 //
@@ -20,7 +20,7 @@
 // (rare in CAD workflows where most edits are local and few entities
 // move long distances).
 
-use acadrust::Handle;
+use codec::Handle;
 
 pub type Aabb = [f64; 4]; // [xmin, ymin, xmax, ymax]
 
@@ -97,7 +97,8 @@ impl QuadTree {
     }
 
     pub fn insert(&mut self, handle: Handle, aabb: Aabb) {
-        if !aabb_contained(self.nodes[0].bounds, aabb) {
+        let aabb = normalize_aabb(aabb);
+        if !aabb.iter().all(|x| x.is_finite()) || !aabb_contained(self.nodes[0].bounds, aabb) {
             self.overflow.push(Item { handle, aabb });
             return;
         }
@@ -256,11 +257,18 @@ impl QuadTree {
 
 // ── AABB helpers ────────────────────────────────────────────────────
 
+pub fn normalize_aabb(mut aabb: Aabb) -> Aabb {
+    if aabb[0] > aabb[2] {
+        aabb.swap(0, 2);
+    }
+    if aabb[1] > aabb[3] {
+        aabb.swap(1, 3);
+    }
+    aabb
+}
+
 fn aabb_contained(outer: Aabb, inner: Aabb) -> bool {
-    inner[0] >= outer[0]
-        && inner[1] >= outer[1]
-        && inner[2] <= outer[2]
-        && inner[3] <= outer[3]
+    inner[0] >= outer[0] && inner[1] >= outer[1] && inner[2] <= outer[2] && inner[3] <= outer[3]
 }
 
 fn aabb_intersects(a: Aabb, b: Aabb) -> bool {
@@ -373,7 +381,13 @@ mod tests {
         let huge = [-1e9, -1e9, 1e9, 1e9];
         let hits = t.query_rect(huge);
         let expected = 40 + 100;
-        assert_eq!(hits.len(), expected, "lost items: tree.len={} hits.len={}", t.len(), hits.len());
+        assert_eq!(
+            hits.len(),
+            expected,
+            "lost items: tree.len={} hits.len={}",
+            t.len(),
+            hits.len()
+        );
     }
 
     #[test]
@@ -390,5 +404,31 @@ mod tests {
         assert!(nw_hits.contains(&h(1)));
         let se_hits = t.query_rect([50.0, 0.0, 100.0, 50.0]);
         assert!(se_hits.contains(&h(1)));
+    }
+
+    #[test]
+    fn insert_handles_nan_and_infinite_bounds_safely() {
+        let root = [0.0, 0.0, 100.0, 100.0];
+        let mut tree = QuadTree::new(root);
+        tree.insert(h(1), [10.0, 10.0, 20.0, 20.0]);
+        tree.insert(h(2), [f64::NAN, 10.0, 20.0, 20.0]);
+        tree.insert(h(3), [10.0, f64::INFINITY, 20.0, 20.0]);
+        tree.insert(h(4), [20.0, 20.0, 10.0, 10.0]); // inverted bounds: normalized
+
+        assert_eq!(tree.len(), 4);
+        // Handles 2 & 3 have non-finite coords so they land in overflow
+        // Handle 4 has inverted coords which normalize and fit inside root
+        assert_eq!(tree.overflow.len(), 2);
+
+        let normal_hits = tree.query_rect([5.0, 5.0, 25.0, 25.0]);
+        assert!(normal_hits.contains(&h(1)));
+        assert!(normal_hits.contains(&h(4))); // normalized [10.0, 10.0, 20.0, 20.0]
+    }
+
+    #[test]
+    fn normalize_aabb_flips_inverted_extents() {
+        let inverted = [50.0, 60.0, 10.0, 20.0];
+        let normalized = normalize_aabb(inverted);
+        assert_eq!(normalized, [10.0, 20.0, 50.0, 60.0]);
     }
 }

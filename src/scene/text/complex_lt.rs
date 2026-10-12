@@ -8,8 +8,8 @@
 
 use crate::entities::text_support::resolve_dxf_special_chars;
 use crate::io::linetypes::{ComplexLt, LtSegment};
-use crate::scene::text::lff;
 use crate::scene::model::wire_model::WireModel;
+use crate::scene::text::lff;
 
 // ── Public entry point ────────────────────────────────────────────────────
 
@@ -147,6 +147,7 @@ pub fn apply_along(
     // Embedded linetype text (LtSeg::Text) renders as SDF glyph quads collected
     // here; emitted as one extra text-carrying WireModel at the end.
     let mut text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
+    let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> = Vec::new();
 
     let mut elem_idx: usize = 0;
     let mut elem_consumed: f32 = 0.0;
@@ -269,19 +270,13 @@ pub fn apply_along(
                     // SDF: glyph quads at the insert point (rotation baked in by
                     // layout_glyph_quads), collected for the text wire.
                     if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
-                        let quads = crate::scene::text::glyph_quads::layout_glyph_quads(
-                            &mut atlas,
-                            *tx_scale,
-                            fwd_angle,
-                            1.0, // width_factor
+                        let (quads, pen_adv) = crate::scene::text::glyph_quads::layout_glyph_quads(
+                            &mut atlas, *tx_scale, fwd_angle, 1.0, // width_factor
                             0.0, // oblique
                             // tracking = 1.0 applies the font's natural
                             // letter_spacing; 0.0 zeroes it and cramps the glyphs
                             // (every other text path passes 1.0).
-                            1.0,
-                            style,
-                            false,
-                            &resolved,
+                            1.0, style, false, &resolved,
                         );
                         crate::scene::pipeline::text_gpu::push_glyph_vertices(
                             &mut text_verts,
@@ -291,6 +286,24 @@ pub fn apply_along(
                             color,
                             0.0,
                         );
+                        {
+                            use crate::scene::model::wire_model::{
+                                clean_searchable_text, SearchableTextRun,
+                            };
+                            let visible = clean_searchable_text(&resolved);
+                            if !visible.is_empty() {
+                                searchable.push(SearchableTextRun {
+                                    text: visible,
+                                    origin: [insert[0] as f64, insert[1] as f64, insert[2] as f64],
+                                    height: *tx_scale,
+                                    rotation: fwd_angle,
+                                    color,
+                                    bold: false,
+                                    font: style.to_string(),
+                                    adv_width: pen_adv,
+                                });
+                            }
+                        }
                     }
 
                     elem_idx += 1;
@@ -316,6 +329,7 @@ pub fn apply_along(
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -341,6 +355,8 @@ pub fn apply_along(
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
+
+            ..Default::default()
         })
         .collect();
 
@@ -365,6 +381,7 @@ pub fn apply_along(
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -374,6 +391,7 @@ pub fn apply_along(
             dash_from_start: false,
             dash_align_end: None,
             text_verts,
+            searchable_text: searchable,
             name: name.to_string(),
             points: Vec::new(),
             points_low: Vec::new(),

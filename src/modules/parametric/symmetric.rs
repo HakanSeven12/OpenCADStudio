@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -83,7 +83,7 @@ impl SymmetricConstraintCommand {
         let planar = crate::entities::curve::entity_curve(entity)?;
         let local = planar.plane.project(point.to_array())?;
         let segments = planar.curve.segments();
-        let (index, _) = cadkernel::geom2d::nearest_of(segments.iter(), local)?;
+        let (index, _) = kernel::geom2d::nearest_of(segments.iter(), local)?;
         Some((index, Self::segment_family(entity, index)?))
     }
 
@@ -193,15 +193,11 @@ impl CadCommand for SymmetricConstraintCommand {
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::ObjectOrTwoPoints => {
-                "Select first object or [2Points] <2Points>:".to_string()
-            }
+            Step::ObjectOrTwoPoints => "Select first object or [2Points] <2Points>:".to_string(),
             Step::SecondObject(_) => "Select second object:".to_string(),
             Step::FirstPoint => "Select first point:".to_string(),
             Step::SecondPoint(_) => "Select second point:".to_string(),
-            Step::ObjectAxis(_, _) | Step::PointAxis(_, _) => {
-                "Select symmetry line:".to_string()
-            }
+            Step::ObjectAxis(_, _) | Step::PointAxis(_, _) => "Select symmetry line:".to_string(),
         }
     }
 
@@ -277,7 +273,7 @@ impl CadCommand for SymmetricConstraintCommand {
                 CmdResult::NeedPoint
             }
             Step::FirstPoint | Step::SecondPoint(_) => {
-                let world = acadrust::types::Vector3::new(point.x, point.y, point.z);
+                let world = codec::types::Vector3::new(point.x, point.y, point.z);
                 if !is_parametric_point_near(&entity, world) {
                     return Self::invalid_point();
                 }

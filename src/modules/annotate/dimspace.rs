@@ -5,7 +5,7 @@
 //   2. Select the other dimensions to space (click each, Enter to finish)
 //   3. Enter a non-negative spacing value, or choose Auto
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, SelectionEntity};
@@ -57,8 +57,7 @@ impl CadCommand for DimSpaceCommand {
             )
             .into_owned(),
             Step::EnterSpacing { .. } => {
-                t!("DIMSPACE  Specify distance between dimensions or [Auto] <Auto>:")
-                    .into_owned()
+                t!("DIMSPACE  Specify distance between dimensions or [Auto] <Auto>:").into_owned()
             }
         }
     }
@@ -107,8 +106,8 @@ impl CadCommand for DimSpaceCommand {
                 && matches!(
                     selected.entity,
                     EntityType::Dimension(
-                        acadrust::entities::Dimension::Linear(_)
-                            | acadrust::entities::Dimension::Aligned(_)
+                        codec::entities::Dimension::Linear(_)
+                            | codec::entities::Dimension::Aligned(_)
                     )
                 )
                 && !others.contains(&selected.handle)
@@ -127,8 +126,8 @@ impl CadCommand for DimSpaceCommand {
                 if !matches!(
                     self.picked_entity.take(),
                     Some(EntityType::Dimension(
-                        acadrust::entities::Dimension::Linear(_)
-                            | acadrust::entities::Dimension::Aligned(_)
+                        codec::entities::Dimension::Linear(_)
+                            | codec::entities::Dimension::Aligned(_)
                     ))
                 ) {
                     return CmdResult::ReportError(
@@ -193,14 +192,14 @@ impl CadCommand for DimSpaceCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         if matches!(self.step, Step::EnterSpacing { .. }) {
-            return self
-                .on_text_input("AUTO")
-                .unwrap_or(CmdResult::Cancel);
+            return self.on_text_input("AUTO").unwrap_or(CmdResult::Cancel);
         }
         CmdResult::Cancel
     }
 }
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMSPACE", "DSPACE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMSPACE", "DSPACE"]
+});
 
 #[cfg(test)]
 mod tests {

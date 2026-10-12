@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import uuid
 
 
 MODERN = "2026-07-28"
@@ -91,6 +92,19 @@ def main() -> None:
         assert "io.modelcontextprotocol/tasks" in discovery["capabilities"]["extensions"]
         sessions = client.tool("ocs_sessions", {"launch_if_none": True})["result"]
         session = sessions[0]["session_id"]
+        while sessions[0].get("modal"):
+            client.tool(
+                "ocs_execute",
+                {
+                    "ocs_session_id": session,
+                    "request": {
+                        "op": "action",
+                        "request_id": f"eval-close-modal-{uuid.uuid4().hex}",
+                        "name": "close_modal",
+                    },
+                },
+            )
+            sessions = client.tool("ocs_sessions", {"launch_if_none": False})["result"]
         active = next(
             document for document in sessions[0]["documents"]
             if document["id"] == sessions[0]["document_id"]
@@ -98,7 +112,7 @@ def main() -> None:
         if active.get("start"):
             client.tool(
                 "ocs_execute",
-                {"ocs_session_id": session, "request": {"op": "new", "request_id": "eval-new"}},
+                {"ocs_session_id": session, "request": {"op": "new", "request_id": f"eval-new-{uuid.uuid4().hex}"}},
             )
 
         base = 1_000_000 + int(time.time()) % 100_000

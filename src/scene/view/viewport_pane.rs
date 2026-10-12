@@ -20,7 +20,7 @@ pub struct ViewportPane<'a> {
     /// Render mode applied to the active Model tile or active paper viewport.
     /// The app may supply a temporary gallery-hover mode; inactive viewports
     /// keep the values stored on their own tile/entity.
-    pub render_mode: acadrust::entities::ViewportRenderMode,
+    pub render_mode: codec::entities::ViewportRenderMode,
     /// `Some(tile_idx)` → this widget renders a single Model pane (one shader
     /// per `pane_grid` pane, filling its own bounds). `None` → the unified
     /// full-canvas path (paper layout, or the whole-canvas Model fallback).
@@ -35,7 +35,7 @@ impl<'a> ViewportPane<'a> {
         scene: &'a Scene,
         show_viewcube: bool,
         show_interaction: bool,
-        render_mode: acadrust::entities::ViewportRenderMode,
+        render_mode: codec::entities::ViewportRenderMode,
         viewcube_text_color: [f32; 4],
     ) -> Self {
         Self {
@@ -54,7 +54,7 @@ impl<'a> ViewportPane<'a> {
         scene: &'a Scene,
         show_viewcube: bool,
         show_interaction: bool,
-        render_mode: acadrust::entities::ViewportRenderMode,
+        render_mode: codec::entities::ViewportRenderMode,
         tile_idx: usize,
         viewcube_text_color: [f32; 4],
     ) -> Self {

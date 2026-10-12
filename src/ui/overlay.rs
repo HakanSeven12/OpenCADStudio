@@ -7,8 +7,8 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Element, Length, Point, Size, Theme};
 
-use crate::app::Message;
 use crate::app::settings::{CursorType, IsoPlane};
+use crate::app::Message;
 use crate::scene::model::object::GripShape;
 use crate::scene::SelectionState;
 
@@ -24,8 +24,8 @@ const DEFAULT_PICK_APERTURE: f32 = 8.0;
 const CONSTRAINT_HOVER_MARKER_RADIUS: f32 = 7.0;
 
 use crate::scene::parametric_constraints::{
-    glyph_hit_test_entries, glyph_is_compact, glyph_is_fixed, glyph_is_vertical,
-    GlyphEntry, GLYPH_SIZE,
+    glyph_hit_test_entries, glyph_is_compact, glyph_is_fixed, glyph_is_vertical, GlyphEntry,
+    GLYPH_SIZE,
 };
 
 /// The lock mark a dynamic dimension carries (`DYNAMIC_DIMENSION_GLYPH`).
@@ -53,11 +53,7 @@ fn draw_smooth_constraint_glyph(frame: &mut canvas::Frame, center: Point, color:
     frame.fill(&canvas::Path::circle(center, 1.35), color);
 }
 
-fn draw_tangent_constraint_glyph(
-    frame: &mut canvas::Frame,
-    center: Point,
-    color: Color,
-) {
+fn draw_tangent_constraint_glyph(frame: &mut canvas::Frame, center: Point, color: Color) {
     let radius = 4.5;
     let circle_center = Point::new(center.x - 0.3, center.y + 2.75);
     let diagonal = radius * std::f32::consts::FRAC_1_SQRT_2;
@@ -69,11 +65,7 @@ fn draw_tangent_constraint_glyph(
     frame.stroke(&canvas::Path::line(contact, tangent_end), stroke);
 }
 
-fn draw_concentric_constraint_glyph(
-    frame: &mut canvas::Frame,
-    center: Point,
-    color: Color,
-) {
+fn draw_concentric_constraint_glyph(frame: &mut canvas::Frame, center: Point, color: Color) {
     let stroke = canvas::Stroke::default().with_color(color).with_width(1.25);
     frame.stroke(&canvas::Path::circle(center, 4.7), stroke.clone());
     frame.stroke(&canvas::Path::circle(center, 2.15), stroke);
@@ -124,7 +116,10 @@ fn draw_fixed_constraint_glyph(
     );
     if point_marker {
         frame.stroke(
-            &canvas::Path::rectangle(Point::new(center.x + 4.0, center.y + 3.6), Size::new(4.6, 4.6)),
+            &canvas::Path::rectangle(
+                Point::new(center.x + 4.0, center.y + 3.6),
+                Size::new(4.6, 4.6),
+            ),
             canvas::Stroke::default()
                 .with_color(Color::from_rgb8(224, 130, 62))
                 .with_width(1.2),
@@ -167,7 +162,10 @@ fn draw_vertical_constraint_glyph(
     );
     if point_marker {
         frame.stroke(
-            &canvas::Path::rectangle(Point::new(center.x + 4.5, center.y - 2.3), Size::new(4.6, 4.6)),
+            &canvas::Path::rectangle(
+                Point::new(center.x + 4.5, center.y - 2.3),
+                Size::new(4.6, 4.6),
+            ),
             canvas::Stroke::default()
                 .with_color(Color::from_rgb8(224, 130, 62))
                 .with_width(1.2),
@@ -213,6 +211,18 @@ pub(crate) fn pick_box_aperture_px(value: i32) -> f32 {
     aperture.max(1.0)
 }
 
+/// Which interactive navigation tool is armed. Each one owns the whole
+/// viewport and hides the CAD crosshair, but they do not share a cursor: the
+/// hand reads as "drag the sheet", which is wrong for a zoom or an orbit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum NavCursor {
+    #[default]
+    None,
+    Pan,
+    Orbit,
+    Zoom,
+}
+
 #[derive(Clone, Copy)]
 pub struct CrosshairOptions {
     pub size_percent: i32,
@@ -223,6 +233,16 @@ pub struct CrosshairOptions {
     pub iso_plane: IsoPlane,
     pub snap_angle_deg: f32,
     pub point_mode: bool,
+    /// A client pick (`user_select` / `getpoint`) is waiting for the person:
+    /// the crosshair arms disappear and a blue pickbox remains — the
+    /// screen-level "the client wants YOU to pick" signal.
+    pub pick_pending: bool,
+    /// Draw only the pickbox: the active command previews a line that the
+    /// full-length arms would cover.
+    pub hide_arms: bool,
+    /// Explicit object-snap marker colour; `None` picks one that reads on
+    /// the canvas.
+    pub snap_color: Option<[u8; 3]>,
 }
 
 /// Rendering style for the viewport grid.
@@ -291,10 +311,7 @@ pub const DEFAULT_WINDOW_COLOR: Color = Color {
 /// Crossing is always a theme-harmonious green/teal variant, and Window is always a theme-harmonious blue/cyan variant.
 pub fn theme_selection_colors(theme: &Theme) -> (Color, Color) {
     match theme {
-        Theme::Dark => (
-            DEFAULT_CROSSING_COLOR,
-            DEFAULT_WINDOW_COLOR,
-        ),
+        Theme::Dark => (DEFAULT_CROSSING_COLOR, DEFAULT_WINDOW_COLOR),
         Theme::Light => (
             Color::from_rgb(0.12, 0.52, 0.30), // Engineering Forest Green
             Color::from_rgb(0.13, 0.40, 0.70), // Engineering Blueprint Blue
@@ -375,10 +392,7 @@ pub fn theme_selection_colors(theme: &Theme) -> (Color, Color) {
             Color::from_rgb(0.69, 0.87, 0.63), // Ferra Sage Green (#b1dda1)
             Color::from_rgb(0.69, 0.84, 0.97), // Ferra Ice Blue (#b1d5f7)
         ),
-        _ => (
-            DEFAULT_CROSSING_COLOR,
-            DEFAULT_WINDOW_COLOR,
-        ),
+        _ => (DEFAULT_CROSSING_COLOR, DEFAULT_WINDOW_COLOR),
     }
 }
 
@@ -471,7 +485,7 @@ pub fn resolve_selection_base_color(
     // ACI 0 (BYBLOCK) and 256 (BYLAYER) are not explicit overrides;
     // the sysvar uses 0 as the unset sentinel; valid user picks are 1..=255.
     if custom > 0 {
-        if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(custom) {
+        if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(custom) {
             return Color::from_rgb8(r, g, b);
         }
     }
@@ -552,7 +566,11 @@ impl GridGeometry {
     /// the `None` path.
     #[doc(hidden)]
     pub fn empty() -> Self {
-        Self { segments: Vec::new(), major_segments: Vec::new(), axis_extent: 0.0 }
+        Self {
+            segments: Vec::new(),
+            major_segments: Vec::new(),
+            axis_extent: 0.0,
+        }
     }
 }
 
@@ -578,7 +596,11 @@ impl GridKey {
     /// Build a key from the per-pane `GridParams`, overlay bounds, and grid style.
     #[doc(hidden)]
     pub fn from_grids(grids: &[GridParams], bounds: iced::Rectangle, style: GridStyle) -> Self {
-        Self { grids: grids.to_vec(), bounds, style }
+        Self {
+            grids: grids.to_vec(),
+            bounds,
+            style,
+        }
     }
 }
 
@@ -609,6 +631,36 @@ pub fn should_reuse(cached: Option<&GridKey>, new: &GridKey) -> bool {
 pub struct GridCanvasState {
     pub key: RefCell<Option<GridKey>>,
     pub cache: canvas::Cache<iced::Renderer>,
+}
+
+/// Compute the adaptive grid step size (world units) from camera zoom.
+///
+/// Returns the smallest power-of-5 multiple of 1.0 that places grid lines at
+/// least `MIN_GRID_PX` pixels apart at the camera pivot. Both orthographic and
+/// perspective cameras have the same vertical scale there. Camera rotation is
+/// intentionally absent so orbiting cannot rescale the visible grid or snap.
+/// World → viewport-local screen via relative-to-eye: subtract the f64 eye
+/// first so points near the camera stay precise at UTM-scale coords.
+/// Rejects points on/behind the perspective eye plane before dividing by W —
+/// without this a behind-camera point wraps to a finite mirrored coordinate
+/// (screen centre for on-axis points) and strokes garbage (#46).
+fn project_point(
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: iced::Rectangle,
+    world: glam::DVec3,
+) -> Option<Point> {
+    let rel = (world - eye).as_vec3();
+    let clip = view_rot * rel.extend(1.0);
+    if !clip.is_finite() || clip.w <= 1e-7 {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    let screen = Point::new(
+        (ndc.x + 1.0) * 0.5 * bounds.width,
+        (1.0 - ndc.y) * 0.5 * bounds.height,
+    );
+    (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
 }
 
 /// Perpendicular screen distance (px) from `p` to the infinite line through
@@ -643,7 +695,12 @@ fn clip_seg(p0: Point, p1: Point, bounds: iced::Rectangle) -> Option<(Point, Poi
     let (xmax, ymax) = (bounds.width + PAD, bounds.height + PAD);
     let (dx, dy) = (p1.x - p0.x, p1.y - p0.y);
     let (mut t0, mut t1) = (0.0f32, 1.0f32);
-    for (p, q) in [(-dx, p0.x - xmin), (dx, xmax - p0.x), (-dy, p0.y - ymin), (dy, ymax - p0.y)] {
+    for (p, q) in [
+        (-dx, p0.x - xmin),
+        (dx, xmax - p0.x),
+        (-dy, p0.y - ymin),
+        (dy, ymax - p0.y),
+    ] {
         if p == 0.0 {
             // Parallel to this edge: outside it means the whole segment is out.
             if q < 0.0 {
@@ -670,12 +727,6 @@ fn clip_seg(p0: Point, p1: Point, bounds: iced::Rectangle) -> Option<(Point, Poi
     ))
 }
 
-/// Compute the adaptive grid step size (world units) from camera zoom.
-///
-/// Returns the smallest power-of-5 multiple of 1.0 that places grid lines at
-/// least `MIN_GRID_PX` pixels apart at the camera pivot. Both orthographic and
-/// perspective cameras have the same vertical scale there. Camera rotation is
-/// intentionally absent so orbiting cannot rescale the visible grid or snap.
 pub fn compute_grid_step(distance: f32, fov_y: f32, bounds: iced::Rectangle) -> f32 {
     compute_grid_steps(1.0, 1.0, distance, fov_y, bounds, true).0
 }
@@ -773,10 +824,7 @@ pub struct OtrackLine {
     pub active: bool,
 }
 
-pub fn grid_overlay<'a>(
-    grid: Vec<GridParams>,
-    style: GridStyle,
-) -> Element<'a, Message> {
+pub fn grid_overlay<'a>(grid: Vec<GridParams>, style: GridStyle) -> Element<'a, Message> {
     canvas(GridCanvas { grid, style })
         .width(Length::Fill)
         .height(Length::Fill)
@@ -873,7 +921,7 @@ pub fn selection_overlay<'a>(
     dividers: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
     pane_drop_rect: Option<iced::Rectangle>,
-    pan_mode: bool,
+    nav: NavCursor,
     suppressed: bool,
     hover_locked: bool,
     crosshair_bg: [f32; 4],
@@ -903,7 +951,7 @@ pub fn selection_overlay<'a>(
         dividers,
         pane_move_rect,
         pane_drop_rect,
-        pan_mode,
+        nav,
         suppressed,
         hover_locked,
         crosshair_bg,
@@ -957,9 +1005,10 @@ struct SelectionCanvas {
     pane_move_rect: Option<iced::Rectangle>,
     /// The pane under the cursor during a pane move (drop target), highlighted.
     pane_drop_rect: Option<iced::Rectangle>,
-    /// Interactive PAN mode: the crosshair is hidden and the cursor becomes a
-    /// hand so the viewport reads as a draggable surface.
-    pan_mode: bool,
+    /// Which interactive navigation tool is armed. Any of them hides the
+    /// crosshair — the viewport is being driven, not drawn on — and each
+    /// picks its own cursor in `mouse_interaction`.
+    nav: NavCursor,
     /// A ribbon dropdown (or similar overlay) is open over the viewport. The
     /// crosshair is not drawn and the OS cursor is shown normally so the panel
     /// is usable instead of the cursor vanishing over it. (#227)
@@ -987,6 +1036,93 @@ struct SelectionCanvas {
     constraint_cursor_badge: Option<String>,
 }
 
+/// The move gizmo: an arrow per axis (X red, Y green, Z blue) from the
+/// centre grip and a square per axis pair; the hovered or dragged part is
+/// yellow.
+fn draw_move_gizmo(frame: &mut canvas::Frame, grips: &[GripMarker]) {
+    use crate::scene::pick::grip::{gizmo_plane_axes, GIZMO_AXIS_PX};
+    const COLORS: [Color; 3] = [
+        Color::from_rgb(0.90, 0.22, 0.20),
+        Color::from_rgb(0.27, 0.70, 0.29),
+        Color::from_rgb(0.18, 0.52, 0.93),
+    ];
+    let active = Color::from_rgb(1.0, 0.84, 0.0);
+    // Unit screen direction (y down) and tip of each shown arrow.
+    let mut axes: [Option<(Point, iced::Vector)>; 3] = [None; 3];
+    for grip in grips {
+        if let (GripShape::GizmoAxis(k), Some([dx, dy])) = (grip.shape, grip.dir) {
+            axes[k as usize % 3] = Some((grip.pos, iced::Vector::new(dx, -dy)));
+        }
+    }
+    let Some(center) = axes
+        .iter()
+        .flatten()
+        .next()
+        .map(|(tip, d)| Point::new(tip.x - d.x * GIZMO_AXIS_PX, tip.y - d.y * GIZMO_AXIS_PX))
+    else {
+        return;
+    };
+    for grip in grips {
+        let GripShape::GizmoPlane(k) = grip.shape else {
+            continue;
+        };
+        let (a, b) = gizmo_plane_axes(k);
+        let (Some((_, a)), Some((_, b))) = (axes[a as usize], axes[b as usize]) else {
+            continue;
+        };
+        let corner = |u: f32, v: f32| {
+            Point::new(
+                center.x + (a.x * u + b.x * v) * GIZMO_AXIS_PX,
+                center.y + (a.y * u + b.y * v) * GIZMO_AXIS_PX,
+            )
+        };
+        let quad = canvas::Path::new(|p| {
+            p.move_to(corner(0.18, 0.18));
+            p.line_to(corner(0.42, 0.18));
+            p.line_to(corner(0.42, 0.42));
+            p.line_to(corner(0.18, 0.42));
+            p.close();
+        });
+        let lit = grip.is_hovered || grip.is_hot;
+        let color = if lit {
+            active
+        } else {
+            Color::from_rgb(0.85, 0.85, 0.85)
+        };
+        frame.fill(&quad, color.scale_alpha(if lit { 0.55 } else { 0.25 }));
+        frame.stroke(
+            &quad,
+            canvas::Stroke::default().with_width(1.0).with_color(color),
+        );
+    }
+    for grip in grips {
+        let (GripShape::GizmoAxis(k), Some((tip, d))) = (
+            grip.shape,
+            grip.dir
+                .map(|[dx, dy]| (grip.pos, iced::Vector::new(dx, -dy))),
+        ) else {
+            continue;
+        };
+        let color = if grip.is_hovered || grip.is_hot {
+            active
+        } else {
+            COLORS[k as usize % 3]
+        };
+        let base = Point::new(tip.x - d.x * 13.0, tip.y - d.y * 13.0);
+        frame.stroke(
+            &canvas::Path::line(center, base),
+            canvas::Stroke::default().with_width(2.5).with_color(color),
+        );
+        let head = canvas::Path::new(|p| {
+            p.move_to(tip);
+            p.line_to(Point::new(base.x - d.y * 6.0, base.y + d.x * 6.0));
+            p.line_to(Point::new(base.x + d.y * 6.0, base.y - d.x * 6.0));
+            p.close();
+        });
+        frame.fill(&head, color);
+    }
+}
+
 fn draw_grip_marker(
     frame: &mut canvas::Frame,
     grip: &GripMarker,
@@ -996,10 +1132,9 @@ fn draw_grip_marker(
     let sp = grip.pos;
     let h = visual.grip_size.clamp(1.0, 25.0);
     let path = match grip.shape {
-        GripShape::Square => canvas::Path::rectangle(
-            Point::new(sp.x - h, sp.y - h),
-            Size::new(h * 2.0, h * 2.0),
-        ),
+        GripShape::Square => {
+            canvas::Path::rectangle(Point::new(sp.x - h, sp.y - h), Size::new(h * 2.0, h * 2.0))
+        }
         GripShape::Rectangle => {
             // Mid-segment stretch handle: small box, longer along the segment
             // direction so the affordance reads as "stretch perpendicular".
@@ -1040,6 +1175,7 @@ fn draw_grip_marker(
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
+        GripShape::GizmoAxis(_) | GripShape::GizmoPlane(_) => return,
         GripShape::Dropdown | GripShape::DropdownAdjacent => canvas::Path::new(|b| {
             b.move_to(Point::new(sp.x - h, sp.y - h * 0.5));
             b.line_to(Point::new(sp.x + h, sp.y - h * 0.5));
@@ -1050,7 +1186,7 @@ fn draw_grip_marker(
 
     if grip.is_hot {
         let hot_color = if visual.grip_hot > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hot) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hot) {
                 Color::from_rgb8(r, g, b)
             } else {
                 theme.palette().danger.base.color
@@ -1062,7 +1198,7 @@ fn draw_grip_marker(
     } else if grip.is_hovered {
         let pair = theme.palette().primary.strong;
         let hover_color = if visual.grip_hover > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hover) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hover) {
                 Color::from_rgb8(r, g, b)
             } else {
                 pair.color
@@ -1082,7 +1218,7 @@ fn draw_grip_marker(
     } else {
         let palette = theme.palette();
         let color = if visual.grip_color > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_color) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_color) {
                 Color::from_rgb8(r, g, b)
             } else {
                 palette.primary.base.color
@@ -1143,13 +1279,30 @@ impl canvas::Program<Message> for SelectionCanvas {
         if self.suppressed {
             return mouse::Interaction::default();
         }
-        // PAN mode owns the whole viewport: an open hand when hovering, a
-        // closed hand while dragging.
-        if self.pan_mode && cursor.is_over(bounds) {
-            return if self.selection.borrow().middle_down {
-                mouse::Interaction::Grabbing
-            } else {
-                mouse::Interaction::Grab
+        // An armed navigation tool owns the whole viewport, and the cursor
+        // says which one: a hand to drag the sheet, four-way arrows to swing
+        // the model, a magnifier that carries the sign of the zoom actually
+        // under way. Hovering before the drag starts shows the neutral "+"
+        // magnifier rather than guessing a direction.
+        if self.nav != NavCursor::None && cursor.is_over(bounds) {
+            let dragging = self.selection.borrow().input.middle_down;
+            return match self.nav {
+                NavCursor::Pan => {
+                    if dragging {
+                        mouse::Interaction::Grabbing
+                    } else {
+                        mouse::Interaction::Grab
+                    }
+                }
+                NavCursor::Orbit => mouse::Interaction::AllScroll,
+                NavCursor::Zoom => {
+                    if dragging && self.selection.borrow().input.zoom_dir_out {
+                        mouse::Interaction::ZoomOut
+                    } else {
+                        mouse::Interaction::ZoomIn
+                    }
+                }
+                NavCursor::None => unreachable!("guarded above"),
             };
         }
         if self.show_viewcube {
@@ -1216,8 +1369,10 @@ impl canvas::Program<Message> for SelectionCanvas {
         if let Some(src) = self.pane_move_rect {
             let accent = theme.palette().primary.base.color;
             // Source pane: dimmed + dashed-feel outline (it has been lifted).
-            let src_path =
-                canvas::Path::rectangle(Point::new(src.x, src.y), iced::Size::new(src.width, src.height));
+            let src_path = canvas::Path::rectangle(
+                Point::new(src.x, src.y),
+                iced::Size::new(src.width, src.height),
+            );
             frame.fill(
                 &src_path,
                 theme.palette().background.strong.color.scale_alpha(0.28),
@@ -1248,7 +1403,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             }
             // Ghost card dragged under the cursor — a 0.32× preview of the
             // source pane, centred on the cursor.
-            if let Some(c) = self.selection.borrow().last_move_pos {
+            if let Some(c) = self.selection.borrow().input.last_move_pos {
                 let gw = (src.width * 0.32).clamp(60.0, 280.0);
                 let gh = (src.height * 0.32).clamp(40.0, 200.0);
                 let g = canvas::Path::rectangle(
@@ -1266,7 +1421,6 @@ impl canvas::Program<Message> for SelectionCanvas {
                 );
             }
         }
-
 
         // Draw a selection marquee (green crossing / blue window) as a filled,
         // stroked rectangle between two canvas points. Shared by the live
@@ -1313,26 +1467,59 @@ impl canvas::Program<Message> for SelectionCanvas {
             );
         }
 
-        if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
-            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual, self.crosshair_bg);
+        // ZOOM Dynamic reuses `box_anchor` to remember where the drag began,
+        // so the marquee would otherwise rubber-band across the screen while
+        // the view zooms. Suppress the drawing, not the state — the anchor is
+        // still re-projected as the camera moves.
+        if self.nav != NavCursor::Zoom {
+            if let (Some(a), Some(b)) = (
+                self.selection.borrow().gesture.box_anchor,
+                self.selection.borrow().gesture.box_current,
+            ) {
+                draw_marquee(
+                    &mut frame,
+                    a,
+                    b,
+                    self.selection.borrow().gesture.box_crossing,
+                    theme,
+                    &self.selection_visual,
+                    self.crosshair_bg,
+                );
+            }
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
-        if let Some((a, b, crossing)) = self.selection.borrow().preview_box {
-            draw_marquee(&mut frame, a, b, crossing, theme, &self.selection_visual, self.crosshair_bg);
+        if let Some((a, b, crossing)) = self.selection.borrow().gesture.preview_box {
+            draw_marquee(
+                &mut frame,
+                a,
+                b,
+                crossing,
+                theme,
+                &self.selection_visual,
+                self.crosshair_bg,
+            );
         }
 
-        if self.selection.borrow().poly_active && self.selection.borrow().poly_points.len() > 1 {
-            let crossing = self.selection.borrow().poly_crossing;
-            let base = resolve_selection_base_color(crossing, theme, &self.selection_visual, self.crosshair_bg);
+        if self.selection.borrow().gesture.poly_active
+            && self.selection.borrow().gesture.poly_points.len() > 1
+        {
+            let crossing = self.selection.borrow().gesture.poly_crossing;
+            let base = resolve_selection_base_color(
+                crossing,
+                theme,
+                &self.selection_visual,
+                self.crosshair_bg,
+            );
             let canvas_light = crate::ui::style::common::canvas_is_light(self.crosshair_bg);
             if self.selection_visual.area && self.selection_visual.opacity > 0 {
-                let alpha = selection_fill_alpha(self.selection_visual.opacity as f32, canvas_light);
+                let alpha =
+                    selection_fill_alpha(self.selection_visual.opacity as f32, canvas_light);
                 let fill = base.scale_alpha(alpha);
-                if let Some(cur) = self.selection.borrow().last_move_pos {
-                    let start = self.selection.borrow().poly_points[0];
+                if let Some(cur) = self.selection.borrow().input.last_move_pos {
+                    let start = self.selection.borrow().gesture.poly_points[0];
                     let fill_path = canvas::Path::new(|p| {
                         p.move_to(start);
-                        for pt in &self.selection.borrow().poly_points[1..] {
+                        for pt in &self.selection.borrow().gesture.poly_points[1..] {
                             p.line_to(*pt);
                         }
                         p.line_to(cur);
@@ -1344,8 +1531,8 @@ impl canvas::Program<Message> for SelectionCanvas {
             let stroke_alpha = if canvas_light { 0.95 } else { 0.90 };
             let stroke = base.scale_alpha(stroke_alpha);
             let path = canvas::Path::new(|p| {
-                p.move_to(self.selection.borrow().poly_points[0]);
-                for pt in &self.selection.borrow().poly_points[1..] {
+                p.move_to(self.selection.borrow().gesture.poly_points[0]);
+                for pt in &self.selection.borrow().gesture.poly_points[1..] {
                     p.line_to(*pt);
                 }
             });
@@ -1363,9 +1550,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                 ..Default::default()
             };
             frame.stroke(&path, stroke_style.clone());
-            if let Some(cur) = self.selection.borrow().last_move_pos {
-                let start = self.selection.borrow().poly_points[0];
-                let last = *self.selection.borrow().poly_points.last().unwrap();
+            if let Some(cur) = self.selection.borrow().input.last_move_pos {
+                let start = self.selection.borrow().gesture.poly_points[0];
+                let last = *self.selection.borrow().gesture.poly_points.last().unwrap();
                 let preview = canvas::Path::new(|p| {
                     p.move_to(last);
                     p.line_to(cur);
@@ -1414,8 +1601,14 @@ impl canvas::Program<Message> for SelectionCanvas {
                         );
                     }
                 }
+                draw_move_gizmo(frame, &self.grips);
                 for grip in &self.grips {
-                    draw_grip_marker(frame, grip, theme, &self.selection_visual);
+                    if !matches!(
+                        grip.shape,
+                        GripShape::GizmoAxis(_) | GripShape::GizmoPlane(_)
+                    ) {
+                        draw_grip_marker(frame, grip, theme, &self.selection_visual);
+                    }
                 }
             });
         }
@@ -1424,12 +1617,20 @@ impl canvas::Program<Message> for SelectionCanvas {
         if let Some((sp, snap_type)) = self.snap {
             let (r, g, b) = if snap_type == SnapType::ObjectPick {
                 (0.95_f32, 0.50, 0.08) // orange object-snap marker
+            } else if let Some([r, g, b]) = self.crosshair.snap_color {
+                (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+            } else if crate::ui::style::common::canvas_is_light(self.crosshair_bg) {
+                (0.80, 0.45, 0.0) // dark amber: yellow vanishes on a light canvas
             } else {
                 (1.0, 0.9, 0.1) // classic yellow OSNAP
             };
             let marker = Color { r, g, b, a: 1.0 };
             let stroke = canvas::Stroke {
-                width: if snap_type == SnapType::ObjectPick { 2.0 } else { 1.5 },
+                width: if snap_type == SnapType::ObjectPick {
+                    2.0
+                } else {
+                    1.5
+                },
                 style: canvas::Style::Solid(marker),
                 ..Default::default()
             };
@@ -1475,6 +1676,25 @@ impl canvas::Program<Message> for SelectionCanvas {
                     let r = 5.5_f32;
                     let path = canvas::Path::circle(sp, r);
                     frame.stroke(&path, stroke);
+                }
+                SnapType::GeometricCenter => {
+                    // Pentagon around a centre dot: the area centroid.
+                    let r = 6.5_f32;
+                    let path = canvas::Path::new(|b| {
+                        for k in 0..5 {
+                            let a = -std::f32::consts::FRAC_PI_2
+                                + k as f32 * std::f32::consts::TAU / 5.0;
+                            let p = Point::new(sp.x + r * a.cos(), sp.y + r * a.sin());
+                            if k == 0 {
+                                b.move_to(p);
+                            } else {
+                                b.line_to(p);
+                            }
+                        }
+                        b.close();
+                    });
+                    frame.stroke(&path, stroke.clone());
+                    frame.fill(&canvas::Path::circle(sp, 1.6), marker);
                 }
                 SnapType::Node => {
                     // Circle with an inscribed X.
@@ -1525,10 +1745,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 },
                                 ..canvas::Stroke::default().with_color(marker).with_width(1.0)
                             };
-                            let tip = Point::new(
-                                sp.x + dx / len * 18.0,
-                                sp.y + dy / len * 18.0,
-                            );
+                            let tip = Point::new(sp.x + dx / len * 18.0, sp.y + dy / len * 18.0);
                             // `base` is a projected entity endpoint: clip before
                             // stroking (see `clip_seg`).
                             if let Some((a, b)) = clip_seg(base, tip, bounds) {
@@ -1769,14 +1986,21 @@ impl canvas::Program<Message> for SelectionCanvas {
         // arrow (see `mouse_interaction`); drawing the CAD crosshair on
         // top of it would double up the visual feedback.
         let over_divider = self.divider_under(cursor, bounds);
-        // PAN mode replaces the crosshair with a hand cursor.
+        // An armed navigation tool replaces the crosshair with its own cursor.
         if !over_viewcube
             && !over_divider
-            && !self.pan_mode
+            && self.nav == NavCursor::None
             && !self.suppressed
             && self.crosshair.cursor_type == CursorType::Crosshair
         {
-            if let Some(cp) = self.selection.borrow().last_move_pos {
+            // Over a grip the crosshair locks onto it, so the click lands on
+            // the grip exactly.
+            let hovered_grip = self
+                .grips
+                .iter()
+                .find(|grip| grip.is_hovered)
+                .map(|grip| grip.pos);
+            if let Some(cp) = hovered_grip.or(self.selection.borrow().input.last_move_pos) {
                 let [r, g, b, a] = self.crosshair.color.map_or_else(
                     || {
                         crate::scene::view::render::adapt_to_bg(
@@ -1784,18 +2008,19 @@ impl canvas::Program<Message> for SelectionCanvas {
                             self.crosshair_bg,
                         )
                     },
-                    |[r, g, b]| {
-                        [
-                            r as f32 / 255.0,
-                            g as f32 / 255.0,
-                            b as f32 / 255.0,
-                            0.90,
-                        ]
-                    },
+                    |[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.90],
                 );
                 let color = Color { r, g, b, a };
+                // Pending client pick: drop the arms, keep a blue pickbox —
+                // the same blue as the MCP "waiting for you to pick" pill.
+                let pick_pending = self.crosshair.pick_pending;
+                let color = if pick_pending {
+                    Color::from_rgb(0.30, 0.55, 0.98)
+                } else {
+                    color
+                };
                 let stroke = canvas::Stroke {
-                    width: 1.0,
+                    width: if pick_pending { 1.5 } else { 1.0 },
                     style: canvas::Style::Solid(color),
                     ..Default::default()
                 };
@@ -1811,33 +2036,43 @@ impl canvas::Program<Message> for SelectionCanvas {
                 } else {
                     [0.0, 90.0]
                 };
-                for angle in base_angles {
-                    let rad = (angle + self.crosshair.snap_angle_deg as f64).to_radians();
-                    let dir = Point::new(rad.cos() as f32, -rad.sin() as f32);
-                    let gap = if point_mode {
-                        9.0
-                    } else if sq > 0.0 {
-                        sq / dir.x.abs().max(dir.y.abs()).max(1e-6)
-                    } else {
-                        0.0
-                    };
-                    let arms = canvas::Path::new(|path| {
-                        path.move_to(Point::new(cp.x + dir.x * gap, cp.y + dir.y * gap));
-                        path.line_to(Point::new(cp.x + dir.x * arm, cp.y + dir.y * arm));
-                        path.move_to(Point::new(cp.x - dir.x * gap, cp.y - dir.y * gap));
-                        path.line_to(Point::new(cp.x - dir.x * arm, cp.y - dir.y * arm));
-                    });
-                    frame.stroke(&arms, stroke.clone());
+                // The arms stay only for the normal (non-pending) cursor: a
+                // waiting pick shows the box alone, regardless of the UCS
+                // rotation, so the square is unmistakable.
+                if !pick_pending && !self.crosshair.hide_arms {
+                    for angle in base_angles {
+                        let rad = (angle + self.crosshair.snap_angle_deg as f64).to_radians();
+                        let dir = Point::new(rad.cos() as f32, -rad.sin() as f32);
+                        let gap = if point_mode {
+                            9.0
+                        } else if sq > 0.0 {
+                            sq / dir.x.abs().max(dir.y.abs()).max(1e-6)
+                        } else {
+                            0.0
+                        };
+                        let arms = canvas::Path::new(|path| {
+                            path.move_to(Point::new(cp.x + dir.x * gap, cp.y + dir.y * gap));
+                            path.line_to(Point::new(cp.x + dir.x * arm, cp.y + dir.y * arm));
+                            path.move_to(Point::new(cp.x - dir.x * gap, cp.y - dir.y * gap));
+                            path.line_to(Point::new(cp.x - dir.x * arm, cp.y - dir.y * arm));
+                        });
+                        frame.stroke(&arms, stroke.clone());
+                    }
                 }
                 if point_mode {
                     let dot = canvas::Path::circle(cp, 1.75);
                     frame.fill(&dot, color);
-                } else if sq > 0.0 {
-                    let square = canvas::Path::rectangle(
-                        Point::new(cp.x - sq, cp.y - sq),
-                        Size::new(sq * 2.0, sq * 2.0),
-                    );
-                    frame.stroke(&square, stroke);
+                } else {
+                    // A pending pick keeps the square visible even when the
+                    // user's PICKBOX setting would hide it.
+                    let sq = if pick_pending { sq.max(8.0) } else { sq };
+                    if sq > 0.0 {
+                        let square = canvas::Path::rectangle(
+                            Point::new(cp.x - sq, cp.y - sq),
+                            Size::new(sq * 2.0, sq * 2.0),
+                        );
+                        frame.stroke(&square, stroke);
+                    }
                 }
 
                 // Locked-layer badge: a small padlock beside the crosshair when
@@ -1850,10 +2085,8 @@ impl canvas::Program<Message> for SelectionCanvas {
                     let bx = cp.x + sq + 7.0;
                     let by = cp.y - sq - 13.0;
                     // Lock body (filled).
-                    let body = canvas::Path::rectangle(
-                        Point::new(bx, by + 6.0),
-                        Size::new(12.0, 9.0),
-                    );
+                    let body =
+                        canvas::Path::rectangle(Point::new(bx, by + 6.0), Size::new(12.0, 9.0));
                     frame.fill(&body, amber);
                     // Shackle: an inverted-U above the body (squared so the
                     // shape is unambiguous regardless of arc winding).
@@ -1877,7 +2110,10 @@ impl canvas::Program<Message> for SelectionCanvas {
                     frame.fill(&hole, dark);
                 }
                 if let Some(label) = &self.constraint_cursor_badge {
-                    let center = Point::new(cp.x + sq + if self.hover_locked { 30.0 } else { 12.0 }, cp.y - sq - 7.0);
+                    let center = Point::new(
+                        cp.x + sq + if self.hover_locked { 30.0 } else { 12.0 },
+                        cp.y - sq - 7.0,
+                    );
                     let blue = Color::from_rgb8(35, 145, 230);
                     let badge = canvas::Path::circle(center, 8.5);
                     frame.fill(&badge, blue);
@@ -1968,9 +2204,10 @@ impl canvas::Program<Message> for SelectionCanvas {
         // yellow OSNAP marker, same glyph as `SnapType::Intersection`) so the
         // point both vectors meet at is unambiguous (#1313).
         if let Some(lock) = crossing_lock {
-            let crossed = self.otrack_lines.iter().any(|l| {
-                !l.active && point_inf_line_dist(lock, l.base, l.tip) <= 2.5
-            });
+            let crossed = self
+                .otrack_lines
+                .iter()
+                .any(|l| !l.active && point_inf_line_dist(lock, l.base, l.tip) <= 2.5);
             if crossed {
                 let r = 5.0_f32;
                 let stroke = canvas::Stroke::default()
@@ -2059,7 +2296,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                 if *is_selected {
                     frame.stroke(
                         &pill,
-                        canvas::Stroke::default().with_color(selected_ring).with_width(2.0),
+                        canvas::Stroke::default()
+                            .with_color(selected_ring)
+                            .with_width(2.0),
                     );
                 }
                 if !compact_coincident {
@@ -2146,7 +2385,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                     );
                     let width = (label.chars().count() as f32 * 7.0 + 14.0).max(54.0);
                     let height = 24.0;
-                    let left = glyph_top_left.x.clamp(2.0, (bounds.width - width - 2.0).max(2.0));
+                    let left = glyph_top_left
+                        .x
+                        .clamp(2.0, (bounds.width - width - 2.0).max(2.0));
                     let top = (glyph_top_left.y + glyph_size.height + 4.0)
                         .clamp(2.0, (bounds.height - height - 2.0).max(2.0));
                     let tooltip = canvas::Path::rounded_rectangle(
@@ -2161,8 +2402,8 @@ impl canvas::Program<Message> for SelectionCanvas {
                             .with_color(theme.palette().background.strong.text)
                             .with_width(1.0),
                     );
-                        frame.fill_text(canvas::Text {
-                            content: label.to_string(),
+                    frame.fill_text(canvas::Text {
+                        content: label.to_string(),
                         position: Point::new(left + width * 0.5, top + height * 0.5),
                         color: theme.palette().background.strong.text,
                         size: iced::Pixels(12.0),
@@ -2246,11 +2487,25 @@ fn draw_grid(
     };
     let major_stroke = canvas::Stroke {
         width: 0.75,
-        style: canvas::Style::Solid(Color { r, g, b, a: major_alpha }),
+        style: canvas::Style::Solid(Color {
+            r,
+            g,
+            b,
+            a: major_alpha,
+        }),
         ..Default::default()
     };
-    let geometry =
-        grid_segments(view_rot, eye, bounds, step_x, step_y, major_every, grid_origin, grid_axes, limits);
+    let geometry = grid_segments(
+        view_rot,
+        eye,
+        bounds,
+        step_x,
+        step_y,
+        major_every,
+        grid_origin,
+        grid_axes,
+        limits,
+    );
     if !geometry.segments.is_empty() {
         let path = canvas::Path::new(|builder| {
             for (p0, p1) in &geometry.segments {
@@ -2272,7 +2527,16 @@ fn draw_grid(
     if geometry.axis_extent > 0.0 {
         let (gx, gy, gz) = grid_axes;
         let extent = (geometry.axis_extent + step_x.max(step_y)) * 1.5;
-        draw_axes(frame, view_rot, eye, bounds, extent.max(10.0), grid_origin, (gx, gy, gz), style.bg_luminance);
+        draw_axes(
+            frame,
+            view_rot,
+            eye,
+            bounds,
+            extent.max(10.0),
+            grid_origin,
+            (gx, gy, gz),
+            style.bg_luminance,
+        );
     }
 }
 
@@ -2302,20 +2566,9 @@ pub fn grid_segments(
 
     // World → viewport-local screen via relative-to-eye: subtract the f64 eye
     // first so grid points near the camera stay precise at UTM-scale coords.
-    // Reject points on/behind the perspective eye plane before dividing by W.
-    let project = |world: glam::DVec3| -> Option<Point> {
-        let rel = (world - eye).as_vec3();
-        let clip = view_rot * rel.extend(1.0);
-        if !clip.is_finite() || clip.w <= 1e-7 {
-            return None;
-        }
-        let ndc = clip.truncate() / clip.w;
-        let screen = Point::new(
-            (ndc.x + 1.0) * 0.5 * bounds.width,
-            (1.0 - ndc.y) * 0.5 * bounds.height,
-        );
-        (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
-    };
+    // Shared eye-plane guard — see project_point (#46).
+    let project =
+        |world: glam::DVec3| -> Option<Point> { project_point(view_rot, eye, bounds, world) };
 
     // Grid is intentionally restricted to the active UCS XY plane.
     let (gx, gy, gz) = grid_axes;
@@ -2335,11 +2588,7 @@ pub fn grid_segments(
         let far = inv.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
         let ray = far - near;
         let denom = ray.dot(plane_normal);
-        if !near.is_finite()
-            || !far.is_finite()
-            || !denom.is_finite()
-            || denom.abs() < 1e-7
-        {
+        if !near.is_finite() || !far.is_finite() || !denom.is_finite() || denom.abs() < 1e-7 {
             return None;
         }
         let t = (plane_rel - near).dot(plane_normal) / denom;
@@ -2393,8 +2642,7 @@ pub fn grid_segments(
             for tangent in tangents2.into_iter().flatten() {
                 let tangent_len = tangent.length();
                 if tangent_len > 1e-6 {
-                    let area =
-                        (neighbour.x * tangent.y - neighbour.y * tangent.x).abs();
+                    let area = (neighbour.x * tangent.y - neighbour.y * tangent.x).abs();
                     gap1 = gap1.max(area / tangent_len);
                 }
             }
@@ -2403,8 +2651,7 @@ pub fn grid_segments(
             for tangent in tangents1.into_iter().flatten() {
                 let tangent_len = tangent.length();
                 if tangent_len > 1e-6 {
-                    let area =
-                        (neighbour.x * tangent.y - neighbour.y * tangent.x).abs();
+                    let area = (neighbour.x * tangent.y - neighbour.y * tangent.x).abs();
                     gap2 = gap2.max(area / tangent_len);
                 }
             }
@@ -2436,58 +2683,53 @@ pub fn grid_segments(
         return GridGeometry::empty();
     }
     let (sx, sy) = (step_x, step_y);
-    let is_major = |index: i32| {
-        major_every >= 2 && (index.rem_euclid(major_every as i32) == 0)
-    };
+    let is_major = |index: i32| major_every >= 2 && (index.rem_euclid(major_every as i32) == 0);
 
     // Trace a family-specific visible region around the viewport perimeter.
     // When a boundary ray points through the horizon, binary-search back toward
     // a readable anchor and stop where neighbouring lines reach the minimum gap.
-    let collect_extent = |
-        family: usize,
-        anchor_screen: glam::Vec2,
-        anchor_world: glam::DVec3,
-    | -> Vec<glam::DVec3> {
-        let visible_at = |screen: glam::Vec2| -> Option<glam::DVec3> {
-            let world = unproject(screen.x, screen.y)?;
-            let gaps = grid_gaps(world, sx, sy)?;
-            let gap = if family == 0 { gaps.0 } else { gaps.1 };
-            (gap >= MIN_HORIZON_GRID_PX).then_some(world)
-        };
+    let collect_extent =
+        |family: usize, anchor_screen: glam::Vec2, anchor_world: glam::DVec3| -> Vec<glam::DVec3> {
+            let visible_at = |screen: glam::Vec2| -> Option<glam::DVec3> {
+                let world = unproject(screen.x, screen.y)?;
+                let gaps = grid_gaps(world, sx, sy)?;
+                let gap = if family == 0 { gaps.0 } else { gaps.1 };
+                (gap >= MIN_HORIZON_GRID_PX).then_some(world)
+            };
 
-        const EDGE_STEPS: usize = 12;
-        const SEARCH_STEPS: usize = 16;
-        let mut hits = vec![anchor_world];
-        for i in 0..=EDGE_STEPS {
-            let f = i as f32 / EDGE_STEPS as f32;
-            let targets = [
-                glam::Vec2::new(bounds.width * f, 0.0),
-                glam::Vec2::new(bounds.width * f, bounds.height),
-                glam::Vec2::new(0.0, bounds.height * f),
-                glam::Vec2::new(bounds.width, bounds.height * f),
-            ];
-            for target in targets {
-                if let Some(world) = visible_at(target) {
-                    hits.push(world);
-                    continue;
-                }
-                let mut near_screen = anchor_screen;
-                let mut far_screen = target;
-                let mut near_world = anchor_world;
-                for _ in 0..SEARCH_STEPS {
-                    let middle = (near_screen + far_screen) * 0.5;
-                    if let Some(world) = visible_at(middle) {
-                        near_screen = middle;
-                        near_world = world;
-                    } else {
-                        far_screen = middle;
+            const EDGE_STEPS: usize = 12;
+            const SEARCH_STEPS: usize = 16;
+            let mut hits = vec![anchor_world];
+            for i in 0..=EDGE_STEPS {
+                let f = i as f32 / EDGE_STEPS as f32;
+                let targets = [
+                    glam::Vec2::new(bounds.width * f, 0.0),
+                    glam::Vec2::new(bounds.width * f, bounds.height),
+                    glam::Vec2::new(0.0, bounds.height * f),
+                    glam::Vec2::new(bounds.width, bounds.height * f),
+                ];
+                for target in targets {
+                    if let Some(world) = visible_at(target) {
+                        hits.push(world);
+                        continue;
                     }
+                    let mut near_screen = anchor_screen;
+                    let mut far_screen = target;
+                    let mut near_world = anchor_world;
+                    for _ in 0..SEARCH_STEPS {
+                        let middle = (near_screen + far_screen) * 0.5;
+                        if let Some(world) = visible_at(middle) {
+                            near_screen = middle;
+                            near_world = world;
+                        } else {
+                            far_screen = middle;
+                        }
+                    }
+                    hits.push(near_world);
                 }
-                hits.push(near_world);
             }
-        }
-        hits
-    };
+            hits
+        };
 
     let best_anchor = |family: usize| -> Option<(glam::Vec2, glam::DVec3, f32)> {
         let mut best = None;
@@ -2534,15 +2776,9 @@ pub fn grid_segments(
     let grid_clip_axis2 = view_rot * axis2.extend(0.0);
     let project_line = |family: usize, value: f32| -> Option<(glam::Vec2, glam::Vec2)> {
         let (base, direction) = if family == 0 {
-            (
-                grid_clip_origin + grid_clip_axis1 * value,
-                grid_clip_axis2,
-            )
+            (grid_clip_origin + grid_clip_axis1 * value, grid_clip_axis2)
         } else {
-            (
-                grid_clip_origin + grid_clip_axis2 * value,
-                grid_clip_axis1,
-            )
+            (grid_clip_origin + grid_clip_axis2 * value, grid_clip_axis1)
         };
         let screen_h = |clip: glam::Vec4| {
             glam::Vec3::new(
@@ -2571,7 +2807,10 @@ pub fn grid_segments(
                 point.x.clamp(0.0, bounds.width),
                 point.y.clamp(0.0, bounds.height),
             );
-            if points.iter().all(|p: &glam::Vec2| p.distance_squared(point) > 1e-4) {
+            if points
+                .iter()
+                .all(|p: &glam::Vec2| p.distance_squared(point) > 1e-4)
+            {
                 points.push(point);
             }
         };
@@ -2611,11 +2850,7 @@ pub fn grid_segments(
     // at least the configured physical-pixel gap away. The visible interval is found in screen
     // space, so oblique/trapezoidal views no longer inherit rectangular world
     // bounds from the top view.
-    let trim_line = |
-        family: usize,
-        p0: glam::Vec2,
-        p1: glam::Vec2,
-    | -> Vec<(Point, Point)> {
+    let trim_line = |family: usize, p0: glam::Vec2, p1: glam::Vec2| -> Vec<(Point, Point)> {
         let visible = |t: f32| {
             let screen = p0.lerp(p1, t);
             let Some(world) = unproject(screen.x, screen.y) else {
@@ -2745,7 +2980,11 @@ pub fn grid_segments(
                 let (start, end) = line_range(min1, max1, anchor, sx);
                 for index in start..=end {
                     if let Some(segment) = clip_world_line(0, index as f32 * sx) {
-                        if is_major(index) { major.push(segment); } else { minor.push(segment); }
+                        if is_major(index) {
+                            major.push(segment);
+                        } else {
+                            minor.push(segment);
+                        }
                     }
                 }
             }
@@ -2756,7 +2995,11 @@ pub fn grid_segments(
                 let (start, end) = line_range(min2, max2, anchor, sy);
                 for index in start..=end {
                     if let Some(segment) = clip_world_line(1, index as f32 * sy) {
-                        if is_major(index) { major.push(segment); } else { minor.push(segment); }
+                        if is_major(index) {
+                            major.push(segment);
+                        } else {
+                            minor.push(segment);
+                        }
                     }
                 }
             }
@@ -2776,7 +3019,11 @@ pub fn grid_segments(
         if limits_extent > 0.0 {
             axis_extent = limits_extent;
         }
-        return GridGeometry { segments: all_segments, major_segments: all_major, axis_extent };
+        return GridGeometry {
+            segments: all_segments,
+            major_segments: all_major,
+            axis_extent,
+        };
     }
 
     let mut all_major: Vec<(Point, Point)> = Vec::new();
@@ -2793,7 +3040,11 @@ pub fn grid_segments(
                     let value = i as f32 * sx;
                     if let Some((p0, p1)) = project_line(0, value) {
                         let segs = trim_line(0, p0, p1);
-                        if is_major(i) { all_major.extend(segs); } else { all_segments.extend(segs); }
+                        if is_major(i) {
+                            all_major.extend(segs);
+                        } else {
+                            all_segments.extend(segs);
+                        }
                     }
                 }
                 axis_extent =
@@ -2815,7 +3066,11 @@ pub fn grid_segments(
                     let value = i as f32 * sy;
                     if let Some((p0, p1)) = project_line(1, value) {
                         let segs = trim_line(1, p0, p1);
-                        if is_major(i) { all_major.extend(segs); } else { all_segments.extend(segs); }
+                        if is_major(i) {
+                            all_major.extend(segs);
+                        } else {
+                            all_segments.extend(segs);
+                        }
                     }
                 }
                 axis_extent =
@@ -2825,11 +3080,16 @@ pub fn grid_segments(
     }
 
     let _ = gz; // gz unused after move; retained for symmetry with `draw_axes` call sites.
-    GridGeometry { segments: all_segments, major_segments: all_major, axis_extent }
+    GridGeometry {
+        segments: all_segments,
+        major_segments: all_major,
+        axis_extent,
+    }
 }
 
 // ── Coloured UCS axes ──────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn draw_axes(
     frame: &mut canvas::Frame,
@@ -2841,34 +3101,67 @@ fn draw_axes(
     axes: (Vec3, Vec3, Vec3),
     bg_luminance: f32,
 ) {
-    let w2s = |world: glam::DVec3| -> Point {
-        let ndc = view_rot.project_point3((world - eye).as_vec3());
-        Point::new(
-            bounds.x + (ndc.x + 1.0) * 0.5 * bounds.width,
-            bounds.y + (1.0 - ndc.y) * 0.5 * bounds.height,
-        )
-    };
-    let e = extent;
-    let (ax, ay, az) = axes;
     let axis_stroke = |r: f32, g: f32, b: f32| canvas::Stroke {
         width: 1.5,
         style: canvas::Style::Solid(Color { r, g, b, a: 0.85 }),
         ..Default::default()
     };
-    // Axes run through the UCS origin along the UCS axis directions.
-    let mut line = |dir: Vec3, r: f32, g: f32, b: f32| {
+    let y_green = if bg_luminance > 0.5 { 0.60 } else { 0.85 };
+    for ((a, b), (r, g, bl)) in axes_segments(view_rot, eye, bounds, extent, origin, axes)
+        .into_iter()
+        .zip([
+            (0.90, 0.20, 0.20),
+            (0.20, y_green, 0.20),
+            (0.20, 0.40, 0.90),
+        ])
+    {
         frame.stroke(
             &canvas::Path::new(|p| {
-                p.move_to(w2s(origin - (dir * e).as_dvec3()));
-                p.line_to(w2s(origin + (dir * e).as_dvec3()));
+                p.move_to(a);
+                p.line_to(b);
             }),
-            axis_stroke(r, g, b),
+            axis_stroke(r, g, bl),
         );
+    }
+}
+
+/// Pure geometry for [`draw_axes`]: per-axis canvas-space segments in X/Y/Z
+/// order after the eye-plane guard and frame clip. An axis with either end
+/// behind the eye is absent entirely (#46) — screen-space clipping of a
+/// mirror-wrapped segment would be garbage, same policy as grid lines.
+/// Extracted so the skip/clip/offset contract is unit-testable without a
+/// renderer (iced `Frame` needs one).
+fn axes_segments(
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: iced::Rectangle,
+    extent: f32,
+    origin: glam::DVec3,
+    axes: (Vec3, Vec3, Vec3),
+) -> Vec<(Point, Point)> {
+    // Axes run through the UCS origin along the UCS axis directions. NOTE: the
+    // pane origin offset below reproduces draw_axes' historical canvas placement
+    // verbatim — whether grid geometry as a whole should be pane-local or
+    // canvas-placed is a separate open question (see #60), not this fix.
+    let w2s = |world: glam::DVec3| -> Option<Point> {
+        project_point(view_rot, eye, bounds, world)
+            .map(|p| Point::new(p.x + bounds.x, p.y + bounds.y))
     };
-    let y_green = if bg_luminance > 0.5 { 0.60 } else { 0.85 };
-    line(ax, 0.90, 0.20, 0.20); // X — red
-    line(ay, 0.20, y_green, 0.20); // Y — green
-    line(az, 0.20, 0.40, 0.90); // Z — blue
+    // clip_seg works frame-local: shift, clip, shift back.
+    let local = |p: Point| Point::new(p.x - bounds.x, p.y - bounds.y);
+    let back = |p: Point| Point::new(p.x + bounds.x, p.y + bounds.y);
+    let (ax, ay, az) = axes;
+    [ax, ay, az]
+        .into_iter()
+        .filter_map(|dir| {
+            let (p0, p1) = (
+                w2s(origin - (dir * extent).as_dvec3())?,
+                w2s(origin + (dir * extent).as_dvec3())?,
+            );
+            let (c0, c1) = clip_seg(local(p0), local(p1), bounds)?;
+            Some((back(c0), back(c1)))
+        })
+        .collect()
 }
 
 // ── UCS icon ──────────────────────────────────────────────────────────────
@@ -3003,8 +3296,7 @@ fn draw_ucs_icon(
     selected: bool,
     crosshair_bg: [f32; 4],
 ) {
-    let Some((icon_origin, at_origin, geom)) =
-        ucs_icon_geometry(vp, bounds, axes, origin_screen)
+    let Some((icon_origin, at_origin, geom)) = ucs_icon_geometry(vp, bounds, axes, origin_screen)
     else {
         return;
     };
@@ -3013,7 +3305,8 @@ fn draw_ucs_icon(
     // corner), so hover/selection highlight applies there too.
     let _ = at_origin;
     let highlight = hover || selected;
-    let is_light_bg = 0.299 * crosshair_bg[0] + 0.587 * crosshair_bg[1] + 0.114 * crosshair_bg[2] > 0.5;
+    let is_light_bg =
+        0.299 * crosshair_bg[0] + 0.587 * crosshair_bg[1] + 0.114 * crosshair_bg[2] > 0.5;
     let y_green = if is_light_bg { 0.60 } else { 0.85 };
 
     struct AxisInfo {
@@ -3268,10 +3561,11 @@ impl DynInputCanvas {
     fn dotted(theme: &Theme) -> canvas::Stroke<'static> {
         canvas::Stroke {
             width: 1.0,
-            style: canvas::Style::Solid(
-                theme.palette().background.neutral.color.scale_alpha(0.9)
-            ),
-            line_dash: canvas::LineDash { segments: &[2.0, 3.0], offset: 0 },
+            style: canvas::Style::Solid(theme.palette().background.neutral.color.scale_alpha(0.9)),
+            line_dash: canvas::LineDash {
+                segments: &[2.0, 3.0],
+                offset: 0,
+            },
             ..Default::default()
         }
     }
@@ -3290,6 +3584,37 @@ impl DynInputCanvas {
         (Self::box_content(b).len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0
     }
 
+    /// Slide a box centred at `center` straight away from the crosshair until
+    /// it neither covers the aim point nor a box already placed (#1546).
+    fn clear_of(center: Point, w: f32, cursor: Point, placed: &[iced::Rectangle]) -> Point {
+        const KEEP: f32 = 18.0;
+        let hits = |c: Point| {
+            let r = iced::Rectangle {
+                x: c.x - w * 0.5,
+                y: c.y - DYN_BOX_H * 0.5,
+                width: w,
+                height: DYN_BOX_H,
+            };
+            r.expand(KEEP).contains(cursor) || placed.iter().any(|p| p.intersects(&r))
+        };
+        let (mut dx, mut dy) = (center.x - cursor.x, center.y - cursor.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1.0 {
+            (dx, dy) = (0.0, 1.0);
+        } else {
+            (dx, dy) = (dx / len, dy / len);
+        }
+        let mut c = center;
+        for _ in 0..60 {
+            if !hits(c) {
+                break;
+            }
+            c.x += dx * 4.0;
+            c.y += dy * 4.0;
+        }
+        c
+    }
+
     /// Draw a value box centred at `center`, clamped inside `bounds`.
     fn draw_box(
         frame: &mut canvas::Frame,
@@ -3302,7 +3627,13 @@ impl DynInputCanvas {
         let w = Self::box_width(b);
         let x = (center.x - w * 0.5).clamp(0.0, (bounds.width - w).max(0.0));
         let y = (center.y - DYN_BOX_H * 0.5).clamp(0.0, (bounds.height - DYN_BOX_H).max(0.0));
-        let rect = canvas::Path::rectangle(Point { x, y }, Size { width: w, height: DYN_BOX_H });
+        let rect = canvas::Path::rectangle(
+            Point { x, y },
+            Size {
+                width: w,
+                height: DYN_BOX_H,
+            },
+        );
         let (fill, border, text) = Self::box_colors(b, theme);
         frame.fill(&rect, fill);
         frame.stroke(
@@ -3313,7 +3644,10 @@ impl DynInputCanvas {
         );
         frame.fill_text(canvas::Text {
             content,
-            position: Point { x: x + DYN_PAD, y: y + DYN_PAD },
+            position: Point {
+                x: x + DYN_PAD,
+                y: y + DYN_PAD,
+            },
             color: text,
             size: iced::Pixels(DYN_FONT),
             // Force Advanced shaping: the default `Auto` uses Basic shaping for
@@ -3355,7 +3689,13 @@ impl DynInputCanvas {
         }
         let palette = theme.palette();
         let pw = (self.prompt.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0;
-        let rect = canvas::Path::rectangle(pos, Size { width: pw, height: DYN_BOX_H });
+        let rect = canvas::Path::rectangle(
+            pos,
+            Size {
+                width: pw,
+                height: DYN_BOX_H,
+            },
+        );
         frame.fill(&rect, palette.background.strong.color);
         frame.stroke(
             &rect,
@@ -3365,7 +3705,10 @@ impl DynInputCanvas {
         );
         frame.fill_text(canvas::Text {
             content: self.prompt.clone(),
-            position: Point { x: pos.x + DYN_PAD, y: pos.y + DYN_PAD },
+            position: Point {
+                x: pos.x + DYN_PAD,
+                y: pos.y + DYN_PAD,
+            },
             color: palette.background.strong.text,
             size: iced::Pixels(DYN_FONT),
             shaping: iced::advanced::text::Shaping::Advanced,
@@ -3373,12 +3716,7 @@ impl DynInputCanvas {
         });
     }
 
-    fn draw_tracking_hint(
-        &self,
-        frame: &mut canvas::Frame,
-        pos: Point,
-        theme: &Theme,
-    ) {
+    fn draw_tracking_hint(&self, frame: &mut canvas::Frame, pos: Point, theme: &Theme) {
         let Some(text) = self.tracking_hint.as_deref() else {
             return;
         };
@@ -3469,7 +3807,10 @@ impl DynInputCanvas {
         while sweep <= -std::f32::consts::PI {
             sweep += std::f32::consts::TAU;
         }
-        let corner = Point { x: cursor.x, y: base.y }; // axis-delta elbow
+        let corner = Point {
+            x: cursor.x,
+            y: base.y,
+        }; // axis-delta elbow
 
         // Perp / PerpDim: perpendicular direction to the reference line, the
         // measured endpoint along it (`end`), and an offset dimension segment
@@ -3480,10 +3821,19 @@ impl DynInputCanvas {
             let (ux, uy) = (ax / al, ay / al); // axis unit (base → ref)
             let (px, py) = (-uy, ux); // perpendicular unit
             let signed = (cursor.x - base.x) * px + (cursor.y - base.y) * py;
-            let end = Point { x: base.x + px * signed, y: base.y + py * signed };
+            let end = Point {
+                x: base.x + px * signed,
+                y: base.y + py * signed,
+            };
             const OFF: f32 = 16.0; // dimension offset, away from the reference
-            let off_base = Point { x: base.x - ux * OFF, y: base.y - uy * OFF };
-            let off_end = Point { x: end.x - ux * OFF, y: end.y - uy * OFF };
+            let off_base = Point {
+                x: base.x - ux * OFF,
+                y: base.y - uy * OFF,
+            };
+            let off_end = Point {
+                x: end.x - ux * OFF,
+                y: end.y - uy * OFF,
+            };
             (end, off_base, off_end)
         });
 
@@ -3564,7 +3914,10 @@ impl DynInputCanvas {
                     // Close the rectangle so both side pairs read as a box.
                     let rest = canvas::Path::new(|p| {
                         p.move_to(base);
-                        p.line_to(Point { x: base.x, y: cursor.y });
+                        p.line_to(Point {
+                            x: base.x,
+                            y: cursor.y,
+                        });
                         p.line_to(cursor);
                     });
                     frame.stroke(&rest, Self::dotted(theme));
@@ -3574,6 +3927,7 @@ impl DynInputCanvas {
         }
 
         // ── Box placement by role ──
+        let mut placed: Vec<iced::Rectangle> = Vec::with_capacity(self.boxes.len());
         for b in &self.boxes {
             let center = b.center.unwrap_or_else(|| match b.role {
                 DynRole::Angle => self.label_screen.unwrap_or_else(|| {
@@ -3606,9 +3960,15 @@ impl DynInputCanvas {
                 {
                     let (end, ob, oe) = perp_info.unwrap();
                     if self.guide == DynGuide::PerpDim {
-                        Point { x: (ob.x + oe.x) * 0.5 + 8.0, y: (ob.y + oe.y) * 0.5 }
+                        Point {
+                            x: (ob.x + oe.x) * 0.5 + 8.0,
+                            y: (ob.y + oe.y) * 0.5,
+                        }
                     } else {
-                        Point { x: (base.x + end.x) * 0.5 + 8.0, y: (base.y + end.y) * 0.5 }
+                        Point {
+                            x: (base.x + end.x) * 0.5 + 8.0,
+                            y: (base.y + end.y) * 0.5,
+                        }
                     }
                 }
                 // Distance / Radius / Diameter and anything else ride the line.
@@ -3616,6 +3976,14 @@ impl DynInputCanvas {
                     x: base.x + dx * len * 0.5 + nx * 16.0,
                     y: base.y + dy * len * 0.5 + ny * 16.0,
                 },
+            });
+            let w = Self::box_width(b);
+            let center = Self::clear_of(center, w, cursor, &placed);
+            placed.push(iced::Rectangle {
+                x: center.x - w * 0.5,
+                y: center.y - DYN_BOX_H * 0.5,
+                width: w,
+                height: DYN_BOX_H,
             });
             Self::draw_box(frame, b, center, bounds, theme);
         }
@@ -3634,14 +4002,7 @@ impl DynInputCanvas {
                 hy = (self.cursor_screen.y - DYN_BOX_H - 4.0).max(0.0);
             }
 
-            self.draw_tracking_hint(
-                frame,
-                Point {
-                    x: hx,
-                    y: hy,
-                },
-                theme,
-            );
+            self.draw_tracking_hint(frame, Point { x: hx, y: hy }, theme);
         }
     }
 
@@ -3662,8 +4023,7 @@ impl DynInputCanvas {
             .iter()
             .map(|t| (t.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0)
             .collect();
-        let total_w: f32 =
-            widths.iter().sum::<f32>() + DYN_GAP * (self.boxes.len() as f32 - 1.0);
+        let total_w: f32 = widths.iter().sum::<f32>() + DYN_GAP * (self.boxes.len() as f32 - 1.0);
 
         // Offset the block off the crosshair by the same gap horizontally and
         // vertically; the prompt sits a gap below the horizontal axis and the
@@ -3697,8 +4057,13 @@ impl DynInputCanvas {
                     continue;
                 }
             }
-            let rect =
-                canvas::Path::rectangle(Point { x, y: by }, Size { width: w, height: DYN_BOX_H });
+            let rect = canvas::Path::rectangle(
+                Point { x, y: by },
+                Size {
+                    width: w,
+                    height: DYN_BOX_H,
+                },
+            );
             let (fill, border, text) = Self::box_colors(b, theme);
             frame.fill(&rect, fill);
             frame.stroke(
@@ -3709,7 +4074,10 @@ impl DynInputCanvas {
             );
             frame.fill_text(canvas::Text {
                 content: texts[i].clone(),
-                position: Point { x: x + DYN_PAD, y: by + DYN_PAD },
+                position: Point {
+                    x: x + DYN_PAD,
+                    y: by + DYN_PAD,
+                },
                 color: text,
                 size: iced::Pixels(DYN_FONT),
                 shaping: iced::advanced::text::Shaping::Advanced,
@@ -3726,14 +4094,7 @@ impl DynInputCanvas {
                 hy = (py - DYN_BOX_H - 3.0).max(0.0);
             }
 
-            self.draw_tracking_hint(
-                frame,
-                Point {
-                    x: bx,
-                    y: hy,
-                },
-                theme,
-            );
+            self.draw_tracking_hint(frame, Point { x: bx, y: hy }, theme);
         }
     }
 }
@@ -3777,14 +4138,7 @@ impl canvas::Program<Message> for DynInputCanvas {
                 if self.tracking_hint.is_some() {
                     let hint_y = py + DYN_BOX_H + 3.0;
 
-                    self.draw_tracking_hint(
-                        &mut frame,
-                        Point {
-                            x: px,
-                            y: hint_y,
-                        },
-                        theme,
-                    );
+                    self.draw_tracking_hint(&mut frame, Point { x: px, y: hint_y }, theme);
                 }
             }
             return vec![frame.into_geometry()];
@@ -3801,10 +4155,142 @@ impl canvas::Program<Message> for DynInputCanvas {
 
 #[cfg(test)]
 mod clip_tests {
+    // Shared eye-plane projection shared by grid_segments and draw_axes (#46).
+    // Behind-eye points must project to None, never to a mirrored finite point.
+    #[test]
+    fn project_point_rejects_behind_eye() {
+        use glam::camera::rh::proj::directx;
+        let eye = glam::DVec3::new(0.0, 0.0, 500.0);
+        let view_rot: glam::Mat4 =
+            directx::perspective(60_f32.to_radians(), 800.0 / 600.0, 0.5, 5000.0);
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        assert!(
+            project_point(view_rot, eye, bounds, glam::DVec3::new(0.0, 0.0, 600.0)).is_none(),
+            "behind-eye must be rejected"
+        );
+        assert!(
+            project_point(view_rot, eye, bounds, glam::DVec3::new(0.0, 0.0, 400.0)).is_some(),
+            "in-front must project"
+        );
+    }
+
+    fn axes_cam() -> (glam::Mat4, glam::DVec3) {
+        use glam::camera::rh::proj::directx;
+        let eye = glam::DVec3::new(0.0, 0.0, 500.0);
+        let view_rot: glam::Mat4 =
+            directx::perspective(60_f32.to_radians(), 800.0 / 600.0, 0.5, 5000.0);
+        (view_rot, eye)
+    }
+
+    /// draw_axes-level contract without a renderer: all three axes present up
+    /// front, each clipped inside the frame.
+    #[test]
+    fn axes_segments_draws_three_when_in_front() {
+        let (view_rot, eye) = axes_cam();
+        let segs = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            100.0,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert_eq!(segs.len(), 3, "all three axes must survive");
+        for (a, c) in &segs {
+            for p in [a, c] {
+                assert!(
+                    p.x >= -16.0 && p.x <= 816.0 && p.y >= -16.0 && p.y <= 616.0,
+                    "segment must be frame-clipped, got ({}, {})",
+                    p.x,
+                    p.y
+                );
+            }
+        }
+    }
+
+    /// Straddling axis (origin in front, far tip behind the eye) is skipped
+    /// whole — screen-space clipping of a wrapped segment would be garbage.
+    #[test]
+    fn axes_segments_skips_straddling_axis() {
+        let (view_rot, eye) = axes_cam();
+        // Origin 100 in front; Z extent 200 puts the +Z tip 100 behind.
+        let segs = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            200.0,
+            glam::DVec3::new(0.0, 0.0, 400.0),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert_eq!(segs.len(), 2, "straddling Z axis must be skipped, X/Y kept");
+    }
+
+    /// Fully behind-eye origin draws nothing at all.
+    #[test]
+    fn axes_segments_empty_when_behind_eye() {
+        let (view_rot, eye) = axes_cam();
+        let segs = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            100.0,
+            glam::DVec3::new(0.0, 0.0, 600.0),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert!(segs.is_empty(), "nothing projectable, nothing drawn");
+    }
+
+    /// Legacy canvas placement: a pane origin offset shifts every segment by
+    /// exactly that offset (pins the historical draw_axes mapping).
+    #[test]
+    fn axes_segments_preserves_pane_offset() {
+        let (view_rot, eye) = axes_cam();
+        let plain = super::axes_segments(
+            view_rot,
+            eye,
+            b(),
+            100.0,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        let shifted_bounds = iced::Rectangle {
+            x: 100.0,
+            y: 50.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let shifted = super::axes_segments(
+            view_rot,
+            eye,
+            shifted_bounds,
+            100.0,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert_eq!(plain.len(), shifted.len());
+        for ((a0, c0), (a1, c1)) in plain.iter().zip(shifted.iter()) {
+            for (p0, p1, dx, dy) in [(a0, a1, 100.0, 50.0), (c0, c1, 100.0, 50.0)] {
+                assert!(
+                    (p1.x - p0.x - dx).abs() < 1e-3 && (p1.y - p0.y - dy).abs() < 1e-3,
+                    "pane offset must carry through exactly"
+                );
+            }
+        }
+    }
     use super::*;
 
     fn b() -> iced::Rectangle {
-        iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 }
+        iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        }
     }
 
     /// The #406 shape: a guide from a point projected millions of pixels away,
@@ -3837,7 +4323,12 @@ mod clip_tests {
     fn keeps_a_fully_visible_segment_and_drops_a_missing_one() {
         let (a, c) = clip_seg(Point::new(10.0, 10.0), Point::new(700.0, 500.0), b()).unwrap();
         assert!((a.x - 10.0).abs() < 0.01 && (c.x - 700.0).abs() < 0.01);
-        assert!(clip_seg(Point::new(-9000.0, -9000.0), Point::new(-8000.0, -8000.0), b()).is_none());
+        assert!(clip_seg(
+            Point::new(-9000.0, -9000.0),
+            Point::new(-8000.0, -8000.0),
+            b()
+        )
+        .is_none());
     }
 }
 
@@ -3857,16 +4348,17 @@ mod otrack_tests {
         assert!(point_inf_line_dist(Point::new(123.0, 0.0), a, b).abs() < 1e-4);
         // Degenerate segment: falls back to point distance.
         let p = Point::new(3.0, 4.0);
-        assert!((point_inf_line_dist(p, Point::new(0.0, 0.0), Point::new(0.0, 0.0)) - 5.0).abs() < 1e-4);
+        assert!(
+            (point_inf_line_dist(p, Point::new(0.0, 0.0), Point::new(0.0, 0.0)) - 5.0).abs()
+                < 1e-4
+        );
     }
 }
 
 #[cfg(test)]
 mod constraint_glyph_tests {
     use super::*;
-    use crate::scene::parametric_constraints::{
-        constraint_glyph_box, constraint_glyph_offsets,
-    };
+    use crate::scene::parametric_constraints::{constraint_glyph_box, constraint_glyph_offsets};
     use std::sync::Arc;
 
     /// Build cache-shaped entries the same way
@@ -3881,10 +4373,8 @@ mod constraint_glyph_tests {
                 .zip(offsets)
                 .enumerate()
                 .map(|(i, ((anchor, outward, label), tangent_dx))| {
-                    let size =
-                        crate::scene::parametric_constraints::constraint_glyph_size(label);
-                    let (top_left, _) =
-                        constraint_glyph_box(*anchor, *outward, label, tangent_dx);
+                    let size = crate::scene::parametric_constraints::constraint_glyph_size(label);
+                    let (top_left, _) = constraint_glyph_box(*anchor, *outward, label, tangent_dx);
                     GlyphEntry {
                         id: i as u32,
                         anchor: *anchor,
@@ -3915,10 +4405,7 @@ mod constraint_glyph_tests {
     #[test]
     fn coincident_glyphs_are_arranged_side_by_side() {
         let anchor = Point::new(100.0, 80.0);
-        let entries = entries_for(&[
-            (anchor, [0.0, -1.0], "—"),
-            (anchor, [0.0, -1.0], "∥"),
-        ]);
+        let entries = entries_for(&[(anchor, [0.0, -1.0], "—"), (anchor, [0.0, -1.0], "∥")]);
         let (left, left_size) = (entries[0].top_left, entries[0].size);
         let (right, right_size) = (entries[1].top_left, entries[1].size);
 
@@ -3926,7 +4413,10 @@ mod constraint_glyph_tests {
         assert!((right.x - (left.x + left_size.width) - 4.0).abs() < 1e-4);
         assert!((anchor.y - (left.y + right_size.height) - 6.0).abs() < 1e-6);
 
-        let click = Point::new(left.x + left_size.width * 0.5, left.y + left_size.height * 0.5);
+        let click = Point::new(
+            left.x + left_size.width * 0.5,
+            left.y + left_size.height * 0.5,
+        );
         assert_eq!(glyph_hit_test_entries(&entries, click), Some(0));
     }
 }
@@ -3963,7 +4453,12 @@ mod grid_key_tests {
     #[test]
     fn grid_key_matches_identical_params() {
         let grids = vec![baseline_params(), baseline_params()];
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 720.0,
+        };
         let a = GridKey::from_grids(&grids, bounds, GridStyle::default());
         let b = GridKey::from_grids(&grids, bounds, GridStyle::default());
         assert_eq!(a, b);
@@ -3982,7 +4477,8 @@ mod grid_key_tests {
             height: 720.0,
         };
         let baseline_grids = vec![baseline_params()];
-        let baseline_key = GridKey::from_grids(&baseline_grids, baseline_bounds, GridStyle::default());
+        let baseline_key =
+            GridKey::from_grids(&baseline_grids, baseline_bounds, GridStyle::default());
 
         // view_rot: small extra rotation
         let mut p = baseline_params();
@@ -4093,7 +4589,12 @@ mod grid_key_tests {
     /// when any pane is dirty.
     #[test]
     fn grid_key_invalidates_when_any_pane_changes() {
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 720.0,
+        };
         let pane1 = baseline_params();
         let pane2 = baseline_params();
         let both = vec![pane1.clone(), pane2.clone()];
@@ -4113,7 +4614,12 @@ mod grid_key_tests {
     #[test]
     fn should_reuse_empty() {
         let grids = vec![baseline_params()];
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 720.0,
+        };
         let key = GridKey::from_grids(&grids, bounds, GridStyle::default());
         assert!(!should_reuse(None, &key));
     }
@@ -4122,7 +4628,12 @@ mod grid_key_tests {
     #[test]
     fn should_reuse_equal() {
         let grids = vec![baseline_params()];
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 720.0,
+        };
         let key = GridKey::from_grids(&grids, bounds, GridStyle::default());
         assert!(should_reuse(Some(&key), &key));
     }
@@ -4135,7 +4646,12 @@ mod grid_key_tests {
         let mut pane2 = baseline_params();
         pane2.step_x = 160.0;
         let grids_b = vec![pane2];
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 720.0,
+        };
         let old = GridKey::from_grids(&grids_a, bounds, GridStyle::default());
         let new = GridKey::from_grids(&grids_b, bounds, GridStyle::default());
         assert!(!should_reuse(Some(&old), &new));
@@ -4145,7 +4661,12 @@ mod grid_key_tests {
     /// ignored the DSettings grid spacing). Fixed mode returns the base verbatim.
     #[test]
     fn grid_steps_follow_base_and_adaptive_flag() {
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1280.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 720.0,
+        };
         // Far zoom: 10-unit base must scale up to stay readable.
         let (sx, sy) = compute_grid_steps(10.0, 10.0, 5000.0, 0.6, bounds, true);
         assert!(sx >= 10.0 && sy >= 10.0);
@@ -4154,16 +4675,27 @@ mod grid_key_tests {
         let (nx, ny) = compute_grid_steps(10.0, 2.0, 5000.0, 0.6, bounds, true);
         assert!(nx >= 10.0 && ny >= 2.0);
         // Fixed mode returns exactly what was typed.
-        assert_eq!(compute_grid_steps(7.5, 2.5, 5000.0, 0.6, bounds, false), (7.5, 2.5));
+        assert_eq!(
+            compute_grid_steps(7.5, 2.5, 5000.0, 0.6, bounds, false),
+            (7.5, 2.5)
+        );
         // Degenerate input sanitizes to 1.0 instead of emptying the grid.
-        assert_eq!(compute_grid_steps(0.0, -3.0, 5000.0, 0.6, bounds, false), (1.0, 1.0));
+        assert_eq!(
+            compute_grid_steps(0.0, -3.0, 5000.0, 0.6, bounds, false),
+            (1.0, 1.0)
+        );
     }
 
     /// Overflow fallback keeps each axis on its own base: an extreme zoom-out
     /// that pushes the 5x growth past 1e9 must return (bx, by), never (bx, bx).
     #[test]
     fn grid_steps_overflow_falls_back_per_axis() {
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1280.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 720.0,
+        };
         assert_eq!(
             compute_grid_steps(10.0, 2.0, 1e15, 0.6, bounds, true),
             (10.0, 2.0)
@@ -4182,10 +4714,22 @@ mod grid_key_tests {
             Vec3::Y,
         );
         let eye = glam::DVec3::new(0.0, 0.0, 500.0);
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
         let g = grid_segments(
-            view_rot, eye, bounds, 10.0, 2.0, 5,
-            glam::DVec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+            view_rot,
+            eye,
+            bounds,
+            10.0,
+            2.0,
+            5,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            None,
         );
         assert!(!g.segments.is_empty(), "grid lines expected");
     }
@@ -4202,17 +4746,36 @@ mod grid_key_tests {
             Vec3::Y,
         );
         let eye = glam::DVec3::new(0.0, 0.0, 500.0);
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
         let g = grid_segments(
-            view_rot, eye, bounds, 10.0, 10.0, 5,
-            glam::DVec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+            view_rot,
+            eye,
+            bounds,
+            10.0,
+            10.0,
+            5,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            None,
         );
         assert!(!g.segments.is_empty(), "minor lines expected");
         assert!(!g.major_segments.is_empty(), "major lines expected");
         // major_every = 1 disables the split: everything is minor.
         let flat = grid_segments(
-            view_rot, eye, bounds, 10.0, 10.0, 1,
-            glam::DVec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+            view_rot,
+            eye,
+            bounds,
+            10.0,
+            10.0,
+            1,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            None,
         );
         assert!(flat.major_segments.is_empty());
         assert!(!flat.segments.is_empty());
@@ -4240,7 +4803,12 @@ mod grid_canvas_state_tests {
     fn stored_key_is_recognized_by_should_reuse() {
         let view_rot = Mat4::from_rotation_x(0.15) * Mat4::from_rotation_y(0.05);
         let eye = glam::DVec3::new(4.0, 3.5, 9.0);
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1280.0, height: 720.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 720.0,
+        };
         let grid_origin = glam::DVec3::new(0.0, 0.0, 0.0);
         let grid_axes = (Vec3::X, Vec3::Y, Vec3::Z);
         let limits: Option<(glam::DVec2, glam::DVec2)> = None;
@@ -4265,7 +4833,12 @@ mod grid_canvas_state_tests {
         assert!(should_reuse(state.key.borrow().as_ref(), &key));
 
         // Different bounds on the same params ⇒ different key, do not reuse.
-        let other_bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 640.0, height: 480.0 };
+        let other_bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 640.0,
+            height: 480.0,
+        };
         let other_key = GridKey::from_grids(&[params], other_bounds, GridStyle::default());
         assert!(!should_reuse(state.key.borrow().as_ref(), &other_key));
     }
@@ -4311,8 +4884,16 @@ mod selection_visual_color_tests {
             let (c, w) = theme_selection_colors(theme);
             assert_eq!(c.a, 1.0, "Theme {:?} crossing alpha should be 1.0", theme);
             assert_eq!(w.a, 1.0, "Theme {:?} window alpha should be 1.0", theme);
-            assert!(c.g > 0.0, "Theme {:?} crossing should have green component", theme);
-            assert!(w.b > 0.0 || w.g > 0.0, "Theme {:?} window should have blue/cyan component", theme);
+            assert!(
+                c.g > 0.0,
+                "Theme {:?} crossing should have green component",
+                theme
+            );
+            assert!(
+                w.b > 0.0 || w.g > 0.0,
+                "Theme {:?} window should have blue/cyan component",
+                theme
+            );
         }
     }
 

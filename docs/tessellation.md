@@ -1,10 +1,10 @@
 # Entity tessellation paths
 
-How each acadrust `EntityType` becomes drawable geometry in OpenCADStudio.
+How each opencadcodec `EntityType` becomes drawable geometry in OpenCADStudio.
 
 There are **three ways** an entity gets there, and they must not be conflated:
 
-1. **Kernel B-rep mesh** — the ACIS document is lifted into a cadkernel `Body`
+1. **Kernel B-rep mesh** — the ACIS document is lifted into a opencadkernel `Body`
    and each face triangulated in its own surface's parameter space. The only
    path that produces filled *mesh* triangles from analytic surfaces.
 2. **Curve-sampled** — the entity's geometry is read through

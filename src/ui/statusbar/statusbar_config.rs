@@ -114,7 +114,6 @@ impl StatusPill {
             StatusPill::CleanScreen => "Clean Screen",
         }
     }
-
 }
 
 /// Tracks which pills the user has hidden. Serialized as the "statusbar" section

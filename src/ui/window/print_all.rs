@@ -37,12 +37,18 @@ pub fn view_window<'a>(
         })
         .collect();
     let list: Element<'a, Message> = if rows.is_empty() {
-        container(text(t!("No paper layouts are available.")).size(12).style(muted))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into()
+        container(
+            text(t!("No paper layouts are available."))
+                .size(12)
+                .style(muted),
+        )
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
     } else {
-        scrollable(column(rows).spacing(2)).height(sizing.height).into()
+        scrollable(column(rows).spacing(2))
+            .height(sizing.height)
+            .into()
     };
     let printer = printer
         .filter(|name| !name.is_empty())
@@ -81,8 +87,10 @@ pub fn view_window<'a>(
 
     container(
         column![
-            text(t!("Select the layouts to output. Each page is printed in Layout mode."))
-                .size(12),
+            text(t!(
+                "Select the layouts to output. Each page is printed in Layout mode."
+            ))
+            .size(12),
             row![
                 button(text(t!("Select all")).size(11))
                     .on_press(Message::PrintAllSelectAll)

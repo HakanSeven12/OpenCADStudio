@@ -1,8 +1,8 @@
 use crate::app::Message;
+use crate::t;
 use crate::ui::style::common::muted_style;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Theme};
-use crate::t;
 use std::borrow::Cow;
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
@@ -50,17 +50,17 @@ fn version_card<'a>(
             palette.background.base
         };
         container::Style {
-        background: Some(Background::Color(pair.color)),
-        border: Border {
-            color: if highlight {
-                palette.primary.base.color
-            } else {
-                palette.background.neutral.color
+            background: Some(Background::Color(pair.color)),
+            border: Border {
+                color: if highlight {
+                    palette.primary.base.color
+                } else {
+                    palette.background.neutral.color
+                },
+                width: 1.0,
+                radius: 6.0.into(),
             },
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        ..Default::default()
+            ..Default::default()
         }
     })
     .into()
@@ -78,9 +78,7 @@ fn version_card<'a>(
 fn render_notes_line<'a>(raw: &str) -> Element<'a, Message> {
     let trimmed = raw.trim_end();
     if trimmed.is_empty() {
-        return Space::new()
-            .height(iced::Length::Fixed(6.0))
-            .into();
+        return Space::new().height(iced::Length::Fixed(6.0)).into();
     }
     if let Some(rest) = trimmed.strip_prefix("## ") {
         return text(strip_inline_md(rest))
@@ -89,13 +87,18 @@ fn render_notes_line<'a>(raw: &str) -> Element<'a, Message> {
             .into();
     }
     if let Some(rest) = trimmed.strip_prefix("### ") {
-        return text(strip_inline_md(rest))
-            .size(12)
-            .into();
+        return text(strip_inline_md(rest)).size(12).into();
     }
-    if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+    {
         return row![
-            container(crate::ui::icons::themed_secondary(crate::ui::icons::DOT, 5.0)).width(14),
+            container(crate::ui::icons::themed_secondary(
+                crate::ui::icons::DOT,
+                5.0
+            ))
+            .width(14),
             text(strip_inline_md(rest)).size(11),
         ]
         .spacing(4)
@@ -129,10 +132,14 @@ pub fn view_window<'a>(
 ) -> Element<'a, Message> {
     let header = container(
         column![
-            text(t!("New Release Available")).size(20).style(primary_style),
-            text(t!("A newer Open CAD Studio version is published on GitHub."))
-                .size(11)
-                .style(muted_style),
+            text(t!("New Release Available"))
+                .size(20)
+                .style(primary_style),
+            text(t!(
+                "A newer Open CAD Studio version is published on GitHub."
+            ))
+            .size(11)
+            .style(muted_style),
         ]
         .spacing(4)
         .align_x(iced::Center),
@@ -161,9 +168,9 @@ pub fn view_window<'a>(
         20.0,
     ))
     .width(iced::Length::Fixed(32.0))
-        .height(sizing.height)
-        .align_x(iced::Center)
-        .align_y(iced::Center);
+    .height(sizing.height)
+    .align_x(iced::Center)
+    .align_y(iced::Center);
     let info_block = row![installed, arrow, latest_card]
         .spacing(0)
         .align_y(iced::Center)
@@ -192,8 +199,8 @@ pub fn view_window<'a>(
     // Release notes panel. Rendered as a light-markdown column inside a
     // bordered scrollable so long bodies stay contained and don't
     // explode the window. Empty body → "No release notes provided."
-    let notes_heading = container(text(t!("What's new")).size(11).style(muted_style))
-        .padding(iced::Padding {
+    let notes_heading =
+        container(text(t!("What's new")).size(11).style(muted_style)).padding(iced::Padding {
             top: 10.0,
             right: 0.0,
             bottom: 4.0,
@@ -238,9 +245,7 @@ pub fn view_window<'a>(
             }),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.base.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.base.color)),
         ..Default::default()
     })
     .width(sizing.width)

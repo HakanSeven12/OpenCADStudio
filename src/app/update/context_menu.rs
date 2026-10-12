@@ -11,7 +11,7 @@ use crate::ui::popup::context_menu::{
     build_context_menu, ContextMenu, GripMenuCmd, GripMenuContext, MenuAction, MenuContext,
     SubmenuId,
 };
-use acadrust::Handle;
+use codec::Handle;
 use iced::Task;
 
 impl OpenCADStudio {
@@ -19,7 +19,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn context_menu_open(&self) -> bool {
         self.tabs
             .get(self.active_tab)
-            .is_some_and(|tab| tab.scene.selection.borrow().context_menu.is_some())
+            .is_some_and(|tab| tab.scene.selection.borrow().menu.open_at.is_some())
     }
 
     /// Everything the menu builder needs, read from the active tab. Called by
@@ -71,7 +71,8 @@ impl OpenCADStudio {
             .scene
             .selection
             .borrow()
-            .context_menu_ui
+            .menu
+            .ui
             .open_submenu;
         build_context_menu(&self.context_menu_context(), open)
     }
@@ -80,29 +81,33 @@ impl OpenCADStudio {
     pub(in crate::app) fn close_context_menu(&mut self) -> Task<Message> {
         let i = self.active_tab;
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        if sel.context_menu.is_none() {
+        if sel.menu.open_at.is_none() {
             return Task::none();
         }
-        sel.close_context_menu();
+        sel.menu.close();
         drop(sel);
         self.focus_cmd_input()
     }
 
-    pub(in crate::app) fn on_context_menu_submenu_toggle(&mut self, id: SubmenuId) -> Task<Message> {
+    pub(in crate::app) fn on_context_menu_submenu_toggle(
+        &mut self,
+        id: SubmenuId,
+    ) -> Task<Message> {
         let i = self.active_tab;
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        let ui = &mut sel.context_menu_ui;
-        ui.open_submenu = if ui.open_submenu == Some(id) { None } else { Some(id) };
+        let ui = &mut sel.menu.ui;
+        ui.open_submenu = if ui.open_submenu == Some(id) {
+            None
+        } else {
+            Some(id)
+        };
         drop(sel);
         // Keep the keyboard highlight on the header that was toggled.
         let menu = self.current_context_menu();
-        let header = menu
-            .selectable()
-            .iter()
-            .position(|s| s.header == Some(id));
+        let header = menu.selectable().iter().position(|s| s.header == Some(id));
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        if sel.context_menu_ui.highlighted.is_some() {
-            sel.context_menu_ui.highlighted = header;
+        if sel.menu.ui.highlighted.is_some() {
+            sel.menu.ui.highlighted = header;
         }
         Task::none()
     }
@@ -118,10 +123,10 @@ impl OpenCADStudio {
         let i = self.active_tab;
         {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.close_context_menu();
+            sel.menu.close();
             // A pick counts as "another interaction" for the Enter-first
             // right-click cycle: the next right-click acts as Enter again.
-            sel.right_click_entered = false;
+            sel.input.right_click_entered = false;
         }
         let focus = self.focus_cmd_input();
         let task = match action {
@@ -164,7 +169,10 @@ impl OpenCADStudio {
     }
 
     /// Keyboard navigation while the menu is open.
-    pub(in crate::app) fn on_context_menu_navigate(&mut self, nav: ContextMenuNav) -> Task<Message> {
+    pub(in crate::app) fn on_context_menu_navigate(
+        &mut self,
+        nav: ContextMenuNav,
+    ) -> Task<Message> {
         if !self.context_menu_open() {
             return Task::none();
         }
@@ -174,7 +182,7 @@ impl OpenCADStudio {
         if rows.is_empty() {
             return Task::none();
         }
-        let current = self.tabs[i].scene.selection.borrow().context_menu_ui.highlighted;
+        let current = self.tabs[i].scene.selection.borrow().menu.ui.highlighted;
         let next_enabled = |from: usize, step: isize| -> usize {
             let n = rows.len() as isize;
             let mut idx = from as isize;
@@ -193,7 +201,13 @@ impl OpenCADStudio {
                     None => menu.default_index(),
                     Some(cur) => next_enabled(cur, 1),
                 };
-                self.tabs[i].scene.selection.borrow_mut().context_menu_ui.highlighted = Some(idx);
+                self.tabs[i]
+                    .scene
+                    .selection
+                    .borrow_mut()
+                    .menu
+                    .ui
+                    .highlighted = Some(idx);
                 Task::none()
             }
             ContextMenuNav::Up => {
@@ -201,7 +215,13 @@ impl OpenCADStudio {
                     None => menu.default_index(),
                     Some(cur) => next_enabled(cur, -1),
                 };
-                self.tabs[i].scene.selection.borrow_mut().context_menu_ui.highlighted = Some(idx);
+                self.tabs[i]
+                    .scene
+                    .selection
+                    .borrow_mut()
+                    .menu
+                    .ui
+                    .highlighted = Some(idx);
                 Task::none()
             }
             ContextMenuNav::Enter => {
@@ -220,8 +240,13 @@ impl OpenCADStudio {
                     if unique {
                         self.on_context_menu_pick(rows[idx].action.clone())
                     } else {
-                        self.tabs[i].scene.selection.borrow_mut().context_menu_ui.highlighted =
-                            Some(idx);
+                        self.tabs[i]
+                            .scene
+                            .selection
+                            .borrow_mut()
+                            .menu
+                            .ui
+                            .highlighted = Some(idx);
                         Task::none()
                     }
                 }
@@ -235,7 +260,10 @@ impl OpenCADStudio {
     /// normal handlers (after closing the menu when the key is not a menu key,
     /// so typing a command name or a coordinate just works — the menu gets
     /// out of the way exactly as it does in commercial solutions).
-    pub(in crate::app) fn intercept_context_menu_key(&mut self, msg: &Message) -> Option<Task<Message>> {
+    pub(in crate::app) fn intercept_context_menu_key(
+        &mut self,
+        msg: &Message,
+    ) -> Option<Task<Message>> {
         match msg {
             Message::ArrowKeyPressed { direction, .. }
             | Message::CommandLineArrowProbe { direction, .. } => match direction {
@@ -244,10 +272,13 @@ impl OpenCADStudio {
                 ArrowKey::Left | ArrowKey::Right => {
                     // On a submenu header, Right expands and Left collapses.
                     let i = self.active_tab;
-                    let ui = self.tabs[i].scene.selection.borrow().context_menu_ui.clone();
+                    let ui = self.tabs[i].scene.selection.borrow().menu.ui.clone();
                     let menu = self.current_context_menu();
                     let rows = menu.selectable();
-                    let header = ui.highlighted.and_then(|c| rows.get(c)).and_then(|r| r.header);
+                    let header = ui
+                        .highlighted
+                        .and_then(|c| rows.get(c))
+                        .and_then(|r| r.header);
                     let want_open = matches!(direction, ArrowKey::Right);
                     match header {
                         Some(id) if (ui.open_submenu == Some(id)) != want_open => {
@@ -258,6 +289,7 @@ impl OpenCADStudio {
                 }
             },
             Message::DynTabNext => Some(self.on_context_menu_navigate(ContextMenuNav::Down)),
+            Message::DynTabPrev => Some(self.on_context_menu_navigate(ContextMenuNav::Up)),
             Message::CommandFinalize | Message::CommandSpace => {
                 if self.command_line.input.trim().is_empty() {
                     Some(self.on_context_menu_navigate(ContextMenuNav::Enter))
@@ -389,7 +421,7 @@ impl OpenCADStudio {
 mod tests {
     use super::*;
     use crate::app::settings::RightClickMode;
-    use crate::command::{CadCommand, StepInput};
+    use crate::command::StepInput;
     use crate::ui::popup::context_menu::MenuAction;
     use glam::DVec3;
     use iced::Point;
@@ -410,7 +442,7 @@ mod tests {
     fn app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        app.tabs[0].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let _ = app.update(Message::ViewportMove(Point::new(200.0, 150.0)));
         app
     }
@@ -428,7 +460,7 @@ mod tests {
     }
 
     fn menu_open(app: &OpenCADStudio) -> bool {
-        app.tabs[0].scene.selection.borrow().context_menu.is_some()
+        app.tabs[0].scene.selection.borrow().menu.open_at.is_some()
     }
 
     fn active(app: &OpenCADStudio) -> Option<&'static str> {
@@ -476,7 +508,11 @@ mod tests {
             right_click(&mut app);
             assert!(menu_open(&app));
             let acts = menu_actions(&app);
-            assert_eq!(acts[0], MenuAction::Command("LINE".into()), "Repeat LINE first");
+            assert_eq!(
+                acts[0],
+                MenuAction::Command("LINE".into()),
+                "Repeat LINE first"
+            );
         });
     }
 
@@ -491,8 +527,8 @@ mod tests {
             let _ = app.update(Message::ViewportRightPress);
             {
                 let mut sel = app.tabs[0].scene.selection.borrow_mut();
-                sel.right_press_time = iced::time::Instant::now()
-                    .checked_sub(std::time::Duration::from_millis(400));
+                sel.input.right_press_time =
+                    iced::time::Instant::now().checked_sub(std::time::Duration::from_millis(400));
             }
             let _ = app.update(Message::ViewportRightRelease);
             assert!(menu_open(&app));
@@ -522,7 +558,7 @@ mod tests {
                     .scene
                     .document
                     .entities()
-                    .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                    .filter(|e| matches!(e, codec::EntityType::Line(_)))
                     .count();
                 assert_eq!(lines, 3, "{mode:?}");
             }
@@ -540,7 +576,7 @@ mod tests {
             assert!(!menu_open(&app));
             assert_eq!(active(&app), None);
             let closed = app.tabs[0].scene.document.entities().any(|e| {
-                matches!(e, acadrust::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
+                matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
             });
             assert!(closed, "PLINE should have been closed by the menu pick");
         });
@@ -558,7 +594,14 @@ mod tests {
             let _ = app.update(Message::ContextMenuPick(MenuAction::Command("LINE".into())));
             assert!(!menu_open(&app));
             assert_eq!(active(&app), Some("LINE"));
-            assert!(!app.tabs[0].scene.selection.borrow().right_click_entered);
+            assert!(
+                !app.tabs[0]
+                    .scene
+                    .selection
+                    .borrow()
+                    .input
+                    .right_click_entered
+            );
         });
     }
 
@@ -582,7 +625,7 @@ mod tests {
             right_click(&mut app);
             let _ = app.update(Message::ContextMenuNavigate(ContextMenuNav::Down)); // Enter row
             assert_eq!(
-                app.tabs[0].scene.selection.borrow().context_menu_ui.highlighted,
+                app.tabs[0].scene.selection.borrow().menu.ui.highlighted,
                 Some(0)
             );
             let _ = app.update(Message::ContextMenuNavigate(ContextMenuNav::Down)); // Cancel
@@ -601,9 +644,11 @@ mod tests {
             let _ = app.update(Message::CommandAppendChar("c".into()));
             assert!(!menu_open(&app));
             assert_eq!(active(&app), None);
-            let closed = app.tabs[0].scene.document.entities().any(
-                |e| matches!(e, acadrust::EntityType::LwPolyline(p) if p.is_closed),
-            );
+            let closed = app.tabs[0]
+                .scene
+                .document
+                .entities()
+                .any(|e| matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed));
             assert!(closed);
         });
     }
@@ -619,7 +664,11 @@ mod tests {
             let _ = app.update(Message::CommandAppendChar("7".into()));
             assert!(!menu_open(&app));
             assert_eq!(active(&app), Some("LINE"));
-            assert!(app.command_line.input.contains('7'), "{:?}", app.command_line.input);
+            assert!(
+                app.command_line.input.contains('7'),
+                "{:?}",
+                app.command_line.input
+            );
         });
     }
 
@@ -635,13 +684,15 @@ mod tests {
             let _ = app.update(Message::ContextMenuSubmenuToggle(SubmenuId::RecentInput));
             let acts = menu_actions(&app);
             assert!(acts.contains(&MenuAction::FeedInput("10,10".into())));
-            let _ = app.update(Message::ContextMenuPick(MenuAction::FeedInput("10,10".into())));
+            let _ = app.update(Message::ContextMenuPick(MenuAction::FeedInput(
+                "10,10".into(),
+            )));
             assert!(!menu_open(&app));
             let lines = app.tabs[0]
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 3);
         });
@@ -658,7 +709,7 @@ mod tests {
                 .document
                 .entities()
                 .find_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.common.handle),
+                    codec::EntityType::Line(l) => Some(l.common.handle),
                     _ => None,
                 })
                 .expect("a line");
@@ -673,7 +724,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 0);
         });
@@ -683,17 +734,19 @@ mod tests {
 
     /// A drawing with one line, selected, its start grip hot at the origin.
     fn grip_app() -> (OpenCADStudio, Handle) {
-        use acadrust::{entities::Line, types::Vector3, EntityType};
+        use codec::{entities::Line, types::Vector3, EntityType};
         let mut app = app();
         app.snapper.snap_enabled = false;
         app.snapper.grid_snap_on = false;
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        let handle = app.tabs[0].scene.add_entity(EntityType::Line(Line::from_points(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        )));
+        let handle = app.tabs[0]
+            .scene
+            .add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(10.0, 0.0, 0.0),
+            )));
         app.tabs[0].scene.selected.insert(handle);
         app.refresh_selected_grips();
         app.tabs[0].active_grip = Some(crate::scene::pick::grip::GripEdit::single(
@@ -710,14 +763,17 @@ mod tests {
             .scene
             .camera
             .borrow()
-            .project(world, iced::Rectangle::with_size(iced::Size::new(800.0, 600.0)))
+            .project(
+                world,
+                iced::Rectangle::with_size(iced::Size::new(800.0, 600.0)),
+            )
             .unwrap();
         let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
     }
 
     fn line_start(app: &OpenCADStudio, handle: Handle) -> (f64, f64) {
         match app.tabs[0].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(l)) => (l.start.x, l.start.y),
+            Some(codec::EntityType::Line(l)) => (l.start.x, l.start.y),
             other => panic!("{other:?}"),
         }
     }
@@ -732,7 +788,10 @@ mod tests {
             assert_eq!(acts[0], MenuAction::Enter);
             assert!(acts.contains(&MenuAction::Grip(GripMenuCmd::Move)));
             assert!(acts.contains(&MenuAction::Grip(GripMenuCmd::Exit)));
-            assert!(app.tabs[0].active_grip.is_some(), "the grip stays hot under the menu");
+            assert!(
+                app.tabs[0].active_grip.is_some(),
+                "the grip stays hot under the menu"
+            );
         });
     }
 
@@ -741,11 +800,17 @@ mod tests {
         with_stack(|| {
             let (mut app, _) = grip_app();
             right_click(&mut app);
-            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(GripMenuCmd::Move)));
+            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(
+                GripMenuCmd::Move,
+            )));
             assert!(!menu_open(&app));
             assert!(app.tabs[0].active_grip.is_none());
             assert_eq!(active(&app), Some("MOVE"));
-            let prompt = app.tabs[0].active_cmd.as_ref().map(|c| c.prompt()).unwrap_or_default();
+            let prompt = app.tabs[0]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.prompt())
+                .unwrap_or_default();
             let base_prompt = crate::tr!("command-move", "base", count = 1i64);
             assert_ne!(prompt, base_prompt, "base already consumed");
             assert_eq!(app.last_point, Some(DVec3::ZERO));
@@ -758,12 +823,20 @@ mod tests {
             let (mut app, handle) = grip_app();
             move_cursor_to(&mut app, DVec3::new(3.0, 4.0, 0.0));
             let (x, y) = line_start(&app, handle);
-            assert!((x - 3.0).abs() < 1e-3 && (y - 4.0).abs() < 1e-3, "drag applied");
+            assert!(
+                (x - 3.0).abs() < 1e-3 && (y - 4.0).abs() < 1e-3,
+                "drag applied"
+            );
             right_click(&mut app);
-            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(GripMenuCmd::Exit)));
+            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(
+                GripMenuCmd::Exit,
+            )));
             assert!(app.tabs[0].active_grip.is_none());
             let (x, y) = line_start(&app, handle);
-            assert!(x.abs() < 1e-9 && y.abs() < 1e-9, "Exit restores the original");
+            assert!(
+                x.abs() < 1e-9 && y.abs() < 1e-9,
+                "Exit restores the original"
+            );
         });
     }
 
@@ -773,7 +846,9 @@ mod tests {
             let (mut app, handle) = grip_app();
             move_cursor_to(&mut app, DVec3::new(3.0, 4.0, 0.0));
             right_click(&mut app);
-            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(GripMenuCmd::Undo)));
+            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(
+                GripMenuCmd::Undo,
+            )));
             let (x, y) = line_start(&app, handle);
             assert!(x.abs() < 1e-9 && y.abs() < 1e-9);
             let grip = app.tabs[0].active_grip.as_ref().expect("grip still hot");
@@ -786,7 +861,9 @@ mod tests {
         with_stack(|| {
             let (mut app, handle) = grip_app();
             right_click(&mut app);
-            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(GripMenuCmd::CopyToggle)));
+            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(
+                GripMenuCmd::CopyToggle,
+            )));
             assert!(app.tabs[0].grip_copy);
             move_cursor_to(&mut app, DVec3::new(3.0, 4.0, 0.0));
             let _ = app.update(Message::CommandFinalize);
@@ -795,22 +872,27 @@ mod tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some((l.start.x, l.start.y)),
+                    codec::EntityType::Line(l) => Some((l.start.x, l.start.y)),
                     _ => None,
                 })
                 .collect();
             assert_eq!(lines.len(), 2, "{lines:?}");
             let (x, y) = line_start(&app, handle);
             assert!(x.abs() < 1e-9 && y.abs() < 1e-9, "original untouched");
-            assert!(lines.iter().any(|&(x, y)| (x - 3.0).abs() < 1e-3 && (y - 4.0).abs() < 1e-3));
-            assert!(app.tabs[0].active_grip.is_some(), "grip re-armed for the next copy");
+            assert!(lines
+                .iter()
+                .any(|&(x, y)| (x - 3.0).abs() < 1e-3 && (y - 4.0).abs() < 1e-3));
+            assert!(
+                app.tabs[0].active_grip.is_some(),
+                "grip re-armed for the next copy"
+            );
             // One undo step removes the copy again.
             app.undo_steps(1);
             let count = app.tabs[0]
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(count, 1);
         });
@@ -821,7 +903,9 @@ mod tests {
         with_stack(|| {
             let (mut app, handle) = grip_app();
             right_click(&mut app);
-            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(GripMenuCmd::BasePoint)));
+            let _ = app.update(Message::ContextMenuPick(MenuAction::Grip(
+                GripMenuCmd::BasePoint,
+            )));
             assert!(app.tabs[0].grip_base_pending);
             move_cursor_to(&mut app, DVec3::new(1.0, 1.0, 0.0));
             let _ = app.update(Message::ViewportLeftPress);
@@ -853,7 +937,7 @@ mod transparent_tests {
     fn line_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        app.tabs[0].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let _ = app.dispatch_command("LINE");
         let _ = app.feed_command(StepInput::Point(DVec3::ZERO));
         app
@@ -895,7 +979,7 @@ mod transparent_tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 1);
         });
@@ -938,6 +1022,79 @@ mod transparent_tests {
             assert!(!app.snapper.snap_enabled);
             app.snapper.clear_override();
             assert!(app.snapper.snap_enabled);
+        });
+    }
+
+    #[test]
+    fn test_direct_distance_entry_dyn_off() {
+        with_stack(|| {
+            let mut app = line_app();
+            app.dyn_input = false;
+            assert_eq!(active(&app), Some("LINE"));
+
+            // Point cursor in +X direction from origin
+            app.tabs[0].last_cursor_world = glam::DVec3::new(10.0, 0.0, 0.0);
+
+            // Type "50" into command line and submit
+            app.command_line.input = "50".to_string();
+            let _ = app.on_command_submit();
+
+            // Line segment should be created from (0,0) to (50,0)
+            let lines: Vec<_> = app.tabs[0]
+                .scene
+                .document
+                .entities()
+                .filter_map(|e| match e {
+                    codec::EntityType::Line(l) => Some(l.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(lines.len(), 1);
+            assert!((lines[0].start.x - 0.0).abs() < 1e-6 && (lines[0].start.y - 0.0).abs() < 1e-6);
+            assert!((lines[0].end.x - 50.0).abs() < 1e-6 && (lines[0].end.y - 0.0).abs() < 1e-6);
+
+            // Command should still be active for the next line segment
+            assert_eq!(active(&app), Some("LINE"));
+
+            // Point cursor in +Y direction from (50, 0)
+            app.tabs[0].last_cursor_world = glam::DVec3::new(50.0, 20.0, 0.0);
+
+            // Type "25" and submit
+            app.command_line.input = "25".to_string();
+            let _ = app.on_command_submit();
+
+            let lines: Vec<_> = app.tabs[0]
+                .scene
+                .document
+                .entities()
+                .filter_map(|e| match e {
+                    codec::EntityType::Line(l) => Some(l.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(lines.len(), 2);
+            assert!(
+                (lines[1].start.x - 50.0).abs() < 1e-6 && (lines[1].start.y - 0.0).abs() < 1e-6
+            );
+            assert!((lines[1].end.x - 50.0).abs() < 1e-6 && (lines[1].end.y - 25.0).abs() < 1e-6);
+
+            // Point cursor in -X direction from (50, 25) using feed_active_cmd
+            app.tabs[0].last_cursor_world = glam::DVec3::new(0.0, 25.0, 0.0);
+            let _ = app.feed_active_cmd("50");
+            let lines: Vec<_> = app.tabs[0]
+                .scene
+                .document
+                .entities()
+                .filter_map(|e| match e {
+                    codec::EntityType::Line(l) => Some(l.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(lines.len(), 3);
+            assert!(
+                (lines[2].start.x - 50.0).abs() < 1e-6 && (lines[2].start.y - 25.0).abs() < 1e-6
+            );
+            assert!((lines[2].end.x - 0.0).abs() < 1e-6 && (lines[2].end.y - 25.0).abs() < 1e-6);
         });
     }
 }

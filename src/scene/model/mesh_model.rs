@@ -164,6 +164,8 @@ pub fn edge_snap_wire(
         dash_align_end: None,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
+        searchable_text: Vec::new(),
+        snap_only: false,
     })
 }
 
@@ -185,7 +187,7 @@ pub struct MeshModel {
     /// Optional AcDbMaterial handle per triangle. Empty means the whole mesh
     /// uses `MeshLodSet::material`; otherwise each entry aligns with one
     /// `indices` triplet and overrides the entity material for that face.
-    pub triangle_material_handles: Vec<Option<acadrust::Handle>>,
+    pub triangle_material_handles: Vec<Option<codec::Handle>>,
     /// Optional ACIS face colour per triangle, aligned with `indices` triplets.
     pub triangle_colors: Vec<Option<[f32; 4]>>,
     /// RGBA colour in [0, 1].
@@ -209,7 +211,7 @@ pub struct MeshModel {
 /// Kernel-owned source for a view-dependent silhouette.
 #[derive(Clone, Debug)]
 pub struct CurvedGen {
-    pub source: cadkernel::brep::mesh::SilhouetteSource,
+    pub source: kernel::brep::mesh::SilhouetteSource,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -227,7 +229,7 @@ pub struct MeshMetrics {
 }
 
 impl MeshMetrics {
-    fn apply_mass_properties(&mut self, properties: cadkernel::brep::MassProperties) {
+    fn apply_mass_properties(&mut self, properties: kernel::brep::MassProperties) {
         self.volume = properties.volume;
         self.centroid = properties.centroid;
         self.moment_of_inertia = properties.moment_of_inertia;
@@ -240,7 +242,7 @@ impl MeshMetrics {
     pub fn translate(&mut self, delta: [f64; 3]) {
         if self.volume > 1e-18 {
             self.apply_mass_properties(
-                cadkernel::brep::MassProperties {
+                kernel::brep::MassProperties {
                     volume: self.volume,
                     centroid: self.centroid,
                     moment_of_inertia: self.moment_of_inertia,
@@ -269,8 +271,7 @@ pub struct MeshLodSet {
     /// Face-level ACIS material overrides, resolved from each LOD's
     /// `triangle_material_handles`. Only handles actually referenced by the
     /// tessellation are retained.
-    pub face_materials:
-        rustc_hash::FxHashMap<acadrust::Handle, super::material_model::MeshMaterial>,
+    pub face_materials: rustc_hash::FxHashMap<codec::Handle, super::material_model::MeshMaterial>,
     /// Effective AcDbVisualStyle override resolved from the entity's full,
     /// face and edge style handles.
     pub visual_style: Option<super::visual_style_model::MeshVisualStyle>,
@@ -305,9 +306,9 @@ pub struct MeshLodSet {
     /// block entity. Top-level meshes leave this empty.
     pub instance_source: Option<std::sync::Arc<MeshInstanceSource>>,
     /// Accumulated block-local → world transform for this rendered instance.
-    pub instance_transform: Option<acadrust::types::Transform>,
+    pub instance_transform: Option<codec::types::Transform>,
     /// Parent INSERT selected for this rendered block instance.
-    pub instance_handle: Option<acadrust::Handle>,
+    pub instance_handle: Option<codec::Handle>,
     /// Effective colour after INSERT inheritance, without copying the mesh.
     pub instance_color: Option<[f32; 4]>,
     /// Precise world bounds used by the interaction index.
@@ -316,7 +317,7 @@ pub struct MeshLodSet {
 
 #[derive(Clone, Debug)]
 pub struct MeshInstanceSource {
-    pub handle: acadrust::Handle,
+    pub handle: codec::Handle,
     pub lods: Vec<MeshModel>,
     pub edge_verts: Vec<[f32; 3]>,
     pub edge_verts_low: Vec<[f32; 3]>,
@@ -348,7 +349,7 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
     let Some(mesh) = lods.iter().find(|mesh| !mesh.indices.is_empty()) else {
         return MeshMetrics::default();
     };
-    let kernel_mesh = cadkernel::brep::Mesh {
+    let kernel_mesh = kernel::brep::Mesh {
         positions: mesh
             .verts
             .iter()
@@ -390,7 +391,7 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
 }
 
 impl MeshLodSet {
-    pub fn apply_mass_properties(&mut self, properties: cadkernel::brep::MassProperties) {
+    pub fn apply_mass_properties(&mut self, properties: kernel::brep::MassProperties) {
         self.metrics.apply_mass_properties(properties);
     }
 
@@ -434,7 +435,7 @@ impl MeshLodSet {
         self.z_aabb = z;
     }
 
-    pub fn prepare_instance_source(&mut self, handle: acadrust::Handle) {
+    pub fn prepare_instance_source(&mut self, handle: codec::Handle) {
         self.instance_source = Some(std::sync::Arc::new(MeshInstanceSource {
             handle,
             lods: self.lods.clone(),
@@ -457,19 +458,21 @@ impl MeshLodSet {
     pub fn geometry_edges(&self) -> (&[[f32; 3]], &[[f32; 3]]) {
         self.instance_source.as_ref().map_or(
             (self.edge_verts.as_slice(), self.edge_verts_low.as_slice()),
-            |source| (
-                source.edge_verts.as_slice(),
-                source.edge_verts_low.as_slice(),
-            ),
+            |source| {
+                (
+                    source.edge_verts.as_slice(),
+                    source.edge_verts_low.as_slice(),
+                )
+            },
         )
     }
 
-    pub fn entity_handle(&self) -> Option<acadrust::Handle> {
+    pub fn entity_handle(&self) -> Option<codec::Handle> {
         self.instance_handle.or_else(|| {
             self.lods
                 .first()
                 .and_then(|mesh| mesh.name.parse::<u64>().ok())
-                .map(acadrust::Handle::new)
+                .map(codec::Handle::new)
         })
     }
 

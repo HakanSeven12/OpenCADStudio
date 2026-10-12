@@ -1,5 +1,5 @@
-use acadrust::{entities::Line, Entity};
 use crate::t;
+use codec::{entities::Line, Entity};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -13,7 +13,7 @@ use crate::scene::model::wire_model::TangentGeom;
 
 fn to_render(line: &Line) -> RenderEntity {
     if let Some(association) =
-        acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
         let segments = crate::scene::centermark::render_segments(&association);
         let mut points = Vec::with_capacity(segments.len() * 3);
@@ -28,8 +28,16 @@ fn to_render(line: &Line) -> RenderEntity {
                 key_vertices.push([point.x, point.y, point.z]);
             }
             tangent_geoms.push(TangentGeom::Line {
-                p1: [segment[0].x as f32, segment[0].y as f32, segment[0].z as f32],
-                p2: [segment[1].x as f32, segment[1].y as f32, segment[1].z as f32],
+                p1: [
+                    segment[0].x as f32,
+                    segment[0].y as f32,
+                    segment[0].z as f32,
+                ],
+                p2: [
+                    segment[1].x as f32,
+                    segment[1].y as f32,
+                    segment[1].z as f32,
+                ],
             });
         }
         let center = crate::scene::centermark::dvec(association.center);
@@ -97,7 +105,7 @@ fn to_render(line: &Line) -> RenderEntity {
 
 fn grips(line: &Line) -> Vec<GripDef> {
     if let Some(association) =
-        acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
         let center = crate::scene::centermark::dvec(association.center);
         let directions = crate::scene::centermark::mark_directions(&association);
@@ -116,7 +124,11 @@ fn grips(line: &Line) -> Vec<GripDef> {
                 + association.length_adjustments[index]
                 + association.overshoots[index])
                 .max(extension_start);
-            result.push(oriented_triangle_grip(index + 5, center + *direction * distance, *direction));
+            result.push(oriented_triangle_grip(
+                index + 5,
+                center + *direction * distance,
+                *direction,
+            ));
         }
         return result;
     }
@@ -124,7 +136,7 @@ fn grips(line: &Line) -> Vec<GripDef> {
     let e = glam::DVec3::new(line.end.x, line.end.y, line.end.z);
     let m = (s + e) * 0.5;
     if let Some(association) =
-        acadrust::entities::CenterLineAssociation::read(&line.common.extended_data)
+        codec::entities::CenterLineAssociation::read(&line.common.extended_data)
     {
         let direction = (e - s).normalize_or(glam::DVec3::X);
         let base_start = s + direction * association.start_extension;
@@ -142,7 +154,7 @@ fn grips(line: &Line) -> Vec<GripDef> {
 
 fn properties(line: &Line) -> Vec<PropSection> {
     if let Some(association) =
-        acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
         use crate::scene::model::object::{PropValue, Property};
         return vec![PropSection {
@@ -152,11 +164,20 @@ fn properties(line: &Line) -> Vec<PropSection> {
                     label: "Show extension".to_owned(),
                     field: "centermark_show_extension",
                     value: PropValue::Choice {
-                        selected: if association.show_extensions { "Yes" } else { "No" }.to_owned(),
+                        selected: if association.show_extensions {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                        .to_owned(),
                         options: vec!["Yes".to_owned(), "No".to_owned()],
                     },
                 },
-                edit("Cross size", "centermark_cross_size", association.cross_size),
+                edit(
+                    "Cross size",
+                    "centermark_cross_size",
+                    association.cross_size,
+                ),
                 edit("Cross gap", "centermark_cross_gap", association.cross_gap),
                 edit(
                     "Extension length",
@@ -172,7 +193,7 @@ fn properties(line: &Line) -> Vec<PropSection> {
         }];
     }
     if let Some(association) =
-        acadrust::entities::CenterLineAssociation::read(&line.common.extended_data)
+        codec::entities::CenterLineAssociation::read(&line.common.extended_data)
     {
         return vec![PropSection {
             title: t!("Geometry").into_owned(),
@@ -187,7 +208,11 @@ fn properties(line: &Line) -> Vec<PropSection> {
                     "centerline_end_extension",
                     association.end_extension,
                 ),
-                ro(t!("Length").as_ref(), "length", format_length(line.length())),
+                ro(
+                    t!("Length").as_ref(),
+                    "length",
+                    format_length(line.length()),
+                ),
                 ro(
                     "Associative",
                     "centerline_associative",
@@ -212,7 +237,11 @@ fn properties(line: &Line) -> Vec<PropSection> {
             ro(t!("Delta X").as_ref(), "delta_x", format_length(dx)),
             ro(t!("Delta Y").as_ref(), "delta_y", format_length(dy)),
             ro(t!("Delta Z").as_ref(), "delta_z", format_length(dz)),
-            ro(t!("Length").as_ref(), "length", format_length(line.length())),
+            ro(
+                t!("Length").as_ref(),
+                "length",
+                format_length(line.length()),
+            ),
             ro(t!("Angle").as_ref(), "angle", format_direction(angle)),
             edit(t!("Normal X").as_ref(), "normal_x", line.normal.x),
             edit(t!("Normal Y").as_ref(), "normal_y", line.normal.y),
@@ -223,7 +252,7 @@ fn properties(line: &Line) -> Vec<PropSection> {
 
 fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
     if let Some(mut association) =
-        acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
         match field {
             "centermark_show_extension" => {
@@ -233,8 +262,12 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
                 );
             }
             "centermark_cross_size" | "centermark_cross_gap" | "centermark_extension_length" => {
-                let Some(number) = parse_f64(value) else { return; };
-                if !number.is_finite() || number < 0.0 { return; }
+                let Some(number) = parse_f64(value) else {
+                    return;
+                };
+                if !number.is_finite() || number < 0.0 {
+                    return;
+                }
                 match field {
                     "centermark_cross_size" => association.cross_size = number,
                     "centermark_cross_gap" => association.cross_gap = number,
@@ -256,7 +289,7 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
         return;
     };
     if let Some(mut association) =
-        acadrust::entities::CenterLineAssociation::read(&line.common.extended_data)
+        codec::entities::CenterLineAssociation::read(&line.common.extended_data)
     {
         if !v.is_finite() || v < 0.0 {
             return;
@@ -268,13 +301,13 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
             "centerline_start_extension" => {
                 let delta = v - association.start_extension;
                 let moved = start - direction * delta;
-                line.start = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+                line.start = codec::types::Vector3::new(moved.x, moved.y, moved.z);
                 association.start_extension = v;
             }
             "centerline_end_extension" => {
                 let delta = v - association.end_extension;
                 let moved = end + direction * delta;
-                line.end = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+                line.end = codec::types::Vector3::new(moved.x, moved.y, moved.z);
                 association.end_extension = v;
             }
             _ => return,
@@ -299,7 +332,7 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
             }
             if normal.is_finite() && normal.length_squared() > 1.0e-18 {
                 let normal = normal.normalize();
-                line.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                line.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
             }
         }
         _ => {}
@@ -308,16 +341,16 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
 
 fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
     if let Some(mut association) =
-        acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
         let center = crate::scene::centermark::dvec(association.center);
         let directions = crate::scene::centermark::mark_directions(&association);
         match (grip_id, apply) {
             (0, GripApply::Translate(delta)) => {
                 let moved = center + delta;
-                association.center = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+                association.center = codec::types::Vector3::new(moved.x, moved.y, moved.z);
                 let origin = crate::scene::centermark::dvec(association.plane_origin) + delta;
-                association.plane_origin = acadrust::types::Vector3::new(origin.x, origin.y, origin.z);
+                association.plane_origin = codec::types::Vector3::new(origin.x, origin.y, origin.z);
                 association.associated = false;
             }
             (id @ 1..=4, GripApply::Absolute(point)) => {
@@ -339,7 +372,7 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
         return;
     }
     if let Some(mut association) =
-        acadrust::entities::CenterLineAssociation::read(&line.common.extended_data)
+        codec::entities::CenterLineAssociation::read(&line.common.extended_data)
     {
         let start = glam::DVec3::new(line.start.x, line.start.y, line.start.z);
         let end = glam::DVec3::new(line.end.x, line.end.y, line.end.z);
@@ -351,13 +384,13 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
                 let delta = (point - base_start).dot(direction);
                 association.start_length_adjustment -= delta;
                 let moved = start + direction * delta;
-                line.start = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+                line.start = codec::types::Vector3::new(moved.x, moved.y, moved.z);
             }
             (1, GripApply::Absolute(point)) => {
                 let delta = (point - base_end).dot(direction);
                 association.end_length_adjustment += delta;
                 let moved = end + direction * delta;
-                line.end = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+                line.end = codec::types::Vector3::new(moved.x, moved.y, moved.z);
             }
             (2, GripApply::Translate(delta)) => {
                 line.start.x += delta.x;
@@ -372,13 +405,13 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
                 let total = (base_start - point).dot(direction).max(0.0);
                 association.start_extension = total;
                 let moved = base_start - direction * association.start_extension;
-                line.start = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+                line.start = codec::types::Vector3::new(moved.x, moved.y, moved.z);
             }
             (4, GripApply::Absolute(point)) => {
                 let total = (point - base_end).dot(direction).max(0.0);
                 association.end_extension = total;
                 let moved = base_end + direction * association.end_extension;
-                line.end = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+                line.end = codec::types::Vector3::new(moved.x, moved.y, moved.z);
             }
             _ => return,
         }
@@ -411,37 +444,49 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
 fn apply_plain_transform(line: &mut Line, t: &EntityTransform) {
     match t {
         EntityTransform::Translate(d) => {
-            line.translate(acadrust::types::Vector3::new(d.x, d.y, d.z));
+            line.translate(codec::types::Vector3::new(d.x, d.y, d.z));
         }
-        EntityTransform::Rotate { center, axis, angle_rad } => {
-            crate::scene::view::transform::apply_standard_transform(line, *center, *axis, *angle_rad);
+        EntityTransform::Rotate {
+            center,
+            axis,
+            angle_rad,
+        } => {
+            crate::scene::view::transform::apply_standard_transform(
+                line, *center, *axis, *angle_rad,
+            );
         }
         EntityTransform::Scale { center, factor } => {
             crate::scene::view::transform::apply_standard_scale(line, *center, *factor);
         }
-        EntityTransform::Mirror { p1, p2, working_normal } => {
-            acadrust::Entity::apply_transform(
+        EntityTransform::Mirror {
+            p1,
+            p2,
+            working_normal,
+        } => {
+            codec::Entity::apply_transform(
                 line,
                 &crate::scene::view::transform::reflection_about_working_line(
-                    *p1, *p2, *working_normal,
+                    *p1,
+                    *p2,
+                    *working_normal,
                 ),
             );
         }
         EntityTransform::Affine(transform) => {
-            acadrust::Entity::apply_transform(line, transform);
+            codec::Entity::apply_transform(line, transform);
         }
     }
 }
 
 fn apply_transform(line: &mut Line, t: &EntityTransform) {
     if let Some(mut association) =
-        acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
         if let EntityTransform::Translate(delta) = t {
             let center = crate::scene::centermark::dvec(association.center) + *delta;
-            association.center = acadrust::types::Vector3::new(center.x, center.y, center.z);
+            association.center = codec::types::Vector3::new(center.x, center.y, center.z);
             let origin = crate::scene::centermark::dvec(association.plane_origin) + *delta;
-            association.plane_origin = acadrust::types::Vector3::new(origin.x, origin.y, origin.z);
+            association.plane_origin = codec::types::Vector3::new(origin.x, origin.y, origin.z);
             association.associated = false;
             crate::scene::centermark::update_carrier(line, &association);
             return;
@@ -450,12 +495,12 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
         let x = crate::scene::centermark::dvec(association.plane_x).normalize_or(glam::DVec3::X);
         let y = crate::scene::centermark::dvec(association.plane_y).normalize_or(glam::DVec3::Y);
         let mut x_basis = Line::from_points(
-            acadrust::types::Vector3::new(center.x, center.y, center.z),
-            acadrust::types::Vector3::new(center.x + x.x, center.y + x.y, center.z + x.z),
+            codec::types::Vector3::new(center.x, center.y, center.z),
+            codec::types::Vector3::new(center.x + x.x, center.y + x.y, center.z + x.z),
         );
         let mut y_basis = Line::from_points(
-            acadrust::types::Vector3::new(center.x, center.y, center.z),
-            acadrust::types::Vector3::new(center.x + y.x, center.y + y.y, center.z + y.z),
+            codec::types::Vector3::new(center.x, center.y, center.z),
+            codec::types::Vector3::new(center.x + y.x, center.y + y.y, center.z + y.z),
         );
         apply_plain_transform(&mut x_basis, t);
         apply_plain_transform(&mut y_basis, t);
@@ -463,14 +508,14 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
         let moved_x = glam::DVec3::new(x_basis.end.x, x_basis.end.y, x_basis.end.z) - moved;
         let moved_y = glam::DVec3::new(y_basis.end.x, y_basis.end.y, y_basis.end.z) - moved;
         let scale = ((moved_x.length() + moved_y.length()) * 0.5).max(1.0e-12);
-        association.center = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
+        association.center = codec::types::Vector3::new(moved.x, moved.y, moved.z);
         association.plane_origin = association.center;
-        association.plane_x = acadrust::types::Vector3::new(
+        association.plane_x = codec::types::Vector3::new(
             moved_x.normalize_or(x).x,
             moved_x.normalize_or(x).y,
             moved_x.normalize_or(x).z,
         );
-        association.plane_y = acadrust::types::Vector3::new(
+        association.plane_y = codec::types::Vector3::new(
             moved_y.normalize_or(y).x,
             moved_y.normalize_or(y).y,
             moved_y.normalize_or(y).z,
@@ -479,7 +524,11 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
         association.cross_size *= scale;
         association.cross_gap *= scale;
         association.extension_length *= scale;
-        for value in association.length_adjustments.iter_mut().chain(association.overshoots.iter_mut()) {
+        for value in association
+            .length_adjustments
+            .iter_mut()
+            .chain(association.overshoots.iter_mut())
+        {
             *value *= scale;
         }
         association.associated = false;
@@ -487,7 +536,7 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
         return;
     }
     if let Some(mut association) =
-        acadrust::entities::CenterLineAssociation::read(&line.common.extended_data)
+        codec::entities::CenterLineAssociation::read(&line.common.extended_data)
     {
         association.associated = false;
         association.write(&mut line.common.extended_data);
@@ -496,7 +545,7 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Line {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
@@ -510,8 +559,8 @@ impl crate::entities::traits::Grippable for Line {
     }
     fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
         use crate::scene::model::object::{GripMenuAction, GripMenuItem};
-        if acadrust::entities::CenterMarkAssociation::read(&self.common.extended_data).is_some()
-            || acadrust::entities::CenterLineAssociation::read(&self.common.extended_data).is_some()
+        if codec::entities::CenterMarkAssociation::read(&self.common.extended_data).is_some()
+            || codec::entities::CenterLineAssociation::read(&self.common.extended_data).is_some()
         {
             return vec![GripMenuItem {
                 label: "Stretch",
@@ -536,7 +585,11 @@ impl crate::entities::traits::Grippable for Line {
             ]
         }
     }
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        _grip_id: usize,
+        _action: crate::scene::model::object::GripMenuAction,
+    ) {
         // Lengthen needs a follow-up distance — handled by
         // `apply_grip_menu_value`.
     }
@@ -632,7 +685,7 @@ impl crate::entities::traits::Transformable for Line {
     }
 }
 
-impl crate::entities::traits::MassPropsCalc for acadrust::entities::Line {
+impl crate::entities::traits::MassPropsCalc for codec::entities::Line {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         let dx = self.end.x - self.start.x;
         let dy = self.end.y - self.start.y;

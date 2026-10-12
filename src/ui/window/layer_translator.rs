@@ -12,6 +12,7 @@ use iced::{Background, Border, Element, Fill, Length, Theme};
 use crate::app::Message;
 use crate::modules::draw::layers::laytrans::{Mapping, TargetLayer};
 use crate::t;
+use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
 
 /// The dialog's working state: what was loaded, what is selected, and the
 /// mappings built so far. None of it touches the drawing until Translate.
@@ -149,9 +150,7 @@ pub fn view_window<'a>(
             .on_press_maybe(can_map.then_some(Message::LayerTranslatorMap))
             .padding([4, 10]),
         button(text(t!("Map same")).size(12))
-            .on_press_maybe(
-                (!state.targets.is_empty()).then_some(Message::LayerTranslatorMapSame)
-            )
+            .on_press_maybe((!state.targets.is_empty()).then_some(Message::LayerTranslatorMapSame))
             .padding([4, 10]),
         Space::new().width(Fill),
         loaded,
@@ -183,15 +182,12 @@ pub fn view_window<'a>(
             .on_press(Message::LayerTranslatorLoadMappings)
             .padding([4, 10]),
         Space::new().width(Fill),
-        button(text(t!("Cancel")).size(12))
-            .on_press(Message::CloseModal)
-            .padding([4, 12]),
-        button(text(t!("Translate")).size(12))
-            .on_press_maybe(
-                (!state.mappings.is_empty()).then_some(Message::LayerTranslatorTranslate)
-            )
-            .style(button::primary)
-            .padding([4, 12]),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button_styled_opt(
+            t!("Translate"),
+            (!state.mappings.is_empty()).then_some(Message::LayerTranslatorTranslate),
+            button::primary,
+        ),
     ]
     .spacing(6)
     .align_y(iced::Center);

@@ -4,6 +4,11 @@
 pub enum SnapHint {
     /// Geometric center of a circle, arc, or ellipse.
     Center,
+    /// Centre of one arc segment of a chain (a polyline). Snaps like
+    /// `Center`, but does not make the wire count as round.
+    ArcCenter,
+    /// Area centroid of a closed polyline.
+    GeometricCenter,
     /// Point entity location.
     Node,
     /// 0 / 90 / 180 / 270 ° point on a circle/arc (within arc span).
@@ -74,29 +79,72 @@ impl TangentGeom {
     pub fn translated(&self, delta: glam::DVec3) -> Self {
         match self {
             Self::Line { p1, p2 } => Self::Line {
-                p1: [p1[0] + delta.x as f32, p1[1] + delta.y as f32, p1[2] + delta.z as f32],
-                p2: [p2[0] + delta.x as f32, p2[1] + delta.y as f32, p2[2] + delta.z as f32],
+                p1: [
+                    p1[0] + delta.x as f32,
+                    p1[1] + delta.y as f32,
+                    p1[2] + delta.z as f32,
+                ],
+                p2: [
+                    p2[0] + delta.x as f32,
+                    p2[1] + delta.y as f32,
+                    p2[2] + delta.z as f32,
+                ],
             },
             Self::Circle { center, radius } => Self::Circle {
-                center: [center[0] + delta.x as f32, center[1] + delta.y as f32, center[2] + delta.z as f32],
+                center: [
+                    center[0] + delta.x as f32,
+                    center[1] + delta.y as f32,
+                    center[2] + delta.z as f32,
+                ],
                 radius: *radius,
             },
-            Self::PlanarCircle { center, axis_x, axis_y, radius } => Self::PlanarCircle {
-                center: [center[0] + delta.x, center[1] + delta.y, center[2] + delta.z],
+            Self::PlanarCircle {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+            } => Self::PlanarCircle {
+                center: [
+                    center[0] + delta.x,
+                    center[1] + delta.y,
+                    center[2] + delta.z,
+                ],
                 axis_x: *axis_x,
                 axis_y: *axis_y,
                 radius: *radius,
             },
-            Self::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => Self::Arc {
-                center: [center[0] + delta.x, center[1] + delta.y, center[2] + delta.z],
+            Self::Arc {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => Self::Arc {
+                center: [
+                    center[0] + delta.x,
+                    center[1] + delta.y,
+                    center[2] + delta.z,
+                ],
                 axis_x: *axis_x,
                 axis_y: *axis_y,
                 radius: *radius,
                 start_angle: *start_angle,
                 end_angle: *end_angle,
             },
-            Self::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => Self::PlanarEllipse {
-                center: [center[0] + delta.x, center[1] + delta.y, center[2] + delta.z],
+            Self::PlanarEllipse {
+                center,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => Self::PlanarEllipse {
+                center: [
+                    center[0] + delta.x,
+                    center[1] + delta.y,
+                    center[2] + delta.z,
+                ],
                 major_axis: *major_axis,
                 normal: *normal,
                 minor_axis_ratio: *minor_axis_ratio,
@@ -108,7 +156,8 @@ impl TangentGeom {
 
     pub fn rotated(&self, center: glam::DVec3, axis: glam::DVec3, angle_rad: f64) -> Self {
         let quat = glam::DQuat::from_axis_angle(axis.normalize_or(glam::DVec3::Z), angle_rad);
-        let rot_pt = |p: [f64; 3]| (center + quat * (glam::DVec3::from_array(p) - center)).to_array();
+        let rot_pt =
+            |p: [f64; 3]| (center + quat * (glam::DVec3::from_array(p) - center)).to_array();
         let rot_vec = |v: [f64; 3]| (quat * glam::DVec3::from_array(v)).to_array();
         match self {
             Self::Line { p1, p2 } => {
@@ -129,13 +178,25 @@ impl TangentGeom {
                     radius: *radius,
                 }
             }
-            Self::PlanarCircle { center: c, axis_x, axis_y, radius } => Self::PlanarCircle {
+            Self::PlanarCircle {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+            } => Self::PlanarCircle {
                 center: rot_pt(*c),
                 axis_x: rot_vec(*axis_x),
                 axis_y: rot_vec(*axis_y),
                 radius: *radius,
             },
-            Self::Arc { center: c, axis_x, axis_y, radius, start_angle, end_angle } => Self::Arc {
+            Self::Arc {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => Self::Arc {
                 center: rot_pt(*c),
                 axis_x: rot_vec(*axis_x),
                 axis_y: rot_vec(*axis_y),
@@ -143,7 +204,14 @@ impl TangentGeom {
                 start_angle: *start_angle,
                 end_angle: *end_angle,
             },
-            Self::PlanarEllipse { center: c, major_axis, normal, minor_axis_ratio, start_param, end_param } => Self::PlanarEllipse {
+            Self::PlanarEllipse {
+                center: c,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => Self::PlanarEllipse {
                 center: rot_pt(*c),
                 major_axis: rot_vec(*major_axis),
                 normal: rot_vec(*normal),
@@ -155,7 +223,8 @@ impl TangentGeom {
     }
 
     pub fn scaled(&self, center: glam::DVec3, factor: f64) -> Self {
-        let scale_pt = |p: [f64; 3]| (center + (glam::DVec3::from_array(p) - center) * factor).to_array();
+        let scale_pt =
+            |p: [f64; 3]| (center + (glam::DVec3::from_array(p) - center) * factor).to_array();
         match self {
             Self::Line { p1, p2 } => {
                 let p1_d = [p1[0] as f64, p1[1] as f64, p1[2] as f64];
@@ -175,13 +244,25 @@ impl TangentGeom {
                     radius: *radius * factor.abs() as f32,
                 }
             }
-            Self::PlanarCircle { center: c, axis_x, axis_y, radius } => Self::PlanarCircle {
+            Self::PlanarCircle {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+            } => Self::PlanarCircle {
                 center: scale_pt(*c),
                 axis_x: *axis_x,
                 axis_y: *axis_y,
                 radius: *radius * factor.abs(),
             },
-            Self::Arc { center: c, axis_x, axis_y, radius, start_angle, end_angle } => Self::Arc {
+            Self::Arc {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => Self::Arc {
                 center: scale_pt(*c),
                 axis_x: *axis_x,
                 axis_y: *axis_y,
@@ -189,7 +270,14 @@ impl TangentGeom {
                 start_angle: *start_angle,
                 end_angle: *end_angle,
             },
-            Self::PlanarEllipse { center: c, major_axis, normal, minor_axis_ratio, start_param, end_param } => Self::PlanarEllipse {
+            Self::PlanarEllipse {
+                center: c,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => Self::PlanarEllipse {
                 center: scale_pt(*c),
                 major_axis: (glam::DVec3::from_array(*major_axis) * factor.abs()).to_array(),
                 normal: *normal,
@@ -228,7 +316,12 @@ impl TangentGeom {
                     radius: *radius,
                 }
             }
-            Self::PlanarCircle { center: c, axis_x, axis_y, radius } => {
+            Self::PlanarCircle {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+            } => {
                 let ax = refl_vec(*axis_x);
                 let ay = refl_vec(*axis_y);
                 Self::PlanarCircle {
@@ -238,7 +331,14 @@ impl TangentGeom {
                     radius: *radius,
                 }
             }
-            Self::Arc { center: c, axis_x, axis_y, radius, start_angle, end_angle } => {
+            Self::Arc {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => {
                 let ax = refl_vec(*axis_x);
                 let ay = refl_vec(*axis_y);
                 Self::Arc {
@@ -250,7 +350,14 @@ impl TangentGeom {
                     end_angle: -start_angle,
                 }
             }
-            Self::PlanarEllipse { center: c, major_axis, normal: n, minor_axis_ratio, start_param, end_param } => {
+            Self::PlanarEllipse {
+                center: c,
+                major_axis,
+                normal: n,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => {
                 let norm = refl_vec(*n);
                 Self::PlanarEllipse {
                     center: refl_pt(*c),
@@ -364,6 +471,200 @@ impl PointMarker {
 /// resolution pass must leave it alone. Only `Batches::finalize` fills it in.
 pub type BgAdapt = Option<Box<BgAdaptInputs>>;
 
+/// One laid-out text run preserved for searchable PDF export.
+///
+/// `origin` is the final world-space baseline start (drawing units, f64 —
+/// annotation scale and block placement already applied), `height` is the
+/// world cap height (run.height × anno), `rotation` the run angle in radians.
+/// `text` holds the visible characters only (DXF controls stripped, `%%`
+/// specials decoded, `\P` → space — multi-line MTEXT arrives as one run per
+/// visual line from the layout stage, so no re-wrapping is needed).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SearchableTextRun {
+    pub text: String,
+    pub origin: [f64; 3],
+    pub height: f32,
+    pub rotation: f32,
+    pub color: [f32; 4],
+    pub bold: bool,
+    /// Style font name as laid out (`GlyphRun.font`: TTF family, LFF/SHX
+    /// name, …). Lets the PDF exporter resolve the run's *actual* font and
+    /// embed a subset instead of always falling back to Helvetica.
+    pub font: String,
+    /// Laid-out advance width in drawing units (pen advance incl. spacing,
+    /// annotation scale applied). Drives `Tz` width-matching and run-level
+    /// culling at export; scaled alongside `height` by every transform.
+    pub adv_width: f32,
+}
+
+impl SearchableTextRun {
+    /// World-space origin translated by `delta` (preview drags, block moves).
+    pub fn translated(&self, delta: [f64; 3]) -> Self {
+        let mut out = self.clone();
+        out.origin[0] += delta[0];
+        out.origin[1] += delta[1];
+        out.origin[2] += delta[2];
+        out
+    }
+}
+
+/// Clean a laid-out run's raw string into visible searchable characters.
+///
+/// The input is the exact string passed to `layout_glyph_quads` for the run,
+/// so the extracted text cannot diverge from the laid-out glyph sequence —
+/// cleaning only strips controls. Traps paid for at the format level:
+/// - `\P` is a real newline → space here (runs are already per-line).
+/// - Decoration toggles (`\L…\l`, `\O…\o`, `\K…\k`) and other backslash
+///   controls are stripped, not searched.
+/// - `\Snum^den;`/stacking → `num/den`; `\U+XXXX` → the char; `{…}` grouping
+///   braces are dropped; `\M+…` paragraph controls are stripped.
+/// - DXF `%%d`/`%%p`/`%%c` decode to `°`/`±`/`Ø`; `%%` + 3 digits → the char.
+/// - Literal `\\` → `\`, `\~` → non-breaking space.
+pub fn clean_searchable_text(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' && i + 1 < bytes.len() {
+            let n = bytes[i + 1];
+            match n {
+                b'P' | b'p' => {
+                    out.push(' ');
+                    i += 2;
+                    continue;
+                }
+                b'\\' => {
+                    out.push('\\');
+                    i += 2;
+                    continue;
+                }
+                b'~' => {
+                    out.push('\u{a0}');
+                    i += 2;
+                    continue;
+                }
+                // Stacking: `\Snum^den;` → `num/den` (searchable fraction).
+                b'S' | b's' => {
+                    if let Some(semi) = raw[i + 2..].find(';') {
+                        let body = &raw[i + 2..i + 2 + semi];
+                        if let Some(caret) = body.find('^') {
+                            out.push_str(&body[..caret]);
+                            out.push('/');
+                            out.push_str(&body[caret + 1..]);
+                        } else {
+                            out.push_str(body);
+                        }
+                        i += 2 + semi + 1;
+                    } else {
+                        i += 2;
+                    }
+                    continue;
+                }
+                // Unicode escape `\U+XXXX` (4–6 hex digits) → the char.
+                // Anything else (bad length, surrogate, > U+10FFFF) leaves
+                // the digits to be copied literally below — visible
+                // garbage-in beats silently dropped text.
+                b'U' | b'u' => {
+                    let rest = &raw[i + 2..];
+                    let after_plus = rest.strip_prefix('+').unwrap_or(rest);
+                    let digits: String = after_plus
+                        .chars()
+                        .take_while(|c| c.is_ascii_hexdigit())
+                        .collect();
+                    let mut pushed = false;
+                    if (4..=6).contains(&digits.len()) {
+                        if let Ok(cp) = u32::from_str_radix(&digits, 16) {
+                            if let Some(ch) = char::from_u32(cp) {
+                                out.push(ch);
+                                pushed = true;
+                            }
+                        }
+                    }
+                    i +=
+                        2 + (rest.len() - after_plus.len()) + if pushed { digits.len() } else { 0 };
+                    continue;
+                }
+                // Decoration / format toggles: drop both the opener and closer.
+                b'L' | b'l' | b'O' | b'o' | b'K' | b'k' | b'C' | b'c' | b'F' | b'f' | b'H'
+                | b'h' | b'Q' | b'q' | b'T' | b't' | b'W' | b'w' | b'A' | b'a' | b'M' | b'm' => {
+                    // `\C1;`, `\Farial;` etc. run to the next `;` — skip it.
+                    if let Some(semi) = raw[i + 2..].find(';') {
+                        i += 2 + semi + 1;
+                    } else {
+                        i += 2;
+                    }
+                    continue;
+                }
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            }
+        } else if b == b'%' && i + 2 < bytes.len() && bytes[i + 1] == b'%' {
+            let c = bytes[i + 2];
+            match c {
+                b'd' | b'D' => out.push('°'),
+                b'p' | b'P' => out.push('±'),
+                b'c' | b'C' => out.push('Ø'),
+                b'%' => out.push('%'),
+                _ if c.is_ascii_digit()
+                    && i + 4 < bytes.len()
+                    && bytes[i + 3].is_ascii_digit()
+                    && bytes[i + 4].is_ascii_digit() =>
+                {
+                    let digits = std::str::from_utf8(&bytes[i + 2..i + 5]).unwrap_or("");
+                    if let Ok(code) = digits.parse::<u32>() {
+                        out.push(char::from_u32(code).unwrap_or('?'));
+                    } else {
+                        out.push_str("%%");
+                        out.push_str(digits);
+                    }
+                    i += 5;
+                    continue;
+                }
+                _ => {
+                    out.push('%');
+                    out.push('%');
+                    out.push(c as char);
+                }
+            }
+            i += 3;
+            continue;
+        } else if b == b'{' || b == b'}' {
+            // MTEXT grouping braces: structure only, not content.
+            i += 1;
+            continue;
+        } else {
+            // Copy one UTF-8 char.
+            if let Some(ch) = raw[i..].chars().next() {
+                out.push(ch);
+                i += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+    }
+    // Collapse whitespace (MTEXT padding) but keep single spaces.
+    let mut collapsed = String::with_capacity(out.len());
+    let mut prev_space = true; // trim leading
+    for ch in out.chars() {
+        if ch.is_whitespace() {
+            if !prev_space {
+                collapsed.push(' ');
+                prev_space = true;
+            }
+        } else {
+            collapsed.push(ch);
+            prev_space = false;
+        }
+    }
+    if collapsed.ends_with(' ') {
+        collapsed.pop();
+    }
+    collapsed
+}
+
 /// The inputs `Batches::finalize` consumes when it resolves a colour.
 ///
 /// The flags are independent — a wire can paint the background itself while
@@ -443,7 +744,7 @@ pub struct WireModel {
     /// Empty for tessellated curves (Circle, Arc, Ellipse) which use snap_pts instead.
     pub key_vertices: Vec<[f64; 3]>,
     /// World-space 2-D bounding box [min_x, min_y, max_x, max_y].
-    /// Set from acadrust `bounding_box()` in `tessellate_entity()`.
+    /// Set from opencadcodec `bounding_box()` in `tessellate_entity()`.
     /// Preview / interim wires use `UNBOUNDED_AABB` so they are never pre-rejected
     /// by the snap world-space filter.
     pub aabb: [f32; 4],
@@ -496,6 +797,17 @@ pub struct WireModel {
     /// exactly like `points` — no separate collector pass. The renderer
     /// gathers these across all wires into the text vertex buffer.
     pub text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
+    /// Searchable text runs for PDF export (real text, not outlines).
+    ///
+    /// The SDF `text_verts` above carry only tessellated quads — the source
+    /// string is lost by the time the PDF exporter runs, so searchable text
+    /// was impossible without re-layout. Each entry preserves one laid-out
+    /// run (already positioned: MTEXT attachment/width/wrap, rotation and
+    /// block placement are baked into `origin`/`rotation`/`height`), letting
+    /// `io::pdf_export` emit `BT … Tj ET` with an embedded font instead of
+    /// vector outlines. Empty on non-text wires; transformed alongside
+    /// `text_verts` by the block-expand loop and preview clones.
+    pub searchable_text: Vec<SearchableTextRun>,
     /// Block-local composed draw-order offset in (-1, 1) for a wire that must
     /// order against its *siblings inside the block* — currently wide-polyline
     /// bands, whose solid area would otherwise cover later-drawn siblings.
@@ -506,6 +818,10 @@ pub struct WireModel {
     pub depth_override: Option<f32>,
     /// Whether this wire is drawn in the normal viewport pass.
     pub display_visible: bool,
+    /// Geometry that is never picked: the content of an underlay. Hidden
+    /// (`display_visible` false) it is what object snaps find; drawn, it is
+    /// display only and snaps skip it too ([`Self::is_display_only`]).
+    pub snap_only: bool,
     /// Whether this wire is included in plotted output.
     pub plot_visible: bool,
     /// `true` when [`fill_tris`] is a real 3-D surface (PolyfaceMesh /
@@ -528,6 +844,16 @@ impl WireModel {
     pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
     /// Rollover (hover) highlight — orange, distinct from the blue selection.
     pub const HOVER: [f32; 4] = [0.95, 0.55, 0.10, 1.0];
+
+    /// Drawn underlay content: shown and plotted, never picked or snapped.
+    pub fn is_display_only(&self) -> bool {
+        self.snap_only && self.display_visible
+    }
+    /// A POINT's wire: the Node is its only snap; the glyph strokes are drawn
+    /// but offer no endpoints or segments to snap to.
+    pub fn is_node_marker(&self) -> bool {
+        self.key_vertices.is_empty() && matches!(self.snap_pts.as_slice(), [(_, SnapHint::Node)])
+    }
     /// Sentinel AABB that never rejects any snap query.
     pub const UNBOUNDED_AABB: [f32; 4] = [
         f32::NEG_INFINITY,
@@ -580,6 +906,7 @@ impl WireModel {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -587,6 +914,7 @@ impl WireModel {
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             text_verts: Vec::new(),
+            searchable_text: Vec::new(),
             name,
             points,
             points_low: Vec::new(),
@@ -620,10 +948,9 @@ impl WireModel {
         if let Some(marker) = &mut out.point_marker {
             marker.origin += delta.as_dvec3();
         }
-        if !out.text_verts.is_empty() {
+        {
             let (dx, dy, dz) = (delta.x as f64, delta.y as f64, delta.z as f64);
-            out.text_verts =
-                map_text_verts(&self.text_verts, |x, y, z| (x + dx, y + dy, z + dz));
+            out.map_text_layout(&|p| [p[0] + dx, p[1] + dy, p[2] + dz], 1.0, 0.0);
         }
         out.tangent_geoms = self
             .tangent_geoms
@@ -633,18 +960,38 @@ impl WireModel {
         out
     }
 
+    /// Return a preview clone with every point mapped through `map` (an
+    /// INSERT-style placement: per-axis scale, rotation, translation).
+    /// Tangent geometry is dropped; a preview is not snapped to.
+    pub fn mapped(&self, map: impl Fn(glam::DVec3) -> glam::DVec3) -> Self {
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        map_points(&mut out.points, &mut out.points_low, &map);
+        if let Some(marker) = &mut out.point_marker {
+            marker.origin = map(marker.origin);
+        }
+        if !out.text_verts.is_empty() {
+            out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
+                let p = map(glam::DVec3::new(x, y, z));
+                (p.x, p.y, p.z)
+            });
+        }
+        // Preview-only clone: searchable export runs are rebuilt from source
+        // geometry, never carried on a rubber-band preview.
+        out.searchable_text.clear();
+        out.tangent_geoms.clear();
+        out
+    }
+
     /// Return a clone with every point rotated around `center` by `angle_rad`.
     pub fn rotated(&self, center: glam::Vec3, angle_rad: f32) -> Self {
         self.rotated_about_axis(center, glam::Vec3::Z, angle_rad)
     }
 
     /// Return a clone rotated about an arbitrary world-space axis.
-    pub fn rotated_about_axis(
-        &self,
-        center: glam::Vec3,
-        axis: glam::Vec3,
-        angle_rad: f32,
-    ) -> Self {
+    pub fn rotated_about_axis(&self, center: glam::Vec3, axis: glam::Vec3, angle_rad: f32) -> Self {
         let rotation = glam::Quat::from_axis_angle(axis.normalize_or_zero(), angle_rad);
         let (s, c) = angle_rad.sin_cos();
         let mut out = self.clone();
@@ -675,10 +1022,7 @@ impl WireModel {
             let (s, c) = (s as f64, c as f64);
             out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
                 let v = glam::DVec3::new(x, y, z) - center;
-                let mapped = center
-                    + v * c
-                    + axis.cross(v) * s
-                    + axis * axis.dot(v) * (1.0 - c);
+                let mapped = center + v * c + axis.cross(v) * s + axis * axis.dot(v) * (1.0 - c);
                 (mapped.x, mapped.y, mapped.z)
             });
         }
@@ -687,6 +1031,7 @@ impl WireModel {
             .iter()
             .map(|tg| tg.rotated(center.as_dvec3(), axis.as_dvec3(), angle_rad as f64))
             .collect();
+        out.searchable_text.clear();
         out
     }
 
@@ -726,6 +1071,7 @@ impl WireModel {
             .iter()
             .map(|tg| tg.scaled(center.as_dvec3(), factor as f64))
             .collect();
+        out.searchable_text.clear();
         out
     }
 
@@ -734,22 +1080,17 @@ impl WireModel {
     /// outside stay put. Exact for line/polyline vertices (the primary stretch
     /// targets); curve tessellation points may deform where a window edge cuts
     /// through them, matching the per-vertex nature of the operation.
-    pub fn stretched(
-    &self,
-    win_min: glam::Vec3,
-    win_max: glam::Vec3,
-    delta: glam::Vec3,
-) -> Self {
-    self.stretched_windows(&[(win_min, win_max)], delta)
-}
+    pub fn stretched(&self, win_min: glam::Vec3, win_max: glam::Vec3, delta: glam::Vec3) -> Self {
+        self.stretched_windows(&[(win_min, win_max)], delta)
+    }
 
-/// Return a clone for a multi-window STRETCH preview. A point moves exactly
-/// once when it lies inside any of the crossing windows.
-pub fn stretched_windows(
-    &self,
-    windows: &[(glam::Vec3, glam::Vec3)],
-    delta: glam::Vec3,
-) -> Self {
+    /// Return a clone for a multi-window STRETCH preview. A point moves exactly
+    /// once when it lies inside any of the crossing windows.
+    pub fn stretched_windows(
+        &self,
+        windows: &[(glam::Vec3, glam::Vec3)],
+        delta: glam::Vec3,
+    ) -> Self {
         let mut out = self.clone();
         out.name = format!("preview_{}", self.name);
         out.color = Self::CYAN;
@@ -757,10 +1098,7 @@ pub fn stretched_windows(
 
         let inside = |x: f32, y: f32| {
             windows.iter().any(|(win_min, win_max)| {
-                x >= win_min.x
-                    && x <= win_max.x
-                    && y >= win_min.y
-                    && y <= win_max.y
+                x >= win_min.x && x <= win_max.x && y >= win_min.y && y <= win_max.y
             })
         };
 
@@ -784,8 +1122,7 @@ pub fn stretched_windows(
         }
 
         if !out.text_verts.is_empty() {
-            let (dx, dy, dz) =
-                (delta.x as f64, delta.y as f64, delta.z as f64);
+            let (dx, dy, dz) = (delta.x as f64, delta.y as f64, delta.z as f64);
 
             out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
                 let inside = windows.iter().any(|(win_min, win_max)| {
@@ -802,6 +1139,7 @@ pub fn stretched_windows(
                 }
             });
         }
+        out.searchable_text.clear();
 
         out
     }
@@ -844,15 +1182,12 @@ pub fn stretched_windows(
             let p1 = p1.as_dvec3();
             let normal = plane_normal.as_dvec3();
             marker.origin -= 2.0 * normal.dot(marker.origin - p1) * normal;
-            marker.normal =
-                (marker.normal - 2.0 * normal.dot(marker.normal) * normal)
-                    .normalize_or(glam::DVec3::Z);
-            marker.axis_x =
-                (marker.axis_x - 2.0 * normal.dot(marker.axis_x) * normal)
-                    .normalize_or(glam::DVec3::X);
-            marker.axis_y =
-                (marker.axis_y - 2.0 * normal.dot(marker.axis_y) * normal)
-                    .normalize_or(glam::DVec3::Y);
+            marker.normal = (marker.normal - 2.0 * normal.dot(marker.normal) * normal)
+                .normalize_or(glam::DVec3::Z);
+            marker.axis_x = (marker.axis_x - 2.0 * normal.dot(marker.axis_x) * normal)
+                .normalize_or(glam::DVec3::X);
+            marker.axis_y = (marker.axis_y - 2.0 * normal.dot(marker.axis_y) * normal)
+                .normalize_or(glam::DVec3::Y);
         }
         // Glyph quads reflect wholesale (true mirror) — the caller only routes
         // text through here for MIRRTEXT-on; MIRRTEXT-off relocates via
@@ -871,6 +1206,7 @@ pub fn stretched_windows(
             .iter()
             .map(|tg| tg.mirrored(p1.as_dvec3(), plane_normal.as_dvec3()))
             .collect();
+        out.searchable_text.clear();
         out
     }
 
@@ -927,6 +1263,125 @@ fn map_points(
     }
 }
 
+impl WireModel {
+    /// Remap every text channel geometrically in ONE call.
+    ///
+    /// The SDF quads and the searchable runs describe the same placed text;
+    /// transforming one without the other strands invisible text away from its
+    /// outlines. Every geometric remap of text (block expand, OCS→WCS, paper
+    /// projection, preview drags) MUST go through here so the rule — origins
+    /// via `map`, cap height and advance scaled by `height_scale`, rotation
+    /// shifted by `rot_delta` — lives in exactly one place instead of being
+    /// re-implemented (and drifted) per call site.
+    pub fn map_text_layout(
+        &mut self,
+        map: &dyn Fn([f64; 3]) -> [f64; 3],
+        height_scale: f64,
+        rot_delta: f32,
+    ) {
+        if !self.text_verts.is_empty() {
+            self.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
+                let p = map([x, y, z]);
+                (p[0], p[1], p[2])
+            });
+        }
+        self.map_searchable_runs(map, height_scale, rot_delta);
+    }
+
+    /// Remap only the searchable runs (origin, cap height, advance, rotation).
+    /// Used where the quads need custom handling (per-vertex colour, per-quad
+    /// culling) but the runs must follow the same geometry — same rule as
+    /// [`Self::map_text_layout`], runs half.
+    pub fn map_searchable_runs(
+        &mut self,
+        map: &dyn Fn([f64; 3]) -> [f64; 3],
+        height_scale: f64,
+        rot_delta: f32,
+    ) {
+        map_searchable_runs(&mut self.searchable_text, map, height_scale, rot_delta);
+    }
+}
+
+/// Remap a run slice geometrically: origins via `map`, cap height and advance
+/// scaled by `height_scale`, rotation shifted by `rot_delta`. The single rule
+/// behind [`WireModel::map_text_layout`] and [`WireModel::map_searchable_runs`];
+/// batch code (block expand) maps runs it appends to shared entries through
+/// this so the geometry can never drift from the method pair.
+pub fn map_searchable_runs(
+    runs: &mut [SearchableTextRun],
+    map: &dyn Fn([f64; 3]) -> [f64; 3],
+    height_scale: f64,
+    rot_delta: f32,
+) {
+    for run in runs {
+        run.origin = map(run.origin);
+        run.height = (run.height as f64 * height_scale) as f32;
+        run.adv_width = (run.adv_width as f64 * height_scale) as f32;
+        run.rotation += rot_delta;
+    }
+}
+
+/// Overlap of a text run's rect with an axis-aligned rect (SAT on both axes).
+///
+/// The run occupies `adv_width` along its baseline direction and roughly
+/// `height` above (cap) plus a descender allowance below: corners span
+/// `[-0.3h, +1.0h]` across the baseline. `rect` is `[x0, y0, x1, y1]`.
+/// Conservative by design (it only gates searchability, never drawing).
+pub fn run_rect_overlap(
+    origin: [f64; 2],
+    rotation: f32,
+    adv_width: f64,
+    height: f64,
+    rect: [f64; 4],
+) -> bool {
+    if !adv_width.is_finite() || !height.is_finite() || adv_width <= 0.0 || height <= 0.0 {
+        return true;
+    }
+    let (s, c) = rotation.sin_cos();
+    let (dx, dy) = (c as f64, s as f64);
+    let (nx, ny) = (-dy, dx);
+    let corners = [
+        [
+            origin[0] + nx * -0.3 * height,
+            origin[1] + ny * -0.3 * height,
+        ],
+        [
+            origin[0] + dx * adv_width + nx * -0.3 * height,
+            origin[1] + dy * adv_width + ny * -0.3 * height,
+        ],
+        [
+            origin[0] + dx * adv_width + nx * height,
+            origin[1] + dy * adv_width + ny * height,
+        ],
+        [origin[0] + nx * height, origin[1] + ny * height],
+    ];
+    // Separating-axis test on the OBB axes plus world x/y.
+    for (ax, ay) in [(dx, dy), (nx, ny), (1.0, 0.0), (0.0, 1.0)] {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for p in &corners {
+            let t = p[0] * ax + p[1] * ay;
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        let (mut rlo, mut rhi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for p in [
+            [rect[0], rect[1]],
+            [rect[2], rect[1]],
+            [rect[2], rect[3]],
+            [rect[0], rect[3]],
+        ] {
+            let t = p[0] * ax + p[1] * ay;
+            rlo = rlo.min(t);
+            rhi = rhi.max(t);
+        }
+        if hi < rlo || rhi < lo {
+            return false;
+        }
+    }
+    true
+}
+
 /// Map every glyph vertex's double-single world position through `f`, re-
 /// splitting the result. The preview transforms above move `points`, but SDF
 /// glyph quads live in `text_verts` (absolute-world double-single) — so a text
@@ -963,6 +1418,7 @@ impl Default for WireModel {
         Self {
             point_marker: None,
             text_verts: Vec::new(),
+            searchable_text: Vec::new(),
             name: String::new(),
             points: Vec::new(),
             points_low: Vec::new(),
@@ -987,6 +1443,7 @@ impl Default for WireModel {
             fill_tris_low: Vec::new(),
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -1038,7 +1495,14 @@ mod tests {
         } else {
             panic!("Expected PlanarCircle");
         }
-        if let TangentGeom::Arc { center, radius, start_angle, end_angle, .. } = trans.tangent_geoms[1] {
+        if let TangentGeom::Arc {
+            center,
+            radius,
+            start_angle,
+            end_angle,
+            ..
+        } = trans.tangent_geoms[1]
+        {
             assert!((center[0] - 15.0).abs() < 1e-5);
             assert!((center[1] - 15.0).abs() < 1e-5);
             assert!((center[2] - 1.0).abs() < 1e-5);
@@ -1048,7 +1512,13 @@ mod tests {
         } else {
             panic!("Expected Arc");
         }
-        if let TangentGeom::PlanarEllipse { center, major_axis, minor_axis_ratio, .. } = trans.tangent_geoms[2] {
+        if let TangentGeom::PlanarEllipse {
+            center,
+            major_axis,
+            minor_axis_ratio,
+            ..
+        } = trans.tangent_geoms[2]
+        {
             assert!((center[0] - 15.0).abs() < 1e-5);
             assert!((center[1] - 15.0).abs() < 1e-5);
             assert!((center[2] - 1.0).abs() < 1e-5);
@@ -1078,7 +1548,13 @@ mod tests {
 
         // Test rotated
         let rot = wire.rotated(glam::Vec3::ZERO, std::f32::consts::FRAC_PI_2);
-        if let TangentGeom::PlanarCircle { center, axis_x, axis_y, .. } = rot.tangent_geoms[0] {
+        if let TangentGeom::PlanarCircle {
+            center,
+            axis_x,
+            axis_y,
+            ..
+        } = rot.tangent_geoms[0]
+        {
             assert!((center[0] - -20.0).abs() < 1e-4);
             assert!((center[1] - 10.0).abs() < 1e-4);
             assert!((axis_x[1] - 1.0).abs() < 1e-4);
@@ -1088,12 +1564,93 @@ mod tests {
         }
 
         // Test mirrored across Y=0 plane (normal = Y)
-        let mirr = wire.mirrored(glam::Vec3::new(0.0, 0.0, 0.0), glam::Vec3::new(1.0, 0.0, 0.0));
+        let mirr = wire.mirrored(
+            glam::Vec3::new(0.0, 0.0, 0.0),
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
         if let TangentGeom::PlanarCircle { center, .. } = mirr.tangent_geoms[0] {
             assert!((center[0] - 10.0).abs() < 1e-4);
             assert!((center[1] - -20.0).abs() < 1e-4);
         } else {
             panic!("Expected PlanarCircle");
         }
+    }
+
+    #[test]
+    fn map_text_layout_moves_quads_and_runs_together() {
+        let mut wire = WireModel::default();
+        wire.searchable_text.push(SearchableTextRun {
+            text: "AB".into(),
+            origin: [10.0, 20.0, 0.0],
+            height: 5.0,
+            rotation: 0.0,
+            color: WireModel::WHITE,
+            bold: false,
+            font: "txt".into(),
+            adv_width: 8.0,
+        });
+        // Uniform scale ×2 about the origin plus translation: quads and runs
+        // must agree afterwards (the lockstep this helper exists to enforce).
+        wire.map_text_layout(&|p| [p[0] * 2.0 + 1.0, p[1] * 2.0, p[2]], 2.0, 0.5);
+        let run = &wire.searchable_text[0];
+        assert_eq!(run.origin, [21.0, 40.0, 0.0]);
+        assert!((run.height - 10.0).abs() < 1e-4);
+        assert!((run.adv_width - 16.0).abs() < 1e-4);
+        assert!((run.rotation - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn run_rect_overlap_keeps_straddlers_drops_outsiders() {
+        assert!(run_rect_overlap(
+            [10.0, 20.0],
+            0.0,
+            8.0,
+            5.0,
+            [0.0, 0.0, 30.0, 30.0]
+        ));
+        assert!(!run_rect_overlap(
+            [10.0, 20.0],
+            0.0,
+            8.0,
+            5.0,
+            [100.0, 100.0, 130.0, 130.0]
+        ));
+        // A 90° run crossing the rect edge still counts (origin-only culling
+        // would have dropped it).
+        assert!(run_rect_overlap(
+            [28.0, 20.0],
+            std::f32::consts::FRAC_PI_2,
+            8.0,
+            5.0,
+            [0.0, 0.0, 30.0, 30.0]
+        ));
+        // Degenerate runs never cull (conservative: searchability only).
+        assert!(run_rect_overlap(
+            [500.0, 500.0],
+            0.0,
+            0.0,
+            5.0,
+            [0.0, 0.0, 30.0, 30.0]
+        ));
+    }
+
+    #[test]
+    fn searchable_text_cleaning_handles_mtext_traps() {
+        // `\P` is a real newline → space (runs arrive per-line).
+        assert_eq!(clean_searchable_text("A\\PB"), "A B");
+        // Decoration toggles are stripped, not searched.
+        assert_eq!(clean_searchable_text("\\LAB\\l"), "AB");
+        // DXF specials decode (incl. %%nnn codes).
+        assert_eq!(clean_searchable_text("%%d"), "°");
+        assert_eq!(clean_searchable_text("%%p"), "±");
+        assert_eq!(clean_searchable_text("%%c"), "Ø");
+        assert_eq!(clean_searchable_text("%%065"), "A");
+        // Stacking, unicode escapes and grouping braces.
+        assert_eq!(clean_searchable_text("\\S1^2;"), "1/2");
+        assert_eq!(clean_searchable_text("\\U+00E9"), "é");
+        assert_eq!(clean_searchable_text("{AB}"), "AB");
+        // Plain text survives verbatim (drawing codes stay searchable).
+        assert_eq!(clean_searchable_text("CMa-03"), "CMa-03");
+        assert_eq!(clean_searchable_text(""), "");
     }
 }

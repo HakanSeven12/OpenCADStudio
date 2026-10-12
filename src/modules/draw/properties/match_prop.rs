@@ -13,7 +13,7 @@ pub fn tool() -> ToolDef {
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -106,6 +106,7 @@ impl CadCommand for MatchPropCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["MATCHPROP"] });  // MatchPropCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MATCHPROP"]
+}); // MatchPropCommand

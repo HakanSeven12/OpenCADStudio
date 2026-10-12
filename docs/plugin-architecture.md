@@ -9,12 +9,12 @@ with Open CAD Studio. The model follows [QGIS](https://plugins.qgis.org/)-style
 extensibility: a small metadata file, a single entry point, an optional separate
 engine crate, and user-installable packages from a curated index.
 
-> **Open CAD Studio ships no built-in plugins.** Every add-on is an **external
-> dynamic library** (`cdylib`) the host loads at runtime from the user plugins
-> folder. The host source only contains the generic plugin *runtime*
+> Plugins are **out-of-process dynamic libraries** (`cdylib`). The host loads
+> first-party packages from its application resources and third-party packages
+> from the user plugins folder. Both use the generic runtime
 > (`src/plugin/`, `src/app/plugin_host.rs`) and the stable contract crate
-> (`crates/ocs_plugin_api`). Add-ons live in their own repositories and
-> **consume** that contract.
+> (`crates/ocs_plugin_api`). A user package with the same id explicitly
+> overrides a bundled package.
 
 ---
 
@@ -24,7 +24,7 @@ engine crate, and user-installable packages from a curated index.
 |------|-----------|
 | **One package, one entry point** | Manifest, ribbon tab and commands ship together in the plugin crate; no edits to the host. |
 | **Stable contract** | Authors target the semver-versioned `ocs_plugin_api` crate, not `OpenCADStudio` internals. |
-| **Out-of-tree by default** | A plugin is its own repo + crate; the host never recompiles to gain one. |
+| **Out-of-tree by default** | Third-party plugins remain independent; selected first-party plugins may build and ship with OCS. |
 | **DWG round-trip** | Domain data lives on entities as XDATA, not in an opaque side database. |
 | **Engine reuse** | A headless `std`-only engine crate can run in WASM/CLI without the CAD host. |
 
@@ -34,7 +34,7 @@ engine crate, and user-installable packages from a curated index.
   the repos they install from). Process isolation limits the blast radius of a
   buggy or malicious plugin, but it is not a security sandbox.
 - Cross-toolchain binary compatibility — see [Compatibility](#compatibility--abi).
-- Sandboxed scripting (Python/Lua); replacing the `acadrust` entity model.
+- Sandboxed scripting (Python/Lua); replacing the `opencadcodec` entity model.
 
 ---
 
@@ -56,7 +56,7 @@ engine crate, and user-installable packages from a curated index.
                                 │ pure Rust API
 ┌───────────────────────────────▼────────────────────────────────────┐
 │  Layer C — Domain engine crate (optional)                          │
-│  hydraulics / COGO / … — `std` only, no iced/acadrust              │
+│  hydraulics / COGO / … — `std` only, no iced/opencadcodec              │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -69,7 +69,7 @@ engine crate, and user-installable packages from a curated index.
 **Hard rules**
 
 1. The host (`src/plugin/`) imports no plugin code — it only knows the contract.
-2. Engine crates import neither `iced`, `acadrust`, nor `OpenCADStudio`.
+2. Engine crates import neither `iced`, `opencadcodec`, nor `OpenCADStudio`.
 3. A plugin never edits host source; it runs entirely from its own crate.
 
 ---
@@ -83,7 +83,7 @@ plugin compiles against. Two tiers:
   ribbon vocabulary — `CadModule`, `ToolDef`, `RibbonGroup`, `RibbonItem`,
   `IconKind`, `ModuleEvent`, `StyleKey`. Engine crates and tooling depend on this
   cheaply.
-- **`host` feature** (pulls `acadrust`): the runtime surface — the `HostApi`
+- **`host` feature** (pulls `opencadcodec`): the runtime surface — the `HostApi`
   trait, the `BuiltinPlugin` entry-point trait, the `export_plugin!` macro, and
   the out-of-process plugin runtime (`PluginProcess`, `runner`).
 
@@ -94,7 +94,7 @@ A plugin enables the `host` feature.
 For API v4 and later the host records two pieces of build-time metadata that
 affect whether a prebuilt plugin can safely be loaded:
 
-- `acadrust_source` — the exact git source of the `acadrust` crate the host was
+- `acadrust_source` — the exact git source of the `opencadcodec` crate the host was
   built against.
 - `rustc_version` — the output of `rustc --version` for the compiler that built
   the host.
@@ -180,9 +180,9 @@ crate-type = ["cdylib"]
 [dependencies]
 ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", features = ["host"] }
 
-# Match the host's acadrust so the loaded library is binary-compatible.
+# Match the host's opencadcodec so the loaded library is binary-compatible.
 [patch.crates-io]
-acadrust = { git = "https://github.com/HakanSeven12/acadrust", branch = "main" }
+opencadcodec = { git = "https://github.com/HakanSeven12/opencadcodec", branch = "main" }
 ```
 
 Your release build must also use the same `rustc` as the host. Record it in
@@ -243,7 +243,7 @@ command_prefixes = ["EX_"]
 xdata_apps = []
 # Both are filled at release-build time; see the CI step below.
 rustc_version = "rustc 1.98.0 (hash date)"
-acadrust_source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=<short>#<full-40-char-commit>"
+acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=<short>#<full-40-char-commit>"
 ```
 
 The full, buildable scaffold is in [`docs/plugin-template/`](plugin-template);
@@ -322,7 +322,7 @@ and `acadrust_source` placeholders from the CI run's actual toolchain and
 resolved dependency, rather than hand-editing them per release — see
 `docs/plugin-template/.github/workflows/release.yml` for the exact `sed`
 substitutions, including reading `acadrust_source` out of `Cargo.lock`'s
-resolved `acadrust` package entry (`source = "git+...#<hash>"`) since that's
+resolved `opencadcodec` package entry (`source = "git+...#<hash>"`) since that's
 the same value the host embeds at its own build time. The template's CI pins
 `rust-toolchain@stable`, which is a floating target — a real release pipeline
 should pin the exact toolchain version the host was built with (check

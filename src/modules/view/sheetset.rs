@@ -5,6 +5,6 @@ pub fn tool() -> ToolDef {
         id: "SHEETSET",
         label: "Sheet Set\nManager",
         icon: ICON,
-        event: ModuleEvent::Command("SHEETSET".to_string()),
+        event: ModuleEvent::Command("_SSMTOGGLE".to_string()),
     }
 }

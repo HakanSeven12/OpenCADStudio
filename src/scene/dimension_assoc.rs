@@ -1,15 +1,15 @@
-use acadrust::entities::Dimension;
-use acadrust::objects::{
+use codec::entities::Dimension;
+use codec::objects::{
     AssocDimensionAssociation, AssocDimensionReference, AssociativeData, AssociativeObject,
     ObjectType,
 };
-use acadrust::types::{Handle, Transform, Vector3};
-use acadrust::EntityType;
-use cadkernel::geom2d::{
+use codec::types::{Handle, Transform, Vector3};
+use codec::EntityType;
+use kernel::geom2d::{
     angle_within_arc, arc as tessellate_arc, arc_span, closest_point, Arc as KernelArc, BulgeArc,
     Circle as KernelCircle, Curve as KernelCurve, DEFAULT_SEGMENTS_PER_RADIAN,
 };
-use cadkernel::space::Plane;
+use kernel::space::Plane;
 use std::f64::consts::TAU;
 
 use crate::command::DimensionAssociationSource;
@@ -103,7 +103,7 @@ type DPoint = [f64; 3];
 
 /// The shared-contract vector (`glam`) as the codec's vector. `AcceptedSnap`
 /// speaks `glam` because the snap engine does; everything stored in a
-/// drawing speaks `acadrust`.
+/// drawing speaks `opencadcodec`.
 fn dvec3(point: glam::DVec3) -> Vector3 {
     Vector3::new(point.x, point.y, point.z)
 }
@@ -214,7 +214,7 @@ fn ocs_point(x: f64, y: f64, elevation: f64, normal: Vector3) -> Vector3 {
     Vector3::new(point.0, point.1, point.2)
 }
 
-fn circle_curve(circle: &acadrust::entities::Circle) -> KernelCurve {
+fn circle_curve(circle: &codec::entities::Circle) -> KernelCurve {
     KernelCurve::Circle(KernelCircle {
         centre: [circle.center.x, circle.center.y],
         radius: circle.radius,
@@ -807,10 +807,7 @@ fn remap_plane_offset(
 /// its first handle, so "some handle in `xrefs` exists" was true even for a
 /// reference whose actual source had been erased. Walking the chain asks the
 /// question that was meant — is the geometry still there.
-pub(crate) fn dimension_is_associative(
-    document: &acadrust::CadDocument,
-    dimension: Handle,
-) -> bool {
+pub(crate) fn dimension_is_associative(document: &codec::CadDocument, dimension: Handle) -> bool {
     document.objects.values().any(|object| {
         let ObjectType::Associative(object) = object else {
             return false;
@@ -829,7 +826,7 @@ pub(crate) fn dimension_is_associative(
 }
 
 pub(crate) fn constraint_from_associative_dimension(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     handle: Handle,
 ) -> Option<(
     super::parametric_constraints::ConstraintKind,
@@ -916,7 +913,7 @@ pub(crate) fn constraint_from_associative_dimension(
 }
 
 pub(crate) fn radial_extension_points(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     dimension: Handle,
     gap: f64,
     extension: f64,
@@ -2159,9 +2156,7 @@ impl Scene {
     }
     pub(crate) fn sync_diameter_association_angle(&mut self, dimension: Handle) {
         let chord = match self.document.get_entity(dimension) {
-            Some(EntityType::Dimension(Dimension::Diameter(diameter))) => {
-                diameter.angle_vertex
-            }
+            Some(EntityType::Dimension(Dimension::Diameter(diameter))) => diameter.angle_vertex,
             _ => return,
         };
 
@@ -2243,7 +2238,7 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::{Circle, DimensionDiameter};
+    use codec::entities::{Circle, DimensionDiameter};
 
     #[test]
     fn diameter_angle_sync_records_the_association_for_undo() {
@@ -2253,10 +2248,7 @@ mod tests {
             5.0,
         )));
         let dimension = scene.add_entity(EntityType::Dimension(Dimension::Diameter(
-            DimensionDiameter::new(
-                Vector3::new(5.0, 0.0, 0.0),
-                Vector3::new(-5.0, 0.0, 0.0),
-            ),
+            DimensionDiameter::new(Vector3::new(5.0, 0.0, 0.0), Vector3::new(-5.0, 0.0, 0.0)),
         )));
         scene.attach_dimension_association(dimension, vec![Some(circle)]);
         let association = scene
@@ -2269,7 +2261,10 @@ mod tests {
                         object.data,
                         AssociativeData::DimensionAssociation(ref association)
                             if association.dimension == dimension
-                    ) => Some(*handle),
+                    ) =>
+                {
+                    Some(*handle)
+                }
                 _ => None,
             })
             .expect("diameter association");
@@ -2307,7 +2302,7 @@ fn centroid_shift(before: [Option<Vector3>; 2], after: [Option<Vector3>; 2]) -> 
     Vector3::new(delta.x / count, delta.y / count, delta.z / count)
 }
 
-fn linear_measurement(linear: &acadrust::entities::DimensionLinear) -> f64 {
+fn linear_measurement(linear: &codec::entities::DimensionLinear) -> f64 {
     let plane = plane_from_normal(linear.first_point, linear.base.normal);
     let first = plane
         .project(dpoint(linear.first_point))
@@ -2392,11 +2387,11 @@ fn feature_reference(
 }
 
 fn persisted_measurement_scale(
-    doc: &acadrust::CadDocument,
+    doc: &codec::CadDocument,
     entity: &EntityType,
 ) -> Option<MeasurementScale> {
     use crate::entities::dim_override;
-    use acadrust::xdata::XDataValue;
+    use codec::xdata::XDataValue;
     let EntityType::Dimension(dimension) = entity else {
         return None;
     };
@@ -2433,4 +2428,58 @@ fn persisted_measurement_scale(
         user_lfac: effective / calculated,
         viewport_compensation: calculated,
     })
+}
+
+/// Drop reactors an entity holds on a dimension association it has no part
+/// in: neither the association's dimension nor geometry it references. Copies
+/// made by earlier releases kept their source's association this way, which
+/// the reference application reports as a damaged drawing. Returns how many
+/// reactors were dropped.
+pub(crate) fn drop_stray_dimension_reactors(document: &mut codec::CadDocument) -> usize {
+    let associations: rustc_hash::FxHashMap<Handle, (Handle, Vec<Handle>)> = document
+        .objects
+        .iter()
+        .filter_map(|(handle, object)| {
+            let ObjectType::Associative(object) = object else {
+                return None;
+            };
+            let AssociativeData::DimensionAssociation(association) = &object.data else {
+                return None;
+            };
+            let geometry = association
+                .references
+                .iter()
+                .flatten()
+                .flat_map(|reference| {
+                    reference
+                        .xrefs
+                        .iter()
+                        .chain(&reference.intersection_objects)
+                        .copied()
+                })
+                .collect();
+            Some((*handle, (association.dimension, geometry)))
+        })
+        .collect();
+    if associations.is_empty() {
+        return 0;
+    }
+    let mut dropped = 0;
+    let handles: Vec<Handle> = document
+        .entities()
+        .map(|entity| entity.common().handle)
+        .collect();
+    for handle in handles {
+        let Some(entity) = document.get_entity_mut(handle) else {
+            continue;
+        };
+        let reactors = &mut entity.common_mut().reactors;
+        let before = reactors.len();
+        reactors.retain(|reactor| match associations.get(reactor) {
+            Some((dimension, geometry)) => *dimension == handle || geometry.contains(&handle),
+            None => true,
+        });
+        dropped += before - reactors.len();
+    }
+    dropped
 }

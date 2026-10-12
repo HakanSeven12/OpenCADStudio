@@ -254,7 +254,7 @@ fn hatch_and_polyline_page_sizes() {
         boundary_exterior: None,
         boundary_sources: None,
         boundary_paths: None,
-        style: acadrust::entities::HatchStyleType::Normal,
+        style: codec::entities::HatchStyleType::Normal,
         pattern: HatchPattern::Pattern(vec![PatFamily {
             angle_deg: 45.0,
             x0: 0.0,

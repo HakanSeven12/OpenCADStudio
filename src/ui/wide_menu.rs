@@ -47,11 +47,10 @@ impl Widget<Message, Theme, Renderer> for WideMenu<'_> {
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let content = self.content.as_widget_mut().layout(
-            &mut tree.children[0],
-            renderer,
-            limits,
-        );
+        let content = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
 
         layout::Node::with_children(content.size(), vec![content])
     }
@@ -142,11 +141,9 @@ impl Widget<Message, Theme, Renderer> for WideMenu<'_> {
         let (state, children) = (&mut tree.state, &mut tree.children);
         let state = state.downcast_mut::<State>();
 
-        state.menu_layout = layout::Node::new(Size::new(
-            self.menu_width.max(bounds.width),
-            bounds.height,
-        ))
-        .move_to(Point::new(bounds.x, bounds.y));
+        state.menu_layout =
+            layout::Node::new(Size::new(self.menu_width.max(bounds.width), bounds.height))
+                .move_to(Point::new(bounds.x, bounds.y));
 
         self.content.as_widget_mut().overlay(
             &mut children[0],

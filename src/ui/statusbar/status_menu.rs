@@ -47,8 +47,8 @@ pub fn menu_bar<'a>(
             // therefore made the pointer vanish. `mouse_area` only fills in
             // where the content stays silent, so an enabled row keeps its own
             // pointer. (#684)
-            let content = iced::widget::mouse_area(entry.content)
-                .interaction(iced::mouse::Interaction::Idle);
+            let content =
+                iced::widget::mouse_area(entry.content).interaction(iced::mouse::Interaction::Idle);
             Item::new(content).close_on_click(entry.close_on_click)
         })
         .collect();

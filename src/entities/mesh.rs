@@ -1,12 +1,12 @@
-use acadrust::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
-use cadkernel::geom2d::{triangulate, Tolerance};
-use cadkernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
+use codec::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
 use glam::Vec3;
+use kernel::geom2d::{triangulate, Tolerance};
+use kernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro,
-    square_grip, stepper_prop as stepper,
+    edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro, square_grip,
+    stepper_prop as stepper,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -16,6 +16,15 @@ use crate::t;
 
 /// Triangulate a planar polygon through the kernel.
 pub(crate) fn triangulate_planar(poly: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    triangulate_planar_indices(poly)
+        .into_iter()
+        .flat_map(|triangle| triangle.map(|index| poly[index]))
+        .collect()
+}
+
+/// Triangles of a planar polygon as indices into `poly` — for callers that
+/// carry per-vertex data (normals) alongside the positions.
+pub(crate) fn triangulate_planar_indices(poly: &[[f64; 3]]) -> Vec<[usize; 3]> {
     if poly.len() < 3 {
         return Vec::new();
     }
@@ -51,21 +60,21 @@ pub(crate) fn triangulate_planar(poly: &[[f64; 3]]) -> Vec<[f64; 3]> {
     }
     triangles
         .into_iter()
-        .flat_map(|triangle| triangle.map(|index| poly[source[index]]))
+        .map(|triangle| triangle.map(|index| source[index]))
         .collect()
 }
 
 // ── Face3D ────────────────────────────────────────────────────────────────────
 
-fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
+fn v3(v: &codec::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
-fn dvec3(v: &acadrust::types::Vector3) -> glam::DVec3 {
+fn dvec3(v: &codec::types::Vector3) -> glam::DVec3 {
     glam::DVec3::new(v.x, v.y, v.z)
 }
 
-fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
+fn v3f32(v: &codec::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
@@ -74,8 +83,7 @@ fn face3d_fill(corners: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
     let mut ring = Vec::with_capacity(4);
     for corner in corners {
         if ring.last().is_none_or(|previous| {
-            KernelVec3::from(*previous).distance(KernelVec3::from(corner))
-                > tolerance.linear()
+            KernelVec3::from(*previous).distance(KernelVec3::from(corner)) > tolerance.linear()
         }) {
             ring.push(corner);
         }
@@ -94,7 +102,7 @@ fn face3d_fill(corners: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
 }
 
 impl RenderConvertible for Face3D {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let p0 = v3(&self.first_corner);
         let p1 = v3(&self.second_corner);
         let p2 = v3(&self.third_corner);
@@ -191,8 +199,7 @@ impl PropertyEditable for Face3D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let was_triangle = self.is_triangle();
         let vertex_count = if was_triangle { 3 } else { 4 };
-        let current = crate::scene::view::dispatch::prop_current_vertex()
-            .min(vertex_count - 1);
+        let current = crate::scene::view::dispatch::prop_current_vertex().min(vertex_count - 1);
         let corner = match current {
             0 => &self.first_corner,
             1 => &self.second_corner,
@@ -254,8 +261,7 @@ impl PropertyEditable for Face3D {
         };
         let was_triangle = self.is_triangle();
         let vertex_count = if was_triangle { 3 } else { 4 };
-        let current = crate::scene::view::dispatch::prop_current_vertex()
-            .min(vertex_count - 1);
+        let current = crate::scene::view::dispatch::prop_current_vertex().min(vertex_count - 1);
         let corner = match current {
             0 => &mut self.first_corner,
             1 => &mut self.second_corner,
@@ -276,23 +282,32 @@ impl PropertyEditable for Face3D {
 
 impl Transformable for Face3D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for corner in [
-                &mut entity.first_corner,
-                &mut entity.second_corner,
-                &mut entity.third_corner,
-                &mut entity.fourth_corner,
-            ] {
-                crate::scene::view::transform::reflect_xy_point(&mut corner.x, &mut corner.y, p1, p2);
-            }
-        });
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for corner in [
+                    &mut entity.first_corner,
+                    &mut entity.second_corner,
+                    &mut entity.third_corner,
+                    &mut entity.fourth_corner,
+                ] {
+                    crate::scene::view::transform::reflect_xy_point(
+                        &mut corner.x,
+                        &mut corner.y,
+                        p1,
+                        p2,
+                    );
+                }
+            },
+        );
     }
 }
 
 // ── PolygonMesh (N×M grid) ────────────────────────────────────────────────────
 
 fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
-    use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+    use codec::entities::polygon_mesh::SurfaceSmoothType;
 
     let m = mesh.m_vertex_count.max(0) as usize;
     let n = mesh.n_vertex_count.max(0) as usize;
@@ -354,7 +369,7 @@ fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
 }
 
 impl RenderConvertible for PolygonMesh {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let (vertices, m, n) = polygon_mesh_display(self);
         if m == 0 || n == 0 || vertices.len() < m * n {
             return None;
@@ -372,8 +387,16 @@ impl RenderConvertible for PolygonMesh {
             lines.push(b);
         };
 
-        let m_segments = if self.is_closed_m() { m } else { m.saturating_sub(1) };
-        let n_segments = if self.is_closed_n() { n } else { n.saturating_sub(1) };
+        let m_segments = if self.is_closed_m() {
+            m
+        } else {
+            m.saturating_sub(1)
+        };
+        let n_segments = if self.is_closed_n() {
+            n
+        } else {
+            n.saturating_sub(1)
+        };
         for row in 0..m {
             for column in 0..n_segments {
                 add_segment(row * n + column, row * n + (column + 1) % n);
@@ -439,7 +462,7 @@ impl Grippable for PolygonMesh {
 
 impl PropertyEditable for PolygonMesh {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+        use codec::entities::polygon_mesh::SurfaceSmoothType;
 
         let smooth = match self.smooth_type {
             SurfaceSmoothType::NoSmooth => "None",
@@ -448,8 +471,8 @@ impl PropertyEditable for PolygonMesh {
             SurfaceSmoothType::Bezier => "Bezier",
         };
         let vertex_count = self.vertices.len();
-        let current = crate::scene::view::dispatch::prop_current_vertex()
-            .min(vertex_count.saturating_sub(1));
+        let current =
+            crate::scene::view::dispatch::prop_current_vertex().min(vertex_count.saturating_sub(1));
         let vertex = self.vertices.get(current);
         let current_vertex = if vertex_count == 0 { 0 } else { current + 1 };
         vec![
@@ -461,15 +484,18 @@ impl PropertyEditable for PolygonMesh {
                         "pm_current_vertex",
                         current_vertex as f64,
                     ),
-                    edit(t!("Vertex X").as_ref(),
+                    edit(
+                        t!("Vertex X").as_ref(),
                         "pm_vx",
                         vertex.map_or(0.0, |vertex| vertex.location.x),
                     ),
-                    edit(t!("Vertex Y").as_ref(),
+                    edit(
+                        t!("Vertex Y").as_ref(),
                         "pm_vy",
                         vertex.map_or(0.0, |vertex| vertex.location.y),
                     ),
-                    edit(t!("Vertex Z").as_ref(),
+                    edit(
+                        t!("Vertex Z").as_ref(),
                         "pm_vz",
                         vertex.map_or(0.0, |vertex| vertex.location.z),
                     ),
@@ -499,8 +525,16 @@ impl PropertyEditable for PolygonMesh {
                         "pm_smooth_n",
                         self.n_smooth_density as f64,
                     ),
-                    ro(t!("M vertex count").as_ref(), "pm_m", self.m_vertex_count.to_string()),
-                    ro(t!("N vertex count").as_ref(), "pm_n", self.n_vertex_count.to_string()),
+                    ro(
+                        t!("M vertex count").as_ref(),
+                        "pm_m",
+                        self.m_vertex_count.to_string(),
+                    ),
+                    ro(
+                        t!("N vertex count").as_ref(),
+                        "pm_n",
+                        self.n_vertex_count.to_string(),
+                    ),
                 ],
             },
             PropSection {
@@ -523,18 +557,14 @@ impl PropertyEditable for PolygonMesh {
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        use acadrust::entities::polygon_mesh::{PolygonMeshFlags, SurfaceSmoothType};
+        use codec::entities::polygon_mesh::{PolygonMeshFlags, SurfaceSmoothType};
 
         let bool_value = |current: bool| {
             if value == "toggle" {
                 Some(!current)
-            } else if value.eq_ignore_ascii_case("true")
-                || value.eq_ignore_ascii_case("yes")
-            {
+            } else if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes") {
                 Some(true)
-            } else if value.eq_ignore_ascii_case("false")
-                || value.eq_ignore_ascii_case("no")
-            {
+            } else if value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("no") {
                 Some(false)
             } else {
                 None
@@ -601,23 +631,27 @@ impl PropertyEditable for PolygonMesh {
 
 impl Transformable for PolygonMesh {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for v in &mut entity.vertices {
-                crate::scene::view::transform::reflect_xy_point(
-                    &mut v.location.x,
-                    &mut v.location.y,
-                    p1,
-                    p2,
-                );
-            }
-        });
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for v in &mut entity.vertices {
+                    crate::scene::view::transform::reflect_xy_point(
+                        &mut v.location.x,
+                        &mut v.location.y,
+                        p1,
+                        p2,
+                    );
+                }
+            },
+        );
     }
 }
 
 // ── PolyfaceMesh (arbitrary faces with 1-based vertex indices) ────────────────
 
 impl RenderConvertible for PolyfaceMesh {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() || self.faces.is_empty() {
             return None;
         }
@@ -668,10 +702,10 @@ impl Grippable for PolyfaceMesh {
 impl PropertyEditable for PolyfaceMesh {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let smooth = match self.smooth_surface {
-            acadrust::entities::PolyfaceSmoothType::None => "None",
-            acadrust::entities::PolyfaceSmoothType::Quadratic => "Quadratic",
-            acadrust::entities::PolyfaceSmoothType::Cubic => "Cubic",
-            acadrust::entities::PolyfaceSmoothType::Bezier => "Bezier",
+            codec::entities::PolyfaceSmoothType::None => "None",
+            codec::entities::PolyfaceSmoothType::Quadratic => "Quadratic",
+            codec::entities::PolyfaceSmoothType::Cubic => "Cubic",
+            codec::entities::PolyfaceSmoothType::Bezier => "Bezier",
         };
         let first = self.vertices.first();
         vec![
@@ -679,17 +713,26 @@ impl PropertyEditable for PolyfaceMesh {
                 title: t!("Geometry").into_owned(),
                 props: vec![
                     ro(t!("Vertex").as_ref(), "pfm_vertex", String::new()),
-                    ro(t!("Vertex X").as_ref(),
+                    ro(
+                        t!("Vertex X").as_ref(),
                         "pfm_vx",
-                        first.map(|v| format!("{:.4}", v.location.x)).unwrap_or_default(),
+                        first
+                            .map(|v| format!("{:.4}", v.location.x))
+                            .unwrap_or_default(),
                     ),
-                    ro(t!("Vertex Y").as_ref(),
+                    ro(
+                        t!("Vertex Y").as_ref(),
                         "pfm_vy",
-                        first.map(|v| format!("{:.4}", v.location.y)).unwrap_or_default(),
+                        first
+                            .map(|v| format!("{:.4}", v.location.y))
+                            .unwrap_or_default(),
                     ),
-                    ro(t!("Vertex Z").as_ref(),
+                    ro(
+                        t!("Vertex Z").as_ref(),
                         "pfm_vz",
-                        first.map(|v| format!("{:.4}", v.location.z)).unwrap_or_default(),
+                        first
+                            .map(|v| format!("{:.4}", v.location.z))
+                            .unwrap_or_default(),
                     ),
                     // Polyface meshes store an explicit vertex/face list rather
                     // than an M×N grid, so the grid-only rows are not applicable.
@@ -699,8 +742,16 @@ impl PropertyEditable for PolyfaceMesh {
                     ro(t!("N closed").as_ref(), "pfm_closed_n", String::new()),
                     ro(t!("M density").as_ref(), "pfm_density_m", String::new()),
                     ro(t!("N density").as_ref(), "pfm_density_n", String::new()),
-                    ro(t!("Vertex count").as_ref(), "pfm_v", self.vertices.len().to_string()),
-                    ro(t!("Face count").as_ref(), "pfm_f", self.faces.len().to_string()),
+                    ro(
+                        t!("Vertex count").as_ref(),
+                        "pfm_v",
+                        self.vertices.len().to_string(),
+                    ),
+                    ro(
+                        t!("Face count").as_ref(),
+                        "pfm_f",
+                        self.faces.len().to_string(),
+                    ),
                 ],
             },
             PropSection {
@@ -715,16 +766,20 @@ impl PropertyEditable for PolyfaceMesh {
 
 impl Transformable for PolyfaceMesh {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for v in &mut entity.vertices {
-                crate::scene::view::transform::reflect_xy_point(
-                    &mut v.location.x,
-                    &mut v.location.y,
-                    p1,
-                    p2,
-                );
-            }
-        });
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for v in &mut entity.vertices {
+                    crate::scene::view::transform::reflect_xy_point(
+                        &mut v.location.x,
+                        &mut v.location.y,
+                        p1,
+                        p2,
+                    );
+                }
+            },
+        );
     }
 }
 
@@ -742,7 +797,11 @@ struct RefinedMesh {
 }
 
 fn edge_key(a: usize, b: usize) -> (usize, usize) {
-    if a < b { (a, b) } else { (b, a) }
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 fn add3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -850,21 +909,25 @@ fn subdivide_catmull_clark(mesh: &RefinedMesh, blend_crease: bool) -> RefinedMes
             continue;
         }
 
-        let face_average =
-            mean_points(incident_faces.iter().filter_map(|&index| face_points.get(index)));
+        let face_average = mean_points(
+            incident_faces
+                .iter()
+                .filter_map(|&index| face_points.get(index)),
+        );
         let edge_midpoints: Vec<[f64; 3]> = incident_edges
             .iter()
             .filter_map(|&(a, b)| {
                 let other = if a == vertex_index { b } else { a };
-                mesh.vertices
-                    .get(other)
-                    .map(|&p| mul3(add3(point, p), 0.5))
+                mesh.vertices.get(other).map(|&p| mul3(add3(point, p), 0.5))
             })
             .collect();
         let edge_average = mean_points(edge_midpoints.iter());
         let n = incident_faces.len() as f64;
         let smooth = mul3(
-            add3(add3(face_average, mul3(edge_average, 2.0)), mul3(point, n - 3.0)),
+            add3(
+                add3(face_average, mul3(edge_average, 2.0)),
+                mul3(point, n - 3.0),
+            ),
             1.0 / n,
         );
 
@@ -887,10 +950,9 @@ fn subdivide_catmull_clark(mesh: &RefinedMesh, blend_crease: bool) -> RefinedMes
         sharp_neighbours.sort_by(|a, b| b.0.total_cmp(&a.0));
 
         let crease_point = match sharp_neighbours.as_slice() {
-            [(_, first), (_, second), ..] => mul3(
-                add3(add3(mul3(point, 6.0), *first), *second),
-                1.0 / 8.0,
-            ),
+            [(_, first), (_, second), ..] => {
+                mul3(add3(add3(mul3(point, 6.0), *first), *second), 1.0 / 8.0)
+            }
             _ => smooth,
         };
         let corner_point = if sharp_neighbours.len() >= 3 {
@@ -898,10 +960,7 @@ fn subdivide_catmull_clark(mesh: &RefinedMesh, blend_crease: bool) -> RefinedMes
         } else {
             crease_point
         };
-        let sharpness = sharp_neighbours
-            .get(1)
-            .map(|item| item.0)
-            .unwrap_or(0.0);
+        let sharpness = sharp_neighbours.get(1).map(|item| item.0).unwrap_or(0.0);
         let amount = if blend_crease {
             sharpness.clamp(0.0, 1.0)
         } else if sharpness > 0.0 {
@@ -994,13 +1053,13 @@ fn display_mesh(mesh: &Mesh) -> RefinedMesh {
 /// Convert a closed indexed mesh entity to an exact planar-faced B-rep.
 /// Open, non-manifold, non-planar, and degenerate meshes return `None` so a
 /// modelling command can leave the source untouched.
-pub(crate) fn closed_mesh_body(entity: &acadrust::EntityType) -> Option<cadkernel::brep::Body> {
+pub(crate) fn closed_mesh_body(entity: &codec::EntityType) -> Option<kernel::brep::Body> {
     match entity {
-        acadrust::EntityType::Mesh(mesh) => {
+        codec::EntityType::Mesh(mesh) => {
             let base = base_refined_mesh(mesh);
-            cadkernel::brep::make::faceted_solid(&base.vertices, &base.faces)
+            kernel::brep::make::faceted_solid(&base.vertices, &base.faces)
         }
-        acadrust::EntityType::PolygonMesh(mesh) => {
+        codec::EntityType::PolygonMesh(mesh) => {
             if !mesh.is_closed_m() || !mesh.is_closed_n() {
                 return None;
             }
@@ -1026,9 +1085,9 @@ pub(crate) fn closed_mesh_body(entity: &acadrust::EntityType) -> Option<cadkerne
                     ]);
                 }
             }
-            cadkernel::brep::make::faceted_solid(&vertices, &faces)
+            kernel::brep::make::faceted_solid(&vertices, &faces)
         }
-        acadrust::EntityType::PolyfaceMesh(mesh) => {
+        codec::EntityType::PolyfaceMesh(mesh) => {
             let vertices = mesh
                 .vertices
                 .iter()
@@ -1046,16 +1105,13 @@ pub(crate) fn closed_mesh_body(entity: &acadrust::EntityType) -> Option<cadkerne
                     (indices.len() >= 3).then_some(indices)
                 })
                 .collect::<Vec<_>>();
-            cadkernel::brep::make::faceted_solid(&vertices, &faces)
+            kernel::brep::make::faceted_solid(&vertices, &faces)
         }
         _ => None,
     }
 }
 
-fn face_triangle_indices(
-    vertices: &[[f64; 3]],
-    faces: &[Vec<usize>],
-) -> (Vec<u32>, Vec<usize>) {
+fn face_triangle_indices(vertices: &[[f64; 3]], faces: &[Vec<usize>]) -> (Vec<u32>, Vec<usize>) {
     let mut indices = Vec::new();
     let mut triangle_faces = Vec::new();
     for (face_index, face) in faces.iter().enumerate() {
@@ -1070,7 +1126,8 @@ fn face_triangle_indices(
             let mut mapped = [0u32; 3];
             let mut valid = true;
             for corner in 0..3 {
-                let Some(local) = polygon.iter().position(|point| *point == triangle[corner]) else {
+                let Some(local) = polygon.iter().position(|point| *point == triangle[corner])
+                else {
                     valid = false;
                     break;
                 };
@@ -1191,13 +1248,13 @@ fn make_mesh_lod_set(
 /// pipeline. The retained wire entity carries snaps/grips only; fill, normals,
 /// depth, materials and face colours live in `MeshLodSet`.
 pub(crate) fn tessellate_shaded_mesh(
-    entity: &acadrust::EntityType,
+    entity: &codec::EntityType,
     color: [f32; 4],
 ) -> Option<crate::scene::model::mesh_model::MeshLodSet> {
     use std::collections::HashSet;
 
     match entity {
-        acadrust::EntityType::Mesh(mesh) => {
+        codec::EntityType::Mesh(mesh) => {
             let display = display_mesh(mesh);
             let mut edges = HashSet::new();
             for face in &display.faces {
@@ -1214,7 +1271,7 @@ pub(crate) fn tessellate_shaded_mesh(
                 &[],
             )
         }
-        acadrust::EntityType::PolygonMesh(mesh) => {
+        codec::EntityType::PolygonMesh(mesh) => {
             let (vertices, m, n) = polygon_mesh_display(mesh);
             if m == 0 || n == 0 || vertices.len() < m.saturating_mul(n) {
                 return None;
@@ -1248,17 +1305,11 @@ pub(crate) fn tessellate_shaded_mesh(
                 &[],
             )
         }
-        acadrust::EntityType::PolyfaceMesh(mesh) => {
+        codec::EntityType::PolyfaceMesh(mesh) => {
             let vertices: Vec<[f64; 3]> = mesh
                 .vertices
                 .iter()
-                .map(|vertex| {
-                    [
-                        vertex.location.x,
-                        vertex.location.y,
-                        vertex.location.z,
-                    ]
-                })
+                .map(|vertex| [vertex.location.x, vertex.location.y, vertex.location.z])
                 .collect();
             let mut faces = Vec::new();
             let mut face_colors = Vec::new();
@@ -1276,11 +1327,18 @@ pub(crate) fn tessellate_shaded_mesh(
                 }
                 for corner in 0..indices.len() {
                     if raw[corner] > 0 {
-                        edges.insert(edge_key(indices[corner], indices[(corner + 1) % indices.len()]));
+                        edges.insert(edge_key(
+                            indices[corner],
+                            indices[(corner + 1) % indices.len()],
+                        ));
                     }
                 }
                 faces.push(indices);
-                face_colors.push(face.color.as_ref().map(crate::scene::convert::tess_util::aci_to_rgba));
+                face_colors.push(
+                    face.color
+                        .as_ref()
+                        .map(crate::scene::convert::tess_util::aci_to_rgba),
+                );
             }
             make_mesh_lod_set(
                 mesh.common.handle.value().to_string(),
@@ -1296,7 +1354,7 @@ pub(crate) fn tessellate_shaded_mesh(
 }
 
 impl RenderConvertible for Mesh {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
@@ -1372,8 +1430,7 @@ impl PropertyEditable for Mesh {
                 *edge_use.entry(key).or_insert(0) += 1;
             }
         }
-        let watertight =
-            !self.faces.is_empty() && edge_use.values().all(|&c| c == 2);
+        let watertight = !self.faces.is_empty() && edge_use.values().all(|&c| c == 2);
         vec![PropSection {
             title: t!("Geometry").into_owned(),
             props: vec![
@@ -1390,10 +1447,23 @@ impl PropertyEditable for Mesh {
                         value: self.blend_crease,
                     },
                 },
-                ro(t!("Number of Faces").as_ref(), "msh_f", self.faces.len().to_string()),
-                ro(t!("Number of Vertices").as_ref(), "msh_v", self.vertices.len().to_string()),
-                ro(t!("Number of Edges").as_ref(), "msh_e", self.edges.len().to_string()),
-                ro(t!("Creased Edges").as_ref(),
+                ro(
+                    t!("Number of Faces").as_ref(),
+                    "msh_f",
+                    self.faces.len().to_string(),
+                ),
+                ro(
+                    t!("Number of Vertices").as_ref(),
+                    "msh_v",
+                    self.vertices.len().to_string(),
+                ),
+                ro(
+                    t!("Number of Edges").as_ref(),
+                    "msh_e",
+                    self.edges.len().to_string(),
+                ),
+                ro(
+                    t!("Creased Edges").as_ref(),
                     "msh_creased",
                     self.edges
                         .iter()
@@ -1401,12 +1471,18 @@ impl PropertyEditable for Mesh {
                         .count()
                         .to_string(),
                 ),
-                ro(t!("Override Option").as_ref(),
+                ro(
+                    t!("Override Option").as_ref(),
                     "msh_override",
                     self.override_option.to_string(),
                 ),
-                ro(t!("Number of Grips").as_ref(), "msh_grips", self.vertices.len().to_string()),
-                ro(t!("Watertight").as_ref(),
+                ro(
+                    t!("Number of Grips").as_ref(),
+                    "msh_grips",
+                    self.vertices.len().to_string(),
+                ),
+                ro(
+                    t!("Watertight").as_ref(),
                     "msh_watertight",
                     if watertight { "Yes" } else { "No" },
                 ),
@@ -1436,10 +1512,14 @@ impl PropertyEditable for Mesh {
 
 impl Transformable for Mesh {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for v in &mut entity.vertices {
-                crate::scene::view::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
-            }
-        });
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for v in &mut entity.vertices {
+                    crate::scene::view::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
+                }
+            },
+        );
     }
 }

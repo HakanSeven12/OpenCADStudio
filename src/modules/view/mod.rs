@@ -1,6 +1,7 @@
 // View module — viewport tools, navigation, visual styles, palettes, interface.
 
 mod cascade;
+mod count_palette;
 mod file_tabs;
 mod layout_tabs;
 pub mod limits;
@@ -9,12 +10,11 @@ mod ortho;
 mod pan;
 mod persp;
 pub mod plot_window;
-pub mod quick_print;
 mod properties_palette;
+pub mod quick_print;
 mod sheetset;
 mod tile_horiz;
 mod tile_vert;
-pub mod visual_style;
 mod tool_palettes;
 pub mod ucs_cmd;
 mod ucs_icon;
@@ -23,6 +23,7 @@ mod view_iso;
 mod view_right;
 mod view_top;
 mod viewcube;
+pub mod visual_style;
 mod vports_config;
 mod vports_join;
 mod vports_named;
@@ -120,6 +121,7 @@ impl CadModule for ViewModule {
                     tools: vec![
                         RibbonItem::LargeTool(tool_palettes::tool()),
                         RibbonItem::LargeTool(properties_palette::tool()),
+                        RibbonItem::LargeTool(count_palette::tool()),
                         RibbonItem::LargeTool(sheetset::tool()),
                     ],
                 },

@@ -1,6 +1,6 @@
-// Open CAD Studio plugin runtime. Plugins are external cdylibs loaded from the
-// user plugins folder (see `external`) and installed via the marketplace; the
-// host ships no built-in add-ons. See `docs/plugin-architecture.md`.
+// Open CAD Studio plugin runtime. Plugins are out-of-process cdylibs loaded
+// from the application bundle or user plugins folder (see `external`).
+// See `docs/plugin-architecture.md`.
 
 pub mod external;
 pub mod host;
@@ -9,8 +9,8 @@ pub mod registry;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod v4_support;
 
-pub use registry::{all_ribbon_modules, plugin_command_names, ribbon_modules_enabled};
 pub(crate) use registry::try_dispatch;
+pub use registry::{all_ribbon_modules, plugin_command_names, ribbon_modules_enabled};
 
 /// Run a plugin entry point under a panic guard so a buggy external plugin
 /// can't take down the host. Returns `None` (after logging) when the plugin
@@ -66,8 +66,8 @@ mod tests {
     #[test]
     fn swallows_panic_and_queues_error_message() {
         let _ = super::drain_errors(); // clear anything from earlier tests
-        // Silence the default panic-hook stderr noise during the test (the
-        // guard's own eprintln stays — that's the diagnostic we want).
+                                       // Silence the default panic-hook stderr noise during the test (the
+                                       // guard's own eprintln stays — that's the diagnostic we want).
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let r: Option<i32> = guard("boom", || panic!("plugin went wrong"));
@@ -77,7 +77,9 @@ mod tests {
         // loop drains it into the command line on the next tick).
         let queued = super::drain_errors();
         assert!(
-            queued.iter().any(|m| m.contains("boom") && m.contains("plugin went wrong")),
+            queued
+                .iter()
+                .any(|m| m.contains("boom") && m.contains("plugin went wrong")),
             "expected an error queued for the command line, got: {queued:?}"
         );
     }

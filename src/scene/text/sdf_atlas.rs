@@ -164,6 +164,12 @@ pub struct GlyphExport {
     pub fill_tris: Vec<[f32; 2]>,
     /// Baked with the 1.7× bold pen; the exporter widens its own pen to match.
     pub bold: bool,
+    /// The character this tile draws (for the PDF text layer / ToUnicode).
+    pub ch: char,
+    /// The TrueType face the filled outline came from, when there is one: the
+    /// PDF exporter embeds that face and draws the glyph as text instead of
+    /// filling `fill_tris`. `None` for stroke glyphs and hollow (TEXTFILL 0) ones.
+    pub source: Option<crate::scene::text::ttf_glyph::GlyphSource>,
 }
 
 /// Pack a glyph quad's `uv_min` corner into a stable hash key for the export
@@ -309,6 +315,16 @@ impl GlyphAtlas {
                 .entry(family.as_str())
                 .or_insert_with(|| Face::resolve(family));
             let Some(g) = face.glyph(*ch) else { continue };
+            // Only a filled outline is drawn as embedded-font text; a hollow
+            // (TEXTFILL 0) glyph keeps its stroked outline.
+            #[cfg(not(target_arch = "wasm32"))]
+            let source = if fill_on && !g.fill_tris.is_empty() {
+                face.glyph_source(*ch)
+            } else {
+                None
+            };
+            #[cfg(target_arch = "wasm32")]
+            let source = None;
             out.insert(
                 uv_key(entry.uv_min),
                 GlyphExport {
@@ -328,6 +344,8 @@ impl GlyphAtlas {
                     // share the centrelines, so carry the flag and let the exporter
                     // widen its own pen by the same factor.
                     bold: *bold,
+                    ch: *ch,
+                    source,
                 },
             );
         }
@@ -439,10 +457,8 @@ fn bake_glyph(g: &Glyph, pen_half: f32) -> Option<BakedTile> {
     let plane_min = [min_x - SPREAD_UNITS, min_y - SPREAD_UNITS];
     let plane_max = [max_x + SPREAD_UNITS, max_y + SPREAD_UNITS];
 
-    let w = (((plane_max[0] - plane_min[0]) * PX_PER_UNIT).ceil() as u32)
-        .clamp(1, MAX_TILE_PX);
-    let h = (((plane_max[1] - plane_min[1]) * PX_PER_UNIT).ceil() as u32)
-        .clamp(1, MAX_TILE_PX);
+    let w = (((plane_max[0] - plane_min[0]) * PX_PER_UNIT).ceil() as u32).clamp(1, MAX_TILE_PX);
+    let h = (((plane_max[1] - plane_min[1]) * PX_PER_UNIT).ceil() as u32).clamp(1, MAX_TILE_PX);
 
     let mut data = vec![0u8; (w * h) as usize];
     let inv = 1.0 / PX_PER_UNIT;
@@ -544,10 +560,10 @@ mod tests {
 
     /// Sample the SDF value at a glyph-space point of a baked tile (0..255).
     fn sample(tile: &BakedTile, gx: f32, gy: f32) -> u8 {
-        let px = (((gx - tile.plane_min[0]) * PX_PER_UNIT) as i32)
-            .clamp(0, tile.w as i32 - 1) as u32;
-        let py = (((tile.plane_max[1] - gy) * PX_PER_UNIT) as i32)
-            .clamp(0, tile.h as i32 - 1) as u32;
+        let px =
+            (((gx - tile.plane_min[0]) * PX_PER_UNIT) as i32).clamp(0, tile.w as i32 - 1) as u32;
+        let py =
+            (((tile.plane_max[1] - gy) * PX_PER_UNIT) as i32).clamp(0, tile.h as i32 - 1) as u32;
         tile.data[(py * tile.w + px) as usize]
     }
 
@@ -581,7 +597,10 @@ mod tests {
     fn filled_glyph_inside_is_high_outside_is_low() {
         let tile = bake_glyph(&filled_square(), PEN_HALF_UNITS).expect("square bakes");
         // Deep inside the fill -> well above the 0.5 (128) edge.
-        assert!(sample(&tile, 2.0, 2.0) > 200, "center should read as inside");
+        assert!(
+            sample(&tile, 2.0, 2.0) > 200,
+            "center should read as inside"
+        );
         // Well outside the fill -> below the edge.
         assert!(
             sample(&tile, -1.0, -1.0) < 60,
@@ -593,7 +612,10 @@ mod tests {
     fn stroke_glyph_on_line_is_high_off_line_is_low() {
         let tile = bake_glyph(&diagonal_stroke(), PEN_HALF_UNITS).expect("stroke bakes");
         // On the diagonal -> inside the pen band.
-        assert!(sample(&tile, 2.0, 2.0) > 128, "on-stroke should be inside band");
+        assert!(
+            sample(&tile, 2.0, 2.0) > 128,
+            "on-stroke should be inside band"
+        );
         // Off the diagonal by more than the pen half-width -> outside.
         assert!(
             sample(&tile, 3.0, 0.5) < 128,
@@ -614,8 +636,12 @@ mod tests {
     #[test]
     fn packing_places_tiles_without_overlap() {
         let mut atlas = GlyphAtlas::new(256, 256);
-        let a = atlas.pack(bake_glyph(&filled_square(), PEN_HALF_UNITS).unwrap()).unwrap();
-        let b = atlas.pack(bake_glyph(&diagonal_stroke(), PEN_HALF_UNITS).unwrap()).unwrap();
+        let a = atlas
+            .pack(bake_glyph(&filled_square(), PEN_HALF_UNITS).unwrap())
+            .unwrap();
+        let b = atlas
+            .pack(bake_glyph(&diagonal_stroke(), PEN_HALF_UNITS).unwrap())
+            .unwrap();
         assert!(atlas.is_dirty());
         // UVs are within the atlas.
         for e in [&a, &b] {
@@ -633,7 +659,9 @@ mod tests {
         // A tiny atlas cannot fit even one padded tile (wider than the atlas —
         // the width the packer does not grow).
         let mut atlas = GlyphAtlas::new(4, 4);
-        assert!(atlas.pack(bake_glyph(&filled_square(), PEN_HALF_UNITS).unwrap()).is_none());
+        assert!(atlas
+            .pack(bake_glyph(&filled_square(), PEN_HALF_UNITS).unwrap())
+            .is_none());
     }
 
     #[test]
@@ -664,7 +692,9 @@ mod tests {
     #[test]
     fn real_lff_glyph_bakes_and_packs() {
         let mut atlas = GlyphAtlas::new(512, 512);
-        let e = atlas.get_or_insert("txt", 'A', false).expect("LFF 'A' bakes");
+        let e = atlas
+            .get_or_insert("txt", 'A', false)
+            .expect("LFF 'A' bakes");
         assert!(atlas.is_dirty());
         assert!(
             e.plane_max[0] > e.plane_min[0] && e.plane_max[1] > e.plane_min[1],

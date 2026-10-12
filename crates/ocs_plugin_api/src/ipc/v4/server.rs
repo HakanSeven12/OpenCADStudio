@@ -26,7 +26,10 @@ macro_rules! vlog {
 
 /// A frame delivered from the V4 reader thread to the host main thread.
 pub enum HostIncoming {
-    Response { id: u64, payload: crate::ipc::protocol::HostResponse },
+    Response {
+        id: u64,
+        payload: crate::ipc::protocol::HostResponse,
+    },
     Request {
         id: u64,
         tab_id: Option<u64>,

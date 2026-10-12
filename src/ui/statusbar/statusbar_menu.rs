@@ -4,9 +4,9 @@ use iced::widget::{button, row, text};
 use iced::{Background, Element, Fill, Theme};
 
 use crate::app::Message;
-use crate::ui::statusbar::statusbar_config::{StatusBarConfig, StatusPill};
-use crate::ui::statusbar::status_menu::Entry;
 use crate::t;
+use crate::ui::statusbar::status_menu::Entry;
+use crate::ui::statusbar::statusbar_config::{StatusBarConfig, StatusPill};
 
 pub fn customization_entries(config: &StatusBarConfig) -> Vec<Entry<'static>> {
     StatusPill::ALL
@@ -21,10 +21,7 @@ pub fn customization_entries(config: &StatusBarConfig) -> Vec<Entry<'static>> {
         .collect()
 }
 
-pub fn layout_entries<'a>(
-    layouts: &[String],
-    current: &str,
-) -> Vec<Entry<'a>> {
+pub fn layout_entries<'a>(layouts: &[String], current: &str) -> Vec<Entry<'a>> {
     layouts
         .iter()
         .map(|name| Entry::close(layout_row(name.clone(), name == current)))
@@ -49,7 +46,11 @@ fn layout_row<'a>(name: String, is_current: bool) -> Element<'a, Message> {
         .into()
 }
 
-fn menu_row(label: std::borrow::Cow<'static, str>, checked: bool, msg: Message) -> Element<'static, Message> {
+fn menu_row(
+    label: std::borrow::Cow<'static, str>,
+    checked: bool,
+    msg: Message,
+) -> Element<'static, Message> {
     let check = crate::ui::icons::themed_check_cell(checked);
 
     let lbl = text(label).size(11);

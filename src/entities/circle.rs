@@ -1,10 +1,8 @@
-use acadrust::entities::Circle;
 use crate::t;
+use codec::entities::Circle;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{
-    center_grip, edit_prop as edit, parse_f64, square_grip,
-};
+use crate::entities::common::{center_grip, edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
@@ -129,11 +127,11 @@ fn to_render(circle: &Circle) -> RenderEntity {
 
 /// Zoom-aware render converter for EntityType::Circle.
 pub fn relative_render(
-    entity: &acadrust::EntityType,
-    _document: &acadrust::CadDocument,
+    entity: &codec::EntityType,
+    _document: &codec::CadDocument,
     wpp: Option<f32>,
 ) -> Option<RenderEntity> {
-    let acadrust::EntityType::Circle(circle) = entity else {
+    let codec::EntityType::Circle(circle) = entity else {
         return None;
     };
     Some(to_render_with_wpp(circle, wpp))
@@ -192,8 +190,7 @@ fn apply_geom_prop(circle: &mut Circle, field: &str, value: &str) {
                 "center_z" => z = v,
                 _ => {}
             }
-            let (ox, oy, oz) =
-                crate::scene::view::transform::wcs_point_to_ocs((x, y, z), normal);
+            let (ox, oy, oz) = crate::scene::view::transform::wcs_point_to_ocs((x, y, z), normal);
             circle.center.x = ox;
             circle.center.y = oy;
             circle.center.z = oz;
@@ -204,11 +201,8 @@ fn apply_geom_prop(circle: &mut Circle, field: &str, value: &str) {
         "area" if v > 0.0 => circle.radius = (v / PI).sqrt(),
         "normal_x" | "normal_y" | "normal_z" => {
             let center = circle.center_wcs();
-            let mut normal = cadkernel::space::Vec3::new(
-                circle.normal.x,
-                circle.normal.y,
-                circle.normal.z,
-            );
+            let mut normal =
+                kernel::space::Vec3::new(circle.normal.x, circle.normal.y, circle.normal.z);
             match field {
                 "normal_x" => normal.x = v,
                 "normal_y" => normal.y = v,
@@ -216,12 +210,12 @@ fn apply_geom_prop(circle: &mut Circle, field: &str, value: &str) {
                 _ => {}
             }
             if let Some(normal) = normal.normalize() {
-                circle.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                circle.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
                 let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
                     (center.x, center.y, center.z),
                     (normal.x, normal.y, normal.z),
                 );
-                circle.center = acadrust::types::Vector3::new(x, y, z);
+                circle.center = codec::types::Vector3::new(x, y, z);
             }
         }
         _ => {}
@@ -273,7 +267,7 @@ fn apply_transform(circle: &mut Circle, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Circle {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
@@ -287,10 +281,7 @@ impl crate::entities::traits::Grippable for Circle {
         apply_grip(self, grip_id, apply);
     }
 
-    fn grip_menu(
-        &self,
-        grip_id: usize,
-    ) -> Vec<crate::scene::model::object::GripMenuItem> {
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
         use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         let mut items = vec![GripMenuItem {
             label: "Stretch",
@@ -436,9 +427,18 @@ mod tests {
         let seg_0_0001 = circle_segments(r, Some(0.0001));
 
         assert!(seg_0_1 >= 48, "seg_0_1 was {seg_0_1}");
-        assert!(seg_0_01 > seg_0_1, "seg_0_01 ({seg_0_01}) <= seg_0_1 ({seg_0_1})");
-        assert!(seg_0_001 > seg_0_01, "seg_0_001 ({seg_0_001}) <= seg_0_01 ({seg_0_01})");
-        assert!(seg_0_0001 > seg_0_001, "seg_0_0001 ({seg_0_0001}) <= seg_0_001 ({seg_0_001})");
+        assert!(
+            seg_0_01 > seg_0_1,
+            "seg_0_01 ({seg_0_01}) <= seg_0_1 ({seg_0_1})"
+        );
+        assert!(
+            seg_0_001 > seg_0_01,
+            "seg_0_001 ({seg_0_001}) <= seg_0_01 ({seg_0_01})"
+        );
+        assert!(
+            seg_0_0001 > seg_0_001,
+            "seg_0_0001 ({seg_0_0001}) <= seg_0_001 ({seg_0_001})"
+        );
 
         // Extreme zoom in hits maximum cap of 4096.
         assert_eq!(circle_segments(r, Some(1e-9)), 4096);
@@ -476,7 +476,10 @@ mod tests {
         };
 
         assert_eq!(far_count, 49); // 48 segments + 1 closing vertex
-        assert!(close_count > far_count, "close_count was {close_count} vs far_count {far_count}");
+        assert!(
+            close_count > far_count,
+            "close_count was {close_count} vs far_count {far_count}"
+        );
     }
 
     #[test]

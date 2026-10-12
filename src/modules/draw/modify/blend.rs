@@ -5,13 +5,13 @@
 //! first and second derivatives reproduce the source curves' tangent and
 //! geometric curvature (G2).
 
-use acadrust::entities::{EntityCommon, Spline};
-use cadkernel::space::curve as space_curve;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use glam::DVec3;
 use crate::t;
-use cadkernel::space::NurbsCurve3;
+use codec::entities::{EntityCommon, Spline};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use glam::DVec3;
+use kernel::space::curve as space_curve;
+use kernel::space::NurbsCurve3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::entities::common::BulgeArc;
@@ -106,27 +106,15 @@ impl CadCommand for BlendCommand {
         match self.step {
             BlendStep::First => {
                 let c = self.continuity.label();
-                t!(
-                    "BLEND  Select first open curve  [Continuity=%{c}]:",
-                    c = c
-                )
-                .into_owned()
+                t!("BLEND  Select first open curve  [Continuity=%{c}]:", c = c).into_owned()
             }
             BlendStep::Continuity { .. } => {
                 let c = self.continuity.label();
-                t!(
-                    "BLEND  Enter continuity [Tangent/Curvature] <%{c}>:",
-                    c = c
-                )
-                .into_owned()
+                t!("BLEND  Enter continuity [Tangent/Curvature] <%{c}>:", c = c).into_owned()
             }
             BlendStep::Second { .. } => {
                 let c = self.continuity.label();
-                t!(
-                    "BLEND  Select second open curve  [Continuity=%{c}]:",
-                    c = c
-                )
-                .into_owned()
+                t!("BLEND  Select second open curve  [Continuity=%{c}]:", c = c).into_owned()
             }
         }
     }
@@ -447,7 +435,7 @@ fn polyline_endpoint(points: &[DVec3], click: DVec3) -> Option<EndpointFrame> {
     }
 }
 
-fn arc_endpoint(arc: &acadrust::entities::Arc, click: DVec3) -> Option<EndpointFrame> {
+fn arc_endpoint(arc: &codec::entities::Arc, click: DVec3) -> Option<EndpointFrame> {
     if arc.radius <= EPS {
         return None;
     }
@@ -479,7 +467,7 @@ fn arc_endpoint(arc: &acadrust::entities::Arc, click: DVec3) -> Option<EndpointF
     })
 }
 
-fn lw_point(poly: &acadrust::entities::LwPolyline, index: usize) -> DVec3 {
+fn lw_point(poly: &codec::entities::LwPolyline, index: usize) -> DVec3 {
     let normal = to_dvec(poly.normal).normalize_or_zero();
     let p = poly.vertices[index].location;
     ocs_to_dvec(p.x, p.y, poly.elevation, normal)
@@ -631,10 +619,7 @@ fn circumcircle_curvature(point: DVec3, next: DVec3, third: DVec3) -> DVec3 {
 /// the two the blend happens to build today, and quietly wrong the moment a
 /// third was added.
 fn sample_bezier(control_points: &[Vector3], segments: usize) -> Vec<[f64; 3]> {
-    let control: Vec<[f64; 3]> = control_points
-        .iter()
-        .map(|p| [p.x, p.y, p.z])
-        .collect();
+    let control: Vec<[f64; 3]> = control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
     space_curve::bezier_points(&control, segments)
 }
 

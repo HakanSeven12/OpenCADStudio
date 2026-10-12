@@ -16,8 +16,7 @@ use crate::ipc::v4::protocol::{HostToPluginV4, NotificationEnvelope};
 use crate::ipc::v4::server::{
     default_notify_rate_limit, run_host_reader_thread, HostIncoming, RateLimiter, V4HostShared,
 };
-use crate::process::PluginError;
-use crate::process::{request_kind, request_timeout};
+use crate::process::{request_kind, request_timeout, PluginError};
 
 type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
 
@@ -146,12 +145,7 @@ impl V4Connection {
                     payload,
                 }) => {
                     if tab_id.is_none_or(|request_tab| request_tab == host.tab_id()) {
-                        self.respond_to_plugin_request(
-                            host,
-                            rid,
-                            payload,
-                            on_start_interactive,
-                        )?;
+                        self.respond_to_plugin_request(host, rid, payload, on_start_interactive)?;
                     } else {
                         self.deferred
                             .lock()
@@ -168,9 +162,7 @@ impl V4Connection {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     self.shared.alive.store(false, Ordering::SeqCst);
-                    return Err(PluginError::Runner(
-                        "V4 reader thread disconnected".into(),
-                    ));
+                    return Err(PluginError::Runner("V4 reader thread disconnected".into()));
                 }
             }
         }
@@ -218,12 +210,7 @@ impl V4Connection {
                     payload,
                 }) => {
                     if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
-                        self.respond_to_plugin_request(
-                            host,
-                            id,
-                            payload,
-                            on_start_interactive,
-                        )?;
+                        self.respond_to_plugin_request(host, id, payload, on_start_interactive)?;
                     } else {
                         self.deferred
                             .lock()
@@ -239,9 +226,7 @@ impl V4Connection {
                 Err(mpsc::TryRecvError::Empty) => return Ok(()),
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.shared.alive.store(false, Ordering::SeqCst);
-                    return Err(PluginError::Runner(
-                        "V4 reader thread disconnected".into(),
-                    ));
+                    return Err(PluginError::Runner("V4 reader thread disconnected".into()));
                 }
             }
         }
@@ -325,7 +310,11 @@ impl V4Connection {
         while self.shared.alive.load(Ordering::SeqCst) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        let _ = self.reader_handle.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let _ = self
+            .reader_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
     }
 }
 
@@ -339,7 +328,7 @@ mod tests {
     use crate::ipc::protocol::{HostResponse, PluginRequest, PluginResponse};
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
-    use acadrust::{CadDocument, Handle};
+    use codec::{CadDocument, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, ToNsName,
@@ -387,15 +376,20 @@ mod tests {
 
     struct DummyHost {
         push_info_messages: StdMutex<Vec<String>>,
+        transactions: StdMutex<Vec<(String, Vec<codec::EntityType>)>>,
     }
     impl DummyHost {
         fn new() -> Self {
             Self {
                 push_info_messages: StdMutex::new(Vec::new()),
+                transactions: StdMutex::new(Vec::new()),
             }
         }
         fn take_push_info(&self) -> Vec<String> {
             std::mem::take(&mut *self.push_info_messages.lock().unwrap())
+        }
+        fn take_transactions(&self) -> Vec<(String, Vec<codec::EntityType>)> {
+            std::mem::take(&mut *self.transactions.lock().unwrap())
         }
     }
     impl HostApi for DummyHost {
@@ -411,7 +405,7 @@ mod tests {
         fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
             Box::new(EmptyReader)
         }
-        fn add_entity(&mut self, _entity: acadrust::EntityType) -> Handle {
+        fn add_entity(&mut self, _entity: codec::EntityType) -> Handle {
             panic!("not used")
         }
         fn bump_geometry(&mut self) {}
@@ -419,13 +413,13 @@ mod tests {
             &self,
             _handle: Handle,
             _app_name: &str,
-        ) -> Option<&acadrust::xdata::ExtendedDataRecord> {
+        ) -> Option<&codec::xdata::ExtendedDataRecord> {
             None
         }
         fn write_record(
             &mut self,
             _handle: Handle,
-            _record: acadrust::xdata::ExtendedDataRecord,
+            _record: codec::xdata::ExtendedDataRecord,
         ) -> bool {
             false
         }
@@ -433,17 +427,28 @@ mod tests {
             false
         }
         fn push_undo(&mut self, _label: &str) {}
+        fn update_entities_transaction(
+            &mut self,
+            label: &str,
+            entities: Vec<codec::EntityType>,
+        ) -> Result<(), String> {
+            self.transactions
+                .lock()
+                .unwrap()
+                .push((label.to_owned(), entities));
+            Ok(())
+        }
         fn set_dirty(&mut self) {}
         fn push_info(&mut self, msg: &str) {
-            self.push_info_messages.lock().unwrap().push(msg.to_string());
+            self.push_info_messages
+                .lock()
+                .unwrap()
+                .push(msg.to_string());
         }
         fn push_output(&mut self, _msg: &str) {}
         fn push_error(&mut self, _msg: &str) {}
         fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
-        fn plugin_state_any(
-            &self,
-            _plugin_id: &str,
-        ) -> Option<&(dyn std::any::Any + Send + Sync)> {
+        fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
             None
         }
         fn plugin_state_any_mut(
@@ -456,8 +461,8 @@ mod tests {
             &mut self,
             _plugin_id: &'static str,
             _init: &mut dyn FnMut() -> Box<dyn std::any::Any + Send + Sync>,
-        ) -> &mut (dyn std::any::Any + Send + Sync) {
-            panic!("not used")
+        ) -> Option<&mut (dyn std::any::Any + Send + Sync)> {
+            None
         }
     }
 
@@ -525,7 +530,10 @@ mod tests {
             // Read the host's V4 request and respond.
             let req = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
             match req {
-                HostToPluginV4::Request { id, payload: HostRequest::Dispatch { cmd } } => {
+                HostToPluginV4::Request {
+                    id,
+                    payload: HostRequest::Dispatch { cmd },
+                } => {
                     assert_eq!(cmd, "HELLO");
                     send(
                         &mut runner_stream,
@@ -542,7 +550,13 @@ mod tests {
 
         let mut host = DummyHost::new();
         let resp = conn
-            .call(&mut host, HostRequest::Dispatch { cmd: "HELLO".to_string() }, &mut |_| {})
+            .call(
+                &mut host,
+                HostRequest::Dispatch {
+                    cmd: "HELLO".to_string(),
+                },
+                &mut |_| {},
+            )
             .unwrap();
         assert!(matches!(resp, HostResponse::Bool(true)));
         runner.join().unwrap();
@@ -561,7 +575,10 @@ mod tests {
         let runner = thread::spawn(move || {
             let req = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
             match req {
-                HostToPluginV4::Request { id, payload: HostRequest::Dispatch { .. } } => {
+                HostToPluginV4::Request {
+                    id,
+                    payload: HostRequest::Dispatch { .. },
+                } => {
                     // Send a nested plugin request.
                     send(
                         &mut runner_stream,
@@ -575,8 +592,10 @@ mod tests {
                     // Read the response to the nested request.
                     let resp = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
                     match resp {
-                        HostToPluginV4::Response { id: rid, payload: PluginResponse::Ok }
-                            if rid == 99 => {}
+                        HostToPluginV4::Response {
+                            id: rid,
+                            payload: PluginResponse::Ok,
+                        } if rid == 99 => {}
                         other => panic!("unexpected nested response: {other:?}"),
                     }
                     // Now respond to the original dispatch.
@@ -595,11 +614,91 @@ mod tests {
 
         let mut host = DummyHost::new();
         let resp = conn
-            .call(&mut host, HostRequest::Dispatch { cmd: "NESTED".to_string() }, &mut |_| {})
+            .call(
+                &mut host,
+                HostRequest::Dispatch {
+                    cmd: "NESTED".to_string(),
+                },
+                &mut |_| {},
+            )
             .unwrap();
         assert!(matches!(resp, HostResponse::Bool(true)));
         let infos = host.take_push_info();
-        assert_eq!(infos, vec!["nested".to_string()], "push_info should be delivered to host");
+        assert_eq!(
+            infos,
+            vec!["nested".to_string()],
+            "push_info should be delivered to host"
+        );
+        runner.join().unwrap();
+        restore_test_env();
+    }
+
+    #[test]
+    fn v4_connection_routes_entity_transaction_over_nested_ipc() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        set_test_env();
+        let (host_stream, mut runner_stream) = connect_pair();
+        let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
+            Arc::new(|_, _| {});
+        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let mut point = codec::entities::Point::new();
+        point.common.handle = Handle::new(42);
+        point.location.x = 7.0;
+        let expected = codec::EntityType::Point(point);
+        let sent = expected.clone();
+
+        let runner = thread::spawn(move || {
+            let req = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
+            let HostToPluginV4::Request {
+                id,
+                payload: HostRequest::Dispatch { .. },
+            } = req
+            else {
+                panic!("unexpected host request: {req:?}");
+            };
+            send(
+                &mut runner_stream,
+                &PluginToHostV4::Request {
+                    id: 99,
+                    tab_id: Some(0),
+                    payload: PluginRequest::UpdateEntitiesTransaction {
+                        label: "Move point".into(),
+                        entities: vec![sent],
+                    },
+                },
+            )
+            .unwrap();
+            assert!(matches!(
+                recv::<HostToPluginV4>(&mut runner_stream).unwrap(),
+                HostToPluginV4::Response {
+                    id: 99,
+                    payload: PluginResponse::EntityTransactionResult(Ok(()))
+                }
+            ));
+            send(
+                &mut runner_stream,
+                &PluginToHostV4::Response {
+                    id,
+                    payload: HostResponse::Bool(true),
+                },
+            )
+            .unwrap();
+        });
+
+        let mut host = DummyHost::new();
+        assert!(matches!(
+            conn.call(
+                &mut host,
+                HostRequest::Dispatch { cmd: "MOVE".into() },
+                &mut |_| {}
+            )
+            .unwrap(),
+            HostResponse::Bool(true)
+        ));
+        assert_eq!(
+            host.take_transactions(),
+            vec![("Move point".into(), vec![expected])]
+        );
         runner.join().unwrap();
         restore_test_env();
     }
@@ -680,7 +779,11 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(200));
         let got = received.lock().unwrap().clone();
-        assert_eq!(got.len(), 1, "second notification should survive handler panic");
+        assert_eq!(
+            got.len(),
+            1,
+            "second notification should survive handler panic"
+        );
         assert_eq!(got[0].0, Some(1));
         runner.join().unwrap();
         drop(conn);
@@ -728,7 +831,10 @@ mod tests {
             count <= 3,
             "rate limiter should drop most notifications, got {count}"
         );
-        assert!(conn.is_alive(), "connection should survive rate-limited flood");
+        assert!(
+            conn.is_alive(),
+            "connection should survive rate-limited flood"
+        );
         runner.join().unwrap();
         drop(conn);
         std::env::remove_var("OCS_PLUGIN_NOTIFY_RATE_LIMIT");
@@ -761,7 +867,10 @@ mod tests {
                     assert_eq!(command_id, 1);
                     assert_eq!(source, CommandSource::Editor);
                     assert_eq!(code, "1+1");
-                    assert_eq!(tab_index, 0, "ExecuteCode should be tied to the host's tab index");
+                    assert_eq!(
+                        tab_index, 0,
+                        "ExecuteCode should be tied to the host's tab index"
+                    );
                     thread::sleep(Duration::from_millis(100));
                     send(
                         &mut runner_stream,

@@ -6,14 +6,10 @@
 //! messages instead of the StyleKind machinery.
 
 use crate::app::Message;
-use crate::ui::style::style_manager::{
-    hdivider, muted_text_style, tb_button, vsep,
-};
-use iced::widget::{
-    column, container, mouse_area, row, scrollable, text, text_input, Space,
-};
-use iced::{Background, Border, Element, Theme};
 use crate::t;
+use crate::ui::style::style_manager::{hdivider, muted_text_style, tb_button, vsep};
+use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input, Space};
+use iced::{Background, Border, Element, Theme};
 use std::borrow::Cow;
 
 /// Inline-rename text-input id, so the rename-start handler can focus it.
@@ -67,57 +63,55 @@ pub fn view_window<'a, 'b>(
         .align_y(iced::Center),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.weak.color
-        )),
+        background: Some(Background::Color(theme.palette().background.weak.color)),
         ..Default::default()
     })
     .width(sizing.width)
     .padding([5, 8]);
 
     // ── Left: scale list ──────────────────────────────────────────────────
-    let rows: Vec<Element<'_, Message>> = scales
-        .iter()
-        .map(|(name, ratio)| {
-            // The row being renamed shows an inline text field; a single click
-            // selects, a double click starts renaming.
-            if rename_active == Some(name.as_str()) {
-                return text_input("", rename_buf)
-                    .id(rename_input_id())
-                    .on_input(Message::ScaleRenameEdit)
-                    .on_submit(Message::ScaleRenameCommit)
-                    .size(11)
-                    .padding([4, 8])
-                    .width(sizing.width)
-                    .into();
-            }
-            let is_sel = name.as_str() == selected;
-            let is_cur = name.eq_ignore_ascii_case(current);
-            let check = crate::ui::icons::themed_check_cell(is_cur);
-            let label = row![
-                check,
-                text(name.clone()).size(11).width(sizing.width),
-                text(ratio.clone()).size(10).style(muted_text_style),
-            ]
-            .spacing(4)
-            .align_y(iced::Center);
-            let cell = container(label)
-                .padding([4, 8])
-                .width(sizing.width)
-                .style(move |theme: &Theme| {
-                    let pair = theme.palette().primary.strong;
-                    container::Style {
-                    background: is_sel.then_some(Background::Color(pair.color)),
-                    text_color: is_sel.then_some(pair.text),
-                    ..Default::default()
-                    }
-                });
-            mouse_area(cell)
-                .on_press(Message::ScaleManagerSelect(name.clone()))
-                .on_double_click(Message::ScaleRenameStart(name.clone()))
-                .into()
-        })
-        .collect();
+    let rows: Vec<Element<'_, Message>> =
+        scales
+            .iter()
+            .map(|(name, ratio)| {
+                // The row being renamed shows an inline text field; a single click
+                // selects, a double click starts renaming.
+                if rename_active == Some(name.as_str()) {
+                    return text_input("", rename_buf)
+                        .id(rename_input_id())
+                        .on_input(Message::ScaleRenameEdit)
+                        .on_submit(Message::ScaleRenameCommit)
+                        .size(11)
+                        .padding([4, 8])
+                        .width(sizing.width)
+                        .into();
+                }
+                let is_sel = name.as_str() == selected;
+                let is_cur = name.eq_ignore_ascii_case(current);
+                let check = crate::ui::icons::themed_check_cell(is_cur);
+                let label = row![
+                    check,
+                    text(name.clone()).size(11).width(sizing.width),
+                    text(ratio.clone()).size(10).style(muted_text_style),
+                ]
+                .spacing(4)
+                .align_y(iced::Center);
+                let cell = container(label).padding([4, 8]).width(sizing.width).style(
+                    move |theme: &Theme| {
+                        let pair = theme.palette().primary.strong;
+                        container::Style {
+                            background: is_sel.then_some(Background::Color(pair.color)),
+                            text_color: is_sel.then_some(pair.text),
+                            ..Default::default()
+                        }
+                    },
+                );
+                mouse_area(cell)
+                    .on_press(Message::ScaleManagerSelect(name.clone()))
+                    .on_double_click(Message::ScaleRenameStart(name.clone()))
+                    .into()
+            })
+            .collect();
 
     let list_panel = container(
         column![
@@ -126,13 +120,13 @@ pub fn view_window<'a, 'b>(
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
                     container::Style {
-                    background: Some(Background::Color(palette.background.weak.color)),
-                    border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
-                        radius: 3.0.into()
-                    },
-                    ..Default::default()
+                        background: Some(Background::Color(palette.background.weak.color)),
+                        border: Border {
+                            color: palette.background.neutral.color,
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
                     }
                 })
                 .width(sizing.width)
@@ -152,20 +146,22 @@ pub fn view_window<'a, 'b>(
     });
 
     // ── Right: editor (name + paper:drawing) ──────────────────────────────
-    let field =
-        |label: Cow<'static, str>, ph: Cow<'static, str>, value: &str, on: fn(String) -> Message| {
-            row![
-                text(label).size(11).style(muted_text_style).width(96),
-                text_input(ph.as_ref(), value)
-                    .on_input(on)
-                    .style(field_style)
-                    .size(12)
-                    .padding([5, 8])
-                    .width(sizing.width),
-            ]
-            .align_y(iced::Center)
-            .spacing(6)
-        };
+    let field = |label: Cow<'static, str>,
+                 ph: Cow<'static, str>,
+                 value: &str,
+                 on: fn(String) -> Message| {
+        row![
+            text(label).size(11).style(muted_text_style).width(96),
+            text_input(ph.as_ref(), value)
+                .on_input(on)
+                .style(field_style)
+                .size(12)
+                .padding([5, 8])
+                .width(sizing.width),
+        ]
+        .align_y(iced::Center)
+        .spacing(6)
+    };
 
     let editor = container(
         column![
@@ -187,9 +183,7 @@ pub fn view_window<'a, 'b>(
 
     container(column![toolbar, hdivider(sizing.width), body])
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(sizing.width)

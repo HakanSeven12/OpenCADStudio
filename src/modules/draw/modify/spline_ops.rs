@@ -1,6 +1,6 @@
 // Shared B-spline utilities for modify commands (TRIM, BREAK, OFFSET, LENGTHEN).
 //
-// The evaluation lives in cadkernel; this file converts a drawing's SPLINE
+// The evaluation lives in opencadkernel; this file converts a drawing's SPLINE
 // entity to and from it and keeps the knot-domain call shapes the commands
 // were written against.
 //
@@ -9,11 +9,11 @@
 // piece of a NURBS circle into a piece of a parabola — a change that looks
 // fine until it is measured.
 
-use acadrust::entities::Spline;
-use acadrust::types::Vector3;
-use acadrust::Handle;
-use cadkernel::geom2d::{NurbsCurve, Parameterization};
-use cadkernel::space::Plane;
+use codec::entities::Spline;
+use codec::types::Vector3;
+use codec::Handle;
+use kernel::geom2d::{NurbsCurve, Parameterization};
+use kernel::space::Plane;
 
 /// The drawing plane a spline sits on.
 ///
@@ -30,7 +30,7 @@ fn elevation(spl: &Spline) -> f64 {
 
 // ── Conversion ─────────────────────────────────────────────────────────────
 
-/// Convert an acadrust `Spline` to a kernel `NurbsCurve`, weights included.
+/// Convert an opencadcodec `Spline` to a kernel `NurbsCurve`, weights included.
 ///
 /// A SPLINE is stored one of two ways and both turn up: a control polygon the
 /// curve approaches, or fit points it must pass through with optional end
@@ -71,9 +71,7 @@ fn spline_to_nurbs_with(
     let control_points: Vec<[f64; 2]> = spl.control_points.iter().map(&point).collect();
     let weights = (!spl.weights.is_empty()).then(|| spl.weights.clone());
 
-    if let Some(curve) =
-        NurbsCurve::new(degree, control_points, spl.knots.clone(), weights)
-    {
+    if let Some(curve) = NurbsCurve::new(degree, control_points, spl.knots.clone(), weights) {
         return Some(curve);
     }
 
@@ -106,15 +104,10 @@ fn spline_to_nurbs_with(
     };
     let start_tangent = tangent(&spl.begin_tangent);
     let end_tangent = tangent(&spl.end_tangent);
-    NurbsCurve::interpolate(
-        &fit,
-        start_tangent,
-        end_tangent,
-        parameterization,
-    )
+    NurbsCurve::interpolate(&fit, start_tangent, end_tangent, parameterization)
 }
 
-/// Rebuild an acadrust `Spline` from a kernel curve.
+/// Rebuild an opencadcodec `Spline` from a kernel curve.
 ///
 /// The `template` supplies entity common data and the Z elevation; splines
 /// here are planar, so the kernel's 2D points are lifted back onto it.
@@ -163,10 +156,7 @@ pub fn spline_cut(spl: &Spline, t: f64) -> Option<(Spline, Spline)> {
     }
     let normalised = (t - start) / (end - start);
     let (left, right) = curve.split_at(normalised)?;
-    Some((
-        nurbs_to_spline(&left, spl),
-        nurbs_to_spline(&right, spl),
-    ))
+    Some((nurbs_to_spline(&left, spl), nurbs_to_spline(&right, spl)))
 }
 
 // ── Sampling ───────────────────────────────────────────────────────────────

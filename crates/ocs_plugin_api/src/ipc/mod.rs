@@ -1,6 +1,6 @@
 //! Inter-process communication layer for out-of-process plugins.
 //!
-//! Built only with the `host` feature because it needs `acadrust`-typed
+//! Built only with the `host` feature because it needs `opencadcodec`-typed
 //! messages and the plugin runner binary.
 //!
 //! Submodules:
@@ -23,13 +23,13 @@ pub mod client;
 #[cfg(feature = "host")]
 pub mod protocol;
 #[cfg(feature = "host")]
+pub mod proxy;
+#[cfg(feature = "host")]
 pub mod server;
 #[cfg(feature = "host")]
 pub mod transport;
 #[cfg(feature = "host")]
 pub mod v4;
-#[cfg(feature = "host")]
-pub mod proxy;
 
 #[cfg(all(test, feature = "host"))]
 mod tests {

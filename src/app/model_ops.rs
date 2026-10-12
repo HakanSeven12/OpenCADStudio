@@ -1,14 +1,12 @@
 // Kernel B-rep solid modelling and exact ACIS persistence.
 
-use acadrust::{
-    entities::{
-        AcisData, EntityCommon, Region, Solid3D, Surface, SurfaceData, SurfaceKind, Wire,
-    },
-    objects::SolidHistoryOperation,
+use codec::{
+    entities::{AcisData, EntityCommon, Region, Solid3D, Surface, SurfaceData, SurfaceKind, Wire},
+    objects::{SolidHistoryBoolean, SolidHistoryOperation},
     EntityType, Handle,
 };
-use cadkernel::brep::{Body, EdgeKey, FaceKey};
 use iced::Task;
+use kernel::brep::{Body, EdgeKey, FaceKey};
 use std::collections::{HashMap, HashSet};
 
 use super::Message;
@@ -59,7 +57,7 @@ struct PreparedUnion {
 
 struct SubtractGroup {
     kind: UnionEntityKind,
-    plane: Option<cadkernel::space::Plane>,
+    plane: Option<kernel::space::Plane>,
     bases: Vec<Handle>,
     cutters: Vec<Handle>,
 }
@@ -85,7 +83,7 @@ struct PreparedSlice {
 }
 
 enum ModelSliceTool {
-    Plane(cadkernel::space::Plane),
+    Plane(kernel::space::Plane),
     Surface(Body),
 }
 
@@ -93,21 +91,21 @@ impl ModelSliceTool {
     fn side(&self, point: [f64; 3]) -> Option<f64> {
         match self {
             Self::Plane(plane) => plane.distance_to(point),
-            Self::Surface(surface) => cadkernel::brep::surface_side(surface, point),
+            Self::Surface(surface) => kernel::brep::surface_side(surface, point),
         }
     }
 
-    fn split(&self, body: &Body) -> Result<Option<cadkernel::brep::PlaneSlice>, cadkernel::brep::Snag> {
+    fn split(&self, body: &Body) -> Result<Option<kernel::brep::PlaneSlice>, kernel::brep::Snag> {
         match self {
-            Self::Plane(plane) => cadkernel::brep::slice_by_plane(body, *plane),
-            Self::Surface(surface) => cadkernel::brep::slice_by_surface(body, surface),
+            Self::Plane(plane) => kernel::brep::slice_by_plane(body, *plane),
+            Self::Surface(surface) => kernel::brep::slice_by_surface(body, surface),
         }
     }
 }
 
 struct IntersectGroup {
     kind: UnionEntityKind,
-    plane: Option<cadkernel::space::Plane>,
+    plane: Option<kernel::space::Plane>,
     handles: Vec<Handle>,
 }
 
@@ -149,33 +147,28 @@ fn inherited_common(source: &EntityCommon) -> EntityCommon {
     result
 }
 
-fn union_bodies(
-    kind: UnionEntityKind,
-    bodies: Vec<Body>,
-) -> Result<Body, cadkernel::brep::Snag> {
+fn union_bodies(kind: UnionEntityKind, bodies: Vec<Body>) -> Result<Body, kernel::brep::Snag> {
     if kind == UnionEntityKind::Solid {
         let mut operands = bodies.into_iter();
-        let mut result = operands
-            .next()
-            .ok_or(cadkernel::brep::Snag::CutRefused)?;
+        let mut result = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
         for operand in operands {
             result = solid_model::boolean_result(Bool::Union, &result, &operand)?;
         }
         return Ok(result);
     }
     let references = bodies.iter().collect::<Vec<_>>();
-    let tolerance = cadkernel::brep::operation_tolerance(&references);
-    cadkernel::brep::union_planar_regions(&bodies, tolerance)
+    let tolerance = kernel::brep::operation_tolerance(&references);
+    kernel::brep::union_planar_regions(&bodies, tolerance)
 }
 
-fn planar_body_plane(body: &Body) -> Option<cadkernel::space::Plane> {
+fn planar_body_plane(body: &Body) -> Option<kernel::space::Plane> {
     let mut faces = body.face_keys();
-    let first = cadkernel::brep::planar_face_profile(body, faces.next()?)?.plane;
+    let first = kernel::brep::planar_face_profile(body, faces.next()?)?.plane;
     let first_normal = glam::DVec3::from_array(first.normal()?);
-    let tolerance = cadkernel::brep::operation_tolerance(&[body]);
+    let tolerance = kernel::brep::operation_tolerance(&[body]);
     faces
         .all(|face| {
-            let Some(profile) = cadkernel::brep::planar_face_profile(body, face) else {
+            let Some(profile) = kernel::brep::planar_face_profile(body, face) else {
                 return false;
             };
             let Some(normal) = profile.plane.normal() else {
@@ -189,7 +182,7 @@ fn planar_body_plane(body: &Body) -> Option<cadkernel::space::Plane> {
         .then_some(first)
 }
 
-fn coplanar_bodies(plane: cadkernel::space::Plane, body: &Body) -> bool {
+fn coplanar_bodies(plane: kernel::space::Plane, body: &Body) -> bool {
     let Some(other) = planar_body_plane(body) else {
         return false;
     };
@@ -199,7 +192,7 @@ fn coplanar_bodies(plane: cadkernel::space::Plane, body: &Body) -> bool {
     let Some(other_normal) = other.normal().map(glam::DVec3::from_array) else {
         return false;
     };
-    let tolerance = cadkernel::brep::operation_tolerance(&[body]);
+    let tolerance = kernel::brep::operation_tolerance(&[body]);
     one_normal.dot(other_normal).abs() >= 1.0 - 1e-9
         && plane
             .distance_to(other.origin)
@@ -208,23 +201,21 @@ fn coplanar_bodies(plane: cadkernel::space::Plane, body: &Body) -> bool {
 
 fn subtract_bodies(
     kind: UnionEntityKind,
-    plane: Option<cadkernel::space::Plane>,
+    plane: Option<kernel::space::Plane>,
     bases: Vec<Body>,
     cutters: Vec<Body>,
-) -> Result<Body, cadkernel::brep::Snag> {
+) -> Result<Body, kernel::brep::Snag> {
     if kind != UnionEntityKind::Solid && plane.is_none() {
-        return Err(cadkernel::brep::Snag::NoClosedForm);
+        return Err(kernel::brep::Snag::NoClosedForm);
     }
     if kind != UnionEntityKind::Solid && plane.is_some() {
         let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
-        let tolerance = cadkernel::brep::operation_tolerance(&references);
-        return cadkernel::brep::subtract_planar_regions(&bases, &cutters, tolerance);
+        let tolerance = kernel::brep::operation_tolerance(&references);
+        return kernel::brep::subtract_planar_regions(&bases, &cutters, tolerance);
     }
 
     let mut bases = bases.into_iter();
-    let mut result = bases
-        .next()
-        .ok_or(cadkernel::brep::Snag::CutRefused)?;
+    let mut result = bases.next().ok_or(kernel::brep::Snag::CutRefused)?;
     for base in bases {
         result = solid_model::boolean_result(Bool::Union, &result, &base)?;
     }
@@ -305,12 +296,10 @@ enum IntersectBodyOutcome {
 fn intersect_bodies(
     kind: UnionEntityKind,
     bodies: Vec<Body>,
-) -> Result<IntersectBodyOutcome, cadkernel::brep::Snag> {
+) -> Result<IntersectBodyOutcome, kernel::brep::Snag> {
     if kind == UnionEntityKind::Solid {
         let mut operands = bodies.into_iter();
-        let mut result = operands
-            .next()
-            .ok_or(cadkernel::brep::Snag::CutRefused)?;
+        let mut result = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
         for operand in operands {
             result = solid_model::boolean_result(Bool::Intersect, &result, &operand)?;
             if result.faces.is_empty() {
@@ -321,12 +310,14 @@ fn intersect_bodies(
     }
 
     let references = bodies.iter().collect::<Vec<_>>();
-    let tolerance = cadkernel::brep::operation_tolerance(&references);
-    Ok(match cadkernel::brep::intersect_planar_regions(&bodies, tolerance)? {
-        cadkernel::brep::PlanarIntersection::Area(body) => IntersectBodyOutcome::Area(body),
-        cadkernel::brep::PlanarIntersection::Touching => IntersectBodyOutcome::Touching,
-        cadkernel::brep::PlanarIntersection::Disjoint => IntersectBodyOutcome::Disjoint,
-    })
+    let tolerance = kernel::brep::operation_tolerance(&references);
+    Ok(
+        match kernel::brep::intersect_planar_regions(&bodies, tolerance)? {
+            kernel::brep::PlanarIntersection::Area(body) => IntersectBodyOutcome::Area(body),
+            kernel::brep::PlanarIntersection::Touching => IntersectBodyOutcome::Touching,
+            kernel::brep::PlanarIntersection::Disjoint => IntersectBodyOutcome::Disjoint,
+        },
+    )
 }
 
 impl super::OpenCADStudio {
@@ -364,8 +355,7 @@ impl super::OpenCADStudio {
             inner.common.plotstyle_flags = 2;
         }
         inner.wires = solid_model::edge_wires(&solid);
-        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid)
-        else {
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid) else {
             self.command_line
                 .push_error(crate::t!("The solid could not be encoded as ACIS.").as_ref());
             return Handle::NULL;
@@ -382,7 +372,13 @@ impl super::OpenCADStudio {
         let require_complete = matches!(history, SolidHistoryOperation::Loft(_));
         self.tabs[i].scene.create_solid_history(handle, history);
         if !self.tabs[i].scene.register_solid_model(handle, solid)
-            || (require_complete && self.tabs[i].scene.meshes.get(&handle).is_none_or(|mesh| !mesh.complete)) {
+            || (require_complete
+                && self.tabs[i]
+                    .scene
+                    .meshes
+                    .get(&handle)
+                    .is_none_or(|mesh| !mesh.complete))
+        {
             // A command result is not successful until it has renderable
             // geometry. Roll the new entity back so DELOBJ cannot consume a
             // visible source in exchange for an invisible result.
@@ -394,11 +390,7 @@ impl super::OpenCADStudio {
 
     /// Add an open sheet body as a persistent Surface entity and register its
     /// exact B-rep for shaded and wireframe display.
-    pub(super) fn add_surface_model(
-        &mut self,
-        entity: EntityType,
-        surface: Body,
-    ) -> Handle {
+    pub(super) fn add_surface_model(&mut self, entity: EntityType, surface: Body) -> Handle {
         self.add_surface_model_inner(entity, surface, true)
     }
 
@@ -420,11 +412,7 @@ impl super::OpenCADStudio {
         handle
     }
 
-    fn add_surface_model_preserving_style(
-        &mut self,
-        entity: EntityType,
-        surface: Body,
-    ) -> Handle {
+    fn add_surface_model_preserving_style(&mut self, entity: EntityType, surface: Body) -> Handle {
         self.add_surface_model_inner(entity, surface, false)
     }
 
@@ -442,13 +430,12 @@ impl super::OpenCADStudio {
             inner.common.plotstyle_flags = 2;
         }
         inner.wires = solid_model::edge_wires(&surface);
-        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&surface)
-        else {
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&surface) else {
             self.command_line
                 .push_error(crate::t!("The surface could not be encoded as ACIS.").as_ref());
             return Handle::NULL;
         };
-        inner.acis_data = acadrust::entities::AcisData::from_sat(&document.to_sat_string());
+        inner.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
         let handle = if apply_creation_style {
             self.commit_entity_handle(entity)
         } else {
@@ -458,9 +445,15 @@ impl super::OpenCADStudio {
             return Handle::NULL;
         };
         let require_complete = self.tabs[i].scene.document.get_entity(handle).is_some_and(|entity|
-            matches!(entity, EntityType::Surface(value) if value.kind == acadrust::entities::SurfaceKind::Lofted));
+            matches!(entity, EntityType::Surface(value) if value.kind == codec::entities::SurfaceKind::Lofted));
         if !self.tabs[i].scene.register_solid_model(handle, surface)
-            || (require_complete && self.tabs[i].scene.meshes.get(&handle).is_none_or(|mesh| !mesh.complete)) {
+            || (require_complete
+                && self.tabs[i]
+                    .scene
+                    .meshes
+                    .get(&handle)
+                    .is_none_or(|mesh| !mesh.complete))
+        {
             self.tabs[i].scene.rollback_new_entities(&[handle]);
             return Handle::NULL;
         }
@@ -655,28 +648,28 @@ impl super::OpenCADStudio {
         };
 
         self.push_undo_snapshot(i, "FILLETEDGE");
-        if self.tabs[i].scene.document.solid_history_graph(handle).is_none()
+        // A solid without history stays without one, as in the reference.
+        let has_history = self.tabs[i]
+            .scene
+            .document
+            .solid_history_graph(handle)
+            .is_some();
+        if has_history
             && !self.tabs[i]
                 .scene
-                .create_solid_history(handle, solid_history::brep_op(source))
+                .append_solid_history(handle, solid_history::fillet_op(history_edges, radius))
         {
-            self.command_line
-                .push_error(crate::t!("The edge body history could not be created.").as_ref());
-            return false;
-        }
-        if !self.tabs[i].scene.append_solid_history(
-            handle,
-            solid_history::fillet_op(history_edges, radius),
-        ) {
             self.command_line
                 .push_error(crate::t!("The fillet history could not be recorded.").as_ref());
             return false;
         }
-        let _ = self.tabs[i].scene.apply_solid_history_choice(
-            handle,
-            solid_history::PROP_HISTORY,
-            "Record",
-        );
+        if has_history {
+            let _ = self.tabs[i].scene.apply_solid_history_choice(
+                handle,
+                solid_history::PROP_HISTORY,
+                "Record",
+            );
+        }
         let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
             return false;
         };
@@ -737,39 +730,40 @@ impl super::OpenCADStudio {
             .position(|candidate| candidate == base_face)
             .and_then(|ordinal| i32::try_from(ordinal).ok())
         else {
-            self.command_line
-                .push_error(crate::t!("The selected base face no longer belongs to the body.").as_ref());
+            self.command_line.push_error(
+                crate::t!("The selected base face no longer belongs to the body.").as_ref(),
+            );
             return false;
         };
 
         self.push_undo_snapshot(i, "CHAMFEREDGE");
-        if self.tabs[i].scene.document.solid_history_graph(handle).is_none()
-            && !self.tabs[i]
-                .scene
-                .create_solid_history(handle, solid_history::brep_op(source))
+        let has_history = self.tabs[i]
+            .scene
+            .document
+            .solid_history_graph(handle)
+            .is_some();
+        if has_history
+            && !self.tabs[i].scene.append_solid_history(
+                handle,
+                solid_history::chamfer_op(
+                    history_edges,
+                    history_face,
+                    base_distance,
+                    other_distance,
+                ),
+            )
         {
-            self.command_line
-                .push_error(crate::t!("The edge body history could not be created.").as_ref());
-            return false;
-        }
-        if !self.tabs[i].scene.append_solid_history(
-            handle,
-            solid_history::chamfer_op(
-                history_edges,
-                history_face,
-                base_distance,
-                other_distance,
-            ),
-        ) {
             self.command_line
                 .push_error(crate::t!("The chamfer history could not be recorded.").as_ref());
             return false;
         }
-        let _ = self.tabs[i].scene.apply_solid_history_choice(
-            handle,
-            solid_history::PROP_HISTORY,
-            "Record",
-        );
+        if has_history {
+            let _ = self.tabs[i].scene.apply_solid_history_choice(
+                handle,
+                solid_history::PROP_HISTORY,
+                "Record",
+            );
+        }
         let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
             return false;
         };
@@ -804,9 +798,10 @@ impl super::OpenCADStudio {
         if self.reject_locked_edit(i, handle) {
             return Task::none();
         }
-        if !matches!(self.tabs[i].scene.document.get_entity(handle), Some(
-            EntityType::Solid3D(_) | EntityType::Surface(_)
-        )) {
+        if !matches!(
+            self.tabs[i].scene.document.get_entity(handle),
+            Some(EntityType::Solid3D(_) | EntityType::Surface(_))
+        ) {
             self.command_line
                 .push_error(crate::t!("Select a 3D solid or surface edge.").as_ref());
             return Task::none();
@@ -818,7 +813,7 @@ impl super::OpenCADStudio {
             return Task::none();
         };
         let result = if fillet {
-            match cadkernel::brep::fillet_edges(&body, edges, value) {
+            match kernel::brep::fillet_edges(&body, edges, value) {
                 Ok(result) => Some(result),
                 Err(error) => {
                     self.command_line
@@ -832,13 +827,7 @@ impl super::OpenCADStudio {
                     .push_error(crate::t!("CHAMFEREDGE: select a base face edge.").as_ref());
                 return Task::none();
             };
-            match cadkernel::brep::chamfer_edges(
-                &body,
-                edges,
-                base_face,
-                value,
-                other_value,
-            ) {
+            match kernel::brep::chamfer_edges(&body, edges, base_face, value, other_value) {
                 Ok(result) => Some(result),
                 Err(error) => {
                     self.command_line
@@ -917,7 +906,7 @@ impl super::OpenCADStudio {
         for action in actions {
             match *action {
                 ShellFaceAction::Remove(point) => {
-                    let Some(face) = cadkernel::brep::shell_face_at_point(&body, point.to_array())
+                    let Some(face) = kernel::brep::shell_face_at_point(&body, point.to_array())
                     else {
                         self.command_line.push_error(
                             crate::t!("A selected face could not be resolved.").as_ref(),
@@ -927,7 +916,7 @@ impl super::OpenCADStudio {
                     removed.insert(face);
                 }
                 ShellFaceAction::Add(point) => {
-                    let Some(face) = cadkernel::brep::shell_face_at_point(&body, point.to_array())
+                    let Some(face) = kernel::brep::shell_face_at_point(&body, point.to_array())
                     else {
                         self.command_line.push_error(
                             crate::t!("A selected face could not be resolved.").as_ref(),
@@ -942,36 +931,39 @@ impl super::OpenCADStudio {
         }
         let removed = removed.into_iter().collect::<Vec<_>>();
 
-        let result = match cadkernel::brep::shell(&body, &removed, distance) {
+        let result = match kernel::brep::shell(&body, &removed, distance) {
             Ok(result) => result,
-            Err(cadkernel::brep::ShellError::InvalidDistance) => {
+            Err(kernel::brep::ShellError::InvalidDistance) => {
                 self.command_line
                     .push_error(crate::t!("The shell offset distance must be nonzero.").as_ref());
                 return Task::none();
             }
-            Err(cadkernel::brep::ShellError::UnsupportedSolid) => {
+            Err(kernel::brep::ShellError::UnsupportedSolid) => {
                 self.command_line.push_error(
                     crate::t!("SHELL supports rectangular boxes, circular cylinders, and spheres.")
                         .as_ref(),
                 );
                 return Task::none();
             }
-            Err(cadkernel::brep::ShellError::UnknownFace) => {
-                self.command_line
-                    .push_error(crate::t!("A selected face does not belong to the solid.").as_ref());
+            Err(kernel::brep::ShellError::UnknownFace) => {
+                self.command_line.push_error(
+                    crate::t!("A selected face does not belong to the solid.").as_ref(),
+                );
                 return Task::none();
             }
-            Err(cadkernel::brep::ShellError::NoMaterial) => {
+            Err(kernel::brep::ShellError::NoMaterial) => {
                 self.command_line.push_error(
                     crate::t!("The offset removes all material. Use a smaller distance or add a face back.")
                         .as_ref(),
                 );
                 return Task::none();
             }
-            Err(cadkernel::brep::ShellError::Kernel(_)) => {
+            Err(kernel::brep::ShellError::Kernel(_)) => {
                 self.command_line.push_error(
-                    crate::t!("The shell could not be constructed from the selected solid and distance.")
-                        .as_ref(),
+                    crate::t!(
+                        "The shell could not be constructed from the selected solid and distance."
+                    )
+                    .as_ref(),
                 );
                 return Task::none();
             }
@@ -1017,6 +1009,32 @@ impl super::OpenCADStudio {
     }
 
     /// Intersect compatible selected solids, Regions, and coplanar Surfaces.
+    /// Before a boolean replaces `retained` with `entity`: with SOLIDHIST on,
+    /// join the histories of the solids it combined (`steps`, in the order
+    /// the result applied them) into `retained`'s and hand that history to
+    /// `entity`; otherwise drop it. True when the history was kept.
+    fn join_boolean_history(
+        &mut self,
+        retained: Handle,
+        entity: &mut EntityType,
+        steps: &[(Handle, u8)],
+        bodies: &HashMap<Handle, Body>,
+    ) -> bool {
+        let scene = &mut self.tabs[self.active_tab].scene;
+        let joined = scene.document.header.record_solid_history
+            && scene.join_boolean_histories(retained, retained, steps, bodies);
+        if !joined {
+            scene.delete_solid_history(retained);
+            return false;
+        }
+        if let (EntityType::Solid3D(entity), Some(EntityType::Solid3D(current))) =
+            (entity, scene.document.get_entity(retained))
+        {
+            entity.history_handle = current.history_handle;
+        }
+        true
+    }
+
     pub(super) fn solid_intersect(&mut self) -> Task<Message> {
         let i = self.active_tab;
         let mut handles = self.selected_intersect_handles();
@@ -1052,24 +1070,26 @@ impl super::OpenCADStudio {
                 .collect::<Vec<_>>();
             let outcome = match intersect_bodies(group.kind, operands) {
                 Ok(outcome) => outcome,
-                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                Err(kernel::brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("INTERSECT: the selected objects do not have a supported coplanar surface intersection.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::Coincident) => {
+                Err(kernel::brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("INTERSECT: the selected coincident geometry is ambiguous.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::CutRefused) => {
+                Err(kernel::brep::Snag::CutRefused) => {
                     self.command_line.push_error(
-                        crate::t!("INTERSECT: the selected topology could not be intersected safely.")
-                            .as_ref(),
+                        crate::t!(
+                            "INTERSECT: the selected topology could not be intersected safely."
+                        )
+                        .as_ref(),
                     );
                     return Task::none();
                 }
@@ -1133,7 +1153,7 @@ impl super::OpenCADStudio {
 
         if prepared.is_empty() {
             self.command_line.push_output(
-                crate::tf!(
+                crate::t!(
                     "INTERSECT: no positive-area common result; %{count} original object(s) retained.",
                     count = retained_without_change
                 )
@@ -1150,11 +1170,17 @@ impl super::OpenCADStudio {
             match group.outcome {
                 PreparedIntersectOutcome::Replace {
                     retained,
-                    entity,
+                    mut entity,
                     body,
                     display,
                 } => {
-                    self.tabs[i].scene.delete_solid_history(retained);
+                    let steps = group
+                        .handles
+                        .iter()
+                        .filter(|handle| **handle != retained)
+                        .map(|handle| (*handle, SolidHistoryBoolean::INTERSECT))
+                        .collect::<Vec<_>>();
+                    let joined = self.join_boolean_history(retained, &mut entity, &steps, &bodies);
                     if !self.tabs[i].scene.update_entity(entity) {
                         self.command_line.push_error(
                             crate::t!("INTERSECT: the retained object could not be updated.")
@@ -1163,6 +1189,7 @@ impl super::OpenCADStudio {
                         return Task::none();
                     }
                     if record_history
+                        && !joined
                         && matches!(
                             self.tabs[i].scene.document.get_entity(retained),
                             Some(EntityType::Solid3D(_))
@@ -1193,7 +1220,7 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!(
+            crate::t!(
                 "INTERSECT: created %{count} result object(s).",
                 count = results.len()
             )
@@ -1286,22 +1313,23 @@ impl super::OpenCADStudio {
                 .collect::<Vec<_>>();
             let result = match union_bodies(group.kind, bodies) {
                 Ok(result) => result,
-                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                Err(kernel::brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("UNION: the selected geometry includes an unsupported surface intersection.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::Coincident) => {
+                Err(kernel::brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("UNION: the selected coincident geometry is ambiguous.").as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::CutRefused) => {
+                Err(kernel::brep::Snag::CutRefused) => {
                     self.command_line.push_error(
-                        crate::t!("UNION: the selected topology could not be closed safely.").as_ref(),
+                        crate::t!("UNION: the selected topology could not be closed safely.")
+                            .as_ref(),
                     );
                     return Task::none();
                 }
@@ -1339,11 +1367,38 @@ impl super::OpenCADStudio {
                     let history = solid_history::brep_op(&group.body);
                     let mut entity = Solid3D::new();
                     entity.common = group.common;
-                    self.add_solid_model_preserving_style(
+                    let handle = self.add_solid_model_preserving_style(
                         EntityType::Solid3D(entity),
                         group.body,
                         history,
-                    )
+                    );
+                    // The new solid's history becomes the joined histories
+                    // of the solids it unites.
+                    let record = self.tabs[i].scene.document.header.record_solid_history;
+                    if !handle.is_null() && record {
+                        let bodies = group
+                            .handles
+                            .iter()
+                            .filter_map(|operand| {
+                                let body = self.tabs[i].scene.solid_models.get(operand)?;
+                                Some((*operand, body.clone()))
+                            })
+                            .collect::<HashMap<_, _>>();
+                        let steps = group
+                            .handles
+                            .iter()
+                            .skip(1)
+                            .map(|operand| (*operand, SolidHistoryBoolean::UNION))
+                            .collect::<Vec<_>>();
+                        let scene = &mut self.tabs[i].scene;
+                        if !scene.join_boolean_histories(handle, group.handles[0], &steps, &bodies)
+                        {
+                            if let Some(body) = scene.solid_models.get(&handle).cloned() {
+                                scene.create_solid_history(handle, solid_history::brep_op(&body));
+                            }
+                        }
+                    }
+                    handle
                 }
                 UnionEntityKind::Region => {
                     let mut entity = Region::new();
@@ -1354,7 +1409,7 @@ impl super::OpenCADStudio {
                     let mut entity = Surface::new(SurfaceKind::Generic);
                     entity.common = group.common;
                     self.add_surface_model_preserving_style(
-                        EntityType::Surface(entity),
+                        EntityType::Surface(Box::new(entity)),
                         group.body,
                     )
                 }
@@ -1375,7 +1430,11 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!("UNION: created %{count} result object(s).", count = created.len()).as_ref(),
+            crate::t!(
+                "UNION: created %{count} result object(s).",
+                count = created.len()
+            )
+            .as_ref(),
         );
         Task::none()
     }
@@ -1432,8 +1491,10 @@ impl super::OpenCADStudio {
         cutter_handles.retain(|handle| operand_bodies.contains_key(handle));
         if base_handles.is_empty() || cutter_handles.is_empty() {
             self.command_line.push_error(
-                crate::t!("SUBTRACT: select at least one base and one cutter Solid, Region, or Surface.")
-                    .as_ref(),
+                crate::t!(
+                    "SUBTRACT: select at least one base and one cutter Solid, Region, or Surface."
+                )
+                .as_ref(),
             );
             return Task::none();
         }
@@ -1537,23 +1598,24 @@ impl super::OpenCADStudio {
                 .iter()
                 .map(|handle| operand_bodies[handle].clone())
                 .collect::<Vec<_>>();
-            let result = match subtract_bodies(group.kind, group.plane, base_bodies, cutter_bodies) {
+            let result = match subtract_bodies(group.kind, group.plane, base_bodies, cutter_bodies)
+            {
                 Ok(result) => result,
-                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                Err(kernel::brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("SUBTRACT: the selected geometry includes an unsupported surface intersection.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::Coincident) => {
+                Err(kernel::brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("SUBTRACT: the selected coincident geometry is ambiguous.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::CutRefused) => {
+                Err(kernel::brep::Snag::CutRefused) => {
                     self.command_line.push_error(
                         crate::t!("SUBTRACT: the selected topology could not be cut safely.")
                             .as_ref(),
@@ -1599,15 +1661,30 @@ impl super::OpenCADStudio {
         let mut retained = Vec::new();
         let mut consumed = Vec::new();
         for group in prepared {
-            if let Some((handle, entity, body, display)) = group.result {
-                self.tabs[i].scene.delete_solid_history(handle);
+            if let Some((handle, mut entity, body, display)) = group.result {
+                let steps = group
+                    .bases
+                    .iter()
+                    .skip(1)
+                    .map(|base| (*base, SolidHistoryBoolean::UNION))
+                    .chain(
+                        group
+                            .cutters
+                            .iter()
+                            .map(|cutter| (*cutter, SolidHistoryBoolean::SUBTRACT)),
+                    )
+                    .collect::<Vec<_>>();
+                let joined =
+                    self.join_boolean_history(handle, &mut entity, &steps, &operand_bodies);
                 if !self.tabs[i].scene.update_entity(entity) {
                     self.command_line.push_error(
-                        crate::t!("SUBTRACT: the retained base object could not be updated.").as_ref(),
+                        crate::t!("SUBTRACT: the retained base object could not be updated.")
+                            .as_ref(),
                     );
                     return Task::none();
                 }
                 if record_history
+                    && !joined
                     && matches!(
                         self.tabs[i].scene.document.get_entity(handle),
                         Some(EntityType::Solid3D(_))
@@ -1634,7 +1711,7 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!(
+            crate::t!(
                 "SUBTRACT: created %{count} result object(s).",
                 count = retained.len()
             )
@@ -1649,7 +1726,7 @@ impl super::OpenCADStudio {
     pub(super) fn solid_slice(
         &mut self,
         requested: &[Handle],
-        plane: cadkernel::space::Plane,
+        plane: kernel::space::Plane,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         self.solid_slice_with_tool(requested, ModelSliceTool::Plane(plane), keep_point)
@@ -1687,14 +1764,13 @@ impl super::OpenCADStudio {
         self.tabs[i].scene.restore_solid_models(&handles);
         handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
         if handles.is_empty() {
-            self.command_line.push_error(
-                crate::t!("SLICE: select at least one solid or surface.").as_ref(),
-            );
+            self.command_line
+                .push_error(crate::t!("SLICE: select at least one solid or surface.").as_ref());
             return Task::none();
         }
 
         let keep_positive = if let Some(point) = keep_point {
-            let tolerance = cadkernel::brep::operation_tolerance(
+            let tolerance = kernel::brep::operation_tolerance(
                 &handles
                     .iter()
                     .map(|handle| &self.tabs[i].scene.solid_models[handle])
@@ -1728,21 +1804,21 @@ impl super::OpenCADStudio {
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                Err(kernel::brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("SLICE: the selected geometry has an unsupported surface intersection; no object was changed.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::Coincident) => {
+                Err(kernel::brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("SLICE: the cutting plane is coincident with source geometry; no object was changed.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(cadkernel::brep::Snag::CutRefused) => {
+                Err(kernel::brep::Snag::CutRefused) => {
                     self.command_line.push_error(
                         crate::t!("SLICE: the selected topology could not be split safely; no object was changed.")
                             .as_ref(),
@@ -1771,8 +1847,10 @@ impl super::OpenCADStudio {
                 .filter(|display| display.0.complete)
             else {
                 self.command_line.push_error(
-                    crate::t!("SLICE: a result could not be displayed completely; no object was changed.")
-                        .as_ref(),
+                    crate::t!(
+                        "SLICE: a result could not be displayed completely; no object was changed."
+                    )
+                    .as_ref(),
                 );
                 return Task::none();
             };
@@ -1782,8 +1860,10 @@ impl super::OpenCADStudio {
                         Some(entity) => entity,
                         None => {
                             self.command_line.push_error(
-                                crate::t!("SLICE: a result could not be encoded; no object was changed.")
-                                    .as_ref(),
+                                crate::t!(
+                                    "SLICE: a result could not be encoded; no object was changed."
+                                )
+                                .as_ref(),
                             );
                             return Task::none();
                         }
@@ -1823,8 +1903,10 @@ impl super::OpenCADStudio {
                 self.tabs[i].scene.rollback_new_entities(&created);
                 self.discard_last_undo_entry(i);
                 self.command_line.push_error(
-                    crate::t!("SLICE: a result could not be committed; all source objects were retained.")
-                        .as_ref(),
+                    crate::t!(
+                        "SLICE: a result could not be committed; all source objects were retained."
+                    )
+                    .as_ref(),
                 );
                 return Task::none();
             }
@@ -1867,7 +1949,7 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!(
+            crate::t!(
                 "SLICE: created %{count} result object(s).",
                 count = retained.len()
             )
@@ -1878,7 +1960,7 @@ impl super::OpenCADStudio {
 
     pub(super) fn slice_selected(
         &mut self,
-        plane: cadkernel::space::Plane,
+        plane: kernel::space::Plane,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         let handles = self.tabs[self.active_tab].scene.selected_handles_in_order();
@@ -1891,8 +1973,9 @@ impl super::OpenCADStudio {
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.len() != 2 {
-            self.command_line
-                .push_error(crate::t!("INTERFERE: select exactly two solids created this session.").as_ref());
+            self.command_line.push_error(
+                crate::t!("INTERFERE: select exactly two solids created this session.").as_ref(),
+            );
             return Task::none();
         }
         let a = self.tabs[i].scene.solid_models[&handles[0]].clone();
@@ -1907,8 +1990,10 @@ impl super::OpenCADStudio {
                 self.add_solid_model(EntityType::Solid3D(s3d), result, history);
                 self.tabs[i].dirty = true;
                 self.refresh_properties();
-                self.command_line
-                    .push_output(crate::t!("INTERFERE: created an interference solid from the overlap.").as_ref());
+                self.command_line.push_output(
+                    crate::t!("INTERFERE: created an interference solid from the overlap.")
+                        .as_ref(),
+                );
             }
             None => self
                 .command_line
@@ -1924,18 +2009,19 @@ impl super::OpenCADStudio {
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.len() != 1 {
-            self.command_line
-                .push_error(crate::t!("3DROTATE: select exactly one solid created this session.").as_ref());
+            self.command_line.push_error(
+                crate::t!("3DROTATE: select exactly one solid created this session.").as_ref(),
+            );
             return Task::none();
         }
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
         let Some(middle) = solid_model::centre(&solid) else {
-            self.command_line
-                .push_error(crate::t!("3DROTATE: could not determine the solid's extent.").as_ref());
+            self.command_line.push_error(
+                crate::t!("3DROTATE: could not determine the solid's extent.").as_ref(),
+            );
             return Task::none();
         };
-        let Some(rotated) =
-            solid_model::turned(&solid, axis, angle_deg.to_radians(), middle)
+        let Some(rotated) = solid_model::turned(&solid, axis, angle_deg.to_radians(), middle)
         else {
             self.command_line
                 .push_error(crate::t!("3DROTATE: could not turn the solid.").as_ref());
@@ -1953,10 +2039,13 @@ impl super::OpenCADStudio {
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
-        self.command_line.push_output(crate::tf!(
-            "3DROTATE: rotated {angle_deg}° about the {} axis.",
-            ["X", "Y", "Z"][axis]
-        ).as_ref());
+        self.command_line.push_output(
+            crate::tf!(
+                "3DROTATE: rotated {angle_deg}° about the {} axis.",
+                ["X", "Y", "Z"][axis]
+            )
+            .as_ref(),
+        );
         Task::none()
     }
 
@@ -1968,14 +2057,16 @@ impl super::OpenCADStudio {
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.len() != 1 {
-            self.command_line
-                .push_error(crate::t!("3DMIRROR: select exactly one solid created this session.").as_ref());
+            self.command_line.push_error(
+                crate::t!("3DMIRROR: select exactly one solid created this session.").as_ref(),
+            );
             return Task::none();
         }
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
         let Some(middle) = solid_model::centre(&solid) else {
-            self.command_line
-                .push_error(crate::t!("3DMIRROR: could not determine the solid's extent.").as_ref());
+            self.command_line.push_error(
+                crate::t!("3DMIRROR: could not determine the solid's extent.").as_ref(),
+            );
             return Task::none();
         };
         let Some(reflected) = solid_model::mirrored(&solid, axis, middle) else {
@@ -1994,10 +2085,13 @@ impl super::OpenCADStudio {
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
-        self.command_line.push_output(crate::tf!(
-            "3DMIRROR: added a mirror across the {} plane.",
-            ["X", "Y", "Z"][axis]
-        ).as_ref());
+        self.command_line.push_output(
+            crate::tf!(
+                "3DMIRROR: added a mirror across the {} plane.",
+                ["X", "Y", "Z"][axis]
+            )
+            .as_ref(),
+        );
         Task::none()
     }
 
@@ -2013,8 +2107,9 @@ impl super::OpenCADStudio {
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.len() != 1 {
-            self.command_line
-                .push_error(crate::t!("3DALIGN: select exactly one solid created this session.").as_ref());
+            self.command_line.push_error(
+                crate::t!("3DALIGN: select exactly one solid created this session.").as_ref(),
+            );
             return Task::none();
         }
         // Build a right-handed frame (origin + orthonormal axes) from 3 points.
@@ -2036,8 +2131,10 @@ impl super::OpenCADStudio {
             ))
         };
         let (Some(s), Some(d)) = (frame(src), frame(dst)) else {
-            self.command_line
-                .push_error(crate::t!("3DALIGN: each point triple must be non-coincident and non-collinear.").as_ref());
+            self.command_line.push_error(
+                crate::t!("3DALIGN: each point triple must be non-coincident and non-collinear.")
+                    .as_ref(),
+            );
             return Task::none();
         };
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
@@ -2059,8 +2156,9 @@ impl super::OpenCADStudio {
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
-        self.command_line
-            .push_output(crate::t!("3DALIGN: aligned the solid to the destination points.").as_ref());
+        self.command_line.push_output(
+            crate::t!("3DALIGN: aligned the solid to the destination points.").as_ref(),
+        );
         Task::none()
     }
 
@@ -2068,14 +2166,15 @@ impl super::OpenCADStudio {
     /// (X/Y/Z = `axis` at `value`) cuts the one selected solid, as Line
     /// entities.
     pub(super) fn solid_section(&mut self, axis: usize, value: f64) -> Task<Message> {
-        use acadrust::types::Vector3;
-        use acadrust::Line;
+        use codec::types::Vector3;
+        use codec::Line;
 
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.len() != 1 {
-            self.command_line
-                .push_error(crate::t!("SECTION: select exactly one solid created this session.").as_ref());
+            self.command_line.push_error(
+                crate::t!("SECTION: select exactly one solid created this session.").as_ref(),
+            );
             return Task::none();
         }
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
@@ -2106,11 +2205,14 @@ impl super::OpenCADStudio {
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
-        self.command_line.push_output(crate::tf!(
-            "SECTION: created {} section line(s) at {}={value}.",
-            segs.len(),
-            ["X", "Y", "Z"][axis]
-        ).as_ref());
+        self.command_line.push_output(
+            crate::tf!(
+                "SECTION: created {} section line(s) at {}={value}.",
+                segs.len(),
+                ["X", "Y", "Z"][axis]
+            )
+            .as_ref(),
+        );
         Task::none()
     }
 
@@ -2153,9 +2255,12 @@ impl super::OpenCADStudio {
             self.tabs[i].scene.select_entity(handle, false);
             self.tabs[i].dirty = true;
             self.refresh_properties();
-            self.command_line.push_output(crate::tf!(
-                "PYRAMID: created a {n}-sided pyramid (radius {radius}, height {height})."
-            ).as_ref());
+            self.command_line.push_output(
+                crate::tf!(
+                    "PYRAMID: created a {n}-sided pyramid (radius {radius}, height {height})."
+                )
+                .as_ref(),
+            );
         }
         Task::none()
     }
@@ -2165,8 +2270,8 @@ impl super::OpenCADStudio {
     /// Bézier formula (the curve provably interpolates each vertex), with a
     /// clamped piecewise-Bézier knot vector the spline renderer reads directly.
     pub(super) fn fit_spline(&mut self) -> Task<Message> {
-        use acadrust::entities::Spline;
-        use acadrust::types::Vector3;
+        use codec::entities::Spline;
+        use codec::types::Vector3;
 
         let i = self.active_tab;
         let found: Option<(Handle, Vec<[f64; 3]>)> = self.tabs[i]
@@ -2179,7 +2284,7 @@ impl super::OpenCADStudio {
                     return None;
                 };
                 let curve = crate::entities::curve::entity_curve(e)?;
-                let cadkernel::geom2d::Curve::Polyline(polyline) = &curve.curve else {
+                let kernel::geom2d::Curve::Polyline(polyline) = &curve.curve else {
                     return None;
                 };
                 Some((
@@ -2192,8 +2297,9 @@ impl super::OpenCADStudio {
                 ))
             });
         let Some((handle, fit)) = found else {
-            self.command_line
-                .push_error(crate::t!("SPLINEFIT: select a polyline to fit a spline through.").as_ref());
+            self.command_line.push_error(
+                crate::t!("SPLINEFIT: select a polyline to fit a spline through.").as_ref(),
+            );
             return Task::none();
         };
         if fit.len() < 3 {
@@ -2228,10 +2334,7 @@ impl super::OpenCADStudio {
         spl.degree = 3;
         spl.control_points = ctrl;
         spl.knots = knots;
-        spl.fit_points = fit
-            .iter()
-            .map(|q| Vector3::new(q[0], q[1], q[2]))
-            .collect();
+        spl.fit_points = fit.iter().map(|q| Vector3::new(q[0], q[1], q[2])).collect();
         // flags.rational defaults to false (non-rational) — exactly what we want.
         self.push_undo_snapshot(i, "SPLINEFIT");
         self.tabs[i].scene.erase_entities(&[handle]);
@@ -2247,8 +2350,8 @@ impl super::OpenCADStudio {
     /// Line entities, giving a flattened 2D shot of the model. Reuses the cached
     /// solid's edge wires (the same source SECTION uses).
     pub(super) fn solid_flatshot(&mut self) -> Task<Message> {
-        use acadrust::types::Vector3;
-        use acadrust::Line;
+        use codec::types::Vector3;
+        use codec::Line;
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.is_empty() {
@@ -2281,13 +2384,14 @@ impl super::OpenCADStudio {
     /// CONVTOSURFACE — convert the selected solid(s) into Surface entities,
     /// carrying the solid's edge wires (reuses the cached B-rep's edge wires).
     pub(super) fn solid_convtosurface(&mut self) -> Task<Message> {
-        use acadrust::entities::{Surface, SurfaceKind, Wire as AWire};
-        use acadrust::types::Vector3;
+        use codec::entities::{Surface, SurfaceKind, Wire as AWire};
+        use codec::types::Vector3;
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.is_empty() {
-            self.command_line
-                .push_error(crate::t!("CONVTOSURFACE: select a solid created this session.").as_ref());
+            self.command_line.push_error(
+                crate::t!("CONVTOSURFACE: select a solid created this session.").as_ref(),
+            );
             return Task::none();
         }
         let mut surfaces: Vec<Surface> = Vec::new();
@@ -2316,12 +2420,15 @@ impl super::OpenCADStudio {
         }
         let n = surfaces.len();
         for surf in surfaces {
-            self.tabs[i].scene.add_entity(EntityType::Surface(surf));
+            self.tabs[i]
+                .scene
+                .add_entity(EntityType::Surface(Box::new(surf)));
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
-        self.command_line
-            .push_output(crate::tf!("CONVTOSURFACE: converted {n} solid(s) to surface(s).").as_ref());
+        self.command_line.push_output(
+            crate::tf!("CONVTOSURFACE: converted {n} solid(s) to surface(s).").as_ref(),
+        );
         Task::none()
     }
 }

@@ -40,7 +40,7 @@ use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DET
 use windows::Win32::UI::Shell::PropertiesSystem::{IInitializeWithFile, IInitializeWithFile_Impl};
 use windows::Win32::UI::Shell::{
     IThumbnailProvider, IThumbnailProvider_Impl, SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST,
-    WTS_ALPHATYPE, WTSAT_ARGB,
+    WTSAT_ARGB, WTS_ALPHATYPE,
 };
 
 /// CLSID of this thumbnail provider (stable; used in the registry keys).
@@ -72,7 +72,8 @@ struct DwgThumbProvider {
 
 impl IInitializeWithFile_Impl for DwgThumbProvider_Impl {
     fn Initialize(&self, pszfilepath: &PCWSTR, _grfmode: u32) -> windows::core::Result<()> {
-        let path = unsafe { pszfilepath.to_string() }.map_err(|_| windows::core::Error::from(E_INVALIDARG))?;
+        let path = unsafe { pszfilepath.to_string() }
+            .map_err(|_| windows::core::Error::from(E_INVALIDARG))?;
         *self.path.borrow_mut() = Some(path);
         Ok(())
     }
@@ -85,7 +86,11 @@ impl IThumbnailProvider_Impl for DwgThumbProvider_Impl {
         phbmp: *mut HBITMAP,
         pdwalpha: *mut WTS_ALPHATYPE,
     ) -> windows::core::Result<()> {
-        let path = self.path.borrow().clone().ok_or(windows::core::Error::from(E_FAIL))?;
+        let path = self
+            .path
+            .borrow()
+            .clone()
+            .ok_or(windows::core::Error::from(E_FAIL))?;
         let mut img = dwg_thumbnailer::extract(std::path::Path::new(&path), cx.max(1))
             .ok_or(windows::core::Error::from(E_FAIL))?;
         dwg_thumbnailer::badge_dwg(&mut img); // full-width "DWG" band
@@ -248,13 +253,14 @@ fn set_value(sub: &str, name: Option<&str>, value: &str) -> windows::core::Resul
         return Err(E_FAIL.into());
     }
     let val_w = wide(value);
-    let bytes =
-        unsafe { std::slice::from_raw_parts(val_w.as_ptr() as *const u8, val_w.len() * 2) };
+    let bytes = unsafe { std::slice::from_raw_parts(val_w.as_ptr() as *const u8, val_w.len() * 2) };
     let name_w = name.map(wide);
     let rc = unsafe {
         RegSetValueExW(
             hkey,
-            name_w.as_ref().map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr())),
+            name_w
+                .as_ref()
+                .map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr())),
             0,
             REG_SZ,
             Some(bytes),

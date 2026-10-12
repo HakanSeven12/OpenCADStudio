@@ -1,8 +1,8 @@
 // Regression for #284: ZOOM Extents must ignore the ±1e6 display segments
 // that XLine/Ray tessellate into, instead of fitting the camera to them.
-use acadrust::entities::{Line, XLine};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{Line, XLine};
+use codec::types::Vector3;
+use codec::EntityType;
 use OpenCADStudio::scene::Scene;
 
 fn add_rect(scene: &mut Scene) {

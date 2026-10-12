@@ -9,21 +9,20 @@
 //   Pick two lines (line-only; arcs are not chamferable).
 //   Finds intersection, backs off dist1 along line 1 and dist2 along line 2.
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
+use codec::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline, LwVertex};
 
-// Shared plane geometry, from cadkernel via the local adapters.
+// Shared plane geometry, from opencadkernel via the local adapters.
 use super::geom;
 use super::geom::{arc_points as arc_pts, line_line as ll, normalize_angle as norm_angle};
-use cadkernel::geom2d::{
-    circle_circle_points as circle_circle_pts, fillet_between_rays, fillets_between, line_circle,
-    Arc as KernelArc, Curve as KernelCurve, Fillet as KernelFillet,
-    Line as KernelLine, Tolerance,
-};
-use acadrust::entities::EntityCommon;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use glam::DVec3;
 use crate::t;
+use codec::entities::EntityCommon;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use glam::DVec3;
+use kernel::geom2d::{
+    circle_circle_points as circle_circle_pts, fillet_between_rays, fillets_between, line_circle,
+    Arc as KernelArc, Curve as KernelCurve, Fillet as KernelFillet, Line as KernelLine, Tolerance,
+};
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -119,8 +118,7 @@ fn fillet_parallel_lines(
 
     // Unit normal to line 1. Project tangent1 perpendicularly onto line 2.
     let normal = [-u1[1], u1[0]];
-    let separation =
-        (p3[0] - tangent1[0]) * normal[0] + (p3[1] - tangent1[1]) * normal[1];
+    let separation = (p3[0] - tangent1[0]) * normal[0] + (p3[1] - tangent1[1]) * normal[1];
 
     if separation.abs() <= 1.0e-9 {
         // Coincident lines do not define a useful semicircle.
@@ -146,10 +144,7 @@ fn fillet_parallel_lines(
 
     // The semicircle must bulge away from the retained portion of line 1.
     // `other1 - tangent1` points back into the line, so negate it.
-    let keep = [
-        other1[0] - tangent1[0],
-        other1[1] - tangent1[1],
-    ];
+    let keep = [other1[0] - tangent1[0], other1[1] - tangent1[1]];
     let keep_len = (keep[0] * keep[0] + keep[1] * keep[1]).sqrt();
 
     if keep_len <= 1.0e-12 {
@@ -158,20 +153,15 @@ fn fillet_parallel_lines(
 
     let bulge_dir = [-keep[0] / keep_len, -keep[1] / keep_len];
 
-    let a1 = norm_angle(
-        (tangent1[1] - centre[1]).atan2(tangent1[0] - centre[0]),
-    );
-    let a2 = norm_angle(
-        (tangent2[1] - centre[1]).atan2(tangent2[0] - centre[0]),
-    );
+    let a1 = norm_angle((tangent1[1] - centre[1]).atan2(tangent1[0] - centre[0]));
+    let a2 = norm_angle((tangent2[1] - centre[1]).atan2(tangent2[0] - centre[0]));
 
     // Between two antipodal points there are two possible semicircles.
     // Determine which CCW orientation bulges toward the selected end.
     let midpoint_angle = a1 + std::f64::consts::FRAC_PI_2;
     let midpoint_dir = [midpoint_angle.cos(), midpoint_angle.sin()];
 
-    let candidate_matches =
-        midpoint_dir[0] * bulge_dir[0] + midpoint_dir[1] * bulge_dir[1] >= 0.0;
+    let candidate_matches = midpoint_dir[0] * bulge_dir[0] + midpoint_dir[1] * bulge_dir[1] >= 0.0;
 
     let (start_angle, end_angle) = if candidate_matches {
         (a1, a2)
@@ -215,8 +205,7 @@ fn compute_fillet(
     }
 
     // Intersection of infinite non-parallel lines.
-    let (t_p, _u_p) =
-        ll(p1[0], p1[1], u1[0], u1[1], p3[0], p3[1], u2[0], u2[1])?;
+    let (t_p, _u_p) = ll(p1[0], p1[1], u1[0], u1[1], p3[0], p3[1], u2[0], u2[1])?;
 
     // Intersection point
     let px = p1[0] + t_p * u1[0];
@@ -247,7 +236,6 @@ fn compute_fillet(
     } else {
         [-u2[0], -u2[1]]
     };
-
 
     let z = l1.start.z;
 
@@ -284,12 +272,7 @@ fn compute_fillet(
 }
 
 /// Move the endpoint opposite the selected keep-side to the tangent point.
-fn trim_to_xy(
-    orig: &LineEnt,
-    tangent: [f64; 2],
-    dir: [f64; 2],
-    unit: [f64; 2],
-) -> Option<LineEnt> {
+fn trim_to_xy(orig: &LineEnt, tangent: [f64; 2], dir: [f64; 2], unit: [f64; 2]) -> Option<LineEnt> {
     let z = orig.start.z;
     let mut l = orig.clone();
     l.common.handle = Handle::NULL;
@@ -470,9 +453,7 @@ fn segment_parameter(point: [f64; 2], start: [f64; 2], end: [f64; 2]) -> Option<
         return None;
     }
 
-    Some(
-        ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / len2,
-    )
+    Some(((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / len2)
 }
 
 /// Apply the current FILLET radius to every eligible corner of a 2D polyline.
@@ -500,9 +481,7 @@ fn fillet_entire_lwpolyline(poly: &LwPolyline, radius: f64) -> Option<LwPolyline
 
         // A bulge belongs to the segment starting at that vertex.
         // For now only fillet corners where both adjacent segments are straight.
-        if poly.vertices[prev].bulge.abs() >= 1.0e-9
-            || poly.vertices[i].bulge.abs() >= 1.0e-9
-        {
+        if poly.vertices[prev].bulge.abs() >= 1.0e-9 || poly.vertices[i].bulge.abs() >= 1.0e-9 {
             continue;
         }
 
@@ -552,20 +531,14 @@ fn fillet_entire_lwpolyline(poly: &LwPolyline, radius: f64) -> Option<LwPolyline
 
         // Whole-polyline FILLET should not extend past neighbouring vertices.
         // If this radius cannot fit at this corner, leave that corner unchanged.
-        if !(-1.0e-9..=1.0 + 1.0e-9).contains(&t_in)
-            || !(-1.0e-9..=1.0 + 1.0e-9).contains(&t_out)
-        {
+        if !(-1.0e-9..=1.0 + 1.0e-9).contains(&t_in) || !(-1.0e-9..=1.0 + 1.0e-9).contains(&t_out) {
             continue;
         }
 
         corners[i] = Some(PolylineCornerFillet {
             incoming: tangent_in,
             outgoing: tangent_out,
-            bulge: compute_bulge(
-                tangent_in,
-                tangent_out,
-                [arc.center.x, arc.center.y],
-            ),
+            bulge: compute_bulge(tangent_in, tangent_out, [arc.center.x, arc.center.y]),
         });
     }
 
@@ -582,22 +555,14 @@ fn fillet_entire_lwpolyline(poly: &LwPolyline, radius: f64) -> Option<LwPolyline
 
         let start = corners[i]
             .map(|corner| corner.outgoing)
-            .unwrap_or([
-                poly.vertices[i].location.x,
-                poly.vertices[i].location.y,
-            ]);
+            .unwrap_or([poly.vertices[i].location.x, poly.vertices[i].location.y]);
 
-        let end = corners[next]
-            .map(|corner| corner.incoming)
-            .unwrap_or([
-                poly.vertices[next].location.x,
-                poly.vertices[next].location.y,
-            ]);
+        let end = corners[next].map(|corner| corner.incoming).unwrap_or([
+            poly.vertices[next].location.x,
+            poly.vertices[next].location.y,
+        ]);
 
-        let original_start = [
-            poly.vertices[i].location.x,
-            poly.vertices[i].location.y,
-        ];
+        let original_start = [poly.vertices[i].location.x, poly.vertices[i].location.y];
         let original_end = [
             poly.vertices[next].location.x,
             poly.vertices[next].location.y,
@@ -769,6 +734,9 @@ enum FilletEntity {
         handle: Handle,
         seg_idx: usize,
     },
+    /// A circle, ellipse or spline: filleted through the kernel's general
+    /// construction, and trimmed only when it has ends to trim.
+    Curve(EntityType),
 }
 
 impl FilletEntity {
@@ -776,6 +744,9 @@ impl FilletEntity {
         match e {
             EntityType::Line(l) => Some(Self::Line(l.clone())),
             EntityType::Arc(a) => Some(Self::Arc(a.clone())),
+            EntityType::Circle(_) | EntityType::Ellipse(_) | EntityType::Spline(_) => {
+                crate::entities::curve::entity_curve_xy(e).map(|_| Self::Curve(e.clone()))
+            }
             _ => None,
         }
     }
@@ -794,6 +765,7 @@ impl FilletEntity {
             Self::Line(l) => EntityType::Line(l.clone()),
             Self::Arc(a) => EntityType::Arc(a.clone()),
             Self::LwPoly { poly, .. } => EntityType::LwPolyline(poly.clone()),
+            Self::Curve(entity) => entity.clone(),
         }
     }
 
@@ -802,6 +774,22 @@ impl FilletEntity {
             Self::Line(l) => l.start.z,
             Self::Arc(a) => a.center.z,
             Self::LwPoly { poly, .. } => poly.elevation,
+            Self::Curve(EntityType::Circle(c)) => c.center.z,
+            Self::Curve(EntityType::Ellipse(e)) => e.center.z,
+            Self::Curve(EntityType::Spline(s)) => s.control_points.first().map_or(0.0, |p| p.z),
+            Self::Curve(_) => 0.0,
+        }
+    }
+
+    /// The shape as a kernel curve in plan.
+    fn kernel_curve(&self) -> Option<KernelCurve> {
+        match self {
+            Self::Line(l) => Some(line_curve(l)),
+            Self::Arc(a) => Some(arc_curve(a)),
+            Self::LwPoly { poly, seg_idx, .. } => {
+                Some(line_curve(&lwpoly_seg_as_line(poly, *seg_idx)))
+            }
+            Self::Curve(entity) => crate::entities::curve::entity_curve_xy(entity),
         }
     }
 }
@@ -817,6 +805,17 @@ fn compute_fillet_entities(
     radius: f64,
 ) -> Option<(EntityType, EntityType, Option<EntityType>)> {
     let z = e1.elevation();
+    // A polyline arc segment would be filleted as its straight chord.
+    let picks_arc_segment = |entity: &FilletEntity| {
+        matches!(entity, FilletEntity::LwPoly { poly, seg_idx, .. }
+            if poly.vertices.get(*seg_idx).is_some_and(|vertex| vertex.bulge.abs() > 1e-12))
+    };
+    if picks_arc_segment(e1) || picks_arc_segment(e2) {
+        return None;
+    }
+    if matches!(e1, FilletEntity::Curve(_)) || matches!(e2, FilletEntity::Curve(_)) {
+        return fillet_curves(e1, click1, e2, click2, radius, z);
+    }
 
     match (e1, e2) {
         // ── Line × Line ───────────────────────────────────────────────────
@@ -848,24 +847,36 @@ fn compute_fillet_entities(
                 ..
             },
         ) if h1 == h2 => {
-            // Adjacent segments share a corner vertex — fillet that corner.
-            let (low, high) = if *s1 < *s2 { (*s1, *s2) } else { (*s2, *s1) };
             let n = p1.vertices.len();
-            // The wrap-around corner of a closed polyline joins the last
-            // segment (n-1) and the first (0); their shared vertex is v0.
-            let wrap = p1.is_closed && low == 0 && high == n.saturating_sub(1);
-            // Segments must be consecutive, or the wrap-around pair above.
-            if !(high == low + 1 || wrap) {
+            let closed = p1.is_closed;
+            let seg_count = if closed { n } else { n.saturating_sub(1) };
+            let next = |seg: usize| if closed { (seg + 1) % n } else { seg + 1 };
+            let straight = |seg: usize| seg < seg_count && p1.vertices[seg].bulge.abs() < 1e-12;
+            // `before` runs into the corner and `after` leaves it. Between them
+            // sits nothing (a sharp corner), an old fillet arc being replaced,
+            // or — on an open polyline — the gap between its two ends, which
+            // the fillet closes. Arc segments themselves are never filleted:
+            // treating one as its chord bent the result across the shape.
+            enum Between {
+                Corner,
+                Arc(usize),
+                OpenEnds,
+            }
+            let order = |a: usize, b: usize| {
+                if next(a) == b {
+                    Some((a, b, Between::Corner))
+                } else if next(a) < seg_count && next(next(a)) == b && !straight(next(a)) {
+                    Some((a, b, Between::Arc(next(a))))
+                } else if !closed && seg_count >= 2 && a == seg_count - 1 && b == 0 {
+                    Some((a, b, Between::OpenEnds))
+                } else {
+                    None
+                }
+            };
+            let (before_seg, after_seg, between) = order(*s1, *s2).or_else(|| order(*s2, *s1))?;
+            if !straight(before_seg) || !straight(after_seg) {
                 return None;
             }
-            // `before_seg` ends at the shared corner vertex, `after_seg` starts
-            // there. For the wrap corner that is seg n-1 → v0 → seg 0; for a
-            // normal corner it is seg low → v[high] → seg high.
-            let (before_seg, after_seg, corner_idx) = if wrap {
-                (high, low, 0)
-            } else {
-                (low, high, high)
-            };
             let l1 = lwpoly_seg_as_line(p1, before_seg);
             let l2 = lwpoly_seg_as_line(p1, after_seg);
             // Re-map click to whichever segment each was picked on.
@@ -874,23 +885,49 @@ fn compute_fillet_entities(
             } else {
                 (click2, click1)
             };
-            match compute_fillet(&l1, c1, &l2, c2, radius)? {
-                (EntityType::Line(tl1), EntityType::Line(tl2), maybe_arc) => {
-                    let t1 = [tl1.end.x, tl1.end.y]; // trimmed end of seg before corner
-                    let t2 = [tl2.start.x, tl2.start.y]; // trimmed start of seg after corner
-                    let bulge = if let Some(EntityType::Arc(ref fa)) = maybe_arc {
-                        // center from arc entity
-                        compute_bulge(t1, t2, [fa.center.x, fa.center.y])
-                    } else {
-                        0.0 // r=0, sharp corner
-                    };
-                    let new_poly = lwpoly_replace_corner(p1, corner_idx, t1, t2, bulge);
-                    let et = EntityType::LwPolyline(new_poly);
-                    // Return same rebuilt poly for both slots; caller uses only h1.
-                    Some((et.clone(), et, None))
+            let (EntityType::Line(tl1), EntityType::Line(tl2), maybe_arc) =
+                compute_fillet(&l1, c1, &l2, c2, radius)?
+            else {
+                return None;
+            };
+            let t1 = [tl1.end.x, tl1.end.y]; // trimmed end of seg before corner
+            let t2 = [tl2.start.x, tl2.start.y]; // trimmed start of seg after corner
+            let bulge = match maybe_arc {
+                Some(EntityType::Arc(ref fa)) => compute_bulge(t1, t2, [fa.center.x, fa.center.y]),
+                _ => 0.0, // r=0, sharp corner
+            };
+            let new_poly = match between {
+                Between::Corner => lwpoly_replace_corner(p1, after_seg, t1, t2, bulge),
+                // The old arc runs from its own vertex to the `after` vertex:
+                // move both onto the new tangent points.
+                Between::Arc(arc_seg) => {
+                    let mut poly = p1.clone();
+                    poly.common.handle = Handle::NULL;
+                    poly.vertices[arc_seg].location.x = t1[0];
+                    poly.vertices[arc_seg].location.y = t1[1];
+                    poly.vertices[arc_seg].bulge = bulge;
+                    poly.vertices[after_seg].location.x = t2[0];
+                    poly.vertices[after_seg].location.y = t2[1];
+                    poly
                 }
-                _ => None,
-            }
+                // The last vertex becomes the start of the fillet and the
+                // closing segment is the fillet itself.
+                Between::OpenEnds => {
+                    let mut poly = p1.clone();
+                    poly.common.handle = Handle::NULL;
+                    let last = n - 1;
+                    poly.vertices[last].location.x = t1[0];
+                    poly.vertices[last].location.y = t1[1];
+                    poly.vertices[last].bulge = bulge;
+                    poly.vertices[0].location.x = t2[0];
+                    poly.vertices[0].location.y = t2[1];
+                    poly.is_closed = true;
+                    poly
+                }
+            };
+            let et = EntityType::LwPolyline(new_poly);
+            // Return same rebuilt poly for both slots; caller uses only h1.
+            Some((et.clone(), et, None))
         }
         // ── LwPoly × LwPoly (different entities) ──────────────────────────
         (
@@ -962,6 +999,8 @@ fn compute_fillet_entities(
                 None
             }
         }
+        // Answered by `fillet_curves` above.
+        (FilletEntity::Curve(_), _) | (_, FilletEntity::Curve(_)) => None,
     }
 }
 
@@ -1213,10 +1252,129 @@ fn fillet_arc_arc(
         return Some((
             EntityType::Arc(new_a1),
             EntityType::Arc(new_a2),
-            Some(EntityType::Arc(fillet_entity(&fillet, radius, z, &a1.common))),
+            Some(EntityType::Arc(fillet_entity(
+                &fillet, radius, z, &a1.common,
+            ))),
         ));
     }
     None
+}
+
+/// FILLET where one side is a circle, ellipse or spline. The kernel finds the
+/// tangent arcs; each side is then cut back to its tangent point, keeping the
+/// part that was picked. A closed curve has no end to cut back and is left
+/// whole.
+fn fillet_curves(
+    e1: &FilletEntity,
+    click1: [f64; 2],
+    e2: &FilletEntity,
+    click2: [f64; 2],
+    radius: f64,
+    z: f64,
+) -> Option<(EntityType, EntityType, Option<EntityType>)> {
+    if radius < 1e-9 {
+        return None;
+    }
+    let (a, b) = (e1.kernel_curve()?, e2.kernel_curve()?);
+    let common = match e1 {
+        FilletEntity::Line(l) => l.common.clone(),
+        FilletEntity::Arc(a) => a.common.clone(),
+        FilletEntity::LwPoly { poly, .. } => poly.common.clone(),
+        FilletEntity::Curve(entity) => entity.common().clone(),
+    };
+    for fillet in ranked_fillets(&a, click1, &b, click2, radius) {
+        let (Some(first), Some(second)) = (
+            trim_to_tangent(e1, &a, fillet.tangent1, click1),
+            trim_to_tangent(e2, &b, fillet.tangent2, click2),
+        ) else {
+            continue;
+        };
+        return Some((
+            first,
+            second,
+            Some(EntityType::Arc(fillet_entity(&fillet, radius, z, &common))),
+        ));
+    }
+    None
+}
+
+/// One side of a fillet cut back to where the arc touches it, the picked part
+/// kept. `None` when the touch is off a bounded curve's drawn part — only a
+/// line may be extended to meet the arc.
+fn trim_to_tangent(
+    entity: &FilletEntity,
+    curve: &KernelCurve,
+    touch: [f64; 2],
+    click: [f64; 2],
+) -> Option<EntityType> {
+    match entity {
+        FilletEntity::Line(l) => trim_line_to_point(l, touch, click).map(EntityType::Line),
+        FilletEntity::LwPoly { poly, seg_idx, .. } => {
+            let line = lwpoly_seg_as_line(poly, *seg_idx);
+            let trimmed = trim_line_to_point(&line, touch, click)?;
+            Some(EntityType::LwPolyline(rebuild_poly_from_trimmed_line(
+                poly, *seg_idx, &line, &trimmed,
+            )))
+        }
+        FilletEntity::Arc(arc) => {
+            let (centre, _, start, end, _) = arc_geom(arc);
+            let at = arc_angle_at(centre, touch);
+            let clamped = clamp_angle_to_arc(at, start, end);
+            if (norm_angle(at) - norm_angle(clamped)).abs() > 0.01 {
+                return None;
+            }
+            let picked = clamp_angle_to_arc(arc_angle_at(centre, click), start, end);
+            Some(EntityType::Arc(
+                if (clamped - start).rem_euclid(TAU) <= (picked - start).rem_euclid(TAU) {
+                    trim_arc(arc, clamped, end)
+                } else {
+                    trim_arc(arc, start, clamped)
+                },
+            ))
+        }
+        FilletEntity::Curve(source) => {
+            let at = curve.parameter_at(touch);
+            let on = curve.point_at(at);
+            let scale = 1e-6 * (1.0 + touch[0].abs().max(touch[1].abs()));
+            if (on[0] - touch[0]).hypot(on[1] - touch[1]) > scale.max(1e-6 * curve.length()) {
+                return None;
+            }
+            if curve.is_closed() {
+                return Some(source.clone());
+            }
+            let keep_end = curve.parameter_at(click) >= at;
+            match source {
+                // Its plan image runs the entity's own parameter only when
+                // it faces up; a mirrored one is left alone.
+                EntityType::Ellipse(ellipse) if ellipse.normal.z > 0.0 => {
+                    let mut trimmed = ellipse.clone();
+                    trimmed.common.handle = Handle::NULL;
+                    let sweep = {
+                        let raw = ellipse.end_parameter - ellipse.start_parameter;
+                        if raw <= 0.0 {
+                            raw + TAU
+                        } else {
+                            raw
+                        }
+                    };
+                    let cut = ellipse.start_parameter + at * sweep;
+                    if keep_end {
+                        trimmed.start_parameter = cut;
+                    } else {
+                        trimmed.end_parameter = cut;
+                    }
+                    Some(EntityType::Ellipse(trimmed))
+                }
+                EntityType::Spline(spline) => {
+                    let (low, high) = super::spline_ops::spline_range(spline)?;
+                    let (head, tail) =
+                        super::spline_ops::spline_cut(spline, low + at * (high - low))?;
+                    Some(EntityType::Spline(if keep_end { tail } else { head }))
+                }
+                _ => None,
+            }
+        }
+    }
 }
 
 /// Trim a line endpoint nearest to the intersection point, keeping the click side.
@@ -1305,6 +1463,9 @@ enum FilletStep {
     // Radius may be typed directly or measured by picking two points.
     WaitingForRadius,
 
+    /// Trim / No trim: whether the picked objects are cut back to the arc.
+    TrimMode,
+
     RadiusSecondPoint {
         first: DVec3,
     },
@@ -1318,6 +1479,9 @@ enum FilletStep {
 
 pub struct FilletCommand {
     radius: f64,
+    /// Whether the picked source entities are shortened to the tangent points
+    /// (the shared TRIMMODE, changed through the Trim option).
+    trim: bool,
     step: FilletStep,
     all_entities: Vec<EntityType>,
     entity_index: ModifyEntityIndex,
@@ -1338,6 +1502,7 @@ impl FilletCommand {
         let entity_index = ModifyEntityIndex::build(&all_entities);
         Self {
             radius: radius as f64,
+            trim: defaults::get_fillet_trim(),
             step: FilletStep::First,
             all_entities,
             entity_index,
@@ -1349,12 +1514,16 @@ impl FilletCommand {
     /// Switch to the radius sub-step, remembering the first pick (if any) so
     /// it can be restored afterwards.
     fn enter_radius_substep(&mut self) {
+        self.enter_substep(FilletStep::WaitingForRadius);
+    }
+
+    fn enter_substep(&mut self, step: FilletStep) {
         self.resume_second = if let FilletStep::Second { h1, e1, click1 } = &self.step {
             Some((*h1, e1.clone(), *click1))
         } else {
             None
         };
-        self.step = FilletStep::WaitingForRadius;
+        self.step = step;
     }
 
     /// Leave the radius sub-step, resuming the second pick when a first object
@@ -1366,7 +1535,18 @@ impl FilletCommand {
         };
     }
 
-    fn continue_after_fillet(&mut self, replacements: Vec<(Handle, Vec<EntityType>)>) -> CmdResult {
+    fn continue_after_fillet(
+        &mut self,
+        mut replacements: Vec<(Handle, Vec<EntityType>)>,
+    ) -> CmdResult {
+        for entity in replacements
+            .iter_mut()
+            .flat_map(|(_, entities)| entities.iter_mut())
+        {
+            if let EntityType::LwPolyline(poly) = entity {
+                drop_zero_length_segments(poly);
+            }
+        }
         self.all_entities.retain(|entity| {
             !replacements
                 .iter()
@@ -1382,6 +1562,17 @@ impl FilletCommand {
         self.resume_second = None;
         self.made += 1;
         CmdResult::ReplaceManyContinue(replacements)
+    }
+
+    /// Keep both source lines and add only the tangent arc. The host commits
+    /// the addition as one undo step and notifies this command of its new handle.
+    fn continue_after_addition(&mut self, addition: EntityType) -> CmdResult {
+        self.all_entities.push(addition.clone());
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
+        self.step = FilletStep::First;
+        self.resume_second = None;
+        self.made += 1;
+        CmdResult::CommitEntities(vec![addition])
     }
 
     /// Undo option: take back the last fillet of this command. The host
@@ -1404,10 +1595,7 @@ impl CadCommand for FilletCommand {
 
         Some(WireModel::solid_f64(
             "fillet_radius_preview".into(),
-            vec![
-                [first.x, first.y, first.z],
-                [pt.x, pt.y, pt.z],
-            ],
+            vec![[first.x, first.y, first.z], [pt.x, pt.y, pt.z]],
             WireModel::CYAN,
             false,
         ))
@@ -1423,29 +1611,29 @@ impl CadCommand for FilletCommand {
                 self.radius
             )
             .into_owned(),
-            FilletStep::Polyline => crate::tf!(
-                "FILLET  Select 2D polyline  [R={:.4}]:",
+            FilletStep::Polyline => {
+                crate::tf!("FILLET  Select 2D polyline  [R={:.4}]:", self.radius).into_owned()
+            }
+            FilletStep::WaitingForRadius => crate::tf!(
+                "FILLET  Specify fillet radius or first point <{:.4}>:",
                 self.radius
             )
             .into_owned(),
-            FilletStep::WaitingForRadius => {
-                crate::tf!(
-                    "FILLET  Specify fillet radius or first point <{:.4}>:",
-                    self.radius
-                )
-                .into_owned()
-            }
 
             FilletStep::RadiusSecondPoint { .. } => {
                 crate::t!("FILLET  Specify second point for radius:").into_owned()
             }
-            FilletStep::Second { .. } => {
-                crate::tf!(
-                    "FILLET  Select second object (Line/Arc/LwPolyline)  [R={:.4}]:",
-                    self.radius
-                )
-                .into_owned()
+            FilletStep::TrimMode => if self.trim {
+                crate::t!("FILLET  Enter Trim mode option [Trim/No trim] <Trim>:")
+            } else {
+                crate::t!("FILLET  Enter Trim mode option [Trim/No trim] <No trim>:")
             }
+            .into_owned(),
+            FilletStep::Second { .. } => crate::tf!(
+                "FILLET  Select second object (Line/Arc/LwPolyline)  [R={:.4}]:",
+                self.radius
+            )
+            .into_owned(),
         }
     }
 
@@ -1460,10 +1648,14 @@ impl CadCommand for FilletCommand {
                 }
                 opts.push(CmdOption::new("Polyline", "P"));
                 opts.push(CmdOption::new("Radius", "R"));
+                opts.push(CmdOption::new("Trim", "T"));
                 opts
             }
             FilletStep::Second { .. } => {
-                vec![CmdOption::new("Radius", "R")]
+                vec![CmdOption::new("Radius", "R"), CmdOption::new("Trim", "T")]
+            }
+            FilletStep::TrimMode => {
+                vec![CmdOption::new("Trim", "T"), CmdOption::new("No trim", "N")]
             }
             FilletStep::Polyline
             | FilletStep::WaitingForRadius
@@ -1472,7 +1664,10 @@ impl CadCommand for FilletCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, FilletStep::WaitingForRadius)
+        matches!(
+            self.step,
+            FilletStep::WaitingForRadius | FilletStep::TrimMode
+        )
     }
 
     fn dyn_field(&self) -> crate::command::DynField {
@@ -1503,6 +1698,22 @@ impl CadCommand for FilletCommand {
                 // Invalid — stay and re-prompt
                 Some(CmdResult::NeedPoint)
             }
+            FilletStep::TrimMode => {
+                match text.trim().to_uppercase().as_str() {
+                    "" => {}
+                    "T" | "TRIM" => {
+                        self.trim = true;
+                        defaults::set_fillet_trim(true);
+                    }
+                    "N" | "NO TRIM" | "NOTRIM" => {
+                        self.trim = false;
+                        defaults::set_fillet_trim(false);
+                    }
+                    _ => return Some(CmdResult::NeedPoint),
+                }
+                self.resume_after_radius();
+                Some(CmdResult::NeedPoint)
+            }
             FilletStep::First | FilletStep::Second { .. } => {
                 let t = text.trim();
                 let upper = t.to_uppercase();
@@ -1512,6 +1723,10 @@ impl CadCommand for FilletCommand {
                 }
                 if upper == "U" || upper == "UNDO" {
                     return self.undo_last();
+                }
+                if upper == "T" || upper == "TRIM" {
+                    self.enter_substep(FilletStep::TrimMode);
+                    return Some(CmdResult::NeedPoint);
                 }
                 // "R" alone → enter sub-step to collect radius
                 if upper == "R" {
@@ -1535,8 +1750,7 @@ impl CadCommand for FilletCommand {
                 }
                 None
             }
-            FilletStep::Polyline
-            | FilletStep::RadiusSecondPoint { .. } => None,
+            FilletStep::Polyline | FilletStep::RadiusSecondPoint { .. } => None,
         }
     }
 
@@ -1545,6 +1759,7 @@ impl CadCommand for FilletCommand {
             self.step,
             FilletStep::WaitingForRadius
                 | FilletStep::RadiusSecondPoint { .. }
+                | FilletStep::TrimMode
         )
     }
 
@@ -1552,7 +1767,7 @@ impl CadCommand for FilletCommand {
         self.undo_last()
     }
 
-    fn on_document_undone(&mut self, document: &acadrust::CadDocument) {
+    fn on_document_undone(&mut self, document: &codec::CadDocument) {
         self.all_entities = document
             .entities()
             .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
@@ -1570,7 +1785,8 @@ impl CadCommand for FilletCommand {
 
         match &self.step {
             FilletStep::WaitingForRadius
-            | FilletStep::RadiusSecondPoint { .. } => {
+            | FilletStep::RadiusSecondPoint { .. }
+            | FilletStep::TrimMode => {
                 return CmdResult::NeedPoint;
             }
 
@@ -1591,10 +1807,7 @@ impl CadCommand for FilletCommand {
                     return CmdResult::NeedPoint;
                 };
 
-                self.continue_after_fillet(vec![(
-                    handle,
-                    vec![EntityType::LwPolyline(result)],
-                )])
+                self.continue_after_fillet(vec![(handle, vec![EntityType::LwPolyline(result)])])
             }
             FilletStep::First => {
                 let e1 = self
@@ -1641,6 +1854,13 @@ impl CadCommand for FilletCommand {
                 if let Some(e2) = e2 {
                     match compute_fillet_entities(&e1, click1, &e2, click, self.radius) {
                         Some((new_e1, new_e2, maybe_arc)) => {
+                            // No trim: the objects stay as they are; only the
+                            // arc is added (#1558).
+                            if !self.trim {
+                                return maybe_arc
+                                    .map(|arc| self.continue_after_addition(arc))
+                                    .unwrap_or(CmdResult::NeedPoint);
+                            }
                             let mut first_replacements = vec![new_e1];
                             if let Some(arc) = maybe_arc {
                                 first_replacements.push(arc);
@@ -1670,17 +1890,15 @@ impl CadCommand for FilletCommand {
 
         match &self.step {
             FilletStep::WaitingForRadius
-            | FilletStep::RadiusSecondPoint { .. } => vec![],
+            | FilletStep::RadiusSecondPoint { .. }
+            | FilletStep::TrimMode => vec![],
             FilletStep::Polyline => {
-                let preview = self
-                    .entity_index
-                    .get(&self.all_entities, handle)
-                    .and_then(|entity| match entity {
-                        EntityType::LwPolyline(poly) => {
-                            fillet_entire_lwpolyline(poly, self.radius)
-                        }
+                let preview = self.entity_index.get(&self.all_entities, handle).and_then(
+                    |entity| match entity {
+                        EntityType::LwPolyline(poly) => fillet_entire_lwpolyline(poly, self.radius),
                         _ => None,
-                    });
+                    },
+                );
 
                 preview
                     .map(|poly| {
@@ -1694,13 +1912,14 @@ impl CadCommand for FilletCommand {
                     .unwrap_or_default()
             }
             FilletStep::First => {
-                let pts = self
-                    .entity_index
-                    .get(&self.all_entities, handle)
-                    .and_then(|e| match e {
-                        EntityType::LwPolyline(p) => Some(lwpoly_seg_hover_pts(p, click)),
-                        _ => FilletEntity::from_entity(e).map(|fe| entity_pts(&fe.to_entity_type())),
-                    });
+                let pts =
+                    self.entity_index
+                        .get(&self.all_entities, handle)
+                        .and_then(|e| match e {
+                            EntityType::LwPolyline(p) => Some(lwpoly_seg_hover_pts(p, click)),
+                            _ => FilletEntity::from_entity(e)
+                                .map(|fe| entity_pts(&fe.to_entity_type())),
+                        });
                 if let Some(pts) = pts {
                     vec![WireModel::solid(
                         "fillet_hover".into(),
@@ -1731,20 +1950,21 @@ impl CadCommand for FilletCommand {
                     if let Some((new_e1, new_e2, maybe_arc)) =
                         compute_fillet_entities(&e1, click1, &e2, click, self.radius)
                     {
-                        let mut out = vec![
-                            WireModel::solid(
+                        let mut out = Vec::new();
+                        if self.trim {
+                            out.push(WireModel::solid(
                                 "fillet_e1".into(),
                                 entity_pts(&new_e1),
                                 WireModel::CYAN,
                                 false,
-                            ),
-                            WireModel::solid(
+                            ));
+                            out.push(WireModel::solid(
                                 "fillet_e2".into(),
                                 entity_pts(&new_e2),
                                 WireModel::CYAN,
                                 false,
-                            ),
-                        ];
+                            ));
+                        }
                         if let Some(arc) = maybe_arc {
                             out.push(WireModel::solid(
                                 "fillet_arc".into(),
@@ -1785,6 +2005,27 @@ impl CadCommand for FilletCommand {
             _ => CmdResult::NeedPoint,
         }
     }
+    fn preserve_commit_layer(&self) -> bool {
+        // Derived no-trim geometry stays on the picked line's layer rather
+        // than being moved to the current creation layer.
+        true
+    }
+
+    fn on_entities_committed(&mut self, entities: &[EntityType]) {
+        let mut handles = entities.iter().map(|entity| entity.common().handle);
+        for entity in self
+            .all_entities
+            .iter_mut()
+            .filter(|entity| entity.common().handle.is_null())
+        {
+            let Some(handle) = handles.next() else {
+                break;
+            };
+            entity.common_mut().handle = handle;
+        }
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
+    }
+
     fn on_entity_replaced(&mut self, _old: Handle, new_handles: &[Handle]) {
         let mut handles = new_handles.iter().copied();
         for entity in self
@@ -1804,6 +2045,29 @@ impl CadCommand for FilletCommand {
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+}
+
+/// A radius-0 fillet over an existing arc leaves its two ends on one point;
+/// the zero-length segment between them blocked every later fillet of that
+/// corner (#1422). The later vertex carries the next segment, so it survives.
+fn drop_zero_length_segments(poly: &mut LwPolyline) {
+    let same = |a: &LwVertex, b: &LwVertex| {
+        (a.location.x - b.location.x).abs() < 1e-9 && (a.location.y - b.location.y).abs() < 1e-9
+    };
+    let mut i = 0;
+    while i + 1 < poly.vertices.len() && poly.vertices.len() > 2 {
+        if same(&poly.vertices[i], &poly.vertices[i + 1]) {
+            poly.vertices.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    if poly.is_closed && poly.vertices.len() > 2 {
+        let n = poly.vertices.len();
+        if same(&poly.vertices[n - 1], &poly.vertices[0]) {
+            poly.vertices.pop();
+        }
     }
 }
 
@@ -1880,9 +2144,17 @@ enum ChamferStep {
     },
 }
 
+/// The refusal a no-trim CHAMFER prints for anything but two independent Lines.
+const NO_TRIM_CHAMFER_LINES_ONLY: &str =
+    "No-trim chamfer supports two independent lines only.";
+
 pub struct ChamferCommand {
     dist1: f64,
     dist2: f64,
+    /// Whether the picked source entities are shortened to the chamfer points
+    /// (the TRIMMODE FILLET shares). No-trim is defined for two independent
+    /// Lines only.
+    trim: bool,
     step: ChamferStep,
     all_entities: Vec<EntityType>,
     entity_index: ModifyEntityIndex,
@@ -1906,6 +2178,7 @@ impl ChamferCommand {
         Self {
             dist1: dist as f64,
             dist2: defaults::get_chamfer_dist2(),
+            trim: defaults::get_fillet_trim(),
             step: ChamferStep::First,
             all_entities,
             entity_index,
@@ -1960,6 +2233,20 @@ impl ChamferCommand {
         self.resume_pick = None;
         self.made += 1;
         CmdResult::ReplaceManyContinue(replacements)
+    }
+
+    /// No-trim mode keeps both source lines and commits only the chamfer line.
+    fn continue_after_addition(&mut self, addition: EntityType) -> CmdResult {
+        self.all_entities.push(addition.clone());
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
+        self.step = ChamferStep::First;
+        self.resume_pick = None;
+        self.made += 1;
+        if self.multiple {
+            CmdResult::CommitEntities(vec![addition])
+        } else {
+            CmdResult::CommitEntitiesAndExit(vec![addition])
+        }
     }
 
     fn undo_last(&mut self) -> Option<CmdResult> {
@@ -2032,10 +2319,22 @@ impl CadCommand for ChamferCommand {
                 if !self.multiple {
                     opts.push(CmdOption::new("Multiple", "M"));
                 }
+                opts.push(if self.trim {
+                    CmdOption::new("No trim", "N")
+                } else {
+                    CmdOption::new("Trim", "T")
+                });
                 opts
             }
             ChamferStep::Second { .. } | ChamferStep::SecondPoly { .. } => {
-                vec![CmdOption::new("Distance", "D")]
+                vec![
+                    CmdOption::new("Distance", "D"),
+                    if self.trim {
+                        CmdOption::new("No trim", "N")
+                    } else {
+                        CmdOption::new("Trim", "T")
+                    },
+                ]
             }
             ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => vec![],
         }
@@ -2093,11 +2392,19 @@ impl CadCommand for ChamferCommand {
                 // Invalid — stay and re-prompt
                 Some(CmdResult::NeedPoint)
             }
-            ChamferStep::First
-            | ChamferStep::Second { .. }
-            | ChamferStep::SecondPoly { .. } => {
+            ChamferStep::First | ChamferStep::Second { .. } | ChamferStep::SecondPoly { .. } => {
                 let t = text.trim();
                 let upper = t.to_uppercase();
+                if matches!(upper.as_str(), "N" | "NOTRIM" | "NO TRIM" | "TRIM=FALSE") {
+                    self.trim = false;
+                    defaults::set_fillet_trim(false);
+                    return Some(CmdResult::NeedPoint);
+                }
+                if matches!(upper.as_str(), "T" | "TRIM" | "TRIM=TRUE") {
+                    self.trim = true;
+                    defaults::set_fillet_trim(true);
+                    return Some(CmdResult::NeedPoint);
+                }
                 if matches!(self.step, ChamferStep::First) {
                     match upper.as_str() {
                         "M" | "MULTIPLE" => {
@@ -2147,7 +2454,7 @@ impl CadCommand for ChamferCommand {
         self.undo_last()
     }
 
-    fn on_document_undone(&mut self, document: &acadrust::CadDocument) {
+    fn on_document_undone(&mut self, document: &codec::CadDocument) {
         self.all_entities = document
             .entities()
             .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
@@ -2155,6 +2462,27 @@ impl CadCommand for ChamferCommand {
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
         self.step = ChamferStep::First;
         self.resume_pick = None;
+    }
+
+    fn preserve_commit_layer(&self) -> bool {
+        // A no-trim chamfer is derived from the picked lines; keep it on their
+        // layer instead of moving it to the current creation layer.
+        true
+    }
+
+    fn on_entities_committed(&mut self, entities: &[EntityType]) {
+        let mut handles = entities.iter().map(|entity| entity.common().handle);
+        for entity in self
+            .all_entities
+            .iter_mut()
+            .filter(|entity| entity.common().handle.is_null())
+        {
+            let Some(handle) = handles.next() else {
+                break;
+            };
+            entity.common_mut().handle = handle;
+        }
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -2175,9 +2503,7 @@ impl CadCommand for ChamferCommand {
                 return CmdResult::NeedPoint;
             }
             ChamferStep::First => {
-                match self
-                    .entity_index.get(&self.all_entities, handle)
-                {
+                match self.entity_index.get(&self.all_entities, handle) {
                     Some(EntityType::Line(l)) => {
                         self.step = ChamferStep::Second {
                             h1: handle,
@@ -2186,6 +2512,11 @@ impl CadCommand for ChamferCommand {
                         };
                     }
                     Some(EntityType::LwPolyline(p)) => {
+                        if !self.trim {
+                            return CmdResult::ReportError(
+                                NO_TRIM_CHAMFER_LINES_ONLY.to_string(),
+                            );
+                        }
                         self.step = ChamferStep::SecondPoly {
                             h1: handle,
                             poly: p.clone(),
@@ -2197,6 +2528,15 @@ impl CadCommand for ChamferCommand {
                 CmdResult::NeedPoint
             }
             ChamferStep::SecondPoly { h1, poly, click1 } => {
+                // A no-trim chamfer cannot preserve a polyline corner as two
+                // source entities; refuse rather than trimming implicitly.
+                if !self.trim {
+                    self.step = ChamferStep::First;
+                    self.resume_pick = None;
+                    return CmdResult::ReportError(
+                        NO_TRIM_CHAMFER_LINES_ONLY.to_string(),
+                    );
+                }
                 let h1 = *h1;
                 let poly = poly.clone();
                 let click1 = *click1;
@@ -2231,6 +2571,11 @@ impl CadCommand for ChamferCommand {
                 if let Some(l2) = l2 {
                     match compute_chamfer(&l1, click1, self.dist1, &l2, click, self.dist2) {
                         Some((new_l1, new_l2, chamfer_line)) => {
+                            // No-trim keeps both source lines and adds only the
+                            // derived chamfer line.
+                            if !self.trim {
+                                return self.continue_after_addition(chamfer_line);
+                            }
                             // Single mode adds the chamfer line as a new entity;
                             // Multiple folds it into the first line's replacement
                             // so the command can carry on.
@@ -2248,6 +2593,10 @@ impl CadCommand for ChamferCommand {
                         }
                         None => CmdResult::NeedPoint,
                     }
+                } else if !self.trim {
+                    self.step = ChamferStep::First;
+                    self.resume_pick = None;
+                    CmdResult::ReportError(NO_TRIM_CHAMFER_LINES_ONLY.to_string())
                 } else {
                     CmdResult::NeedPoint
                 }
@@ -2300,6 +2649,14 @@ impl CadCommand for ChamferCommand {
                     if let Some((new_l1, new_l2, cline)) =
                         compute_chamfer(&l1, click1, self.dist1, &l2, click, self.dist2)
                     {
+                        if !self.trim {
+                            return vec![WireModel::solid(
+                                "chamfer_line".into(),
+                                entity_pts(&cline),
+                                WireModel::CYAN,
+                                false,
+                            )];
+                        }
                         return vec![
                             WireModel::solid(
                                 "chamfer_l1".into(),
@@ -2325,6 +2682,9 @@ impl CadCommand for ChamferCommand {
                 vec![]
             }
             ChamferStep::SecondPoly { h1, poly, click1 } => {
+                if !self.trim {
+                    return vec![];
+                }
                 if handle != *h1 {
                     return vec![];
                 }
@@ -2354,10 +2714,11 @@ impl CadCommand for ChamferCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["CHAMFER"] });  // ChamferCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["FILLET"] });  // FilletCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CHAMFER"]
+}); // ChamferCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["FILLET"] }); // FilletCommand
 
 #[cfg(test)]
 mod tests {
@@ -2377,7 +2738,7 @@ mod tests {
     /// by an infinite factor: the center becomes (inf, NaN).
     fn overflowed_arc(sweep_sign: f64) -> ArcEnt {
         let mut arc = ArcEnt::new();
-        arc.center = acadrust::types::Vector3::new(f64::INFINITY, f64::NAN, 0.0);
+        arc.center = codec::types::Vector3::new(f64::INFINITY, f64::NAN, 0.0);
         arc.radius = f64::INFINITY;
         arc.start_angle = 0.0;
         arc.end_angle = sweep_sign * std::f64::consts::PI;
@@ -2399,29 +2760,83 @@ mod tests {
             1.0,
             vec![line(0.0, 0.0, 10.0, 0.0, 1), line(0.0, 0.0, 0.0, 10.0, 2)],
         );
-        assert_eq!(keywords(&command), ["P", "R"]);
+        assert_eq!(keywords(&command), ["P", "R", "T"]);
         assert!(command.on_text_input("U").is_none(), "nothing to undo yet");
         command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
         assert!(matches!(
             command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)),
             CmdResult::ReplaceManyContinue(_)
         ));
-        assert_eq!(keywords(&command), ["U", "P", "R"]);
+        assert_eq!(keywords(&command), ["U", "P", "R", "T"]);
         assert!(matches!(command.on_text_input("U"), Some(CmdResult::UndoDocument)));
-        assert_eq!(keywords(&command), ["P", "R"]);
+        assert_eq!(keywords(&command), ["P", "R", "T"]);
         // The host hands the restored document back; the cache follows it.
-        let mut doc = acadrust::CadDocument::new();
-        doc.add_entity(line(0.0, 0.0, 20.0, 0.0, 7));
+        let mut doc = codec::CadDocument::new();
+        let _ = doc.add_entity(line(0.0, 0.0, 20.0, 0.0, 7));
         command.on_document_undone(&doc);
         assert_eq!(command.all_entities.len(), 1);
         assert_eq!(command.all_entities[0].common().handle, Handle::new(7));
     }
 
     #[test]
+    fn no_trim_fillet_adds_only_an_arc_and_keeps_source_handles() {
+        let first = Handle::new(1);
+        let second = Handle::new(2);
+        let original = vec![
+            line(0.0, 0.0, 10.0, 0.0, 1),
+            line(0.0, 0.0, 0.0, 10.0, 2),
+        ];
+        let mut command = FilletCommand::new(1.0, original);
+        command.trim = false;
+        assert!(matches!(
+            command.on_entity_pick(first, DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        let addition = match command.on_entity_pick(second, DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::CommitEntities(mut entities) => {
+                assert_eq!(entities.len(), 1);
+                entities.pop().unwrap()
+            }
+            _ => panic!("no-trim FILLET should add one arc"),
+        };
+        assert!(matches!(addition, EntityType::Arc(_)));
+        assert!(command
+            .all_entities
+            .iter()
+            .any(|entity| entity.common().handle == first));
+        assert!(command
+            .all_entities
+            .iter()
+            .any(|entity| entity.common().handle == second));
+        assert!(command
+            .all_entities
+            .iter()
+            .any(|entity| matches!(entity, EntityType::Arc(arc) if arc.common.handle.is_null())));
+
+        let mut committed = addition;
+        committed.common_mut().handle = Handle::new(10);
+        command.on_entities_committed(&[committed]);
+        assert!(command
+            .all_entities
+            .iter()
+            .any(|entity| entity.common().handle == Handle::new(10)));
+        let source_lines: Vec<_> = command
+            .all_entities
+            .iter()
+            .filter_map(|entity| match entity {
+                EntityType::Line(line) => Some((line.start, line.end)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(source_lines[0], (Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0)));
+        assert_eq!(source_lines[1], (Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 10.0, 0.0)));
+    }
+
+    #[test]
     fn chamfer_multiple_keeps_going_and_single_ends() {
         let lines = || vec![line(0.0, 0.0, 10.0, 0.0, 1), line(0.0, 0.0, 0.0, 10.0, 2)];
         let mut single = ChamferCommand::new(1.0, lines());
-        assert_eq!(keywords(&single), ["D", "M"]);
+        assert_eq!(keywords(&single), ["D", "M", "N"]);
         single.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
         assert!(matches!(
             single.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)),
@@ -2430,7 +2845,7 @@ mod tests {
 
         let mut multi = ChamferCommand::new(1.0, lines());
         assert!(matches!(multi.on_text_input("M"), Some(CmdResult::NeedPoint)));
-        assert_eq!(keywords(&multi), ["D"], "Multiple is not offered twice");
+        assert_eq!(keywords(&multi), ["D", "N"], "Multiple is not offered twice");
         multi.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
         match multi.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)) {
             CmdResult::ReplaceManyContinue(replacements) => {
@@ -2440,8 +2855,95 @@ mod tests {
             }
             _ => panic!("multiple mode should keep the command active"),
         }
-        assert_eq!(keywords(&multi), ["U", "D"]);
+        assert_eq!(keywords(&multi), ["U", "D", "N"]);
         assert!(matches!(multi.on_text_input("U"), Some(CmdResult::UndoDocument)));
+    }
+
+    #[test]
+    fn no_trim_chamfer_adds_only_the_cut_line_and_keeps_source_handles() {
+        let first = Handle::new(1);
+        let second = Handle::new(2);
+        let lines = || vec![
+            line(0.0, 0.0, 10.0, 0.0, 1),
+            line(0.0, 0.0, 0.0, 10.0, 2),
+        ];
+
+        let mut single = ChamferCommand::new(1.0, lines());
+        single.dist2 = 1.0;
+        single.trim = false;
+        assert!(!single.trim);
+        assert!(matches!(
+            single.on_entity_pick(first, DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        let addition = match single.on_entity_pick(second, DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::CommitEntitiesAndExit(mut entities) => {
+                assert_eq!(entities.len(), 1);
+                entities.pop().unwrap()
+            }
+            _ => panic!("no-trim CHAMFER should add one line and exit"),
+        };
+        let EntityType::Line(cut) = &addition else {
+            panic!("no-trim CHAMFER should add a line")
+        };
+        assert!((cut.start.x - 1.0).abs() < 1e-9 && cut.start.y.abs() < 1e-9);
+        assert!(cut.end.x.abs() < 1e-9 && (cut.end.y - 1.0).abs() < 1e-9);
+        assert!(single
+            .all_entities
+            .iter()
+            .any(|entity| entity.common().handle == first));
+        assert!(single
+            .all_entities
+            .iter()
+            .any(|entity| entity.common().handle == second));
+
+        let mut multi = ChamferCommand::new(1.0, lines());
+        multi.dist2 = 1.0;
+        assert!(matches!(multi.on_text_input("M"), Some(CmdResult::NeedPoint)));
+        multi.trim = false;
+        assert!(matches!(
+            multi.on_entity_pick(first, DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        match multi.on_entity_pick(second, DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::CommitEntities(entities) => assert_eq!(entities.len(), 1),
+            _ => panic!("multiple no-trim CHAMFER should keep running"),
+        }
+        assert!(matches!(multi.step, ChamferStep::First));
+        let mut committed = addition;
+        committed.common_mut().handle = Handle::new(10);
+        multi.on_entities_committed(&[committed]);
+        assert!(multi
+            .all_entities
+            .iter()
+            .any(|entity| entity.common().handle == Handle::new(10)));
+    }
+
+    #[test]
+    fn no_trim_chamfer_refuses_polyline_corners() {
+        for token in ["N", "NOTRIM", "NO TRIM", "TRIM=FALSE"] {
+            let mut command = ChamferCommand::new(1.0, Vec::new());
+            assert!(matches!(command.on_text_input(token), Some(CmdResult::NeedPoint)));
+            assert!(!command.trim, "{token}");
+        }
+        for token in ["T", "TRIM", "TRIM=TRUE"] {
+            let mut command = ChamferCommand::new(1.0, Vec::new());
+            assert!(matches!(command.on_text_input(token), Some(CmdResult::NeedPoint)));
+            assert!(command.trim, "{token}");
+        }
+
+        let mut poly = LwPolyline::new();
+        poly.add_point(codec::types::Vector2::new(0.0, 0.0));
+        poly.add_point(codec::types::Vector2::new(10.0, 0.0));
+        poly.add_point(codec::types::Vector2::new(10.0, 10.0));
+        poly.common.handle = Handle::new(3);
+        let mut command = ChamferCommand::new(1.0, vec![EntityType::LwPolyline(poly)]);
+        command.trim = false;
+        assert!(matches!(
+            command.on_entity_pick(Handle::new(3), DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::ReportError(_)
+        ));
+        assert!(matches!(command.step, ChamferStep::First));
     }
 
     #[test]

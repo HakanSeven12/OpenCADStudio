@@ -13,7 +13,7 @@
 //! sidecar) are also shared with the existing `parse_document` action, which
 //! returns documents over the same boundary in the opposite direction.
 
-use acadrust::{CadDocument, DwgWriter, DxfWriter};
+use codec::{CadDocument, DwgWriter, DxfWriter};
 
 /// Worker protocol version. Bumped whenever a request/response payload shape
 /// changes; the `?v=` cache-buster on the worker URL must match. v5 adds the
@@ -67,7 +67,7 @@ pub fn extract_entity_runtime_fields(doc: &CadDocument) -> Vec<EntityRuntimeFiel
     doc.entities()
         .map(|entity| {
             let common = entity.common();
-            let handle = |value: Option<acadrust::Handle>| value.map(|handle| handle.value());
+            let handle = |value: Option<codec::Handle>| value.map(|handle| handle.value());
             EntityRuntimeFields {
                 handle: common.handle.value(),
                 linetype_handle: handle(common.linetype_handle),
@@ -91,9 +91,9 @@ pub fn extract_entity_runtime_fields(doc: &CadDocument) -> Vec<EntityRuntimeFiel
 /// into a document that crossed a serde boundary. Entities whose handle no
 /// longer resolves are skipped silently (mirrors the parse direction).
 pub fn restore_entity_runtime_fields(document: &mut CadDocument, fields: Vec<EntityRuntimeFields>) {
-    let handle = |value: Option<u64>| value.map(acadrust::Handle::new);
+    let handle = |value: Option<u64>| value.map(codec::Handle::new);
     for fields in fields {
-        let Some(entity) = document.get_entity_mut(acadrust::Handle::new(fields.handle)) else {
+        let Some(entity) = document.get_entity_mut(codec::Handle::new(fields.handle)) else {
             continue;
         };
         let common = entity.common_mut();
@@ -169,8 +169,8 @@ pub fn decode_response(bytes: &[u8]) -> Result<Result<Vec<u8>, String>, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::{EntityType, Line, Point};
-    use acadrust::types::Vector3;
+    use codec::entities::{EntityType, Line, Point};
+    use codec::types::Vector3;
 
     fn sample_document() -> CadDocument {
         let mut doc = CadDocument::new();
@@ -178,12 +178,12 @@ mod tests {
         pt.common.handle = doc.allocate_handle();
         pt.common.layer = "RUNTIME-FIELDS".to_string();
         // Fill every serde-skipped field with a recognizable value.
-        pt.common.linetype_handle = Some(acadrust::Handle::new(0xABCD));
-        pt.common.color_book_handle = Some(acadrust::Handle::new(0x101));
+        pt.common.linetype_handle = Some(codec::Handle::new(0xABCD));
+        pt.common.color_book_handle = Some(codec::Handle::new(0x101));
         pt.common.material_flags = 0b11;
-        pt.common.material_handle = Some(acadrust::Handle::new(0x202));
+        pt.common.material_handle = Some(codec::Handle::new(0x202));
         pt.common.plotstyle_flags = 0b11;
-        pt.common.plotstyle_handle = Some(acadrust::Handle::new(0x303));
+        pt.common.plotstyle_handle = Some(codec::Handle::new(0x303));
         pt.common.shadow_flags = 7;
         pt.common.entity_mode = Some(2);
         pt.common.has_ds_data = true;
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn serialize_document_picks_format_by_extension() {
         let mut doc = CadDocument::new();
-        doc.version = acadrust::DxfVersion::AC1032;
+        doc.version = codec::DxfVersion::AC1032;
         let dxf = serialize_document(&doc, "dxf").expect("dxf bytes");
         assert!(!dxf.is_empty());
         assert!(dxf.starts_with(b"  0") || dxf.starts_with(b"0\n"), "not a DXF header");

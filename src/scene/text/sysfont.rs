@@ -278,6 +278,44 @@ pub fn has_family(family: &str) -> bool {
     face_id(family).is_some()
 }
 
+/// The family of the installed face whose file is named `name` — a bare file
+/// name or any path to one, matched case-insensitively.
+fn family_for_file(name: &str) -> Option<String> {
+    let file = name.rsplit(['/', '\\']).next()?.trim();
+    if file.is_empty() {
+        return None;
+    }
+    let file = file.to_ascii_lowercase();
+    fonts().db.lock().unwrap().faces().find_map(|face| {
+        let fontdb::Source::File(path) = &face.source else {
+            return None;
+        };
+        let face_file = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+        if face_file != file {
+            return None;
+        }
+        face.families.first().map(|(name, _)| name.clone())
+    })
+}
+
+/// The installed family a drawing's font reference names, or `None` when
+/// nothing installed answers to it.
+///
+/// A DWG text style stores the TrueType font *file* (`GOST2304_TypeA_italic.ttf`,
+/// sometimes with a directory), which is what AutoCAD resolves; the family name
+/// lives inside the file and is usually not the same string. Inline `\f` codes
+/// carry either form, so both are tried.
+pub fn family_for_reference(reference: &str) -> Option<String> {
+    let reference = reference.trim();
+    if reference.is_empty() {
+        return None;
+    }
+    // The file name is exact; the family lookup ends in a prefix/subset match
+    // that a longer file name loses to (`ISOCPEUI.TTF` would take `ISOCP`), so
+    // an installed face file answers first.
+    family_for_file(reference).or_else(|| canonical_family_name(reference))
+}
+
 /// Web: add a fetched font's bytes (a Noto subset, see `web_font`) to the
 /// database so family-name resolution starts finding it. Fetches land after
 /// the first text layout pass, so the family list is rebuilt and the
@@ -305,6 +343,39 @@ pub fn register_web_font(bytes: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A DWG stores a style's TrueType font as a file name, so every installed
+    /// face has to be reachable by the name of its file — case-insensitively,
+    /// and whether it comes as a bare name or as a path.
+    #[test]
+    fn face_files_resolve_to_their_family() {
+        let found = fonts().db.lock().unwrap().faces().find_map(|face| {
+            match &face.source {
+                fontdb::Source::File(path) => {
+                    let file = path.file_name()?.to_string_lossy().into_owned();
+                    let family = face.families.first().map(|(name, _)| name.clone())?;
+                    Some((file, family))
+                }
+                _ => None,
+            }
+        });
+        let Some((file, family)) = found else {
+            eprintln!("no installed face files on this host; skipping");
+            return;
+        };
+
+        assert_eq!(family_for_file(&file).as_deref(), Some(family.as_str()));
+        assert_eq!(
+            family_for_file(&file.to_ascii_uppercase()).as_deref(),
+            Some(family.as_str())
+        );
+        assert_eq!(
+            family_for_reference(&format!("/somewhere/else/{file}")).as_deref(),
+            Some(family.as_str())
+        );
+        assert_eq!(family_for_file("no-such-face-9f3.ttf"), None);
+        assert_eq!(family_for_reference("   "), None);
+    }
 
     #[test]
     fn sans_aliases_map_to_noto_sans() {

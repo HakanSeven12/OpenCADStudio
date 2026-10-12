@@ -12,6 +12,7 @@
   <a href="docs/readme/README.it.md">Italiano</a> ·
   <a href="docs/readme/README.ja.md">日本語</a> ·
   <a href="docs/readme/README.ko.md">한국어</a> ·
+  <a href="docs/readme/README.lo.md">ລາວ</a> ·
   <a href="docs/readme/README.pl.md">Polski</a> ·
   <a href="docs/readme/README.ru.md">Русский</a> ·
   <a href="docs/readme/README.zh-CN.md">简体中文</a> ·
@@ -113,6 +114,19 @@ chmod +x OpenCADStudio-*-linux-x86_64.AppImage
 ./OpenCADStudio-*-linux-x86_64.AppImage
 ```
 
+Or install it as a Flatpak from [FlatPark](https://flatpark.org/apps/io.github.HakanSeven12.OpenCadStudio), which installs the official AppImage and follows new releases:
+
+```bash
+flatpak remote-add --if-not-exists flatpark https://dl.flatpark.org/flatpark.flatpakrepo
+flatpak install flatpark io.github.HakanSeven12.OpenCadStudio
+```
+
+The Flatpak opens and saves drawings through the file chooser. External references and underlays that point at other files need home access:
+
+```bash
+flatpak override --user --filesystem=home io.github.HakanSeven12.OpenCadStudio
+```
+
 ### macOS
 
 The published macOS package supports Apple Silicon:
@@ -125,9 +139,9 @@ The application is ad-hoc signed but is not currently notarized by Apple.
 
 ## Languages
 
-Open CAD Studio can follow the system language or use any of these 21 interface languages:
+Open CAD Studio can follow the system language or use any of these 22 interface languages:
 
-> Arabic · Brazilian Portuguese · Bulgarian · Czech · Dutch · English · Finnish · French · German · Greek · Hindi · Hungarian · Italian · Japanese · Korean · Polish · Russian · Simplified Chinese · Spanish · Traditional Chinese · Turkish
+> Arabic · Brazilian Portuguese · Bulgarian · Czech · Dutch · English · Finnish · French · German · Greek · Hindi · Hungarian · Italian · Japanese · Korean · Lao · Polish · Russian · Simplified Chinese · Spanish · Traditional Chinese · Turkish
 
 Change the language from the application settings. The browser version also uses the browser's preferred locale when **System** is selected.
 
@@ -191,12 +205,13 @@ The desktop binary supports one-shot conversion, a persistent headless server, a
 
 ```bash
 OpenCADStudio --export input.dwg output.dxf
+OpenCADStudio --export input-r12.dxf output.dwg --target-version R14
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
 OpenCADStudio --mcp
 ```
 
-The automation server exchanges one JSON object per line over standard input/output or a local TCP socket. The self-contained MCP endpoint exposes the live desktop editor through the same tools to every compatible client. To connect a client, configure it to launch `OpenCADStudio --mcp`. See the [MCP control guide](docs/automation/README.md).
+The automation server exchanges one JSON object per line over standard input/output or a local TCP socket. The self-contained MCP endpoint exposes the live desktop editor through the same tools to every compatible client. Its `audit` and `save_verified` operations check an explicit DWG/DXF target version, lossy records, raw DXF handle references, reopen the output, compare its semantic manifest, and return a SHA-256 hash. To connect a client, configure it to launch `OpenCADStudio --mcp`. See the [MCP control guide](docs/automation/README.md).
 
 ## Plugins
 

@@ -110,7 +110,9 @@ fn collect_item_command_ids(item: &OwnedRibbonItem, out: &mut Vec<String>) {
             }
         }
         OwnedRibbonItem::PropertiesGroup { match_prop } => push_tool_command(match_prop, out),
-        OwnedRibbonItem::StyleComboGroup { rows, manager_cmd, .. } => {
+        OwnedRibbonItem::StyleComboGroup {
+            rows, manager_cmd, ..
+        } => {
             for t in rows.iter().flatten() {
                 push_tool_command(t, out);
             }
@@ -214,17 +216,22 @@ impl From<RibbonItem> for OwnedRibbonItem {
                     .collect(),
                 default: default.to_string(),
             },
-            RibbonItem::LabeledDropdown { id, label, icon, items, default } => {
-                OwnedRibbonItem::LabeledDropdown {
-                    id: id.to_string(),
-                    label: label.to_string(),
-                    icon: icon.into(),
-                    items: items.into_iter().map(|(a, b, i)| {
-                        (a.to_string(), b.to_string(), i.into())
-                    }).collect(),
-                    default: default.to_string(),
-                }
-            }
+            RibbonItem::LabeledDropdown {
+                id,
+                label,
+                icon,
+                items,
+                default,
+            } => OwnedRibbonItem::LabeledDropdown {
+                id: id.to_string(),
+                label: label.to_string(),
+                icon: icon.into(),
+                items: items
+                    .into_iter()
+                    .map(|(a, b, i)| (a.to_string(), b.to_string(), i.into()))
+                    .collect(),
+                default: default.to_string(),
+            },
             RibbonItem::LargeDropdown {
                 id,
                 label,
@@ -242,9 +249,10 @@ impl From<RibbonItem> for OwnedRibbonItem {
                 default: default.to_string(),
             },
             RibbonItem::ToolGrid { columns } => OwnedRibbonItem::ToolGrid {
-                columns: columns.into_iter().map(|column| {
-                    column.into_iter().map(Into::into).collect()
-                }).collect(),
+                columns: columns
+                    .into_iter()
+                    .map(|column| column.into_iter().map(Into::into).collect())
+                    .collect(),
             },
             RibbonItem::LayerComboGroup { row2, row3 } => OwnedRibbonItem::LayerComboGroup {
                 row2: row2.into_iter().map(Into::into).collect(),
@@ -297,19 +305,28 @@ impl OwnedRibbonItem {
                     .collect(),
                 default: &*Box::leak(default.into_boxed_str()),
             },
-            OwnedRibbonItem::LabeledDropdown { id, label, icon, items, default } => {
-                RibbonItem::LabeledDropdown {
-                    id: &*Box::leak(id.into_boxed_str()),
-                    label: &*Box::leak(label.into_boxed_str()),
-                    icon: icon.to_static(),
-                    items: items.into_iter().map(|(a, b, i)| (
-                        &*Box::leak(a.into_boxed_str()),
-                        &*Box::leak(b.into_boxed_str()),
-                        i.to_static(),
-                    )).collect(),
-                    default: &*Box::leak(default.into_boxed_str()),
-                }
-            }
+            OwnedRibbonItem::LabeledDropdown {
+                id,
+                label,
+                icon,
+                items,
+                default,
+            } => RibbonItem::LabeledDropdown {
+                id: &*Box::leak(id.into_boxed_str()),
+                label: &*Box::leak(label.into_boxed_str()),
+                icon: icon.to_static(),
+                items: items
+                    .into_iter()
+                    .map(|(a, b, i)| {
+                        (
+                            &*Box::leak(a.into_boxed_str()),
+                            &*Box::leak(b.into_boxed_str()),
+                            i.to_static(),
+                        )
+                    })
+                    .collect(),
+                default: &*Box::leak(default.into_boxed_str()),
+            },
             OwnedRibbonItem::LargeDropdown {
                 id,
                 label,
@@ -333,9 +350,10 @@ impl OwnedRibbonItem {
                 default: &*Box::leak(default.into_boxed_str()),
             },
             OwnedRibbonItem::ToolGrid { columns } => RibbonItem::ToolGrid {
-                columns: columns.into_iter().map(|column| {
-                    column.into_iter().map(OwnedToolDef::to_static).collect()
-                }).collect(),
+                columns: columns
+                    .into_iter()
+                    .map(|column| column.into_iter().map(OwnedToolDef::to_static).collect())
+                    .collect(),
             },
             OwnedRibbonItem::LayerComboGroup { row2, row3 } => RibbonItem::LayerComboGroup {
                 row2: row2.into_iter().map(|t| t.to_static()).collect(),
@@ -382,17 +400,22 @@ impl From<&RibbonItem> for OwnedRibbonItem {
                     .collect(),
                 default: default.to_string(),
             },
-            RibbonItem::LabeledDropdown { id, label, icon, items, default } => {
-                OwnedRibbonItem::LabeledDropdown {
-                    id: id.to_string(),
-                    label: label.to_string(),
-                    icon: icon.into(),
-                    items: items.iter().map(|(a, b, i)| {
-                        (a.to_string(), b.to_string(), i.into())
-                    }).collect(),
-                    default: default.to_string(),
-                }
-            }
+            RibbonItem::LabeledDropdown {
+                id,
+                label,
+                icon,
+                items,
+                default,
+            } => OwnedRibbonItem::LabeledDropdown {
+                id: id.to_string(),
+                label: label.to_string(),
+                icon: icon.into(),
+                items: items
+                    .iter()
+                    .map(|(a, b, i)| (a.to_string(), b.to_string(), i.into()))
+                    .collect(),
+                default: default.to_string(),
+            },
             RibbonItem::LargeDropdown {
                 id,
                 label,
@@ -410,9 +433,10 @@ impl From<&RibbonItem> for OwnedRibbonItem {
                 default: default.to_string(),
             },
             RibbonItem::ToolGrid { columns } => OwnedRibbonItem::ToolGrid {
-                columns: columns.iter().map(|column| {
-                    column.iter().map(Into::into).collect()
-                }).collect(),
+                columns: columns
+                    .iter()
+                    .map(|column| column.iter().map(Into::into).collect())
+                    .collect(),
             },
             RibbonItem::LayerComboGroup { row2, row3 } => OwnedRibbonItem::LayerComboGroup {
                 row2: row2.iter().map(Into::into).collect(),
@@ -622,7 +646,10 @@ mod tests {
         };
 
         let ids = group.command_ids();
-        assert_eq!(ids, ["SHOW_ALL", "SHOW_SELECTED", "PARALLEL", "PERPENDICULAR"]);
+        assert_eq!(
+            ids,
+            ["SHOW_ALL", "SHOW_SELECTED", "PARALLEL", "PERPENDICULAR"]
+        );
         let round_trip: OwnedRibbonGroup = group.to_static().into();
         assert_eq!(round_trip.command_ids(), ids);
     }

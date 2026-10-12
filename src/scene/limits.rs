@@ -97,15 +97,11 @@ impl Scene {
 
     pub fn set_current_drawing_limits(&mut self, min: glam::DVec2, max: glam::DVec2) {
         if self.input_uses_model_space() {
-            self.document.header.model_space_limits_min =
-                acadrust::types::Vector2::new(min.x, min.y);
-            self.document.header.model_space_limits_max =
-                acadrust::types::Vector2::new(max.x, max.y);
+            self.document.header.model_space_limits_min = codec::types::Vector2::new(min.x, min.y);
+            self.document.header.model_space_limits_max = codec::types::Vector2::new(max.x, max.y);
         } else {
-            self.document.header.paper_space_limits_min =
-                acadrust::types::Vector2::new(min.x, min.y);
-            self.document.header.paper_space_limits_max =
-                acadrust::types::Vector2::new(max.x, max.y);
+            self.document.header.paper_space_limits_min = codec::types::Vector2::new(min.x, min.y);
+            self.document.header.paper_space_limits_max = codec::types::Vector2::new(max.x, max.y);
         }
 
         // Keep the current Layout object synchronized with the header values.

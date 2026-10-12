@@ -82,5 +82,5 @@ fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
     if alpha <= 0.0 {
         discard;
     }
-    return vec4<f32>(in.color.rgb, in.color.a * alpha);
+    return vec4<f32>(in.color.rgb, select(1.0, in.color.a, u.transparency_enable > 0.5) * alpha);
 }

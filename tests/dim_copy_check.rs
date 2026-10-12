@@ -1,9 +1,9 @@
 // Regression for #161: COPY must duplicate a dimension's baked block so the
 // copy renders at the copy position, not on top of the original.
-use acadrust::entities::{Dimension, DimensionLinear, Line};
-use acadrust::tables::BlockRecord;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::entities::{Dimension, DimensionLinear, Line};
+use codec::tables::BlockRecord;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use OpenCADStudio::command::EntityTransform;
 use OpenCADStudio::scene::Scene;
@@ -26,10 +26,7 @@ fn copy_dimension_duplicates_its_block() {
     scene.document.add_entity(sub_e).unwrap();
 
     // A linear dimension whose drawn geometry is that baked block.
-    let mut dim = DimensionLinear::new(
-        Vector3::new(0.0, 0.0, 0.0),
-        Vector3::new(10.0, 0.0, 0.0),
-    );
+    let mut dim = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
     dim.base.block_name = "*D0".to_string();
     let dim_h = scene.add_entity(EntityType::Dimension(Dimension::Linear(dim)));
 
@@ -67,6 +64,9 @@ fn copy_dimension_duplicates_its_block() {
             (l.start.x, l.start.y),
             (l.end.x, l.end.y)
         ),
-        other => panic!("copy block sub is not a line: {:?}", other.map(std::mem::discriminant)),
+        other => panic!(
+            "copy block sub is not a line: {:?}",
+            other.map(std::mem::discriminant)
+        ),
     }
 }

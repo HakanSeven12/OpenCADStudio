@@ -112,22 +112,22 @@ impl CadCommand for ParametersCliCommand {
                 };
                 Some(CmdResult::NeedPoint)
             }
-            Step::NewExpression { name } => {
-                Some(CmdResult::Dispatch(format!("-PARAMETERS NEW {name} {text}")))
-            }
+            Step::NewExpression { name } => Some(CmdResult::Dispatch(format!(
+                "-PARAMETERS NEW {name} {text}"
+            ))),
             Step::EditName => Some(CmdResult::Dispatch(format!("-PARAMETERS EDIT {text}"))),
-            Step::EditExpression { name } => {
-                Some(CmdResult::Dispatch(format!("-PARAMETERS SET {name} {text}")))
-            }
+            Step::EditExpression { name } => Some(CmdResult::Dispatch(format!(
+                "-PARAMETERS SET {name} {text}"
+            ))),
             Step::RenameOld => {
                 self.step = Step::RenameNew {
                     old: text.to_string(),
                 };
                 Some(CmdResult::NeedPoint)
             }
-            Step::RenameNew { old } => {
-                Some(CmdResult::Dispatch(format!("-PARAMETERS RENAME {old} {text}")))
-            }
+            Step::RenameNew { old } => Some(CmdResult::Dispatch(format!(
+                "-PARAMETERS RENAME {old} {text}"
+            ))),
             Step::DeleteName => Some(CmdResult::Dispatch(format!("-PARAMETERS DELETE {text}"))),
         }
     }

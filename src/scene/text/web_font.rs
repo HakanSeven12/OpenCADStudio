@@ -33,6 +33,7 @@ pub enum Script {
     Arabic,
     Hebrew,
     Thai,
+    Lao,
     Devanagari,
     Chinese,
     TraditionalChinese,
@@ -53,6 +54,7 @@ impl Script {
             Script::Arabic => "fonts/arabic.ttf",
             Script::Hebrew => "fonts/hebrew.ttf",
             Script::Thai => "fonts/thai.ttf",
+            Script::Lao => "fonts/lao.ttf",
             Script::Devanagari => "fonts/devanagari.ttf",
             Script::Chinese => "fonts/chinese.ttf",
             Script::TraditionalChinese => "fonts/traditional_chinese.ttf",
@@ -75,6 +77,7 @@ impl Script {
             | Script::Arabic
             | Script::Hebrew
             | Script::Thai
+            | Script::Lao
             | Script::Devanagari => "Noto Sans",
         }
     }
@@ -91,8 +94,9 @@ impl Script {
             8 => Script::Japanese,
             9 => Script::Korean,
             10 => Script::TraditionalChinese,
-            11 => Script::Armenian,
-            12 => Script::Georgian,
+            11 => Script::Lao,
+            12 => Script::Armenian,
+            13 => Script::Georgian,
             _ => Script::Latin,
         }
     }
@@ -111,8 +115,9 @@ impl Script {
             Script::Japanese => 8,
             Script::Korean => 9,
             Script::TraditionalChinese => 10,
-            Script::Armenian => 11,
-            Script::Georgian => 12,
+            Script::Lao => 11,
+            Script::Armenian => 12,
+            Script::Georgian => 13,
         }
     }
 }
@@ -155,6 +160,7 @@ pub fn scripts_for_language_tag(language: &str) -> Vec<Script> {
             "ko" => Some(Script::Korean),
             "ru" | "uk" | "bg" | "sr" => Some(Script::Cyrillic),
             "th" => Some(Script::Thai),
+            "lo" => Some(Script::Lao),
             "zh" => Some(Script::Chinese),
             _ => None,
         }
@@ -188,6 +194,7 @@ pub fn requires_shaping(text: &str) -> bool {
                 | 0x08A0..=0x08FF
                 | 0x0900..=0x097F
                 | 0x0E00..=0x0E7F
+                | 0x0E80..=0x0EFF
                 | 0xA8E0..=0xA8FF
                 | 0xFB1D..=0xFB4F
                 | 0xFB50..=0xFDFF
@@ -245,6 +252,8 @@ pub fn script_of(ch: char) -> Option<Script> {
         // Georgian: Asomtavruli/Nuskhuri, Mtavruli capitals, and the legacy
         // Supplement (khutsuri round mkhedruli).
         0x10A0..=0x10FF | 0x1C90..=0x1CBF | 0x2D00..=0x2D2F => Script::Georgian,
+        0x0E00..=0x0E7F => Script::Thai,
+        0x0E80..=0x0EFF => Script::Lao,
         // Hangul → always Korean; kana → always Japanese.
         0x1100..=0x11FF | 0x3130..=0x318F | 0xAC00..=0xD7A3 => Script::Korean,
         0x3040..=0x30FF | 0x31F0..=0x31FF => Script::Japanese,

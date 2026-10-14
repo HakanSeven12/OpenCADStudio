@@ -22,6 +22,9 @@ use iced::{mouse, Point, Task};
 
 impl OpenCADStudio {
     pub(in crate::app) fn open_save_dialog_window(&mut self, tab_idx: usize) -> Task<Message> {
+        if self.refuse_block_test_save(tab_idx) {
+            return Task::none();
+        }
         // Every entry here is Save-As semantics (the SAVEAS command, the
         // recovery save-as, the native failure redirects): the user is
         // choosing a destination, so on the web the FS Access picker must

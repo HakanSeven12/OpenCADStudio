@@ -63,6 +63,11 @@ impl CadModule for BlockEditorModule {
                             "Close Block Editor",
                             include_bytes!("../../../assets/icons/mt_cancel.svg"),
                         ),
+                        command(
+                            "BTESTBLOCK",
+                            "Test Block",
+                            include_bytes!("../../../assets/icons/edit_block.svg"),
+                        ),
                     ],
                 },
                 RibbonGroup {

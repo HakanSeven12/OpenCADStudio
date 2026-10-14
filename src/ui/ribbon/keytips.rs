@@ -443,6 +443,9 @@ const CODES: &[(&str, &str, &str)] = &[
     ("block_editor", "Open and Save", "BO"),
     ("block_editor", "BEDIT", "BE"),
     ("block_editor", "BSAVE", "BS"),
+    ("block_editor", "BTESTBLOCK", "TB"),
+    ("draw", "Close", "TC"),
+    ("draw", "BCLOSETESTBLOCK", "CT"),
     ("block_editor", "ATTDEF", "AD"),
     ("block_editor", "AUTOCONSTRAIN", "AC"),
     ("block_editor", "CCONSTRAINT", "CI"),
@@ -641,7 +644,7 @@ impl Ribbon {
         };
         let scope = module.id();
         let mut tips = Vec::new();
-        for group in module.ribbon_groups() {
+        for group in self.groups_for(index) {
             for item in &group.tools {
                 match item {
                     RibbonItem::Tool(tool)
@@ -719,12 +722,7 @@ impl Ribbon {
     fn item_tips(&self, index: usize, open: &str) -> Vec<Tip> {
         let mut items = draw_panel::keytip_items(open);
         if items.is_empty() {
-            let groups = self
-                .modules
-                .get(index)
-                .map(|m| m.ribbon_groups())
-                .unwrap_or(&[]);
-            for item in groups.iter().flat_map(|group| &group.tools) {
+            for item in self.groups_for(index).flat_map(|group| &group.tools) {
                 if let RibbonItem::Dropdown {
                     id, items: list, ..
                 }

@@ -230,6 +230,7 @@ impl OpenCADStudio {
             }
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
+            Some(BlockEditPicker) => self.block_edit_picker = None,
             Some(BlockSaveAs) => self.block_save_as = None,
             Some(PdfAttach) => self.pdf_attach = None,
             Some(UnderlayLayers) => self.underlay_layers = None,
@@ -346,7 +347,17 @@ impl OpenCADStudio {
             .tabs
             .get(self.active_tab)
             .is_some_and(|tab| tab.active_block_edit.is_some());
-        self.ribbon.set_block_editing(block_editing);
+        let testing = self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|tab| tab.block_test.is_some());
+        if testing {
+            self.ribbon.set_block_editing(false);
+            self.ribbon.set_block_testing(true);
+        } else {
+            self.ribbon.set_block_testing(false);
+            self.ribbon.set_block_editing(block_editing);
+        }
         task
     }
 
@@ -444,6 +455,12 @@ impl OpenCADStudio {
                         }
                     }
                 }
+            }
+            if self.active_modal == Some(super::ModalKind::BlockEditPicker)
+                && (matches!(msg, Message::CommandFinalize)
+                    || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN")))
+            {
+                return self.apply_bedit_dialog();
             }
             if self.active_modal == Some(super::ModalKind::BlockSaveAs)
                 && (matches!(msg, Message::CommandFinalize)
@@ -595,7 +612,11 @@ impl OpenCADStudio {
             }
         }
         #[cfg(target_arch = "wasm32")]
-        crate::sys::set_unsaved_changes_warning(self.tabs.iter().any(|tab| tab.dirty));
+        crate::sys::set_unsaved_changes_warning(
+            self.tabs
+                .iter()
+                .any(|tab| tab.dirty && tab.block_test.is_none()),
+        );
         if self.tabs[i].active_cmd.is_none() {
             self.block_palette.placing = None;
         }
@@ -10511,6 +10532,62 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::BlockSaveAsApply => self.apply_block_save_as_dialog(),
+            Message::BlockEditPickerName(name) => {
+                if let Some(state) = self.block_edit_picker.as_mut() {
+                    state.name = name.clone();
+                    let trimmed = name.trim();
+                    state.error = if trimmed.is_empty() {
+                        None
+                    } else {
+                        crate::scene::block_service::validate_block_name(trimmed)
+                            .err()
+                            .map(|e| e.to_string())
+                    };
+                    if let Some(tab_idx) =
+                        self.tabs.iter().position(|t| t.id == state.document_id)
+                    {
+                        if let Some(matched) = state
+                            .existing_names
+                            .iter()
+                            .find(|n| n.eq_ignore_ascii_case(trimmed))
+                        {
+                            state.preview =
+                                self.tabs[tab_idx].scene.block_preview_wires(matched);
+                            state.description = self.tabs[tab_idx]
+                                .scene
+                                .document
+                                .block_records
+                                .get(matched)
+                                .map(|b| b.description.clone())
+                                .unwrap_or_default();
+                        } else {
+                            state.preview.clear();
+                            state.description.clear();
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::BlockEditPickerSelect(name) => {
+                if let Some(state) = self.block_edit_picker.as_mut() {
+                    state.name = name.clone();
+                    state.error = None;
+                    if let Some(tab_idx) =
+                        self.tabs.iter().position(|t| t.id == state.document_id)
+                    {
+                        state.preview = self.tabs[tab_idx].scene.block_preview_wires(&name);
+                        state.description = self.tabs[tab_idx]
+                            .scene
+                            .document
+                            .block_records
+                            .get(&name)
+                            .map(|b| b.description.clone())
+                            .unwrap_or_default();
+                    }
+                }
+                Task::none()
+            }
+            Message::BlockEditPickerApply => self.apply_bedit_dialog(),
             Message::BlockEditChangesDiscard => self.resolve_block_edit_close(false),
             Message::BlockEditChangesCancel => {
                 self.cancel_block_edit_close();

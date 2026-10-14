@@ -1160,6 +1160,12 @@ impl OpenCADStudio {
             "view_focus" => self.control_view_focus(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "save" => {
+                if self.tabs[i].block_test.is_some() {
+                    return Err(failure(
+                        "temporary_document",
+                        "Test Block is temporary and cannot be saved",
+                    ));
+                }
                 let path = req["path"]
                     .as_str()
                     .map(std::path::PathBuf::from)
@@ -1210,6 +1216,12 @@ impl OpenCADStudio {
             // Web: no filesystem path; the drawing comes back in the reply.
             #[cfg(target_arch = "wasm32")]
             "save" => {
+                if self.tabs[i].block_test.is_some() {
+                    return Err(failure(
+                        "temporary_document",
+                        "Test Block is temporary and cannot be saved",
+                    ));
+                }
                 use base64::Engine as _;
                 let default_is_dxf = crate::io::source_is_dxf(None, &self.tabs[i].scene.document);
                 let (version, is_dxf) = super::automation::requested_save_target(

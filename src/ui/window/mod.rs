@@ -5,6 +5,8 @@ pub mod attdef_dialog;
 pub mod attribute_editor;
 pub mod auto_constrain_settings;
 pub mod block_definition;
+pub mod block_edit_picker;
+pub mod block_save_as;
 pub mod block_palette;
 pub mod block_save_as;
 pub mod browser;

@@ -38,7 +38,7 @@ impl OpenCADStudio {
                     let mut saved = 0usize;
                     let mut skipped = 0usize;
                     for t in 0..self.tabs.len() {
-                        if self.tabs[t].is_start {
+                        if self.tabs[t].is_start || self.tabs[t].block_test.is_some() {
                             continue;
                         }
                         if let Some(path) = self.tabs[t].current_path.clone() {

@@ -410,6 +410,12 @@ impl OpenCADStudio {
     /// this needs no undo snapshot. Format follows the path extension.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn control_wblock(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        if self.tabs[self.active_tab].block_test.is_some() {
+            return Err(failure(
+                "temporary_document",
+                "Test Block is temporary and cannot be saved",
+            ));
+        }
         let path = string(req, "path")?;
         let document = &self.tabs[self.active_tab].scene.document;
         // A template base keeps its tables/styles in the exported file

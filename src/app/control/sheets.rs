@@ -20,7 +20,10 @@ impl OpenCADStudio {
             self.set_control_result(json!({ "closed": false, "reason": "start_page" }));
             return Ok(Task::none());
         }
-        if self.tabs[index].dirty && !req["discard"].as_bool().unwrap_or(false) {
+        if self.tabs[index].dirty
+            && self.tabs[index].block_test.is_none()
+            && !req["discard"].as_bool().unwrap_or(false)
+        {
             return Err(failure(
                 "document_dirty",
                 "Save the document or pass discard:true",

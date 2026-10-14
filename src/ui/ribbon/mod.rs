@@ -126,6 +126,7 @@ pub struct Ribbon {
     /// A block editor session is open: the tab that was active before the
     /// Block Editor tab took over.
     block_editing: Option<usize>,
+    block_testing: Option<usize>,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
     /// Open key tips (Alt).
@@ -231,6 +232,7 @@ impl Ribbon {
             xref_ctx: false,
             point_cloud_ctx: None,
             block_editing: None,
+            block_testing: None,
             xref_fade: 50,
             keytips: None,
         }
@@ -329,6 +331,40 @@ impl Ribbon {
             }
             _ => {}
         }
+    }
+
+    pub fn set_block_testing(&mut self, testing: bool) {
+        if testing != self.block_testing.is_some() {
+            self.close_dropdown();
+            let _ = self.hide_keytips();
+        }
+        let Some(index) = self.modules.iter().position(|module| module.id() == "draw") else {
+            return;
+        };
+        match (testing, self.block_testing) {
+            (true, None) => {
+                self.block_testing = Some(self.active);
+                self.active = index;
+            }
+            (false, Some(previous)) => {
+                self.block_testing = None;
+                if self.active == index {
+                    self.active = previous.min(self.modules.len().saturating_sub(1));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Contextual panels share their normal tab with the drawing tools.
+    fn groups_for(&self, index: usize) -> impl Iterator<Item = &RibbonGroup> {
+        let testing = self.block_testing.is_some();
+        self.modules.get(index).into_iter().flat_map(move |module| {
+            module
+                .ribbon_groups()
+                .iter()
+                .filter(move |group| module.id() != "draw" || group.title != "Close" || testing)
+        })
     }
 
     pub fn select(&mut self, index: usize) {
@@ -736,37 +772,35 @@ impl Ribbon {
         } else {
             self.active
         };
-        let tool_area: Element<'_, Message> =
-            if let Some(module) = self.modules.get(effective_active) {
-                let groups = module.ribbon_groups();
-                let style_ctx = StyleContext {
-                    text_style_names: &self.text_style_names,
-                    active_text_style: &self.active_text_style,
-                    dim_style_names: &self.dim_style_names,
-                    active_dim_style: &self.active_dim_style,
-                    mleader_style_names: &self.mleader_style_names,
-                    active_mleader_style: &self.active_mleader_style,
-                    table_style_names: &self.table_style_names,
-                    active_table_style: &self.active_table_style,
-                };
-
-                // Adaptive tool area: panels sit on one row; when they don't all
-                // fit they degrade from the right — a panel's large buttons first
-                // shrink to compact icon columns, then it collapses to a ▾ flyout
-                // button. See `CollapsePanels`.
-                let ts = self.toggle_state(show_block_palette);
-                let panels: Vec<Panel<'_>> = groups
-                    .iter()
-                    .map(|g| self.panel(g, ts, &style_ctx, &|_| Vec::new()))
-                    .collect();
-                CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
-                    .report_height(self.tool_bar_h.clone())
-                    .report_tight(self.collapse_tight.clone())
-                    .mode(self.collapse_mode)
-                    .into()
-            } else {
-                text("").into()
+        let tool_area: Element<'_, Message> = if self.modules.get(effective_active).is_some() {
+            let groups = self.groups_for(effective_active);
+            let style_ctx = StyleContext {
+                text_style_names: &self.text_style_names,
+                active_text_style: &self.active_text_style,
+                dim_style_names: &self.dim_style_names,
+                active_dim_style: &self.active_dim_style,
+                mleader_style_names: &self.mleader_style_names,
+                active_mleader_style: &self.active_mleader_style,
+                table_style_names: &self.table_style_names,
+                active_table_style: &self.active_table_style,
             };
+
+            // Adaptive tool area: panels sit on one row; when they don't all
+            // fit they degrade from the right — a panel's large buttons first
+            // shrink to compact icon columns, then it collapses to a ▾ flyout
+            // button. See `CollapsePanels`.
+            let ts = self.toggle_state(show_block_palette);
+            let panels: Vec<Panel<'_>> = groups
+                .map(|g| self.panel(g, ts, &style_ctx, &|_| Vec::new()))
+                .collect();
+            CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
+                .report_height(self.tool_bar_h.clone())
+                .report_tight(self.collapse_tight.clone())
+                .mode(self.collapse_mode)
+                .into()
+        } else {
+            text("").into()
+        };
 
         let tool_bar: Element<'_, Message> = container(tool_area)
             .style(|theme: &Theme| container::Style {
@@ -934,8 +968,7 @@ impl Ribbon {
             return Some(ov);
         }
 
-        let module = self.modules.get(self.active)?;
-        let groups = module.ribbon_groups();
+        let groups = self.groups_for(self.active);
         let mut items_list: Option<Vec<(&'static str, &'static str, IconKind)>> = None;
         let mut dd_default = "";
         let mut dd_id: &'static str = "";
@@ -1164,7 +1197,7 @@ impl Ribbon {
     /// Draw-tab dropdowns — so the list grows to fit its entries instead of
     /// being clipped to the ribbon-row height. (#153)
     fn style_combo_overlay(&self, open_id: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
-        let groups = self.modules.get(self.active)?.ribbon_groups();
+        let groups = self.groups_for(self.active);
 
         // Locate the open style combo; capture its style key + manager command.
         let mut found: Option<(crate::modules::StyleKey, Option<&'static str>)> = None;
@@ -1679,6 +1712,41 @@ impl Default for Ribbon {
 mod tests {
     use super::widgets::is_active_tool;
     use super::Ribbon;
+
+    #[test]
+    fn block_test_close_panel_extends_draw_only_while_testing() {
+        let mut ribbon = Ribbon::default();
+        let draw = ribbon
+            .modules
+            .iter()
+            .position(|module| module.id() == "draw")
+            .unwrap();
+        assert!(!ribbon
+            .modules
+            .iter()
+            .any(|module| module.id() == "block_test"));
+        let ordinary: Vec<_> = ribbon.groups_for(draw).map(|group| group.title).collect();
+        assert!(!ordinary.contains(&"Close"));
+        ribbon.set_block_editing(true);
+        ribbon.set_block_editing(false);
+        ribbon.set_block_testing(true);
+        assert_eq!(ribbon.active, draw);
+        let testing: Vec<_> = ribbon.groups_for(draw).map(|group| group.title).collect();
+        assert_eq!(&testing[..ordinary.len()], ordinary.as_slice());
+        assert_eq!(testing.last(), Some(&"Close"));
+        ribbon.toggle_collapsed_panel("Close");
+        ribbon.set_block_testing(false);
+        assert!(ribbon.collapsed_open.is_none());
+        assert_eq!(
+            ribbon
+                .groups_for(draw)
+                .map(|group| group.title)
+                .collect::<Vec<_>>(),
+            ordinary
+        );
+        ribbon.set_block_editing(true);
+        assert_eq!(ribbon.modules[ribbon.active].id(), "block_editor");
+    }
 
     #[test]
     fn block_palette_highlight_follows_the_app_state_passed_to_the_view() {

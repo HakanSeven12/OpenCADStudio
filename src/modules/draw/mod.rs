@@ -15,7 +15,7 @@ mod report;
 pub mod select;
 pub mod units;
 
-use crate::modules::{CadModule, RibbonGroup, RibbonItem};
+use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
 pub struct DrawModule;
 
@@ -250,6 +250,15 @@ impl CadModule for DrawModule {
                         ],
                         default: "DIST",
                     }],
+                },
+                RibbonGroup {
+                    title: "Close",
+                    tools: vec![RibbonItem::LargeTool(ToolDef {
+                        id: "BCLOSETESTBLOCK",
+                        label: "Close Test Block",
+                        icon: IconKind::Svg(include_bytes!("../../../assets/icons/mt_ok.svg")),
+                        event: ModuleEvent::Command("BCLOSETESTBLOCK".into()),
+                    })],
                 },
                 // Support group lives on the Start tab now (see view.rs:
                 // start_page_view). Removed from the Draw ribbon to declutter.

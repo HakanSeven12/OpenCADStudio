@@ -458,7 +458,6 @@ impl OpenCADStudio {
             }
 
             "BEDIT" => {
-                use crate::modules::draw::modify::block_edit::BlockEditPickCommand;
                 if self.tabs[i].refedit_session.is_some() {
                     self.command_line.push_error(
                         crate::t!("BEDIT: finish the active REFEDIT (REFCLOSE) first.").as_ref(),
@@ -476,10 +475,44 @@ impl OpenCADStudio {
                             return Some(Task::none());
                         }
                     }
-                    let cmd_obj = BlockEditPickCommand::new();
-                    self.command_line.push_info(&cmd_obj.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    self.open_bedit_dialog(i);
                 }
+            }
+
+            cmd if cmd.starts_with("BEDIT_NEW:") => {
+                if self.tabs[i].refedit_session.is_some() {
+                    self.command_line.push_error(
+                        crate::t!("BEDIT: finish the active REFEDIT (REFCLOSE) first.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let raw_name = &cmd["BEDIT_NEW:".len()..];
+                let block_name = match crate::scene::block_service::validate_block_name(raw_name) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        self.command_line.push_error(&e.to_string());
+                        return Some(Task::none());
+                    }
+                };
+                if let Some(br) = self.tabs[i].scene.document.block_records.get(&block_name) {
+                    let real_name = br.name.clone();
+                    return Some(self.dispatch_command(&format!("BEDIT_OPEN:{real_name}")));
+                }
+                if self.tabs[i].active_block_edit_session().is_some() {
+                    return Some(self.request_block_edit_close(
+                        i,
+                        crate::app::block_editor::BlockEditContinuation::Create(block_name),
+                    ));
+                }
+                let pre_doc = self.tabs[i].scene.document.clone();
+                self.tabs[i]
+                    .scene
+                    .define_block_raw(&block_name, codec::types::Vector3::ZERO, vec![]);
+                let Some(record) = self.tabs[i].scene.document.block_records.get(&block_name) else {
+                    return Some(Task::none());
+                };
+                let br_handle = record.handle;
+                self.start_block_edit_session(i, block_name, br_handle, Some(pre_doc));
             }
 
             cmd if cmd.starts_with("BEDIT_BEGIN:") || cmd.starts_with("BEDIT_OPEN:") => {
@@ -489,7 +522,6 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                use crate::modules::draw::modify::block_edit::BlockEditSession;
                 use codec::Handle;
 
                 let block_name = if let Some(name) = cmd.strip_prefix("BEDIT_OPEN:") {
@@ -539,81 +571,14 @@ impl OpenCADStudio {
                     ));
                 }
 
-                // Capture the camera before the editor reframes it, so leaving
-                // the block editor returns the view exactly where it was (#425).
-                let current_camera = self.tabs[i].scene.camera.borrow().clone();
-                let current_ucs = self.tabs[i].active_ucs.clone();
-                let (return_layout, return_block, return_camera) =
-                    if let Some(parent_index) = self.tabs[i].active_block_edit {
-                        let parent = &mut self.tabs[i].block_edits[parent_index];
-                        parent.editor_camera = current_camera.clone();
-                        parent.editor_ucs = current_ucs;
-                        (
-                            parent.return_layout.clone(),
-                            Some(parent.block_name.clone()),
-                            parent.return_camera.clone(),
-                        )
-                    } else {
-                        self.tabs[i].scene.sync_camera_to_document();
-                        (
-                            self.tabs[i].scene.current_layout.clone(),
-                            None,
-                            current_camera.clone(),
-                        )
-                    };
-                // A block editor renders in model style; switch to Model first so
-                // the paper-space code paths stay off, then scope to the block.
-                if self.tabs[i].scene.current_layout != "Model" {
-                    self.tabs[i].scene.set_current_layout("Model".to_string());
-                }
-                self.tabs[i].scene.block_edit_block = Some(br_handle);
-                self.tabs[i].block_edits.push(BlockEditSession {
-                    block_name: block_name.clone(),
-                    br_handle,
-                    return_layout,
-                    return_block,
-                    return_camera,
-                    editor_camera: current_camera,
-                    editor_ucs: None,
-                });
-                self.tabs[i].active_block_edit = Some(self.tabs[i].block_edits.len() - 1);
-                // Every BEDIT tab owns an isolated local UCS. Never inherit or
-                // overwrite the drawing's model-space UCS.
-                self.tabs[i].refresh_active_ucs();
-
-                self.tabs[i].scene.deselect_all();
-                // The first click of a double-click selects the model-space
-                // INSERT and populates the cached grip overlay. Clearing only
-                // Scene::selected leaves that INSERT's grips active inside the
-                // block editor, where dragging one moves the outer reference
-                // instead of block-local geometry (#517).
-                self.tabs[i].active_grip = None;
-                self.grip_hover = None;
-                self.grip_popup = None;
-                self.visibility_popup = None;
-                // Entering BEDIT changes which block is assembled, not the
-                // cached geometry of that block's entities.
-                self.tabs[i].scene.bump_geometry_no_blocks();
-                // Frame the camera on the block's own geometry (block-local, near
-                // origin) — fit_all() goes through current_layout_block_handle so
-                // it already scopes to the edited block. Without this the view
-                // stays wherever model/paper space was. (#261)
-                self.tabs[i].scene.fit_all();
-                let editor_camera = self.tabs[i].scene.camera.borrow().clone();
-                if let Some(session) = self.tabs[i].active_block_edit_session_mut() {
-                    session.editor_camera = editor_camera;
-                }
-                self.tabs[i].last_synced_camera_gen = self.tabs[i].scene.camera_generation;
-                self.refresh_properties();
-                self.tabs[i].active_cmd = None;
-                self.begin_block_edit_history(i);
-                self.command_line
-                    .push_info(crate::tf!("Block Editor: editing {}", block_name).as_ref());
+                self.start_block_edit_session(i, block_name, br_handle, None);
             }
 
             "BSAVE" => {
                 self.save_block_edit(i);
             }
+            "BTESTBLOCK" => return Some(self.open_block_test(i)),
+            "BCLOSETESTBLOCK" => return Some(self.close_block_test(i)),
             "BSAVEAS" => {
                 self.open_block_save_as_dialog(i);
             }
@@ -1023,6 +988,87 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+
+    pub(in crate::app) fn start_block_edit_session(
+        &mut self,
+        i: usize,
+        block_name: String,
+        br_handle: codec::Handle,
+        unpersisted_pre_document: Option<codec::CadDocument>,
+    ) {
+        use crate::modules::draw::modify::block_edit::BlockEditSession;
+        // Capture the camera before the editor reframes it, so leaving
+        // the block editor returns the view exactly where it was (#425).
+        let current_camera = self.tabs[i].scene.camera.borrow().clone();
+        let current_ucs = self.tabs[i].active_ucs.clone();
+        let (return_layout, return_block, return_camera) =
+            if let Some(parent_index) = self.tabs[i].active_block_edit {
+                let parent = &mut self.tabs[i].block_edits[parent_index];
+                parent.editor_camera = current_camera.clone();
+                parent.editor_ucs = current_ucs;
+                (
+                    parent.return_layout.clone(),
+                    Some(parent.block_name.clone()),
+                    parent.return_camera.clone(),
+                )
+            } else {
+                self.tabs[i].scene.sync_camera_to_document();
+                (
+                    self.tabs[i].scene.current_layout.clone(),
+                    None,
+                    current_camera.clone(),
+                )
+            };
+        // A block editor renders in model style; switch to Model first so
+        // the paper-space code paths stay off, then scope to the block.
+        if self.tabs[i].scene.current_layout != "Model" {
+            self.tabs[i].scene.set_current_layout("Model".to_string());
+        }
+        self.tabs[i].scene.block_edit_block = Some(br_handle);
+        self.tabs[i].block_edits.push(BlockEditSession {
+            block_name: block_name.clone(),
+            br_handle,
+            return_layout,
+            return_block,
+            return_camera,
+            editor_camera: current_camera,
+            editor_ucs: None,
+            unpersisted_pre_document,
+        });
+        self.tabs[i].active_block_edit = Some(self.tabs[i].block_edits.len() - 1);
+        // Every BEDIT tab owns an isolated local UCS. Never inherit or
+        // overwrite the drawing's model-space UCS.
+        self.tabs[i].refresh_active_ucs();
+
+        self.tabs[i].scene.deselect_all();
+        // The first click of a double-click selects the model-space
+        // INSERT and populates the cached grip overlay. Clearing only
+        // Scene::selected leaves that INSERT's grips active inside the
+        // block editor, where dragging one moves the outer reference
+        // instead of block-local geometry (#517).
+        self.tabs[i].active_grip = None;
+        self.grip_hover = None;
+        self.grip_popup = None;
+        self.visibility_popup = None;
+        // Entering BEDIT changes which block is assembled, not the
+        // cached geometry of that block's entities.
+        self.tabs[i].scene.bump_geometry_no_blocks();
+        // Frame the camera on the block's own geometry (block-local, near
+        // origin) — fit_all() goes through current_layout_block_handle so
+        // it already scopes to the edited block. Without this the view
+        // stays wherever model/paper space was. (#261)
+        self.tabs[i].scene.fit_all();
+        let editor_camera = self.tabs[i].scene.camera.borrow().clone();
+        if let Some(session) = self.tabs[i].active_block_edit_session_mut() {
+            session.editor_camera = editor_camera;
+        }
+        self.tabs[i].last_synced_camera_gen = self.tabs[i].scene.camera_generation;
+        self.refresh_properties();
+        self.tabs[i].active_cmd = None;
+        self.begin_block_edit_history(i);
+        self.command_line
+            .push_info(crate::tf!("Block Editor: editing {}", block_name).as_ref());
     }
 
     pub(in crate::app) fn restore_after_block_edit_close(

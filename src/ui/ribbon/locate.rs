@@ -68,15 +68,11 @@ impl Ribbon {
     fn entries(&self) -> impl Iterator<Item = (usize, Entry<'_>)> {
         let order = std::iter::once(self.active)
             .chain((0..self.modules.len()).filter(move |i| *i != self.active));
-        order
-            .filter_map(|i| self.modules.get(i).map(|m| (i, m)))
-            .flat_map(|(i, module)| {
-                module
-                    .ribbon_groups()
-                    .iter()
-                    .flat_map(group_entries)
-                    .map(move |entry| (i, entry))
-            })
+        order.flat_map(|i| {
+            self.groups_for(i)
+                .flat_map(group_entries)
+                .map(move |entry| (i, entry))
+        })
     }
 
     /// The button id that runs the command line `cmd`: an exact match first,
@@ -111,12 +107,7 @@ impl Ribbon {
     /// module has no tab (its tools are on the side toolbar).
     pub(super) fn tab_holding_active_tool(&self) -> Option<usize> {
         let id = self.active_tool.as_deref()?;
-        let holds = |i: usize| {
-            self.modules[i]
-                .ribbon_groups()
-                .iter()
-                .any(|group| group_holds(group, id))
-        };
+        let holds = |i: usize| self.groups_for(i).any(|group| group_holds(group, id));
         if self
             .modules
             .get(self.active)

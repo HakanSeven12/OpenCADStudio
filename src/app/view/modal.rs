@@ -81,6 +81,7 @@ impl OpenCADStudio {
             Some(K::LayerDeleteWarning) => crate::tr!("modal", "delete-layer"),
             Some(K::Unsaved) => crate::tr!("modal", "unsaved-changes"),
             Some(K::BlockEditChanges) => crate::t!("Block Editor").into_owned(),
+            Some(K::BlockEditPicker) => crate::t!("Edit Block Definition").into_owned(),
             Some(K::BlockSaveAs) => crate::t!("Save Block As").into_owned(),
             Some(K::PointStyle) => crate::tr!("modal", "point-style"),
             Some(K::AttributeEditor) => crate::tr!("modal", "attribute-editor"),
@@ -501,6 +502,12 @@ impl OpenCADStudio {
                 let state = self.block_definition.as_ref()?;
                 sized_flow(ex, 580, 390, |flow| {
                     crate::ui::window::block_definition::view_window(state, flow)
+                })
+            }
+            super::super::ModalKind::BlockEditPicker => {
+                let state = self.block_edit_picker.as_ref()?;
+                sized_flow(ex, 540, 380, |flow| {
+                    crate::ui::window::block_edit_picker::view(state, flow)
                 })
             }
             super::super::ModalKind::BlockSaveAs => {

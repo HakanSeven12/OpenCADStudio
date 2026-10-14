@@ -9,6 +9,10 @@ pub(crate) mod config;
 pub use automation::{export_headless, serve};
 mod annotation_data;
 mod block_editor;
+mod block_test;
+#[cfg(test)]
+mod block_test_tests;
+mod block_save_as;
 #[cfg(test)]
 mod block_editor_tests;
 mod block_save_as;
@@ -572,6 +576,7 @@ pub(super) struct OpenCADStudio {
     drawing_units: Option<crate::ui::window::drawing_units::State>,
     /// Working copy of the Block Definition dialog; `None` while it is closed.
     block_definition: Option<crate::ui::window::block_definition::BlockDefinitionState>,
+    block_edit_picker: Option<crate::ui::window::block_edit_picker::State>,
     block_save_as: Option<crate::ui::window::block_save_as::State>,
     /// PDF dialogs' working copies; `None` while closed.
     pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
@@ -2188,6 +2193,7 @@ pub enum ModalKind {
     DimStyle,
     Unsaved,
     BlockEditChanges,
+    BlockEditPicker,
     BlockSaveAs,
     SaveDialog,
     Recovery,
@@ -2825,6 +2831,9 @@ pub enum Message {
     BlockEditChangesCancel,
     BlockSaveAsName(String),
     BlockSaveAsApply,
+    BlockEditPickerName(String),
+    BlockEditPickerSelect(String),
+    BlockEditPickerApply,
     // ── AEC / unsupported-object drop warning (lossy Save-As) ──────────────
     /// Save as the source DWG version so the unsupported objects survive.
     AecDropSameVersion,
@@ -4575,6 +4584,7 @@ impl OpenCADStudio {
             layer_translator: None,
             drawing_units: None,
             block_definition: None,
+            block_edit_picker: None,
             block_save_as: None,
             pdf_attach: None,
             point_cloud_attach: None,

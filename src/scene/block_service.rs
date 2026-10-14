@@ -16,7 +16,7 @@
 use codec::objects::ObjectType;
 use codec::tables::BlockRecord;
 use codec::types::Handle;
-use codec::{CadDocument, EntityType};
+use codec::{CadDocument, EntityType, TableEntry};
 use std::collections::HashSet;
 use std::fmt;
 
@@ -283,6 +283,29 @@ fn is_layout_record(document: &CadDocument, record: &BlockRecord) -> bool {
             document.objects.get(&record.layout),
             Some(ObjectType::Layout(_))
         )
+}
+
+/// Candidate block names for the Edit Block Definition (BEDIT) dialog:
+/// excludes standard layouts (*MODEL_SPACE, *PAPER_SPACE), layout records,
+/// anonymous blocks (*U, *D, *T, etc.), and externally referenced blocks.
+/// Sorted alphabetically, case-insensitive.
+pub fn bedit_candidate_block_names(document: &CadDocument) -> Vec<String> {
+    let mut names: Vec<String> = document
+        .block_records
+        .iter()
+        .filter(|record| {
+            !record.is_standard()
+                && !is_layout_record(document, record)
+                && !record.is_anonymous()
+                && !record.name.starts_with('*')
+                && !record.flags.is_xref
+                && !record.flags.is_xref_overlay
+                && !record.name.contains('|')
+        })
+        .map(|record| record.name.clone())
+        .collect();
+    names.sort_by_key(|n| n.to_ascii_lowercase());
+    names
 }
 
 /// The extension-dictionary key on a dynamic block's record.
@@ -1237,5 +1260,33 @@ mod tests {
         add_insert(&mut scene, "BlockB", Some(blk_a));
         assert!(would_create_cycle(&scene.document, "blockb", "BLOCKA"));
         assert!(!would_create_cycle(&scene.document, "blocka", "BLOCKB"));
+    }
+
+    #[test]
+    fn locked_bedit_candidate_block_names_filters_and_sorts() {
+        let mut scene = scene();
+        define(&mut scene, "zebra");
+        define(&mut scene, "Alpha");
+        define(&mut scene, "Beta");
+
+        // Anonymous block
+        let mut anon = BlockRecord::new("*U1");
+        anon.handle = Handle::new(9901);
+        anon.flags.anonymous = true;
+        scene.document.block_records.add(anon).unwrap();
+
+        // Xref block
+        let mut xref = BlockRecord::new("XrefBlock");
+        xref.handle = Handle::new(9902);
+        xref.flags.is_xref = true;
+        scene.document.block_records.add(xref).unwrap();
+
+        // Xref dependent symbol
+        let mut xref_dep = BlockRecord::new("HOST|CHILD");
+        xref_dep.handle = Handle::new(9903);
+        scene.document.block_records.add(xref_dep).unwrap();
+
+        let candidates = bedit_candidate_block_names(&scene.document);
+        assert_eq!(candidates, vec!["Alpha", "Beta", "zebra"]);
     }
 }

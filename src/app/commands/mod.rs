@@ -150,6 +150,33 @@ impl OpenCADStudio {
         };
         let resolved = self.resolve_alias(cmd);
         let cmd = resolved.as_deref().unwrap_or(cmd);
+        if self.tabs[i].block_test.is_some() {
+            let name = cmd.split([' ', ':']).next().unwrap_or(cmd);
+            if matches!(
+                name,
+                "BEDIT"
+                    | "BEDIT_BEGIN"
+                    | "BEDIT_OPEN"
+                    | "REFEDIT"
+                    | "REFEDIT_BEGIN"
+                    | "BSAVE"
+                    | "BSAVEAS"
+                    | "SAVE"
+                    | "QSAVE"
+                    | "SAVEAS"
+                    | "SAVEALL"
+                    | "WBLOCK"
+                    | "EXPORT"
+                    | "ETRANSMIT"
+                    | "ARCHIVE"
+            ) {
+                self.command_line.push_error(
+                    crate::t!("Close Test Block before saving or opening another block editor.")
+                        .as_ref(),
+                );
+                return Task::none();
+            }
+        }
         if is_spacemouse_command(cmd) {
             return self.run_action(cmd);
         }

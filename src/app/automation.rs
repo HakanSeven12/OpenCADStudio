@@ -698,6 +698,9 @@ impl OpenCADStudio {
         };
         match req["op"].as_str().unwrap_or("") {
             "new" => {
+                if self.tabs[self.active_tab].block_test.is_some() {
+                    return err("Close Test Block before replacing the drawing.");
+                }
                 if self.tabs[self.active_tab].block_edit_history.is_some() {
                     return err("Close the block editor before replacing the drawing.");
                 }
@@ -724,6 +727,9 @@ impl OpenCADStudio {
             }
             #[cfg(not(target_arch = "wasm32"))]
             "open" => {
+                if self.tabs[self.active_tab].block_test.is_some() {
+                    return err("Close Test Block before replacing the drawing.");
+                }
                 if self.tabs[self.active_tab].block_edit_history.is_some() {
                     return err("Close the block editor before replacing the drawing.");
                 }
@@ -790,6 +796,7 @@ impl OpenCADStudio {
                 if self.command_line.error_revision != error_revision {
                     return err(self.command_line.last_error.clone().unwrap_or_default());
                 }
+                let i = self.active_tab;
                 let after = self.tabs[i].scene.document.entities().count();
                 // A command can finish with an interactive surface still open:
                 // the in-place text editor (the `TEXT` content step), the MTEXT
@@ -994,6 +1001,9 @@ impl OpenCADStudio {
                 json!({ "ok": true, "selected": self.tabs[i].scene.selected_entities().len() })
             }
             "save" => {
+                if self.tabs[self.active_tab].block_test.is_some() {
+                    return err("Test Block is temporary and cannot be saved.");
+                }
                 let i = self.active_tab;
                 let path = req["path"]
                     .as_str()
@@ -1531,6 +1541,11 @@ impl OpenCADStudio {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn save_verified_request(&mut self, req: &Value) -> Result<Value, Value> {
         let i = self.active_tab;
+        if self.tabs[i].block_test.is_some() {
+            return Err(
+                json!({"ok":false,"code":"temporary_document","error":"Test Block is temporary and cannot be saved."}),
+            );
+        }
         let Some(raw_path) = req["path"].as_str() else {
             return Err(
                 json!({"ok":false,"status":"failed","code":"path_required","error":"save_verified requires an explicit absolute path"}),

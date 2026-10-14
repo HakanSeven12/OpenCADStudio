@@ -27,6 +27,7 @@ pub(super) struct BlockEditHistory {
 pub(super) enum BlockEditContinuation {
     Close,
     Switch(String),
+    Create(String),
     Layout(String),
     Tab(u64),
     Quit,
@@ -98,7 +99,7 @@ impl OpenCADStudio {
         });
     }
 
-    fn block_edit_delta(&mut self, i: usize) -> Option<DeltaSnapshot> {
+    fn block_edit_delta(&mut self, i: usize, for_save: bool) -> Option<DeltaSnapshot> {
         self.reconcile_block_edit_membership(i);
         self.finish_pending_history(i);
         let current_structure = self.tabs[i].scene.document.snapshot_structure();
@@ -106,12 +107,19 @@ impl OpenCADStudio {
         let history = tab.block_edit_history.as_ref()?;
         let checkpoint = &history.checkpoint;
         let session = tab.active_block_edit_session()?;
-        let before: FxHashMap<_, _> = checkpoint
-            .document
+        let before_doc = if for_save {
+            session
+                .unpersisted_pre_document
+                .as_ref()
+                .unwrap_or(&checkpoint.document)
+        } else {
+            &checkpoint.document
+        };
+        let before: FxHashMap<_, _> = before_doc
             .entities()
             .map(|e| {
                 let h = e.common().handle;
-                (h, checkpoint.document.get_entity_arc(h).unwrap())
+                (h, before_doc.get_entity_arc(h).unwrap())
             })
             .collect();
         let after: FxHashMap<_, _> = tab
@@ -134,7 +142,7 @@ impl OpenCADStudio {
             })
             .collect();
         entities.sort_by_key(|(handle, _, _)| handle.value());
-        let mut before_structure = checkpoint.document.clone();
+        let mut before_structure = before_doc.clone();
         before_structure = before_structure.snapshot_structure();
         let mut after_structure = current_structure;
         // The editor temporarily uses Model rendering. Drawing history must
@@ -221,7 +229,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn block_edit_dirty(&mut self, i: usize) -> bool {
-        self.block_edit_delta(i).is_some()
+        self.block_edit_delta(i, false).is_some()
     }
 
     pub(super) fn validate_block_save_as_name(
@@ -243,6 +251,88 @@ impl OpenCADStudio {
             );
         }
         Ok(name)
+    }
+
+    pub(super) fn open_bedit_dialog(&mut self, i: usize) {
+        if self.tabs[i].refedit_session.is_some() {
+            self.command_line.push_error(
+                crate::t!("BEDIT: finish the active REFEDIT (REFCLOSE) first.").as_ref(),
+            );
+            return;
+        }
+
+        let existing_names =
+            crate::scene::block_service::bedit_candidate_block_names(&self.tabs[i].scene.document);
+
+        let initial_name = if let Some(session) = self.tabs[i].active_block_edit_session() {
+            session.block_name.clone()
+        } else if let Some(first) = existing_names.first() {
+            first.clone()
+        } else {
+            String::new()
+        };
+
+        let preview = if !initial_name.is_empty() {
+            self.tabs[i].scene.block_preview_wires(&initial_name)
+        } else {
+            Vec::new()
+        };
+
+        let description = if !initial_name.is_empty() {
+            self.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get(&initial_name)
+                .map(|b| b.description.clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let error = if initial_name.is_empty() {
+            None
+        } else {
+            crate::scene::block_service::validate_block_name(&initial_name)
+                .err()
+                .map(|e| e.to_string())
+        };
+
+        self.block_edit_picker = Some(crate::ui::window::block_edit_picker::State {
+            document_id: self.tabs[i].id,
+            name: initial_name,
+            existing_names,
+            preview,
+            description,
+            error,
+        });
+        self.active_modal = Some(ModalKind::BlockEditPicker);
+        self.reset_modal_geometry();
+    }
+
+    pub(super) fn apply_bedit_dialog(&mut self) -> Task<Message> {
+        let Some(state) = self.block_edit_picker.as_ref() else {
+            return Task::none();
+        };
+        let id = state.document_id;
+        let name = state.name.trim().to_string();
+        if name.is_empty() || state.error.is_some() {
+            return Task::none();
+        }
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == id) else {
+            return Task::none();
+        };
+        self.active_tab = i;
+        self.block_edit_picker = None;
+        self.active_modal = None;
+        self.reset_modal_geometry();
+
+        if let Some(record) = self.tabs[i].scene.document.block_records.get(&name) {
+            let real_name = record.name.clone();
+            self.dispatch_command(&format!("BEDIT_OPEN:{real_name}"))
+        } else {
+            self.dispatch_command(&format!("BEDIT_NEW:{name}"))
+        }
     }
 
     pub(super) fn open_block_save_as_dialog(&mut self, i: usize) {
@@ -385,7 +475,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.named_parameters = parameters;
         self.tabs[i].active_layer = active_layer;
         let mut delta = self
-            .block_edit_delta(i)
+            .block_edit_delta(i, true)
             .expect("a new definition changes the document");
         delta.label = format!("Save block as {name}");
         let mut history = self.tabs[i].block_edit_history.take().unwrap();
@@ -398,6 +488,7 @@ impl OpenCADStudio {
         debug_assert_eq!(session.br_handle, source_handle);
         session.br_handle = copied.record;
         session.block_name = name.clone();
+        session.unpersisted_pre_document = None;
         self.tabs[i].scene.block_edit_block = Some(copied.record);
         self.tabs[i].scene.deselect_all();
         self.tabs[i].active_grip = None;
@@ -460,7 +551,7 @@ impl OpenCADStudio {
             definition,
         );
         self.tabs[i].scene.visibility_states.remove(&definition);
-        if let Some(delta) = self.block_edit_delta(i) {
+        if let Some(delta) = self.block_edit_delta(i, true) {
             let mut history = self.tabs[i].block_edit_history.take().unwrap();
             std::mem::swap(&mut self.tabs[i].history, &mut history.main);
             self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
@@ -469,6 +560,9 @@ impl OpenCADStudio {
             history.checkpoint = self.block_edit_checkpoint(i);
             self.tabs[i].block_edit_history = Some(history);
             self.tabs[i].scene.bump_geometry();
+        }
+        if let Some(session) = self.tabs[i].active_block_edit_session_mut() {
+            session.unpersisted_pre_document = None;
         }
         self.command_line
             .push_output(crate::tf!("Block {} saved.", name).as_ref());
@@ -482,7 +576,11 @@ impl OpenCADStudio {
         };
         if let Some(history) = self.tabs[i].block_edit_history.take() {
             if discard {
-                self.tabs[i].scene.document = history.checkpoint.document;
+                if let Some(pre_doc) = session.unpersisted_pre_document {
+                    self.tabs[i].scene.document = pre_doc;
+                } else {
+                    self.tabs[i].scene.document = history.checkpoint.document;
+                }
                 self.tabs[i].scene.parametric_constraints = history.checkpoint.constraints;
                 self.tabs[i].scene.named_parameters = history.checkpoint.parameters;
                 self.tabs[i].active_layer = history.checkpoint.active_layer;
@@ -499,6 +597,7 @@ impl OpenCADStudio {
             &session.return_camera,
         );
         self.cancel_attr_editor();
+        self.discard_block_tests(self.tabs[i].id);
     }
 
     pub(super) fn request_block_edit_close(
@@ -506,6 +605,7 @@ impl OpenCADStudio {
         i: usize,
         continuation: BlockEditContinuation,
     ) -> Task<Message> {
+        let id = self.tabs[i].id;
         if self.tabs[i].active_block_edit_session().is_some() {
             if self.block_edit_dirty(i) {
                 self.active_tab = i;
@@ -515,6 +615,7 @@ impl OpenCADStudio {
             }
             self.close_block_edit(i, true);
         }
+        let i = self.tabs.iter().position(|tab| tab.id == id).unwrap();
         self.continue_after_block_edit(continuation, i)
     }
 
@@ -528,6 +629,10 @@ impl OpenCADStudio {
             BlockEditContinuation::Switch(name) => {
                 self.active_tab = i;
                 self.dispatch_command(&format!("BEDIT_OPEN:{name}"))
+            }
+            BlockEditContinuation::Create(name) => {
+                self.active_tab = i;
+                self.dispatch_command(&format!("BEDIT_NEW:{name}"))
             }
             BlockEditContinuation::Layout(name) => {
                 self.active_tab = i;
@@ -564,6 +669,7 @@ impl OpenCADStudio {
         self.pending_block_close = None;
         self.active_modal = None;
         self.close_block_edit(i, !save);
+        let i = self.tabs.iter().position(|tab| tab.id == id).unwrap();
         self.continue_after_block_edit(continuation, i)
     }
 
@@ -583,7 +689,11 @@ impl OpenCADStudio {
         {
             return self.request_block_edit_close(i, BlockEditContinuation::Quit);
         }
-        if self.tabs.iter().any(|tab| tab.dirty) {
+        if self
+            .tabs
+            .iter()
+            .any(|tab| tab.dirty && tab.block_test.is_none())
+        {
             self.pending_close = Some(super::PendingClose::Quit);
             self.open_unsaved_dialog_window()
         } else {

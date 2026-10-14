@@ -1761,6 +1761,11 @@ impl OpenCADStudio {
         version: codec::DxfVersion,
         set_current_path: bool,
     ) -> Result<(), crate::io::SaveFailure> {
+        if self.tabs[i].block_test.is_some() {
+            return Err(crate::io::SaveFailure::other(
+                "Test Block is temporary and cannot be saved",
+            ));
+        }
         let previous_autosave = self.autosave_target(i);
         if self.tabs[i].recovery_save_as_required
             && self.tabs[i]
@@ -2426,7 +2431,7 @@ impl OpenCADStudio {
         let mut skipped = 0usize;
         let mut pending: Vec<(crate::app::WebSaveallEntry, codec::CadDocument)> = Vec::new();
         for t in 0..self.tabs.len() {
-            if self.tabs[t].is_start {
+            if self.tabs[t].is_start || self.tabs[t].block_test.is_some() {
                 continue;
             }
             let Some(path) = self.tabs[t].current_path.clone() else {
@@ -3084,6 +3089,9 @@ impl OpenCADStudio {
         set_current_path: bool,
         check_external_change: bool,
     ) -> Task<Message> {
+        if self.refuse_block_test_save(i) {
+            return Task::none();
+        }
         let tab_id = self.tabs[i].id;
         if self
             .pending_native_thumbnail_save
@@ -3752,6 +3760,9 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_save_file(&mut self) -> Task<Message> {
+        if self.refuse_block_test_save(self.active_tab) {
+            return Task::none();
+        }
         if self.read_only {
             self.command_line.push_error(
                 crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
@@ -3808,6 +3819,9 @@ impl OpenCADStudio {
     /// Used by plain Save (QSAVE) on an as-yet-unsaved drawing and by the
     /// save-before-close flow — the version picker is reserved for Save As.
     pub(in crate::app) fn save_with_default_format(&mut self, tab_idx: usize) -> Task<Message> {
+        if self.refuse_block_test_save(tab_idx) {
+            return Task::none();
+        }
         self.active_tab = tab_idx;
         // Every caller of this entry (Save/QSAVE, the save-before-close
         // flow) is plain-save semantics: on the web, the tab's retained
@@ -4192,7 +4206,10 @@ impl OpenCADStudio {
     pub(super) fn on_autosave(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         for i in 0..self.tabs.len() {
-            if !self.tabs[i].dirty || self.active_save_jobs.contains_key(&self.tabs[i].id) {
+            if self.tabs[i].block_test.is_some()
+                || !self.tabs[i].dirty
+                || self.active_save_jobs.contains_key(&self.tabs[i].id)
+            {
                 continue;
             }
             self.prepare_snapshot_save(i);
@@ -4227,7 +4244,7 @@ impl OpenCADStudio {
         }
         let mut pending = Vec::new();
         for i in 0..self.tabs.len() {
-            if !self.tabs[i].dirty {
+            if self.tabs[i].block_test.is_some() || !self.tabs[i].dirty {
                 continue;
             }
             // Same pre-serialize state sync the web Save flow performs
@@ -4553,7 +4570,7 @@ impl OpenCADStudio {
         let mut names: Vec<String> = Vec::new();
         let mut active = 0;
         for (index, tab) in self.tabs.iter().enumerate() {
-            if tab.is_start {
+            if tab.is_start || tab.block_test.is_some() {
                 continue;
             }
             if index == self.active_tab {

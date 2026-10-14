@@ -160,7 +160,7 @@ impl OpenCADStudio {
             if self.tabs[idx].is_start {
                 continue;
             }
-            if self.tabs[idx].active_block_edit.is_some() {
+            if self.tabs[idx].active_block_edit.is_some() || self.tabs[idx].block_test.is_some() {
                 tasks.push(self.on_tab_close(idx));
                 if self.pending_block_close.is_some() || self.pending_close.is_some() {
                     break;
@@ -178,6 +178,27 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
+        let test_return_id = self
+            .tabs
+            .get(idx)
+            .and_then(|tab| tab.block_test.as_ref())
+            .map(|test| {
+                if idx == self.active_tab {
+                    test.source_id
+                } else {
+                    self.tabs[self.active_tab].id
+                }
+            });
+        if test_return_id.is_some() {
+            if idx == self.active_tab {
+                self.cancel_active_grip_edit();
+                self.grip_pending = None;
+                self.visibility_popup = None;
+                self.grip_popup = None;
+                self.grip_hover = None;
+            }
+            self.tabs[idx].dirty = false;
+        }
         // Start tab is fixed — close requests on it are no-ops.
         if self.tabs.get(idx).map_or(false, |t| t.is_start) {
             return Task::none();
@@ -249,6 +270,16 @@ impl OpenCADStudio {
         // The active tab is now either a brand-new blank or a
         // different existing tab; in both cases the ribbon needs
         // to track that doc's defaults / selection. #21.
+        if let Some(index) =
+            test_return_id.and_then(|id| self.tabs.iter().position(|tab| tab.id == id))
+        {
+            self.active_tab = index;
+            self.adopt_header_sysvars(index);
+        }
+        self.ribbon
+            .set_block_testing(self.tabs[self.active_tab].block_test.is_some());
+        self.ribbon
+            .set_block_editing(self.tabs[self.active_tab].active_block_edit.is_some());
         self.sync_ribbon_layers();
         self.sync_ribbon_styles();
         self.sync_ribbon_from_selection();

@@ -12,7 +12,6 @@ mod block_editor;
 mod block_test;
 #[cfg(test)]
 mod block_test_tests;
-mod block_save_as;
 #[cfg(test)]
 mod block_editor_tests;
 mod block_save_as;

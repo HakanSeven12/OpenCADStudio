@@ -204,6 +204,26 @@ fn open_bytes_request(req: &Value) -> Result<(String, Vec<u8>), Value> {
     }
     Ok((name.to_string(), bytes))
 }
+/// `{"op":"font_register","file_name":"Brand-Regular.ttf","data_base64":"…"}`:
+/// a host hands over a TrueType/OpenType file that text styles reference by
+/// name. The web build has no font folder, so this is how such styles get
+/// their real face instead of a fallback.
+fn font_register_request(req: &Value) -> Result<(String, Vec<u8>), Value> {
+    use base64::Engine as _;
+    let name = string(req, "file_name")?;
+    let name = name.rsplit(['/', '\\']).next().unwrap_or(name).trim();
+    if name.is_empty() {
+        return Err(failure("invalid_request", "Missing file_name"));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(req["data_base64"].as_str().unwrap_or_default())
+        .map_err(|e| failure("invalid_request", format!("data_base64: {e}")))?;
+    if bytes.is_empty() {
+        return Err(failure("invalid_request", "data_base64 is empty"));
+    }
+    Ok((name.to_string(), bytes))
+}
+
 fn string<'a>(req: &'a Value, key: &str) -> Result<&'a str, Value> {
     req[key]
         .as_str()
@@ -277,6 +297,7 @@ fn command_category(name: &str) -> &'static str {
         "BREAK",
         "JOIN",
         "EXPLODE",
+        "TXTEXP",
         "STRETCH",
         "ARRAY",
         "PEDIT",
@@ -359,6 +380,7 @@ fn command_selection_policy(name: &str) -> &'static str {
         "CUTCLIP",
         "ERASE",
         "EXPLODE",
+        "TXTEXP",
         "GROUP",
         "LAYFRZ",
         "LAYLCK",
@@ -547,6 +569,7 @@ impl OpenCADStudio {
                 | "audit"
                 | "text_search"
                 | "text_audit"
+                | "keytips"
         );
         if !query && !self.control.enabled {
             return (
@@ -783,7 +806,12 @@ impl OpenCADStudio {
             }
         // Interactive requests operate on the active tab by definition, so
         // a client may omit document_id (the GUI-hosted REST channel does).
-        } else if !query && !matches!(op, "new" | "open" | "stop" | "user_select" | "getpoint") {
+        } else if !query
+            && !matches!(
+                op,
+                "new" | "open" | "font_register" | "stop" | "user_select" | "getpoint"
+            )
+        {
             return (
                 failure("document_required", "Read state and supply document_id"),
                 Task::none(),
@@ -833,6 +861,7 @@ impl OpenCADStudio {
                     }
                 }
                 "grips" => self.control_grips(),
+                "keytips" => self.ribbon.keytips_json(req["detail"].as_str() == Some("full")),
                 "xdata_get" => self.xdata_read(&req),
                 "get_selection" => self.control_get_selection(),
                 "text_search" => self.control_text_search(&req).unwrap_or_else(|e| e),
@@ -987,6 +1016,24 @@ impl OpenCADStudio {
             "open" => self.update(Message::OpenExternal(std::path::PathBuf::from(string(
                 req, "path",
             )?))),
+            "font_register" => {
+                let (name, bytes) = font_register_request(req)?;
+                let (family, faces) =
+                    crate::scene::text::sysfont::register_font_file(&name, &bytes)
+                        .ok_or_else(|| failure("font_invalid", "data_base64 holds no font face"))?;
+                // Same invalidation as a fetched web font: styles that fell
+                // back while the file was missing lay out again.
+                crate::scene::text::ttf_glyph::clear_fallback_cache();
+                for tab in self.tabs.iter_mut() {
+                    tab.scene.invalidate_text_geometry_dependencies();
+                }
+                self.set_control_result(json!({
+                    "file_name": name,
+                    "family": family,
+                    "faces": faces,
+                }));
+                Task::none()
+            }
             "activate" | "switch_document" => {
                 let i = self
                     .tabs
@@ -1080,6 +1127,7 @@ impl OpenCADStudio {
             "property" => self.control_set_property(req)?,
             "grip_drag" => self.control_grip_drag(req)?,
             "click" => self.control_click(req)?,
+            "pointer" => self.control_pointer(req)?,
             "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
             #[cfg(not(target_arch = "wasm32"))]
@@ -2314,6 +2362,59 @@ mod tests {
         assert_eq!(bad.unwrap_err()["code"], "invalid_request");
     }
     #[test]
+    fn font_register_validates_the_request() {
+        let ok = font_register_request(
+            &json!({"file_name":"C:\\Fonts\\Brand.ttf","data_base64":"AAEC"}),
+        );
+        assert_eq!(ok, Ok(("Brand.ttf".to_string(), vec![0, 1, 2])));
+        for req in [
+            json!({"data_base64":"AAEC"}),
+            json!({"file_name":"fonts/","data_base64":"AAEC"}),
+            json!({"file_name":"a.ttf","data_base64":""}),
+            json!({"file_name":"a.ttf","data_base64":"not base64!"}),
+        ] {
+            assert_eq!(
+                font_register_request(&req).unwrap_err()["code"],
+                "invalid_request",
+                "{req}"
+            );
+        }
+    }
+
+    #[test]
+    fn font_register_makes_a_style_file_resolve() {
+        use base64::Engine as _;
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/greek.ttf"))
+            .expect("bundled web font");
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        let reply = request(
+            &mut app,
+            json!({
+                "op":"font_register",
+                "file_name":"Control-Registered.ttf",
+                "data_base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+            }),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let family = reply["result"]["family"]
+            .as_str()
+            .expect("family")
+            .to_string();
+        assert!(reply["result"]["faces"].as_u64().unwrap() >= 1, "{reply}");
+        assert_eq!(
+            crate::scene::text::sysfont::family_for_reference("control-registered.ttf"),
+            Some(family)
+        );
+
+        let refused = request(
+            &mut app,
+            json!({"op":"font_register","file_name":"x.ttf","data_base64":"AAEC"}),
+        );
+        assert_eq!(refused["code"], "font_invalid", "{refused}");
+    }
+
+    #[test]
     fn open_from_bytes_is_refused_natively_without_touching_documents() {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
@@ -2816,8 +2917,8 @@ mod tests {
         assert_eq!(response["status"], "completed", "{response}");
 
         // The plotted PDF carries two distinct pen widths — the per-layer
-        // 0.13 mm / 0.50 mm hierarchy survives the plot style (thin clamps to
-        // the 1 px floor, so the ratio is the clamped-pixel ratio 1.889).
+        // 0.13 mm / 0.50 mm hierarchy survives the plot style at its true
+        // ratio; the screen's 1 px floor does not reach the plot (#1749).
         let text =
             crate::io::pdf_export::pdf_stream_text(&std::fs::read(&pdf).expect("pdf written"));
         let tokens: Vec<&str> = text.split_whitespace().collect();
@@ -2840,7 +2941,7 @@ mod tests {
             "two layer weights in the plotted PDF: {widths:?}"
         );
         assert!(
-            (widths[1] / widths[0] - 1.889).abs() < 0.15,
+            (widths[1] / widths[0] - 50.0 / 13.0).abs() < 0.15,
             "0.50 mm vs 0.13 mm hierarchy: {widths:?}"
         );
         let _ = std::fs::remove_file(&pdf);

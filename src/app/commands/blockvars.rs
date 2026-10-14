@@ -16,6 +16,9 @@ pub(super) const BLOCK_SYSVARS: &[&str] = &[
     "BLOCKSTATE",
     "EXPLMODE",
     "INSNAME",
+    "REFEDITNAME",
+    "XEDIT",
+    "XFADECTL",
 ];
 
 /// The `SETVAR ?` line for this family.
@@ -44,6 +47,15 @@ impl OpenCADStudio {
                 let state = self.tabs[i].refedit_session.is_some() as u8;
                 self.command_line
                     .push_output(&format!("BLOCKSTATE = {state} (read only)"));
+            }
+            "REFEDITNAME" => {
+                let name = self.tabs[i]
+                    .refedit_session
+                    .as_ref()
+                    .map(|s| s.block_name.clone())
+                    .unwrap_or_default();
+                self.command_line
+                    .push_output(&format!("REFEDITNAME = \"{name}\" (read only)"));
             }
             "INSNAME" | "BLOCKNAVIGATE" => {
                 let current = if name == "INSNAME" {
@@ -77,6 +89,8 @@ impl OpenCADStudio {
                 let (current, max) = match name.as_str() {
                     "BLOCKMRULIST" => (self.block_mru_list as i32, 100),
                     "BLOCKREDEFINEMODE" => (self.block_redefine_mode as i32, 2),
+                    "XEDIT" => (self.tabs[i].scene.document.header.xedit as i32, 1),
+                    "XFADECTL" => (crate::scene::cache::block_cache::refedit_fade_ctl(), 90),
                     _ => (explmode(&self.tabs[i].scene.document) as i32, 1),
                 };
                 let ask = |app: &mut Self, name: String| {
@@ -108,6 +122,23 @@ impl OpenCADStudio {
                             "BLOCKREDEFINEMODE" => {
                                 self.block_redefine_mode = n as u8;
                                 self.persist_settings_if_changed();
+                            }
+                            "XEDIT" => {
+                                if n != current {
+                                    self.push_undo_snapshot(i, "XEDIT");
+                                    self.tabs[i].scene.document.header.xedit = n == 1;
+                                    self.tabs[i].dirty = true;
+                                }
+                            }
+                            "XFADECTL" => {
+                                crate::scene::cache::block_cache::set_refedit_fade_ctl(n);
+                                self.persist_settings_if_changed();
+                                for tab in &mut self.tabs {
+                                    if !tab.is_start {
+                                        tab.scene.recolor_meshes();
+                                        tab.scene.bump_geometry();
+                                    }
+                                }
                             }
                             _ => {
                                 if n != current {

@@ -32,7 +32,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 ///
 /// `block_delete` gained its optional `force` parameter.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "96510df2d38cf3f7feb99e50e9491dda6fc1ee9221dc82020303df918292f580";
+const TOOL_SCHEMA_DIGEST: &str = "9a7aeb5e1fd76b94fabece3a7ba213f622f449076fac9c25c7e69592989094fd";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -68,6 +68,7 @@ const READ_OPS: &[&str] = &[
     "audit",
     "text_search",
     "text_audit",
+    "keytips",
     "capture",
 ];
 const EXECUTE_OPS: &[&str] = &[
@@ -85,6 +86,7 @@ const EXECUTE_OPS: &[&str] = &[
     "property",
     "grip_drag",
     "click",
+    "pointer",
     "set_properties",
     "action",
     "embed_image",

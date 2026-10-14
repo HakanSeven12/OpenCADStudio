@@ -538,14 +538,16 @@ fn locked_redefine_with_a_changed_base_moves_the_instance() {
     );
 
     // The redefine path: the same contents, but a new base point (0,20,0).
-    scene.redefine_block_raw(
-        NAME,
-        v(0.0, 20.0, 0.0),
-        vec![EntityType::Line(Line::from_points(
-            v(0.0, 0.0, 0.0),
-            v(20.0, 0.0, 0.0),
-        ))],
-    );
+    assert!(scene
+        .redefine_block_raw(
+            NAME,
+            v(0.0, 20.0, 0.0),
+            vec![EntityType::Line(Line::from_points(
+                v(0.0, 0.0, 0.0),
+                v(20.0, 0.0, 0.0),
+            ))],
+        )
+        .is_ok());
     assert_close(
         block_base_point(&scene.document, NAME),
         [0.0, 20.0, 0.0],
@@ -616,14 +618,16 @@ fn locked_noop_redefine_leaves_the_instance_where_it_is() {
     assert_close(end, [62.990381, 27.5, 0.0], 1e-6, "line end before");
 
     // No-op redefine: identical contents, same base.
-    scene.redefine_block_raw(
-        NAME,
-        base,
-        vec![EntityType::Line(Line::from_points(
-            v(6.0, 4.0, 0.0),
-            v(16.0, 4.0, 0.0),
-        ))],
-    );
+    assert!(scene
+        .redefine_block_raw(
+            NAME,
+            base,
+            vec![EntityType::Line(Line::from_points(
+                v(6.0, 4.0, 0.0),
+                v(16.0, 4.0, 0.0),
+            ))],
+        )
+        .is_ok());
     assert_close(
         block_base_point(&scene.document, NAME),
         [6.0, 4.0, 0.0],
@@ -667,9 +671,8 @@ fn locked_block_definition_dialog_prefills_the_existing_definition_base_point() 
 
 #[test]
 fn locked_explode_places_geometry_at_convention_positions() {
-    // base-point: `explode_entity` shifts the definition's contents by -base before
-    // handing them to the codec's explode, so the pieces land where the render
-    // path puts them (see the module header for the derivation).
+    // The document-aware codec explosion uses the definition's base point,
+    // so the pieces land where the render path puts them.
     let mut scene = scene_with_bp_test();
     let insert = placed_instance(&mut scene);
     let pieces = crate::modules::draw::modify::explode::explode_entity(
@@ -679,7 +682,7 @@ fn locked_explode_places_geometry_at_convention_positions() {
     let mut line_start = None;
     let mut line_end = None;
     let mut circle_center = None;
-    for piece in pieces {
+    for piece in &pieces {
         match piece {
             EntityType::Line(line) => {
                 if line_end.is_none() {
@@ -710,6 +713,20 @@ fn locked_explode_places_geometry_at_convention_positions() {
         1e-6,
         "exploded circle center",
     );
+    // Exploding an INSERT drops attribute values and the
+    // attribute definitions (tags) reappear as ATTDEF entities.
+    let attdef_piece = pieces.iter().find_map(|p| match p {
+        EntityType::AttributeDefinition(ad) => Some(ad.clone()),
+        _ => None,
+    });
+    let ad = attdef_piece.expect("the exploded ATTDEF");
+    assert_eq!(ad.tag, "TAG1");
+    assert_close(
+        ad.insertion_point,
+        EXPECTED_ATTR_POINT,
+        1e-6,
+        "exploded attdef insertion point",
+    );
     // Same numbers as the render path: EXPLODE and the renderer agree.
     let (render_start, render_end) = instance_line_world(&scene, BP_TEST);
     assert_close(render_end, EXPECTED_LINE_END, 1e-6, "render path: line end");
@@ -718,6 +735,62 @@ fn locked_explode_places_geometry_at_convention_positions() {
         EXPECTED_LINE_START,
         1e-6,
         "render path: line start",
+    );
+}
+
+#[test]
+fn locked_minsert_explode_restores_attdefs_in_each_rotated_cell() {
+    let scene = scene_with_bp_test();
+    let mut insert = Insert::new(BP_TEST, v(100.0, 100.0, 0.0))
+        .with_uniform_scale(2.0)
+        .with_rotation(std::f64::consts::FRAC_PI_2)
+        .with_array(2, 2, 10.0, 20.0);
+    insert
+        .attributes
+        .push(AttributeEntity::new("TAG1".into(), "Instance value".into()));
+    let pieces = crate::modules::draw::modify::explode::explode_entity(
+        &EntityType::Insert(insert),
+        &scene.document,
+    );
+    let definitions: Vec<_> = pieces
+        .iter()
+        .filter_map(|entity| match entity {
+            EntityType::AttributeDefinition(definition) => Some(definition),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(definitions.len(), 4);
+    for (definition, expected) in definitions.iter().zip([
+        [94.0, 104.0, 0.0],
+        [94.0, 114.0, 0.0],
+        [74.0, 104.0, 0.0],
+        [74.0, 114.0, 0.0],
+    ]) {
+        assert_close(definition.insertion_point, expected, 1e-6, "array ATTDEF");
+        assert_eq!(definition.tag, "TAG1");
+        assert_eq!(definition.default_value, "");
+    }
+    let lines: Vec<_> = pieces
+        .iter()
+        .filter_map(|entity| match entity {
+            EntityType::Line(line) => Some(line),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lines.len(), 4);
+    for (line, expected) in lines.iter().zip([
+        [100.0, 100.0, 0.0],
+        [100.0, 110.0, 0.0],
+        [80.0, 100.0, 0.0],
+        [80.0, 110.0, 0.0],
+    ]) {
+        assert_close(line.start, expected, 1e-6, "array LINE");
+    }
+    assert_close(
+        block_attdefs(&scene.document, BP_TEST)[0].insertion_point,
+        [12.0, 8.0, 0.0],
+        1e-6,
+        "source ATTDEF stays in definition coordinates",
     );
 }
 
@@ -1034,5 +1107,151 @@ fn locked_nested_reference_explode_matches_the_render_path() {
         [93.339746, 103.535898, 0.0],
         1e-6,
         "render path: inner line end",
+    );
+}
+
+#[test]
+fn locked_nested_insert_with_attributes_exploded_one_level() {
+    // When an outer block containing an inner INSERT and attributes is exploded one level,
+    // the outer block's attributes drop their values and its ATTDEFs reappear, while
+    // the inner INSERT remains an intact INSERT with its attributes preserved.
+    const INNER: &str = "BP_ATTR_INNER";
+    const OUTER: &str = "BP_ATTR_OUTER";
+    let mut scene = Scene::new();
+
+    // INNER block: base (0,0,0), has a LINE and an ATTDEF
+    let inner_ad = AttributeDefinition {
+        insertion_point: v(1.0, 1.0, 0.0),
+        height: 1.0,
+        ..AttributeDefinition::new(
+            "INNER_TAG".to_string(),
+            "Inner prompt".to_string(),
+            "Inner val".to_string(),
+        )
+    };
+    scene.define_block_raw(
+        INNER,
+        v(0.0, 0.0, 0.0),
+        vec![
+            EntityType::Line(Line::from_points(v(0.0, 0.0, 0.0), v(5.0, 0.0, 0.0))),
+            EntityType::AttributeDefinition(inner_ad),
+        ],
+    );
+
+    // OUTER block: base (10.0, 5.0, 0.0), has a nested INSERT of INNER (with an attribute instance) and an ATTDEF
+    let mut inner_ins = Insert::new(INNER.to_string(), v(5.0, 3.0, 0.0));
+    let mut inner_attr =
+        AttributeEntity::new("INNER_TAG".to_string(), "Actual inner value".to_string());
+    inner_attr.insertion_point = v(6.0, 4.0, 0.0);
+    inner_ins.attributes.push(inner_attr);
+
+    let outer_ad = AttributeDefinition {
+        insertion_point: v(12.0, 8.0, 0.0),
+        height: 1.0,
+        ..AttributeDefinition::new(
+            "OUTER_TAG".to_string(),
+            "Outer prompt".to_string(),
+            "Outer val".to_string(),
+        )
+    };
+
+    scene.define_block_raw(
+        OUTER,
+        v(10.0, 5.0, 0.0),
+        vec![
+            EntityType::Insert(inner_ins),
+            EntityType::AttributeDefinition(outer_ad),
+        ],
+    );
+
+    // Model space: instance of OUTER at (100, 100), 30°, scale 2
+    let mut outer_instance = Insert::new(OUTER.to_string(), v(100.0, 100.0, 0.0));
+    outer_instance.set_x_scale(2.0);
+    outer_instance.set_y_scale(2.0);
+    outer_instance.set_z_scale(2.0);
+    outer_instance.rotation = DEG30;
+    let mut outer_attr =
+        AttributeEntity::new("OUTER_TAG".to_string(), "Actual outer value".to_string());
+    outer_attr.insertion_point = v(100.464102, 107.196152, 0.0);
+    outer_instance.attributes.push(outer_attr);
+
+    // Explode outer instance one level
+    let pieces = crate::modules::draw::modify::explode::explode_entity(
+        &EntityType::Insert(outer_instance),
+        &scene.document,
+    );
+
+    // Expected pieces: the nested inner INSERT (with its attribute still intact) and the outer ATTDEF
+    let nested_insert = pieces
+        .iter()
+        .find_map(|p| match p {
+            EntityType::Insert(ins) if ins.block_name == INNER => Some(ins.clone()),
+            _ => None,
+        })
+        .expect("nested inner INSERT among pieces");
+
+    assert_eq!(nested_insert.attributes.len(), 1);
+    assert_eq!(nested_insert.attributes[0].tag, "INNER_TAG");
+    assert_eq!(
+        nested_insert.attributes[0].get_value(),
+        "Actual inner value"
+    );
+
+    let outer_attdef = pieces
+        .iter()
+        .find_map(|p| match p {
+            EntityType::AttributeDefinition(ad) if ad.tag == "OUTER_TAG" => Some(ad.clone()),
+            _ => None,
+        })
+        .expect("reappeared outer ATTDEF among pieces");
+
+    assert_close(
+        outer_attdef.insertion_point,
+        EXPECTED_ATTR_POINT,
+        1e-6,
+        "outer attdef insertion point",
+    );
+}
+
+#[test]
+fn locked_redefine_block_raw_refuses_cycle() {
+    let mut scene = Scene::new();
+    let blk_a = "REDEF_A";
+    let blk_b = "REDEF_B";
+
+    scene.define_block_raw(
+        blk_a,
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(1.0, 0.0, 0.0),
+        ))],
+    );
+
+    // B contains A
+    scene.define_block_raw(
+        blk_b,
+        Vector3::ZERO,
+        vec![EntityType::Insert(Insert::new(
+            blk_a.to_string(),
+            Vector3::ZERO,
+        ))],
+    );
+
+    // Redefining A to contain B would create cycle A -> B -> A; must refuse
+    let res = scene.redefine_block_raw(
+        blk_a,
+        Vector3::ZERO,
+        vec![EntityType::Insert(Insert::new(
+            blk_b.to_string(),
+            Vector3::ZERO,
+        ))],
+    );
+
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(
+        err.contains("circular dependency detected"),
+        "expected cycle error, got: {err}"
     );
 }

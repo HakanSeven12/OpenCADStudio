@@ -8,8 +8,22 @@ use crate::modules::insert::xattach::{
     existing_reference, path_to_block_name, prepare_xref_definition, stored_path, XAttachCommand,
     XrefAttachRequest, XrefPlacement,
 };
+use crate::modules::insert::xattach::IMAGE_EXTENSIONS;
 use crate::modules::insert::xref_cmd::display_path;
 use crate::ui::window::xref_attach::{XrefAttachMsg, XrefAttachState};
+
+/// ATTACH's file types, in the reference order (the picker counts from 1).
+const ATTACH_FILTERS: [(&str, &[&str]); 8] = [
+    ("All image files", IMAGE_EXTENSIONS),
+    ("DWF files (*.dwfx; *.dwf)", &["dwfx", "dwf"]),
+    ("MicroStation DGN (*.dgn)", &["dgn"]),
+    ("All DGN Files (*.*)", &["*"]),
+    ("PDF files (*.pdf)", &["pdf"]),
+    ("Point Cloud (*.rcp; *.rcs)", &["rcp", "rcs"]),
+    ("Drawing (*.dwg)", &["dwg"]),
+    ("All files (*.*)", &["*"]),
+];
+const ALL_DGN_FILTER: u32 = 4;
 
 impl OpenCADStudio {
     /// DWFATTACH / DGNATTACH on the command line: with a file, from its
@@ -42,12 +56,26 @@ impl OpenCADStudio {
             Some((verb, rest)) => (verb.to_ascii_uppercase(), rest.trim()),
             None => (upper.clone(), ""),
         };
+        // FILEDIA 0 sends the picking commands to their command-line forms.
+        let dialog = crate::sys::file_dia();
         match (verb.as_str(), rest.is_empty()) {
-            ("ATTACH", true) => Some(Task::done(Message::AttachPick)),
-            ("DWFATTACH", true) => Some(Task::done(Message::UnderlayAttachPick(
+            ("ATTACH", true) if dialog => Some(Task::done(Message::AttachPick)),
+            ("ATTACH", true) | ("-ATTACH", _) => {
+                use crate::command::CadCommand;
+                let command = crate::modules::insert::xref_cmd::AttachCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                if !rest.is_empty() {
+                    return Some(
+                        self.feed_command(crate::command::StepInput::Text(rest.to_string())),
+                    );
+                }
+                Some(Task::none())
+            }
+            ("DWFATTACH", true) if dialog => Some(Task::done(Message::UnderlayAttachPick(
                 codec::entities::UnderlayType::Dwf,
             ))),
-            ("DGNATTACH", true) => Some(Task::done(Message::UnderlayAttachPick(
+            ("DGNATTACH", true) if dialog => Some(Task::done(Message::UnderlayAttachPick(
                 codec::entities::UnderlayType::Dgn,
             ))),
             // A file after DWFATTACH / DGNATTACH, or the - forms, go on the
@@ -62,7 +90,9 @@ impl OpenCADStudio {
             }
             // POINTCLOUDATTACH picks the file; with a file, or as
             // -POINTCLOUDATTACH, it asks on the command line.
-            ("POINTCLOUDATTACH", true) => Some(Task::done(Message::PointCloudAttachPick)),
+            ("POINTCLOUDATTACH", true) if dialog => {
+                Some(Task::done(Message::PointCloudAttachPick))
+            }
             ("POINTCLOUDATTACH" | "-POINTCLOUDATTACH", _) => {
                 use crate::command::CadCommand;
                 let command = crate::modules::insert::pc_attach::PointCloudAttachCommand::new();
@@ -75,7 +105,14 @@ impl OpenCADStudio {
                 }
                 Some(Task::none())
             }
-            ("XATTACH", true) => Some(Task::done(Message::XAttachPick)),
+            ("XATTACH", true) if dialog => Some(Task::done(Message::XAttachPick)),
+            ("XATTACH", true) => {
+                let command =
+                    crate::modules::insert::xref_cmd::XrefCommand::attach(self.saved_xref_paths(i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                Some(Task::none())
+            }
             // A file named on the command line skips the picker.
             // Handled at once, so the placement it starts belongs to this
             // command line (automation included).
@@ -96,15 +133,8 @@ impl OpenCADStudio {
                 Some(self.finish_dispatch(cmd))
             }
             ("-XREF", true) => {
-                let saved: Vec<(String, String)> = self.tabs[i]
-                    .scene
-                    .document
-                    .block_records
-                    .iter()
-                    .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
-                    .map(|br| (br.name.clone(), br.xref_path.clone()))
-                    .collect();
-                let command = crate::modules::insert::xref_cmd::XrefCommand::new(saved);
+                let command =
+                    crate::modules::insert::xref_cmd::XrefCommand::new(self.saved_xref_paths(i));
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
                 Some(Task::none())
@@ -126,6 +156,18 @@ impl OpenCADStudio {
             }
             _ => None,
         }
+    }
+
+    /// Saved paths by reference name, for -XREF.
+    fn saved_xref_paths(&self, i: usize) -> Vec<(String, String)> {
+        self.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+            .map(|br| (br.name.clone(), br.xref_path.clone()))
+            .collect()
     }
 
     /// `-XREF ?` — the reference table as the reference application prints it.
@@ -392,40 +434,41 @@ impl OpenCADStudio {
                 },
                 Message::AttachPickResult,
             ),
-            Message::AttachPick => Task::perform(
-                async {
-                    let handle = crate::sys::file_dialog()
-                        .set_title(crate::t!("Select Reference File").as_ref())
-                        .add_filter(
-                            crate::t!("All Reference Files").as_ref(),
-                            &[
-                                "dwg", "dxf", "pdf", "dwf", "dwfx", "dgn", "png", "jpg", "jpeg",
-                                "bmp", "tif", "tiff", "rcp", "rcs",
-                            ],
-                        )
-                        .add_filter(crate::t!("Drawing").as_ref(), &["dwg", "dxf"])
-                        .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
-                        .add_filter(crate::t!("DWF Files").as_ref(), &["dwf", "dwfx"])
-                        .add_filter(crate::t!("DGN Files").as_ref(), &["dgn"])
-                        .add_filter(
-                            crate::t!("Images").as_ref(),
-                            &["png", "jpg", "jpeg", "bmp", "tif", "tiff"],
-                        )
-                        .add_filter(crate::t!("Point Clouds").as_ref(), &["rcp", "rcs"])
-                        .pick_file()
-                        .await;
-                    match handle {
-                        Some(h) => Ok(crate::sys::handle_path(&h)),
-                        None => Err("Cancelled".to_string()),
-                    }
-                },
-                Message::AttachPickResult,
-            ),
+            Message::AttachPick => {
+                let filters = ATTACH_FILTERS
+                    .iter()
+                    .map(|(label, extensions)| (crate::t!(label).to_string(), *extensions))
+                    .collect();
+                let title = crate::t!("Select Reference File").to_string();
+                let index = crate::sys::attach_filter();
+                Task::perform(
+                    async move {
+                        match crate::sys::pick_file_with_filter(title, filters, index).await {
+                            Some((path, index)) => {
+                                crate::sys::set_attach_filter(index);
+                                Ok(path)
+                            }
+                            None => Err("Cancelled".to_string()),
+                        }
+                    },
+                    Message::AttachPickResult,
+                )
+            }
             Message::AttachPickResult(Ok(path)) => {
-                let ext = path
+                // The file type the picker was left on is a profile setting.
+                self.save_config();
+                let mut ext = path
                     .extension()
                     .map(|e| e.to_string_lossy().to_ascii_lowercase())
                     .unwrap_or_default();
+                // Any file picked under "All DGN Files" is a DGN.
+                let known = ["dwg", "dxf", "pdf", "dwf", "dwfx", "dgn", "rcp", "rcs"];
+                if crate::sys::attach_filter() == ALL_DGN_FILTER
+                    && !known.contains(&ext.as_str())
+                    && !IMAGE_EXTENSIONS.contains(&ext.as_str())
+                {
+                    ext = "dgn".to_string();
+                }
                 match ext.as_str() {
                     "pdf" => match std::fs::read(&path) {
                         Ok(bytes) => self.update(Message::PdfAttachPickResult(Ok((
@@ -477,7 +520,7 @@ impl OpenCADStudio {
                         self.open_point_cloud_attach_dialog(&path);
                         Task::none()
                     }
-                    "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" => {
+                    e if IMAGE_EXTENSIONS.contains(&e) => {
                         let result = image::image_dimensions(&path)
                             .map(|(w, h)| (path.clone(), w, h))
                             .map_err(|e| e.to_string());

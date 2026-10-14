@@ -165,6 +165,7 @@ impl Scene {
 
     pub fn deselect_all(&mut self) {
         self.selected_constraint = None;
+        self.sub_segments.clear();
         if self.selected.is_empty() {
             return;
         }

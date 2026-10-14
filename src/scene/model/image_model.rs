@@ -252,7 +252,12 @@ impl ImageModel {
         Some(Self {
             render_instance: None,
             file_path: img.file_path.clone(),
-            pixels: decoded.pixels,
+            pixels: adjusted_image_pixels(
+                &img.file_path,
+                &decoded.pixels,
+                img.brightness,
+                img.contrast,
+            ),
             width: decoded.width,
             height: decoded.height,
             opacity,
@@ -648,6 +653,78 @@ pub fn clear_image_cache() {
     if let Ok(mut cache) = image_cache().lock() {
         cache.clear();
     }
+}
+
+/// Brightness and contrast (0–100, 50 = unchanged) as one lookup table per
+/// colour channel. Measured against the reference's display of a gradient:
+/// brightness is a power curve x^g with g = ((100 − B) / B)^0.72 (0 is black,
+/// 100 white); contrast bends lightness around one half the same way,
+/// 0.5 ± 0.5·|2x − 1|^h with h = ((100 − C) / C)^0.72 (0 is flat grey, 100 a
+/// hard step). Brightness is applied first. Fade is the model's opacity.
+pub(crate) fn brightness_contrast_lut(brightness: u8, contrast: u8) -> [u8; 256] {
+    // ponytail: the 0.72 exponent is a least-squares fit of seven measured
+    // levels (within about 10/255); refine with more reference samples.
+    let curve = |v: u8| -> f64 {
+        let v = v.min(100);
+        (f64::from(100 - v) / f64::from(v.max(1))).powf(0.72)
+    };
+    let mut lut = [0u8; 256];
+    for (i, out) in lut.iter_mut().enumerate() {
+        let mut x = i as f64 / 255.0;
+        x = match brightness.min(100) {
+            0 => 0.0,
+            100 => if i == 0 { 0.0 } else { 1.0 },
+            b => x.powf(curve(b)),
+        };
+        x = match contrast.min(100) {
+            0 => 0.5,
+            100 => if x >= 0.5 { 1.0 } else { 0.0 },
+            c => {
+                let d = 2.0 * x - 1.0;
+                0.5 + 0.5 * d.signum() * d.abs().powf(curve(c))
+            }
+        };
+        *out = (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    }
+    lut
+}
+
+/// The decoded raster with the entity's brightness and contrast applied,
+/// memoised per source and setting (the GPU keeps textures per pixel buffer).
+/// An entry holds its source buffer, so the address in its key cannot be
+/// handed to another decode (a reloaded file) while the entry lives.
+fn adjusted_image_pixels(
+    path: &str,
+    pixels: &Arc<Vec<u8>>,
+    brightness: u8,
+    contrast: u8,
+) -> Arc<Vec<u8>> {
+    if brightness == 50 && contrast == 50 {
+        return Arc::clone(pixels);
+    }
+    type Key = (String, usize, u8, u8);
+    type Entry = (Arc<Vec<u8>>, Arc<Vec<u8>>);
+    static CACHE: OnceLock<Mutex<HashMap<Key, Entry>>> = OnceLock::new();
+    let key = (path.to_string(), Arc::as_ptr(pixels) as usize, brightness, contrast);
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((_, hit)) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
+        return Arc::clone(hit);
+    }
+    let lut = brightness_contrast_lut(brightness, contrast);
+    let mut out = pixels.as_ref().clone();
+    for px in out.chunks_exact_mut(4) {
+        for c in &mut px[..3] {
+            *c = lut[*c as usize];
+        }
+    }
+    let out = Arc::new(out);
+    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
+    // ponytail: cleared wholesale past 64 entries; an LRU if many images are adjusted.
+    if cache.len() > 64 {
+        cache.clear();
+    }
+    cache.insert(key, (Arc::clone(pixels), Arc::clone(&out)));
+    out
 }
 
 /// Resolve an image reference to decoded pixels, memoised per path. Handles a

@@ -5,6 +5,7 @@ mod count_palette;
 mod file_tabs;
 mod graphic_attributes_palette;
 mod layout_tabs;
+pub mod dview;
 pub mod limits;
 mod orbit;
 mod ortho;

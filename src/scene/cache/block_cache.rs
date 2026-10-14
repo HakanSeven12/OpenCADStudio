@@ -178,6 +178,7 @@ pub struct BlockCache {
         HashMap<ExpansionPrototypeKey, Arc<std::sync::Mutex<Option<Arc<CachedExpansion>>>>>,
     >,
     clip_prototypes: std::sync::Mutex<HashMap<(u64, Vec<u64>), u64>>,
+    cycle_warnings: std::sync::Mutex<HashSet<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -193,7 +194,10 @@ struct ExpansionPrototypeKey {
 #[derive(Debug)]
 struct CachedExpansion {
     translation: [f64; 3],
+    /// The wires every further reference repeats one by one.
     wires: Arc<Vec<WireModel>>,
+    /// The part a further reference carries as one stub wire, and its XY box.
+    stubbed: Option<(Arc<Vec<WireModel>>, [f32; 4])>,
 }
 
 impl BlockCache {
@@ -217,6 +221,22 @@ impl BlockCache {
     }
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn record_cycle_warning(&self, block_name: &str) -> bool {
+        let mut warnings = self
+            .cycle_warnings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        warnings.insert(block_name.to_ascii_uppercase())
+    }
+
+    pub fn drain_cycle_warnings(&self) -> Vec<String> {
+        let mut warnings = self
+            .cycle_warnings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        warnings.drain().collect()
     }
 
     pub fn defn(&self, block_name: &str) -> Option<&Arc<BlockDefn>> {
@@ -1096,16 +1116,26 @@ pub fn expand_insert(
             translation[1] - cached.translation[1],
             translation[2] - cached.translation[2],
         ];
-        return Some(
-            cached
-                .wires
-                .iter()
-                .map(|wire| translated_prototype_wire(wire, &name, delta))
-                .collect(),
-        );
+        let mut wires: Vec<WireModel> = cached
+            .wires
+            .iter()
+            .map(|wire| translated_prototype_wire(wire, &name, delta))
+            .collect();
+        if let Some((prototype, aabb)) = &cached.stubbed {
+            let mut stub = crate::scene::model::instance_model::stub_wire(
+                Arc::clone(prototype),
+                *aabb,
+                delta,
+                0.0,
+            );
+            stub.name = name.to_string();
+            stub.selected = selected;
+            wires.push(stub);
+        }
+        return Some(wires);
     }
     let mut batches = Batches::default();
-    let mut visited: Vec<String> = Vec::with_capacity(8);
+    let mut visited: Vec<String> = vec![ins.block_name.clone()];
 
     let offsets = crate::scene::render_graph::array_offsets(ins);
     let cell_xform = |offset: &[f64; 3]| {
@@ -1226,9 +1256,20 @@ pub fn expand_insert(
                 });
             }
         }
+        // Further references carry the block-drawn part as one stub instead
+        // of a wire per primitive (#1698).
+        let (stubbed, repeated): (Vec<_>, Vec<_>) = wires
+            .iter()
+            .cloned()
+            .partition(crate::scene::model::instance_model::stubbable);
+        let stubbed = (!stubbed.is_empty()).then(|| {
+            let aabb = crate::scene::model::instance_model::prototype_aabb(&stubbed);
+            (Arc::new(stubbed), aabb)
+        });
         let cached = Arc::new(CachedExpansion {
             translation,
-            wires: Arc::new(wires.clone()),
+            wires: Arc::new(repeated),
+            stubbed,
         });
         **guard = Some(cached);
     }
@@ -1295,9 +1336,24 @@ fn expansion_prototype_key(
     }
 }
 
-fn translated_prototype_wire(source: &WireModel, name: &str, delta: [f64; 3]) -> WireModel {
+pub(crate) fn translated_prototype_wire(
+    source: &WireModel,
+    name: &str,
+    delta: [f64; 3],
+) -> WireModel {
     let mut wire = source.clone();
     wire.name = name.to_string();
+    if let Some(stub) = &source.stub {
+        wire.stub = Some(Arc::new(crate::scene::model::instance_model::InstanceStub {
+            prototype: Arc::clone(&stub.prototype),
+            delta: [
+                stub.delta[0] + delta[0],
+                stub.delta[1] + delta[1],
+                stub.delta[2] + delta[2],
+            ],
+            depth_delta: stub.depth_delta,
+        }));
+    }
     if let Some(instance) = wire.render_instance.as_mut() {
         for axis in 0..3 {
             instance.translation[axis] += delta[axis];
@@ -1475,6 +1531,29 @@ pub(crate) fn fade_toward_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     ]
 }
 
+/// XFADECTL: how far objects outside the REFEDIT working set fade toward the
+/// background, in percent (0–90, default 70).
+static REFEDIT_FADE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(70);
+
+pub fn refedit_fade_ctl() -> i32 {
+    REFEDIT_FADE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_refedit_fade_ctl(value: i32) {
+    REFEDIT_FADE.store(value.clamp(0, 90), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A colour outside the REFEDIT working set, faded by XFADECTL.
+pub(crate) fn refedit_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+    let t = refedit_fade_ctl().clamp(0, 90) as f32 / 100.0;
+    [
+        color[0] * (1.0 - t) + bg[0] * t,
+        color[1] * (1.0 - t) + bg[1] * t,
+        color[2] * (1.0 - t) + bg[2] * t,
+        color[3],
+    ]
+}
+
 /// XDWGFADECTL: how far referenced drawings fade toward the background, in
 /// percent (0–90); zero or negative shows them unfaded.
 static XREF_FADE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(50);
@@ -1606,7 +1685,10 @@ struct NestedPrototypeKey {
 struct NestedPrototype {
     translation: [f64; 3],
     depth_base: f32,
+    /// The wires every further copy repeats one by one.
     wires: Arc<Vec<WireModel>>,
+    /// The part a further copy carries as one stub wire, and its XY box.
+    stubbed: Option<(Arc<Vec<WireModel>>, [f32; 4])>,
 }
 
 /// Hard cap on point count for a single batched WireModel. Above this the
@@ -1762,6 +1844,7 @@ impl Batches {
                     fill_is_3d: b.fill_is_3d,
                     fill_is_2d_solid: b.fill_is_2d_solid,
                     render_instance: None,
+                    stub: None,
                     pick_tris: b.pick_tris,
                     pick_tris_low: b.pick_tris_low,
                     dash_from_start: false,
@@ -1952,7 +2035,16 @@ fn expand_defn(
                         emit_wire(attachment, &attachment_transform, &inner_ctx, out, d_range);
                     }
                 }
-                if visited.iter().any(|n| n == &nref.block_name) {
+                if visited
+                    .iter()
+                    .any(|n| n.eq_ignore_ascii_case(&nref.block_name))
+                {
+                    if ctx.cache.record_cycle_warning(&nref.block_name) {
+                        eprintln!(
+                            "Warning: circular block reference detected for block \"{}\"; cutting cycle",
+                            nref.block_name
+                        );
+                    }
                     continue;
                 }
                 let Some(nested_defn) = ctx.cache.defn(&nref.block_name) else {
@@ -2087,11 +2179,22 @@ fn expand_defn(
                             let depth_delta = nested_range.0 - cached.depth_base;
                             out.extra_wires.extend(cached.wires.iter().map(|wire| {
                                 let mut wire = translated_prototype_wire(wire, "", delta);
-                                if let Some(depth) = wire.depth_override.as_mut() {
-                                    *depth += depth_delta;
-                                }
+                                crate::scene::model::instance_model::shift_depth(
+                                    &mut wire,
+                                    depth_delta,
+                                );
                                 wire
                             }));
+                            if let Some((prototype, aabb)) = &cached.stubbed {
+                                out.extra_wires.push(
+                                    crate::scene::model::instance_model::stub_wire(
+                                        Arc::clone(prototype),
+                                        *aabb,
+                                        delta,
+                                        depth_delta,
+                                    ),
+                                );
+                            }
                         } else {
                             let mut sub = Batches::default();
                             expand_defn(
@@ -2119,12 +2222,23 @@ fn expand_defn(
                                 }
                             }
                             out.extra_wires.extend(wires.iter().cloned());
+                            // Further copies carry the block-drawn part as one
+                            // stub instead of a wire per primitive (#1698).
+                            let (stubbed, repeated): (Vec<_>, Vec<_>) = wires
+                                .into_iter()
+                                .partition(crate::scene::model::instance_model::stubbable);
+                            let stubbed = (!stubbed.is_empty()).then(|| {
+                                let aabb =
+                                    crate::scene::model::instance_model::prototype_aabb(&stubbed);
+                                (Arc::new(stubbed), aabb)
+                            });
                             out.nested_prototypes.insert(
                                 key,
                                 NestedPrototype {
                                     translation,
                                     depth_base: nested_range.0,
-                                    wires: Arc::new(wires),
+                                    wires: Arc::new(repeated),
+                                    stubbed,
                                 },
                             );
                         }
@@ -3483,5 +3597,98 @@ mod metrics_depth_tests {
             .expect("tail block built");
         assert_ne!(root.metrics.aabb_local, [0.0; 4]);
         assert_eq!(root.metrics.aabb_local, tail.metrics.aabb_local);
+    }
+
+    #[test]
+    fn locked_cyclic_block_document_renders_without_hanging_and_warns_once() {
+        // Document built in code with pre-existing cycle:
+        // A contains B, B contains A
+        let mut document = CadDocument::new();
+        let blk_a = add_block(&mut document, "CYC_A");
+        let blk_b = add_block(&mut document, "CYC_B");
+
+        add_owned(
+            &mut document,
+            blk_a,
+            EntityType::Insert(Insert::new("CYC_B", Vector3::ZERO)),
+        );
+        add_owned(
+            &mut document,
+            blk_b,
+            EntityType::Insert(Insert::new("CYC_A", Vector3::ZERO)),
+        );
+        // Add a line in A so there is some actual geometry
+        add_owned(
+            &mut document,
+            blk_a,
+            EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )),
+        );
+
+        // Model space references CYC_A
+        document
+            .add_entity(EntityType::Insert(Insert::new("CYC_A", Vector3::ZERO)))
+            .unwrap();
+
+        // Building the cache computes defns and metrics without hanging
+        let cache = BlockCache::build(
+            &document,
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
+        );
+
+        // Verify defns exist
+        assert!(cache.defns.contains_key("CYC_A"));
+        assert!(cache.defns.contains_key("CYC_B"));
+
+        // Expanding / tessellating into wires does not hang and cuts the cycle
+        let ins = Insert::new("CYC_A", Vector3::ZERO);
+        let inherit_style = crate::scene::view::render::InheritStyle {
+            color: [1.0, 1.0, 1.0, 1.0],
+            pat_len: 1.0,
+            pat: [0.0; 8],
+            lw_px: 1.0,
+        };
+
+        let result = expand_insert(
+            &document,
+            &cache,
+            &ins,
+            Handle::new(1),
+            [1.0, 1.0, 1.0, 1.0],
+            7,
+            1.0,
+            [0.0; 8],
+            1.0,
+            inherit_style,
+            7,
+            true,
+            false,
+            1.0,
+            None,
+            None,
+            false,
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+            crate::scene::BlockScalePolicy::FromInsert,
+            false,
+        );
+
+        assert!(result.is_some());
+
+        // Warning was recorded once
+        let warnings = cache.drain_cycle_warnings();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0], "CYC_A");
+
+        // Subsequent expansion does not warn again because warned set retains it
+        let warnings_after = cache.drain_cycle_warnings();
+        assert!(warnings_after.is_empty());
     }
 }

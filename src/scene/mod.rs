@@ -6,6 +6,11 @@
 //   view    — camera, transforms, viewport, render pipeline driver
 //   cache   — block-definition and property caches
 pub mod annotative;
+pub mod assoc_array;
+pub mod block_visibility;
+pub mod compare;
+pub mod section_cull;
+pub mod sub_select;
 pub mod block_service;
 pub mod cache;
 pub mod convert;
@@ -882,12 +887,78 @@ pub(crate) struct ResidentWireLayout {
     marker_start: usize,
 }
 
+/// One memoized entity tessellation.
+#[derive(Clone)]
+pub(crate) enum MemoRun {
+    /// The wires themselves: an entity with no run in the backing set
+    /// (hidden, or tessellated after the set was built).
+    Owned(Arc<Vec<WireModel>>),
+    /// Still valid, and the same wires the backing resident set holds for the
+    /// entity, so they are kept once instead of twice (#1542).
+    InSet,
+    /// Tessellated into the resident set being built, which becomes the
+    /// backing when it is done; until then the run reads as a miss.
+    Pending,
+}
+
+/// The resident set `MemoRun::InSet` runs live in. Held weakly so the set
+/// stays uniquely owned and can be patched in place; `keep` holds a set an
+/// abandoned patch took apart until the following full build has read it.
+#[derive(Clone, Default)]
+pub(crate) struct MemoBacking {
+    set: std::sync::Weak<Vec<WireModel>>,
+    ranges: HashMap<Handle, (usize, usize)>,
+    keep: Option<Arc<Vec<WireModel>>>,
+}
+
+/// A memoized run resolved to its wires.
+enum MemoHit {
+    Owned(Arc<Vec<WireModel>>),
+    Slice(Arc<Vec<WireModel>>, usize, usize),
+}
+
+impl MemoHit {
+    fn wires(&self) -> &[WireModel] {
+        match self {
+            MemoHit::Owned(wires) => wires,
+            MemoHit::Slice(set, start, len) => &set[*start..*start + *len],
+        }
+    }
+}
+
+/// Hands the set an abandoned resident patch was taking apart back to the
+/// memo, whose `InSet` runs still read from it.
+struct ReclaimOnDecline<'a> {
+    scene: &'a Scene,
+    wires: Option<Vec<WireModel>>,
+    backed: bool,
+}
+
+impl Drop for ReclaimOnDecline<'_> {
+    fn drop(&mut self) {
+        if let Some(wires) = self.wires.take() {
+            if self.backed {
+                self.scene.keep_memo_backing(wires);
+            }
+        }
+    }
+}
+
+/// Kill-switch: `OCS_NO_RESIDENT_MEMO` reverts the resident set to the old
+/// full re-tessellation on every edit, in case a mutation site is ever found
+/// that edits geometry without dropping its handle from the memo.
+fn resident_memo_enabled() -> bool {
+    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *EN.get_or_init(|| std::env::var("OCS_NO_RESIDENT_MEMO").is_err())
+}
+
 #[derive(Clone)]
 pub struct PreparedOpenGeometry {
     pub wires: Arc<Vec<WireModel>>,
     pub interaction_index: Option<Arc<crate::scene::pick::interaction_index::InteractionIndex>>,
     /// Loader tessellations and their guard; a state mismatch clears the memo.
-    pub tess_memo: HashMap<Handle, Arc<Vec<WireModel>>>,
+    pub(crate) tess_memo: HashMap<Handle, MemoRun>,
+    pub(crate) tess_memo_backing: MemoBacking,
     pub tess_guard: u64,
     /// The loader's submission-order layout for `wires`.
     ///
@@ -1483,6 +1554,7 @@ pub fn prepare_open_geometry(
     }
     // Taken, not cloned: the scene is discarded on the next line.
     let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
+    let tess_memo_backing = std::mem::take(&mut *scene.resident_memo_backing.borrow_mut());
     let tess_guard = scene.resident_tess_guard.get();
     let draw_depths = scene.draw_depth_cache.borrow_mut().take();
     // The layout the loader already built for exactly these wires. Taken by
@@ -1508,6 +1580,7 @@ pub fn prepare_open_geometry(
             wires,
             interaction_index,
             tess_memo,
+            tess_memo_backing,
             tess_guard,
             block_defns,
             draw_depths,
@@ -2051,8 +2124,14 @@ pub struct Scene {
     /// frozen-layer signature. Invalidated only when a light entity changes;
     /// ordinary geometry edits never rescan the drawing's lights.
     lighting_cache: RefCell<HashMap<(Handle, u64), Vec<SceneLight>>>,
+    /// The visibility state each dynamic block shows in the Block Editor,
+    /// by block record.
+    pub visibility_states: HashMap<Handle, usize>,
     /// Currently selected entity handles.
     pub selected: HashSet<Handle>,
+    /// Polylines only part of which is selected (Ctrl+click): the picked
+    /// segment indices.
+    pub sub_segments: HashMap<Handle, std::collections::BTreeSet<usize>>,
     selected_order: Vec<Handle>,
     /// The parametric-constraint glyph currently selected in the viewport.
     /// Entity selection changes clear it so the two selections stay exclusive.
@@ -2072,6 +2151,8 @@ pub struct Scene {
     /// edited geometry stands out while the surrounding drawing stays visible
     /// for context. `None` = not editing. (#136)
     pub refedit_keep: Option<HashSet<Handle>>,
+    /// REFEDIT locks the objects outside the working set (`refedit_keep`).
+    pub refedit_lock: bool,
     /// COUNT mode colours: counted references in COUNTCOLOR, overlapping
     /// duplicates in COUNTERRORCOLOR, everything else faded. `None` outside
     /// count mode.
@@ -2360,6 +2441,9 @@ pub struct Scene {
     /// Layouts created in this session and not opened yet: the first time
     /// one opens it gets the LAYOUTCREATEVIEWPORT viewport.
     pub(crate) unopened_layouts: std::collections::HashSet<String>,
+    /// The plot style table a layout's page setup takes when it is
+    /// initialized on first opening.
+    pub(crate) new_layout_plot_style: String,
     layout_names_cache: RefCell<Option<(u64, std::sync::Arc<Vec<String>>)>>,
     /// Bump on any annotation-scale list mutation.
     scale_epoch: u64,
@@ -2538,12 +2622,17 @@ pub struct Scene {
     /// `tess_memo_guard` (tol / view / anno / offset / bg); a guard mismatch
     /// (zoom, layout, …) clears it. `bump_geometry` clears it (structural
     /// change); `mark_entity_dirty` drops one handle (incremental edit).
-    tess_memo: RefCell<HashMap<Handle, Arc<Vec<WireModel>>>>,
+    tess_memo: RefCell<HashMap<Handle, MemoRun>>,
     /// Hash of the tessellation parameters `tess_memo` was built under. When
     /// the current call's parameters differ, the memo is stale and cleared.
     tess_memo_guard: std::cell::Cell<u64>,
     /// Camera-independent model tessellation, separate from the culled memo.
-    resident_tess_memo: RefCell<HashMap<Handle, Arc<Vec<WireModel>>>>,
+    resident_tess_memo: RefCell<HashMap<Handle, MemoRun>>,
+    /// The resident set `resident_tess_memo`'s `InSet` runs read from.
+    resident_memo_backing: RefCell<MemoBacking>,
+    /// Set while `resident_wires_for` assembles a set that will become the
+    /// memo's backing; new runs then go straight into it (`Pending`).
+    building_resident_set: std::cell::Cell<bool>,
     /// Annotation, background, viewport and glyph-atlas signature.
     resident_tess_guard: std::cell::Cell<u64>,
     /// Per-mutation delta journal: which handles changed on each `geometry_epoch`
@@ -2687,13 +2776,16 @@ impl Scene {
             last_created_dimension: None,
             object_data_cache: crate::entities::object_data::ObjectDataCache::default(),
             lighting_cache: RefCell::new(HashMap::default()),
+            visibility_states: HashMap::default(),
             selected: HashSet::default(),
+            sub_segments: HashMap::default(),
             selected_order: Vec::new(),
             selected_constraint: None,
             object_isolation: ObjectIsolationState::default(),
             preview_hidden: HashSet::default(),
             command_preview_hidden: HashSet::default(),
             refedit_keep: None,
+            refedit_lock: false,
             count_display: None,
             hover_highlight: None,
             constraint_hover_highlights: HashSet::default(),
@@ -2773,6 +2865,7 @@ impl Scene {
             layout_type_names_cache: RefCell::new(None),
             layout_epoch: 0,
             unopened_layouts: Default::default(),
+            new_layout_plot_style: String::new(),
             layout_names_cache: RefCell::new(None),
             scale_epoch: 0,
             scale_picker_cache: RefCell::new(None),
@@ -2815,6 +2908,8 @@ impl Scene {
             tess_memo: RefCell::new(HashMap::default()),
             tess_memo_guard: std::cell::Cell::new(0),
             resident_tess_memo: RefCell::new(HashMap::default()),
+            resident_memo_backing: RefCell::new(MemoBacking::default()),
+            building_resident_set: std::cell::Cell::new(false),
             resident_tess_guard: std::cell::Cell::new(0),
             geometry_deltas: RefCell::new(std::collections::VecDeque::new()),
             pending_removed_categories: RefCell::new(HashMap::default()),
@@ -3005,6 +3100,7 @@ impl Scene {
         // the entities it touched instead of rebuilding every one of them.
         if !prepared.tess_memo.is_empty() {
             *self.resident_tess_memo.borrow_mut() = prepared.tess_memo;
+            *self.resident_memo_backing.borrow_mut() = prepared.tess_memo_backing;
             self.resident_tess_guard.set(prepared.tess_guard);
         }
         // Reuse the loader's draw-order map with this scene's epoch.
@@ -3899,6 +3995,7 @@ impl Scene {
         // Structural change — drop both per-entity tessellation memos.
         self.tess_memo.borrow_mut().clear();
         self.resident_tess_memo.borrow_mut().clear();
+        *self.resident_memo_backing.borrow_mut() = MemoBacking::default();
         self.invalidate_dependency_index();
         // Can't name the changed handles → force every journal consumer to rebuild.
         self.push_geometry_delta(epoch, Vec::new(), true);
@@ -4252,7 +4349,7 @@ impl Scene {
                         );
                     if let Some(keep) = &self.refedit_keep {
                         if !keep.contains(&h) {
-                            material.diffuse = crate::scene::cache::block_cache::fade_toward_bg(
+                            material.diffuse = crate::scene::cache::block_cache::refedit_fade(
                                 material.diffuse,
                                 bg,
                             );
@@ -4308,7 +4405,7 @@ impl Scene {
                         .is_some_and(|keep| !keep.contains(&handle))
                     {
                         material.diffuse =
-                            crate::scene::cache::block_cache::fade_toward_bg(material.diffuse, bg);
+                            crate::scene::cache::block_cache::refedit_fade(material.diffuse, bg);
                     }
                     if self.meshes.contains_key(&handle) {
                         material.diffuse = self.count_color(handle, material.diffuse, bg);
@@ -4418,7 +4515,14 @@ impl Scene {
     /// keep set (no-op when not editing). The geometry is untouched, so
     /// hit-testing still works on faded entities. In count mode the counted
     /// references and the duplicates take the count colours instead.
-    fn apply_refedit_fade(&self, wires: &mut [WireModel], bg: [f32; 4]) {
+    fn apply_refedit_fade(&self, wires: &mut Vec<WireModel>, bg: [f32; 4]) {
+        // Block copies kept as stubs draw in their prototype's colour; while
+        // copies are recoloured one by one they are expanded instead.
+        if (self.count_display.is_some() || self.refedit_keep.is_some())
+            && wires.iter().any(|wire| wire.stub.is_some())
+        {
+            *wires = crate::scene::model::instance_model::expand_stubs(wires).into_owned();
+        }
         if let Some(count) = &self.count_display {
             for w in wires.iter_mut() {
                 let (color, class) = match Self::handle_from_wire_name(&w.name) {
@@ -4446,7 +4550,7 @@ impl Scene {
             let keep_bright =
                 Self::handle_from_wire_name(&w.name).is_some_and(|h| keep.contains(&h));
             if !keep_bright {
-                w.color = crate::scene::cache::block_cache::fade_toward_bg(w.color, bg);
+                w.color = crate::scene::cache::block_cache::refedit_fade(w.color, bg);
             }
         }
     }
@@ -4555,6 +4659,46 @@ impl Scene {
     pub fn sync_active_space_to_document(&mut self) {
         self.document.header.show_model_space = self.current_layout == "Model";
         crate::io::set_saved_active_layout(&mut self.document, &self.current_layout);
+    }
+
+    /// Record the entered viewport (or the sheet, in paper space) as the
+    /// current layout's last active viewport, which reopens it (#1670).
+    pub fn sync_active_viewport_to_document(&mut self) {
+        let Some(handle) = self.current_layout_object_handle() else {
+            return;
+        };
+        let sheet = match self.document.objects.get(&handle) {
+            Some(ObjectType::Layout(layout)) => {
+                Self::layout_sheet_viewport_handle(&self.document, layout)
+            }
+            _ => return,
+        };
+        let active = self.active_viewport.unwrap_or(sheet);
+        if let Some(ObjectType::Layout(layout)) = self.document.objects.get_mut(&handle) {
+            layout.viewport = active;
+        }
+    }
+
+    /// The model viewport the current layout was saved with entered: its
+    /// last active viewport when that is an on viewport other than the sheet.
+    pub fn saved_entered_viewport(&self) -> Option<Handle> {
+        let handle = self.current_layout_object_handle()?;
+        let Some(ObjectType::Layout(layout)) = self.document.objects.get(&handle) else {
+            return None;
+        };
+        let viewport = layout.viewport;
+        let sheet = Self::layout_sheet_viewport_handle(&self.document, layout);
+        if viewport.is_null() || viewport == sheet {
+            return None;
+        }
+        match self.document.get_entity(viewport) {
+            Some(EntityType::Viewport(vp))
+                if vp.common.owner_handle == layout.block_record && !vp.status.is_off =>
+            {
+                Some(viewport)
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn layout_sheet_viewport_handle(
@@ -4704,27 +4848,10 @@ impl Scene {
         }
 
         // Create the full-screen overall viewport covering the paper limits.
-        let pw = (max_lim.0 - min_lim.0).abs().max(1.0);
-        let ph = (max_lim.1 - min_lim.1).abs().max(1.0);
         let mut vp = codec::entities::Viewport::new();
         vp.id = 1;
         vp.status = codec::entities::ViewportStatusFlags::default_on();
-        // Paper-space center is an (x, y) point with z = 0.
-        vp.center = codec::types::Vector3::new(
-            (min_lim.0 + max_lim.0) / 2.0,
-            (min_lim.1 + max_lim.1) / 2.0,
-            0.0,
-        );
-        vp.width = pw;
-        vp.height = ph;
-        // Frame the full sheet with a small margin.
-        vp.view_target = codec::types::Vector3::new(
-            (min_lim.0 + max_lim.0) / 2.0,
-            (min_lim.1 + max_lim.1) / 2.0,
-            0.0,
-        );
-        vp.view_center = codec::types::Vector3::ZERO;
-        vp.view_height = ph * 1.1;
+        fit_sheet_viewport(&mut vp, min_lim, max_lim);
         if let Ok(handle) = self
             .document
             .add_entity_to_layout(EntityType::Viewport(vp), layout_name)
@@ -4735,6 +4862,45 @@ impl Scene {
             }
         }
         true
+    }
+
+    /// Fit a layout's sheet viewport to its page. (Taking the sheet out
+    /// instead would leave a viewport onto the model looking like the sheet.)
+    pub fn fit_layout_sheet(&mut self, layout_name: &str) {
+        let layout = self.document.objects.values().find_map(|object| match object {
+            ObjectType::Layout(layout) if layout.name == layout_name => Some(layout.clone()),
+            _ => None,
+        });
+        let Some(layout) = layout else {
+            return;
+        };
+        let sheet = Self::layout_sheet_viewport_handle(&self.document, &layout);
+        if let Some(EntityType::Viewport(vp)) = self.document.get_entity_mut(sheet) {
+            fit_sheet_viewport(vp, layout.min_limits, layout.max_limits);
+        }
+    }
+
+    /// Gives a layout whose page setup was never initialized (no paper size
+    /// and no media name, as the reference leaves a layout until it is first
+    /// opened) the default page setup; true when it did.
+    pub fn initialize_layout_page_setup(&mut self, layout_name: &str) -> bool {
+        let plot_style = self.new_layout_plot_style.clone();
+        for object in self.document.objects.values_mut() {
+            if let ObjectType::Layout(layout) = object {
+                if layout.name == layout_name {
+                    if !page_setup_uninitialized(layout) {
+                        return false;
+                    }
+                    crate::scene::apply_default_page_setup(layout, &plot_style);
+                    // A sheet written for a layout never set up is not the
+                    // page's; it is fitted to the page.
+                    self.fit_layout_sheet(layout_name);
+                    self.bump_layout_epoch();
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// The viewport a layout gets when it first opens (LAYOUTCREATEVIEWPORT),
@@ -6572,6 +6738,12 @@ impl Scene {
         let Some(viewport) = self.explicit_viewport_handle() else {
             return false;
         };
+        self.set_viewport_scale_factor_for(viewport, factor)
+    }
+
+    /// Scale `viewport` to `factor` paper units per model unit, as
+    /// [`Self::set_viewport_scale_factor`] does for the active one.
+    pub fn set_viewport_scale_factor_for(&mut self, viewport: Handle, factor: f64) -> bool {
         let unit_factor = self.annotation_scale_unit_factor();
         let named = self
             .document
@@ -6902,6 +7074,7 @@ impl Scene {
         // set is zoom-independent (GPU analytical circles/arcs/ellipses).
         let t_tess = iced::time::Instant::now();
         let mut atlas_gen = crate::scene::text::sdf_atlas::generation();
+        self.building_resident_set.set(true);
         let mut wires = self.wires_for_block_culled(
             block,
             None,
@@ -6940,6 +7113,7 @@ impl Scene {
                 style_viewport,
             );
         }
+        self.building_resident_set.set(false);
         let perf = crate::perf::enabled();
         let t_post = perf.then(iced::time::Instant::now);
         // Synthesized nonprint markers (geo-location daisy) live in model space
@@ -6967,6 +7141,16 @@ impl Scene {
             .set(t_tess.elapsed().as_secs_f32() * 1000.0);
         self.last_tess_wires.set(wires.len());
         let arc = Arc::new(wires);
+        // The memo keeps one copy of what this set holds; read before the
+        // previous set is evicted below, which may hold runs it still needs.
+        if self.uses_resident_memo(block, frozen_layers) {
+            match &layout {
+                Some(layout) if self.resident_runs_match_memo(block) => {
+                    self.bind_memo_to_set(&arc, &layout.ranges);
+                }
+                _ => self.detach_memo_backing(),
+            }
+        }
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
         // A full rebuild of the Model set — the GPU arena must rebuild too, not
@@ -7060,6 +7244,98 @@ impl Scene {
         }
     }
 
+    /// The wires a memoized run stands for; `None` when an `InSet` run's
+    /// backing set is gone, so the caller tessellates afresh.
+    fn resolve_memo_run(&self, handle: Handle, run: &MemoRun) -> Option<MemoHit> {
+        match run {
+            MemoRun::Owned(wires) => Some(MemoHit::Owned(Arc::clone(wires))),
+            MemoRun::InSet => {
+                let backing = self.resident_memo_backing.borrow();
+                let set = backing.set.upgrade()?;
+                let &(start, len) = backing.ranges.get(&handle)?;
+                (start + len <= set.len()).then_some(MemoHit::Slice(set, start, len))
+            }
+            MemoRun::Pending => None,
+        }
+    }
+
+    /// Whether building `block` reads and fills the resident memo.
+    fn uses_resident_memo(&self, block: Handle, frozen_layers: Option<&HashSet<Handle>>) -> bool {
+        block == self.model_space_block_handle()
+            && frozen_layers.is_none_or(|layers| layers.is_empty())
+            && resident_memo_enabled()
+    }
+
+    /// Whether a resident set's entity runs are exactly the memo's: nothing
+    /// recolours or replaces them after tessellation.
+    fn resident_runs_match_memo(&self, block: Handle) -> bool {
+        self.count_display.is_none()
+            && self.refedit_keep.is_none()
+            && self.active_live_section(block).is_none()
+    }
+
+    /// Point the memo at `set`: an entity with a run there keeps no copy of
+    /// its own; a run only the previous backing held is copied out first.
+    fn bind_memo_to_set(
+        &self,
+        set: &Arc<Vec<WireModel>>,
+        ranges: &HashMap<Handle, (usize, usize)>,
+    ) {
+        let old = std::mem::take(&mut *self.resident_memo_backing.borrow_mut());
+        let old_set = old.set.upgrade();
+        self.resident_tess_memo.borrow_mut().retain(|handle, run| {
+            if ranges.contains_key(handle) {
+                *run = MemoRun::InSet;
+            } else if let MemoRun::Pending = run {
+                return false;
+            } else if let MemoRun::InSet = run {
+                match old_set.as_ref().zip(old.ranges.get(handle)) {
+                    Some((wires, &(start, len))) if start + len <= wires.len() => {
+                        *run = MemoRun::Owned(Arc::new(wires[start..start + len].to_vec()));
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        });
+        *self.resident_memo_backing.borrow_mut() = MemoBacking {
+            set: Arc::downgrade(set),
+            ranges: ranges.clone(),
+            keep: None,
+        };
+    }
+
+    /// Give every `InSet` run a copy of its own and drop the backing, before
+    /// a build whose set will not match the memo.
+    fn detach_memo_backing(&self) {
+        let old = std::mem::take(&mut *self.resident_memo_backing.borrow_mut());
+        let set = old.set.upgrade();
+        self.resident_tess_memo.borrow_mut().retain(|handle, run| {
+            if let MemoRun::Pending = run {
+                return false;
+            }
+            if let MemoRun::InSet = run {
+                match set.as_ref().zip(old.ranges.get(handle)) {
+                    Some((wires, &(start, len))) if start + len <= wires.len() => {
+                        *run = MemoRun::Owned(Arc::new(wires[start..start + len].to_vec()));
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        });
+    }
+
+    /// An abandoned patch took the backing set apart: keep it alive for the
+    /// full build that follows. Runs the patch left untouched are intact, and
+    /// the runs it blanked were copied out or dropped from the memo first.
+    fn keep_memo_backing(&self, wires: Vec<WireModel>) {
+        let keep = Arc::new(wires);
+        let mut backing = self.resident_memo_backing.borrow_mut();
+        backing.set = Arc::downgrade(&keep);
+        backing.keep = Some(keep);
+    }
+
     fn resident_wire_layout(wires: &[WireModel]) -> Option<ResidentWireLayout> {
         let mut order = Vec::new();
         let mut ranges = HashMap::default();
@@ -7144,9 +7420,16 @@ impl Scene {
             return declined("viewport-style");
         }
         let t_patch = iced::time::Instant::now();
+        // A patch whose set will not equal the memo's runs leaves the memo
+        // holding its own copies, taken while the set is still whole.
+        let shareable = self.uses_resident_memo(block, frozen_layers)
+            && self.resident_runs_match_memo(block);
+        if self.uses_resident_memo(block, frozen_layers) && !shareable {
+            self.detach_memo_backing();
+        }
         // The entry must exist, be stale, and be uniquely held so we can move
         // its wires out rather than deep-clone them.
-        let cached_epoch = {
+        let (cached_epoch, backed_here) = {
             let sets = self.resident_wire_sets.borrow();
             let Some(entry) = sets.get(&key) else {
                 drop(sets);
@@ -7166,7 +7449,13 @@ impl Scene {
                 }
                 return None;
             }
-            entry.epoch
+            let backed_here = shareable
+                && self
+                    .resident_memo_backing
+                    .borrow()
+                    .set
+                    .ptr_eq(&Arc::downgrade(&entry.wires));
+            (entry.epoch, backed_here)
         };
         let Some(deltas) = self.replay_since(cached_epoch) else {
             return declined("journal-too-old");
@@ -7175,7 +7464,7 @@ impl Scene {
         // Take ownership of the cached assembly (guaranteed unique above).
         // `prev_gen` is the content id the GPU currently holds for this set — the
         // base the wire-arena patch replays from.
-        let (prev_gen, mut owned, mut layout) = {
+        let (prev_gen, owned, mut layout) = {
             let removed = self.resident_wire_sets.borrow_mut().remove(&key)?;
             (
                 removed.gen,
@@ -7183,6 +7472,14 @@ impl Scene {
                 removed.layout?,
             )
         };
+        // Every early return below abandons the patch; the memo's `InSet`
+        // runs then still need this set, so the guard hands it back.
+        let mut reclaim = ReclaimOnDecline {
+            scene: self,
+            wires: Some(owned),
+            backed: backed_here,
+        };
+        let owned = reclaim.wires.as_mut()?;
         if layout.marker_start > owned.len() {
             return None;
         }
@@ -7227,10 +7524,21 @@ impl Scene {
             }
             visible_changed.insert(*h);
             let memoized = memo_ok
-                .then(|| self.resident_tess_memo.borrow().get(h).cloned())
+                .then(|| {
+                    let memo = self.resident_tess_memo.borrow();
+                    match memo.get(h)? {
+                        MemoRun::Owned(wires) => Some(wires.as_ref().clone()),
+                        MemoRun::InSet if backed_here => {
+                            let &(start, len) = layout.ranges.get(h)?;
+                            owned.get(start..start + len).map(<[WireModel]>::to_vec)
+                        }
+                        run => self
+                            .resolve_memo_run(*h, run)
+                            .map(|hit| hit.wires().to_vec()),
+                    }
+                })
                 .flatten();
-            if let Some(raw) = memoized {
-                let mut faded = raw.as_ref().clone();
+            if let Some(mut faded) = memoized {
                 self.apply_refedit_fade(&mut faded, bg);
                 new_runs.insert(*h, faded);
                 continue;
@@ -7260,7 +7568,7 @@ impl Scene {
         {
             let mut memo = self.resident_tess_memo.borrow_mut();
             for (h, a) in memo_updates {
-                memo.insert(h, a);
+                memo.insert(h, MemoRun::Owned(a));
             }
         }
         // Capture whether any replaced/removed OLD run fed the Face3D/fill
@@ -7332,6 +7640,18 @@ impl Scene {
                 if let Some((start, old_len)) = old_range {
                     if start + old_len > layout.marker_start {
                         return None;
+                    }
+                    // A hidden entity's memo run lives in these slots: copy it
+                    // out before blanking them, for when it is shown again.
+                    if backed_here && !matches!(kind, ChangeKind::Removed) {
+                        let mut memo = self.resident_tess_memo.borrow_mut();
+                        if let Some(run) = memo.get_mut(&handle) {
+                            if matches!(run, MemoRun::InSet) {
+                                *run = MemoRun::Owned(Arc::new(
+                                    owned[start..start + old_len].to_vec(),
+                                ));
+                            }
+                        }
                     }
                     for slot in &mut owned[start..start + old_len] {
                         *slot = WireModel::solid(String::new(), Vec::new(), [0.0; 4], false);
@@ -7458,7 +7778,7 @@ impl Scene {
                     .is_some_and(|run| run.iter().any(|wire| !wire.fill_tris.is_empty()))
             });
 
-        let arc = Arc::new(owned);
+        let arc = Arc::new(reclaim.wires.take().unwrap_or_default());
         self.last_tess_wires.set(arc.len());
         self.resident_patch_hits
             .set(self.resident_patch_hits.get() + 1);
@@ -7479,6 +7799,9 @@ impl Scene {
                     face_pass_changed,
                 }),
             ));
+        }
+        if shareable {
+            self.bind_memo_to_set(&arc, &layout.ranges);
         }
         let cur_epoch = self.geometry_epoch;
         let mut sets = self.resident_wire_sets.borrow_mut();
@@ -7591,7 +7914,11 @@ impl Scene {
     /// the previous per-call deep clone was a full copy of every wire buffer
     /// (hundreds of MB on large mesh imports, #358).
     pub fn entity_wires(&self) -> Arc<Vec<WireModel>> {
-        self.entity_wires_arc()
+        let wires = self.entity_wires_arc();
+        match crate::scene::model::instance_model::expand_stubs(&wires) {
+            std::borrow::Cow::Borrowed(_) => wires,
+            std::borrow::Cow::Owned(expanded) => Arc::new(expanded),
+        }
     }
 
     /// Return paper entities and projected model-viewport entities separately.
@@ -7615,7 +7942,9 @@ impl Scene {
             }
         };
         if self.current_layout == "Model" {
-            let mut wires = self.entity_wires_arc().as_ref().clone();
+            let mut wires =
+                crate::scene::model::instance_model::expand_stubs(&self.entity_wires_arc())
+                    .into_owned();
             apply_mode(
                 &mut wires,
                 render_mode_override.unwrap_or_else(|| self.active_model_tile_render_mode()),
@@ -7637,7 +7966,9 @@ impl Scene {
             apply_mode(&mut wires, mode);
             model_wires.extend(wires);
         }
-        (self.paper_sheet_wires_arc().as_ref().clone(), model_wires)
+        let paper = crate::scene::model::instance_model::expand_stubs(&self.paper_sheet_wires_arc())
+            .into_owned();
+        (paper, model_wires)
     }
 
     pub(crate) fn plot_wire_depths(&self, wires: &[WireModel]) -> Vec<f32> {
@@ -8598,6 +8929,14 @@ impl Scene {
                 body.wires = wires;
                 body.silhouettes.clear();
             }
+            // The cut mesh is drawn as the solid it bounds.
+            EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_) => {
+                let mut solid = codec::entities::Solid3D::new();
+                solid.common = entity.common().clone();
+                solid.point_of_reference = reference;
+                solid.wires = wires;
+                entity = EntityType::Solid3D(solid);
+            }
             _ => return Err(()),
         }
         Ok(Some(entity))
@@ -8623,6 +8962,12 @@ impl Scene {
             Some(EntityType::Surface(surface)) => {
                 crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
             }
+            // A mesh that closes a volume is cut as the solid it bounds.
+            Some(
+                mesh @ (EntityType::Mesh(_)
+                | EntityType::PolygonMesh(_)
+                | EntityType::PolyfaceMesh(_)),
+            ) => crate::entities::mesh::closed_mesh_body(mesh),
             _ => None,
         }?;
         Some(std::borrow::Cow::Owned(body))
@@ -8634,16 +8979,29 @@ impl Scene {
         slice_depth: Option<f64>,
         body_to_world: Option<&codec::types::Transform>,
     ) -> Result<Option<kernel::brep::Body>, ()> {
-        let Some((origin, tangent, vertical, viewing)) = section_frame(data) else {
-            return Err(());
-        };
-        let front = section_plane(origin, tangent, viewing, body_to_world).ok_or(())?;
-        let mut clipped = keep_section_positive(body, front)?;
-        let Some(mut current) = clipped.take() else {
-            return Ok(None);
-        };
+        let planes = Self::section_planes(data, slice_depth, body_to_world).ok_or(())?;
+        let mut current = body.clone();
+        for plane in planes {
+            match keep_section_positive(&current, plane)? {
+                Some(next) => current = next,
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(current))
+    }
+
+    /// The planes bounding what section `data` keeps, each facing inward:
+    /// the section plane, then the back of a slice, the ends of a boundary
+    /// and the top and bottom of a volume.
+    fn section_planes(
+        data: &codec::entities::SectionObjectData,
+        slice_depth: Option<f64>,
+        body_to_world: Option<&codec::types::Transform>,
+    ) -> Option<Vec<kernel::space::Plane>> {
+        let (origin, tangent, vertical, viewing) = section_frame(data)?;
+        let mut planes = vec![section_plane(origin, tangent, viewing, body_to_world)?];
         if data.state == 1 && slice_depth.is_none() {
-            return Ok(Some(current));
+            return Some(planes);
         }
 
         let depth = slice_depth.unwrap_or_else(|| {
@@ -8658,82 +9016,44 @@ impl Scene {
                 })
         });
         if depth <= 1e-12 {
-            return Ok(Some(current));
+            return Some(planes);
         }
-        let back =
-            section_plane(origin + viewing * depth, tangent, -viewing, body_to_world).ok_or(())?;
-        let Some(next) = keep_section_positive(&current, back)? else {
-            return Ok(None);
-        };
-        current = next;
-
+        planes.push(section_plane(
+            origin + viewing * depth,
+            tangent,
+            -viewing,
+            body_to_world,
+        )?);
         if data.state == 1 {
-            return Ok(Some(current));
+            return Some(planes);
         }
 
-        let span = data
-            .vertices
-            .first()
-            .zip(data.vertices.last())
-            .map_or(0.0, |(first, last)| {
-                (glam::DVec3::new(last.x, last.y, last.z)
-                    - glam::DVec3::new(first.x, first.y, first.z))
-                .length()
-            });
-        if span <= 1e-12 {
-            return Ok(Some(current));
+        let first = data.vertices.first()?;
+        let last = data.vertices.last()?;
+        let first = glam::DVec3::new(first.x, first.y, first.z);
+        let last = glam::DVec3::new(last.x, last.y, last.z);
+        if (last - first).length() <= 1e-12 {
+            return Some(planes);
         }
-
-        let first = data
-            .vertices
-            .first()
-            .map(|point| glam::DVec3::new(point.x, point.y, point.z))
-            .ok_or(())?;
-        let last = data
-            .vertices
-            .last()
-            .map(|point| glam::DVec3::new(point.x, point.y, point.z))
-            .ok_or(())?;
-        for plane in [
-            section_plane(first, vertical, tangent, body_to_world),
-            section_plane(last, vertical, -tangent, body_to_world),
-        ] {
-            let Some(plane) = plane else {
-                return Err(());
-            };
-            let Some(next) = keep_section_positive(&current, plane)? else {
-                return Ok(None);
-            };
-            current = next;
-        }
-
+        planes.push(section_plane(first, vertical, tangent, body_to_world)?);
+        planes.push(section_plane(last, vertical, -tangent, body_to_world)?);
         if data.state != 4 {
-            return Ok(Some(current));
+            return Some(planes);
         }
 
-        for plane in [
-            section_plane(
-                origin - vertical * data.bottom_height,
-                tangent,
-                vertical,
-                body_to_world,
-            ),
-            section_plane(
-                origin + vertical * data.top_height,
-                tangent,
-                -vertical,
-                body_to_world,
-            ),
-        ] {
-            let Some(plane) = plane else {
-                return Err(());
-            };
-            let Some(next) = keep_section_positive(&current, plane)? else {
-                return Ok(None);
-            };
-            current = next;
-        }
-        Ok(Some(current))
+        planes.push(section_plane(
+            origin - vertical * data.bottom_height,
+            tangent,
+            vertical,
+            body_to_world,
+        )?);
+        planes.push(section_plane(
+            origin + vertical * data.top_height,
+            tangent,
+            -vertical,
+            body_to_world,
+        )?);
+        Some(planes)
     }
 
     /// True when `layer` is turned off or frozen — entities on it never render.
@@ -9143,6 +9463,13 @@ impl Scene {
                 .layers
                 .get(&entity.common().layer)
                 .is_some_and(|l| l.is_locked())
+            // REFEDIT with "Lock objects not in working set": only the
+            // working set can be edited.
+            || (self.refedit_lock
+                && self
+                    .refedit_keep
+                    .as_ref()
+                    .is_some_and(|keep| !keep.contains(&handle)))
     }
 
     /// The name of the locked layer `handle` sits on, if any (for messages).
@@ -9436,7 +9763,7 @@ impl Scene {
         };
         if let Some(keep) = &self.refedit_keep {
             if !keep.contains(&h) {
-                c = crate::scene::cache::block_cache::fade_toward_bg(c, self.current_bg());
+                c = crate::scene::cache::block_cache::refedit_fade(c, self.current_bg());
             }
         }
         Some(c)
@@ -9908,9 +10235,12 @@ impl Scene {
             if changed.contains(&handle) || self.document.get_entity(handle).is_none() {
                 continue;
             }
-            if let Some(wire) = memo
+            let hit = memo
                 .get(&handle)
-                .and_then(|entity_wires| entity_wires.get(ordinal as usize))
+                .and_then(|run| self.resolve_memo_run(handle, run));
+            if let Some(wire) = hit
+                .as_ref()
+                .and_then(|hit| hit.wires().get(ordinal as usize))
             {
                 base_slots.insert((handle_value, ordinal), wires.len() as u32);
                 wires.push(wire.clone());
@@ -9946,6 +10276,17 @@ impl Scene {
     }
 
     fn indexed_interaction_candidates_xy(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        allow_pending_empty: bool,
+        area_only: bool,
+    ) -> crate::scene::pick::interaction_index::InteractionCandidates {
+        self.indexed_interaction_candidates_xy_stubbed(wires, aabb, allow_pending_empty, area_only)
+            .materialize_stubs()
+    }
+
+    fn indexed_interaction_candidates_xy_stubbed(
         &self,
         wires: Arc<Vec<WireModel>>,
         aabb: [f64; 4],
@@ -10013,6 +10354,26 @@ impl Scene {
     }
 
     fn indexed_interaction_candidates_screen(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        screen_rect: [f32; 4],
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        allow_pending_empty: bool,
+    ) -> crate::scene::pick::interaction_index::InteractionCandidates {
+        self.indexed_interaction_candidates_screen_stubbed(
+            wires,
+            screen_rect,
+            view_rot,
+            eye,
+            bounds,
+            allow_pending_empty,
+        )
+        .materialize_stubs()
+    }
+
+    fn indexed_interaction_candidates_screen_stubbed(
         &self,
         wires: Arc<Vec<WireModel>>,
         screen_rect: [f32; 4],
@@ -10276,7 +10637,8 @@ impl Scene {
         if !self.interaction_source_is_resident(&wires, bounds.height)
             || !self.interaction_index_worthwhile(&wires)
         {
-            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires);
+            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
+                .materialize_stubs();
         }
         let radius_px = self.indexed_interaction_pick_radius(
             &wires,
@@ -10290,7 +10652,8 @@ impl Scene {
         if !flat_ortho {
             let clip = view_rot * (cursor - eye).as_vec3().extend(1.0);
             if !clip.is_finite() || clip.w <= 1e-6 {
-                return crate::scene::pick::interaction_index::InteractionCandidates::all(wires);
+                return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
+                .materialize_stubs();
             }
             let ndc = clip.truncate() / clip.w;
             let screen = iced::Point::new(
@@ -10320,7 +10683,8 @@ impl Scene {
         .sqrt();
         let s = world_x_px.min(world_y_px);
         if s <= 1e-6 {
-            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires);
+            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
+                .materialize_stubs();
         }
         let radius = radius_px.max(0.0) as f64 / s as f64;
         let query = [
@@ -10356,7 +10720,8 @@ impl Scene {
         if !self.interaction_source_is_resident(&wires, bounds.height)
             || !self.interaction_index_worthwhile(&wires)
         {
-            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires);
+            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
+                .materialize_stubs();
         }
         let pad_px = self.indexed_interaction_pick_radius(&wires, 0.0, bounds.height, true);
         if flat_ortho {
@@ -11357,13 +11722,6 @@ impl Scene {
         // bypasses the memo.
         let frozen_empty = frozen_layers.map(|f| f.is_empty()).unwrap_or(true);
         let base_ok = is_model_block && frozen_empty;
-        // Kill-switch: `OCS_NO_RESIDENT_MEMO` reverts the resident set to the old
-        // full re-tessellation on every edit, in case a mutation site is ever
-        // found that edits geometry without dropping its handle from the memo.
-        fn resident_memo_enabled() -> bool {
-            static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-            *EN.get_or_init(|| std::env::var("OCS_NO_RESIDENT_MEMO").is_err())
-        }
         let resident = base_ok && view_aabb.is_none() && resident_memo_enabled();
         let memo_active = base_ok && (view_aabb.is_some() || resident);
         // Reported in one line below. `tess_ms` / `memo_misses` are assigned by
@@ -11403,14 +11761,14 @@ impl Scene {
             }
             // Classify (serial, cheap): reuse memoized Arcs, collect misses.
             let t_classify = perf.then(iced::time::Instant::now);
-            let mut hit_arcs: Vec<Arc<Vec<WireModel>>> = Vec::new();
+            let mut hit_arcs: Vec<MemoHit> = Vec::new();
             let mut misses: Vec<&EntityType> = Vec::new();
             {
                 let memo = memo_cell.borrow();
                 for e in &visible {
                     let h = e.common().handle;
-                    match memo.get(&h) {
-                        Some(a) => hit_arcs.push(Arc::clone(a)),
+                    match memo.get(&h).and_then(|run| self.resolve_memo_run(h, run)) {
+                        Some(hit) => hit_arcs.push(hit),
                         None => misses.push(*e),
                     }
                 }
@@ -11422,7 +11780,7 @@ impl Scene {
             let t_hits = perf.then(iced::time::Instant::now);
             let hit_wires: Vec<WireModel> = hit_arcs
                 .par_iter()
-                .flat_map_iter(|a| a.iter().cloned())
+                .flat_map_iter(|hit| hit.wires().iter().cloned())
                 .collect();
             hits_ms = crate::perf::elapsed_ms(t_hits);
             let t_tess_miss = perf.then(iced::time::Instant::now);
@@ -11457,9 +11815,16 @@ impl Scene {
                     // with B-rep vertex snaps before the memo/assembly split.
                     let mut wires = Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
                     self.attach_solid_snaps(h, &mut wires);
-                    let a = Arc::new(wires);
-                    out.extend(a.iter().cloned());
-                    memo.insert(h, Arc::clone(&a));
+                    if resident && self.building_resident_set.get() {
+                        // The resident set built from `out` becomes the
+                        // memo's backing: no second copy (#1542, #1698).
+                        out.extend(wires);
+                        memo.insert(h, MemoRun::Pending);
+                    } else {
+                        let a = Arc::new(wires);
+                        out.extend(a.iter().cloned());
+                        memo.insert(h, MemoRun::Owned(Arc::clone(&a)));
+                    }
                 }
             }
             materialize_ms = crate::perf::elapsed_ms(t_materialize);
@@ -12709,26 +13074,148 @@ vis_index={:.1} visible_probe={:.1}",
             Some(e) => e,
             None => return,
         };
+        let (min, max) = (min.as_dvec3(), max.as_dvec3());
         let center = (min + max) * 0.5;
-        let content_w = (max.x - min.x).max(1e-3);
-        let content_h = (max.y - min.y).max(1e-3);
 
         let vp = match self.document.get_entity_mut(vp_handle) {
             Some(codec::EntityType::Viewport(vp)) => vp,
             _ => return,
         };
-        // Set the view target to the model-space centroid (XY plane, z=0).
-        vp.view_target.x = center.x as f64;
-        vp.view_target.y = center.y as f64;
-        vp.view_target.z = 0.0;
+        let direction = glam::DVec3::new(
+            vp.view_direction.x,
+            vp.view_direction.y,
+            vp.view_direction.z,
+        )
+        .normalize_or(glam::DVec3::Z);
+        // The extents box as seen along the view direction: its span across
+        // the view's right and up axes. Looking down Z that is its X/Y size.
+        let right = glam::DVec3::Z.cross(direction).normalize_or(glam::DVec3::X);
+        let up = direction.cross(right);
+        let (mut span_right, mut span_up) = ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN));
+        for corner in 0..8 {
+            let point = glam::DVec3::new(
+                if corner & 1 == 0 { min.x } else { max.x },
+                if corner & 2 == 0 { min.y } else { max.y },
+                if corner & 4 == 0 { min.z } else { max.z },
+            );
+            let (along_right, along_up) = (point.dot(right), point.dot(up));
+            span_right = (span_right.0.min(along_right), span_right.1.max(along_right));
+            span_up = (span_up.0.min(along_up), span_up.1.max(along_up));
+        }
+        let content_w = (span_right.1 - span_right.0).max(1e-3);
+        let content_h = (span_up.1 - span_up.0).max(1e-3);
+
+        // Aim at the model's centre; a plan view keeps it on the XY plane.
+        vp.view_target.x = center.x;
+        vp.view_target.y = center.y;
+        vp.view_target.z = if direction == glam::DVec3::Z {
+            0.0
+        } else {
+            center.z
+        };
 
         // Choose the scale that fits both dimensions with the margin.
-        let scale_w = vp.width / (content_w as f64 * margin);
-        let scale_h = vp.height / (content_h as f64 * margin);
+        let scale_w = vp.width / (content_w * margin);
+        let scale_h = vp.height / (content_h * margin);
         let fit_scale = scale_w.min(scale_h).min(1000.0).max(1e-6);
 
         vp.custom_scale = fit_scale;
         vp.view_height = vp.height / fit_scale;
+    }
+}
+
+/// A page setup never initialized: no paper size and no media name (the
+/// reference writes a layout so until it is first opened).
+pub fn page_setup_uninitialized(layout: &codec::objects::Layout) -> bool {
+    layout.paper_size.trim().is_empty() && layout.paper_width <= 0.0 && layout.paper_height <= 0.0
+}
+
+/// A layout written as never opened: the page setup fields back to the
+/// uninitialized state and no viewports, as the reference stores a layout
+/// it has not opened yet. A layout already holding a viewport onto the model
+/// (one added by automation) is plainly set up and is written as it is.
+pub(crate) fn write_layout_unopened(document: &mut codec::CadDocument, layout_name: &str) {
+    let block = document.objects.values().find_map(|object| match object {
+        ObjectType::Layout(layout) if layout.name == layout_name => Some(layout.block_record),
+        _ => None,
+    });
+    let has_model_view = document.entities().any(|entity| {
+        matches!(entity, EntityType::Viewport(viewport)
+            if Some(viewport.common.owner_handle) == block
+                && !Scene::is_sheet_viewport(document, viewport))
+    });
+    if has_model_view {
+        return;
+    }
+    let fresh = codec::objects::Layout::new(layout_name);
+    let mut block = Handle::NULL;
+    for object in document.objects.values_mut() {
+        if let ObjectType::Layout(layout) = object {
+            if layout.name == layout_name {
+                block = layout.block_record;
+                layout.paper_size = fresh.paper_size.clone();
+                layout.paper_width = fresh.paper_width;
+                layout.paper_height = fresh.paper_height;
+                layout.plot_rotation = fresh.plot_rotation;
+                layout.plot_paper_units = fresh.plot_paper_units;
+                layout.min_limits = fresh.min_limits;
+                layout.max_limits = fresh.max_limits;
+                layout.min_extents = fresh.min_extents;
+                layout.max_extents = fresh.max_extents;
+            }
+        }
+    }
+    drop_layout_viewports(document, block);
+}
+
+/// Size a sheet (overall paper) viewport to the paper limits `min`..`max`,
+/// framing the whole sheet with a small margin.
+fn fit_sheet_viewport(vp: &mut codec::entities::Viewport, min: (f64, f64), max: (f64, f64)) {
+    let height = (max.1 - min.1).abs().max(1.0);
+    // Paper-space center is an (x, y) point with z = 0.
+    let center = codec::types::Vector3::new((min.0 + max.0) / 2.0, (min.1 + max.1) / 2.0, 0.0);
+    vp.center = center;
+    vp.width = (max.0 - min.0).abs().max(1.0);
+    vp.height = height;
+    vp.view_target = center;
+    vp.view_center = codec::types::Vector3::ZERO;
+    vp.view_height = height * 1.1;
+}
+
+/// Takes a layout's sheet (overall paper) viewport out of its block (entity
+/// and membership). Viewports onto the model are the user's drawing and stay:
+/// a file may carry them on a layout whose page setup was never filled in.
+pub(crate) fn drop_layout_viewports(document: &mut codec::CadDocument, block: Handle) {
+    if block.is_null() {
+        return;
+    }
+    let viewports: Vec<Handle> = document
+        .entities()
+        .filter_map(|entity| match entity {
+            EntityType::Viewport(viewport)
+                if viewport.common.owner_handle == block
+                    && Scene::is_sheet_viewport(document, viewport) =>
+            {
+                Some(viewport.common.handle)
+            }
+            _ => None,
+        })
+        .collect();
+    for handle in &viewports {
+        document.remove_entity(*handle);
+    }
+    if let Some(record) = document.block_records.iter_mut().find(|record| record.handle == block) {
+        record.entity_handles.retain(|handle| !viewports.contains(handle));
+    }
+    for object in document.objects.values_mut() {
+        if let ObjectType::Layout(layout) = object {
+            if layout.block_record == block {
+                layout.viewports.retain(|handle| !viewports.contains(handle));
+                if viewports.contains(&layout.viewport) {
+                    layout.viewport = Handle::NULL;
+                }
+            }
+        }
     }
 }
 
@@ -13398,6 +13885,7 @@ mod journal_tests {
             wires: Arc::new(Vec::new()),
             interaction_index: None,
             tess_memo: HashMap::default(),
+            tess_memo_backing: MemoBacking::default(),
             tess_guard: 0,
             block_defns: Vec::new(),
             draw_depths: Some(handed_over),

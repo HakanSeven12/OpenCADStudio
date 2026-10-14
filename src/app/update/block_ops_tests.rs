@@ -887,11 +887,9 @@ fn locked_palette_remove_refuses_a_block_with_an_open_bedit_session() {
     );
 }
 
-/// Nested BEDIT sessions all count: the outer and the inner record are both
-/// open, so both are refused — the whole session stack is handed to the
-/// service, not just the active tab.
+/// Switching replaces the open session; the active definition stays protected.
 #[test]
-fn locked_palette_remove_refuses_every_block_of_a_nested_bedit_session() {
+fn locked_palette_remove_refuses_the_open_block_after_switching() {
     let mut app = app();
     let inner = "BO_NEST_INNER";
     define_block(&mut app, inner);
@@ -915,10 +913,10 @@ fn locked_palette_remove_refuses_every_block_of_a_nested_bedit_session() {
     begin_bedit(&mut app, inner_reference);
     assert_eq!(
         app.tabs[tab(&app)].block_edits.len(),
-        2,
-        "the nested session did not open"
+        1,
+        "switching must keep one session"
     );
-    for name in [outer, inner] {
+    for name in [inner] {
         palette_remove(&mut app, name);
         assert!(record_exists(&app, name), "{name} went while open");
         let expected = command_line_error(&format!(
@@ -1345,5 +1343,221 @@ fn locked_purge_skips_a_block_with_an_open_bedit_session() {
     // The BEDIT session's own reference keeps the block live through the
     // edited block record, so the purge sees it as reachable.
     assert!(record_exists(&app, &name));
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn locked_attedit_attribute_flags_cases() {
+    use crate::ui::window::attribute_editor::AttrRow;
+    use codec::entities::{AttributeDefinition, AttributeEntity};
+    use codec::tables::BlockRecord;
+
+    // Verify flag behavior in ATTEDIT conversion and apply:
+    // 1. Normal attribute: editable, modifies value
+    let mut normal_entity =
+        AttributeEntity::new("NORM_TAG".to_string(), "original_norm".to_string());
+    let normal_row = AttrRow {
+        tag: "NORM_TAG".to_string(),
+        prompt: "Enter norm:".to_string(),
+        value: "edited_norm".to_string(),
+        text_style: "STANDARD".to_string(),
+        height: "2.5".to_string(),
+        rotation: "0".to_string(),
+        width_factor: "1".to_string(),
+        oblique: "0".to_string(),
+        h_align: codec::entities::HorizontalAlignment::Left,
+        v_align: codec::entities::VerticalAlignment::Baseline,
+        backwards: false,
+        upside_down: false,
+        layer: "0".to_string(),
+        color: codec::types::Color::ByLayer,
+        linetype: "ByLayer".to_string(),
+        line_weight: codec::types::LineWeight::ByLayer,
+        is_constant: false,
+    };
+    assert!(!normal_row.is_constant);
+
+    // 2. Constant attribute: is_constant is true, apply ignores value edit
+    let mut const_entity =
+        AttributeEntity::new("CONST_TAG".to_string(), "original_const".to_string());
+    const_entity.flags.constant = true;
+    let mut const_row = normal_row.clone();
+    const_row.tag = "CONST_TAG".to_string();
+    const_row.value = "attempted_edit".to_string();
+    const_row.is_constant = true;
+
+    // 3. Invisible attribute: editable in ATTEDIT (flags.invisible is true, but is_constant is false)
+    let mut invis_entity =
+        AttributeEntity::new("INVIS_TAG".to_string(), "original_invis".to_string());
+    invis_entity.flags.invisible = true;
+    let mut invis_row = normal_row.clone();
+    invis_row.tag = "INVIS_TAG".to_string();
+    invis_row.value = "edited_invis".to_string();
+    invis_row.is_constant = false;
+
+    // 4. Preset attribute: editable in ATTEDIT (preset only affects initial insertion prompt)
+    let mut preset_entity =
+        AttributeEntity::new("PRESET_TAG".to_string(), "original_preset".to_string());
+    preset_entity.flags.preset = true;
+    let mut preset_row = normal_row.clone();
+    preset_row.tag = "PRESET_TAG".to_string();
+    preset_row.value = "edited_preset".to_string();
+    preset_row.is_constant = false;
+
+    // Verify metadata mapping from CadDocument
+    let mut doc = codec::CadDocument::new();
+    let next = doc.next_handle();
+    let br_h = Handle::new(next);
+    let mut br = BlockRecord::new("FLAG_BLOCK");
+    br.handle = br_h;
+    br.block_entity_handle = Handle::new(next + 1);
+    br.block_end_handle = Handle::new(next + 2);
+
+    let mut ad_norm = AttributeDefinition::new(
+        "NORM_TAG".to_string(),
+        "Enter norm:".to_string(),
+        "def".to_string(),
+    );
+    let mut ad_const = AttributeDefinition::new(
+        "CONST_TAG".to_string(),
+        "Enter const:".to_string(),
+        "def".to_string(),
+    );
+    ad_const.flags.constant = true;
+    let mut ad_invis = AttributeDefinition::new(
+        "INVIS_TAG".to_string(),
+        "Enter invis:".to_string(),
+        "def".to_string(),
+    );
+    ad_invis.flags.invisible = true;
+    let mut ad_preset = AttributeDefinition::new(
+        "PRESET_TAG".to_string(),
+        "Enter preset:".to_string(),
+        "def".to_string(),
+    );
+    ad_preset.flags.preset = true;
+
+    let h1 = Handle::new(next + 3);
+    let h2 = Handle::new(next + 4);
+    let h3 = Handle::new(next + 5);
+    let h4 = Handle::new(next + 6);
+    ad_norm.common.handle = h1;
+    ad_const.common.handle = h2;
+    ad_invis.common.handle = h3;
+    ad_preset.common.handle = h4;
+    br.entity_handles = vec![h1, h2, h3, h4];
+
+    doc.block_records.add(br).unwrap();
+    doc.add_entity(EntityType::AttributeDefinition(ad_norm))
+        .unwrap();
+    doc.add_entity(EntityType::AttributeDefinition(ad_const))
+        .unwrap();
+    doc.add_entity(EntityType::AttributeDefinition(ad_invis))
+        .unwrap();
+    doc.add_entity(EntityType::AttributeDefinition(ad_preset))
+        .unwrap();
+
+    let meta = crate::app::update::command::block_attr_meta(&doc, "FLAG_BLOCK");
+    assert!(!meta.get("NORM_TAG").unwrap().constant);
+    assert!(meta.get("CONST_TAG").unwrap().constant);
+    assert!(!meta.get("INVIS_TAG").unwrap().constant);
+    assert!(!meta.get("PRESET_TAG").unwrap().constant);
+
+    // Test conversion from AttributeEntity to AttrRow
+    let r_norm = crate::app::update::command::attr_row_from_entity(&normal_entity, &meta);
+    assert!(!r_norm.is_constant);
+    assert_eq!(r_norm.prompt, "Enter norm:");
+
+    let r_const = crate::app::update::command::attr_row_from_entity(&const_entity, &meta);
+    assert!(r_const.is_constant);
+    assert_eq!(r_const.prompt, "Enter const:");
+
+    let r_invis = crate::app::update::command::attr_row_from_entity(&invis_entity, &meta);
+    assert!(!r_invis.is_constant);
+    assert_eq!(r_invis.prompt, "Enter invis:");
+
+    let r_preset = crate::app::update::command::attr_row_from_entity(&preset_entity, &meta);
+    assert!(!r_preset.is_constant);
+    assert_eq!(r_preset.prompt, "Enter preset:");
+
+    // Test apply_attr_row behavior on constant vs non-constant
+    // Normal: applies
+    let mut edited_norm_row = r_norm.clone();
+    edited_norm_row.value = "edited_norm".to_string();
+    assert!(crate::app::update::command::apply_attr_row(
+        &mut normal_entity,
+        &edited_norm_row
+    ));
+    assert_eq!(normal_entity.get_value(), "edited_norm");
+
+    // Constant: ignores value change!
+    let mut edited_const_row = r_const.clone();
+    edited_const_row.value = "attempted_edit".to_string();
+    assert!(!crate::app::update::command::apply_attr_row(
+        &mut const_entity,
+        &edited_const_row
+    ));
+    assert_eq!(const_entity.get_value(), "original_const");
+
+    // Invisible: applies
+    let mut edited_invis_row = r_invis.clone();
+    edited_invis_row.value = "edited_invis".to_string();
+    assert!(crate::app::update::command::apply_attr_row(
+        &mut invis_entity,
+        &edited_invis_row
+    ));
+    assert_eq!(invis_entity.get_value(), "edited_invis");
+
+    // Preset: applies
+    let mut edited_preset_row = r_preset.clone();
+    edited_preset_row.value = "edited_preset".to_string();
+    assert!(crate::app::update::command::apply_attr_row(
+        &mut preset_entity,
+        &edited_preset_row
+    ));
+    assert_eq!(preset_entity.get_value(), "edited_preset");
+}
+
+#[test]
+fn locked_bedit_insert_refuses_cycle() {
+    let mut app = app();
+    let name_a = "BEDIT_CYC_A";
+    let name_b = "BEDIT_CYC_B";
+
+    define_block(&mut app, name_a);
+
+    // B contains an insert of A
+    let ins_a = Insert::new(name_a.to_string(), Vector3::ZERO);
+    let i = tab(&app);
+    app.tabs[i]
+        .scene
+        .define_block_raw(name_b, Vector3::ZERO, vec![EntityType::Insert(ins_a)]);
+
+    // Now open BEDIT for block A
+    let insert_a = add_insert(&mut app, name_a);
+    begin_bedit(&mut app, insert_a);
+    assert!(bedit_open(&app));
+
+    // Try committing an INSERT of B into A inside BEDIT space:
+    // Inserting B into A would create A -> B -> A cycle
+    let _ = app.dispatch_command("-INSERT");
+    let mut feed = |text: &str| {
+        let _ = app.update(crate::app::Message::CommandInput(text.to_string()));
+        let _ = app.update(crate::app::Message::CommandSubmit);
+    };
+    feed(name_b);
+    feed("0,0");
+    feed("1");
+    feed("1");
+    feed("0");
+
+    // Verify refusal error on command line
+    let errs = errors(&app);
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("circular dependency detected")),
+        "expected cycle error in errors: {errs:?}"
+    );
+
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }

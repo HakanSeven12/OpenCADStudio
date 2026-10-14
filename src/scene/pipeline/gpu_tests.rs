@@ -71,35 +71,45 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     let original = pipeline.upload_block_wires(
         &device,
         &queue,
-        &[&first, &second],
+        &[(&first).into(), (&second).into()],
         &depth,
         &mut block_geometry,
     );
     let unchanged = pipeline.upload_block_wires(
         &device,
         &queue,
-        &[&first, &second],
+        &[(&first).into(), (&second).into()],
         &depth,
         &mut block_geometry,
     );
     assert_eq!(original[0].geometry_id(), unchanged[0].geometry_id());
     assert_eq!(original[0].instance_count, 2);
 
-    let removed =
-        pipeline.upload_block_wires(&device, &queue, &[&second], &depth, &mut block_geometry);
+    let removed = pipeline.upload_block_wires(
+        &device,
+        &queue,
+        &[(&second).into()],
+        &depth,
+        &mut block_geometry,
+    );
     assert_ne!(
         original[0].geometry_id(),
         removed[0].geometry_id(),
         "removing the base instance must replace vertices baked at its old position"
     );
     let moved = block(2, 30.0);
-    let moved_gpu =
-        pipeline.upload_block_wires(&device, &queue, &[&moved], &depth, &mut block_geometry);
+    let moved_gpu = pipeline.upload_block_wires(
+        &device,
+        &queue,
+        &[(&moved).into()],
+        &depth,
+        &mut block_geometry,
+    );
     assert_ne!(removed[0].geometry_id(), moved_gpu[0].geometry_id());
     let restored = pipeline.upload_block_wires(
         &device,
         &queue,
-        &[&first, &second],
+        &[(&first).into(), (&second).into()],
         &depth,
         &mut block_geometry,
     );

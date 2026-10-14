@@ -227,7 +227,8 @@ fn parse_flag(value: &str, current: bool) -> bool {
 pub(crate) fn validate_property(field: &str, value: &str) -> Result<(), &'static str> {
     let number = || value.trim().parse::<f64>().ok();
     match field {
-        "ul_contrast" | "ul_fade" => match number() {
+        // A raster image's Image Adjust rows take the same range.
+        "ul_contrast" | "ul_fade" | "ri_bright" | "ri_contrast" | "ri_fade" => match number() {
             Some(v) if (0.0..=100.0).contains(&v) && v.fract() == 0.0 => Ok(()),
             _ => Err("Value must be an integer between 0 and 100"),
         },

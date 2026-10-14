@@ -335,8 +335,15 @@ impl CadCommand for SliceCommand {
         self.selected = entities
             .into_iter()
             .filter_map(|item| {
-                matches!(item.entity, EntityType::Solid3D(_) | EntityType::Surface(_))
-                    .then_some(item.handle)
+                matches!(
+                    item.entity,
+                    EntityType::Solid3D(_)
+                        | EntityType::Surface(_)
+                        | EntityType::Mesh(_)
+                        | EntityType::PolygonMesh(_)
+                        | EntityType::PolyfaceMesh(_)
+                )
+                .then_some(item.handle)
             })
             .collect();
     }

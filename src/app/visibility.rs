@@ -186,6 +186,20 @@ impl OpenCADStudio {
             return;
         }
 
+        // A reference to the definition itself gets an evaluated copy first,
+        // so the state picked for it leaves the definition alone.
+        let direct = {
+            let doc = &self.tabs[i].scene.document;
+            matches!(doc.get_entity(insert_handle), Some(EntityType::Insert(ins))
+                if doc.block_records.get(&ins.block_name).is_some_and(|record| {
+                    crate::scene::block_visibility::parameter(doc, record.handle).is_some()
+                }))
+        };
+        if direct {
+            self.push_undo_snapshot(i, "Visibility State");
+            self.tabs[i].scene.visibility_representation(insert_handle);
+        }
+
         // Resolve everything against an immutable borrow first.
         let mapping = {
             let doc = &self.tabs[i].scene.document;
@@ -202,7 +216,9 @@ impl OpenCADStudio {
             return;
         };
 
-        self.push_undo_snapshot(i, "Visibility State");
+        if !direct {
+            self.push_undo_snapshot(i, "Visibility State");
+        }
 
         // Apply invisibility flags to the anonymous block's members.
         {

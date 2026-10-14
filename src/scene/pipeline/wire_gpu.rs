@@ -863,7 +863,7 @@ pub(crate) fn emit_wire_packed(
         wire.pattern[6],
         wire.pattern[7],
     ];
-    let half_width = wire.line_weight_px * 0.5;
+    let half_width = wire.line_weight_px.max(1.0) * 0.5;
     let n = wire.points.len();
     let seg_count = n.saturating_sub(1);
     if seg_count == 0 {
@@ -965,7 +965,7 @@ pub(crate) fn emit_wire_native(
             wire.pattern[6],
             wire.pattern[7],
         ],
-        half_width: wire.line_weight_px * 0.5,
+        half_width: wire.line_weight_px.max(1.0) * 0.5,
         pattern_length: wire.pattern_length,
         draw_depth,
         align_end,
@@ -1043,6 +1043,83 @@ pub fn fast_parse_u64(s: &str) -> Option<u64> {
 /// wires that carry no document handle). A wire carrying a block-local
 /// `depth_override` (a wide-polyline band inside a block) composes it into
 /// the insert's own sub-range so the band orders against its block siblings.
+/// One block-instanced wire to draw: a wire of the set, or a prototype wire
+/// reached through a stub, moved by `delta` with its depth shifted by
+/// `depth_delta` and owned (named, depth-ordered) by the stub `owner`.
+#[derive(Clone, Copy)]
+pub struct BlockRef<'a> {
+    pub wire: &'a WireModel,
+    pub delta: [f64; 3],
+    pub depth_delta: f32,
+    pub owner: Option<&'a WireModel>,
+}
+
+impl<'a> From<&'a WireModel> for BlockRef<'a> {
+    fn from(wire: &'a WireModel) -> Self {
+        Self {
+            wire,
+            delta: [0.0; 3],
+            depth_delta: 0.0,
+            owner: None,
+        }
+    }
+}
+
+impl<'a> BlockRef<'a> {
+    /// The wire whose name and visibility stand for this copy.
+    pub fn named(&self) -> &'a WireModel {
+        self.owner.unwrap_or(self.wire)
+    }
+
+    /// The copy's draw depth: its owner's slot, the prototype wire's
+    /// block-local depth shifted for this copy.
+    pub fn draw_depth(&self, depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>) -> f32 {
+        let base = fast_parse_u64(&self.named().name).and_then(|h| depth_map.get(&h).copied());
+        match (base, self.wire.depth_override) {
+            (Some([d, half]), Some(local)) => d + (local + self.depth_delta) * half,
+            (Some([d, _]), None) => d,
+            (None, _) => 0.0,
+        }
+    }
+}
+
+/// Push the block-instanced wires `wire` stands for: itself, or every copy a
+/// stub holds (stubs inside stubs included).
+pub fn push_block_refs<'a>(wire: &'a WireModel, out: &mut Vec<BlockRef<'a>>) {
+    fn walk<'a>(
+        wire: &'a WireModel,
+        delta: [f64; 3],
+        depth_delta: f32,
+        owner: &'a WireModel,
+        out: &mut Vec<BlockRef<'a>>,
+    ) {
+        match &wire.stub {
+            Some(stub) => {
+                let delta = [
+                    delta[0] + stub.delta[0],
+                    delta[1] + stub.delta[1],
+                    delta[2] + stub.delta[2],
+                ];
+                for inner in stub.prototype.iter() {
+                    walk(inner, delta, depth_delta + stub.depth_delta, owner, out);
+                }
+            }
+            None if wire.render_instance.is_some() => out.push(BlockRef {
+                wire,
+                delta,
+                depth_delta,
+                owner: Some(owner),
+            }),
+            None => {}
+        }
+    }
+    if wire.stub.is_some() {
+        walk(wire, [0.0; 3], 0.0, wire, out);
+    } else if wire.render_instance.is_some() {
+        out.push(BlockRef::from(wire));
+    }
+}
+
 pub(crate) fn wire_draw_depth(
     wire: &WireModel,
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
@@ -1121,7 +1198,7 @@ impl BlockWireGpu {
     pub fn from_wires(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        wires: &[&WireModel],
+        wires: &[BlockRef<'_>],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         color_override: Option<[f32; 4]>,
         target: BlockWireTarget<'_>,
@@ -1129,9 +1206,12 @@ impl BlockWireGpu {
     ) -> Vec<Self> {
         let BlockWireTarget { const_bgl, mode } = target;
         let mut slots: rustc_hash::FxHashMap<(u64, bool), usize> = rustc_hash::FxHashMap::default();
-        let mut groups: Vec<(bool, Vec<&WireModel>)> = Vec::new();
-        for &wire in wires {
-            if color_override.is_none() && !wire.display_visible {
+        let mut groups: Vec<(bool, Vec<BlockRef<'_>>)> = Vec::new();
+        for &block in wires {
+            let wire = block.wire;
+            if color_override.is_none()
+                && !(wire.display_visible && block.named().display_visible)
+            {
                 continue;
             }
             let Some(instance) = wire.render_instance else {
@@ -1147,7 +1227,7 @@ impl BlockWireGpu {
                 groups.push((mesh_edge, Vec::new()));
                 slot
             });
-            groups[slot].1.push(wire);
+            groups[slot].1.push(block);
         }
 
         let mut arena = BlockArenaBuilder::new(device, mode);
@@ -1157,7 +1237,10 @@ impl BlockWireGpu {
         // visible rather than assumed.
         let mut emitted_segments = 0usize;
         for (mesh_edge, group) in groups {
-            let Some(&source) = group.first() else {
+            // A copy reached through a stub carries the prototype's
+            // geometry at the prototype's placement, which is what `base`
+            // means; its own `delta` only moves the instance.
+            let Some(source) = group.first().map(|block| block.wire) else {
                 continue;
             };
             let Some(base) = source.render_instance else {
@@ -1460,19 +1543,19 @@ impl BlockArenaBuilder {
 
 /// Placements and draw depths relative to the group's first instance.
 fn block_instances(
-    group: &[&WireModel],
+    group: &[BlockRef<'_>],
     base: crate::scene::model::instance_model::RenderInstance,
     mesh_edge: bool,
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
 ) -> Vec<BlockWireInstance> {
     group
         .iter()
-        .filter_map(|wire| {
-            let instance = wire.render_instance?;
+        .filter_map(|block| {
+            let instance = block.wire.render_instance?;
             let delta = [
-                instance.translation[0] - base.translation[0],
-                instance.translation[1] - base.translation[1],
-                instance.translation[2] - base.translation[2],
+                instance.translation[0] + block.delta[0] - base.translation[0],
+                instance.translation[1] + block.delta[1] - base.translation[1],
+                instance.translation[2] + block.delta[2] - base.translation[2],
             ];
             let high = delta.map(|value| value as f32);
             Some(BlockWireInstance {
@@ -1486,7 +1569,7 @@ fn block_instances(
                     if mesh_edge {
                         0.0
                     } else {
-                        wire_draw_depth(wire, depth_map)
+                        block.draw_depth(depth_map)
                     },
                     0.0,
                 ],

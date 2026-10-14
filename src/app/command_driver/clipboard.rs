@@ -66,6 +66,46 @@ impl OpenCADStudio {
         None
     }
 
+    /// ARRAYRECT / ARRAYPOLAR with Associative on: the objects become the
+    /// source of an associative array, in one undo step.
+    pub(super) fn handle_assoc_array(
+        &mut self,
+        mut handles: Vec<Handle>,
+        spec: crate::scene::assoc_array::AssocArraySpec,
+    ) {
+        let i = self.active_tab;
+        handles.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
+        self.tabs[i].scene.clear_preview_wire();
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.restore_pre_cmd_tangent();
+        if handles.is_empty() {
+            return;
+        }
+        let label = self.history_label_from_active_cmd(i, "ARRAY");
+        let source_point = crate::app::helpers::entities_lower_left_by_bbox(
+            &self.tabs[i].scene.document,
+            &handles,
+        );
+        self.push_undo_snapshot(i, label.clone());
+        match crate::scene::assoc_array::create_from_spec(
+            &mut self.tabs[i].scene,
+            &handles,
+            source_point,
+            &spec,
+        ) {
+            Ok(array) => {
+                self.tabs[i].scene.deselect_all();
+                self.tabs[i].scene.select_entity(array, false);
+                self.command_line
+                    .push_output(crate::tf!("{label}: associative array created.").as_ref());
+            }
+            Err(error) => self.command_line.push_error(&format!("{label}: {error}")),
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+    }
+
     pub(super) fn handle_replace_many(
         &mut self,
         replacements: Vec<(Handle, Vec<codec::EntityType>)>,

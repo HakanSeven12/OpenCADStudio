@@ -15,7 +15,7 @@
 // block record in place, so there is no copy-back and no transform — the space
 // render filter (`current_layout_block_handle`) already draws only the block.
 
-use codec::{EntityType, Handle};
+use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -26,16 +26,22 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 pub fn block_edit_tools() -> Vec<ToolDef> {
     vec![
         ToolDef {
-            id: "BEDIT_SAVE",
+            id: "BSAVE",
             label: "Save Block",
             icon: IconKind::Svg(include_bytes!("../../../../assets/icons/mt_ok.svg")),
-            event: ModuleEvent::Command("BEDIT_SAVE".to_string()),
+            event: ModuleEvent::Command("BSAVE".to_string()),
         },
         ToolDef {
-            id: "BEDIT_DISCARD",
-            label: "Discard Block Edit",
+            id: "BSAVEAS",
+            label: "Save Block As",
+            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/ui/save.svg")),
+            event: ModuleEvent::Command("BSAVEAS".to_string()),
+        },
+        ToolDef {
+            id: "BCLOSE",
+            label: "Close Block Editor",
             icon: IconKind::Svg(include_bytes!("../../../../assets/icons/mt_cancel.svg")),
-            event: ModuleEvent::Command("BEDIT_DISCARD".to_string()),
+            event: ModuleEvent::Command("BCLOSE".to_string()),
         },
     ]
 }
@@ -55,17 +61,6 @@ pub struct BlockEditSession {
     /// Parent block tab to return to for a nested BEDIT session. `None` returns
     /// to `return_layout`.
     pub return_block: Option<String>,
-    /// The complete block definition captured on entry, so Discard restores
-    /// structural markers and content with their original handles.
-    pub snapshot: Vec<EntityType>,
-    /// Baked anonymous dimension-block entities transformed alongside
-    /// dimensions in this definition. They remain in place, so Discard can
-    /// restore their shared before-images directly.
-    pub dependent_snapshot: Vec<std::sync::Arc<EntityType>>,
-    /// Inline ATTRIB values/positions on every existing INSERT of this block.
-    /// Rebasing the origin moves them with the definition; Discard restores
-    /// their exact on-entry state.
-    pub reference_attributes: Vec<(Handle, Vec<codec::entities::AttributeEntity>)>,
     /// Camera state of the space that was active when BEDIT began, restored
     /// on Save/Discard so the view returns exactly where it was (#425).
     pub return_camera: crate::scene::view::camera::Camera,
@@ -120,4 +115,7 @@ inventory::submit!(crate::command::CommandRegistration {
 });
 inventory::submit!(crate::command::CommandRegistration {
     names: &["BEDIT_DISCARD"]
+});
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["BSAVE", "BSAVEAS", "BCLOSE"]
 });

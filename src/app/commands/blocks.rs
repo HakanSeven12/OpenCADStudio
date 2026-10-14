@@ -95,6 +95,23 @@ impl OpenCADStudio {
         }
     }
 
+    /// PASTESPEC with the formats on hand: the copied objects, and `text`
+    /// from the system clipboard once it has been read.
+    pub(in crate::app) fn paste_special_command(
+        &self,
+        i: usize,
+        text: Option<&str>,
+    ) -> Box<dyn CadCommand> {
+        let document = &self.tabs[i].scene.document;
+        let defaults = crate::scene::creation_style::current_text_defaults(document);
+        Box::new(crate::modules::draw::clipboard::pastespec::PasteSpecCommand::new(
+            !self.clipboard.is_empty(),
+            text,
+            defaults.style_name,
+            defaults.height,
+        ))
+    }
+
     pub(super) fn dispatch_blocks(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
             // ── BASE — drawing insertion base point ───────────────────────
@@ -282,6 +299,58 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
+            }
+
+            // ARRAYEDIT — edit an associative array; a preselected one skips
+            // the pick.
+            "ARRAYEDIT" => {
+                use crate::modules::draw::modify::arrayedit::ArrayEditCommand;
+                let selected = self.tabs[i].scene.selected_handles_in_order();
+                let array = match selected.as_slice() {
+                    [handle] => Some(*handle),
+                    _ => None,
+                };
+                self.tabs[i].scene.deselect_all();
+                let command = ArrayEditCommand::new(array);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            // ARRAYEDIT Source: edit the objects the array repeats in the
+            // Block Editor; every item follows when it is saved.
+            cmd if cmd.starts_with("ARRAYEDIT_SOURCE:") => {
+                let handle = codec::Handle::new(
+                    cmd["ARRAYEDIT_SOURCE:".len()..].parse().unwrap_or(0),
+                );
+                let document = &self.tabs[i].scene.document;
+                let source = crate::scene::assoc_array::array_of_insert(document, handle)
+                    .and_then(|array| {
+                        document
+                            .block_records
+                            .iter()
+                            .find(|record| record.handle == array.source_block)
+                            .map(|record| record.name.clone())
+                    });
+                match source {
+                    Some(name) => return Some(self.dispatch_command(&format!("BEDIT_OPEN:{name}"))),
+                    None => self.command_line.push_error(
+                        crate::t!("ARRAYEDIT: the selected object is not an associative array.")
+                            .as_ref(),
+                    ),
+                }
+            }
+
+            // PASTESPEC — offer the copied objects now; the system clipboard's
+            // text joins the formats once read (Message::PasteSpecial).
+            "PASTESPEC" => {
+                let command = self.paste_special_command(i, None);
+                let started = self.start_count_command(i, command);
+                #[cfg(target_arch = "wasm32")]
+                let read = Task::perform(crate::sys::read_clipboard_text(), Message::PasteSpecial);
+                #[cfg(not(target_arch = "wasm32"))]
+                let read = iced::clipboard::read_text()
+                    .map(|result| Message::PasteSpecial(result.ok().map(|text| (*text).clone())));
+                return Some(Task::batch([started, read]));
             }
 
             // PASTEORIG — paste at the entities' original coordinates (no pick).
@@ -839,7 +908,7 @@ impl OpenCADStudio {
                     .split_once(char::is_whitespace)
                     .map(|(verb, rest)| (verb.to_ascii_uppercase(), rest.trim()))
                     .unwrap_or_else(|| (cmd.to_ascii_uppercase(), ""));
-                if verb == "PDFATTACH" && rest.is_empty() {
+                if verb == "PDFATTACH" && rest.is_empty() && crate::sys::file_dia() {
                     return Some(Task::done(Message::PdfAttachPick));
                 }
                 let insunits = self.tabs[i].scene.document.header.insertion_units;
@@ -921,17 +990,30 @@ impl OpenCADStudio {
                 }
             }
 
-            // EXTERNALREFERENCES — toggle the docked External References panel.
+            // EXTERNALREFERENCES opens the docked External References panel
+            // (an open one stays open); EXTERNALREFERENCESCLOSE closes it.
             // (XREFMAN was a provisional name and is not kept, not even as an
             // alias.) The XREF command below is untouched.
             "EXTERNALREFERENCES" => {
-                self.show_external_references ^= true;
-                if self.show_external_references {
-                    // Always open expanded so the panel is immediately usable;
-                    // dock it on the right if the user closed it from the layout.
-                    self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);
-                    self.refresh_xref_manager();
-                }
+                self.show_external_references = true;
+                // Always open expanded so the panel is immediately usable;
+                // dock it on the right if the user closed it from the layout.
+                self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);
+                self.refresh_xref_manager();
+            }
+            "EXTERNALREFERENCESCLOSE" => self.show_external_references = false,
+            // ERSTATE (read only): whether the panel is open.
+            cmd if cmd
+                .strip_prefix("SETVAR ")
+                .unwrap_or(cmd)
+                .split_whitespace()
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case("ERSTATE")) =>
+            {
+                self.command_line.push_output(&format!(
+                    "ERSTATE = {} (read only)",
+                    u8::from(self.show_external_references)
+                ));
             }
 
             cmd if cmd.eq_ignore_ascii_case("XREF")

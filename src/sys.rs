@@ -440,7 +440,6 @@ fn pasted_image_name(mime_type: &str) -> String {
 /// the candidate already names a registered source. The taken-check is
 /// injectable so this — the part worth locking with tests — runs natively;
 /// wasm passes [`crate::scene::model::image_model::has_source`].
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // tested everywhere, used on wasm
 pub(crate) fn unique_pasted_image_name(
     base: &str,
     ext: &str,
@@ -585,6 +584,121 @@ pub fn blocking_file_dialog() -> rfd::FileDialog {
 #[cfg(target_arch = "wasm32")]
 pub fn file_dialog() -> rfd::AsyncFileDialog {
     rfd::AsyncFileDialog::new()
+}
+
+// ── FILEDIA and file pickers that keep their file type ───────────────────────
+
+static FILE_DIA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// FILEDIA (a profile setting): commands that have a command-line form show
+/// their file dialogs only while it is on.
+pub fn file_dia() -> bool {
+    FILE_DIA.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_file_dia(on: bool) {
+    FILE_DIA.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The file type ATTACH's picker was last left on (1-based; 7 = Drawing).
+static ATTACH_FILTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(7);
+
+pub fn attach_filter() -> u32 {
+    ATTACH_FILTER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_attach_filter(index: u32) {
+    ATTACH_FILTER.store(index, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A file type of [`pick_file_with_filter`]: its label and extensions
+/// (`"*"` for every file).
+pub type FileFilter = (String, &'static [&'static str]);
+
+/// Open-file dialog that starts on file type `index` (1-based) and returns the
+/// picked path with the file type the dialog was left on.
+#[cfg(target_os = "windows")]
+pub async fn pick_file_with_filter(
+    title: String,
+    filters: Vec<FileFilter>,
+    index: u32,
+) -> Option<(std::path::PathBuf, u32)> {
+    // The dialog blocks, so it runs on its own thread like the async picker.
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(open_file_dialog_blocking(&title, &filters, index));
+    });
+    rx.await.ok().flatten()
+}
+
+#[cfg(target_os = "windows")]
+fn open_file_dialog_blocking(
+    title: &str,
+    filters: &[FileFilter],
+    index: u32,
+) -> Option<(std::path::PathBuf, u32)> {
+    use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_HIDEREADONLY, OFN_NOCHANGEDIR,
+        OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let mut filter = Vec::new();
+    for (label, extensions) in filters {
+        let pattern = extensions
+            .iter()
+            .map(|e| format!("*.{e}"))
+            .collect::<Vec<_>>()
+            .join(";");
+        filter.extend(wide(label));
+        filter.extend(wide(&pattern));
+    }
+    filter.push(0);
+    let title = wide(title);
+    let dir = crate::config::last_dialog_dir().map(|d| wide(&d.to_string_lossy()));
+    let mut file = vec![0u16; 32768];
+    let mut ofn = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        lpstrFilter: filter.as_ptr(),
+        nFilterIndex: index,
+        lpstrFile: file.as_mut_ptr(),
+        nMaxFile: file.len() as u32,
+        lpstrTitle: title.as_ptr(),
+        lpstrInitialDir: dir.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()),
+        Flags: OFN_EXPLORER
+            | OFN_FILEMUSTEXIST
+            | OFN_PATHMUSTEXIST
+            | OFN_NOCHANGEDIR
+            | OFN_HIDEREADONLY,
+        ..Default::default()
+    };
+    // SAFETY: every pointer in `ofn` points into buffers that outlive the call.
+    let picked = unsafe {
+        CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
+        GetOpenFileNameW(&mut ofn)
+    };
+    if picked == 0 {
+        return None;
+    }
+    let len = file.iter().position(|&c| c == 0).unwrap_or(file.len());
+    let path = std::path::PathBuf::from(String::from_utf16_lossy(&file[..len]));
+    crate::config::remember_dialog_dir(&path);
+    Some((path, ofn.nFilterIndex))
+}
+
+/// Elsewhere the picker cannot start on a file type; the index passes through.
+#[cfg(not(target_os = "windows"))]
+pub async fn pick_file_with_filter(
+    title: String,
+    filters: Vec<FileFilter>,
+    index: u32,
+) -> Option<(std::path::PathBuf, u32)> {
+    let mut dialog = file_dialog().set_title(title);
+    for (label, extensions) in &filters {
+        dialog = dialog.add_filter(label, extensions);
+    }
+    let handle = dialog.pick_file().await?;
+    Some((handle_path(&handle), index))
 }
 
 /// Trigger a browser download of `bytes` as `name`. Builds a Blob, points a

@@ -427,7 +427,11 @@ impl OpenCADStudio {
         for def in deps.blocks {
             let scene = &mut self.tabs[i].scene;
             if redefine && def.name.eq_ignore_ascii_case(name) {
-                scene.redefine_block_raw(&def.name, def.base_point, def.entities);
+                if let Err(err) = scene.redefine_block_raw(&def.name, def.base_point, def.entities)
+                {
+                    self.command_line.push_error(&err);
+                    return Err(err);
+                }
             } else if scene.document.block_records.get(&def.name).is_none() {
                 scene.define_block_raw(&def.name, def.base_point, def.entities);
             }

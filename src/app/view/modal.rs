@@ -40,6 +40,8 @@ impl OpenCADStudio {
                 crate::tr!("view-background", "title"),
                 self.view_background.as_ref().map_or("", |s| s.view.as_str())
             ),
+            Some(K::ImageAdjust) => crate::tr!("image-adjust", "title"),
+            Some(K::RefEdit) => crate::tr!("ref-edit", "dialog-title"),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
             Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),
@@ -76,6 +78,8 @@ impl OpenCADStudio {
             Some(K::ExternalChange) => crate::tr!("modal", "drawing-changed"),
             Some(K::LayerDeleteWarning) => crate::tr!("modal", "delete-layer"),
             Some(K::Unsaved) => crate::tr!("modal", "unsaved-changes"),
+            Some(K::BlockEditChanges) => crate::t!("Block Editor").into_owned(),
+            Some(K::BlockSaveAs) => crate::t!("Save Block As").into_owned(),
             Some(K::PointStyle) => crate::tr!("modal", "point-style"),
             Some(K::AttributeEditor) => crate::tr!("modal", "attribute-editor"),
             Some(K::SaveDialog) => crate::tr!("modal", "save-drawing-as"),
@@ -299,6 +303,10 @@ impl OpenCADStudio {
                             textfill: crate::scene::text::sdf_atlas::textfill(),
                             cliprompt_lines: self.cliprompt_lines,
                             commandline_fade_ms: self.commandline_fade_ms,
+                            command_line_opacity: self.command_line.opacity_percent(),
+                            show_menu_bar: self.show_menu_bar,
+                            show_ribbon: !self.ribbon_closed,
+                            hatch_associative: self.hatch_associative,
                             zoom_wheel_reversed: self.zoom_wheel_reversed,
                             touchpad_pan: self.touchpad_pan,
                             ui_scale_percent: self.ui_scale_percent,
@@ -493,6 +501,12 @@ impl OpenCADStudio {
                     crate::ui::window::block_definition::view_window(state, flow)
                 })
             }
+            super::super::ModalKind::BlockSaveAs => {
+                let state = self.block_save_as.as_ref()?;
+                sized_flow(ex, 430, 370, |flow| {
+                    crate::ui::window::block_save_as::view(state, flow)
+                })
+            }
             super::super::ModalKind::PdfAttach => {
                 let state = self.pdf_attach.as_ref()?;
                 sized_flow(ex, 880, 540, |flow| {
@@ -521,6 +535,18 @@ impl OpenCADStudio {
                 let state = self.view_background.as_ref()?;
                 sized_flow(ex, 420, 560, |flow| {
                     crate::ui::window::pdf_dialogs::view_background(state, flow)
+                })
+            }
+            super::super::ModalKind::ImageAdjust => {
+                let state = self.image_adjust.as_ref()?;
+                sized_flow(ex, 520, 560, |flow| {
+                    crate::ui::window::pdf_dialogs::image_adjust(state, flow)
+                })
+            }
+            super::super::ModalKind::RefEdit => {
+                let state = self.refedit_dialog.as_ref()?;
+                sized_flow(ex, 560, 470, |flow| {
+                    crate::ui::window::refedit_dialog::view(state, flow)
                 })
             }
             super::super::ModalKind::UnderlayLayers => {
@@ -1738,7 +1764,19 @@ impl OpenCADStudio {
                         .unwrap_or_default(),
                     None => String::new(),
                 };
-                automatic_flow(ex, |flow| unsaved_changes_dialog_window(&tab_name, flow))
+                automatic_flow(ex, |flow| {
+                    unsaved_changes_dialog_window(&tab_name, flow, false)
+                })
+            }
+            super::super::ModalKind::BlockEditChanges => {
+                let name = self
+                    .pending_block_close
+                    .as_ref()
+                    .and_then(|(id, _)| self.tabs.iter().find(|tab| tab.id == *id))
+                    .and_then(|tab| tab.active_block_edit_session())
+                    .map(|session| session.block_name.clone())
+                    .unwrap_or_default();
+                automatic_flow(ex, |flow| unsaved_changes_dialog_window(&name, flow, true))
             }
             super::super::ModalKind::PointStyle => sized_flow(ex, 360, 470, |flow| {
                 crate::ui::style::point_style::view_window(
@@ -2056,23 +2094,53 @@ fn save_as_dialog_window<'a>(
 fn unsaved_changes_dialog_window(
     name: &str,
     sizing: crate::ui::modal::ModalSizing,
+    block_edit: bool,
 ) -> Element<'static, Message> {
     container(
         column![
-            text(name.to_owned()).size(14),
+            text(if block_edit {
+                crate::tf!("Save changes to {}?", name).into_owned()
+            } else {
+                name.to_owned()
+            })
+            .size(14),
             iced::widget::Space::new().height(4),
-            text(crate::tr!("modal", "unsaved-save-prompt"))
-                .size(12)
-                .style(dialog_muted_text_style),
+            text(if block_edit {
+                String::new()
+            } else {
+                crate::tr!("modal", "unsaved-save-prompt")
+            })
+            .size(12)
+            .style(dialog_muted_text_style),
             iced::widget::Space::new().height(20),
             row![
-                dialog_button(t!("Save"), Message::UnsavedDialogSave, button::primary),
+                dialog_button(
+                    t!("Save"),
+                    if block_edit {
+                        Message::BlockEditChangesSave
+                    } else {
+                        Message::UnsavedDialogSave
+                    },
+                    button::primary
+                ),
                 iced::widget::Space::new().width(8),
-                dialog_button(t!("Discard"), Message::UnsavedDialogDiscard, button::danger),
+                dialog_button(
+                    t!("Discard"),
+                    if block_edit {
+                        Message::BlockEditChangesDiscard
+                    } else {
+                        Message::UnsavedDialogDiscard
+                    },
+                    button::danger
+                ),
                 iced::widget::Space::new().width(8),
                 dialog_button(
                     t!("Cancel"),
-                    Message::UnsavedDialogCancel,
+                    if block_edit {
+                        Message::BlockEditChangesCancel
+                    } else {
+                        Message::UnsavedDialogCancel
+                    },
                     button::secondary
                 ),
             ],

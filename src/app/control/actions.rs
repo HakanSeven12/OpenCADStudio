@@ -104,6 +104,8 @@ pub(super) const NAMES: &[&str] = &[
     "external_change_cancel",
     "pdf_dialog_ok",
     "view_background",
+    "image_adjust",
+    "refedit_dialog",
     "pdf_layer_toggle",
     "pc_manager_toggle",
     "pc_manager",
@@ -114,6 +116,7 @@ pub(super) const NAMES: &[&str] = &[
     "pc_section",
     "ribbon_tab",
     "ribbon_dropdown",
+    "keytips",
     "dialog_ok",
     "attdef_dialog",
     "field_dialog",
@@ -124,6 +127,7 @@ pub(super) const NAMES: &[&str] = &[
     "toggle_grid",
     "toggle_snap",
     "toggle_ortho",
+    "grip_menu_pick",
     "mtext_insert",
     "mtext_commit",
     "mtext_cancel",
@@ -841,6 +845,7 @@ impl OpenCADStudio {
                     "point": [grip.world.x, grip.world.y, grip.world.z],
                     "shape": format!("{:?}", grip.shape),
                     "moves_entity": grip.is_midpoint,
+                    "axis": grip.axis.map(|a| [a.x, a.y, a.z]),
                 })
             })
             .collect::<Vec<_>>();
@@ -911,33 +916,119 @@ impl OpenCADStudio {
 
     /// Click the viewport where `point` (world) shows, as the left button
     /// would, holding Ctrl and/or Shift when `modifiers` names them.
-    pub(super) fn control_click(&mut self, req: &Value) -> Result<Task<Message>, Value> {
-        let i = self.active_tab;
-        let at = point(req)?;
-        let modifiers = req["modifiers"].as_str().unwrap_or("").to_ascii_lowercase();
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
-        let tile = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
+    /// Where a world point shows on the drawing canvas, through the camera
+    /// the cursor edits with: an entered viewport's, else the active tile's.
+    fn control_world_to_canvas(&self, at: glam::DVec3) -> Result<iced::Point, Value> {
+        let scene = &self.tabs[self.active_tab].scene;
+        let (vw, vh) = scene.selection.borrow().view.vp_size;
+        let (camera, bounds) = scene.viewport_edit_frame((vw, vh)).unwrap_or_else(|| {
+            (scene.camera.borrow().clone(), scene.active_model_tile_bounds(vw, vh))
+        });
         let local = iced::Rectangle {
-            width: tile.width,
-            height: tile.height,
+            width: bounds.width,
+            height: bounds.height,
             ..iced::Rectangle::default()
         };
-        let screen = self.tabs[i]
-            .scene
-            .camera
-            .borrow()
+        camera
             .project(at, local)
-            .ok_or_else(|| failure("invalid_point", "The point is not in view"))?;
+            .filter(|p| p.x.is_finite() && p.y.is_finite())
+            .map(|p| iced::Point::new(p.x + bounds.x, p.y + bounds.y))
+            .ok_or_else(|| failure("invalid_point", "The point is not in view"))
+    }
+
+    pub(super) fn control_click(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let at = point(req)?;
+        let modifiers = req["modifiers"].as_str().unwrap_or("").to_ascii_lowercase();
+        let cursor = self.control_world_to_canvas(at)?;
         let saved = (self.ctrl_down, self.shift_down);
         self.ctrl_down = modifiers.contains("ctrl");
         self.shift_down = modifiers.contains("shift");
-        let cursor = iced::Point::new(screen.x + tile.x, screen.y + tile.y);
         let tasks = [
             self.update(Message::ViewportMove(cursor)),
             self.update(Message::ViewportLeftPress),
             self.update(Message::ViewportLeftRelease),
         ];
         (self.ctrl_down, self.shift_down) = saved;
+        Ok(Task::batch(tasks))
+    }
+
+    /// Replay pointer events on the drawing canvas in order, as the mouse
+    /// sends them: moves (canvas pixels, or a world point projected through
+    /// the editing camera), button presses and releases, and wheel steps.
+    /// Each step reports where the cursor landed in the world, so a drag
+    /// shows the points the interaction actually received.
+    pub(super) fn control_pointer(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let i = self.active_tab;
+        let events = req["events"]
+            .as_array()
+            .filter(|events| !events.is_empty())
+            .ok_or_else(|| failure("invalid_request", "Supply a non-empty events array"))?;
+        let modifiers = req["modifiers"].as_str().unwrap_or("").to_ascii_lowercase();
+        let coords = |value: &Value, n: usize| -> Option<Vec<f64>> {
+            let values: Vec<f64> = value.as_array()?.iter().filter_map(Value::as_f64).collect();
+            (values.len() == n && values.iter().all(|v| v.is_finite())).then_some(values)
+        };
+        let saved = (self.ctrl_down, self.shift_down);
+        self.ctrl_down = modifiers.contains("ctrl");
+        self.shift_down = modifiers.contains("shift");
+        let mut tasks = Vec::new();
+        let mut steps = Vec::new();
+        let mut outcome = Ok(());
+        for event in events {
+            let message = if let Some(xy) = event.get("move").and_then(|v| coords(v, 2)) {
+                Message::ViewportMove(iced::Point::new(xy[0] as f32, xy[1] as f32))
+            } else if let Some(at) = event.get("move_world").and_then(|v| coords(v, 3)) {
+                match self.control_world_to_canvas(glam::DVec3::new(at[0], at[1], at[2])) {
+                    Ok(cursor) => Message::ViewportMove(cursor),
+                    Err(error) => {
+                        outcome = Err(error);
+                        break;
+                    }
+                }
+            } else if let Some(button) = event.get("press").and_then(Value::as_str) {
+                match button {
+                    "left" => Message::ViewportLeftPress,
+                    "right" => Message::ViewportRightPress,
+                    "middle" => Message::ViewportMiddlePress,
+                    _ => {
+                        outcome = Err(failure("invalid_request", "press is left, right or middle"));
+                        break;
+                    }
+                }
+            } else if let Some(button) = event.get("release").and_then(Value::as_str) {
+                match button {
+                    "left" => Message::ViewportLeftRelease,
+                    "right" => Message::ViewportRightRelease,
+                    "middle" => Message::ViewportMiddleRelease,
+                    _ => {
+                        outcome = Err(failure("invalid_request", "release is left, right or middle"));
+                        break;
+                    }
+                }
+            } else if let Some(lines) = event.get("wheel").and_then(Value::as_f64) {
+                Message::ViewportScroll(iced::mouse::ScrollDelta::Lines {
+                    x: 0.0,
+                    y: lines as f32,
+                })
+            } else {
+                outcome = Err(failure(
+                    "invalid_request",
+                    "Each event is move, move_world, press, release or wheel",
+                ));
+                break;
+            };
+            tasks.push(self.update(message));
+            let tab = &self.tabs[i];
+            let world = tab.last_cursor_world;
+            steps.push(json!({
+                "screen":[tab.last_cursor_screen.x, tab.last_cursor_screen.y],
+                "world":[world.x, world.y, world.z],
+                "dragging_grip":tab.active_grip.is_some(),
+            }));
+        }
+        (self.ctrl_down, self.shift_down) = saved;
+        outcome?;
+        self.set_control_result(json!({"steps":steps}));
         Ok(Task::batch(tasks))
     }
 
@@ -1796,6 +1887,58 @@ impl OpenCADStudio {
                 })
             }
             "ribbon_dropdown" => Message::ToggleRibbonDropdown(string(req, "value")?.into()),
+            // The Edit Reference dialog, one field per call: "level=<n>" (0 =
+            // the picked reference), "nested=0|1" (pick the working set in the
+            // drawing), "attributes=0|1", "lock=0|1", "unique=0|1", "ok" or
+            // "cancel".
+            "refedit_dialog" => {
+                use crate::ui::window::refedit_dialog::RefEditDialogMsg as R;
+                if self.active_modal != Some(crate::app::ModalKind::RefEdit) {
+                    return Err(failure("no_dialog", "The Reference Edit dialog is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let flag = || match value {
+                    "1" => Ok(true),
+                    "0" => Ok(false),
+                    _ => Err(failure("invalid_value", spec)),
+                };
+                if key == "cancel" {
+                    Message::CloseModal
+                } else {
+                Message::RefEditDialog(match key {
+                    "ok" => R::Ok,
+                    "level" => R::Level(value.parse().map_err(|_| failure("invalid_value", spec))?),
+                    "nested" => R::Nested(flag()?),
+                    "attributes" => R::Attributes(flag()?),
+                    "lock" => R::Lock(flag()?),
+                    "unique" => R::Unique(flag()?),
+                    _ => return Err(failure("invalid_value", "Unknown Reference Edit field")),
+                })
+                }
+            }
+            // Ribbon key tips: `show`, `alt` (a lone Alt), `type:<codes>`, `enter`,
+            // `esc` or `hide`. Read them back with the `keytips` read operation.
+            "keytips" => {
+                use crate::ui::ribbon::KeyTipInput as K;
+                let value = string(req, "value")?;
+                let inputs: Vec<K> = match value {
+                    "show" => vec![K::Open { refocus: false }],
+                    "alt" => vec![K::AltTap],
+                    "esc" => vec![K::Escape],
+                    "hide" => vec![K::Hide],
+                    "enter" => vec![K::Enter],
+                    _ => match value.strip_prefix("type:") {
+                        Some(codes) if !codes.is_empty() => codes
+                            .chars()
+                            .map(|ch| K::Char(ch.to_uppercase().collect()))
+                            .collect(),
+                        _ => return Err(failure("invalid_value", "Use show, alt, type:<codes>, enter, esc or hide")),
+                    },
+                };
+                let tasks: Vec<_> = inputs.into_iter().map(|input| self.on_keytip(input)).collect();
+                return Ok(Task::batch(tasks));
+            }
             // The -VIEW Background dialog, one field per call: "type=gradient",
             // "color|top|middle|bottom=r,g,b", "three=1", "rotation=30",
             // "image=<path>", "position=center|stretch|tile", "aspect=1", "offset=x,y" (pixels), "scale=x,y",
@@ -1870,6 +2013,43 @@ impl OpenCADStudio {
                     _ => return Err(bad()),
                 }
             }
+            // The Image Adjust dialog, one field per call: "brightness=70",
+            // "contrast=40", "fade=20" (the bar), "type=fade,abc" (typed into
+            // the box), "step=brightness,+1|-1", "reset", "apply" or "cancel".
+            "image_adjust" => {
+                use crate::ui::window::pdf_dialogs::PdfDialogMsg as P;
+                if self.active_modal != Some(crate::app::ModalKind::ImageAdjust) {
+                    return Err(failure("no_dialog", "The Image Adjust dialog is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let bad = || failure("invalid_value", spec);
+                let row = |name: &str| match name.trim() {
+                    "brightness" => Ok(0u8),
+                    "contrast" => Ok(1),
+                    "fade" => Ok(2),
+                    _ => Err(bad()),
+                };
+                match key {
+                    "cancel" => Message::CloseModal,
+                    "apply" => Message::PdfDialog(P::IaApply),
+                    "reset" => Message::PdfDialog(P::IaReset),
+                    "brightness" | "contrast" | "fade" => {
+                        let v: u8 = value.trim().parse().ok().filter(|v| *v <= 100).ok_or_else(bad)?;
+                        Message::PdfDialog(P::IaValue(row(key)?, v))
+                    }
+                    "type" => {
+                        let (name, typed) = value.split_once(',').ok_or_else(bad)?;
+                        Message::PdfDialog(P::IaText(row(name)?, typed.to_string()))
+                    }
+                    "step" => {
+                        let (name, dir) = value.split_once(',').ok_or_else(bad)?;
+                        let dir: i8 = dir.trim().parse().map_err(|_| bad())?;
+                        Message::PdfDialog(P::IaStep(row(name)?, dir))
+                    }
+                    _ => return Err(bad()),
+                }
+            }
             "pdf_dialog_ok" => {
                 use crate::ui::window::pdf_dialogs::PdfDialogMsg;
                 Message::PdfDialog(match self.active_modal {
@@ -1909,6 +2089,20 @@ impl OpenCADStudio {
             "toggle_grid" => Message::ToggleGrid,
             "toggle_snap" => Message::ToggleSnapEnabled,
             "toggle_ortho" => Message::ToggleOrtho,
+            // Choose an entry of the open multi-functional grip menu by its
+            // position (0 = first), as a click on it does.
+            "grip_menu_pick" => {
+                let entries = self.grip_popup.as_ref().map_or(0, |popup| popup.items.len());
+                if entries == 0 {
+                    return Err(failure("menu_closed", "No grip menu is open"));
+                }
+                let index = string(req, "value")?
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|index| *index < entries)
+                    .ok_or_else(|| failure("invalid_value", "value is a menu entry index"))?;
+                Message::GripMenuPick(index)
+            }
             "mtext_insert" => {
                 if self.mtext_editor.is_none() {
                     return Err(failure("editor_closed", "MText editor is closed"));

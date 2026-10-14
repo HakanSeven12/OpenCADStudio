@@ -71,6 +71,22 @@ and `data_base64`, and the tab is marked clean. `target_format` and `target_vers
 default to the drawing's own; a conversion that would drop unsupported records needs
 `allow_lossy: true`, as on native.
 
+## Supplying fonts
+
+The web build has no font folder. A text style whose TrueType or OpenType file is not one
+of the bundled Noto subsets falls back to them. The host page can hand the file over:
+
+```json
+{"op":"font_register","file_name":"Brand-Regular.ttf","data_base64":"…"}
+```
+
+`file_name` is the name the drawing's text styles use; it is matched case-insensitively and
+without a directory, as for installed fonts. The reply carries the `family` inside the file
+and the number of `faces` it added. Open drawings lay their text out again. The font stays
+registered for the session and is never written into saved files. Bytes without a readable
+face fail with `font_invalid`; a missing `file_name` or empty or invalid base64 with
+`invalid_request`.
+
 ## Receiving saved files in the host page
 
 A page that embeds the app can take every saved or exported file itself instead of a

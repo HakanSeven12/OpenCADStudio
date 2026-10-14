@@ -31,6 +31,12 @@ use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
 mod locate;
+mod keytips;
+pub use keytips::{
+    active as keytips_active, key_pressed as keytip_key_pressed,
+    key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed, KeyTipInput,
+    KeyTipStep,
+};
 use crate::t;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use collapse::CollapseMode;
@@ -117,8 +123,13 @@ pub struct Ribbon {
     xref_ctx: bool,
     /// Only point clouds are selected: whether the first shows its crops.
     point_cloud_ctx: Option<bool>,
+    /// A block editor session is open: the tab that was active before the
+    /// Block Editor tab took over.
+    block_editing: Option<usize>,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
+    /// Open key tips (Alt).
+    keytips: Option<keytips::State>,
 }
 
 /// Per-layer display data shown in the ribbon layer dropdown.
@@ -219,7 +230,9 @@ impl Ribbon {
             underlay_ctx: None,
             xref_ctx: false,
             point_cloud_ctx: None,
+            block_editing: None,
             xref_fade: 50,
+            keytips: None,
         }
     }
 
@@ -291,6 +304,28 @@ impl Ribbon {
 
     pub fn set_available_linetypes(&mut self, items: Vec<LinetypeItem>) {
         self.available_linetypes = items;
+    }
+
+    /// Show the Block Editor tab while a block is being edited, and return to
+    /// the previous tab when the editing ends.
+    pub fn set_block_editing(&mut self, editing: bool) {
+        let Some(index) = self.modules.iter().position(|module| module.id() == "block_editor")
+        else {
+            return;
+        };
+        match (editing, self.block_editing) {
+            (true, None) => {
+                self.block_editing = Some(self.active);
+                self.active = index;
+            }
+            (false, Some(previous)) => {
+                self.block_editing = None;
+                if self.active == index {
+                    self.active = previous.min(self.modules.len().saturating_sub(1));
+                }
+            }
+            _ => {}
+        }
     }
 
     pub fn select(&mut self, index: usize) {
@@ -550,12 +585,14 @@ impl Ribbon {
             |mut acc, (i, module)| {
                 // The Layout module no longer has a ribbon tab — its paper-space
                 // tools live in the right-edge side toolbar (see ui::side_toolbar).
-                if module.id() == "layout" {
+                if module.id() == "layout"
+                    || (module.id() == "block_editor" && self.block_editing.is_none())
+                {
                     return acc;
                 }
 
                 let is_active = i == self.active;
-                let is_contextual = module.id() == "layout";
+                let is_contextual = matches!(module.id(), "layout" | "block_editor");
                 let holds_tool = holding_tab == Some(i);
                 let btn = container(
                     button(
@@ -634,7 +671,7 @@ impl Ribbon {
                     },
                     ..Default::default()
                 });
-                acc.push(btn.into());
+                acc.push(keytips::anchor_with(|| format!("tab:{}", module.id()), btn));
                 acc
             },
         );
@@ -772,7 +809,7 @@ impl Ribbon {
             tool_bar
         };
 
-        column![tab_bar, tool_bar].into()
+        keytips::ribbon_area(column![tab_bar, tool_bar])
     }
 
     // ── Dropdown overlay ──────────────────────────────────────────────────
@@ -943,7 +980,7 @@ impl Ribbon {
                             .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
                     });
 
-                button(
+                let item = button(
                     row![checkmark, icon_el, label_el]
                         .spacing(4)
                         .align_y(iced::Center),
@@ -954,8 +991,8 @@ impl Ribbon {
                 }))
                 .style(popup_row_style)
                 .width(Fill)
-                .padding([4, 10])
-                .into()
+                .padding([4, 10]);
+                keytips::anchor_with(|| keytips::item_anchor(dd_id, cmd), item)
             })
             .collect();
 
@@ -1543,7 +1580,10 @@ fn collapse_button<'a>(
         .style(opener_style(holds))
         .width(Fill)
         .padding([3, 5]);
-        return automatic_large_button(localized_title, content.into());
+        return keytips::anchor_with(
+            || keytips::collapsed_anchor(title),
+            automatic_large_button(localized_title, content.into()),
+        );
     }
 
     // Collapsed (not yet tight): a large representative-tool face — a live button
@@ -1608,7 +1648,10 @@ fn collapse_button<'a>(
     .style(opener_style(holds && !face_lit))
     .width(Fill)
     .padding([1, 4]);
-    let opener = automatic_large_button(localized_title, opener.into());
+    let opener = keytips::anchor_with(
+        || keytips::collapsed_anchor(title),
+        automatic_large_button(localized_title, opener.into()),
+    );
 
     // The large face fills a fixed slot so a collapsed panel is shorter than a full
     // 3-row panel, letting `CollapsePanels` shrink the ribbon row.

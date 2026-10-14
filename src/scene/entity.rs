@@ -1263,19 +1263,35 @@ impl Scene {
 
     /// Replace the contents and base point of block `name`, defining it when
     /// absent. References keep pointing at it and show the new contents.
+    /// Refuses and returns Err if the new contents lead back to `name` directly or transitively.
     pub fn redefine_block_raw(
         &mut self,
         name: &str,
         base_point: codec::types::Vector3,
         entities: Vec<EntityType>,
-    ) {
+    ) -> Result<(), String> {
+        for entity in &entities {
+            if let EntityType::Insert(ins) = entity {
+                if crate::scene::block_service::would_create_cycle(
+                    &self.document,
+                    name,
+                    &ins.block_name,
+                ) {
+                    return Err(crate::scene::block_service::circular_dependency_error(
+                        name,
+                        &ins.block_name,
+                    ));
+                }
+            }
+        }
         let Some((br_handle, block_handle)) = self
             .document
             .block_records
             .get(name)
             .map(|br| (br.handle, br.block_entity_handle))
         else {
-            return self.define_block_raw(name, base_point, entities);
+            self.define_block_raw(name, base_point, entities);
+            return Ok(());
         };
         let owned: Vec<Handle> = self
             .document
@@ -1299,6 +1315,7 @@ impl Scene {
             let _ = self.document.add_entity(entity);
         }
         self.bump_geometry();
+        Ok(())
     }
 
     pub(super) fn synced_hatch_models(
@@ -2228,7 +2245,14 @@ impl Scene {
                     .colors
                     .get(i)
                     .and_then(|e| e.color.rgb())
-                    .map(|(r, g, b)| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, color[3]])
+                    .map(|(r, g, b)| {
+                        [
+                            r as f32 / 255.0,
+                            g as f32 / 255.0,
+                            b as f32 / 255.0,
+                            color[3],
+                        ]
+                    })
             };
             gradient_color1 = stop(0);
             let color1 = gradient_color1.unwrap_or(color);
@@ -3098,6 +3122,7 @@ impl Scene {
             if let codec::objects::ObjectType::Layout(l) = obj {
                 if l.name != "Model" {
                     crate::scene::apply_default_page_setup(l, "");
+                    self.unopened_layouts.insert(l.name.clone());
                 }
             }
         }

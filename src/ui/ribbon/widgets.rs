@@ -99,7 +99,7 @@ thread_local! {
 
 /// Dropdown items that report a state and cannot be picked.
 pub(super) fn is_disabled_item(cmd: &str) -> bool {
-    cmd == "FRAMES3"
+    matches!(cmd, "FRAMES3" | "UOSNAP2")
 }
 
 fn ribbon_label_bounds(
@@ -543,11 +543,13 @@ pub(super) fn render_small<'a>(
                 .width(Length::Fixed(SMALL_W))
                 .height(ROW_H)
                 .padding([4, 4]);
-            tooltip(btn, make_tip(tip_text), TipPos::Right)
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style)
-                .into()
+            super::keytips::anchor(
+                t.id,
+                tooltip(btn, make_tip(tip_text), TipPos::Right)
+                    .gap(6.0)
+                    .delay(Duration::from_millis(400))
+                    .style(tip_style),
+            )
         }
 
         RibbonItem::LabeledTool(t) => {
@@ -568,11 +570,13 @@ pub(super) fn render_small<'a>(
                 .width(Length::Fixed(LABELED_SMALL_W + ARROW_W))
                 .height(ROW_H)
                 .padding([3, 4]);
-            tooltip(btn, make_tip(tip_text), TipPos::Right)
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style)
-                .into()
+            super::keytips::anchor(
+                t.id,
+                tooltip(btn, make_tip(tip_text), TipPos::Right)
+                    .gap(6.0)
+                    .delay(Duration::from_millis(400))
+                    .style(tip_style),
+            )
         }
 
         RibbonItem::Dropdown {
@@ -895,7 +899,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
             let event = t.event.clone();
             let icon_el: Element<Message> = make_icon(t.icon, 16.0);
             let msg = module_event_to_message(event);
-            tooltip(
+            let btn = tooltip(
                 button(icon_el)
                     .on_press(msg)
                     .style(move |theme: &Theme, status| tool_btn_style(theme, is_active, status))
@@ -905,8 +909,8 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
             )
             .gap(4.0)
             .delay(Duration::from_millis(400))
-            .style(tip_style)
-            .into()
+            .style(tip_style);
+            super::keytips::anchor(t.id, btn)
         })
         .collect();
     row(btns).spacing(2).align_y(iced::Center).into()
@@ -974,15 +978,17 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 bottom: 4.0,
                 left: 4.0,
             });
-            tooltip(
-                automatic_large_button(label, btn.into()),
-                make_tip(tip_text),
-                TipPos::Right,
+            super::keytips::anchor(
+                t.id,
+                tooltip(
+                    automatic_large_button(label, btn.into()),
+                    make_tip(tip_text),
+                    TipPos::Right,
+                )
+                .gap(6.0)
+                .delay(Duration::from_millis(400))
+                .style(tip_style),
             )
-            .gap(6.0)
-            .delay(Duration::from_millis(400))
-            .style(tip_style)
-            .into()
         }
 
         RibbonItem::LargeDropdown {
@@ -1308,11 +1314,13 @@ pub(super) fn quick_access_btn<'a>(
     .width(Length::Fixed(TOP_HIST_W))
     .height(24)
     .padding([2, 0]);
-    tooltip(btn, make_tip(t!(label).into_owned()), TipPos::Bottom)
-        .gap(6.0)
-        .delay(Duration::from_millis(400))
-        .style(tip_style)
-        .into()
+    super::keytips::anchor_with(
+        || super::keytips::quick_access_anchor(cmd),
+        tooltip(btn, make_tip(t!(label).into_owned()), TipPos::Bottom)
+            .gap(6.0)
+            .delay(Duration::from_millis(400))
+            .style(tip_style),
+    )
 }
 
 pub(super) fn render_history_control<'a>(

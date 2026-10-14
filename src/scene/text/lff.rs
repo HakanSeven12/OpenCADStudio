@@ -518,10 +518,19 @@ fn fonts_map() -> &'static HashMap<String, Font> {
 pub fn is_builtin(name: &str) -> bool {
     let map = fonts_map();
     let key = name.trim().to_ascii_uppercase();
-    map.contains_key(&key)
-        || key
-            .rsplit_once('.')
-            .is_some_and(|(stem, _)| map.contains_key(stem))
+    let stem = key.rsplit_once('.').map_or(key.as_str(), |(stem, _)| stem);
+    (map.contains_key(&key) || map.contains_key(stem)) && !installed_alias(stem, name)
+}
+
+/// An alias names a real font (ISOCPEUR is a TrueType face): an installed
+/// copy of exactly that font draws it, Cyrillic included, where the LFF
+/// stand-in has no such glyphs (#1764).
+fn installed_alias(stem: &str, name: &str) -> bool {
+    use crate::scene::text::sysfont;
+    ALIASES.iter().any(|(alias, _)| *alias == stem)
+        && (sysfont::family_for_file(name).is_some()
+            || sysfont::canonical_family_name(stem)
+                .is_some_and(|family| family.eq_ignore_ascii_case(stem)))
 }
 
 pub fn get_font(name: &str) -> &'static Font {

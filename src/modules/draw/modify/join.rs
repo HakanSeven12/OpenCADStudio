@@ -445,14 +445,64 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
     }
 }
 
+/// Join `entities` end-to-end: into one entity when they form a single
+/// chain, otherwise chain by chain, leaving alone what joins nothing (a
+/// closed polyline, a lone object, a branching set). Returns
+/// `(removed_handles, new_entities)`, or `None` when nothing joined.
+pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<EntityType>)> {
+    if let Some(joined) = join_chain(entities) {
+        return Some(joined);
+    }
+    let ends: Vec<Option<Vec<DVec3>>> = entities
+        .iter()
+        .map(|(_, entity)| {
+            segs_of(entity).map(|segs| segs.iter().flat_map(|seg| [seg.a, seg.b]).collect())
+        })
+        .collect();
+    fn root(group: &mut [usize], mut index: usize) -> usize {
+        while group[index] != index {
+            group[index] = group[group[index]];
+            index = group[index];
+        }
+        index
+    }
+    // ponytail: all-pairs endpoint test, a spatial grid if huge selections drag.
+    let mut group: Vec<usize> = (0..entities.len()).collect();
+    for a in 0..entities.len() {
+        for b in a + 1..entities.len() {
+            let (Some(pa), Some(pb)) = (&ends[a], &ends[b]) else {
+                continue;
+            };
+            if pa.iter().any(|p| pb.iter().any(|q| p.distance(*q) <= JOIN_EPS)) {
+                let (ra, rb) = (root(&mut group, a), root(&mut group, b));
+                group[ra] = rb;
+            }
+        }
+    }
+    let mut chains: std::collections::BTreeMap<usize, Vec<(Handle, &EntityType)>> =
+        Default::default();
+    for (index, entity) in entities.iter().enumerate() {
+        if ends[index].is_some() {
+            chains.entry(root(&mut group, index)).or_default().push(*entity);
+        }
+    }
+    let (mut removed, mut merged) = (Vec::new(), Vec::new());
+    for chain in chains.values().filter(|chain| chain.len() < entities.len()) {
+        if let Some((gone, made)) = join_chain(chain) {
+            removed.extend(gone);
+            merged.extend(made);
+        }
+    }
+    (!removed.is_empty()).then_some((removed, merged))
+}
+
 /// Join all `entities` end-to-end into a single entity. Segments join
 /// wherever their endpoints touch — the angle between them is irrelevant.
 /// A collinear straight run collapses to one `Line`; a planar chain
 /// becomes an `LwPolyline` (arcs kept as bulges); a chain with varying Z
-/// becomes a `Polyline3D` (straight segments only). Returns
-/// `(removed_handles, new_entities)`, or `None` when the selection isn't a
-/// single connected chain or holds an unsupported entity.
-pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<EntityType>)> {
+/// becomes a `Polyline3D` (straight segments only). `None` when the
+/// selection isn't a single connected chain or holds an unsupported entity.
+fn join_chain(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<EntityType>)> {
     if entities.len() < 2 {
         return None;
     }
@@ -734,6 +784,35 @@ mod join_tests {
             "collapsed line must keep source thickness, got {}",
             l.thickness
         );
+    }
+
+    // Several separate squares of lines join square by square (#1765).
+    #[test]
+    fn separate_chains_join_one_by_one() {
+        let square = |o: f64, size: f64| {
+            [
+                line(o, o, o + size, o, 0.0),
+                line(o + size, o, o + size, o + size, 0.0),
+                line(o + size, o + size, o, o + size, 0.0),
+                line(o, o + size, o, o, 0.0),
+            ]
+        };
+        let lines: Vec<EntityType> =
+            square(0.0, 10.0).into_iter().chain(square(2.0, 6.0)).collect();
+        let lone = line(50.0, 0.0, 60.0, 0.0, 0.0);
+        let mut pairs: Vec<(Handle, &EntityType)> = lines
+            .iter()
+            .enumerate()
+            .map(|(index, entity)| (Handle::new(index as u64 + 1), entity))
+            .collect();
+        pairs.push((Handle::new(99), &lone));
+        let (removed, out) = join_entities(&pairs).expect("both squares join");
+        assert_eq!(removed.len(), 8);
+        assert!(!removed.contains(&Handle::new(99)));
+        assert_eq!(out.len(), 2);
+        assert!(out
+            .iter()
+            .all(|entity| matches!(entity, EntityType::LwPolyline(pl) if pl.is_closed)));
     }
 
     #[test]

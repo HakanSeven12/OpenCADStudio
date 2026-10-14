@@ -654,14 +654,14 @@ pub fn layer_overrides(doc: &CadDocument, name: &str, raw_path: &str, base_dir: 
 /// to the name-keyed bytes registry instead (trailing-name match); the
 /// returned path is the registry key.
 #[cfg(target_arch = "wasm32")]
-fn resolve_path(raw: &str, _base_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn resolve_path(raw: &str, _base_dir: &Path) -> Option<PathBuf> {
     find_registered_source(raw).map(PathBuf::from)
 }
 
 /// Try to build an absolute path from a raw xref path string.
 /// Handles absolute paths, relative paths, and Windows-style separators.
 #[cfg(not(target_arch = "wasm32"))]
-fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
     let normalised = raw.replace('\\', "/");
     let p = PathBuf::from(&normalised);
 

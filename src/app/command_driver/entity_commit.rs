@@ -982,6 +982,35 @@ impl OpenCADStudio {
 
     pub(super) fn handle_attreq_needed(&mut self, block_name: String) -> Option<Task<Message>> {
         let i = self.active_tab;
+        // When active space is a block editor session (BEDIT), refuse inserting
+        // any block that would create a circular nesting dependency.
+        if let Some(edit_handle) = self.tabs[i].scene.block_edit_block {
+            let container_name = self.tabs[i]
+                .scene
+                .document
+                .block_records
+                .iter()
+                .find(|br| br.handle == edit_handle)
+                .map(|br| br.name.clone());
+            if let Some(container) = container_name {
+                if crate::scene::block_service::would_create_cycle(
+                    &self.tabs[i].scene.document,
+                    &container,
+                    &block_name,
+                ) {
+                    self.command_line.push_error(
+                        &crate::scene::block_service::circular_dependency_error(
+                            &container,
+                            &block_name,
+                        ),
+                    );
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.tabs[i].scene.clear_preview_wire();
+                    return None;
+                }
+            }
+        }
         // Collect the full AttributeDefinitions owned by this block
         // record so each created attribute keeps its geometry (#255).
         let mut attdefs: Vec<codec::entities::AttributeDefinition> = {

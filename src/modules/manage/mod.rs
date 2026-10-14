@@ -2,6 +2,7 @@
 
 mod about;
 mod audit;
+pub mod compare;
 mod cui_export;
 mod cui_import;
 mod find_nonpurgeable;

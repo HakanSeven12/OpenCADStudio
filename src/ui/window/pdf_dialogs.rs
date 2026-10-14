@@ -130,6 +130,16 @@ pub enum PdfDialogMsg {
     /// Offset 0, scale 1.
     BgReset,
     BgApply,
+    // Image Adjust: rows 0 brightness, 1 contrast, 2 fade.
+    /// A row's value from its bar.
+    IaValue(u8, u8),
+    /// A row's box, as typed.
+    IaText(u8, String),
+    /// One step down (-1) or up (+1).
+    IaStep(u8, i8),
+    /// Brightness 50, contrast 50, fade 0.
+    IaReset,
+    IaApply,
 }
 
 fn msg(m: PdfDialogMsg) -> Message {
@@ -302,7 +312,7 @@ pub(crate) fn well_style(theme: &Theme) -> container::Style {
 }
 
 /// A titled card.
-fn card<'a>(title: String, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+pub(crate) fn card<'a>(title: String, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(
         column![
             text(title.to_uppercase()).size(10).style(accent_text),
@@ -1037,10 +1047,16 @@ pub fn view_layers<'a>(
 ) -> Element<'a, Message> {
     let names: Vec<String> = state.targets.iter().map(|t| t.name.clone()).collect();
     let target = state.targets.get(state.current);
+    let has_underlays = !names.is_empty();
     let underlay = pick_list(target.map(|t| t.name.clone()), names, |n: &String| {
         n.clone()
-    })
-    .on_select(|n| msg(PdfDialogMsg::LayersUnderlay(n)))
+    });
+    // No underlays: the list stays empty and disabled.
+    let underlay = if has_underlays {
+        underlay.on_select(|n| msg(PdfDialogMsg::LayersUnderlay(n)))
+    } else {
+        underlay
+    }
     .text_size(12)
     .padding([5, 8])
     .width(Fill);
@@ -2609,5 +2625,239 @@ fn adjust_card<'a>(state: &'a ViewBackgroundState) -> Element<'a, Message> {
     .padding([10, 12])
     .width(Fill)
     .style(card_style)
+    .into()
+}
+
+// ── Image Adjust (IMAGEADJUST) ──────────────────────────────────────────
+
+/// The Image Adjust dialog: brightness, contrast and fade (0–100) of the
+/// chosen raster images, with a before / after preview of the first.
+pub struct ImageAdjustState {
+    pub handles: Vec<codec::Handle>,
+    /// The first image's file name, shown over the preview.
+    pub name: String,
+    /// Brightness, contrast, fade.
+    pub values: [u8; 3],
+    /// The boxes as shown; a box may be empty while it is typed in.
+    pub texts: [String; 3],
+    /// The first image, at most 512 pixels a side, as RGBA.
+    pub source: Option<(u32, u32, Vec<u8>)>,
+    /// The drawing area colour the image fades into.
+    pub canvas: [u8; 3],
+    /// Left half as it is, right half adjusted, over the drawing area colour.
+    pub preview: Option<image::Handle>,
+}
+
+/// Brightness 50, contrast 50, fade 0.
+pub const IMAGE_ADJUST_DEFAULTS: [u8; 3] = [50, 50, 0];
+
+impl ImageAdjustState {
+    pub fn new(handles: Vec<codec::Handle>, path: &str, values: [u8; 3], canvas: [u8; 3]) -> Self {
+        let name = std::path::Path::new(path.trim())
+            .file_name()
+            .map_or_else(|| path.trim().to_string(), |n| n.to_string_lossy().into_owned());
+        let source = crate::scene::model::image_model::resolve_image(path).and_then(|decoded| {
+            let full = ::image::RgbaImage::from_raw(decoded.width, decoded.height, decoded.pixels.to_vec())?;
+            let small = if full.width().max(full.height()) > 512 {
+                ::image::imageops::thumbnail(&full, 512, 512)
+            } else {
+                full
+            };
+            Some((small.width(), small.height(), small.into_raw()))
+        });
+        let mut state = Self {
+            handles,
+            name,
+            values: [0; 3],
+            texts: Default::default(),
+            source,
+            canvas,
+            preview: None,
+        };
+        state.set_all(values);
+        state
+    }
+
+    pub fn set(&mut self, row: usize, value: u8) {
+        let mut values = self.values;
+        values[row] = value.min(100);
+        self.set_all(values);
+    }
+
+    pub fn set_all(&mut self, values: [u8; 3]) {
+        self.values = values.map(|v| v.min(100));
+        self.texts = self.values.map(|v| v.to_string());
+        self.preview = self.source.as_ref().map(|(w, h, pixels)| {
+            // As the drawing shows it: brightness then contrast per channel,
+            // fade as the image's opacity over the drawing area.
+            let lut = crate::scene::model::image_model::brightness_contrast_lut(self.values[0], self.values[1]);
+            let opacity = 1.0 - f32::from(self.values[2]) / 100.0;
+            let mut out = Vec::with_capacity(pixels.len());
+            for (k, px) in pixels.chunks_exact(4).enumerate() {
+                let after = k as u32 % w >= w / 2;
+                let alpha = f32::from(px[3]) / 255.0 * if after { opacity } else { 1.0 };
+                for c in 0..3 {
+                    let value = if after { lut[px[c] as usize] } else { px[c] };
+                    let bg = f32::from(self.canvas[c]);
+                    out.push((bg + (f32::from(value) - bg) * alpha).round() as u8);
+                }
+                out.push(255);
+            }
+            image::Handle::from_rgba(*w, *h, out)
+        });
+    }
+}
+
+pub fn image_adjust<'a>(
+    state: &'a ImageAdjustState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let badge = |label: String, accent: bool| {
+        container(text(label).size(10))
+            .padding([2, 8])
+            .style(move |theme: &Theme| container::Style {
+                background: Some(Background::Color(if accent {
+                    theme.palette().primary.base.color.scale_alpha(0.2)
+                } else {
+                    iced::Color::from_rgba8(0x1e, 0x1e, 0x1e, 0.85)
+                })),
+                border: Border {
+                    width: 1.0,
+                    radius: 10.0.into(),
+                    color: if accent {
+                        theme.palette().primary.base.color
+                    } else {
+                        iced::Color::from_rgb8(0x4a, 0x4a, 0x4a)
+                    },
+                },
+                text_color: Some(iced::Color::WHITE),
+                ..Default::default()
+            })
+    };
+    let canvas = iced::Color::from_rgb8(state.canvas[0], state.canvas[1], state.canvas[2]);
+    let picture: Element<'a, Message> = match &state.preview {
+        Some(handle) => image(handle.clone())
+            .content_fit(iced::ContentFit::Cover)
+            .width(Fill)
+            .height(Fill)
+            .into(),
+        None => container(text(crate::tr!("image-adjust", "no-preview")).size(11).style(muted_style))
+            .center(Fill)
+            .into(),
+    };
+    let divider = container(
+        container(Space::new().width(2.0).height(Fill)).style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().primary.base.color)),
+            ..Default::default()
+        }),
+    )
+    .center_x(Fill)
+    .height(Fill);
+    let badges = row![
+        badge(crate::tr!("image-adjust", "before"), false),
+        Space::new().width(Fill),
+        badge(crate::tr!("image-adjust", "after"), true),
+    ]
+    .padding(8);
+    let mut layers = iced::widget::Stack::new().width(Fill).height(Fill).push(picture);
+    if state.preview.is_some() {
+        layers = layers.push(divider).push(badges);
+    }
+    let preview = card(
+        format!("{} · {}", crate::tr!("image-adjust", "preview"), state.name),
+        container(layers)
+            .width(Fill)
+            .height(Length::Fixed(150.0))
+            .clip(true)
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(canvas)),
+                border: Border { radius: 5.0.into(), ..Default::default() },
+                ..Default::default()
+            }),
+    );
+    let ramp = |row: u8| -> Background {
+        let (from, to) = match row {
+            // Contrast: grey, the flat image its zero gives.
+            1 => (iced::Color::from_rgb8(0x77, 0x77, 0x77), iced::Color::from_rgb8(0x77, 0x77, 0x77)),
+            _ => (iced::Color::from_rgb8(0x22, 0x22, 0x22), iced::Color::from_rgb8(0xee, 0xee, 0xee)),
+        };
+        Background::Gradient(iced::Gradient::Linear(
+            iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
+                .add_stop(0.0, from)
+                .add_stop(1.0, to),
+        ))
+    };
+    let line = |row: u8, label: String| -> Element<'a, Message> {
+        let k = row as usize;
+        let bar = container(container(Space::new()).width(Fill).height(8.0).style(move |_: &Theme| {
+            container::Style {
+                background: Some(ramp(row)),
+                border: Border { radius: 4.0.into(), ..Default::default() },
+                ..Default::default()
+            }
+        }))
+        .center_y(16.0)
+        .width(Fill);
+        let slide = iced::widget::slider(0..=100u8, state.values[k], move |v| msg(PdfDialogMsg::IaValue(row, v)))
+            .height(16.0)
+            .style(|theme: &Theme, _| iced::widget::slider::Style {
+                rail: iced::widget::slider::Rail {
+                    backgrounds: (iced::Color::TRANSPARENT.into(), iced::Color::TRANSPARENT.into()),
+                    width: 0.0,
+                    border: Border::default(),
+                },
+                handle: iced::widget::slider::Handle {
+                    shape: iced::widget::slider::HandleShape::Rectangle { width: 4, border_radius: 2.0.into() },
+                    background: theme.palette().primary.base.color.into(),
+                    border_width: 0.0,
+                    border_color: iced::Color::TRANSPARENT,
+                },
+            });
+        let step = |dir: i8| {
+            button(text(if dir < 0 { "\u{2212}" } else { "+" }).size(12))
+                .on_press(msg(PdfDialogMsg::IaStep(row, dir)))
+                .style(button_style(false))
+                .padding([2, 8])
+        };
+        let value = text_input("", &state.texts[k])
+            .on_input(move |v| msg(PdfDialogMsg::IaText(row, v)))
+            .size(11)
+            .padding([3, 4])
+            .width(Length::Fixed(40.0))
+            .align_x(iced::alignment::Horizontal::Right)
+            .style(field_style);
+        row![
+            text(label).size(11).width(Length::Fixed(72.0)),
+            iced::widget::Stack::new().width(Fill).push(bar).push(slide),
+            container(row![step(-1), value, step(1)].spacing(2).align_y(iced::Center))
+                .padding(2)
+                .style(well_style),
+        ]
+        .spacing(10)
+        .align_y(iced::Center)
+        .into()
+    };
+    let adjust = card(
+        crate::tr!("image-adjust", "adjust"),
+        column![
+            line(0, crate::tr!("image-adjust", "brightness")),
+            line(1, crate::tr!("image-adjust", "contrast")),
+            line(2, crate::tr!("image-adjust", "fade")),
+            text(crate::tr!("image-adjust", "hint")).size(10).style(muted_style),
+        ]
+        .spacing(10),
+    );
+    let reset = button(text(crate::tr!("image-adjust", "reset")).size(11).style(accent_text))
+        .on_press(msg(PdfDialogMsg::IaReset))
+        .style(button::text)
+        .padding([5, 4]);
+    column![
+        preview,
+        adjust,
+        footer("imageadjust", Some(reset.into()), crate::tr!("image-adjust", "apply").into(), PdfDialogMsg::IaApply),
+    ]
+    .spacing(10)
+    .padding([10, 12])
+    .width(sizing.width)
     .into()
 }

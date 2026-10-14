@@ -3589,9 +3589,11 @@ pub struct InheritStyle {
 }
 
 /// Convert a concrete (already layer-resolved) lineweight to display pixels.
+/// Kept below 1 px for thin weights so plots and SVG get the true width;
+/// the GPU paths draw at least 1 px (#1749).
 pub(crate) fn lineweight_to_px(lw: &LineWeight) -> f32 {
     lw.millimeters()
-        .map(|mm| (mm as f32 * MM_TO_PX).max(1.0))
+        .map(|mm| mm as f32 * MM_TO_PX)
         .unwrap_or(1.0)
 }
 
@@ -4056,6 +4058,18 @@ impl Scene {
             } else {
                 WireModel::HOVER
             };
+            if let Some(points) = selected
+                .then(|| self.picked_segment_points(handle))
+                .flatten()
+            {
+                wires.push(WireModel::solid_f64(
+                    handle.value().to_string(),
+                    points,
+                    tint,
+                    true,
+                ));
+                continue;
+            }
             for set in interaction_meshes
                 .iter()
                 .filter(|set| set.entity_handle() == Some(handle))
@@ -4918,7 +4932,13 @@ impl Scene {
             wire_content_id,
             wire_patch,
             selected_handles: Arc::new(if show_interaction {
-                self.selected.iter().copied().collect()
+                // A partly picked polyline lights only its picked segments,
+                // drawn with the highlight wires.
+                self.selected
+                    .iter()
+                    .copied()
+                    .filter(|handle| self.picked_segments(*handle).is_none())
+                    .collect()
             } else {
                 rustc_hash::FxHashSet::default()
             }),

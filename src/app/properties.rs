@@ -924,6 +924,10 @@ impl OpenCADStudio {
                         crate::io::xref::layer_overrides(doc, &br.name, &br.xref_path, &base_dir);
                     xref_rows(&mut sections, ins, &br.xref_path, factor, overrides);
                 }
+                // An associative array's counts and spacings.
+                if let Some(array) = crate::scene::assoc_array::array_of_insert(doc, handle) {
+                    sections.push(crate::scene::assoc_array::property_section(doc, &array));
+                }
             }
             // Underlay: name, page, path and size from the definition.
             codec::EntityType::Underlay(ul) => {

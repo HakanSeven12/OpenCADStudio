@@ -84,6 +84,7 @@ impl Scene {
             // path wants the full-fidelity (no-LOD-stub) wire list,
             // regardless of paper zoom.
             let model_wires = self.model_wires_for_viewport_arc(vp_handle, 0.0);
+            let model_wires = crate::scene::model::instance_model::expand_stubs(&model_wires);
 
             // ── Project and clip wires into viewport ──────────────────────
             let vp_x0 = pcx - hw;

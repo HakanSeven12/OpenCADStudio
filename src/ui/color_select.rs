@@ -82,16 +82,13 @@ pub fn aci_string_to_color(s: &str) -> AcadColor {
 }
 
 /// Display name for a colour: the standard name for ACI 1-9 / ByLayer /
-/// ByBlock, otherwise the "R,G,B" values (0-255) so unnamed palette colours
-/// read meaningfully.
+/// ByBlock, the index for any other palette colour and "R,G,B" for a true
+/// colour, so the two kinds read apart (#1748).
 pub fn color_display_name(c: AcadColor) -> String {
     let (_, label) = acad_color_display(c);
     if label == "Index" || label == "Custom" {
         match c {
-            AcadColor::Index(i) => {
-                let (r, g, b) = codec::types::aci_table::aci_to_rgb(i).unwrap_or((128, 128, 128));
-                format!("{r},{g},{b}")
-            }
+            AcadColor::Index(i) => i.to_string(),
             AcadColor::Rgb { r, g, b } => format!("{r},{g},{b}"),
             _ => label.to_string(),
         }

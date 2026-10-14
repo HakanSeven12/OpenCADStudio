@@ -146,7 +146,7 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
     if !wire.display_visible {
         return WireKind::Invisible;
     }
-    if wire.render_instance.is_some() {
+    if wire.render_instance.is_some() || wire.stub.is_some() {
         return WireKind::Block;
     }
     if !wire.tangent_geoms.is_empty()
@@ -176,7 +176,7 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
 pub struct PartitionedWires<'a> {
     pub regular: Vec<&'a WireModel>,
     pub mesh: Vec<&'a WireModel>,
-    pub instanced: Vec<&'a WireModel>,
+    pub instanced: Vec<super::wire_gpu::BlockRef<'a>>,
     pub circle_instances: Vec<super::circle_gpu::CircleInstance>,
     pub ellipse_instances: Vec<super::ellipse_gpu::EllipseInstance>,
     /// Handles that contributed to the retained analytical uploads.
@@ -213,11 +213,11 @@ pub fn partition_wires<'a>(
         if !wire.display_visible {
             continue;
         }
-        if wire.render_instance.is_some() {
+        if wire.render_instance.is_some() || wire.stub.is_some() {
             if let Some(handle) = handle_of(wire) {
                 contributors.insert(handle);
             }
-            instanced.push(wire);
+            super::wire_gpu::push_block_refs(wire, &mut instanced);
             continue;
         }
         // Resolve draw depth only for wires eligible for analytical extraction.

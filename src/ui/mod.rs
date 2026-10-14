@@ -8,6 +8,7 @@ pub mod dock;
 pub mod icons;
 pub mod modal;
 pub mod node_graph;
+pub mod menu_bar;
 pub mod overlay;
 pub mod popup;
 pub mod properties;

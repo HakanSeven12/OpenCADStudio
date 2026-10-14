@@ -102,6 +102,7 @@ mod dialog;
 mod dynamic;
 mod file;
 mod graphic_attributes;
+mod keytips;
 pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) use file::native_paths_match;
@@ -215,6 +216,7 @@ impl OpenCADStudio {
         match self.active_modal {
             // Dismissing these via ✕ is the cancel/decline path.
             Some(Unsaved) => self.pending_close = None,
+            Some(BlockEditChanges) => self.cancel_block_edit_close(),
             Some(AssocPrompt) => self.mark_assoc_prompted(),
             // Cancel: leave the layer (and its objects) untouched.
             Some(LayerDeleteWarning) => self.layer_delete_pending = None,
@@ -228,6 +230,7 @@ impl OpenCADStudio {
             }
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
+            Some(BlockSaveAs) => self.block_save_as = None,
             Some(PdfAttach) => self.pdf_attach = None,
             Some(UnderlayLayers) => self.underlay_layers = None,
             Some(PdfImportSettings) => self.pdf_import_settings = None,
@@ -339,6 +342,11 @@ impl OpenCADStudio {
             self.sync_underlay_tab();
         }
         self.sync_frame_dropdown();
+        let block_editing = self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|tab| tab.active_block_edit.is_some());
+        self.ribbon.set_block_editing(block_editing);
         task
     }
 
@@ -356,6 +364,12 @@ impl OpenCADStudio {
             _ => "FRAMES3",
         };
         self.ribbon.set_dropdown_current("FRAMES_DROPDOWN", current);
+        let uosnap = match crate::scene::model::pdf_vector::uosnap() {
+            0 => "UOSNAP0",
+            1 => "UOSNAP1",
+            _ => "UOSNAP2",
+        };
+        self.ribbon.set_dropdown_current("UOSNAP_DROPDOWN", uosnap);
         let attmode = match tab.scene.document.header.attribute_visibility {
             0 => "ATTMODE0",
             2 => "ATTMODE2",
@@ -430,6 +444,12 @@ impl OpenCADStudio {
                         }
                     }
                 }
+            }
+            if self.active_modal == Some(super::ModalKind::BlockSaveAs)
+                && (matches!(msg, Message::CommandFinalize)
+                    || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN")))
+            {
+                return self.apply_block_save_as_dialog();
             }
             if self.active_modal == Some(super::ModalKind::WriteBlock) {
                 if matches!(msg, Message::CommandFinalize)
@@ -599,6 +619,7 @@ impl OpenCADStudio {
         match msg {
             Message::SpaceMouseWake => self.on_spacemouse_wake(),
             Message::TrackpadPinch(magnification) => self.on_pinch_zoom(magnification),
+            Message::Touch(event) => self.on_touch(event),
             Message::SpaceMouseFrame(time) => {
                 self.spacemouse
                     .frame(time.saturating_duration_since(self.start).as_secs_f64() * 1000.);
@@ -607,6 +628,14 @@ impl OpenCADStudio {
             Message::SpaceMouseFocus(id, focused) => {
                 if Some(id) == self.main_window {
                     self.spacemouse_focused = focused;
+                }
+                // Key tips close when the window loses the focus, and an Alt
+                // held while it left (Alt+Tab) no longer counts as a lone tap.
+                if !focused {
+                    crate::ui::ribbon::keytip_pointer_pressed();
+                }
+                if !focused && self.ribbon.keytips_active() {
+                    return self.hide_keytips();
                 }
                 Task::none()
             }
@@ -821,15 +850,23 @@ impl OpenCADStudio {
             // Web: fetch every script queued by startup language selection or
             // drawing text discovery. Each script has one shared store entry.
             Message::PollWebFonts => {
+                #[cfg(target_arch = "wasm32")]
+                let autosave = if web_autosave_due(self.savetime_min) {
+                    self.on_autosave()
+                } else {
+                    Task::none()
+                };
+                #[cfg(not(target_arch = "wasm32"))]
+                let autosave = Task::none();
                 let pending = crate::scene::text::web_font::take_pending();
                 if pending.is_empty() {
-                    return Task::none();
+                    return autosave;
                 }
-                Task::batch(pending.into_iter().map(|script| {
+                Task::batch(std::iter::once(autosave).chain(pending.into_iter().map(|script| {
                     Task::perform(crate::scene::text::web_font::fetch(script), move |res| {
                         Message::WebFontLoaded(script, res)
                     })
-                }))
+                })))
             }
 
             // Web: a per-script font arrived. The same bytes feed drawing text,
@@ -1144,6 +1181,12 @@ impl OpenCADStudio {
                 self.set_recent_limit(limit);
                 // Resync the input box to the clamped, applied value.
                 self.recent_limit_input = self.recent_limit.to_string();
+                Task::none()
+            }
+
+            Message::SetRecentView(view) => {
+                self.recent_view = view;
+                self.save_config();
                 Task::none()
             }
 
@@ -1989,6 +2032,62 @@ impl OpenCADStudio {
                 }
             }
 
+            // ── FBX export ────────────────────────────────────────────────
+            Message::FbxExport => {
+                let i = self.active_tab;
+                if self.tabs[i].scene.meshes.is_empty() {
+                    self.command_line.push_error(
+                        crate::t!("FBXEXPORT: no 3D mesh data in this drawing.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    Task::perform(
+                        async {
+                            crate::sys::file_dialog()
+                                .set_title(crate::t!("Export FBX").as_ref())
+                                .set_file_name("export.fbx")
+                                .add_filter(crate::t!("FBX Files").as_ref(), &["fbx"])
+                                .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                                .save_file()
+                                .await
+                                .map(|h| crate::sys::handle_path(&h))
+                        },
+                        Message::FbxExportPath,
+                    )
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let stem = self.tabs[i]
+                        .current_path
+                        .as_deref()
+                        .and_then(|p: &std::path::Path| p.file_stem())
+                        .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "drawing".into());
+                    Task::perform(
+                        crate::io::fbx::pick_fbx_path_owned(stem),
+                        Message::FbxExportPath,
+                    )
+                }
+            }
+
+            Message::FbxExportPath(Some(path)) => self.on_fbx_export_path_some(path),
+
+            Message::FbxExportPath(None) => Task::none(),
+
+            Message::FbxExportFinished(path, result) => {
+                match result {
+                    Ok(()) => self.command_line.push_output(
+                        crate::tf!("FBXEXPORT: exported to \"{}\"", path.display()).as_ref(),
+                    ),
+                    Err(error) => self
+                        .command_line
+                        .push_error(crate::tf!("FBXEXPORT: {error}").as_ref()),
+                }
+                Task::none()
+            }
+
             Message::StepExportPath(Some(path)) => self.on_step_export_path_some(path),
 
             Message::StepExportPath(None) => Task::none(),
@@ -2199,9 +2298,11 @@ impl OpenCADStudio {
             Message::PdfDialog(message) => self.update_pdf_dialog(message),
             Message::AttdefDialog(message) => self.on_attdef_dialog(message),
             Message::FieldDialog(message) => self.on_field_dialog(message),
+            Message::RefEditDialog(message) => self.update_refedit_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
             Message::Count(message) => self.on_count(message),
             Message::SheetSet(message) => self.on_sheet_set(message),
+            Message::KeyTip(input) => self.on_keytip(input),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
                 Task::none()
@@ -2754,6 +2855,11 @@ impl OpenCADStudio {
                 self.command_line.literal_spaces = !self.command_line.literal_spaces;
                 self.save_config();
                 self.focus_cmd_input()
+            }
+
+            Message::CommandHistoryHover(hovered) => {
+                self.command_line.set_history_hover(hovered);
+                Task::none()
             }
 
             Message::CommandHistoryToggle => {
@@ -3834,11 +3940,7 @@ impl OpenCADStudio {
 
             Message::WindowCloseRequested(id) => {
                 if self.main_window == Some(id) {
-                    if self.tabs.iter().any(|t| t.dirty) {
-                        self.pending_close = Some(super::PendingClose::Quit);
-                        return self.open_unsaved_dialog_window();
-                    }
-                    return self.exit_app();
+                    return self.request_quit_with_block_edits();
                 }
                 Task::none()
             }
@@ -4278,6 +4380,18 @@ impl OpenCADStudio {
 
             // ── Cursor / viewport messages ─────────────────────────────────
             Message::CursorMoved(p, viewport) => self.on_cursor_moved(p, viewport),
+
+            // A multi-finger gesture owns the pointer while it runs.
+            Message::ViewportMove(_)
+            | Message::ViewportLeftPress
+            | Message::ViewportLeftRelease
+            | Message::PaneMove(..)
+            | Message::PanePress(_)
+            | Message::PaneRelease(_)
+                if self.touch.active() =>
+            {
+                Task::none()
+            }
 
             Message::ViewportMove(p) => self.on_viewport_move(p),
 
@@ -6457,7 +6571,13 @@ impl OpenCADStudio {
                     self.ribbon.close_dropdown();
                     return Task::none();
                 }
-                self.ribbon.select_dropdown_item(dropdown_id, cmd);
+                // Save As is a secondary operation; the save face keeps BSAVE.
+                let face = if dropdown_id == "BLOCK_SAVE" {
+                    "BSAVE"
+                } else {
+                    cmd
+                };
+                self.ribbon.select_dropdown_item(dropdown_id, face);
                 self.ribbon.activate_tool(cmd);
                 self.dispatch_command(cmd)
             }
@@ -6816,6 +6936,31 @@ impl OpenCADStudio {
                 }
             }
 
+            Message::PasteSpecial(text) => {
+                let i = self.active_tab;
+                let waiting = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.name() == "PASTESPEC");
+                if !waiting {
+                    return Task::none();
+                }
+                match text.filter(|text| !text.trim().is_empty()) {
+                    Some(text) => {
+                        // Same prompt, one more option: swap without echoing it.
+                        self.tabs[i].active_cmd = Some(self.paste_special_command(i, Some(&text)));
+                        self.push_ucs_to_cmd(i);
+                        Task::none()
+                    }
+                    // Nothing but maybe an image: paste it as one.
+                    None if self.clipboard.is_empty() => {
+                        self.tabs[i].active_cmd = None;
+                        self.read_system_clipboard_image()
+                    }
+                    None => Task::none(),
+                }
+            }
+
             Message::SystemClipboardPaste(result) => {
                 use super::SystemClipboardText as Text;
 
@@ -6828,24 +6973,11 @@ impl OpenCADStudio {
                         self.focus_cmd_input()
                     }
                     Text::EmptyOrUnsupported => {
-                        // Web: no text — the clipboard may still hold an IMAGE
-                        // (a pasted screenshot). Read it through the async
-                        // Clipboard API and attach it the way the IMAGE
-                        // command's pick does; only when that also finds
+                        // No text — the clipboard may still hold an IMAGE (a
+                        // pasted screenshot). Read it and attach it the way the
+                        // IMAGE command's pick does; only when that also finds
                         // nothing does the unsupported-content error surface.
-                        // Native has no image route off the sync clipboard.
-                        #[cfg(target_arch = "wasm32")]
-                        return Task::perform(
-                            crate::sys::read_clipboard_image(),
-                            Message::SystemClipboardPasteImage,
-                        );
-                        #[cfg(not(target_arch = "wasm32"))]
-                        {
-                            self.command_line.push_error(
-                                crate::tr!("clipboard", "no-supported-content").as_ref(),
-                            );
-                            Task::none()
-                        }
+                        self.read_system_clipboard_image()
                     }
                     Text::Unavailable => {
                         self.command_line
@@ -6865,10 +6997,9 @@ impl OpenCADStudio {
                 }
             }
 
-            // Web: the clipboard-image fallback of a text-less paste either
+            // The clipboard-image fallback of a text-less paste either
             // attaches the image or falls back to the same error the text
             // path reports when nothing readable was on the clipboard.
-            #[cfg(target_arch = "wasm32")]
             Message::SystemClipboardPasteImage(image) => match image {
                 Some((name, bytes)) => self.paste_clipboard_image(name, bytes),
                 None => {
@@ -7729,6 +7860,13 @@ impl OpenCADStudio {
                     panel.active_field = None;
                 }
                 Task::none()
+            }
+
+            Message::PropPickerSurface(quick, message) => {
+                let task = self.update(*message);
+                let i = self.active_tab;
+                self.tabs[i].properties.picker_in_quick = quick;
+                task
             }
 
             Message::PropColorPickerToggle => {
@@ -8927,6 +9065,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::SnapMarkerSizeChanged(size) => {
+                self.model_space.snap_marker_size = size.clamp(1, 20);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::GripColorChanged(color) => {
                 self.model_space.grip_color = color;
                 self.sync_model_space_theme(false);
@@ -9032,6 +9176,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::CommandLineOpacityChanged(percent) => {
+                self.command_line.set_opacity_percent(percent);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::CommandLineFadeChanged(ms) => {
                 let ms = crate::app::settings::clamp_commandline_fade_ms(ms);
                 self.commandline_fade_ms = ms;
@@ -9042,6 +9192,24 @@ impl OpenCADStudio {
 
             Message::ZoomWheelReversedChanged(reversed) => {
                 self.zoom_wheel_reversed = reversed;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::MenuBarChanged(shown) => {
+                self.show_menu_bar = shown;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::RibbonVisibleChanged(shown) => {
+                self.ribbon_closed = !shown;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::HatchAssociativeChanged(associative) => {
+                self.hatch_associative = associative;
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -9353,6 +9521,9 @@ impl OpenCADStudio {
                     let i = self.active_tab;
                     return self.run_dash_view("SETTINGS", i);
                 }
+                if self.active_modal == Some(super::ModalKind::ImageAdjust) {
+                    self.image_adjust = None;
+                }
                 if self.active_modal == Some(super::ModalKind::Field) {
                     self.close_field_dialog();
                     return Task::none();
@@ -9369,6 +9540,9 @@ impl OpenCADStudio {
                     } else {
                         Task::none()
                     };
+                }
+                if self.active_modal == Some(super::ModalKind::RefEdit) {
+                    self.refedit_dialog = None;
                 }
                 // Cancelling the section settings drops the waiting extraction.
                 if self.active_modal == Some(super::ModalKind::PcSection) {
@@ -10324,6 +10498,22 @@ impl OpenCADStudio {
             Message::UnsavedDialogDiscard => self.on_unsaved_dialog_discard(),
 
             Message::UnsavedDialogSave => self.on_unsaved_dialog_save(),
+            Message::BlockEditChangesSave => self.resolve_block_edit_close(true),
+            Message::BlockSaveAsName(name) => {
+                let i = self.active_tab;
+                let error = self.validate_block_save_as_name(i, &name).err();
+                if let Some(state) = self.block_save_as.as_mut() {
+                    state.name = name;
+                    state.error = error;
+                }
+                Task::none()
+            }
+            Message::BlockSaveAsApply => self.apply_block_save_as_dialog(),
+            Message::BlockEditChangesDiscard => self.resolve_block_edit_close(false),
+            Message::BlockEditChangesCancel => {
+                self.cancel_block_edit_close();
+                Task::none()
+            }
 
             Message::AecDropSameVersion => self.on_aec_drop_same_version(),
             Message::AecDropProceed => self.on_aec_drop_proceed(),
@@ -12183,4 +12373,25 @@ fn set_preview_bit(current: u8, bit: u8, enabled: bool) -> u8 {
     } else {
         current & !bit
     }
+}
+
+/// Web autosave deadline (SAVETIME minutes), polled from a short tick: the
+/// first call arms it, a later one past it re-arms it and answers true.
+#[cfg(target_arch = "wasm32")]
+fn web_autosave_due(savetime_min: i32) -> bool {
+    use std::cell::Cell;
+    thread_local!(static DUE_MS: Cell<f64> = const { Cell::new(0.0) });
+    let now = js_sys::Date::now();
+    let period = savetime_min.max(0) as f64 * 60_000.0;
+    DUE_MS.with(|due| {
+        if period == 0.0 || due.get() == 0.0 {
+            due.set(if period == 0.0 { 0.0 } else { now + period });
+            return false;
+        }
+        let fire = now >= due.get();
+        if fire {
+            due.set(now + period);
+        }
+        fire
+    })
 }

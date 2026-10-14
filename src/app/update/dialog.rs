@@ -580,11 +580,14 @@ impl OpenCADStudio {
                 .define_block_raw(&def.name, def.base_point, def.entities);
         }
         if redefine {
-            self.tabs[i].scene.redefine_block_raw(
+            if let Err(err) = self.tabs[i].scene.redefine_block_raw(
                 &name,
                 codec::types::Vector3::new(base.x, base.y, base.z),
                 entities,
-            );
+            ) {
+                self.command_line.push_error(&err);
+                return Err(err);
+            }
         } else {
             self.tabs[i]
                 .scene

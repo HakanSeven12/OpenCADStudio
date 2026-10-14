@@ -55,6 +55,16 @@ fn polyline_add_vertex_target(entity: &AcadEntityType, grip_id: usize) -> Option
         AcadEntityType::Polyline3D(polyline) if grip_id < polyline.vertices.len() => {
             Some((grip_id + 1, polyline.vertices.len()))
         }
+        // A hatch boundary vertex: the new vertex is the next grip.
+        AcadEntityType::Hatch(hatch) => {
+            use crate::entities::traits::Grippable;
+            use crate::scene::model::object::GripMenuAction;
+            hatch
+                .grip_menu(grip_id)
+                .iter()
+                .any(|item| matches!(item.action, GripMenuAction::AddVertex))
+                .then(|| (grip_id + 1, hatch.grips().len()))
+        }
         _ => None,
     }
 }
@@ -65,6 +75,9 @@ fn polyline_vertex_count(entity: &AcadEntityType) -> Option<usize> {
         AcadEntityType::Polyline(polyline) => Some(polyline.vertices.len()),
         AcadEntityType::Polyline2D(polyline) => Some(polyline.vertices.len()),
         AcadEntityType::Polyline3D(polyline) => Some(polyline.vertices.len()),
+        AcadEntityType::Hatch(hatch) => {
+            Some(crate::entities::traits::Grippable::grips(hatch).len())
+        }
         _ => None,
     }
 }
@@ -138,13 +151,20 @@ impl OpenCADStudio {
     /// Close queued drawings until a dirty tab requires confirmation. Queue
     /// entries use stable document ids because removing an earlier tab changes
     /// every later vector index.
-    pub(super) fn continue_tab_close_queue(&mut self) -> Task<Message> {
+    pub(in crate::app) fn continue_tab_close_queue(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         while let Some(tab_id) = self.pending_tab_closes.pop_front() {
             let Some(idx) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
                 continue;
             };
             if self.tabs[idx].is_start {
+                continue;
+            }
+            if self.tabs[idx].active_block_edit.is_some() {
+                tasks.push(self.on_tab_close(idx));
+                if self.pending_block_close.is_some() || self.pending_close.is_some() {
+                    break;
+                }
                 continue;
             }
             if self.tabs[idx].dirty {
@@ -157,10 +177,20 @@ impl OpenCADStudio {
         Task::batch(tasks)
     }
 
-    pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
+    pub(in crate::app) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         // Start tab is fixed — close requests on it are no-ops.
         if self.tabs.get(idx).map_or(false, |t| t.is_start) {
             return Task::none();
+        }
+        if self
+            .tabs
+            .get(idx)
+            .is_some_and(|tab| tab.active_block_edit.is_some())
+        {
+            return self.request_block_edit_close(
+                idx,
+                crate::app::block_editor::BlockEditContinuation::Tab(self.tabs[idx].id),
+            );
         }
         // Closing a tab shifts indices / the active tab. The attribute
         // editor holds a document-local handle into one tab, so drop it
@@ -868,6 +898,13 @@ impl OpenCADStudio {
             if let Some(task) = self.try_selection_keyword(&text) {
                 return task;
             }
+            // Under a typed `<angle` a bare number is the distance along it,
+            // before the step reads it as a value of its own.
+            if self.angle_override.is_some() {
+                if let Some(task) = self.try_direct_distance_entry(&text) {
+                    return task;
+                }
+            }
             if self.tabs[i]
                 .active_cmd
                 .as_ref()
@@ -893,6 +930,10 @@ impl OpenCADStudio {
 
             if text.is_empty() {
                 return self.feed_command(crate::command::StepInput::Enter);
+            }
+
+            if self.try_angle_override(&text) {
+                return Task::none();
             }
 
             // OTRACK and Extension both allow a bare scalar to act as a
@@ -1001,6 +1042,25 @@ impl OpenCADStudio {
     /// has an established anchor, and `text` parses as a scalar distance,
     /// project along the active reference ray (if any) or the current cursor
     /// direction in the active UCS plane.
+    /// `<angle` at a point prompt locks the next point's direction from the
+    /// last point; a bare distance then runs along it. True when consumed.
+    pub(in crate::app) fn try_angle_override(&mut self, text: &str) -> bool {
+        let (Some(angle), Some(_)) = (text.trim().strip_prefix('<'), self.last_point) else {
+            return false;
+        };
+        let Some(angle) = crate::entities::common::parse_typed_direction(angle) else {
+            return false;
+        };
+        let local = glam::DVec3::new(angle.cos(), angle.sin(), 0.0);
+        self.angle_override = Some(match &self.tabs[self.active_tab].active_ucs {
+            Some(ucs) => ucs_rotate_vec(local, ucs),
+            None => local,
+        });
+        let shown = crate::entities::common::format_direction(angle);
+        self.command_line.push_output(crate::tf!("Angle Override: {shown}").as_ref());
+        true
+    }
+
     pub(in crate::app) fn try_direct_distance_entry(
         &mut self,
         text: &str,
@@ -2103,12 +2163,59 @@ impl OpenCADStudio {
         }
     }
 
-    /// Attach a clipboard image read on the web (a pasted screenshot) the way
-    /// the IMAGE command's pick does: register the bytes name-keyed, decode
-    /// for the file's true pixel size, then commit the entity — but placed
-    /// directly at the cursor (0,0 before any pointer move) with the command's
+    /// Read an image off the system clipboard for a paste that found no
+    /// text. The web gets the encoded file from the Clipboard API; native
+    /// gets pixels, which are written as a PNG beside the drawing (or, for a
+    /// drawing never saved, in the config folder) so the image entity keeps
+    /// a file to point at.
+    pub(in crate::app) fn read_system_clipboard_image(&self) -> Task<Message> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Task::perform(
+                crate::sys::read_clipboard_image(),
+                Message::SystemClipboardPasteImage,
+            )
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let folder = self.tabs[self.active_tab]
+                .current_path
+                .as_ref()
+                .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+                .filter(|folder| !folder.as_os_str().is_empty())
+                .or_else(|| crate::config::config_dir().map(|dir| dir.join("pasted")));
+            iced::clipboard::read_image().map(move |image| {
+                let saved = image.ok().zip(folder.clone()).and_then(|(image, folder)| {
+                    let pixels = image::RgbaImage::from_raw(
+                        image.size.width,
+                        image.size.height,
+                        image.rgba.to_vec(),
+                    )?;
+                    let mut png = std::io::Cursor::new(Vec::new());
+                    pixels.write_to(&mut png, image::ImageFormat::Png).ok()?;
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |elapsed| elapsed.as_millis());
+                    let name = crate::sys::unique_pasted_image_name(
+                        &format!("pasted-{stamp}"),
+                        "png",
+                        |name| folder.join(name).exists(),
+                    );
+                    let path = folder.join(name);
+                    std::fs::create_dir_all(&folder).ok()?;
+                    std::fs::write(&path, png.get_ref()).ok()?;
+                    Some((path.to_string_lossy().into_owned(), png.into_inner()))
+                });
+                Message::SystemClipboardPasteImage(saved)
+            })
+        }
+    }
+
+    /// Attach a clipboard image (a pasted screenshot) the way the IMAGE
+    /// command's pick does: register the bytes name-keyed, decode for the
+    /// file's true pixel size, then commit the entity — but placed directly
+    /// at the cursor (0,0 before any pointer move) with the command's
     /// default width, skipping the pick prompts a paste should not run.
-    #[cfg(target_arch = "wasm32")]
     pub(super) fn paste_clipboard_image(&mut self, name: String, bytes: Vec<u8>) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].is_start {
@@ -3689,6 +3796,40 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// An associative array row: the typed value changes the array's
+    /// parameter and its items are placed again, in one undo step.
+    fn on_assoc_array_field_commit(&mut self, i: usize, field: &'static str, handles: &[Handle]) {
+        let Some(text) = self.tabs[i]
+            .properties
+            .edit_buf
+            .remove(&crate::ui::properties::FieldKey::Geom(field))
+        else {
+            return;
+        };
+        let arrays: Vec<_> = handles
+            .iter()
+            .filter_map(|handle| {
+                crate::scene::assoc_array::array_of_insert(&self.tabs[i].scene.document, *handle)
+            })
+            .collect();
+        if arrays.is_empty() {
+            return;
+        }
+        self.push_undo_snapshot(i, "ARRAYEDIT");
+        for array in &arrays {
+            if let Err(error) = crate::scene::assoc_array::apply_field(
+                &mut self.tabs[i].scene,
+                array,
+                field,
+                &crate::app::expr_eval::eval_to_string(&text),
+            ) {
+                self.command_line.push_error(&format!("ARRAYEDIT: {error}"));
+            }
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+    }
+
     pub(super) fn on_prop_geom_commit(&mut self, field: &'static str) -> Task<Message> {
         use crate::ui::window::named_parameters::ParamField;
         // A dynamic dimension's Name/Expression rows edit its parameter.
@@ -3706,6 +3847,10 @@ impl OpenCADStudio {
         let i = self.active_tab;
         self.tabs[i].properties.active_field = None;
         let handles = self.property_target_handles(i);
+        if field.starts_with("assoc_array_") {
+            self.on_assoc_array_field_commit(i, field, &handles);
+            return Task::none();
+        }
         if !handles.is_empty() {
             let driven_reference = match field {
                 "start_x" | "start_y" | "start_z" => Some(Some(0)),
@@ -3767,7 +3912,9 @@ impl OpenCADStudio {
                         return Task::none();
                     }
                 }
-                if field.starts_with("ul_") {
+                if field.starts_with("ul_")
+                    || matches!(field, "ri_bright" | "ri_contrast" | "ri_fade")
+                {
                     if let Err(message) = crate::entities::underlay::validate_property(field, &val)
                     {
                         self.command_line.push_error(message);
@@ -4266,11 +4413,11 @@ impl OpenCADStudio {
             Some(codec::EntityType::Insert(ins)) if !ins.attributes.is_empty() => {
                 // The prompt text lives on the block's ATTDEFs, not on the
                 // attribute instances — map tag → prompt from the definition.
-                let prompts = block_attr_prompts(doc, &ins.block_name);
+                let meta = block_attr_meta(doc, &ins.block_name);
                 let rows = ins
                     .attributes
                     .iter()
-                    .map(|a| attr_row_from_entity(a, &prompts))
+                    .map(|a| attr_row_from_entity(a, &meta))
                     .collect::<Vec<_>>();
                 Ok((ins.block_name.clone(), rows))
             }
@@ -4302,7 +4449,7 @@ impl OpenCADStudio {
     /// Close the attribute editor without applying, if it is open. Used when
     /// the tab it belongs to closes or the active tab switches — its handle is
     /// document-local and must not outlive its tab.
-    pub(super) fn cancel_attr_editor(&mut self) {
+    pub(in crate::app) fn cancel_attr_editor(&mut self) {
         if self.active_modal == Some(crate::app::ModalKind::AttributeEditor) {
             self.active_modal = None;
             self.reset_modal_geometry();
@@ -4364,16 +4511,47 @@ impl OpenCADStudio {
     }
 }
 
+pub(crate) struct BlockAttrMeta {
+    pub(crate) prompt: String,
+    pub(crate) constant: bool,
+}
+
+/// Map each attribute tag to the metadata (prompt text, constant flag) declared on
+/// the block's matching ATTDEF. Tags with no definition are absent.
+pub(crate) fn block_attr_meta(
+    doc: &codec::CadDocument,
+    block_name: &str,
+) -> rustc_hash::FxHashMap<String, BlockAttrMeta> {
+    let mut map = rustc_hash::FxHashMap::default();
+    if let Some(br) = doc.block_records.get(block_name) {
+        for &eh in &br.entity_handles {
+            if let Some(codec::EntityType::AttributeDefinition(ad)) = doc.get_entity(eh) {
+                map.insert(
+                    ad.tag.clone(),
+                    BlockAttrMeta {
+                        prompt: ad.prompt.clone(),
+                        constant: ad.flags.constant,
+                    },
+                );
+            }
+        }
+    }
+    map
+}
+
 /// Build the editor's working copy of one attribute. Angles are shown in
 /// degrees; numeric fields become strings so the user can type freely.
-fn attr_row_from_entity(
+pub(crate) fn attr_row_from_entity(
     a: &codec::entities::AttributeEntity,
-    prompts: &rustc_hash::FxHashMap<String, String>,
+    meta: &rustc_hash::FxHashMap<String, BlockAttrMeta>,
 ) -> AttrRow {
     let fmt = |v: f64| format!("{v}");
+    let ad_meta = meta.get(&a.tag);
+    let prompt = ad_meta.map(|m| m.prompt.clone()).unwrap_or_default();
+    let is_constant = a.flags.constant || ad_meta.map_or(false, |m| m.constant);
     AttrRow {
         tag: a.tag.clone(),
-        prompt: prompts.get(&a.tag).cloned().unwrap_or_default(),
+        prompt,
         value: a.get_value().to_string(),
         text_style: a.text_style.clone(),
         height: fmt(a.height),
@@ -4388,15 +4566,16 @@ fn attr_row_from_entity(
         color: a.common.color,
         linetype: a.common.linetype.clone(),
         line_weight: a.common.line_weight,
+        is_constant,
     }
 }
 
 /// Write one edited row back onto its attribute; returns whether anything
 /// changed. Numeric fields are parsed (angles from degrees); an unparseable
-/// field is left as-is.
-fn apply_attr_row(a: &mut codec::entities::AttributeEntity, row: &AttrRow) -> bool {
+/// field is left as-is. Constant attributes ignore edits to their value.
+pub(crate) fn apply_attr_row(a: &mut codec::entities::AttributeEntity, row: &AttrRow) -> bool {
     let mut ch = false;
-    if a.get_value() != row.value {
+    if !row.is_constant && a.get_value() != row.value {
         a.set_value(row.value.clone());
         ch = true;
     }
@@ -4465,24 +4644,6 @@ fn apply_attr_row(a: &mut codec::entities::AttributeEntity, row: &AttrRow) -> bo
         ch = true;
     }
     ch
-}
-
-/// Map each attribute tag to the prompt text declared on the block's matching
-/// ATTDEF. Attribute instances (ATTRIB) carry only tag + value; the prompt is
-/// defined once on the block definition. Tags with no definition are absent.
-fn block_attr_prompts(
-    doc: &codec::CadDocument,
-    block_name: &str,
-) -> rustc_hash::FxHashMap<String, String> {
-    let mut map = rustc_hash::FxHashMap::default();
-    if let Some(br) = doc.block_records.get(block_name) {
-        for &eh in &br.entity_handles {
-            if let Some(codec::EntityType::AttributeDefinition(ad)) = doc.get_entity(eh) {
-                map.insert(ad.tag.clone(), ad.prompt.clone());
-            }
-        }
-    }
-    map
 }
 
 #[cfg(test)]

@@ -313,6 +313,9 @@ impl Scene {
                             | EntityType::Region(_)
                             | EntityType::Body(_)
                             | EntityType::Surface(_)
+                            | EntityType::Mesh(_)
+                            | EntityType::PolygonMesh(_)
+                            | EntityType::PolyfaceMesh(_)
                     )
                 })
             {
@@ -578,6 +581,122 @@ impl Scene {
         }
     }
 
+    /// Deep-clone the extension-dictionary tree rooted at `src_root` (owned by
+    /// the entity `src_owner`) and return the clone's root, wired for
+    /// `new_owner`. In-drawing COPY parity: the copy gets its own tree, so
+    /// edits on it never touch the source. Dictionary entries, owners,
+    /// reactors, nested xdictionary links, and XRecord handle references that
+    /// land inside the tree are remapped onto fresh handles; references
+    /// leaving the tree are preserved verbatim. A cyclic tree terminates via
+    /// the visited set and remaps consistently. Atomic: nothing enters
+    /// `document.objects` unless the whole tree clones; a missing or dangling
+    /// root returns `None` so the caller leaves the copy without an extension
+    /// dictionary — never shared.
+    pub(super) fn clone_xdict_tree(
+        doc: &mut codec::CadDocument,
+        src_owner: Handle,
+        src_root: Handle,
+        new_owner: Handle,
+    ) -> Option<Handle> {
+        if src_root.is_null() {
+            return None;
+        }
+        // Walk every object reachable through dictionary entries and
+        // xdictionary links, in discovery order (root first).
+        let mut order: Vec<Handle> = Vec::new();
+        let mut index = rustc_hash::FxHashMap::default();
+        let mut stack = vec![src_root];
+        while let Some(h) = stack.pop() {
+            if index.contains_key(&h) {
+                continue;
+            }
+            let Some(obj) = doc.objects.get(&h) else {
+                if h == src_root {
+                    return None;
+                }
+                continue;
+            };
+            index.insert(h, order.len());
+            order.push(h);
+            match obj {
+                codec::objects::ObjectType::Dictionary(d) => {
+                    for (_, child) in &d.entries {
+                        stack.push(*child);
+                    }
+                    if let Some(xd) = d.xdictionary_handle {
+                        stack.push(xd);
+                    }
+                }
+                codec::objects::ObjectType::XRecord(x) => {
+                    if let Some(xd) = x.xdictionary_handle {
+                        stack.push(xd);
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Clone and remap onto fresh handles; insert only once the whole tree
+        // is built so a mid-walk failure leaves the document untouched.
+        let mut remap = rustc_hash::FxHashMap::default();
+        for &h in &order {
+            remap.insert(h, doc.allocate_handle());
+        }
+        let rewrite = |handle: Handle| {
+            if handle == src_owner {
+                new_owner
+            } else {
+                *remap.get(&handle).unwrap_or(&handle)
+            }
+        };
+        let mut clones = Vec::with_capacity(order.len());
+        for &h in &order {
+            let new_h = remap[&h];
+            let obj = doc.objects.get(&h)?;
+            let mut obj = obj.clone();
+            match &mut obj {
+                codec::objects::ObjectType::Dictionary(d) => {
+                    d.handle = new_h;
+                    d.owner = rewrite(d.owner);
+                    for (_, child) in &mut d.entries {
+                        *child = rewrite(*child);
+                    }
+                    d.xdictionary_handle = d.xdictionary_handle.map(rewrite);
+                    for r in &mut d.reactors {
+                        *r = rewrite(*r);
+                    }
+                }
+                codec::objects::ObjectType::XRecord(x) => {
+                    x.handle = new_h;
+                    x.owner = rewrite(x.owner);
+                    x.xdictionary_handle = x.xdictionary_handle.map(rewrite);
+                    for r in &mut x.reactors {
+                        *r = rewrite(*r);
+                    }
+                    for entry in &mut x.entries {
+                        if let codec::objects::XRecordValue::Handle(h) = &mut entry.value {
+                            *h = rewrite(*h);
+                        }
+                    }
+                    for entry in &mut x.object_references {
+                        entry.handle = rewrite(entry.handle);
+                    }
+                    // The raw DWG stream describes the source's object bytes;
+                    // the clone regenerates its own from the remapped entries.
+                    x.raw_dwg_data = None;
+                    x.raw_dwg_handle_bits = 0;
+                    x.raw_dwg_version = None;
+                    x.preserve_object_reference_stream = false;
+                }
+                _ => {}
+            }
+            clones.push((new_h, obj));
+        }
+        for (new_h, obj) in clones {
+            doc.objects.insert(new_h, obj);
+        }
+        Some(remap[&src_root])
+    }
+
     /// Add a clone to the active space with fresh top-level and inline handles.
     /// Source owner handles are document-local and must not cross drawings.
     /// (#129, #934)
@@ -756,15 +875,35 @@ impl Scene {
             }
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
 
-            // An annotative LEADER/MTEXT pair must receive a fresh extension dictionary.
-            // Keeping this handle would make the copy share the source's context tree.
-            if !annotation_scales.is_empty() {
+            // An annotative entity's extension dictionary is a context tree
+            // recreated fresh below; any other copy's tree is deep-cloned
+            // after insertion, so the clone must never carry the source's
+            // handle through add_entity.
+            let src_xdict = if annotation_scales.is_empty() {
+                entity.common_mut().xdictionary_handle.take()
+            } else {
                 entity.common_mut().xdictionary_handle = None;
-            }
+                None
+            };
 
             entity.common_mut().handle = Handle::NULL;
             let h = self.document.add_entity(entity).unwrap_or(Handle::NULL);
             if !h.is_null() {
+                // Deep-clone the extension-dictionary tree so edits on the
+                // copy never touch the source. A dangling or missing root
+                // leaves the copy without one — never shared.
+                if let Some(src_root) = src_xdict {
+                    if let Some(new_root) =
+                        Self::clone_xdict_tree(&mut self.document, src_handle, src_root, h)
+                    {
+                        if let Some(clone) = self.document.get_entity_mut(h) {
+                            clone.common_mut().xdictionary_handle = Some(new_root);
+                        }
+                        // The cloned tree lives in document.objects — outside
+                        // a pure-entity delta; keep undo on the full snapshot.
+                        self.poison_undo_recording();
+                    }
+                }
                 if !annotation_scales.is_empty() {
                     for scale_handle in annotation_scales {
                         crate::scene::annotative::create_annotation_context(
@@ -2373,6 +2512,433 @@ mod add_entity_clone_xdict_tests {
                 "exported clone must not carry an extension dictionary"
             ),
             None => panic!("exported clone missing"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod copy_entities_xdict_tests {
+    use super::*;
+    use crate::command::EntityTransform;
+    use codec::objects::{
+        Dictionary, ObjectType, ProxyObjectReference, ProxyReferenceKind, XRecord, XRecordValue,
+    };
+    use glam::DVec3;
+
+    /// Line with an extension-dictionary tree:
+    /// root { SUB -> sub { DEEP -> deep }, REC -> rec("CLONE_ME") };
+    /// root owner and reactors both name the source entity.
+    #[allow(clippy::type_complexity)]
+    fn scene_with_xdict_tree() -> (
+        Scene,
+        codec::Handle,
+        codec::Handle,
+        codec::Handle,
+        codec::Handle,
+        codec::Handle,
+    ) {
+        let mut scene = Scene::new();
+        let root_h = scene.document.allocate_handle();
+        let sub_h = scene.document.allocate_handle();
+        let deep_h = scene.document.allocate_handle();
+        let rec_h = scene.document.allocate_handle();
+
+        let mut deep = XRecord::named("DEEP");
+        deep.handle = deep_h;
+        deep.owner = sub_h;
+        deep.add_string(1, "DEEP_VALUE");
+        let mut sub = Dictionary::new();
+        sub.handle = sub_h;
+        sub.owner = root_h;
+        sub.add_entry("DEEP", deep_h);
+        let mut rec = XRecord::named("REC");
+        rec.handle = rec_h;
+        rec.owner = root_h;
+        rec.add_string(1, "CLONE_ME");
+        let mut root = Dictionary::new();
+        root.handle = root_h;
+        root.add_entry("SUB", sub_h);
+        root.add_entry("REC", rec_h);
+
+        scene
+            .document
+            .objects
+            .insert(root_h, ObjectType::Dictionary(root));
+        scene
+            .document
+            .objects
+            .insert(sub_h, ObjectType::Dictionary(sub));
+        scene
+            .document
+            .objects
+            .insert(deep_h, ObjectType::XRecord(deep));
+        scene
+            .document
+            .objects
+            .insert(rec_h, ObjectType::XRecord(rec));
+
+        let mut line = codec::entities::Line::new();
+        line.common.xdictionary_handle = Some(root_h);
+        let src = scene
+            .document
+            .add_entity(codec::EntityType::Line(line))
+            .expect("add source entity");
+        if let Some(ObjectType::Dictionary(d)) = scene.document.objects.get_mut(&root_h) {
+            d.owner = src;
+            d.reactors.push(src);
+        }
+        (scene, src, root_h, sub_h, deep_h, rec_h)
+    }
+
+    /// Every object reachable from `root` through dictionary entries and
+    /// xdictionary links (cycle-safe).
+    fn tree_handles(doc: &codec::CadDocument, root: codec::Handle) -> Vec<codec::Handle> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(h) = stack.pop() {
+            if !seen.insert(h) {
+                continue;
+            }
+            out.push(h);
+            match doc.objects.get(&h) {
+                Some(ObjectType::Dictionary(d)) => {
+                    for (_, c) in &d.entries {
+                        stack.push(*c);
+                    }
+                    if let Some(xd) = d.xdictionary_handle {
+                        stack.push(xd);
+                    }
+                }
+                Some(ObjectType::XRecord(x)) => {
+                    if let Some(xd) = x.xdictionary_handle {
+                        stack.push(xd);
+                    }
+                }
+                _ => {}
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Byte-for-byte image of a tree for source-unchanged assertions.
+    fn tree_image(
+        doc: &codec::CadDocument,
+        root: codec::Handle,
+    ) -> Vec<(codec::Handle, ObjectType)> {
+        tree_handles(doc, root)
+            .into_iter()
+            .map(|h| (h, doc.objects.get(&h).expect("tree object").clone()))
+            .collect()
+    }
+
+    #[test]
+    fn copy_deep_clones_extension_dictionary_tree() {
+        let (mut scene, src, root, _sub, _deep, rec) = scene_with_xdict_tree();
+        let before = tree_image(&scene.document, root);
+
+        let copies = scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::ZERO));
+        assert_eq!(copies.len(), 1);
+        let copy = copies[0];
+        assert!(!copy.is_null() && copy != src);
+
+        let copy_root = scene
+            .document
+            .get_entity(copy)
+            .expect("copy entity")
+            .common()
+            .xdictionary_handle
+            .expect("copy must own a deep-cloned extension dictionary");
+        assert_ne!(copy_root, root, "copy must not claim the source's root");
+
+        // Structure mirrors the source shape on fresh handles.
+        let copy_tree = tree_handles(&scene.document, copy_root);
+        assert_eq!(
+            copy_tree.len(),
+            4,
+            "cloned tree must mirror the source: {copy_tree:?}"
+        );
+        for h in &copy_tree {
+            assert!(
+                !tree_handles(&scene.document, root).contains(h),
+                "clone must not reuse source handles"
+            );
+        }
+
+        // Root wiring: owner and reactor rewritten to the copy.
+        let ObjectType::Dictionary(copy_root_obj) = scene
+            .document
+            .objects
+            .get(&copy_root)
+            .expect("copy root object")
+        else {
+            panic!("copy root must be a dictionary");
+        };
+        assert_eq!(
+            copy_root_obj.owner, copy,
+            "cloned root must be owned by the copy"
+        );
+        assert_eq!(
+            copy_root_obj.reactors,
+            vec![copy],
+            "reactor naming the source must be rewritten to the copy"
+        );
+
+        // Children resolve by key with preserved content.
+        let sub_h = copy_root_obj.get("SUB").expect("SUB entry on copy");
+        let copy_rec = copy_root_obj.get("REC").expect("REC entry on copy");
+        let ObjectType::Dictionary(sub_obj) =
+            scene.document.objects.get(&sub_h).expect("copy sub object")
+        else {
+            panic!("copy SUB must be a dictionary");
+        };
+        assert_eq!(
+            sub_obj.owner, copy_root,
+            "nested owner must point at the cloned parent"
+        );
+        let deep_h = sub_obj.get("DEEP").expect("DEEP entry on copy");
+        let ObjectType::XRecord(deep_obj) = scene
+            .document
+            .objects
+            .get(&deep_h)
+            .expect("copy deep object")
+        else {
+            panic!("copy DEEP must be an XRecord");
+        };
+        assert_eq!(deep_obj.name, "DEEP");
+        let ObjectType::XRecord(copy_rec_obj) = scene
+            .document
+            .objects
+            .get(&copy_rec)
+            .expect("copy REC object")
+        else {
+            panic!("copy REC must be an XRecord");
+        };
+        assert_eq!(copy_rec_obj.name, "REC");
+        assert!(
+            copy_rec_obj
+                .entries
+                .iter()
+                .any(|e| matches!(&e.value, XRecordValue::String(s) if s == "CLONE_ME")),
+            "cloned XRecord must carry the string content"
+        );
+
+        // Mutation independence: edit the copy, source stays untouched.
+        if let Some(ObjectType::XRecord(x)) = scene.document.objects.get_mut(&copy_rec) {
+            if let Some(e) = x
+                .entries
+                .iter_mut()
+                .find(|e| matches!(&e.value, XRecordValue::String(s) if s == "CLONE_ME"))
+            {
+                e.value = XRecordValue::String("MUTATED".into());
+            }
+        }
+        let ObjectType::XRecord(src_rec_obj) =
+            scene.document.objects.get(&rec).expect("source REC object")
+        else {
+            panic!("source REC must be an XRecord");
+        };
+        assert!(
+            src_rec_obj
+                .entries
+                .iter()
+                .any(|e| matches!(&e.value, XRecordValue::String(s) if s == "CLONE_ME")),
+            "source XRecord must be unaffected by edits on the copy"
+        );
+
+        // Source tree byte-for-byte unchanged.
+        let after = tree_image(&scene.document, root);
+        assert_eq!(
+            before, after,
+            "source extension-dictionary tree must be byte-for-byte unchanged"
+        );
+    }
+
+    #[test]
+    fn copy_without_xdict_adds_no_objects_and_keeps_delta_undo() {
+        let mut scene = Scene::new();
+        let line = codec::entities::Line::new();
+        let src = scene
+            .document
+            .add_entity(codec::EntityType::Line(line))
+            .expect("add source entity");
+        let objects_before = scene.document.objects.len();
+
+        scene.begin_undo_recording();
+        let copies = scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::ZERO));
+        let objects_after = scene.document.objects.len();
+
+        assert_eq!(copies.len(), 1);
+        assert_ne!(copies[0], src);
+        assert_eq!(
+            objects_before, objects_after,
+            "xdict-free copy must add no document.objects entries"
+        );
+        let recording = scene.take_undo_recording().expect("recording open");
+        assert!(
+            !recording.poisoned,
+            "xdict-free copy must stay on the delta-undo path"
+        );
+    }
+
+    #[test]
+    fn copy_with_dangling_xdict_root_leaves_copy_without_one() {
+        let mut scene = Scene::new();
+        let missing = scene.document.allocate_handle();
+        let mut line = codec::entities::Line::new();
+        line.common.xdictionary_handle = Some(missing);
+        let src = scene
+            .document
+            .add_entity(codec::EntityType::Line(line))
+            .expect("add source entity");
+        let objects_before = scene.document.objects.len();
+
+        let copies = scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::ZERO));
+
+        let copy_root = scene
+            .document
+            .get_entity(copies[0])
+            .expect("copy entity")
+            .common()
+            .xdictionary_handle;
+        assert!(
+            copy_root.is_none(),
+            "dangling root must leave the copy without an extension dictionary, never shared"
+        );
+        assert_eq!(
+            objects_before,
+            scene.document.objects.len(),
+            "dangling root must not invent objects"
+        );
+    }
+
+    #[test]
+    fn copy_cloned_xdict_cycle_terminates_and_remaps() {
+        let (mut scene, src, root, ..) = scene_with_xdict_tree();
+        if let Some(ObjectType::Dictionary(d)) = scene.document.objects.get_mut(&root) {
+            d.add_entry("BACK", root);
+        }
+
+        let copies = scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::ZERO));
+        let copy_root = scene
+            .document
+            .get_entity(copies[0])
+            .expect("copy entity")
+            .common()
+            .xdictionary_handle
+            .expect("copy dictionary");
+        let ObjectType::Dictionary(d) = scene.document.objects.get(&copy_root).expect("dict")
+        else {
+            panic!("dictionary");
+        };
+        assert_eq!(
+            d.get("BACK"),
+            Some(copy_root),
+            "cyclic entry must be remapped to the cloned root, consistently"
+        );
+        assert_eq!(
+            tree_handles(&scene.document, copy_root).len(),
+            4,
+            "cycle must not duplicate the tree"
+        );
+    }
+
+    #[test]
+    fn copy_keeps_references_outside_the_cloned_tree() {
+        let (mut scene, src, root, ..) = scene_with_xdict_tree();
+        let (_, rec) = {
+            let ObjectType::Dictionary(d) = scene.document.objects.get(&root).expect("root") else {
+                panic!("root must be a dictionary");
+            };
+            ((), d.get("REC").expect("REC entry"))
+        };
+        // An entity recorded inside the tree (e.g. a field pointing back at a
+        // drawing entity) stays pointed at the original; entities are never
+        // part of the object-tree clone.
+        let mut other_line = codec::entities::Line::new();
+        other_line.common.handle = Handle::NULL;
+        let other = scene
+            .document
+            .add_entity(codec::EntityType::Line(other_line))
+            .expect("other entity");
+        // An object outside the reachable closure, referenced only through
+        // the XRecord handle stream, likewise stays pointed at the original.
+        let outside_h = scene.document.allocate_handle();
+        let mut outside = Dictionary::new();
+        outside.handle = outside_h;
+        scene
+            .document
+            .objects
+            .insert(outside_h, ObjectType::Dictionary(outside));
+        if let Some(ObjectType::XRecord(x)) = scene.document.objects.get_mut(&rec) {
+            x.add_handle(340, other);
+            x.object_references.push(ProxyObjectReference {
+                handle: outside_h,
+                kind: ProxyReferenceKind::SoftPointer,
+            });
+        }
+
+        let copies = scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::ZERO));
+        let copy_root = scene
+            .document
+            .get_entity(copies[0])
+            .expect("copy entity")
+            .common()
+            .xdictionary_handle
+            .expect("copy dictionary");
+        let ObjectType::Dictionary(d) = scene.document.objects.get(&copy_root).expect("dict")
+        else {
+            panic!("dictionary");
+        };
+        let copy_rec = d.get("REC").expect("REC entry on copy");
+        let ObjectType::XRecord(copy_rec_obj) =
+            scene.document.objects.get(&copy_rec).expect("copy REC")
+        else {
+            panic!("copy REC must be an XRecord");
+        };
+        assert!(
+            copy_rec_obj
+                .entries
+                .iter()
+                .any(|e| matches!(&e.value, XRecordValue::Handle(h) if *h == other)),
+            "entity references leaving the object tree must stay pointed at the original"
+        );
+        assert!(
+            copy_rec_obj
+                .object_references
+                .iter()
+                .any(|r| r.handle == outside_h),
+            "handle-stream references leaving the source tree must stay pointed at the original"
+        );
+    }
+
+    #[test]
+    fn each_copy_gets_its_own_disjoint_tree() {
+        let (mut scene, src, root, ..) = scene_with_xdict_tree();
+        let source_tree = tree_handles(&scene.document, root);
+        let mut all_trees = vec![source_tree];
+
+        for _ in 0..3 {
+            let copies = scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::ZERO));
+            let copy_root = scene
+                .document
+                .get_entity(copies[0])
+                .expect("copy entity")
+                .common()
+                .xdictionary_handle
+                .expect("each copy must own a dictionary");
+            all_trees.push(tree_handles(&scene.document, copy_root));
+        }
+
+        for (i, a) in all_trees.iter().enumerate() {
+            for (j, b) in all_trees.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                let overlap = a.iter().any(|h| b.contains(h));
+                assert!(!overlap, "tree {i} and tree {j} must be disjoint");
+            }
         }
     }
 }

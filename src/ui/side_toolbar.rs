@@ -49,6 +49,53 @@ fn tip_panel(label: &'static str) -> Element<'static, Message> {
         .into()
 }
 
+/// The REFEDIT session toolbar's head: the definition being edited as an
+/// accent pill (REFEDITNAME) and how many objects the working set holds.
+pub fn refedit_header(name: &str, count: usize) -> Element<'static, Message> {
+    // Long names are cut so the bar stays narrow; the full name is in the tip.
+    let short: String = if name.chars().count() > 7 {
+        format!("{}…", name.chars().take(6).collect::<String>())
+    } else {
+        name.to_string()
+    };
+    let pill = container(text(short).size(10))
+        .padding([1, 6])
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.primary.base.color)),
+                border: Border {
+                    radius: 8.0.into(),
+                    ..Default::default()
+                },
+                text_color: Some(palette.primary.base.text),
+                ..Default::default()
+            }
+        });
+    let tip = container(text(name.to_string()).size(11)).padding([2, 6]).style(|theme: &Theme| {
+        let palette = theme.palette();
+        container::Style {
+            background: Some(Background::Color(palette.background.strong.color)),
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            text_color: Some(palette.background.strong.text),
+            ..Default::default()
+        }
+    });
+    column![
+        tooltip(pill, tip, tooltip::Position::Left).gap(6),
+        text(format!("{} {}", count, crate::tr!("ref-edit", "toolbar-objects")))
+            .size(9)
+            .style(crate::ui::style::common::muted_style),
+    ]
+    .spacing(2)
+    .align_x(iced::Center)
+    .into()
+}
+
 /// Build the floating right-edge vertical toolbar from `tools`, vertically
 /// centred over the canvas. Returns `None` when `tools` is empty so the caller
 /// can skip pushing an overlay.
@@ -61,12 +108,39 @@ pub fn view_with_active(
     tools: &[ToolDef],
     active: &dyn Fn(&str) -> bool,
 ) -> Option<Element<'static, Message>> {
-    if tools.is_empty() {
+    view_sections(None, &[tools], active)
+}
+
+/// As [`view_with_active`], with `header` on top and a rule between the
+/// groups of tools.
+pub fn view_sections(
+    header: Option<Element<'static, Message>>,
+    groups: &[&[ToolDef]],
+    active: &dyn Fn(&str) -> bool,
+) -> Option<Element<'static, Message>> {
+    if groups.iter().all(|g| g.is_empty()) {
         return None;
     }
 
     let mut col = column![].spacing(4).align_x(iced::Center);
-    for t in tools {
+    if let Some(header) = header {
+        col = col.push(header);
+    }
+    let tools = groups.iter().filter(|g| !g.is_empty()).enumerate().flat_map(|(group, tools)| {
+        tools.iter().enumerate().map(move |(k, t)| (group > 0 && k == 0, t))
+    });
+    for (starts_group, t) in tools {
+        if starts_group {
+            col = col.push(
+                container(iced::widget::Space::new())
+                    .width(Length::Fixed(BTN_SIZE - 4.0))
+                    .height(Length::Fixed(1.0))
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(theme.palette().background.neutral.color)),
+                        ..Default::default()
+                    }),
+            );
+        }
         let on = active(t.id);
         let btn = button(icon_el(t.icon))
             .on_press(Message::RibbonToolClick {

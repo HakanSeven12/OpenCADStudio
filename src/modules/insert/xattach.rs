@@ -147,6 +147,9 @@ pub struct XAttachCommand {
 
 const NONZERO: &str = "Value must be nonzero.";
 
+/// Raster image files ATTACH places as images.
+pub const IMAGE_EXTENSIONS: &[&str] = &["bmp", "gif", "jpg", "jpeg", "png", "tif", "tiff", "webp"];
+
 impl XAttachCommand {
     pub fn new(request: XrefAttachRequest, placement: XrefPlacement, label: &'static str) -> Self {
         let block_name = path_to_block_name(&request.path);

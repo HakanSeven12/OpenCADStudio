@@ -2486,7 +2486,7 @@ impl Pipeline {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        wires: &[&WireModel],
+        wires: &[wire_gpu::BlockRef<'_>],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         block_geometry: &mut wire_gpu::BlockGeometryCache,
     ) -> Vec<BlockWireGpu> {
@@ -2620,7 +2620,7 @@ impl Pipeline {
         // and alpha blending both depend on it. Scissor and mesh-edge stay
         // grouping keys because the draw loop sets one scissor per batch and
         let mut batches: Vec<WireGpu> = Vec::new();
-        let mut block_wires: Vec<&WireModel> = Vec::new();
+        let mut block_wires: Vec<wire_gpu::BlockRef<'_>> = Vec::new();
         let mut i = 0;
         while i < wires.len() {
             let kind = wire_arena::classify_wire(&wires[i]);
@@ -2633,7 +2633,7 @@ impl Pipeline {
                     continue;
                 }
                 wire_arena::WireKind::Block => {
-                    block_wires.push(&wires[i]);
+                    wire_gpu::push_block_refs(&wires[i], &mut block_wires);
                     i += 1;
                     continue;
                 }
@@ -2721,7 +2721,7 @@ impl Pipeline {
         Vec<CircleInstance>,
         Vec<EllipseInstance>,
         Vec<&'a WireModel>,
-        Vec<&'a WireModel>,
+        Vec<wire_gpu::BlockRef<'a>>,
     ) {
         use crate::par::prelude::*;
         // Pure per-wire work, so it fans out; `collect` on an indexed
@@ -2734,7 +2734,7 @@ impl Pipeline {
         )> = wires
             .par_iter()
             .map(|&wire| {
-                if wire.render_instance.is_some() {
+                if wire.render_instance.is_some() || wire.stub.is_some() {
                     return (None, None, true);
                 }
                 let depth = wire_gpu::wire_draw_depth(wire, depth_map);
@@ -2763,10 +2763,10 @@ impl Pipeline {
         let mut circles: Vec<CircleInstance> = Vec::new();
         let mut ellipses: Vec<EllipseInstance> = Vec::new();
         let mut regular: Vec<&'a WireModel> = Vec::new();
-        let mut blocks: Vec<&'a WireModel> = Vec::new();
+        let mut blocks: Vec<wire_gpu::BlockRef<'a>> = Vec::new();
         for (&wire, (wire_circles, wire_ellipses, is_block)) in wires.iter().zip(per) {
             if is_block {
-                blocks.push(wire);
+                wire_gpu::push_block_refs(wire, &mut blocks);
                 continue;
             }
             let shaped = wire_circles.is_some() || wire_ellipses.is_some();

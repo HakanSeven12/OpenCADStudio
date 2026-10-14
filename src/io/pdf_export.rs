@@ -897,7 +897,20 @@ fn append_pdf_page(
             // Linetype dash pattern. Without this every wire exported as a solid
             // line regardless of its linetype (dashed / centre / dash-dot). (#155)
             let dash_arr = dash_array_from_pattern(wire.pattern_length, &wire.pattern, MM_TO_PT);
-            let stationed = !dash_arr.is_empty() && wire.pattern_stations.len() > wire.points.len();
+            // Dash entries are whole points in the plot's user space, so a
+            // pattern only a fraction of a drawing unit long (an inch sheet)
+            // rounds away; such a wire is cut into its dashes here (#1739).
+            let page_h = paper_h as f64 / scale.max(1e-6) as f64;
+            let synthesized;
+            let stations: &[f32] = if wire.pattern_stations.len() > wire.points.len() {
+                &wire.pattern_stations
+            } else if !dash_arr.is_empty() && dash_rounds_off(&wire.pattern) {
+                synthesized = length_stations(wire, page_h);
+                &synthesized
+            } else {
+                &[]
+            };
+            let stationed = !dash_arr.is_empty() && !stations.is_empty();
             if stationed {
                 if last_dash.as_ref().is_none_or(|dash| !dash.is_empty()) {
                     ops.push(Op::SetLineDashPattern {
@@ -910,11 +923,11 @@ fn append_pdf_page(
                     {
                         continue;
                     }
-                    let start = wire.point_world(index, paper_h as f64 / scale.max(1e-6) as f64);
-                    let end = wire.point_world(index + 1, paper_h as f64 / scale.max(1e-6) as f64);
+                    let start = wire.point_world(index, page_h);
+                    let end = wire.point_world(index + 1, page_h);
                     for [from, to] in visible_station_ranges(
-                        wire.pattern_stations[index],
-                        wire.pattern_stations[index + 1],
+                        stations[index],
+                        stations[index + 1],
                         wire.pattern_length,
                         &wire.pattern,
                     ) {
@@ -1141,6 +1154,38 @@ fn dash_array_from_pattern(pattern_length: f32, pattern: &[f32; 8], mm_to_pt: f3
         // 1 pt floor so a zero-length dot still prints as a short mark.
         .map(|&v| (((v.abs() * mm_to_pt).round()) as i64).max(1))
         .collect()
+}
+
+/// Whether a pattern element is too short for a whole-point dash entry to
+/// carry it within 5 %.
+fn dash_rounds_off(pattern: &[f32; 8]) -> bool {
+    pattern
+        .iter()
+        .any(|value| *value != 0.0 && value.abs() * MM_TO_PT < 10.0)
+}
+
+/// Distance along the wire at each point (restarting after a pen-up), plus
+/// the total, in the layout `visible_station_ranges` reads.
+fn length_stations(wire: &crate::scene::WireModel, page_h: f64) -> Vec<f32> {
+    let mut stations = Vec::with_capacity(wire.points.len() + 1);
+    let mut along = 0.0_f64;
+    let mut previous: Option<glam::DVec3> = None;
+    for index in 0..wire.points.len() {
+        if !wire.points[index][0].is_finite() {
+            previous = None;
+            along = 0.0;
+            stations.push(0.0);
+            continue;
+        }
+        let point = wire.point_world(index, page_h);
+        if let Some(previous) = previous {
+            along += point.distance(previous);
+        }
+        previous = Some(point);
+        stations.push(along as f32);
+    }
+    stations.push(along as f32);
+    stations
 }
 
 fn visible_station_ranges(

@@ -34,14 +34,46 @@ use crate::app::Message;
 thread_local! {
     /// Screen bounds of every ribbon dropdown button, keyed by dropdown id, so
     /// an open dropdown's overlay can anchor directly below its widget at any
-    /// size. Written by `PosReport` on draw, read by `dropdown_bounds`.
-    static DD_BOUNDS: RefCell<FxHashMap<String, Rectangle>> =
+    /// size. Written by `PosReport` on draw, read by `dropdown_bounds`. Each
+    /// entry keeps the frame it was drawn in (see `fresh_bounds`).
+    static DD_BOUNDS: RefCell<FxHashMap<String, (Rectangle, u64)>> =
         RefCell::new(FxHashMap::default());
+    /// Advanced by `end_frame` once everything above the widgets has drawn.
+    static FRAME: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Last-drawn screen bounds of the dropdown button with this id.
 pub fn dropdown_bounds(id: &str) -> Option<Rectangle> {
-    DD_BOUNDS.with(|m| m.borrow().get(id).copied())
+    DD_BOUNDS.with(|m| m.borrow().get(id).map(|(bounds, _)| *bounds))
+}
+
+/// Bounds of the widget `id` only when it was drawn in the current frame, so
+/// a widget that left the screen does not report its old place.
+pub fn fresh_bounds(id: &str) -> Option<Rectangle> {
+    let frame = FRAME.with(Cell::get);
+    DD_BOUNDS.with(|m| {
+        m.borrow()
+            .get(id)
+            .filter(|(_, drawn)| *drawn == frame)
+            .map(|(bounds, _)| *bounds)
+    })
+}
+
+/// Bounds of the widget `id` when it was drawn in the current or the last
+/// finished frame (for use between frames).
+pub fn recent_bounds(id: &str) -> Option<Rectangle> {
+    let frame = FRAME.with(Cell::get);
+    DD_BOUNDS.with(|m| {
+        m.borrow()
+            .get(id)
+            .filter(|(_, drawn)| drawn + 1 >= frame)
+            .map(|(bounds, _)| *bounds)
+    })
+}
+
+/// Close the current frame for `fresh_bounds`.
+pub fn end_frame() {
+    FRAME.with(|frame| frame.set(frame.get() + 1));
 }
 
 pub struct WrapBar<'a> {
@@ -1038,7 +1070,8 @@ impl<'a> Widget<Message, Theme, Renderer> for PosReport<'a> {
         viewport: &Rectangle,
     ) {
         DD_BOUNDS.with(|m| {
-            m.borrow_mut().insert(self.id.to_string(), layout.bounds());
+            m.borrow_mut()
+                .insert(self.id.to_string(), (layout.bounds(), FRAME.with(Cell::get)));
         });
         self.child.as_widget().draw(
             &tree.children[0],

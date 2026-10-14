@@ -550,9 +550,10 @@ impl CadCommand for ClipCommand {
         self.inner.as_mut().and_then(|c| c.on_text_input(text))
     }
     fn on_enter(&mut self) -> CmdResult {
+        // Enter before an object is picked ends CLIP without a message.
         self.inner
             .as_mut()
-            .map_or(CmdResult::Cancel, |c| c.on_enter())
+            .map_or(CmdResult::Measurement(String::new()), |c| c.on_enter())
     }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         self.inner.as_mut().and_then(|c| c.on_mouse_move(pt))

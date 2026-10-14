@@ -17,6 +17,7 @@ thread_local! {
     static ARRAY_P_COUNT:   Cell<f64> = Cell::new(6.0);
     static ARRAY_P_ANGLE:   Cell<f64> = Cell::new(360.0); // degrees
     static ARRAY_PATH_COUNT: Cell<f64> = Cell::new(6.0);
+    static ARRAY_ASSOC:     Cell<f64> = Cell::new(1.0); // 1 = associative
     static POLYGON_SIDES:   Cell<f64> = Cell::new(6.0);
     static RECT_ELEVATION:  Cell<f64> = Cell::new(0.0);
     static RECT_THICKNESS:  Cell<f64> = Cell::new(0.0);
@@ -61,6 +62,7 @@ accessors!(get_fillet_radius, set_fillet_radius, FILLET_RADIUS);
 accessors!(get_chamfer_dist1, set_chamfer_dist1, CHAMFER_DIST1);
 accessors!(get_chamfer_dist2, set_chamfer_dist2, CHAMFER_DIST2);
 accessors!(get_array_rows, set_array_rows, ARRAY_ROWS);
+accessors!(get_array_assoc, set_array_assoc, ARRAY_ASSOC);
 accessors!(get_array_cols, set_array_cols, ARRAY_COLS);
 accessors!(get_array_row_sp, set_array_row_sp, ARRAY_ROW_SP);
 accessors!(get_array_col_sp, set_array_col_sp, ARRAY_COL_SP);

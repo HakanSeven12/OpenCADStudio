@@ -98,6 +98,7 @@ impl OpenCADStudio {
         self.otrack_cross = None;
         self.otrack_kind = None;
         self.axis_lock_dir = None;
+        self.angle_override = None;
         self.dyn_user_reshaped = false;
         self.dyn_coord_absolute = false;
         self.grip_hover = None;
@@ -506,6 +507,32 @@ impl OpenCADStudio {
         StepInput::SelectionComplete(kept)
     }
 
+    /// Keeps only the kinds of object the active command takes, dropping
+    /// the rest of a completed selection silently.
+    fn filter_command_entity_selection(&mut self, input: StepInput) -> StepInput {
+        let StepInput::SelectionComplete(handles) = input else {
+            return input;
+        };
+        let i = self.active_tab;
+        let Some(keep) = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.selection_entity_filter())
+        else {
+            return StepInput::SelectionComplete(handles);
+        };
+        let (kept, dropped): (Vec<Handle>, Vec<Handle>) = handles
+            .into_iter()
+            .partition(|h| self.tabs[i].scene.document.get_entity(*h).is_some_and(keep));
+        for handle in &dropped {
+            self.tabs[i].scene.deselect_entity(*handle);
+        }
+        if !dropped.is_empty() {
+            self.refresh_properties();
+        }
+        StepInput::SelectionComplete(kept)
+    }
+
     /// Drops locked point clouds from a completed selection when the active
     /// command would move them, saying which were locked and how many went.
     fn filter_locked_point_cloud_selection(&mut self, input: StepInput) -> StepInput {
@@ -561,6 +588,7 @@ impl OpenCADStudio {
         let input = self.filter_associative_dimension_selection(input);
         let input = self.filter_block_reference_selection(input);
         let input = self.filter_locked_point_cloud_selection(input);
+        let input = self.filter_command_entity_selection(input);
         // XCLIP / CLIP learn which chosen references carry a clip already.
         {
             let i = self.active_tab;
@@ -595,6 +623,7 @@ impl OpenCADStudio {
             if !self.command_point_allowed(i, *point) {
                 return (Task::none(), true);
             }
+            self.angle_override = None;
             // Typed / dynamic-input / headless points carry no snap, but the
             // accepted-snap list must stay index-parallel with the points the
             // command collects. Interactive picks record themselves in
@@ -1130,6 +1159,9 @@ impl OpenCADStudio {
             self.apply_snap_override(kind);
             return Task::none();
         }
+        if self.try_angle_override(token) {
+            return Task::none();
+        }
         if let Some((coord, kind)) = crate::app::helpers::parse_coord(token) {
             // Match the GUI command line: typed coordinates are in the active
             // UCS (relative offsets are rotated by the UCS axes), so a multi-
@@ -1161,7 +1193,13 @@ impl OpenCADStudio {
             // bare number is the step's own value, not a distance — ROTATE's
             // angle, SCALE's factor, CIRCLE's radius. Only a token no step
             // claims becomes direct distance entry, measured along the cursor
-            // direction from the command's anchor.
+            // direction from the command's anchor. Under a typed `<angle`
+            // the number is the distance along it first.
+            if self.angle_override.is_some() {
+                if let Some(distance) = self.try_direct_distance_entry(token) {
+                    return distance;
+                }
+            }
             let (task, consumed) = self.feed_command_consumed(StepInput::Text(token.to_string()));
             if consumed {
                 return task;

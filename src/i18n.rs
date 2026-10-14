@@ -365,6 +365,7 @@ pub fn ribbon_module_title(id: &str, fallback: &str) -> String {
         "layout" => crate::tr!("ribbon-tab", "layout"),
         "manage" => crate::tr!("ribbon-tab", "manage"),
         "view" => crate::tr!("ribbon-tab", "view"),
+        "block_editor" => crate::tr!("ribbon-tab", "block-editor"),
         _ => fallback.to_string(),
     }
 }

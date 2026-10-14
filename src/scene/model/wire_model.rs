@@ -836,6 +836,9 @@ pub struct WireModel {
     pub fill_is_2d_solid: bool,
     /// Shared block-render source and this placement's translation.
     pub render_instance: Option<super::instance_model::RenderInstance>,
+    /// Set on a wire that stands for a translated copy of a nested block
+    /// expansion; its own geometry is empty (see `InstanceStub`).
+    pub stub: Option<std::sync::Arc<super::instance_model::InstanceStub>>,
 }
 
 impl WireModel {
@@ -911,6 +914,7 @@ impl WireModel {
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,
+            stub: None,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             text_verts: Vec::new(),
@@ -1448,6 +1452,7 @@ impl Default for WireModel {
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,
+            stub: None,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
         }

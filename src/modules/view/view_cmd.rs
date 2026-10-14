@@ -71,6 +71,9 @@ pub struct ViewNames {
     /// (handle, [min x, min y, max x, max y]), one of which takes a
     /// model-space view being restored.
     pub sheet_viewports: Option<Vec<(u64, [f64; 4])>>,
+    /// The pick box (PICKBOX pixels) in sheet units: a viewport is selected
+    /// by its frame, within this distance of it.
+    pub sheet_pick_tolerance: f64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -513,9 +516,14 @@ impl CadCommand for DashViewCommand {
                 name, first.x, first.y, pt.x, pt.y
             )),
             Step::RestoreViewport(name) => {
-                // The topmost viewport under the pick.
+                // The topmost viewport whose frame the pick box touches; a
+                // pick well inside a viewport selects nothing, as in the
+                // reference.
+                let tol = self.names.sheet_pick_tolerance.max(0.0);
                 let hit = self.names.sheet_viewports.iter().flatten().rev().find(|(_, [x0, y0, x1, y1])| {
-                    pt.x >= *x0 && pt.x <= *x1 && pt.y >= *y0 && pt.y <= *y1
+                    let outside = pt.x < x0 - tol || pt.x > x1 + tol || pt.y < y0 - tol || pt.y > y1 + tol;
+                    let inside = pt.x > x0 + tol && pt.x < x1 - tol && pt.y > y0 + tol && pt.y < y1 - tol;
+                    !outside && !inside
                 });
                 match hit {
                     Some((handle, _)) => CmdResult::Dispatch(format!("-VIEW >RESTOREVP {name}\u{1f}{handle:X}")),

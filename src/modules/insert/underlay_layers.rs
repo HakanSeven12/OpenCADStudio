@@ -6,6 +6,6 @@ pub fn tool() -> ToolDef {
         id: "UNDERLAYLAYERS",
         label: "Underlay\nLayers",
         icon: ICON,
-        event: ModuleEvent::Command("UNDERLAYLAYERS".to_string()),
+        event: ModuleEvent::Command("ULAYERS".to_string()),
     }
 }

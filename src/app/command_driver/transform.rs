@@ -24,6 +24,9 @@ impl OpenCADStudio {
         // component so each member keeps its own dimensions. Other
         // transforms retain their selected-object behavior.
         let pending = self.begin_undo(i, label, handles.len(), true);
+        let handles = self.tabs[i]
+            .scene
+            .transform_picked_segments(&handles, &transform);
         self.tabs[i].scene.transform_entities(&handles, &transform);
         self.apply_inferred_constraints(i, &handles);
         self.tabs[i].dirty = true;

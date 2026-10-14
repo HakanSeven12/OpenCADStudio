@@ -1284,12 +1284,9 @@ mod bedit_characterization_tests {
         assert!(app.tabs[tab].block_edits.is_empty());
     }
 
-    /// Documenting: the REFEDIT guard lives only in the `BEDIT` picker arm.
-    /// `BEDIT_BEGIN:<handle>` (used by the palette "Edit" action) has no
-    /// REFEDIT check and opens a session while REFEDIT is active. Expected to
-    /// flip in Phase 1 once the guard moves into the begin path.
+    /// Every entry point must refuse while REFEDIT is active.
     #[test]
-    fn documenting_bedit_begin_bypasses_refedit_guard() {
+    fn locked_bedit_begin_refuses_active_refedit() {
         let mut app = OpenCADStudio::new_for_test();
         let (insert, _) = setup_block_and_insert(&mut app);
         let tab = app.active_tab;
@@ -1297,8 +1294,8 @@ mod bedit_characterization_tests {
         assert!(app.tabs[tab].refedit_session.is_some());
         let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", insert.value()));
         assert!(
-            app.tabs[tab].active_block_edit.is_some(),
-            "documenting: BEDIT_BEGIN opens a session despite an active REFEDIT"
+            app.tabs[tab].active_block_edit.is_none(),
+            "begin must refuse while REFEDIT is active"
         );
     }
 
@@ -1323,12 +1320,9 @@ mod bedit_characterization_tests {
 
     // ---- documenting: today's behavior, expected to flip in Phase 1 ----
 
-    /// Documenting: modify an existing member, discard, then undo once. The
-    /// undo target is the BEDIT_BEGIN entry. Records whatever the stack does
-    /// with the stale before-image (ISS-02). The assertion pins the current
-    /// result; Phase 1 must justify any change.
+    /// Discard removes local before-images before drawing undo resumes.
     #[test]
-    fn documenting_modify_discard_then_undo_probes_stale_before_image() {
+    fn locked_modify_discard_then_undo_does_not_restore_local_edits() {
         let mut app = OpenCADStudio::new_for_test();
         let (insert, members) = setup_block_and_insert(&mut app);
         let line = members[0];
@@ -1367,10 +1361,9 @@ mod bedit_characterization_tests {
         );
     }
 
-    /// Documenting: undo during a session crosses the entry boundary. A
-    /// single undo after an in-session edit may revert the BEDIT_BEGIN step.
+    /// Local undo restores both the entity store and block membership.
     #[test]
-    fn documenting_undo_inside_session_crosses_entry_boundary() {
+    fn locked_session_undo_restores_membership_without_crossing_entry() {
         let mut app = OpenCADStudio::new_for_test();
         let (insert, _) = setup_block_and_insert(&mut app);
         begin_bedit(&mut app, insert);
@@ -1381,38 +1374,33 @@ mod bedit_characterization_tests {
         assert_eq!(block_members(&app, "BLK").len(), 2);
 
         app.undo_steps(1);
-        // Documenting: undo removes the circle from the entity store but leaves
-        // its handle in the block record, so the definition holds a dangling
-        // member. Expected to flip in Phase 1 (members should match the store).
         let members = block_members(&app, "BLK");
         assert_eq!(
             members.len(),
-            2,
-            "documenting: block record keeps the undone handle"
+            1,
+            "block membership must match the undone entity store"
         );
         let dangling = members
             .iter()
             .filter(|h| app.tabs[tab].scene.document.get_entity(**h).is_none())
             .count();
-        assert_eq!(dangling, 1, "documenting: one member handle has no entity");
+        assert_eq!(dangling, 0, "every member must have an entity");
         assert!(
             app.tabs[tab].active_block_edit.is_some(),
             "documenting: undo does not close the session"
         );
     }
 
-    /// Documenting: undoing the BEDIT_BEGIN step itself, while the session is
-    /// still open, leaves the editor open. Records whether the undo reaches
-    /// across the entry boundary.
+    /// Opening starts an empty local history; undo cannot cross entry.
     #[test]
-    fn documenting_undo_across_entry_leaves_session_open() {
+    fn locked_session_entry_has_no_undo_step() {
         let mut app = OpenCADStudio::new_for_test();
         let (insert, _) = setup_block_and_insert(&mut app);
         let tab = app.active_tab;
         begin_bedit(&mut app, insert);
         app.finish_pending_history(tab);
         let depth_after_begin = undo_depth(&app);
-        assert!(depth_after_begin >= 1, "BEDIT_BEGIN recorded an undo step");
+        assert_eq!(depth_after_begin, 0, "opening must not record an undo step");
 
         app.undo_steps(1);
         assert!(
@@ -1421,10 +1409,9 @@ mod bedit_characterization_tests {
         );
     }
 
-    /// Documenting: BEDIT on a block while another block is open nests a
-    /// second session. Records the resulting stack.
+    /// Switching a clean block replaces the single session.
     #[test]
-    fn documenting_nested_bedit_opens_second_session() {
+    fn locked_clean_switch_replaces_the_session() {
         let mut app = OpenCADStudio::new_for_test();
         let (insert, _) = setup_block_and_insert(&mut app);
         let tab = app.active_tab;
@@ -1448,15 +1435,14 @@ mod bedit_characterization_tests {
         begin_bedit(&mut app, other_insert);
         assert_eq!(
             app.tabs[tab].block_edits.len(),
-            2,
-            "documenting: a second BEDIT pushes a nested session"
+            1,
+            "a drawing has only one block-editor session"
         );
     }
 
-    /// Documenting: BEDIT_BEGIN pushes an undo entry, and BEDIT_SAVE and
-    /// BEDIT_DISCARD push none. Phase 1 may change this.
+    /// No-change Save and Discard leave the drawing history untouched.
     #[test]
-    fn documenting_save_and_discard_push_no_undo_entry() {
+    fn locked_clean_save_and_discard_leave_history_unchanged() {
         let mut app = OpenCADStudio::new_for_test();
         let (insert, _) = setup_block_and_insert(&mut app);
         begin_bedit(&mut app, insert);

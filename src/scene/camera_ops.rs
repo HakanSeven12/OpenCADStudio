@@ -1378,10 +1378,18 @@ impl Scene {
             // Every paper layout has a full-screen sheet viewport that holds
             // its view; create one if a loaded file lacks it.
             let layout = self.current_layout.clone();
-            // A layout opening for the first time: one whose sheet had to be
-            // made, or one created in this session.
-            let created = self.ensure_sheet_viewport(&layout);
-            if self.unopened_layouts.remove(&layout) || created {
+            // A layout opening for the first time, as the reference tells
+            // it: its page setup was never initialized (a file's layout
+            // with no paper), or it was created in this session and not
+            // opened yet. Its page setup is initialized and, with
+            // LAYOUTCREATEVIEWPORT, it gets its first viewport.
+            let unopened = self.unopened_layouts.remove(&layout);
+            let initialized = self.initialize_layout_page_setup(&layout);
+            if unopened && !initialized {
+                self.fit_layout_sheet(&layout);
+            }
+            self.ensure_sheet_viewport(&layout);
+            if unopened || initialized {
                 self.add_layout_default_viewport(&layout);
             }
             self.apply_sheet_viewport_camera()

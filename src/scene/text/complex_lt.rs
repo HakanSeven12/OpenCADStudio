@@ -386,6 +386,7 @@ pub fn apply_along(
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,
+            stub: None,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             dash_from_start: false,

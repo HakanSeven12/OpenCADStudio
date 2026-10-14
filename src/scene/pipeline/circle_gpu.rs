@@ -264,7 +264,7 @@ pub fn extract_circle_instance_from_geom_indexed(
     }
 
     let (ch, cl) = split_ds_xyz(center[0], center[1], center[2]);
-    let hw = wire.line_weight_px * 0.5;
+    let hw = wire.line_weight_px.max(1.0) * 0.5;
     let pat0 = [
         wire.pattern[0],
         wire.pattern[1],

@@ -304,6 +304,22 @@ pub static CLICK: OpDef = OpDef {
     example: r#"{"op":"click","point":[10,0,0],"modifiers":"ctrl"}"#,
 };
 
+pub static POINTER: OpDef = OpDef {
+    name: "pointer",
+    doc: "Replay mouse events on the drawing canvas in order, as the mouse sends them: move to canvas pixels or to a world point (projected through the camera the cursor edits with), press and release a button, turn the wheel. A grip press-move-release goes through the same cursor path as a hand drag. Each step reports the cursor's world point.",
+    batchable: true,
+    params: &[
+        req(
+            "events",
+            Ty::ArrayOf(&Ty::Raw(r#"{"type":"object","properties":{"move":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},"move_world":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"press":{"type":"string","enum":["left","right","middle"]},"release":{"type":"string","enum":["left","right","middle"]},"wheel":{"type":"number"}}}"#)),
+            "Events in order; each holds one of move, move_world, press, release or wheel (lines, positive zooms in).",
+        ),
+        opt("modifiers", Ty::Str, "Keys held throughout: \"ctrl\", \"shift\" or \"ctrl+shift\"."),
+    ],
+    rules: &[],
+    example: r#"{"op":"pointer","events":[{"move_world":[10,0,0]},{"press":"left"},{"release":"left"},{"move_world":[12,3,0]},{"press":"left"},{"release":"left"}]}"#,
+};
+
 pub static SET_PROPERTIES: OpDef = OpDef {
     name: "set_properties",
     doc: "Atomically update record properties by RFC 6901 JSON pointer paths.",
@@ -877,6 +893,7 @@ pub static OPS: &[&OpDef] = &[
     &PROPERTY,
     &GRIP_DRAG,
     &CLICK,
+    &POINTER,
     &SET_PROPERTIES,
     &ACTION,
     &EMBED_IMAGE,

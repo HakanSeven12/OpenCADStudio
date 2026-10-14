@@ -1646,6 +1646,78 @@ impl InteractionCandidates {
             .map(|(rect, (view, eye, bounds))| (rect, view, eye, bounds))
     }
 
+    /// The candidates with every block-copy stub among them expanded into
+    /// the wires it stands for, so snapping and picking see each copy. Only
+    /// the copies' wires near an XY query are kept.
+    pub(crate) fn materialize_stubs(self) -> Self {
+        if !self.iter().any(|wire| wire.stub.is_some()) {
+            return self;
+        }
+        let near = |wire: &WireModel, query: [f64; 4]| {
+            let [x0, y0, x1, y1] = wire.aabb.map(f64::from);
+            !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite())
+                || (x1 >= query[0] && x0 <= query[2] && y1 >= query[1] && y0 <= query[3])
+        };
+        let mut wires = Vec::new();
+        for wire in self.iter() {
+            if wire.stub.is_none() {
+                wires.push(wire.clone());
+                continue;
+            }
+            let start = wires.len();
+            crate::scene::model::instance_model::expand_stub_into(wire, &mut wires);
+            if let Some(query) = self.query_aabb {
+                let mut keep = start;
+                for index in start..wires.len() {
+                    if near(&wires[index], query) {
+                        wires.swap(keep, index);
+                        keep += 1;
+                    }
+                }
+                wires.truncate(keep);
+            }
+        }
+        Self {
+            query_aabb: self.query_aabb,
+            screen_rect: self.screen_rect,
+            screen_view: self.screen_view,
+            ..Self::all(Arc::new(wires))
+        }
+    }
+
+    /// Leave out every wire `drop` matches, with the segments, points and
+    /// triangles that belong to it.
+    pub(crate) fn exclude_wires(&mut self, drop: impl Fn(&WireModel) -> bool) {
+        let wires = Arc::clone(&self.wires);
+        let dropped = |wire: u32| wires.get(wire as usize).is_some_and(&drop);
+        match self.wire_indices.as_mut() {
+            Some(indices) => indices.retain(|&wire| !dropped(wire)),
+            None => {
+                self.wire_indices = Some(
+                    (0..wires.len() as u32)
+                        .filter(|&wire| !dropped(wire))
+                        .collect(),
+                );
+            }
+        }
+        fn keep<T>(
+            refs: &mut Option<Vec<T>>,
+            wire: impl Fn(&T) -> u32,
+            dropped: impl Fn(u32) -> bool,
+        ) {
+            if let Some(refs) = refs.as_mut() {
+                refs.retain(|item| !dropped(wire(item)));
+            }
+        }
+        keep(&mut self.segments, |r| r.wire, dropped);
+        keep(&mut self.snap_points, |r| r.wire, dropped);
+        keep(&mut self.key_vertices, |r| r.wire, dropped);
+        keep(&mut self.key_segments, |r| r.wire, dropped);
+        keep(&mut self.fill_triangles, |r| r.wire, dropped);
+        keep(&mut self.pick_triangles, |r| r.wire, dropped);
+        keep(&mut self.glyphs, |r| r.wire, dropped);
+    }
+
     pub(crate) fn extend_indexed_area(&mut self, other: Self) {
         debug_assert!(Arc::ptr_eq(&self.wires, &other.wires));
 
@@ -1878,6 +1950,14 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
             vertex.pos[1] as f64 + vertex.pos_low[1] as f64,
             vertex.pos[2] as f64 + vertex.pos_low[2] as f64,
         ]);
+    }
+    if let Some(stub) = &wire.stub {
+        for inner in stub.prototype.iter() {
+            if let Some(inner) = finite_wire_aabb3(inner) {
+                aabb[2] = aabb[2].min(inner[2] + stub.delta[2]);
+                aabb[5] = aabb[5].max(inner[5] + stub.delta[2]);
+            }
+        }
     }
     if !aabb[2].is_finite() {
         aabb[2] = 0.0;

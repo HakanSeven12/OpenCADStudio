@@ -647,6 +647,34 @@ impl OpenCADStudio {
                 }
             }
 
+            // MVSETUP — sheet border in model space, viewports on a layout.
+            "MVSETUP" => {
+                let scene = &mut self.tabs[i].scene;
+                let target = (scene.current_layout == "Model").then(|| {
+                    scene
+                        .layout_names()
+                        .into_iter()
+                        .find(|name| name != "Model")
+                        .unwrap_or_else(|| "Layout1".to_string())
+                });
+                // The sheet MVSETUP lays viewports out on: the layout it
+                // switches to from model space, or the current one.
+                let current = target
+                    .clone()
+                    .map(|name| std::mem::replace(&mut scene.current_layout, name));
+                let paper_bounds = scene
+                    .printable_area_limits()
+                    .or_else(|| scene.paper_limits())
+                    .unwrap_or(((0.0, 0.0), (297.0, 210.0)));
+                if let Some(current) = current {
+                    scene.current_layout = current;
+                }
+                use crate::modules::layout::mvsetup::MvsetupCommand;
+                let command = MvsetupCommand::new(target, paper_bounds);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
             // ── MSPACE / PSPACE ───────────────────────────────────────────
             "MSPACE" => {
                 return Some(Task::done(Message::MspaceCommand));

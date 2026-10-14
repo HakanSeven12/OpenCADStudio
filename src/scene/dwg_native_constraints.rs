@@ -2489,9 +2489,15 @@ fn detach_preserved_scope(
                 Some(ObjectType::Associative(object)) => match &object.data {
                     AssociativeData::ConstraintGroup(_) | AssociativeData::Network(_) => false,
                     AssociativeData::Variable(variable) => variable.name.trim().is_empty(),
-                    // A surface action whose surface was erased goes with it.
-                    AssociativeData::Action(_) => action_surface(document, *handle)
-                        .is_none_or(|surface| document.get_entity(surface).is_some()),
+                    // A surface action whose surface was erased goes with it,
+                    // and an array action whose array reference was.
+                    AssociativeData::Action(_) => {
+                        action_surface(document, *handle)
+                            .is_none_or(|surface| document.get_entity(surface).is_some())
+                            && !crate::scene::assoc_array::orphaned_array_action(
+                                document, *handle,
+                            )
+                    }
                     _ => true,
                 },
                 _ => false,

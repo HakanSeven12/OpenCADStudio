@@ -25,6 +25,7 @@ pub mod print_to_printer;
 pub mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod single_instance;
+pub mod fbx;
 pub mod step;
 pub mod stl;
 pub mod svg_export;

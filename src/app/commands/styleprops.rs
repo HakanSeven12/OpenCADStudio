@@ -1148,6 +1148,9 @@ impl OpenCADStudio {
                     | "SHORTCUTMENUDURATION"
                     | "CURSORSIZE"
                     | "PICKBOX"
+                    | "HPASSOC"
+                    | "COMMANDLINEOPACITY"
+                    | "MENUBAR"
                     | "CURSORTYPE"
                     | "SNAPANG"
                     | "TEXTFILL"
@@ -1210,6 +1213,7 @@ impl OpenCADStudio {
                     | "DGNOSNAP"
                     | "UOSNAP"
                     | "FIELDDISPLAY"
+                    | "FILEDIA"
                     | "SURFACEASSOCIATIVITY"
                     | "UCSORTHO"
                     | "UCSVIEW"
@@ -1347,9 +1351,15 @@ impl OpenCADStudio {
                         if let Some(value) = &value {
                             match value.parse::<i32>().ok().filter(|v| (-90..=90).contains(v)) {
                                 Some(fade) => self.set_xref_fade(fade),
-                                None => self
-                                    .command_line
-                                    .push_error("Requires an integer between -90 and 90."),
+                                // Refused: say why and ask again.
+                                None => {
+                                    self.command_line
+                                        .push_error("Requires an integer between -90 and 90.");
+                                    self.command_line.push_output(&format!(
+                                        "Enter new value for XDWGFADECTL <{current}>:"
+                                    ));
+                                    self.pending_setvar = Some(name.clone());
+                                }
                             }
                         } else {
                             self.command_line.push_output(&format!(
@@ -1587,6 +1597,35 @@ impl OpenCADStudio {
                             None => {
                                 self.command_line.push_output(&format!(
                                     "Enter new value for FIELDDISPLAY <{current}>:"
+                                ));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "FILEDIA" {
+                        let current = i16::from(crate::sys::file_dia());
+                        match value
+                            .as_deref()
+                            .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
+                        {
+                            Some(Some(mode)) => {
+                                if current != mode {
+                                    crate::sys::set_file_dia(mode == 1);
+                                    self.save_config();
+                                }
+                            }
+                            Some(None) => {
+                                self.command_line
+                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for FILEDIA <{current}>:"
+                                ));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                            None => {
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for FILEDIA <{current}>:"
                                 ));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -2188,6 +2227,28 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((format!("PICKBOX = {}", self.pick_box), false)),
                             },
+                            "MENUBAR" => match value.as_deref() {
+                                Some(v @ ("0" | "1")) => {
+                                    self.show_menu_bar = v == "1";
+                                    Ok((format!("MENUBAR = {v}"), true))
+                                }
+                                Some(_) => Err("SETVAR: 0 or 1 required.".into()),
+                                None => Ok((
+                                    format!("MENUBAR = {}", u8::from(self.show_menu_bar)),
+                                    false,
+                                )),
+                            },
+                            "HPASSOC" => match value.as_deref() {
+                                Some(v @ ("0" | "1")) => {
+                                    self.hatch_associative = v == "1";
+                                    Ok((format!("HPASSOC = {v}"), true))
+                                }
+                                Some(_) => Err("SETVAR: 0 or 1 required.".into()),
+                                None => Ok((
+                                    format!("HPASSOC = {}", u8::from(self.hatch_associative)),
+                                    false,
+                                )),
+                            },
                             "CURSORTYPE" => match &value {
                                 Some(v) => match v.as_str() {
                                     "0" => {
@@ -2522,6 +2583,22 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((
                                     format!("CLIPROMPTLINES = {}", self.cliprompt_lines),
+                                    false,
+                                )),
+                            },
+                            "COMMANDLINEOPACITY" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(n) if (20..=100).contains(&n) => {
+                                        self.command_line.set_opacity_percent(n);
+                                        Ok((format!("COMMANDLINEOPACITY = {n}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 20 to 100 required.".into()),
+                                },
+                                None => Ok((
+                                    format!(
+                                        "COMMANDLINEOPACITY = {}",
+                                        self.command_line.opacity_percent()
+                                    ),
                                     false,
                                 )),
                             },
@@ -3134,6 +3211,9 @@ impl OpenCADStudio {
                                         | "SHORTCUTMENUDURATION"
                                         | "CURSORSIZE"
                                         | "PICKBOX"
+                                        | "HPASSOC"
+                                        | "COMMANDLINEOPACITY"
+                                        | "MENUBAR"
                                         | "CURSORTYPE"
                                         | "SNAPANG"
                                         | "CLIPROMPTLINES"
@@ -3291,6 +3371,42 @@ impl OpenCADStudio {
             // Read-only scan: flags entities on undefined layers and block
             // references to undefined block definitions. Reports only; it does
             // not auto-repair (so it can never make the drawing worse).
+            // COMPARE — overlay what differs from another drawing. Bare picks
+            // the drawing; with a path it compares at once.
+            "COMPARE" => {
+                return Some(Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Compare with drawing").as_ref())
+                            .add_filter(crate::t!("Drawing").as_ref(), &["dwg", "dxf"])
+                            .pick_file()
+                            .await
+                            .map(|handle| crate::sys::handle_path(&handle))
+                    },
+                    |path| match path {
+                        Some(path) => Message::Command(format!("COMPARE {}", path.display())),
+                        None => Message::Noop,
+                    },
+                ));
+            }
+            cmd if cmd.starts_with("COMPARE ") => {
+                let path = std::path::PathBuf::from(cmd.trim_start_matches("COMPARE").trim());
+                match crate::io::load_file(&path) {
+                    Ok(other) => {
+                        let comparison =
+                            crate::scene::compare::compare(&self.tabs[i].scene, other);
+                        // The overlay shows at once, before the cursor moves.
+                        self.tabs[i].scene.set_preview_wires(comparison.overlay.clone());
+                        let command =
+                            crate::modules::manage::compare::CompareCommand::new(comparison);
+                        self.command_line.push_info(&command.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(command));
+                    }
+                    Err(error) => self
+                        .command_line
+                        .push_error(crate::tf!("COMPARE: {error}").as_ref()),
+                }
+            }
             "AUDIT" => {
                 use std::collections::BTreeSet;
                 let mut undefined_layers: BTreeSet<String> = BTreeSet::new();
@@ -4441,11 +4557,12 @@ mod scale_validation_tests {
 }
 
 impl OpenCADStudio {
-    /// XDWGFADECTL: store it, show it on the ribbon and redraw every tab's
-    /// referenced drawings.
+    /// XDWGFADECTL: store it in the profile, show it on the ribbon and redraw
+    /// every tab's referenced drawings.
     pub(in crate::app) fn set_xref_fade(&mut self, fade: i32) {
         crate::scene::cache::block_cache::set_xref_fade_ctl(fade);
         self.ribbon.xref_fade = crate::scene::cache::block_cache::xref_fade_ctl();
+        self.save_config();
         for tab in &mut self.tabs {
             if !tab.is_start {
                 tab.scene.recolor_meshes();

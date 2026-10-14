@@ -333,7 +333,20 @@ impl PropertyEditable for RasterImage {
             .contains(codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY);
         let clip_inverted = self.clip_boundary.clip_mode == codec::entities::ClipMode::Inside;
         let transparency = self.common.transparency.to_string();
+        let whole = |label: &str, field: &'static str, value: u8| Property {
+            label: t!(label).into_owned(),
+            field,
+            value: PropValue::EditText(value.to_string()),
+        };
         vec![
+            PropSection {
+                title: t!("Image Adjust").into_owned(),
+                props: vec![
+                    whole("Brightness", "ri_bright", self.brightness),
+                    whole("Contrast", "ri_contrast", self.contrast),
+                    whole("Fade", "ri_fade", self.fade),
+                ],
+            },
             PropSection {
                 title: t!("Geometry").into_owned(),
                 props: vec![
@@ -362,13 +375,6 @@ impl PropertyEditable for RasterImage {
                 title: t!("Misc").into_owned(),
                 props: vec![
                     ro(t!("Name").as_ref(), "ri_name", self.file_name().to_string()),
-                    edit(
-                        t!("Brightness").as_ref(),
-                        "ri_bright",
-                        self.brightness as f64,
-                    ),
-                    edit(t!("Contrast").as_ref(), "ri_contrast", self.contrast as f64),
-                    edit(t!("Fade").as_ref(), "ri_fade", self.fade as f64),
                     ro(t!("Transparency").as_ref(), "ri_transparency", transparency),
                     Property {
                         label: t!("Show image").into_owned(),
@@ -449,9 +455,10 @@ impl PropertyEditable for RasterImage {
             "ri_ox" => self.insertion_point.x = v,
             "ri_oy" => self.insertion_point.y = v,
             "ri_oz" => self.insertion_point.z = v,
-            "ri_bright" => self.brightness = v.clamp(0.0, 100.0) as u8,
-            "ri_contrast" => self.contrast = v.clamp(0.0, 100.0) as u8,
-            "ri_fade" => self.fade = v.clamp(0.0, 100.0) as u8,
+            // Out-of-range values are refused before they get here.
+            "ri_bright" if (0.0..=100.0).contains(&v) => self.brightness = v as u8,
+            "ri_contrast" if (0.0..=100.0).contains(&v) => self.contrast = v as u8,
+            "ri_fade" if (0.0..=100.0).contains(&v) => self.fade = v as u8,
             _ => {}
         }
     }

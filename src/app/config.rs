@@ -369,6 +369,8 @@ pub struct ModelSpaceThemeConfig {
     pub grip_hot: u8,
     /// GRIPHOVER: hovered/warm grip ACI color (0 = Theme Primary Strong, 1..=255 = ACI).
     pub grip_hover: u8,
+    /// SNAPMARKERSIZE: object-snap marker half-size in pixels (1–20, default 5).
+    pub snap_marker_size: u8,
 }
 
 impl Default for ModelSpaceThemeConfig {
@@ -390,6 +392,7 @@ impl Default for ModelSpaceThemeConfig {
             grip_color: 0,
             grip_hot: 0,
             grip_hover: 0,
+            snap_marker_size: 5,
         }
     }
 }
@@ -518,6 +521,8 @@ pub struct RecentConfig {
     pub files: Vec<String>,
     /// How many recent files to keep.
     pub limit: usize,
+    /// List, icons or large previews.
+    pub view: super::RecentView,
 }
 
 impl Default for RecentConfig {
@@ -525,6 +530,7 @@ impl Default for RecentConfig {
         Self {
             files: Vec::new(),
             limit: super::recent::RECENT_DEFAULT,
+            view: super::RecentView::default(),
         }
     }
 }

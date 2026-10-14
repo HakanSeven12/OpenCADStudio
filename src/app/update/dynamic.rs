@@ -29,6 +29,10 @@ impl OpenCADStudio {
         &self,
         i: usize,
     ) -> Option<(glam::DVec3, glam::DVec3)> {
+        // A typed `<angle` locks the way from the last point.
+        if let (Some(dir), Some(base)) = (self.angle_override, self.last_point) {
+            return Some((base, dir));
+        }
         // OTRACK already exposes its acquired world-space ray.
         if let Some((base, dir)) = self.otrack_active {
             return Some((base, dir));

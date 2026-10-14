@@ -26,7 +26,7 @@ mod snap_underlays;
 pub(crate) mod solid3d_cmds;
 mod underlay_layers;
 pub(crate) mod wblock;
-mod xadjust;
+pub(crate) mod xadjust;
 pub(crate) mod xattach;
 pub(crate) mod xclip;
 pub(crate) mod xref_cmd;
@@ -50,6 +50,46 @@ impl CadModule for InsertModule {
         static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
         GROUPS.get_or_init(|| {
             vec![
+                // ── Block ─────────────────────────────────────────────────────────
+                RibbonGroup {
+                    title: "Block",
+                    tools: vec![
+                        RibbonItem::LargeTool(mview_block::tool()),
+                        insert_block::gallery(),
+                        RibbonItem::LabeledDropdown {
+                            id: "ATTEDIT_DROPDOWN",
+                            label: "Edit Attribute",
+                            icon: attedit::ICON,
+                            items: vec![
+                                ("ATTEDIT", "Single", attedit::ICON),
+                                ("-ATTEDIT", "Multiple", attedit::ICON),
+                            ],
+                            default: "ATTEDIT",
+                        },
+                        // ATTMODE: the face shows the drawing's current setting.
+                        RibbonItem::LabeledDropdown {
+                            id: "ATTMODE_DROPDOWN",
+                            label: "",
+                            icon: attedit::ICON,
+                            items: vec![
+                                ("ATTMODE1", "Retain Attribute Display", attedit::ICON),
+                                ("ATTMODE2", "Display All Attributes", attedit::ICON),
+                                ("ATTMODE0", "Hide All Attributes", attedit::ICON),
+                            ],
+                            default: "ATTMODE1",
+                        },
+                    ],
+                },
+                // ── Block Definition (slide-out: Set Base Point, Synchronize) ─────
+                RibbonGroup {
+                    title: "Block Definition",
+                    tools: vec![
+                        RibbonItem::LargeTool(create_block::tool()),
+                        RibbonItem::LargeTool(attdef::tool()),
+                        RibbonItem::LargeTool(attman::tool()),
+                        RibbonItem::LargeTool(edit_block::tool()),
+                    ],
+                },
                 // ── Reference ────────────────────────────────────────────────────
                 RibbonGroup {
                     title: "Reference",
@@ -89,54 +129,18 @@ impl CadModule for InsertModule {
                         },
                         RibbonItem::LabeledDropdown {
                             id: "UOSNAP_DROPDOWN",
-                            label: "Snap to Underlays",
+                            // An empty label shows the current state.
+                            label: "",
                             icon: snap_underlays::ICON,
                             items: vec![
                                 ("UOSNAP1", "Snap to Underlays ON", snap_underlays::ICON),
                                 ("UOSNAP0", "Snap to Underlays OFF", snap_underlays::ICON),
+                                // Shown (not selectable) while PDFOSNAP, DWFOSNAP
+                                // and DGNOSNAP differ (UOSNAP 2).
+                                ("UOSNAP2", "*Underlay OSnap's vary*", snap_underlays::ICON),
                             ],
                             default: "UOSNAP1",
                         },
-                    ],
-                },
-                // ── Block ─────────────────────────────────────────────────────────
-                RibbonGroup {
-                    title: "Block",
-                    tools: vec![
-                        RibbonItem::LargeTool(mview_block::tool()),
-                        insert_block::gallery(),
-                        RibbonItem::LabeledDropdown {
-                            id: "ATTEDIT_DROPDOWN",
-                            label: "Edit Attribute",
-                            icon: attedit::ICON,
-                            items: vec![
-                                ("ATTEDIT", "Single", attedit::ICON),
-                                ("-ATTEDIT", "Multiple", attedit::ICON),
-                            ],
-                            default: "ATTEDIT",
-                        },
-                        // ATTMODE: the face shows the drawing's current setting.
-                        RibbonItem::LabeledDropdown {
-                            id: "ATTMODE_DROPDOWN",
-                            label: "",
-                            icon: attedit::ICON,
-                            items: vec![
-                                ("ATTMODE1", "Retain Attribute Display", attedit::ICON),
-                                ("ATTMODE2", "Display All Attributes", attedit::ICON),
-                                ("ATTMODE0", "Hide All Attributes", attedit::ICON),
-                            ],
-                            default: "ATTMODE1",
-                        },
-                    ],
-                },
-                // ── Block Definition (slide-out: Set Base Point, Synchronize) ─────
-                RibbonGroup {
-                    title: "Block Definition",
-                    tools: vec![
-                        RibbonItem::LargeTool(create_block::tool()),
-                        RibbonItem::LargeTool(attdef::tool()),
-                        RibbonItem::LargeTool(attman::tool()),
-                        RibbonItem::LargeTool(edit_block::tool()),
                     ],
                 },
                 // ── Import ────────────────────────────────────────────────────────

@@ -80,6 +80,7 @@ pub static PIN_ACTIVE: &[u8] = include_bytes!("../../assets/icons/ui/pin_active.
 pub static SPLIT_V: &[u8] = include_bytes!("../../assets/icons/ui/split_v.svg");
 pub static SPLIT_H: &[u8] = include_bytes!("../../assets/icons/ui/split_h.svg");
 pub static GRID: &[u8] = include_bytes!("../../assets/icons/ui/grid.svg");
+pub static PREVIEW: &[u8] = include_bytes!("../../assets/icons/ui/preview.svg");
 pub static SNAP: &[u8] = include_bytes!("../../assets/icons/ui/snap.svg");
 pub static DOC_NEW: &[u8] = include_bytes!("../../assets/icons/ui/doc_new.svg");
 pub static DOC: &[u8] = include_bytes!("../../assets/icons/ui/doc.svg");

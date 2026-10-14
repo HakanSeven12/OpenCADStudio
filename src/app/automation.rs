@@ -700,6 +700,9 @@ impl OpenCADStudio {
         };
         match req["op"].as_str().unwrap_or("") {
             "new" => {
+                if self.tabs[self.active_tab].block_edit_history.is_some() {
+                    return err("Close the block editor before replacing the drawing.");
+                }
                 if let Some(template) = req["template"].as_str() {
                     let purged = match self.apply_template(template) {
                         Ok(purged) => purged,
@@ -723,6 +726,9 @@ impl OpenCADStudio {
             }
             #[cfg(not(target_arch = "wasm32"))]
             "open" => {
+                if self.tabs[self.active_tab].block_edit_history.is_some() {
+                    return err("Close the block editor before replacing the drawing.");
+                }
                 let Some(path) = req["path"].as_str() else {
                     return err("open: missing \"path\"");
                 };

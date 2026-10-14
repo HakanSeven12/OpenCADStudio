@@ -1004,6 +1004,7 @@ impl Scene {
         } else {
             self.paper_sheet_wires_arc()
         };
+        let wires = crate::scene::model::instance_model::expand_stubs(&wires);
         for wire in wires.iter() {
             let Some(handle) = Self::handle_from_wire_name(&wire.name) else {
                 continue;

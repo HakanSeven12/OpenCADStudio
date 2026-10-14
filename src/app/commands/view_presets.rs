@@ -80,6 +80,12 @@ impl OpenCADStudio {
             visual_styles: visual_styles.into_iter().map(|(name, _)| name).collect(),
             live_sections: live_sections.into_iter().map(|(name, _)| name).collect(),
             sheet_viewports,
+            // PICKBOX pixels in sheet units, at the sheet camera's zoom.
+            sheet_pick_tolerance: {
+                let height = scene.camera.borrow().ortho_size() as f64 * 2.0;
+                let (_, pixels) = scene.selection.borrow().view.vp_size;
+                f64::from(self.pick_box) * height / f64::from(pixels).max(1.0)
+            },
         }
     }
 

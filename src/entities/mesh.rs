@@ -1054,15 +1054,26 @@ fn display_mesh(mesh: &Mesh) -> RefinedMesh {
 /// Open, non-manifold, non-planar, and degenerate meshes return `None` so a
 /// modelling command can leave the source untouched.
 pub(crate) fn closed_mesh_body(entity: &codec::EntityType) -> Option<kernel::brep::Body> {
+    if let codec::EntityType::PolygonMesh(mesh) = entity {
+        if !mesh.is_closed_m() || !mesh.is_closed_n() {
+            return None;
+        }
+    }
+    let (vertices, faces) = mesh_polygons(entity)?;
+    kernel::brep::make::faceted_solid(&vertices, &faces)
+}
+
+/// The vertices and face loops (vertex indices) of a MESH, polygon mesh or
+/// polyface mesh, as drawn without smoothing.
+pub(crate) fn mesh_polygons(
+    entity: &codec::EntityType,
+) -> Option<(Vec<[f64; 3]>, Vec<Vec<usize>>)> {
     match entity {
         codec::EntityType::Mesh(mesh) => {
             let base = base_refined_mesh(mesh);
-            kernel::brep::make::faceted_solid(&base.vertices, &base.faces)
+            Some((base.vertices, base.faces))
         }
         codec::EntityType::PolygonMesh(mesh) => {
-            if !mesh.is_closed_m() || !mesh.is_closed_n() {
-                return None;
-            }
             let m = mesh.m_vertex_count.max(0) as usize;
             let n = mesh.n_vertex_count.max(0) as usize;
             let vertices = mesh
@@ -1074,9 +1085,11 @@ pub(crate) fn closed_mesh_body(entity: &codec::EntityType) -> Option<kernel::bre
             if m < 2 || n < 2 || vertices.len() != m.saturating_mul(n) {
                 return None;
             }
-            let mut faces = Vec::with_capacity(m.saturating_mul(n));
-            for row in 0..m {
-                for column in 0..n {
+            let rows = if mesh.is_closed_m() { m } else { m - 1 };
+            let columns = if mesh.is_closed_n() { n } else { n - 1 };
+            let mut faces = Vec::with_capacity(rows.saturating_mul(columns));
+            for row in 0..rows {
+                for column in 0..columns {
                     faces.push(vec![
                         row * n + column,
                         ((row + 1) % m) * n + column,
@@ -1085,7 +1098,7 @@ pub(crate) fn closed_mesh_body(entity: &codec::EntityType) -> Option<kernel::bre
                     ]);
                 }
             }
-            kernel::brep::make::faceted_solid(&vertices, &faces)
+            Some((vertices, faces))
         }
         codec::EntityType::PolyfaceMesh(mesh) => {
             let vertices = mesh
@@ -1105,10 +1118,60 @@ pub(crate) fn closed_mesh_body(entity: &codec::EntityType) -> Option<kernel::bre
                     (indices.len() >= 3).then_some(indices)
                 })
                 .collect::<Vec<_>>();
-            kernel::brep::make::faceted_solid(&vertices, &faces)
+            Some((vertices, faces))
         }
         _ => None,
     }
+}
+
+/// The part of a mesh on one side of a cut: every face loop clipped to where
+/// `side` is positive (`keep_positive`) or negative, rebuilt as a MESH with
+/// `common`. The mesh stays open where the cut crossed it. `None` when no face
+/// reaches that side.
+pub(crate) fn clipped_mesh(
+    vertices: &[[f64; 3]],
+    faces: &[Vec<usize>],
+    side: impl Fn([f64; 3]) -> f64,
+    keep_positive: bool,
+    common: &codec::entities::EntityCommon,
+) -> Option<Mesh> {
+    let sign = if keep_positive { 1.0 } else { -1.0 };
+    let distances: Vec<f64> = vertices.iter().map(|&point| sign * side(point)).collect();
+    let mut mesh = Mesh::new();
+    mesh.common = common.clone();
+    let mut welded: std::collections::HashMap<[u64; 3], usize> = Default::default();
+    let mut index_of = |mesh: &mut Mesh, point: [f64; 3]| {
+        *welded.entry(point.map(f64::to_bits)).or_insert_with(|| {
+            mesh.add_vertex(codec::types::Vector3::new(point[0], point[1], point[2]))
+        })
+    };
+    for face in faces {
+        if face.iter().any(|&index| index >= vertices.len()) {
+            continue;
+        }
+        let mut loop_points = Vec::with_capacity(face.len() + 2);
+        for (k, &a) in face.iter().enumerate() {
+            let b = face[(k + 1) % face.len()];
+            let (da, db) = (distances[a], distances[b]);
+            if da >= 0.0 {
+                loop_points.push(vertices[a]);
+            }
+            if (da > 0.0 && db < 0.0) || (da < 0.0 && db > 0.0) {
+                let t = da / (da - db);
+                let (pa, pb) = (vertices[a], vertices[b]);
+                loop_points.push(std::array::from_fn(|axis| pa[axis] + (pb[axis] - pa[axis]) * t));
+            }
+        }
+        if loop_points.len() < 3 {
+            continue;
+        }
+        let indices = loop_points
+            .into_iter()
+            .map(|point| index_of(&mut mesh, point))
+            .collect::<Vec<_>>();
+        mesh.add_face(codec::entities::MeshFace::new(indices));
+    }
+    (!mesh.faces.is_empty()).then_some(mesh)
 }
 
 fn face_triangle_indices(vertices: &[[f64; 3]], faces: &[Vec<usize>]) -> (Vec<u32>, Vec<usize>) {

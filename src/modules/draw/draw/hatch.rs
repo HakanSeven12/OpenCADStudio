@@ -248,6 +248,12 @@ impl HatchCommand {
         command
     }
 
+    /// HPASSOC: whether the hatch starts out associative.
+    pub fn with_associative(mut self, associative: bool) -> Self {
+        self.associative = associative;
+        self
+    }
+
     pub fn with_origin(mut self, origin: [f64; 2]) -> Self {
         self.default_origin = origin;
         self

@@ -1971,6 +1971,12 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
                     })
                     .collect()
             };
+            // A section volume is also pushed or pulled at its top and bottom.
+            if data.state == 4 {
+                grips.extend(section_plane_edge_grips(data).into_iter().filter(|grip| {
+                    matches!(grip.id, SECTION_GRIP_TOP | SECTION_GRIP_BOTTOM)
+                }));
+            }
             if let Some(right) = data.vertices.last() {
                 let vertical = normalized(data.vertical_direction, Vector3::UNIT_Z);
                 let edge_center_offset = (data.top_height - data.bottom_height) * 0.5;

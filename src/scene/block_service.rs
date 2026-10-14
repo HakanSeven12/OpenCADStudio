@@ -598,7 +598,88 @@ fn record_of<'a>(
         .get(name)
         .ok_or_else(|| missing(name))
 }
+
+/// Checks whether inserting `inserted_block` into `container_block` would create a circular
+/// block nesting dependency, directly or transitively.
+///
+/// Matching is case-insensitive, consistent with the rest of the block service.
+///
+/// Xrefs (`|` in name or xref flags) and anonymous blocks (`*` prefix) are handled as follows:
+/// - Anonymous blocks (`*U...`) are fully traversed like normal blocks because their geometry
+///   and nested inserts live in the document.
+/// - Externally referenced blocks (xrefs) have definitions that come from external files and
+///   are not edited inline in the host document, but if an xref name is tested, it is matched
+///   case-insensitively and its local block record entities (if any) are traversed.
+pub fn would_create_cycle(
+    document: &CadDocument,
+    container_block: &str,
+    inserted_block: &str,
+) -> bool {
+    let container = container_block.trim();
+    let inserted = inserted_block.trim();
+    if container.is_empty() || inserted.is_empty() {
+        return false;
+    }
+    if container.eq_ignore_ascii_case(inserted) {
+        return true;
+    }
+
+    let mut visited: HashSet<String> = HashSet::default();
+    let mut stack: Vec<String> = vec![inserted.to_ascii_uppercase()];
+
+    while let Some(current_upper) = stack.pop() {
+        if !visited.insert(current_upper.clone()) {
+            continue;
+        }
+
+        // Find block record matching current_upper case-insensitively
+        let Some(record) = document.block_records.get(&current_upper) else {
+            continue;
+        };
+
+        // Check entities owned by this block record: either registered in entity_handles
+        // or having owner_handle == record.handle in the document.
+        let mut sub_inserts = Vec::new();
+        for &handle in &record.entity_handles {
+            if let Some(EntityType::Insert(sub_ins)) = document.get_entity(handle) {
+                sub_inserts.push(sub_ins.block_name.trim().to_string());
+            }
+        }
+        for entity in document.entities() {
+            if entity.common().owner_handle == record.handle {
+                if let EntityType::Insert(sub_ins) = entity {
+                    sub_inserts.push(sub_ins.block_name.trim().to_string());
+                }
+            }
+        }
+
+        for sub_name in sub_inserts {
+            if sub_name.eq_ignore_ascii_case(container) {
+                return true;
+            }
+            let sub_upper = sub_name.to_ascii_uppercase();
+            if !visited.contains(&sub_upper) {
+                stack.push(sub_upper);
+            }
+        }
+    }
+
+    false
+}
+
+pub const CIRCULAR_BLOCK_DEPENDENCY_ERROR: &str =
+    "Cannot insert block: circular dependency detected.";
+
+/// Standard command-line error text when block insertion would create a circular dependency.
+pub fn circular_dependency_error(container_block: &str, inserted_block: &str) -> String {
+    format!(
+        "Cannot insert block \"{}\" into block \"{}\": circular dependency detected.",
+        inserted_block, container_block
+    )
+}
+
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use codec::entities::{
@@ -1096,5 +1177,65 @@ mod tests {
             BlockServiceError::InEditSession("A".to_string()).to_string(),
             "block \"A\" is open in the block editor; close the editor first"
         );
+    }
+
+    #[test]
+    fn locked_would_create_cycle_self_insert() {
+        let mut scene = scene();
+        define(&mut scene, "BLK_A");
+        assert!(would_create_cycle(&scene.document, "BLK_A", "BLK_A"));
+        assert!(would_create_cycle(&scene.document, "blk_a", "BLK_A"));
+        assert!(would_create_cycle(&scene.document, "BLK_A", "blk_a"));
+    }
+
+    #[test]
+    fn locked_would_create_cycle_direct_pair() {
+        let mut scene = scene();
+        let blk_a = define(&mut scene, "BLK_A");
+        define(&mut scene, "BLK_B");
+        // A contains B
+        add_insert(&mut scene, "BLK_B", Some(blk_a));
+        // Inserting A into B would create a cycle
+        assert!(would_create_cycle(&scene.document, "BLK_B", "BLK_A"));
+        // Inserting B into A is not allowed either since A already inserts B
+        assert!(!would_create_cycle(&scene.document, "BLK_A", "BLK_B"));
+    }
+
+    #[test]
+    fn locked_would_create_cycle_three_level_chain() {
+        let mut scene = scene();
+        let blk_a = define(&mut scene, "BLK_A");
+        let blk_b = define(&mut scene, "BLK_B");
+        define(&mut scene, "BLK_C");
+        // A contains B, B contains C
+        add_insert(&mut scene, "BLK_B", Some(blk_a));
+        add_insert(&mut scene, "BLK_C", Some(blk_b));
+        // Inserting A into C creates cycle C -> A -> B -> C
+        assert!(would_create_cycle(&scene.document, "BLK_C", "BLK_A"));
+        // Inserting B into C creates cycle C -> B -> C
+        assert!(would_create_cycle(&scene.document, "BLK_C", "BLK_B"));
+    }
+
+    #[test]
+    fn locked_would_create_cycle_shared_child_not_a_cycle() {
+        let mut scene = scene();
+        let blk_a = define(&mut scene, "BLK_A");
+        let blk_b = define(&mut scene, "BLK_B");
+        define(&mut scene, "BLK_SHARED");
+        // A contains SHARED, B contains SHARED. Inserting B into A is fine (diamond/DAG, not cycle).
+        add_insert(&mut scene, "BLK_SHARED", Some(blk_a));
+        add_insert(&mut scene, "BLK_SHARED", Some(blk_b));
+        assert!(!would_create_cycle(&scene.document, "BLK_A", "BLK_B"));
+        assert!(!would_create_cycle(&scene.document, "BLK_B", "BLK_A"));
+    }
+
+    #[test]
+    fn locked_would_create_cycle_case_differences() {
+        let mut scene = scene();
+        let blk_a = define(&mut scene, "BlockA");
+        let _blk_b = define(&mut scene, "BlockB");
+        add_insert(&mut scene, "BlockB", Some(blk_a));
+        assert!(would_create_cycle(&scene.document, "blockb", "BLOCKA"));
+        assert!(!would_create_cycle(&scene.document, "blocka", "BLOCKB"));
     }
 }

@@ -617,13 +617,21 @@ fn interpret(
                     if n_oct == 0.0 {
                         n_oct = 8.0;
                     }
+                    // The arc spans `n_oct` octants from `start_oct`, starting
+                    // `so`/256 of an octant into the first one and ending `eo`/256
+                    // into the last (0 = on its far boundary) (#1638).
                     let q = std::f64::consts::FRAC_PI_4;
-                    let start = start_oct * q + so * q / 256.0 * if cw { -1.0 } else { 1.0 };
-                    let total = n_oct * q;
-                    let sweep_mag = total - so * q / 256.0 - (255.0 - eo) * q / 256.0
-                        + if eo == 0.0 { 0.0 } else { 0.0 };
-                    let sweep = sweep_mag.max(0.0) * if cw { -1.0 } else { 1.0 };
-                    emit_arc(st, cur, out, radius, start, sweep);
+                    let dir = if cw { -1.0 } else { 1.0 };
+                    let start = (start_oct + dir * so / 256.0) * q;
+                    let end = if eo == 0.0 {
+                        (start_oct + dir * n_oct) * q
+                    } else {
+                        (start_oct + dir * (n_oct - 1.0 + eo / 256.0)) * q
+                    };
+                    let sweep = end - start;
+                    if sweep * dir > 0.0 {
+                        emit_arc(st, cur, out, radius, start, sweep);
+                    }
                 }
             }
             0xC => {
@@ -753,5 +761,31 @@ mod tests {
             g.advance
         );
         assert!(font_glyph(&path, 'B' as u16).is_none());
+    }
+
+    /// The `9` program of the ISOCP fonts: a fractional arc into the stem,
+    /// then octant arcs. Its ink spans 36 font units, the cap height; the
+    /// fractional arc used to end short and drop the glyph to ~0.68 (#1638).
+    #[test]
+    fn fractional_arc_spans_its_octants() {
+        const NINE: [u8; 25] = [
+            0x02, 0x08, 0x0a, 0x02, 0x01, 0x0b, 0x6c, 0x00, 0x00, 0x12, 0x62, 0xb4, 0x0a, 0x08,
+            0x04, 0x4c, 0x0a, 0x08, 0x42, 0x80, 0x02, 0x08, 0x06, 0xee, 0x00,
+        ];
+        let mut b = b"AutoCAD-86 unifont 1.0\r\n\x1a".to_vec();
+        b.extend_from_slice(&2u32.to_le_bytes());
+        let head: Vec<u8> = [b"UNI\x00".as_slice(), &[36u8, 8, 2, 0, 0, 0]].concat();
+        b.extend_from_slice(&(head.len() as u16).to_le_bytes());
+        b.extend_from_slice(&head);
+        let glyph: Vec<u8> = [b"\x00".as_slice(), &NINE].concat();
+        b.extend_from_slice(&('9' as u16).to_le_bytes());
+        b.extend_from_slice(&(glyph.len() as u16).to_le_bytes());
+        b.extend_from_slice(&glyph);
+        let path = tmp("nine.shx", &b);
+        let g = font_glyph(&path, '9' as u16).expect("glyph for 9");
+        let ys = g.strokes.iter().flatten().map(|p| p[1]);
+        let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+        // 36 font units at above = 36 → the 9-unit cap height.
+        assert!(((hi - lo) - 9.0).abs() < 0.05, "ink height {}", hi - lo);
     }
 }

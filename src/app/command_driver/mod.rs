@@ -80,7 +80,7 @@ use crate::command::{CmdResult, SelectionEntity, StepInput};
 use codec::Handle;
 use iced::Task;
 
-mod clipboard;
+pub(super) mod clipboard;
 mod constraint;
 mod dim_edit;
 mod entity_commit;
@@ -95,7 +95,8 @@ mod utilities;
 mod viewport;
 
 pub(crate) use clipboard::{
-    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference, PasteSpace,
+    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference, remap_object,
+    PasteSpace,
 };
 
 impl OpenCADStudio {
@@ -606,6 +607,9 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::AssocArray { handles, spec } => {
+                self.handle_assoc_array(handles, spec);
+            }
             CmdResult::ReplaceMany(replacements, additions) => {
                 if let Some(task) = self.handle_replace_many(replacements, additions) {
                     return task;
@@ -881,6 +885,21 @@ impl OpenCADStudio {
 
             CmdResult::ZoomToWindow { p1, p2 } => {
                 self.handle_zoom_to_window(p1, p2);
+            }
+            CmdResult::Show { p1, p2 } => {
+                let i = self.active_tab;
+                self.tabs[i].scene.remember_current_view();
+                self.tabs[i].scene.zoom_to_window(p1.as_vec3(), p2.as_vec3());
+            }
+            CmdResult::CommitAndZoom { entity, p1, p2 } => {
+                self.handle_commit_entities_and_exit(vec![entity], false, false);
+                self.handle_zoom_to_window(p1, p2);
+            }
+            CmdResult::ScaleViewports { handles, factor } => {
+                self.handle_scale_viewports(handles, factor);
+            }
+            CmdResult::TwistView(twist) => {
+                self.handle_twist_view(twist);
             }
             CmdResult::Measurement(msg) => {
                 self.handle_measurement(msg);
@@ -1294,7 +1313,9 @@ impl OpenCADStudio {
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
-        self.command_line.push_output(&msg);
+        if !msg.is_empty() {
+            self.command_line.push_output(&msg);
+        }
     }
 
     fn handle_report_measurement(&mut self, msg: String) {

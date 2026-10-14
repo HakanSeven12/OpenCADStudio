@@ -2205,7 +2205,9 @@ impl Snapper {
             let mut eval_tangent = |wire: &WireModel| {
                 let mut line_cursor = 0usize;
                 for tg in &wire.tangent_geoms {
-                    let (world_pt, d2) = match tg {
+                    // A tangent point computed from the rubber-band base.
+                    let mut exact = false;
+                    let (world_pt, mut d2) = match tg {
                         TangentGeom::Line { p1, p2 } => {
                             let (lp1, lp2) = tangent_line_endpoints(wire, *p1, *p2, &mut line_cursor);
                             let sp0 = world_to_screen(lp1, view_rot, eye, bounds);
@@ -2233,6 +2235,7 @@ impl Snapper {
                                 {
                                     let s0 = world_to_screen(t0.as_dvec3(), view_rot, eye, bounds);
                                     let s1 = world_to_screen(t1.as_dvec3(), view_rot, eye, bounds);
+                                    exact = true;
                                     if dist2(s0, cursor_screen) <= dist2(s1, cursor_screen) {
                                         t0
                                     } else {
@@ -2299,6 +2302,7 @@ impl Snapper {
                                     })
                                     .unwrap_or_else(|| DVec3::from_array(*center))
                             };
+                            exact = candidate.is_some();
                             let world = candidate.unwrap_or_else(fallback);
                             let edge_d2 = wire
                                 .points
@@ -2348,6 +2352,7 @@ impl Snapper {
                                     })
                                     .unwrap_or(cv)
                             };
+                            exact = candidate.is_some();
                             let world = candidate.unwrap_or_else(fallback);
                             let edge_d2 = wire
                                 .points
@@ -2427,6 +2432,7 @@ impl Snapper {
                                         }
                                     };
 
+                                exact = candidate.is_some();
                                 let world = candidate.unwrap_or(fallback);
                                 let edge_d2 = if wire.points.len() >= 2 {
                                     wire.points
@@ -2454,11 +2460,17 @@ impl Snapper {
                             }
                         }
                     };
-                    let (tier, sub) = (
-                        snap_tier(SnapType::Tangent),
-                        snap_priority(SnapType::Tangent),
-                    );
                     let screen_pt = world_to_screen(world_pt, view_rot, eye, bounds);
+                    // Near the computed tangent point it is a point snap like
+                    // the others, so the rim-hover Center no longer masks it.
+                    let point_d2 = dist2(screen_pt, cursor_screen);
+                    let tier = if exact && point_d2 < radius2 {
+                        d2 = point_d2;
+                        0
+                    } else {
+                        snap_tier(SnapType::Tangent)
+                    };
+                    let sub = snap_priority(SnapType::Tangent);
                     if d2 < radius2
                         && in_bounds(screen_pt)
                         && snap_better(tier, d2, sub, (best_rank, best_d2, best_sub))
@@ -5490,6 +5502,57 @@ mod ext_tests {
         // Ellipse arc spanning 4.0..5.0 (third quadrant, far away from tangents)
         let empty_pts = planar_ellipse_tangent_points(from, center, major, normal, ratio, 4.0, 5.0);
         assert!(empty_pts.is_empty());
+    }
+
+    #[test]
+    fn tangent_point_beats_rim_center() {
+        // TAN and CEN on, the cursor on the circle at the tangent point seen
+        // from the base: Tangent wins, not the rim-hover Center (#1768).
+        let mut snapper = Snapper::default();
+        snapper.snap_enabled = true;
+        snapper.enabled = [SnapType::Tangent, SnapType::Center].into_iter().collect();
+        snapper.from_point = Some(DVec3::new(100.0, 0.0, 0.0));
+        let points = (0..=64)
+            .map(|i| {
+                let a = i as f32 / 64.0 * std::f32::consts::TAU;
+                [50.0 * a.cos(), 50.0 * a.sin(), 0.0]
+            })
+            .collect();
+        let circle = WireModel {
+            points,
+            aabb: [-50.0, -50.0, 50.0, 50.0],
+            snap_pts: vec![(DVec3::ZERO, SnapHint::Center)],
+            tangent_geoms: vec![TangentGeom::Circle {
+                center: [0.0, 0.0, 0.0],
+                radius: 50.0,
+            }],
+            ..Default::default()
+        };
+        let wires = vec![circle];
+        let view_rot = Mat4::from_scale(Vec3::new(0.005, 0.005, 1.0));
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+        let tangent = DVec3::new(25.0, 50.0 * 0.75f64.sqrt(), 0.0);
+        let cursor = world_to_screen(tangent, view_rot, DVec3::ZERO, bounds);
+        let snap = snapper
+            .snap(
+                tangent,
+                cursor,
+                wires.as_slice(),
+                view_rot,
+                DVec3::ZERO,
+                bounds,
+                Vec3::ZERO,
+                (Vec3::X, Vec3::Y, Vec3::Z),
+                None,
+            )
+            .expect("a snap on the rim");
+        assert_eq!(snap.snap_type, SnapType::Tangent);
+        assert!((snap.world - tangent).length() < 1e-3);
     }
 
     #[test]

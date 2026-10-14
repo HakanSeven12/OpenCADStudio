@@ -636,6 +636,13 @@ mod w2d {
                     let size = r.i32()?;
                     r.i = r.i.checked_add(size.max(0) as usize)?;
                 }
+                b'O' => {
+                    // Set origin: the absolute point later relative
+                    // coordinates continue from (plot-optimized streams
+                    // start each drawing with it).
+                    r.i += 1;
+                    at = [r.i32()? as f64, r.i32()? as f64];
+                }
                 b'V' => {
                     visible = true;
                     r.i += 1;

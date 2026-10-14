@@ -206,6 +206,8 @@ pub(super) struct DocumentTab {
     /// Index of the field that TAB has focused (the one keystrokes edit).
     pub(super) dyn_active: usize,
     pub(super) history: HistoryState,
+    /// Drawing history is suspended while `history` belongs to BEDIT.
+    pub(super) block_edit_history: Option<super::block_editor::BlockEditHistory>,
     pub(super) active_layer: String,
     /// Block references whose properties panel shows per-axis Scale X/Y/Z even
     /// though the three factors are currently equal — the user unchecked the
@@ -228,6 +230,10 @@ pub(super) struct DocumentTab {
     pub(super) paper_bg_color: Option<[f32; 4]>,
     /// Active REFEDIT session, if any.
     pub(super) refedit_session: Option<RefEditSession>,
+    /// Sessions closed by REFCLOSE, reopened by undoing it.
+    pub(super) refedit_closed: Vec<RefEditSession>,
+    /// Sessions ended by undoing REFEDIT, reopened by redoing it.
+    pub(super) refedit_reopen: Vec<RefEditSession>,
     /// COUNT mode, while it is on.
     pub(crate) count: Option<crate::ui::window::count_palette::CountMode>,
     /// Open BEDIT block tabs. Definitions are edited live; each tab owns its
@@ -655,6 +661,7 @@ impl DocumentTab {
             dyn_ref_screen: None,
             dyn_active: 0,
             history: HistoryState::default(),
+            block_edit_history: None,
             active_layer: "0".to_string(),
             props_asym_scale: std::collections::HashSet::new(),
             graph: Default::default(),
@@ -664,6 +671,8 @@ impl DocumentTab {
             bg_color: None,
             paper_bg_color: None,
             refedit_session: None,
+            refedit_closed: Vec::new(),
+            refedit_reopen: Vec::new(),
             count: None,
             block_edits: Vec::new(),
             active_block_edit: None,

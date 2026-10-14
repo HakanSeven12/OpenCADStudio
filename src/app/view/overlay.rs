@@ -928,6 +928,7 @@ fn position_canvas_overlay_clamped<'a>(
         bottom_inset: bottom_inset.max(0.0),
         gap: 0.0,
         offset,
+        passive: false,
     })
 }
 
@@ -944,6 +945,48 @@ pub(super) fn position_canvas_overlay_near_cursor<'a>(
         bottom_inset: bottom_inset.max(0.0),
         gap: 12.0,
         offset: Vector::ZERO,
+        passive: false,
+    })
+}
+
+/// Measured, wrapping text in the existing clamped panel layout. Input goes
+/// straight through, including clicks directly on the result text.
+pub(super) fn measurement_overlay<'a>(
+    anchor: iced::Point,
+    bottom_inset: f32,
+    value: String,
+) -> Element<'a, Message> {
+    // Inquiry commands return a compact, comma-separated summary for the
+    // command line. Show its fields on separate lines in the transient HUD,
+    // without altering the command-line history or the measured precision.
+    let display_value = if value.contains("\n") {
+        value.replace(",  ", "\n").replace(", ", "\n")
+    } else {
+        value
+    };
+    let panel = container(text(display_value).size(12))
+        .padding([6, 8])
+        .width(Length::Fit.max(300.0))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
+                text_color: Some(palette.background.weak.text),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+    Element::new(ClampedPin {
+        content: panel.into(),
+        anchor,
+        bottom_inset: bottom_inset.max(0.0),
+        gap: 18.0,
+        offset: Vector::ZERO,
+        passive: true,
     })
 }
 
@@ -954,6 +997,8 @@ struct ClampedPin<'a> {
     gap: f32,
     /// Preferred placement shift from the anchor (applied before fitting).
     offset: Vector,
+    /// Readouts prefer above the cursor and never participate in input.
+    passive: bool,
 }
 
 impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
@@ -1008,7 +1053,9 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
         let max_y = (max.height - bottom_inset - MARGIN - content.height).max(MARGIN);
         let below = self.anchor.y + self.gap + self.offset.y;
         let above = self.anchor.y - self.gap - content.height;
-        let y = if below <= max_y {
+        let y = if self.passive && above >= MARGIN && above <= max_y {
+            above
+        } else if below <= max_y {
             below.max(MARGIN)
         } else if above >= MARGIN {
             above
@@ -1016,6 +1063,9 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
             max_y
         };
 
+        // A cursor over the command-line inset can put even the "above"
+        // candidate below the safe area. Keep this passive readout inside it.
+        let y = if self.passive { y.min(max_y) } else { y };
         node = node.move_to(iced::Point::new(x, y));
         let size = limits.resolve(Length::Fill, Length::Fill, node.size());
         layout::Node::with_children(size, vec![node])
@@ -1046,6 +1096,9 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        if self.passive {
+            return;
+        }
         self.content.as_widget_mut().update(
             tree,
             event,
@@ -1065,6 +1118,9 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
+        if self.passive {
+            return mouse::Interaction::None;
+        }
         self.content.as_widget().mouse_interaction(
             tree,
             layout.children().next().unwrap(),
@@ -1871,4 +1927,66 @@ fn qselect_content<'a>(
         });
 
     panel.into()
+}
+
+#[cfg(test)]
+mod measurement_tests {
+    use super::*;
+    #[test]
+    fn measurement_overlay_passes_all_clicks_on_text() {
+        let underlay = mouse_area(Space::new().width(Fill).height(Fill))
+            .on_press(Message::ViewportLeftPress)
+            .on_right_press(Message::ViewportRightPress)
+            .on_middle_press(Message::ViewportMiddlePress);
+        let mut ui = iced_test::simulator(stack![
+            underlay,
+            measurement_overlay(
+                iced::Point::new(400.0, 300.0),
+                60.0,
+                "measurement-result".into()
+            )
+        ]);
+        let center = ui
+            .find("measurement-result")
+            .unwrap()
+            .visible_bounds()
+            .unwrap()
+            .center();
+        ui.point_at(center);
+        for button in [
+            iced::mouse::Button::Left,
+            iced::mouse::Button::Right,
+            iced::mouse::Button::Middle,
+        ] {
+            ui.simulate([Event::Mouse(iced::mouse::Event::ButtonPressed(button))]);
+            ui.simulate([Event::Mouse(iced::mouse::Event::ButtonReleased(button))]);
+        }
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::ViewportLeftPress)));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::ViewportRightPress)));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::ViewportMiddlePress)));
+    }
+    #[test]
+    fn measurement_overlay_stays_inside_canvas_above_command_line() {
+        for anchor in [iced::Point::new(5.0, 5.0), iced::Point::new(790.0, 595.0)] {
+            let mut ui = iced_test::simulator::Simulator::with_size(
+                Default::default(),
+                iced::Size::new(800.0, 600.0),
+                measurement_overlay(anchor, 90.0, "measurement-result".into()),
+            );
+            let bounds = ui
+                .find("measurement-result")
+                .unwrap()
+                .visible_bounds()
+                .unwrap();
+            assert!(bounds.x >= 4.0 && bounds.y >= 4.0);
+            assert!(bounds.x + bounds.width <= 796.0 && bounds.y + bounds.height <= 506.0);
+        }
+    }
 }

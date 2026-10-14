@@ -41,6 +41,17 @@ impl CadCommand for DistCommand {
         }
     }
 
+    fn has_measurement_readout(&self) -> bool {
+        true
+    }
+
+    fn measurement_readout(&self, cursor: DVec3) -> Option<String> {
+        let distance = self.plane.vector_to_local(cursor - self.first?).length();
+        distance
+            .is_finite()
+            .then(|| crate::tr!("measurement", "distance", value = format_length(distance)))
+    }
+
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if let Some(p1) = self.first {
             let delta = self.plane.vector_to_local(pt - p1);
@@ -250,5 +261,33 @@ mod tests {
             }
             _ => panic!("Expected CmdResult::Measurement"),
         }
+    }
+}
+
+#[cfg(test)]
+mod measurement_tests {
+    use super::*;
+    #[test]
+    fn live_distance_keeps_f64_and_unit_settings() {
+        let previous = unit_context();
+        let mut ctx = previous;
+        ctx.lunits = 2;
+        ctx.luprec = 4;
+        crate::entities::common::set_unit_context(ctx);
+        let mut command = DistCommand::new();
+        let first = DVec3::new(500000.001, 600000.002, 0.0);
+        assert!(command.measurement_readout(first).is_none());
+        command.on_point(first);
+        assert!(command
+            .measurement_readout(first + DVec3::X * 0.001)
+            .unwrap()
+            .contains("0.0010"));
+        ctx.lunits = 4;
+        crate::entities::common::set_unit_context(ctx);
+        assert!(command
+            .measurement_readout(first + DVec3::X * 18.0)
+            .unwrap()
+            .contains("1'-6\""));
+        crate::entities::common::set_unit_context(previous);
     }
 }

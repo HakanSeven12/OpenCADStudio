@@ -6272,3 +6272,20 @@ view-background =
     .help = Adlandırılmış görünüm geri yüklendiğinde gösterilecek arka planı ayarlar.
     .image-files = Görüntü dosyaları
     .select-image = Arka Plan Görüntüsü Seç
+
+# Transient geometry inquiry readouts.
+measurement =
+    .distance = Distance = { $value }
+    .angle-start = { $command }  Specify vertex point or [Lines]:
+    .first-line = { $command }  Select first line or [Points] (smaller angle):
+    .second-line = { $command }  Select second line (smaller angle):
+    .lines = Lines
+    .points = Points
+    .invalid-radius = Select a circle or arc with a finite, positive radius.
+    .invalid-line = Select a nonzero, finite line.
+    .different-line = Select a different line.
+    .invalid-point = Specify a point with finite coordinates.
+    .degenerate-ray = The ray endpoint must differ from the angle vertex.
+    .area-preview =
+        { $current }
+        Preview total area = { $total }

@@ -61,6 +61,7 @@ impl OpenCADStudio {
     /// (the block palette), so they don't inherit the previous command's last
     /// point, snaps or dynamic-input values. (#1525)
     pub(in crate::app) fn reset_command_start_state(&mut self, i: usize) {
+        self.tabs[i].measurement.clear();
         // A command parked behind a transparent zoom / MTP goes with it.
         self.tabs[i].suspended_cmd = None;
         self.tabs[i].transparent_resume = false;

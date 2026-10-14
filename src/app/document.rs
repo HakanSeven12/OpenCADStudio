@@ -151,6 +151,7 @@ pub(super) struct DocumentTab {
     pub(super) properties: PropertiesPanel,
     pub(super) layers: LayerPanel,
     pub(super) active_cmd: Option<Box<dyn CadCommand>>,
+    pub(super) measurement: super::measurement::MeasurementDisplay,
     /// Remaining command tokens queued behind a PAUSE (or `\`) awaiting user interaction.
     pub(super) pending_pause_tokens: Option<Vec<String>>,
     /// The selection set the most recent command worked on, captured when a
@@ -628,6 +629,7 @@ impl DocumentTab {
             properties: PropertiesPanel::empty(),
             layers: LayerPanel::default(),
             active_cmd: None,
+            measurement: super::measurement::MeasurementDisplay::default(),
             pending_pause_tokens: None,
             last_cmd: None,
             last_draw_anchor: None,

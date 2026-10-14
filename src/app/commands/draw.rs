@@ -598,9 +598,13 @@ impl OpenCADStudio {
                 }
             }
 
-            "MEASUREGEOM" => {
+            "MEASUREGEOM" | "MEASURERADIUS" | "MEASUREANGLE" => {
                 use crate::modules::draw::inquiry::measuregeom::MeasureGeomCommand;
-                let new_cmd = MeasureGeomCommand::new();
+                let new_cmd = match cmd {
+                    "MEASURERADIUS" => MeasureGeomCommand::radius(),
+                    "MEASUREANGLE" => MeasureGeomCommand::angle(),
+                    _ => MeasureGeomCommand::new(),
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

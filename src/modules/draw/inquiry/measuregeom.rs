@@ -44,11 +44,21 @@ enum Mode {
     Area,
     Angle,
     Radius,
+    AngleLines,
 }
 
 // ── Command implementation ──────────────────────────────────────────────────
 
+pub const RADIUS_ICON: IconKind = IconKind::Svg(include_bytes!(
+    "../../../../assets/icons/measure-radius.svg"
+));
+pub const ANGLE_ICON: IconKind =
+    IconKind::Svg(include_bytes!("../../../../assets/icons/measure-angle.svg"));
+
 pub struct MeasureGeomCommand {
+    name: &'static str,
+    hovered: Option<(Handle, EntityType)>,
+    first_line: Option<(Handle, DVec3)>,
     mode: Mode,
     /// Picked points for the active point-pick mode.
     points: Vec<DVec3>,
@@ -60,11 +70,80 @@ pub struct MeasureGeomCommand {
 impl MeasureGeomCommand {
     pub fn new() -> Self {
         Self {
+            name: "MEASUREGEOM",
+            hovered: None,
+            first_line: None,
             mode: Mode::Choose,
             points: vec![],
             picked: None,
             plane: WorkingPlane::default(),
         }
+    }
+
+    pub fn radius() -> Self {
+        Self {
+            name: "MEASURERADIUS",
+            mode: Mode::Radius,
+            ..Self::new()
+        }
+    }
+
+    pub fn angle() -> Self {
+        Self {
+            name: "MEASUREANGLE",
+            mode: Mode::Angle,
+            ..Self::new()
+        }
+    }
+
+    fn radius_msg(radius: f64) -> String {
+        t!(
+            "Radius = %{radius},  Diameter = %{diameter}",
+            radius = crate::entities::common::format_length(radius),
+            diameter = crate::entities::common::format_length(radius * 2.0)
+        )
+        .into_owned()
+    }
+
+    // Normalize only after rescaling, retaining f64 precision without an
+    // arbitrary drawing-unit tolerance or overflowing on long vectors.
+    fn direction(vector: DVec3) -> Option<DVec3> {
+        if !vector.is_finite() {
+            return None;
+        }
+        let scale = vector.abs().max_element();
+        if scale == 0.0 {
+            return None;
+        }
+        let vector = vector / scale;
+        Some(vector / vector.length())
+    }
+
+    fn angle_degrees(a: DVec3, b: DVec3) -> Option<f64> {
+        let a = Self::direction(a)?;
+        let b = Self::direction(b)?;
+        Some(a.cross(b).length().atan2(a.dot(b)).to_degrees())
+    }
+
+    fn line_direction(entity: &EntityType) -> Option<DVec3> {
+        let EntityType::Line(line) = entity else {
+            return None;
+        };
+        Self::direction(
+            DVec3::new(line.end.x, line.end.y, line.end.z)
+                - DVec3::new(line.start.x, line.start.y, line.start.z),
+        )
+    }
+
+    // Unoriented lines: the smaller angle, independent of endpoint order.
+    fn line_angle(a: DVec3, b: DVec3) -> Option<f64> {
+        Self::angle_degrees(a, b).map(|angle| angle.min(180.0 - angle))
+    }
+
+    fn angle_value_msg(angle: f64) -> String {
+        let aprec = crate::entities::common::unit_context().auprec.max(0) as usize;
+        let angle = crate::entities::common::without_negative_zero(format!("{angle:.aprec$}"));
+        t!("Angle = %{angle}°", angle = angle).into_owned()
     }
 
     /// Build a cyan preview wire connecting the picked points and the cursor.
@@ -110,11 +189,12 @@ impl MeasureGeomCommand {
 
     /// Extract (radius) from a Circle or Arc; `None` for anything else.
     fn radius_of(entity: &EntityType) -> Option<f64> {
-        match entity {
-            EntityType::Circle(c) => Some(c.radius),
-            EntityType::Arc(a) => Some(a.radius),
-            _ => None,
-        }
+        let radius = match entity {
+            EntityType::Circle(circle) => circle.radius,
+            EntityType::Arc(arc) => arc.radius,
+            _ => return None,
+        };
+        (radius.is_finite() && radius > 0.0 && (radius * 2.0).is_finite()).then_some(radius)
     }
 
     /// DISTANCE readout for the two collected points.
@@ -172,27 +252,14 @@ impl MeasureGeomCommand {
         .into_owned()
     }
 
-    /// ANGLE readout: angle at `vertex` between the rays to `a` and `b`.
-    fn angle_msg(vertex: DVec3, a: DVec3, b: DVec3) -> String {
-        let va = a - vertex;
-        let vb = b - vertex;
-        let la = va.length();
-        let lb = vb.length();
-        let aprec = crate::entities::common::unit_context().auprec.max(0) as usize;
-        if la == 0.0 || lb == 0.0 {
-            let zero = crate::entities::common::without_negative_zero(format!("{:.aprec$}", 0.0));
-            return t!("Angle = %{angle}° (degenerate rays)", angle = zero).into_owned();
-        }
-        let cos = (va.dot(vb) / (la * lb)).clamp(-1.0, 1.0);
-        let angle = cos.acos().to_degrees();
-        let angle_s = crate::entities::common::without_negative_zero(format!("{angle:.aprec$}"));
-        t!("Angle = %{angle}°", angle = angle_s).into_owned()
+    fn angle_msg(vertex: DVec3, a: DVec3, b: DVec3) -> Option<String> {
+        Self::angle_degrees(a - vertex, b - vertex).map(Self::angle_value_msg)
     }
 }
 
 impl CadCommand for MeasureGeomCommand {
     fn name(&self) -> &'static str {
-        "MEASUREGEOM"
+        self.name
     }
 
     fn prompt(&self) -> String {
@@ -220,12 +287,20 @@ impl CadCommand for MeasureGeomCommand {
                 }
             }
             Mode::Angle => match self.points.len() {
-                0 => t!("MEASUREGEOM  Specify vertex point:").into_owned(),
+                0 => return crate::tr!("measurement", "angle-start", command = self.name),
                 1 => t!("MEASUREGEOM  Specify first ray point:").into_owned(),
                 _ => t!("MEASUREGEOM  Specify second ray point:").into_owned(),
             },
             Mode::Radius => t!("MEASUREGEOM  Select arc or circle:").into_owned(),
+            Mode::AngleLines => {
+                return if self.first_line.is_none() {
+                    crate::tr!("measurement", "first-line", command = self.name)
+                } else {
+                    crate::tr!("measurement", "second-line", command = self.name)
+                }
+            }
         }
+        .replace("MEASUREGEOM", self.name)
     }
 
     fn set_working_plane(&mut self, plane: WorkingPlane) {
@@ -233,14 +308,64 @@ impl CadCommand for MeasureGeomCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        // Only the opening mode-keyword step reads a typed token.
-        self.mode == Mode::Choose
+        self.mode == Mode::Choose || self.point_step_accepts_keywords()
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        (self.mode == Mode::Angle && self.points.is_empty())
+            || (self.mode == Mode::AngleLines && self.first_line.is_none())
+    }
+
+    fn has_measurement_readout(&self) -> bool {
+        true
+    }
+
+    fn measurement_readout(&self, cursor: DVec3) -> Option<String> {
+        match self.mode {
+            Mode::Distance if !self.points.is_empty() && cursor.is_finite() => Some(crate::tr!(
+                "measurement",
+                "distance",
+                value = crate::entities::common::format_length((cursor - self.points[0]).length())
+            )),
+            Mode::Area if self.points.len() >= 2 && cursor.is_finite() => {
+                let mut points = self.points.clone();
+                points.push(cursor);
+                Some(Self::area_msg(self.plane, &points))
+            }
+            Mode::Angle if self.points.len() >= 2 => {
+                Self::angle_msg(self.points[0], self.points[1], cursor)
+            }
+            Mode::Radius => self
+                .hovered
+                .as_ref()
+                .and_then(|(_, e)| Self::radius_of(e))
+                .map(Self::radius_msg),
+            Mode::AngleLines => {
+                let (first_handle, first) = self.first_line?;
+                let (handle, entity) = self.hovered.as_ref()?;
+                if first_handle == *handle {
+                    return None;
+                }
+                Self::line_angle(first, Self::line_direction(entity)?).map(Self::angle_value_msg)
+            }
+            _ => None,
+        }
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         if self.mode != Mode::Choose {
-            return Vec::new();
+            return match self.mode {
+                Mode::Angle if self.points.is_empty() => vec![CmdOption {
+                    label: crate::tr!("measurement", "lines"),
+                    keyword: "LINES".into(),
+                }],
+                Mode::AngleLines if self.first_line.is_none() => vec![CmdOption {
+                    label: crate::tr!("measurement", "points"),
+                    keyword: "POINTS".into(),
+                }],
+                _ => Vec::new(),
+            };
         }
         vec![
             CmdOption::new("Distance", "D"),
@@ -251,6 +376,22 @@ impl CadCommand for MeasureGeomCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let input = text.trim().to_ascii_uppercase();
+        if self.mode == Mode::Angle
+            && self.points.is_empty()
+            && matches!(input.as_str(), "L" | "LINES")
+        {
+            self.mode = Mode::AngleLines;
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.mode == Mode::AngleLines
+            && self.first_line.is_none()
+            && matches!(input.as_str(), "P" | "POINTS")
+        {
+            self.mode = Mode::Angle;
+            self.hovered = None;
+            return Some(CmdResult::NeedPoint);
+        }
         if self.mode != Mode::Choose {
             return None;
         }
@@ -266,7 +407,7 @@ impl CadCommand for MeasureGeomCommand {
     }
 
     fn needs_entity_pick(&self) -> bool {
-        self.mode == Mode::Radius
+        matches!(self.mode, Mode::Radius | Mode::AngleLines)
     }
 
     fn inject_before_entity_pick(&self) -> bool {
@@ -277,30 +418,65 @@ impl CadCommand for MeasureGeomCommand {
         self.picked = Some(entity);
     }
 
-    fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
+    fn wants_hover_entity(&self, handle: Handle) -> bool {
+        self.needs_entity_pick()
+            && !handle.is_null()
+            && self.hovered.as_ref().map(|(h, _)| *h) != Some(handle)
+    }
+
+    fn inject_hover_entity(&mut self, handle: Handle, entity: EntityType) {
+        self.hovered = Some((handle, entity));
+    }
+
+    fn on_hover_entity(&mut self, handle: Handle, _point: DVec3) -> Vec<WireModel> {
+        if handle.is_null() || self.hovered.as_ref().map(|(h, _)| *h) != Some(handle) {
+            self.hovered = None;
+        }
+        Vec::new()
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, _point: DVec3) -> CmdResult {
+        // Never reuse an entity injected for a previous pick.
+        let picked = self.picked.take();
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
-        match self.picked.as_ref().and_then(Self::radius_of) {
-            Some(radius) => {
-                let diameter = radius * 2.0;
-                let radius_s = crate::entities::common::format_length(radius);
-                let diameter_s = crate::entities::common::format_length(diameter);
-                CmdResult::Measurement(
-                    t!(
-                        "Radius = %{radius},  Diameter = %{diameter}",
-                        radius = radius_s,
-                        diameter = diameter_s
-                    )
-                    .into_owned(),
-                )
+        match self.mode {
+            Mode::Radius => match picked.as_ref().and_then(Self::radius_of) {
+                Some(radius) => CmdResult::Measurement(Self::radius_msg(radius)),
+                None => CmdResult::ReportError(crate::tr!("measurement", "invalid-radius")),
+            },
+            Mode::AngleLines => {
+                let Some(direction) = picked.as_ref().and_then(Self::line_direction) else {
+                    return CmdResult::ReportError(crate::tr!("measurement", "invalid-line"));
+                };
+                if let Some((first_handle, first)) = self.first_line {
+                    if first_handle == handle {
+                        return CmdResult::ReportError(crate::tr!("measurement", "different-line"));
+                    }
+                    match Self::line_angle(first, direction) {
+                        Some(angle) => CmdResult::Measurement(Self::angle_value_msg(angle)),
+                        None => CmdResult::ReportError(crate::tr!("measurement", "invalid-line")),
+                    }
+                } else {
+                    self.first_line = Some((handle, direction));
+                    CmdResult::NeedPoint
+                }
             }
-            // Picked something that is not a circle or arc — keep prompting.
-            None => CmdResult::NeedPoint,
+            _ => CmdResult::NeedPoint,
         }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if matches!(self.mode, Mode::Distance | Mode::Angle | Mode::Area) && !pt.is_finite() {
+            return CmdResult::ReportError(crate::tr!("measurement", "invalid-point"));
+        }
+        if self.mode == Mode::Angle
+            && !self.points.is_empty()
+            && Self::direction(pt - self.points[0]).is_none()
+        {
+            return CmdResult::ReportError(crate::tr!("measurement", "degenerate-ray"));
+        }
         match self.mode {
             Mode::Distance => {
                 self.points.push(pt);
@@ -317,11 +493,13 @@ impl CadCommand for MeasureGeomCommand {
             Mode::Angle => {
                 self.points.push(pt);
                 if self.points.len() == 3 {
-                    CmdResult::Measurement(Self::angle_msg(
-                        self.points[0],
-                        self.points[1],
-                        self.points[2],
-                    ))
+                    match Self::angle_msg(self.points[0], self.points[1], self.points[2]) {
+                        Some(text) => CmdResult::Measurement(text),
+                        None => {
+                            self.points.pop();
+                            CmdResult::ReportError(crate::tr!("measurement", "degenerate-ray"))
+                        }
+                    }
                 } else {
                     CmdResult::NeedPoint
                 }
@@ -360,6 +538,9 @@ impl CadCommand for MeasureGeomCommand {
                     return None;
                 }
                 let mut pts: Vec<[f32; 3]> = self.points.iter().map(|p| f(*p)).collect();
+                if self.mode == Mode::Angle && self.points.len() >= 2 {
+                    pts = vec![f(self.points[1]), f(self.points[0])];
+                }
                 pts.push(f(pt));
                 Some(Self::preview_wire("measuregeom_preview", pts))
             }
@@ -379,5 +560,241 @@ impl CadCommand for MeasureGeomCommand {
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["MEASUREGEOM", "MEA"]
+    names: &["MEASUREGEOM", "MEA", "MEASURERADIUS", "MEASUREANGLE"]
 }); // MeasureGeomCommand
+
+#[cfg(test)]
+mod measurement_tests {
+    use super::*;
+    use crate::entities::common::{set_unit_context, unit_context};
+    use codec::{
+        entities::{Arc, Circle, Line},
+        types::Vector3,
+    };
+
+    fn units() {
+        let mut context = unit_context();
+        context.lunits = 2;
+        context.luprec = 4;
+        context.auprec = 2;
+        set_unit_context(context);
+    }
+    fn result(result: CmdResult) -> String {
+        let CmdResult::Measurement(text) = result else {
+            panic!("expected measurement");
+        };
+        text
+    }
+    fn pick(command: &mut MeasureGeomCommand, entity: EntityType, id: u64) -> CmdResult {
+        command.inject_picked_entity(entity);
+        command.on_entity_pick(Handle::new(id), DVec3::ZERO)
+    }
+    fn line(end: Vector3) -> EntityType {
+        EntityType::Line(Line::from_points(Vector3::ZERO, end))
+    }
+
+    #[test]
+    fn radius_circle_and_arc_respect_length_precision() {
+        units();
+        for entity in [
+            EntityType::Circle(Circle::from_coords(500000.0, 100000.0, 0.0, 2.34567)),
+            EntityType::Arc(Arc::from_center_radius_angles(
+                Vector3::ZERO,
+                2.34567,
+                0.0,
+                std::f64::consts::FRAC_PI_2,
+            )),
+        ] {
+            let text = result(pick(&mut MeasureGeomCommand::radius(), entity, 1));
+            assert!(text.contains("2.3457"), "{text}");
+            assert!(text.contains("4.6913"), "{text}");
+        }
+    }
+
+    #[test]
+    fn radius_rejects_invalid_entities_and_stale_injection() {
+        let mut command = MeasureGeomCommand::radius();
+        assert!(matches!(
+            pick(&mut command, line(Vector3::UNIT_X), 1),
+            CmdResult::ReportError(_)
+        ));
+        for radius in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                pick(
+                    &mut command,
+                    EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, radius)),
+                    1
+                ),
+                CmdResult::ReportError(_)
+            ));
+        }
+        command.inject_picked_entity(EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 2.0)));
+        assert!(matches!(
+            command.on_entity_pick(Handle::NULL, DVec3::ZERO),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_entity_pick(Handle::new(2), DVec3::ZERO),
+            CmdResult::ReportError(_)
+        ));
+    }
+
+    #[test]
+    fn known_angles_extreme_scales_and_degenerate_rays() {
+        for degrees in [0.0_f64, 30.0, 45.0, 90.0, 135.0, 180.0] {
+            let radians = degrees.to_radians();
+            let ray = DVec3::new(radians.cos(), radians.sin(), 0.0);
+            for scale in [1e-200, 1.0, 1e200] {
+                let actual =
+                    MeasureGeomCommand::angle_degrees(DVec3::X * scale, ray * scale).unwrap();
+                assert!((actual - degrees).abs() < 1e-10);
+            }
+        }
+        assert_eq!(
+            MeasureGeomCommand::angle_degrees(DVec3::X, DVec3::Z),
+            Some(90.0)
+        );
+        assert_eq!(
+            MeasureGeomCommand::angle_degrees(DVec3::ZERO, DVec3::X),
+            None
+        );
+        assert_eq!(
+            MeasureGeomCommand::angle_degrees(DVec3::NAN, DVec3::X),
+            None
+        );
+    }
+
+    #[test]
+    fn invalid_angle_points_do_not_advance_and_survey_precision_is_retained() {
+        units();
+        let mut command = MeasureGeomCommand::angle();
+        let vertex = DVec3::new(500000.001, 600000.002, 100.0);
+        assert!(matches!(
+            command.on_point(DVec3::NAN),
+            CmdResult::ReportError(_)
+        ));
+        assert!(command.points.is_empty());
+        command.on_point(vertex);
+        assert!(matches!(
+            command.on_point(vertex),
+            CmdResult::ReportError(_)
+        ));
+        assert_eq!(command.points.len(), 1);
+        command.on_point(vertex + DVec3::X * 0.001);
+        assert!(matches!(
+            command.on_point(vertex),
+            CmdResult::ReportError(_)
+        ));
+        assert_eq!(command.points.len(), 2);
+        assert!(result(command.on_point(vertex + DVec3::Y * 0.001)).contains("90.00°"));
+    }
+
+    #[test]
+    fn angle_preview_two_rays_and_live_value() {
+        units();
+        let mut command = MeasureGeomCommand::angle();
+        command.on_point(DVec3::ZERO);
+        assert!(command.measurement_readout(DVec3::Y).is_none());
+        command.on_point(DVec3::X);
+        assert!(command
+            .measurement_readout(DVec3::Y)
+            .unwrap()
+            .contains("90.00°"));
+        assert!(command
+            .measurement_readout(DVec3::X + DVec3::Y)
+            .unwrap()
+            .contains("45.00°"));
+        assert_eq!(
+            command.on_mouse_move(DVec3::Y).unwrap().points,
+            vec![[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+    }
+
+    #[test]
+    fn two_lines_smaller_angle_and_invalid_selections() {
+        units();
+        let mut command = MeasureGeomCommand::angle();
+        command.on_text_input("LINES");
+        assert!(command.needs_entity_pick());
+        assert!(matches!(
+            pick(&mut command, line(Vector3::ZERO), 1),
+            CmdResult::ReportError(_)
+        ));
+        assert!(matches!(
+            pick(&mut command, line(Vector3::UNIT_X), 1),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            pick(&mut command, line(Vector3::UNIT_X), 1),
+            CmdResult::ReportError(_)
+        ));
+        assert!(matches!(
+            pick(
+                &mut command,
+                EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 1.0)),
+                2
+            ),
+            CmdResult::ReportError(_)
+        ));
+        assert!(
+            result(pick(&mut command, line(Vector3::new(-1.0, -1.0, 0.0)), 2)).contains("45.00°")
+        );
+        assert_eq!(
+            MeasureGeomCommand::line_angle(DVec3::X, -DVec3::X),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn hover_clears_on_miss_without_completing_measurement() {
+        units();
+        let mut command = MeasureGeomCommand::radius();
+        let handle = Handle::new(5);
+        assert!(command.wants_hover_entity(handle));
+        command.inject_hover_entity(
+            handle,
+            EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 2.0)),
+        );
+        command.on_hover_entity(handle, DVec3::ZERO);
+        assert!(command
+            .measurement_readout(DVec3::ZERO)
+            .unwrap()
+            .contains("2.0000"));
+        assert!(!command.wants_hover_entity(handle));
+        assert!(command.picked.is_none());
+        command.on_hover_entity(Handle::NULL, DVec3::ZERO);
+        assert!(command.measurement_readout(DVec3::ZERO).is_none());
+        command.inject_hover_entity(handle, line(Vector3::UNIT_X));
+        assert!(command.measurement_readout(DVec3::ZERO).is_none());
+    }
+
+    #[test]
+    fn measuregeom_all_four_modes_remain_available() {
+        units();
+        assert_eq!(MeasureGeomCommand::new().options().len(), 4);
+        let mut command = MeasureGeomCommand::new();
+        command.on_text_input("D");
+        command.on_point(DVec3::ZERO);
+        assert!(result(command.on_point(DVec3::new(3.0, 4.0, 0.0))).contains("5.0000"));
+        let mut command = MeasureGeomCommand::new();
+        command.on_text_input("AR");
+        for p in [DVec3::ZERO, DVec3::X * 4.0, DVec3::Y * 3.0] {
+            command.on_point(p);
+        }
+        let text = result(command.on_enter());
+        assert!(text.contains("6.0000") && text.contains("12.0000"));
+        let mut command = MeasureGeomCommand::new();
+        command.on_text_input("A");
+        command.on_point(DVec3::ZERO);
+        command.on_point(DVec3::X);
+        assert!(result(command.on_point(DVec3::Y)).contains("90.00°"));
+        let mut command = MeasureGeomCommand::new();
+        command.on_text_input("R");
+        assert!(result(pick(
+            &mut command,
+            EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 3.0)),
+            1
+        ))
+        .contains("3.0000"));
+    }
+}

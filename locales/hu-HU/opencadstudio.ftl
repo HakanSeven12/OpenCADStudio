@@ -6335,3 +6335,20 @@ view-background =
     .help = Sets the background a named view shows when it is restored.
     .image-files = Image files
     .select-image = Select Background Image
+
+# Ideiglenes geometriai mérési eredmények.
+measurement =
+    .distance = Távolság = { $value }
+    .angle-start = { $command }  Adja meg a szög csúcspontját vagy [Vonalak]:
+    .first-line = { $command }  Jelölje ki az első vonalat vagy [Pontok] (kisebb szög):
+    .second-line = { $command }  Jelölje ki a második vonalat (kisebb szög):
+    .lines = Vonalak
+    .points = Pontok
+    .invalid-radius = Jelöljön ki véges, pozitív sugarú kört vagy körívet.
+    .invalid-line = Jelöljön ki véges koordinátájú, nem nulla hosszúságú vonalat.
+    .different-line = Jelöljön ki egy másik vonalat.
+    .invalid-point = Adjon meg véges koordinátájú pontot.
+    .degenerate-ray = A szár végpontja nem egyezhet meg a szög csúcspontjával.
+    .area-preview =
+        { $current }
+        Előzetes összterület = { $total }

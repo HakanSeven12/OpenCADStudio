@@ -4364,6 +4364,7 @@ impl OpenCADStudio {
             Message::ViewportRightPress => {
                 self.graphic_attributes.open_menu = None;
                 let i = self.active_tab;
+                self.tabs[i].measurement.dismiss_result();
                 self.ribbon.close_dropdown();
                 // Shift+RMB: the one-shot snap override menu at the cursor —
                 // pick a snap for just the next point, then it expires (#337).

@@ -35,7 +35,7 @@ impl CadModule for DrawModule {
         use clipboard::{copy_clip, cut, paste};
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
         use groups::{group, ungroup};
-        use inquiry::{area, dist};
+        use inquiry::{area, dist, measuregeom};
         use layers::{
             layfrz, layiso, laylck, layoff, layon, laythw, layulk, layuniso, make_current,
             match_layer, panel,
@@ -244,6 +244,8 @@ impl CadModule for DrawModule {
                         icon: dist::ICON,
                         items: vec![
                             ("DIST", "Distance", dist::ICON),
+                            ("MEASURERADIUS", "Radius", measuregeom::RADIUS_ICON),
+                            ("MEASUREANGLE", "Angle", measuregeom::ANGLE_ICON),
                             ("AREA", "Area", area::ICON),
                         ],
                         default: "DIST",

@@ -1717,6 +1717,15 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 34.0 + self.command_line.overlay_lines_height()
             };
+            if !tab.is_start {
+                if let Some(readout) = self.measurement_readout(self.active_tab) {
+                    viewport_stack = viewport_stack.push(overlay::measurement_overlay(
+                        readout.anchor,
+                        command_line_inset,
+                        readout.text,
+                    ));
+                }
+            }
             // Quick Properties: stay near the selection cursor, flipping around
             // it as needed to remain inside the visible drawing area.
             if self.quick_properties && !tab.is_start {

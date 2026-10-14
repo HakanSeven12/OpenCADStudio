@@ -2850,6 +2850,17 @@ pub trait CadCommand: Send {
 
     fn inject_hover_entity(&mut self, _handle: Handle, _entity: EntityType) {}
 
+    /// Opt in to transient measurement text; unrelated Measurement users keep
+    /// their existing command-line-only behavior.
+    fn has_measurement_readout(&self) -> bool {
+        false
+    }
+
+    /// Live inquiry text at the same full-precision point as the preview.
+    fn measurement_readout(&self, _cursor: DVec3) -> Option<String> {
+        None
+    }
+
     /// Called on every mouse-move in the viewport.
     /// Return `Some(WireModel)` to update the rubber-band preview, `None` to skip.
     fn on_mouse_move(&mut self, _pt: DVec3) -> Option<WireModel> {

@@ -1144,6 +1144,7 @@ impl OpenCADStudio {
 
     fn handle_cancel(&mut self, cancel: CmdResult) {
         let i = self.active_tab;
+        self.tabs[i].measurement.clear();
         let space_changed = matches!(cancel, CmdResult::CancelForSpaceChange);
         self.tabs[i].scene.clear_preview_wire();
         if !space_changed && self.tabs[i].suspended_cmd.is_some() {
@@ -1287,6 +1288,7 @@ impl OpenCADStudio {
     }
 
     fn handle_measurement(&mut self, msg: String) {
+        self.remember_measurement(&msg);
         let i = self.active_tab;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
@@ -1296,6 +1298,7 @@ impl OpenCADStudio {
     }
 
     fn handle_report_measurement(&mut self, msg: String) {
+        self.remember_measurement(&msg);
         let i = self.active_tab;
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
@@ -1317,6 +1320,7 @@ impl OpenCADStudio {
     }
 
     fn handle_report_measurement_and_deselect(&mut self, msg: String) {
+        self.remember_measurement(&msg);
         let i = self.active_tab;
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.deselect_all();

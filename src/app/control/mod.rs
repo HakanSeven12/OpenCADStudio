@@ -287,7 +287,17 @@ fn command_category(name: &str) -> &'static str {
     .contains(&name)
     {
         "modify"
-    } else if ["DIST", "ID", "AREA", "MEASURE", "MEASUREGEOM"].contains(&name) {
+    } else if [
+        "DIST",
+        "ID",
+        "AREA",
+        "MEASURE",
+        "MEASUREGEOM",
+        "MEASURERADIUS",
+        "MEASUREANGLE",
+    ]
+    .contains(&name)
+    {
         "inspect"
     } else if ["ZOOM", "PAN", "UCS", "PLAN", "VPORTS", "3DORBIT"].contains(&name) {
         "view"

@@ -3211,10 +3211,9 @@ fn polyline_band_width(entity: &EntityType, fill_mode: bool) -> f32 {
 /// The widest start / end width of a 2-D polyline (0 for other entities).
 fn polyline_max_width(entity: &EntityType) -> f64 {
     match entity {
-        EntityType::LwPolyline(p) => p
-            .vertices
-            .iter()
-            .fold(p.constant_width, |w, v| w.max(v.start_width).max(v.end_width)),
+        EntityType::LwPolyline(p) => p.vertices.iter().fold(p.constant_width, |w, v| {
+            w.max(v.start_width).max(v.end_width)
+        }),
         EntityType::Polyline2D(p) => p
             .vertices
             .iter()

@@ -42,7 +42,12 @@ static CATALOG: OnceLock<Vec<PatternDef>> = OnceLock::new();
 /// All parsed patterns, in file order: the bundled catalog, then the user's
 /// own `.pat` files.
 pub fn catalog() -> &'static [PatternDef] {
-    CATALOG.get_or_init(|| parse(&format!("{PAT_SRC}\n{}", user_definitions("patterns", "pat"))))
+    CATALOG.get_or_init(|| {
+        parse(&format!(
+            "{PAT_SRC}\n{}",
+            user_definitions("patterns", "pat")
+        ))
+    })
 }
 
 /// The text of every `*.<ext>` file in `<config>/<folder>`, where users drop
@@ -59,7 +64,10 @@ pub(crate) fn user_definitions(folder: &str, ext: &str) -> String {
     let mut paths: Vec<_> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+        })
         .collect();
     paths.sort();
     paths

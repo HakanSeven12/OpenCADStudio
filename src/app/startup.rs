@@ -242,7 +242,8 @@ mod tests {
         assert_eq!(app.active_modal, Some(ModalKind::DonationPrompt));
         let _ = app.update(Message::CloseModal);
         app.donation_prompt_version = "previous-release".to_string();
-        app.pending_startup_modals.push_back(ModalKind::DonationPrompt);
+        app.pending_startup_modals
+            .push_back(ModalKind::DonationPrompt);
         let _ = app.control_request(serde_json::json!({"op":"state"}));
         assert!(app.pending_startup_modals.is_empty());
         app.queue_startup_prompts();
@@ -252,7 +253,9 @@ mod tests {
         let mut queued = OpenCADStudio::new_for_test();
         queued.default_assoc_prompted = true;
         queued.donation_prompt_version = "previous-release".to_string();
-        queued.pending_startup_modals.push_back(ModalKind::DonationPrompt);
+        queued
+            .pending_startup_modals
+            .push_back(ModalKind::DonationPrompt);
         let _ = queued.control_request(serde_json::json!({"op":"state"}));
         queued.queue_startup_prompts();
         assert_ne!(queued.active_modal, Some(ModalKind::DonationPrompt));

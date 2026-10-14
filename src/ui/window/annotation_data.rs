@@ -904,9 +904,14 @@ pub fn data_extraction_view(
     #[cfg(target_arch = "wasm32")]
     let add_folder = iced::widget::tooltip(
         add_folder,
-        container(text(t!("Adding folders is not available in the browser. Add drawing files instead.")).size(11))
-            .padding([3, 6])
-            .style(container::bordered_box),
+        container(
+            text(t!(
+                "Adding folders is not available in the browser. Add drawing files instead."
+            ))
+            .size(11),
+        )
+        .padding([3, 6])
+        .style(container::bordered_box),
         iced::widget::tooltip::Position::Top,
     )
     .gap(4);

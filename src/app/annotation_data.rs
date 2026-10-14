@@ -319,7 +319,9 @@ fn workbook_metadata(path: &Path) -> Result<(Vec<String>, Vec<String>), String> 
         return workbook_metadata_bytes(&bytes);
     }
     if cfg!(target_arch = "wasm32") {
-        return Err(crate::t!("Pick the file again to load its contents in the browser.").into_owned());
+        return Err(
+            crate::t!("Pick the file again to load its contents in the browser.").into_owned(),
+        );
     }
     use calamine::{open_workbook_auto, Reader};
     let workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
@@ -336,7 +338,8 @@ fn workbook_metadata(path: &Path) -> Result<(Vec<String>, Vec<String>), String> 
 /// the web, where no path exists to reopen).
 fn workbook_metadata_bytes(bytes: &[u8]) -> Result<(Vec<String>, Vec<String>), String> {
     use calamine::{open_workbook_auto_from_rs, Reader};
-    let workbook = open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
+    let workbook =
+        open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
     let sheets = workbook.sheet_names();
     let names = workbook
         .defined_names()
@@ -362,7 +365,9 @@ fn read_text_source(path: &Path) -> Result<String, String> {
         return Ok(String::from_utf8_lossy(&bytes).into_owned());
     }
     if cfg!(target_arch = "wasm32") {
-        return Err(crate::t!("Pick the file again to load its contents in the browser.").into_owned());
+        return Err(
+            crate::t!("Pick the file again to load its contents in the browser.").into_owned(),
+        );
     }
     std::fs::read_to_string(path).map_err(|error| error.to_string())
 }
@@ -387,8 +392,9 @@ fn workbook_rows<RS: std::io::Read + std::io::Seek>(
             .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
             .map(|(_, formula)| formula.clone())
             .ok_or_else(|| crate::t!("The named range was not found.").into_owned())?;
-        named_range_target(&formula)
-            .ok_or_else(|| crate::t!("The named range does not refer to a worksheet cell range.").into_owned())?
+        named_range_target(&formula).ok_or_else(|| {
+            crate::t!("The named range does not refer to a worksheet cell range.").into_owned()
+        })?
     } else {
         let selected_sheet = sheet
             .filter(|value| !value.trim().is_empty())
@@ -442,7 +448,9 @@ pub(crate) fn read_tabular_file(
             .map_err(|error| error.to_string())?;
         workbook_rows(&mut workbook, sheet, range_kind, range_value)?
     } else if cfg!(target_arch = "wasm32") {
-        return Err(crate::t!("Pick the file again to load its contents in the browser.").into_owned());
+        return Err(
+            crate::t!("Pick the file again to load its contents in the browser.").into_owned(),
+        );
     } else {
         use calamine::open_workbook_auto;
         let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
@@ -2139,7 +2147,6 @@ mod tests {
         assert!(register_picked_source("a.csv", Arc::new(b"old".to_vec())));
     }
 
-
     use super::*;
 
     #[test]
@@ -2222,10 +2229,7 @@ mod tests {
     #[test]
     fn registered_bytes_match_by_file_name() {
         let key = format!("ocs-match-{}-{}.xlsx", std::process::id(), line!());
-        register_picked_source(
-            &format!(r"C:\drawings\{key}"),
-            Arc::new(Vec::new()),
-        );
+        register_picked_source(&format!(r"C:\drawings\{key}"), Arc::new(Vec::new()));
         // Exact key…
         assert!(picked_source_bytes(&format!(r"C:\drawings\{key}")).is_some());
         // …same file under a differently-cased bare name (the web stores only

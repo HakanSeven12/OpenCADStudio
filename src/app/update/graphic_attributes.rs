@@ -118,12 +118,8 @@ fn is_open_fill_boundary(entity: &EntityType) -> bool {
         EntityType::Polyline(polyline) => {
             !polyline.flags.is_closed() && polyline.vertices.len() >= 3
         }
-        EntityType::Polyline2D(polyline) => {
-            !polyline.is_closed() && polyline.vertices.len() >= 3
-        }
-        EntityType::Polyline3D(polyline) => {
-            !polyline.flags.closed && polyline.vertices.len() >= 3
-        }
+        EntityType::Polyline2D(polyline) => !polyline.is_closed() && polyline.vertices.len() >= 3,
+        EntityType::Polyline3D(polyline) => !polyline.flags.closed && polyline.vertices.len() >= 3,
         _ => false,
     }
 }
@@ -296,11 +292,15 @@ impl OpenCADStudio {
             }
             M::HatchPattern(name) => self.apply_graphic_hatch_pattern(name),
             M::HatchPatternConfirm => {
-                let name = self.graphic_attributes.hatch_editor.as_ref().and_then(|editor| {
-                    crate::ui::properties::filtered_hatch_patterns(&editor.search)
-                        .get(editor.focus)
-                        .map(|entry| entry.name.clone())
-                });
+                let name = self
+                    .graphic_attributes
+                    .hatch_editor
+                    .as_ref()
+                    .and_then(|editor| {
+                        crate::ui::properties::filtered_hatch_patterns(&editor.search)
+                            .get(editor.focus)
+                            .map(|entry| entry.name.clone())
+                    });
                 match name {
                     Some(name) => self.apply_graphic_hatch_pattern(name),
                     None => Task::none(),
@@ -322,7 +322,8 @@ impl OpenCADStudio {
             "" | "Y" | "YES" => self.on_graphic_fill_close_response(true),
             "N" | "NO" => self.on_graphic_fill_close_response(false),
             _ => {
-                self.command_line.push_error(crate::t!("Enter Yes or No.").as_ref());
+                self.command_line
+                    .push_error(crate::t!("Enter Yes or No.").as_ref());
                 Task::none()
             }
         }
@@ -352,7 +353,12 @@ impl OpenCADStudio {
     }
 
     /// Edit the unlocked `part` of the selection as one undo step.
-    fn edit_graphic_part(&mut self, part: Part, label: &str, mut edit: impl FnMut(&mut EntityType)) {
+    fn edit_graphic_part(
+        &mut self,
+        part: Part,
+        label: &str,
+        mut edit: impl FnMut(&mut EntityType),
+    ) {
         let i = self.active_tab;
         let handles = self.unlocked_graphic_handles(i, part);
         self.apply_property_op(i, label, &handles, |app, handle| {
@@ -363,15 +369,18 @@ impl OpenCADStudio {
     }
 
     fn has_selection(&self) -> bool {
-        !self.tabs[self.active_tab].scene.selected_handles_in_order().is_empty()
+        !self.tabs[self.active_tab]
+            .scene
+            .selected_handles_in_order()
+            .is_empty()
     }
 
     fn current_graphic_attributes(&self, i: usize) -> ConcreteGraphicAttributes {
         let document = &self.tabs[i].scene.document;
         let handles = self.graphic_handles(i, Part::Both);
         let draw_depth = self.tabs[i].scene.draw_depth_map();
-        if let Some(entity) =
-            palette::top_handle(&handles, &draw_depth).and_then(|handle| document.get_entity(handle))
+        if let Some(entity) = palette::top_handle(&handles, &draw_depth)
+            .and_then(|handle| document.get_entity(handle))
         {
             let common = entity.common();
             return concrete_graphic_attributes(
@@ -431,12 +440,27 @@ impl OpenCADStudio {
 
     pub(super) fn on_graphic_attributes_set_all(&mut self, by_layer: bool) -> Task<Message> {
         let (color, linetype, lineweight, transparency) = if by_layer {
-            (AcadColor::ByLayer, "ByLayer", LineWeight::ByLayer, Transparency::BY_LAYER)
+            (
+                AcadColor::ByLayer,
+                "ByLayer",
+                LineWeight::ByLayer,
+                Transparency::BY_LAYER,
+            )
         } else {
-            (AcadColor::ByBlock, "ByBlock", LineWeight::ByBlock, Transparency::BY_BLOCK)
+            (
+                AcadColor::ByBlock,
+                "ByBlock",
+                LineWeight::ByBlock,
+                Transparency::BY_BLOCK,
+            )
         };
         if !self.has_selection() {
-            self.set_current_graphic_attributes(color, linetype.to_owned(), lineweight, transparency);
+            self.set_current_graphic_attributes(
+                color,
+                linetype.to_owned(),
+                lineweight,
+                transparency,
+            );
             return Task::none();
         }
         self.edit_graphic_part(Part::Both, &crate::t!("Graphic Attributes"), |entity| {
@@ -480,18 +504,27 @@ impl OpenCADStudio {
             })
             .collect();
         let handles: Vec<_> = values.keys().copied().collect();
-        self.apply_property_op(i, crate::t!("Graphic Attributes"), &handles, |app, handle| {
-            let (Some(values), Some(entity)) = (
-                values.get(&handle),
-                app.tabs[i].scene.document.get_entity_mut(handle),
-            ) else {
-                return;
-            };
-            crate::scene::view::dispatch::apply_color(entity, values.color);
-            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &values.linetype);
-            crate::scene::view::dispatch::apply_line_weight(entity, values.lineweight);
-            entity.common_mut().transparency = values.transparency;
-        });
+        self.apply_property_op(
+            i,
+            crate::t!("Graphic Attributes"),
+            &handles,
+            |app, handle| {
+                let (Some(values), Some(entity)) = (
+                    values.get(&handle),
+                    app.tabs[i].scene.document.get_entity_mut(handle),
+                ) else {
+                    return;
+                };
+                crate::scene::view::dispatch::apply_color(entity, values.color);
+                crate::scene::view::dispatch::apply_common_prop(
+                    entity,
+                    "linetype",
+                    &values.linetype,
+                );
+                crate::scene::view::dispatch::apply_line_weight(entity, values.lineweight);
+                entity.common_mut().transparency = values.transparency;
+            },
+        );
         Task::none()
     }
 
@@ -499,8 +532,10 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let name = raw_name.trim();
         if !crate::scene::valid_block_name(name) {
-            self.command_line
-                .push_error(crate::t!("Graphic Attributes: enter a valid layer name without <>/\\\":;?*|,=`.").as_ref());
+            self.command_line.push_error(
+                crate::t!("Graphic Attributes: enter a valid layer name without <>/\\\":;?*|,=`.")
+                    .as_ref(),
+            );
             return Task::none();
         }
         if self.tabs[i]
@@ -530,8 +565,9 @@ impl OpenCADStudio {
         layer.line_weight = values.lineweight;
         layer.transparency = values.transparency;
         if self.tabs[i].scene.document.layers.add(layer).is_err() {
-            self.command_line
-                .push_error(crate::t!("Graphic Attributes: the layer could not be created.").as_ref());
+            self.command_line.push_error(
+                crate::t!("Graphic Attributes: the layer could not be created.").as_ref(),
+            );
             return Task::none();
         }
         self.tabs[i].dirty = true;
@@ -781,11 +817,17 @@ impl OpenCADStudio {
         let document = &self.tabs[i].scene.document;
         let (associated, new_hatches, updated_hatches, skipped) = if value == GraphicAttribute::None
         {
-            (palette::fill_handles(document, selected), Vec::new(), Vec::new(), 0)
+            (
+                palette::fill_handles(document, selected),
+                Vec::new(),
+                Vec::new(),
+                0,
+            )
         } else {
             let Some((name, pattern)) = fill_pattern(value) else {
-                self.command_line
-                    .push_error(crate::t!("Graphic Attributes: no hatch pattern is available.").as_ref());
+                self.command_line.push_error(
+                    crate::t!("Graphic Attributes: no hatch pattern is available.").as_ref(),
+                );
                 return false;
             };
             let working = if self.tabs[i].editing_model_space() {
@@ -883,13 +925,15 @@ impl OpenCADStudio {
             .chain(updated_hatches.iter().map(|entity| &entity.common().handle))
             .any(|handle| self.tabs[i].scene.is_layer_locked(*handle))
         {
-            self.command_line
-                .push_error(crate::t!("Graphic Attributes: an associated fill is on a locked layer.").as_ref());
+            self.command_line.push_error(
+                crate::t!("Graphic Attributes: an associated fill is on a locked layer.").as_ref(),
+            );
             return false;
         }
         if skipped == 1 {
-            self.command_line
-                .push_info(crate::t!("Graphic Attributes: 1 unsupported object was not changed.").as_ref());
+            self.command_line.push_info(
+                crate::t!("Graphic Attributes: 1 unsupported object was not changed.").as_ref(),
+            );
         } else if skipped > 1 {
             self.command_line.push_info(
                 crate::tf!("Graphic Attributes: {skipped} unsupported objects were not changed.")
@@ -959,7 +1003,11 @@ impl OpenCADStudio {
         };
         if !self.has_selection() {
             let i = self.active_tab;
-            self.tabs[i].scene.document.header.current_entity_linetype_scale = scale;
+            self.tabs[i]
+                .scene
+                .document
+                .header
+                .current_entity_linetype_scale = scale;
             self.tabs[i].dirty = true;
             self.refresh_properties();
             return Task::none();
@@ -1013,7 +1061,9 @@ mod tests {
         }
         polyline.close();
         let i = app.active_tab;
-        app.tabs[i].scene.add_entity(EntityType::LwPolyline(polyline))
+        app.tabs[i]
+            .scene
+            .add_entity(EntityType::LwPolyline(polyline))
     }
 
     fn select(app: &mut OpenCADStudio, handles: &[Handle]) {
@@ -1062,13 +1112,18 @@ mod tests {
     #[test]
     fn coincident_boundaries_each_get_their_own_associative_fill() {
         let mut app = fresh();
-        let boundaries = [add_closed_square(&mut app, 0.0), add_closed_square(&mut app, 0.0)];
+        let boundaries = [
+            add_closed_square(&mut app, 0.0),
+            add_closed_square(&mut app, 0.0),
+        ];
         select(&mut app, &boundaries);
 
         let _ = app.on_graphic_attribute(GraphicAttribute::Solid);
         let fills = hatches(&app);
         assert_eq!(fills.len(), 2);
-        assert!(fills.iter().all(|hatch| hatch.is_solid && hatch.is_associative));
+        assert!(fills
+            .iter()
+            .all(|hatch| hatch.is_solid && hatch.is_associative));
         assert!(fills.iter().all(|hatch| hatch
             .paths
             .iter()
@@ -1087,7 +1142,10 @@ mod tests {
     fn unsupported_objects_are_skipped_while_the_rest_is_filled() {
         let mut app = fresh();
         let i = app.active_tab;
-        let boundaries = [add_closed_square(&mut app, 0.0), add_closed_square(&mut app, 20.0)];
+        let boundaries = [
+            add_closed_square(&mut app, 0.0),
+            add_closed_square(&mut app, 20.0),
+        ];
         select(&mut app, &boundaries);
         let _ = app.on_graphic_attribute(GraphicAttribute::Gradient);
 
@@ -1104,7 +1162,10 @@ mod tests {
     fn editing_a_shared_gradient_is_one_undo_step() {
         let mut app = fresh();
         let i = app.active_tab;
-        let boundaries = [add_closed_square(&mut app, 0.0), add_closed_square(&mut app, 20.0)];
+        let boundaries = [
+            add_closed_square(&mut app, 0.0),
+            add_closed_square(&mut app, 20.0),
+        ];
         select(&mut app, &boundaries);
         let _ = app.on_graphic_attribute(GraphicAttribute::Gradient);
 
@@ -1152,7 +1213,11 @@ mod tests {
         assert_eq!(palette::line_handles(document, &[hatch]), vec![boundary]);
         assert_eq!(fill_kind(&app, hatch), GraphicAttribute::Gradient);
 
-        for kind in [GraphicAttribute::Solid, GraphicAttribute::Hatch, GraphicAttribute::Gradient] {
+        for kind in [
+            GraphicAttribute::Solid,
+            GraphicAttribute::Hatch,
+            GraphicAttribute::Gradient,
+        ] {
             let _ = app.on_graphic_attribute(kind);
             assert_eq!(fill_kind(&app, hatch), kind);
         }
@@ -1240,9 +1305,11 @@ mod tests {
 
         let _ = app.update(ga(GraphicAttributesMsg::Fill(GraphicAttribute::Solid)));
         assert!(app.graphic_attributes.pending_fill_close.is_some());
-        assert!(!app.tabs[i].scene.document.entities().any(|entity| {
-            matches!(entity, EntityType::Hatch(_))
-        }));
+        assert!(!app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .any(|entity| { matches!(entity, EntityType::Hatch(_)) }));
 
         let _ = app.update(Message::CommandOptionPick("Y".to_string()));
         assert!(app.graphic_attributes.pending_fill_close.is_none());
@@ -1268,10 +1335,7 @@ mod tests {
         let _ = app.on_line_transparency(codec::types::Transparency::from_percent(0.3));
 
         let header = &app.tabs[i].scene.document.header;
-        assert_eq!(
-            header.current_entity_color,
-            codec::types::Color::Index(2)
-        );
+        assert_eq!(header.current_entity_color, codec::types::Color::Index(2));
         assert_eq!(header.current_linetype_name, "Continuous");
         assert_eq!(header.current_line_weight, 35);
         assert!((header.current_entity_linetype_scale - 2.5).abs() < f64::EPSILON);
@@ -1606,14 +1670,18 @@ mod tests {
         assert_eq!(app.dock.location(PanelId::GraphicAttributes), None);
 
         let _ = app.update(Message::ToggleGraphicAttributes);
-        let properties = app.dock.location(PanelId::Properties).expect("properties docked");
+        let properties = app
+            .dock
+            .location(PanelId::Properties)
+            .expect("properties docked");
         assert_eq!(
             app.dock.location(PanelId::GraphicAttributes),
             Some(properties)
         );
 
         // A place the user chose is kept when the palette is shown again.
-        app.dock.dock(PanelId::GraphicAttributes, DockSide::Right, 0);
+        app.dock
+            .dock(PanelId::GraphicAttributes, DockSide::Right, 0);
         let _ = app.update(Message::ToggleGraphicAttributes);
         let _ = app.update(Message::ToggleGraphicAttributes);
         assert_eq!(
@@ -1659,7 +1727,9 @@ mod tests {
         assert_eq!(common(&app, line).linetype_scale, 1.0);
 
         // Typing alone does not apply; Enter does, with a decimal comma too.
-        let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleInput("0,35".into())));
+        let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleInput(
+            "0,35".into(),
+        )));
         assert_eq!(common(&app, line).linetype_scale, 1.0);
         let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleSubmit));
         assert_eq!(common(&app, line).linetype_scale, 0.35);
@@ -1667,7 +1737,9 @@ mod tests {
 
         // Invalid or non-positive input is dropped.
         for typed in ["abc", "0", "-2"] {
-            let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleInput(typed.into())));
+            let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleInput(
+                typed.into(),
+            )));
             let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleSubmit));
             assert_eq!(common(&app, line).linetype_scale, 0.35);
         }

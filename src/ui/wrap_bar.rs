@@ -1070,8 +1070,10 @@ impl<'a> Widget<Message, Theme, Renderer> for PosReport<'a> {
         viewport: &Rectangle,
     ) {
         DD_BOUNDS.with(|m| {
-            m.borrow_mut()
-                .insert(self.id.to_string(), (layout.bounds(), FRAME.with(Cell::get)));
+            m.borrow_mut().insert(
+                self.id.to_string(),
+                (layout.bounds(), FRAME.with(Cell::get)),
+            );
         });
         self.child.as_widget().draw(
             &tree.children[0],

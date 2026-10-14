@@ -737,7 +737,6 @@ fn name_tip<'a>(name: &'a str) -> Element<'a, Message> {
         .into()
 }
 
-
 /// The layer-name field while a rename is open; a click that moves focus
 /// elsewhere commits the typed name.
 pub fn rename_input_id() -> iced::widget::Id {

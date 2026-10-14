@@ -56,7 +56,9 @@ fn main_depth(app: &OpenCADStudio) -> usize {
 
 #[test]
 fn local_undo_preserves_imported_native_networks_when_constraints_are_unchanged() {
-    use codec::objects::{AssocNetwork, AssociativeData, AssociativeObject, Dictionary, ObjectType};
+    use codec::objects::{
+        AssocNetwork, AssociativeData, AssociativeObject, Dictionary, ObjectType,
+    };
     let (mut app, reference) = fixture();
     let i = app.active_tab;
     let doc = &mut app.tabs[i].scene.document;

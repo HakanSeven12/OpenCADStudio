@@ -292,7 +292,9 @@ impl CadCommand for MvsetupCommand {
                 let count = if text.is_empty() {
                     2
                 } else {
-                    text.parse::<u32>().ok().filter(|count| (1..=100).contains(count))?
+                    text.parse::<u32>()
+                        .ok()
+                        .filter(|count| (1..=100).contains(count))?
                 };
                 if self.step == Step::Columns {
                     self.columns = count;
@@ -325,9 +327,7 @@ impl CadCommand for MvsetupCommand {
                     factor: self.paper_units / model_units,
                 });
             }
-            Step::FirstCorner | Step::SecondCorner | Step::Delete | Step::Viewports => {
-                return None
-            }
+            Step::FirstCorner | Step::SecondCorner | Step::Delete | Step::Viewports => return None,
         }
         Some(CmdResult::NeedPoint)
     }
@@ -357,7 +357,10 @@ impl CadCommand for MvsetupCommand {
                     return CmdResult::NeedPoint;
                 }
                 CmdResult::ReplaceManyContinue(
-                    erased.into_iter().map(|handle| (handle, Vec::new())).collect(),
+                    erased
+                        .into_iter()
+                        .map(|handle| (handle, Vec::new()))
+                        .collect(),
                 )
             }
             Step::Viewports if self.picked.is_empty() => CmdResult::Cancel,
@@ -371,4 +374,6 @@ impl CadCommand for MvsetupCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["MVSETUP"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MVSETUP"]
+});

@@ -85,7 +85,12 @@ impl CadCommand for PasteSpecCommand {
         if self.placing_text {
             return None;
         }
-        match text.trim().trim_start_matches('_').to_ascii_uppercase().as_str() {
+        match text
+            .trim()
+            .trim_start_matches('_')
+            .to_ascii_uppercase()
+            .as_str()
+        {
             "O" | "OBJECTS" if self.objects => Some(CmdResult::Dispatch("PASTECLIP".into())),
             "B" | "BLOCK" if self.objects => Some(CmdResult::Dispatch("PASTEBLOCK".into())),
             "T" | "TEXT" if self.text.is_some() => {
@@ -123,7 +128,9 @@ impl CadCommand for PasteSpecCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["PASTESPEC"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["PASTESPEC"]
+});
 
 #[cfg(test)]
 mod tests {

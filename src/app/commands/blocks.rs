@@ -104,12 +104,14 @@ impl OpenCADStudio {
     ) -> Box<dyn CadCommand> {
         let document = &self.tabs[i].scene.document;
         let defaults = crate::scene::creation_style::current_text_defaults(document);
-        Box::new(crate::modules::draw::clipboard::pastespec::PasteSpecCommand::new(
-            !self.clipboard.is_empty(),
-            text,
-            defaults.style_name,
-            defaults.height,
-        ))
+        Box::new(
+            crate::modules::draw::clipboard::pastespec::PasteSpecCommand::new(
+                !self.clipboard.is_empty(),
+                text,
+                defaults.style_name,
+                defaults.height,
+            ),
+        )
     }
 
     pub(super) fn dispatch_blocks(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
@@ -319,20 +321,22 @@ impl OpenCADStudio {
             // ARRAYEDIT Source: edit the objects the array repeats in the
             // Block Editor; every item follows when it is saved.
             cmd if cmd.starts_with("ARRAYEDIT_SOURCE:") => {
-                let handle = codec::Handle::new(
-                    cmd["ARRAYEDIT_SOURCE:".len()..].parse().unwrap_or(0),
-                );
+                let handle =
+                    codec::Handle::new(cmd["ARRAYEDIT_SOURCE:".len()..].parse().unwrap_or(0));
                 let document = &self.tabs[i].scene.document;
-                let source = crate::scene::assoc_array::array_of_insert(document, handle)
-                    .and_then(|array| {
+                let source = crate::scene::assoc_array::array_of_insert(document, handle).and_then(
+                    |array| {
                         document
                             .block_records
                             .iter()
                             .find(|record| record.handle == array.source_block)
                             .map(|record| record.name.clone())
-                    });
+                    },
+                );
                 match source {
-                    Some(name) => return Some(self.dispatch_command(&format!("BEDIT_OPEN:{name}"))),
+                    Some(name) => {
+                        return Some(self.dispatch_command(&format!("BEDIT_OPEN:{name}")))
+                    }
                     None => self.command_line.push_error(
                         crate::t!("ARRAYEDIT: the selected object is not an associative array.")
                             .as_ref(),
@@ -439,8 +443,7 @@ impl OpenCADStudio {
                             self.tabs[i].dirty = true;
                             let wires = self.tabs[i].scene.wires_for_entities(&self.clipboard);
                             use crate::modules::insert::insert_block::InsertBlockCommand;
-                            let cmd =
-                                InsertBlockCommand::new_for_block(name, wires, base);
+                            let cmd = InsertBlockCommand::new_for_block(name, wires, base);
                             self.command_line.push_info(&cmd.prompt());
                             self.tabs[i].active_cmd = Some(Box::new(cmd));
                         }

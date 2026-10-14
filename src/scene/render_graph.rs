@@ -663,7 +663,9 @@ pub(crate) fn dimension_picture_placement(
 /// placed picture has its placement folded into the subs and the dimension's
 /// own placement cleared (`clear_dim_picture_placement`); a placement left on
 /// the dimension would be applied again on top of the moved subs.
-pub(crate) fn dim_picture_placement(entity: &EntityType) -> Option<crate::command::EntityTransform> {
+pub(crate) fn dim_picture_placement(
+    entity: &EntityType,
+) -> Option<crate::command::EntityTransform> {
     let EntityType::Dimension(d) = entity else {
         return None;
     };

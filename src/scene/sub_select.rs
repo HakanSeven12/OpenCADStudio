@@ -129,8 +129,8 @@ impl Scene {
                 .iter()
                 .flat_map(|&index| [index, (index + 1) % count])
                 .collect();
-            let Some(plane) = crate::entities::curve::lwpolyline_curve(polyline)
-                .map(|curve| curve.plane)
+            let Some(plane) =
+                crate::entities::curve::lwpolyline_curve(polyline).map(|curve| curve.plane)
             else {
                 whole.push(handle);
                 continue;

@@ -4,11 +4,11 @@
 
 use super::*;
 use crate::io::xref_model::Pathtype;
+use crate::modules::insert::xattach::IMAGE_EXTENSIONS;
 use crate::modules::insert::xattach::{
     existing_reference, path_to_block_name, prepare_xref_definition, stored_path, XAttachCommand,
     XrefAttachRequest, XrefPlacement,
 };
-use crate::modules::insert::xattach::IMAGE_EXTENSIONS;
 use crate::modules::insert::xref_cmd::display_path;
 use crate::ui::window::xref_attach::{XrefAttachMsg, XrefAttachState};
 
@@ -90,9 +90,7 @@ impl OpenCADStudio {
             }
             // POINTCLOUDATTACH picks the file; with a file, or as
             // -POINTCLOUDATTACH, it asks on the command line.
-            ("POINTCLOUDATTACH", true) if dialog => {
-                Some(Task::done(Message::PointCloudAttachPick))
-            }
+            ("POINTCLOUDATTACH", true) if dialog => Some(Task::done(Message::PointCloudAttachPick)),
             ("POINTCLOUDATTACH" | "-POINTCLOUDATTACH", _) => {
                 use crate::command::CadCommand;
                 let command = crate::modules::insert::pc_attach::PointCloudAttachCommand::new();

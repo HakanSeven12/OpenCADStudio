@@ -28,7 +28,9 @@ fn blockpalette_pin_toggles_autocollapse_and_close_hides() {
 /// One at a time: two headless renderers made in parallel crash the process.
 fn with_stack(f: impl FnOnce() + Send + 'static) {
     static REAL_VIEW: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _one = REAL_VIEW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _one = REAL_VIEW
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(f)
@@ -562,7 +564,8 @@ fn docked_title_bar_double_click_floats_the_pallet_in_the_real_view() {
     with_stack(|| {
         use crate::ui::dock::PanelId;
         let mut app = dock_app();
-        let press = iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
+        let press =
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
         let release = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
             iced::mouse::Button::Left,
         ));

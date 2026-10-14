@@ -29,7 +29,9 @@ pub enum KeyTipInput {
     AltTap,
     /// Show the tab level; `refocus` returns the focus to the command line
     /// when the tips close.
-    Open { refocus: bool },
+    Open {
+        refocus: bool,
+    },
     /// One typed character (upper case).
     Char(String),
     /// Settle a code that also starts a longer one.
@@ -101,7 +103,10 @@ pub fn active() -> bool {
 }
 
 /// Record `el`'s bounds under `id` while key tips show.
-pub(super) fn anchor<'a>(id: &'static str, el: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+pub(super) fn anchor<'a>(
+    id: &'static str,
+    el: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
     if active() {
         PosReport::new(id, el).into()
     } else {
@@ -142,7 +147,11 @@ pub(super) fn collapsed_anchor(title: &str) -> String {
 
 /// Keyboard listener hook for a key press. `Some` while key tips own the
 /// keyboard (the inner value is the message to send, if any).
-pub fn key_pressed(key: &Key, modifiers: keyboard::Modifiers, repeat: bool) -> Option<Option<Message>> {
+pub fn key_pressed(
+    key: &Key,
+    modifiers: keyboard::Modifiers,
+    repeat: bool,
+) -> Option<Option<Message>> {
     let alt = matches!(key, Key::Named(Named::Alt));
     if !repeat {
         ALT_ALONE.store(
@@ -553,7 +562,8 @@ impl Ribbon {
         };
         let codes = || tips.iter().filter_map(|tip| tip.code.as_deref());
         let exact = |typed: &str| tips.iter().find(|tip| tip.code.as_deref() == Some(typed));
-        let longer = |typed: &str| codes().any(|code| code.len() > typed.len() && code.starts_with(typed));
+        let longer =
+            |typed: &str| codes().any(|code| code.len() > typed.len() && code.starts_with(typed));
         let typed = ch.map(|ch| format!("{}{ch}", state.typed));
         let chosen = match typed {
             Some(typed) if codes().any(|code| code.starts_with(&typed)) => {
@@ -709,11 +719,21 @@ impl Ribbon {
     fn item_tips(&self, index: usize, open: &str) -> Vec<Tip> {
         let mut items = draw_panel::keytip_items(open);
         if items.is_empty() {
-            let groups = self.modules.get(index).map(|m| m.ribbon_groups()).unwrap_or(&[]);
+            let groups = self
+                .modules
+                .get(index)
+                .map(|m| m.ribbon_groups())
+                .unwrap_or(&[]);
             for item in groups.iter().flat_map(|group| &group.tools) {
-                if let RibbonItem::Dropdown { id, items: list, .. }
-                | RibbonItem::LabeledDropdown { id, items: list, .. }
-                | RibbonItem::LargeDropdown { id, items: list, .. } = item
+                if let RibbonItem::Dropdown {
+                    id, items: list, ..
+                }
+                | RibbonItem::LabeledDropdown {
+                    id, items: list, ..
+                }
+                | RibbonItem::LargeDropdown {
+                    id, items: list, ..
+                } = item
                 {
                     if *id == open {
                         items = list
@@ -732,7 +752,9 @@ impl Ribbon {
             .map(|(position, (dropdown_id, cmd, submenu))| Tip {
                 anchor: item_anchor(dropdown_id, cmd),
                 target: cmd,
-                code: Some(code(open, cmd).map_or_else(|| (position + 1).to_string(), str::to_string)),
+                code: Some(
+                    code(open, cmd).map_or_else(|| (position + 1).to_string(), str::to_string),
+                ),
                 action: if submenu {
                     Action::Open(Message::ToggleRibbonDropdown(cmd.to_string()))
                 } else {
@@ -1035,8 +1057,10 @@ impl overlay::Overlay<Message, Theme, Renderer> for KeyTipOverlay<'_> {
                     // Small buttons: at the lower left, over the icon.
                     Point::new(b.x + width / 2.0, b.y + b.height - PILL_H / 2.0 + 3.0)
                 };
-                let x = (center.x - width / 2.0).clamp(window.x, (window.width - width).max(window.x));
-                let y = (center.y - PILL_H / 2.0).clamp(window.y, (window.height - PILL_H).max(window.y));
+                let x =
+                    (center.x - width / 2.0).clamp(window.x, (window.width - width).max(window.x));
+                let y = (center.y - PILL_H / 2.0)
+                    .clamp(window.y, (window.height - PILL_H).max(window.y));
                 let pill = Rectangle::new(Point::new(x, y), Size::new(width, PILL_H));
                 renderer.fill_quad(
                     renderer::Quad {
@@ -1069,9 +1093,27 @@ impl overlay::Overlay<Message, Theme, Renderer> for KeyTipOverlay<'_> {
                     ..pill
                 };
                 if !done.is_empty() {
-                    draw_text(renderer, done, Point::new(left, pill.center_y() - 0.5), PILL_TEXT, font, ink.scale_alpha(0.45), false, clip);
+                    draw_text(
+                        renderer,
+                        done,
+                        Point::new(left, pill.center_y() - 0.5),
+                        PILL_TEXT,
+                        font,
+                        ink.scale_alpha(0.45),
+                        false,
+                        clip,
+                    );
                 }
-                draw_text(renderer, rest, Point::new(left + done_w, pill.center_y() - 0.5), PILL_TEXT, font, ink, false, clip);
+                draw_text(
+                    renderer,
+                    rest,
+                    Point::new(left + done_w, pill.center_y() - 0.5),
+                    PILL_TEXT,
+                    font,
+                    ink,
+                    false,
+                    clip,
+                );
                 shown.push(anchor.clone());
             }
         });
@@ -1118,7 +1160,16 @@ fn draw_bar(renderer: &mut Renderer, theme: &Theme, parts: &[String; 3]) {
             1 => (regular, ink),
             _ => (regular, ink.scale_alpha(0.6)),
         };
-        draw_text(renderer, part, Point::new(x, y), BAR_TEXT, part_font, color, false, bar);
+        draw_text(
+            renderer,
+            part,
+            Point::new(x, y),
+            BAR_TEXT,
+            part_font,
+            color,
+            false,
+            bar,
+        );
         x += text_width(part, BAR_TEXT, part_font) + 18.0;
     }
 }

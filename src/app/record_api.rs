@@ -1157,9 +1157,7 @@ fn apply_updates(
 /// float would otherwise never match its `expected` value.
 fn json_values_match(actual: &Value, expected: &Value) -> bool {
     match (actual, expected) {
-        (Value::Number(a), Value::Number(b)) if a.is_f64() || b.is_f64() => {
-            numbers_match(a, b)
-        }
+        (Value::Number(a), Value::Number(b)) if a.is_f64() || b.is_f64() => numbers_match(a, b),
         (Value::Array(a), Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_values_match(a, b))
         }
@@ -1675,11 +1673,23 @@ mod tests {
             Value::Number(number) => number,
             _ => unreachable!(),
         };
-        assert!(super::numbers_match(&number(json!(10)), &number(json!(10.0))));
-        assert!(!super::numbers_match(&number(json!(10)), &number(json!(10.5))));
+        assert!(super::numbers_match(
+            &number(json!(10)),
+            &number(json!(10.0))
+        ));
+        assert!(!super::numbers_match(
+            &number(json!(10)),
+            &number(json!(10.5))
+        ));
         let past_precision = number(json!(9_007_199_254_740_993_u64));
-        assert!(!super::numbers_match(&past_precision, &number(json!(9_007_199_254_740_992.0))));
-        assert!(super::numbers_match(&number(json!(-3)), &number(json!(-3.0))));
+        assert!(!super::numbers_match(
+            &past_precision,
+            &number(json!(9_007_199_254_740_992.0))
+        ));
+        assert!(super::numbers_match(
+            &number(json!(-3)),
+            &number(json!(-3.0))
+        ));
     }
 
     fn execute(app: &mut OpenCADStudio, mut request: Value, id: &str) -> Value {

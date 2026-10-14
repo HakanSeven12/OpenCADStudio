@@ -443,7 +443,8 @@ impl OpenCADStudio {
                                 Ok(text) => return Some(self.run_script(clean_path, &text)),
                                 Err(e) => {
                                     self.command_line.push_error(
-                                        crate::tf!("SCRIPT: cannot read {clean_path}: {e}").as_ref(),
+                                        crate::tf!("SCRIPT: cannot read {clean_path}: {e}")
+                                            .as_ref(),
                                     );
                                 }
                             }
@@ -733,9 +734,8 @@ impl OpenCADStudio {
         let drawing = match result {
             Ok(bytes) => bytes,
             Err(e) => {
-                self.command_line.push_error(
-                    crate::tf!("{cmd}: cannot package the drawing ({e}).").as_ref(),
-                );
+                self.command_line
+                    .push_error(crate::tf!("{cmd}: cannot package the drawing ({e}).").as_ref());
                 return Task::none();
             }
         };
@@ -752,16 +752,18 @@ impl OpenCADStudio {
                     crate::tf!("{cmd}: packaged {copied} file(s) into {}", zip_name).as_ref(),
                 );
             }
-            Err(e) => self.command_line.push_error(
-                crate::tf!("{cmd}: cannot build the transmittal ZIP ({e}).").as_ref(),
-            ),
+            Err(e) => self
+                .command_line
+                .push_error(crate::tf!("{cmd}: cannot build the transmittal ZIP ({e}).").as_ref()),
         }
         if !skipped.is_empty() {
             let n = skipped.len();
             let names = skipped.join(", ");
             self.command_line.push_output(
-                crate::tf!("{cmd}: skipped {n} referenced file(s) not loaded in this session: {names}")
-                    .as_ref(),
+                crate::tf!(
+                    "{cmd}: skipped {n} referenced file(s) not loaded in this session: {names}"
+                )
+                .as_ref(),
             );
         }
         Task::none()

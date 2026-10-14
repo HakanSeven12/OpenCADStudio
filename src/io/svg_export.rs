@@ -63,8 +63,7 @@ pub fn export_svg_pages(
         .unwrap_or_else(|| "drawing".to_string());
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     for (index, page) in pages.iter().enumerate() {
-        let svg = build_svg(page, plot_style)
-            .map_err(|e| format!("Page {}: {e}", index + 1))?;
+        let svg = build_svg(page, plot_style).map_err(|e| format!("Page {}: {e}", index + 1))?;
         let numbered = parent.join(format!("{stem}-{}.svg", index + 1));
         write_svg_atomically(&numbered, svg.as_bytes())
             .map_err(|e| format!("Page {}: {e}", index + 1))?;
@@ -128,7 +127,11 @@ pub fn build_svg(
     ));
     out.push_str(">\n<title>Open CAD Studio plot</title>\n");
     out.push_str("<rect x=\"0\" y=\"0\"");
-    out.push_str(&format!(" width=\"{}\" height=\"{}\" fill=\"#ffffff\"/>\n", fmt(paper_w), fmt(paper_h)));
+    out.push_str(&format!(
+        " width=\"{}\" height=\"{}\" fill=\"#ffffff\"/>\n",
+        fmt(paper_w),
+        fmt(paper_h)
+    ));
 
     let mut clip_id: Option<String> = None;
     if let Some((cx, cy, cw, ch)) = page.clip {
@@ -140,14 +143,25 @@ pub fn build_svg(
             map.apply((cx + cw) as f64, (cy + ch) as f64),
             map.apply(cx as f64, (cy + ch) as f64),
         ];
-        let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let (mut x0, mut y0, mut x1, mut y1) = (
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
         for (x, y) in corners {
             x0 = x0.min(x);
             y0 = y0.min(y);
             x1 = x1.max(x);
             y1 = y1.max(y);
         }
-        if x1 > x0 && y1 > y0 && x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite() {
+        if x1 > x0
+            && y1 > y0
+            && x0.is_finite()
+            && y0.is_finite()
+            && x1.is_finite()
+            && y1.is_finite()
+        {
             out.push_str(&format!(
                 "<clipPath id=\"plot-clip\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>\n",
                 fmt(x0), fmt(y0), fmt(x1 - x0), fmt(y1 - y0)
@@ -238,7 +252,8 @@ fn emit_page_content(
         (first_wires, first_hatches, first_wipeouts, first_images),
         (second_wires, second_hatches, second_wipeouts, second_images),
     ] {
-        let mut items = Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len() + images.len());
+        let mut items =
+            Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len() + images.len());
         let mut sequence = 0usize;
         for wire in wires {
             if !wire.fill_tris.is_empty() {
@@ -257,7 +272,12 @@ fn emit_page_content(
             sequence += 1;
         }
         for image in images {
-            items.push((image.image.draw_depth, 1u8, sequence, DrawItem::Image(image)));
+            items.push((
+                image.image.draw_depth,
+                1u8,
+                sequence,
+                DrawItem::Image(image),
+            ));
             sequence += 1;
         }
         items.sort_by(|a, b| {
@@ -267,10 +287,16 @@ fn emit_page_content(
         });
         for (_, _, _, item) in items {
             match item {
-                DrawItem::WireFill(wire) => emit_wire_fills(out, &wire.wire, ox, oy, plot_style, options, map),
+                DrawItem::WireFill(wire) => {
+                    emit_wire_fills(out, &wire.wire, ox, oy, plot_style, options, map)
+                }
                 DrawItem::Hatch(hatch) => emit_hatch(out, hatch, ox, oy, plot_style, options, map),
-                DrawItem::Text(wire) => emit_searchable_text(out, &wire.wire, ox, oy, plot_style, options, map),
-                DrawItem::Wire(wire) => emit_wire(out, &wire.wire, ox, oy, plot_style, options, map),
+                DrawItem::Text(wire) => {
+                    emit_searchable_text(out, &wire.wire, ox, oy, plot_style, options, map)
+                }
+                DrawItem::Wire(wire) => {
+                    emit_wire(out, &wire.wire, ox, oy, plot_style, options, map)
+                }
                 DrawItem::Image(image) => emit_image(out, image, ox, oy, options, map)?,
             }
         }
@@ -294,7 +320,10 @@ fn emit_wire(
     if a < 0.01 {
         return;
     }
-    if matches!(wire.name.as_str(), "__paper_boundary__" | "paper_printable_area") {
+    if matches!(
+        wire.name.as_str(),
+        "__paper_boundary__" | "paper_printable_area"
+    ) {
         return;
     }
     let mut lw_override_mm: Option<f64> = None;
@@ -368,7 +397,12 @@ fn emit_wire(
             pen_down = false;
             continue;
         }
-        d.push_str(&format!("{} {} {} ", if pen_down { 'L' } else { 'M' }, fmt(sx), fmt(sy)));
+        d.push_str(&format!(
+            "{} {} {} ",
+            if pen_down { 'L' } else { 'M' },
+            fmt(sx),
+            fmt(sy)
+        ));
         pen_down = true;
         any = true;
     }
@@ -400,7 +434,11 @@ fn emit_wire_fills(
     if a < 0.01 {
         return;
     }
-    if wire.bg_adapt.as_deref().is_some_and(|adapt| adapt.canvas_color) {
+    if wire
+        .bg_adapt
+        .as_deref()
+        .is_some_and(|adapt| adapt.canvas_color)
+    {
         [r, g, b] = [1.0, 1.0, 1.0];
     } else {
         let mut screening = 1.0;
@@ -424,7 +462,11 @@ fn emit_wire_fills(
         let mut pts = Vec::with_capacity(3);
         let mut ok = true;
         for (pi, &[x, y, _]) in tri.iter().enumerate() {
-            let low = wire.fill_tris_low.get(ti * 3 + pi).copied().unwrap_or([0.0; 3]);
+            let low = wire
+                .fill_tris_low
+                .get(ti * 3 + pi)
+                .copied()
+                .unwrap_or([0.0; 3]);
             let (sx, sy) = map.apply(x as f64 + low[0] as f64 + ox, y as f64 + low[1] as f64 + oy);
             if !sx.is_finite() || !sy.is_finite() {
                 ok = false;
@@ -437,9 +479,12 @@ fn emit_wire_fills(
         }
         d.push_str(&format!(
             "M {} {} L {} {} L {} {} Z ",
-            fmt(pts[0].0), fmt(pts[0].1),
-            fmt(pts[1].0), fmt(pts[1].1),
-            fmt(pts[2].0), fmt(pts[2].1),
+            fmt(pts[0].0),
+            fmt(pts[0].1),
+            fmt(pts[1].0),
+            fmt(pts[1].1),
+            fmt(pts[2].0),
+            fmt(pts[2].1),
         ));
     }
     if d.is_empty() {
@@ -490,7 +535,10 @@ fn emit_hatch(
     }
     if is_wipeout {
         [r, g, b] = [1.0, 1.0, 1.0];
-    } else if !color_overridden && hatch.aci != 0 && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid)) {
+    } else if !color_overridden
+        && hatch.aci != 0
+        && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
+    {
         let is_light = r > 0.80
             && g > 0.80
             && b > 0.80
@@ -514,7 +562,11 @@ fn emit_hatch(
             0.1 * PT_TO_MM
         }
         .max(0.1 * PT_TO_MM);
-        let width_mm = if options.scale_lineweights { physical * s } else { physical };
+        let width_mm = if options.scale_lineweights {
+            physical * s
+        } else {
+            physical
+        };
         let segments = hatch.pattern_segments_for_plot();
         if segments.is_empty() {
             return;
@@ -531,7 +583,13 @@ fn emit_hatch(
                 let diam = fmt(width_mm.max(0.04));
                 d.push_str(&format!("M {x} {y} m -{rad} 0 a {rad} {rad} 0 1 0 {diam} 0 a {rad} {rad} 0 1 0 -{diam} 0 ", x = fmt(ax), y = fmt(ay)));
             } else {
-                d.push_str(&format!("M {} {} L {} {} ", fmt(ax), fmt(ay), fmt(bx), fmt(by)));
+                d.push_str(&format!(
+                    "M {} {} L {} {} ",
+                    fmt(ax),
+                    fmt(ay),
+                    fmt(bx),
+                    fmt(by)
+                ));
             }
         }
         if d.is_empty() {
@@ -554,7 +612,11 @@ fn emit_hatch(
             screening,
             options,
         );
-        [r, g, b] = [(r + second[0]) * 0.5, (g + second[1]) * 0.5, (b + second[2]) * 0.5];
+        [r, g, b] = [
+            (r + second[0]) * 0.5,
+            (g + second[1]) * 0.5,
+            (b + second[2]) * 0.5,
+        ];
     }
 
     let mut d = String::new();
@@ -572,7 +634,12 @@ fn emit_hatch(
         if !sx.is_finite() || !sy.is_finite() {
             continue;
         }
-        d.push_str(&format!("{} {} {} ", if current_empty { 'M' } else { 'L' }, fmt(sx), fmt(sy)));
+        d.push_str(&format!(
+            "{} {} {} ",
+            if current_empty { 'M' } else { 'L' },
+            fmt(sx),
+            fmt(sy)
+        ));
         current_empty = false;
         any = true;
     }
@@ -624,11 +691,20 @@ fn emit_searchable_text(
         let size_mm = (run.height as f64 * map.scale / HELVETICA_CAP_RATIO).max(0.1);
         let deg = -(run.rotation as f64).to_degrees();
         let rotate = if deg.abs() > 1e-6 {
-            format!(" transform=\"rotate({} {} {})\"", fmt(deg), fmt(sx), fmt(sy))
+            format!(
+                " transform=\"rotate({} {} {})\"",
+                fmt(deg),
+                fmt(sx),
+                fmt(sy)
+            )
         } else {
             String::new()
         };
-        let weight = if run.bold { " font-weight=\"bold\"" } else { "" };
+        let weight = if run.bold {
+            " font-weight=\"bold\""
+        } else {
+            ""
+        };
         out.push_str(&format!(
             "<text x=\"{}\" y=\"{}\" font-size=\"{}\"{rotate}{weight} fill=\"{}\" font-family=\"{}\"{opacity}>{text}</text>\n",
             fmt(sx),
@@ -678,10 +754,15 @@ fn emit_image(
         return Ok(());
     }
     let to_svg = |high: [f32; 3], low: [f32; 3]| {
-        map.apply(high[0] as f64 + low[0] as f64 + ox, high[1] as f64 + low[1] as f64 + oy)
+        map.apply(
+            high[0] as f64 + low[0] as f64 + ox,
+            high[1] as f64 + low[1] as f64 + oy,
+        )
     };
-    let corners: [[f64; 2]; 4] =
-        std::array::from_fn(|i| { let (x, y) = to_svg(image.corners[i], image.corners_low[i]); [x, y] });
+    let corners: [[f64; 2]; 4] = std::array::from_fn(|i| {
+        let (x, y) = to_svg(image.corners[i], image.corners_low[i]);
+        [x, y]
+    });
     if !corners.iter().flatten().all(|v| v.is_finite())
         || !image.verts.iter().all(|v| {
             let (x, y) = to_svg(v.pos, v.pos_low);
@@ -739,12 +820,19 @@ fn emit_image(
             let mut d = String::new();
             for (i, p) in ring.iter().enumerate() {
                 let (x, y) = map.apply(p[0] + ox, p[1] + oy);
-                d.push_str(&format!("{} {} {} ", if i == 0 { 'M' } else { 'L' }, fmt(x), fmt(y)));
+                d.push_str(&format!(
+                    "{} {} {} ",
+                    if i == 0 { 'M' } else { 'L' },
+                    fmt(x),
+                    fmt(y)
+                ));
             }
             d.push_str("Z ");
             rings.push_str(&format!("<path d=\"{}\"/>\n", d.trim_end()));
         }
-        out.push_str(&format!("<clipPath id=\"img-clip-{id}\">{rings}</clipPath>\n"));
+        out.push_str(&format!(
+            "<clipPath id=\"img-clip-{id}\">{rings}</clipPath>\n"
+        ));
         clip_open = format!("<g clip-path=\"url(#img-clip-{id})\">\n");
         clip_close = "</g>\n";
     }
@@ -907,7 +995,12 @@ mod tests {
     #[test]
     fn y_flip_puts_bottom_left_geometry_at_the_svg_bottom() {
         // A wire point at paper y=0 (sheet bottom) must land at y=paper_h in SVG.
-        let map = PageMap { paper_w: 210.0, paper_h: 297.0, scale: 1.0, rotation_deg: 0 };
+        let map = PageMap {
+            paper_w: 210.0,
+            paper_h: 297.0,
+            scale: 1.0,
+            rotation_deg: 0,
+        };
         assert_eq!(map.apply(10.0, 0.0), (10.0, 297.0));
         assert_eq!(map.apply(0.0, 297.0), (0.0, 0.0));
     }
@@ -915,12 +1008,22 @@ mod tests {
     #[test]
     fn rotation_matches_the_pdf_ctm_convention() {
         // PDF 90°: x' = paper_w - s*y, y' = s*x, then SVG flips y.
-        let map = PageMap { paper_w: 297.0, paper_h: 210.0, scale: 1.0, rotation_deg: 90 };
+        let map = PageMap {
+            paper_w: 297.0,
+            paper_h: 210.0,
+            scale: 1.0,
+            rotation_deg: 90,
+        };
         let (x, y) = map.apply(0.0, 0.0);
         assert_eq!((x, y), (297.0, 210.0));
         let (x, y) = map.apply(5.0, 7.0);
         assert_eq!((x, y), (297.0 - 7.0, 210.0 - 5.0));
-        let map = PageMap { paper_w: 210.0, paper_h: 297.0, scale: 1.0, rotation_deg: 180 };
+        let map = PageMap {
+            paper_w: 210.0,
+            paper_h: 297.0,
+            scale: 1.0,
+            rotation_deg: 180,
+        };
         let (x, y) = map.apply(0.0, 0.0);
         assert_eq!((x, y), (210.0, 0.0));
     }
@@ -950,7 +1053,12 @@ mod tests {
     fn nan_splits_subpaths_and_helpers_stay_paper_coloured() {
         let wire = WireModel::solid(
             "L1".to_string(),
-            vec![[0.0, 0.0, 0.0], [f32::NAN, f32::NAN, 0.0], [5.0, 5.0, 0.0], [6.0, 5.0, 0.0]],
+            vec![
+                [0.0, 0.0, 0.0],
+                [f32::NAN, f32::NAN, 0.0],
+                [5.0, 5.0, 0.0],
+                [6.0, 5.0, 0.0],
+            ],
             [0.0, 0.0, 1.0, 1.0],
             false,
         );
@@ -1002,6 +1110,9 @@ mod tests {
         let svg = build_svg(&page, None).expect("builds");
         assert!(svg.contains("<clipPath id=\"plot-clip\">"), "{svg}");
         // y-flipped: rect y = 297 - (20 + 50) = 227.
-        assert!(svg.contains("x=\"10\" y=\"227\" width=\"100\" height=\"50\""), "{svg}");
+        assert!(
+            svg.contains("x=\"10\" y=\"227\" width=\"100\" height=\"50\""),
+            "{svg}"
+        );
     }
 }

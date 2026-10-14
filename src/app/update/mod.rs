@@ -862,11 +862,13 @@ impl OpenCADStudio {
                 if pending.is_empty() {
                     return autosave;
                 }
-                Task::batch(std::iter::once(autosave).chain(pending.into_iter().map(|script| {
-                    Task::perform(crate::scene::text::web_font::fetch(script), move |res| {
-                        Message::WebFontLoaded(script, res)
-                    })
-                })))
+                Task::batch(
+                    std::iter::once(autosave).chain(pending.into_iter().map(|script| {
+                        Task::perform(crate::scene::text::web_font::fetch(script), move |res| {
+                            Message::WebFontLoaded(script, res)
+                        })
+                    })),
+                )
             }
 
             // Web: a per-script font arrived. The same bytes feed drawing text,

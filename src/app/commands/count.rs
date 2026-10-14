@@ -188,7 +188,11 @@ impl OpenCADStudio {
         }
     }
 
-    pub(in crate::app) fn start_count_command(&mut self, i: usize, command: Box<dyn CadCommand>) -> Task<Message> {
+    pub(in crate::app) fn start_count_command(
+        &mut self,
+        i: usize,
+        command: Box<dyn CadCommand>,
+    ) -> Task<Message> {
         self.reset_command_start_state(i);
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(command);

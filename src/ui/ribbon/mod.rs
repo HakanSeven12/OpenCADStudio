@@ -30,17 +30,17 @@ pub use context_tools::{pdf_underlay_tools, point_cloud_tools, xref_tools, Under
 use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
-mod locate;
 mod keytips;
+mod locate;
+use crate::t;
+use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
+pub use collapse::CollapseMode;
+use collapse::{CollapsePanels, Panel};
 pub use keytips::{
     active as keytips_active, key_pressed as keytip_key_pressed,
     key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed, KeyTipInput,
     KeyTipStep,
 };
-use crate::t;
-use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
-pub use collapse::CollapseMode;
-use collapse::{CollapsePanels, Panel};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
     widgets::make_tip(text)
@@ -309,7 +309,10 @@ impl Ribbon {
     /// Show the Block Editor tab while a block is being edited, and return to
     /// the previous tab when the editing ends.
     pub fn set_block_editing(&mut self, editing: bool) {
-        let Some(index) = self.modules.iter().position(|module| module.id() == "block_editor")
+        let Some(index) = self
+            .modules
+            .iter()
+            .position(|module| module.id() == "block_editor")
         else {
             return;
         };

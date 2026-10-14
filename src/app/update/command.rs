@@ -1057,7 +1057,8 @@ impl OpenCADStudio {
             None => local,
         });
         let shown = crate::entities::common::format_direction(angle);
-        self.command_line.push_output(crate::tf!("Angle Override: {shown}").as_ref());
+        self.command_line
+            .push_output(crate::tf!("Angle Override: {shown}").as_ref());
         true
     }
 

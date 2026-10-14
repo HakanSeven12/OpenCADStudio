@@ -589,9 +589,9 @@ impl OpenCADStudio {
                     self.active_theme = resolved;
                     self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
-                    self.command_line.push_output(crate::tf!(
-                        "Color scheme set to 'System' (currently {name})."
-                    ).as_ref());
+                    self.command_line.push_output(
+                        crate::tf!("Color scheme set to 'System' (currently {name}).").as_ref(),
+                    );
                     return Some(Task::none());
                 }
                 let theme = crate::app::config::parse_theme_name(sub);

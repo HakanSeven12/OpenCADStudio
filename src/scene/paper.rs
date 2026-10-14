@@ -604,7 +604,10 @@ impl Scene {
                 _ => model.clone(),
             };
             let style = self.render_style(entity);
-            if matches!(hatch.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
+            if matches!(
+                hatch.pattern,
+                model::hatch_model::HatchPattern::Gradient { .. }
+            ) {
                 hatch.set_alpha(style.0[3]);
             } else {
                 hatch.color = style.0;

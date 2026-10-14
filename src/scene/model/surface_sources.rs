@@ -15,10 +15,22 @@ pub const SURFACE_SOURCES_APP: &str = "OCS_SURFACE_SOURCES";
 pub enum SurfaceSources {
     /// EXTRUDE: the profile, the height along its normal (or the length of a
     /// given direction) and the taper angle.
-    Extrude { profile: Handle, height: f64, direction: Option<DVec3>, taper: f64 },
+    Extrude {
+        profile: Handle,
+        height: f64,
+        direction: Option<DVec3>,
+        taper: f64,
+    },
     /// REVOLVE: the profile, the axis (an axis object or two points), the
     /// angle and the start angle.
-    Revolve { profile: Handle, axis: Option<Handle>, start: DVec3, end: DVec3, angle: f64, start_angle: f64 },
+    Revolve {
+        profile: Handle,
+        axis: Option<Handle>,
+        start: DVec3,
+        end: DVec3,
+        angle: f64,
+        start_angle: f64,
+    },
     /// LOFT: the cross sections in order.
     Loft { sections: Vec<Handle> },
 }
@@ -28,20 +40,31 @@ impl SurfaceSources {
     pub fn handles(&self) -> Vec<Handle> {
         match self {
             SurfaceSources::Extrude { profile, .. } => vec![*profile],
-            SurfaceSources::Revolve { profile, axis, .. } => std::iter::once(*profile).chain(*axis).collect(),
+            SurfaceSources::Revolve { profile, axis, .. } => {
+                std::iter::once(*profile).chain(*axis).collect()
+            }
             SurfaceSources::Loft { sections } => sections.clone(),
         }
     }
 }
 
 /// Keep the sources with the surface.
-pub fn link_surface_sources(document: &mut codec::CadDocument, surface: Handle, sources: &SurfaceSources) {
+pub fn link_surface_sources(
+    document: &mut codec::CadDocument,
+    surface: Handle,
+    sources: &SurfaceSources,
+) {
     if surface.is_null() {
         return;
     }
     let point = |p: DVec3| XDataValue::Point3D(codec::types::Vector3::new(p.x, p.y, p.z));
     let values = match sources {
-        SurfaceSources::Extrude { profile, height, direction, taper } => {
+        SurfaceSources::Extrude {
+            profile,
+            height,
+            direction,
+            taper,
+        } => {
             let mut values = vec![
                 XDataValue::String("EXTRUDE".into()),
                 XDataValue::Handle(*profile),
@@ -51,7 +74,14 @@ pub fn link_surface_sources(document: &mut codec::CadDocument, surface: Handle, 
             values.extend(direction.map(point));
             values
         }
-        SurfaceSources::Revolve { profile, axis, start, end, angle, start_angle } => {
+        SurfaceSources::Revolve {
+            profile,
+            axis,
+            start,
+            end,
+            angle,
+            start_angle,
+        } => {
             let mut values = vec![
                 XDataValue::String("REVOLVE".into()),
                 XDataValue::Handle(*profile),
@@ -67,7 +97,12 @@ pub fn link_surface_sources(document: &mut codec::CadDocument, surface: Handle, 
             .chain(sections.iter().map(|handle| XDataValue::Handle(*handle)))
             .collect(),
     };
-    crate::scene::view::dispatch::set_entity_xdata(document, surface, SURFACE_SOURCES_APP, Some(values));
+    crate::scene::view::dispatch::set_entity_xdata(
+        document,
+        surface,
+        SURFACE_SOURCES_APP,
+        Some(values),
+    );
 }
 
 /// The sources an associative surface keeps.

@@ -5394,10 +5394,18 @@ fn append_linear_dimension(
     let beyond_d2 = chase_text.then_some(text_beyond_d2).flatten();
     if (arrows_outside && !params.dimsoxd) || beyond_d1.is_some() || beyond_d2.is_some() {
         if !suppress.dim1 && (arrows_outside || beyond_d1.is_some()) {
-            add_segment(&mut g.dim_lines, d1 - dir_d1_to_d2 * reach(stub, beyond_d1), d1);
+            add_segment(
+                &mut g.dim_lines,
+                d1 - dir_d1_to_d2 * reach(stub, beyond_d1),
+                d1,
+            );
         }
         if !suppress.dim2 && (arrows_outside || beyond_d2.is_some()) {
-            add_segment(&mut g.dim_lines, d2, d2 + dir_d1_to_d2 * reach(stub, beyond_d2));
+            add_segment(
+                &mut g.dim_lines,
+                d2,
+                d2 + dir_d1_to_d2 * reach(stub, beyond_d2),
+            );
         }
     }
 

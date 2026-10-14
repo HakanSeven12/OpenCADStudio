@@ -19,7 +19,10 @@ pub(crate) enum TouchAction {
     Pan(Vector),
     /// Scale the view by `factor` (above 1 zooms in) about `centre`, in
     /// window coordinates.
-    Zoom { factor: f32, centre: Point },
+    Zoom {
+        factor: f32,
+        centre: Point,
+    },
     Orbit(Vector),
     Tap(usize),
     SwipeUp,
@@ -197,7 +200,10 @@ mod tests {
     fn two_fingers_pan_pinch_and_tap() {
         let mut touch = TouchGestures::default();
         assert!(touch.event(press(1, 100.0, 100.0)).is_empty());
-        assert_eq!(touch.event(press(2, 200.0, 100.0)), vec![TouchAction::Cancel]);
+        assert_eq!(
+            touch.event(press(2, 200.0, 100.0)),
+            vec![TouchAction::Cancel]
+        );
         assert!(touch.active());
         // Both fingers slide right: a pan, no zoom.
         touch.event(moved(1, 110.0, 100.0));

@@ -3800,10 +3800,13 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             .iter()
             .filter(|hatch| hatch.boundary.len() >= 3)
             .count();
-        let (translucent, opaque): (Vec<HatchModel>, Vec<HatchModel>) =
-            hatches.iter().cloned().partition(|hatch| hatch.color[3] < 0.999);
+        let (translucent, opaque): (Vec<HatchModel>, Vec<HatchModel>) = hatches
+            .iter()
+            .cloned()
+            .partition(|hatch| hatch.color[3] < 0.999);
         self.hatch_gpu.upload(device, queue, &opaque);
-        self.hatch_translucent_gpu.upload(device, queue, &translucent);
+        self.hatch_translucent_gpu
+            .upload(device, queue, &translucent);
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
             if elapsed_ms >= 1.0 {
@@ -4853,8 +4856,11 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 // Transparent hatches blend over the lines already drawn; the
                 // lines in front of them still win the depth test.
                 if !self.skip_hatch_frame {
-                    self.hatch_translucent_gpu
-                        .draw(&mut pass, &self.uniform_bind_group, stencil_ref);
+                    self.hatch_translucent_gpu.draw(
+                        &mut pass,
+                        &self.uniform_bind_group,
+                        stencil_ref,
+                    );
                 }
             }
 
@@ -5656,10 +5662,7 @@ impl MultiPipeline {
             total.wire_arena += slot.wire_arena;
             total.block_geometry +=
                 wire_gpu::block_arena_bytes(&inner.gpu_block_wires, &mut counted)
-                    + wire_gpu::block_arena_bytes(
-                        &inner.gpu_selected_block_wires,
-                        &mut counted,
-                    );
+                    + wire_gpu::block_arena_bytes(&inner.gpu_selected_block_wires, &mut counted);
         }
         for entry in self.wire_buffer_cache.values() {
             total.block_geometry += wire_gpu::block_arena_bytes(&entry.1, &mut counted);

@@ -66,7 +66,6 @@ fn fonts() -> &'static SysFonts {
     })
 }
 
-
 /// Sorted, de-duplicated family names of every face currently in `db`.
 fn family_names(db: &fontdb::Database) -> Vec<String> {
     let mut families: Vec<String> = db
@@ -446,14 +445,19 @@ mod tests {
     /// and whether it comes as a bare name or as a path.
     #[test]
     fn face_files_resolve_to_their_family() {
-        let found = fonts().db.lock().unwrap().faces().find_map(|face| match &face.source {
-            fontdb::Source::File(path) => {
-                let file = path.file_name()?.to_string_lossy().into_owned();
-                let family = face.families.first().map(|(name, _)| name.clone())?;
-                Some((file, family))
-            }
-            _ => None,
-        });
+        let found = fonts()
+            .db
+            .lock()
+            .unwrap()
+            .faces()
+            .find_map(|face| match &face.source {
+                fontdb::Source::File(path) => {
+                    let file = path.file_name()?.to_string_lossy().into_owned();
+                    let family = face.families.first().map(|(name, _)| name.clone())?;
+                    Some((file, family))
+                }
+                _ => None,
+            });
         let Some((file, family)) = found else {
             eprintln!("no installed face files on this host; skipping");
             return;

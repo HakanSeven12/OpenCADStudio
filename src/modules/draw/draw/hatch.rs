@@ -264,7 +264,9 @@ impl HatchCommand {
         self
     }
 
-    pub fn finish_selected(mut self) -> CmdResult { self.on_enter() }
+    pub fn finish_selected(mut self) -> CmdResult {
+        self.on_enter()
+    }
 
     fn set_object_selection(&mut self, handles: Vec<Handle>) {
         let mut segments = Vec::new();

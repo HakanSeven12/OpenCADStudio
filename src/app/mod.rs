@@ -9,9 +9,9 @@ pub(crate) mod config;
 pub use automation::{export_headless, serve};
 mod annotation_data;
 mod block_editor;
-mod block_save_as;
 #[cfg(test)]
 mod block_editor_tests;
+mod block_save_as;
 mod command_driver;
 pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel, PasteSpace};
 pub(crate) mod commands;

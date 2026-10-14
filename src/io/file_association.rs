@@ -243,7 +243,10 @@ mod windows_impl {
             "ms-settings:defaultapps?registeredAppUser={}",
             APP_REGISTRY_NAME.replace(' ', "%20")
         );
-        std::process::Command::new("explorer.exe").arg(uri).spawn().ok()?;
+        std::process::Command::new("explorer.exe")
+            .arg(uri)
+            .spawn()
+            .ok()?;
         Some(
             "Opened Settings → Default apps — choose Open CAD Studio for .dwg / .dxf there."
                 .to_string(),

@@ -80,12 +80,13 @@ pub fn array_of_insert(document: &CadDocument, insert: Handle) -> Option<AssocAr
             let Some(dependency) = dependency(document, link.dependency) else {
                 continue;
             };
-            match (dependency.is_read_dependency, dependency.is_write_dependency) {
+            match (
+                dependency.is_read_dependency,
+                dependency.is_write_dependency,
+            ) {
                 (true, true) if dependency.dependent_on == insert => owns_insert = true,
                 (false, true) => array_block = dependency.dependent_on,
-                (true, false) if source_block.is_null() => {
-                    source_block = dependency.dependent_on
-                }
+                (true, false) if source_block.is_null() => source_block = dependency.dependent_on,
                 _ => {}
             }
         }
@@ -95,16 +96,14 @@ pub fn array_of_insert(document: &CadDocument, insert: Handle) -> Option<AssocAr
             "AcDbAssocArrayPathParameters" => ArrayKind::Path,
             _ => return None,
         };
-        (owns_insert && !array_block.is_null() && !source_block.is_null()).then_some(
-            AssocArray {
-                insert,
-                action: handle,
-                body: action.action_body,
-                array_block,
-                source_block,
-                kind,
-            },
-        )
+        (owns_insert && !array_block.is_null() && !source_block.is_null()).then_some(AssocArray {
+            insert,
+            action: handle,
+            body: action.action_body,
+            array_block,
+            source_block,
+            kind,
+        })
     })
 }
 
@@ -181,8 +180,7 @@ pub fn column_axis(document: &CadDocument, array: &AssocArray) -> DVec3 {
             let AssociativeData::EdgeActionParam(edge) = &object.data else {
                 return None;
             };
-            if edge.single_dependency.action_param.name != "RowProfile" || edge.action_type != 19
-            {
+            if edge.single_dependency.action_param.name != "RowProfile" || edge.action_type != 19 {
                 return None;
             }
             match edge.curve.get(1)? {
@@ -307,10 +305,17 @@ pub fn polar_items(
         get("Levels", 1.0).max(1.0) as i32,
     );
     // ponytail: Direction 0 read as clockwise; no sample with 0 to confirm.
-    let sign = if get("Direction", 1.0) == 0.0 { -1.0 } else { 1.0 };
+    let sign = if get("Direction", 1.0) == 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
     let align = get("AlignItems", 1.0) != 0.0;
-    let (spacing, start, radius) =
-        (get("ItemSpacing", 0.0), get("StartAngle", 0.0), get("Radius", 0.0));
+    let (spacing, start, radius) = (
+        get("ItemSpacing", 0.0),
+        get("StartAngle", 0.0),
+        get("Radius", 0.0),
+    );
     let x = plane_x(normal);
     let y = normal.cross(x);
     let start_dir = x * start.cos() + y * start.sin();
@@ -342,11 +347,21 @@ fn property_rows(kind: ArrayKind) -> &'static [(&'static str, &'static str, &'st
     match kind {
         ArrayKind::Rectangular => &[
             ("assoc_array_columns", "Items", "Columns", 0),
-            ("assoc_array_column_spacing", "ItemSpacing", "Column spacing", 1),
+            (
+                "assoc_array_column_spacing",
+                "ItemSpacing",
+                "Column spacing",
+                1,
+            ),
             ("assoc_array_rows", "Rows", "Rows", 0),
             ("assoc_array_row_spacing", "RowSpacing", "Row spacing", 1),
             ("assoc_array_levels", "Levels", "Levels", 0),
-            ("assoc_array_level_spacing", "LevelSpacing", "Level spacing", 1),
+            (
+                "assoc_array_level_spacing",
+                "LevelSpacing",
+                "Level spacing",
+                1,
+            ),
         ],
         ArrayKind::Polar => &[
             ("assoc_array_items", "Items", "Items", 0),
@@ -355,7 +370,12 @@ fn property_rows(kind: ArrayKind) -> &'static [(&'static str, &'static str, &'st
             ("assoc_array_rows", "Rows", "Rows", 0),
             ("assoc_array_row_spacing", "RowSpacing", "Row spacing", 1),
             ("assoc_array_levels", "Levels", "Levels", 0),
-            ("assoc_array_level_spacing", "LevelSpacing", "Level spacing", 1),
+            (
+                "assoc_array_level_spacing",
+                "LevelSpacing",
+                "Level spacing",
+                1,
+            ),
         ],
         ArrayKind::Path => &[
             ("assoc_array_items", "Items", "Items", 0),
@@ -363,7 +383,12 @@ fn property_rows(kind: ArrayKind) -> &'static [(&'static str, &'static str, &'st
             ("assoc_array_rows", "Rows", "Rows", 0),
             ("assoc_array_row_spacing", "RowSpacing", "Row spacing", 1),
             ("assoc_array_levels", "Levels", "Levels", 0),
-            ("assoc_array_level_spacing", "LevelSpacing", "Level spacing", 1),
+            (
+                "assoc_array_level_spacing",
+                "LevelSpacing",
+                "Level spacing",
+                1,
+            ),
         ],
     }
 }
@@ -417,8 +442,7 @@ pub fn apply_field(
     field: &str,
     text: &str,
 ) -> Result<(), String> {
-    let Some(&(_, name, _, kind)) =
-        property_rows(array.kind).iter().find(|row| row.0 == field)
+    let Some(&(_, name, _, kind)) = property_rows(array.kind).iter().find(|row| row.0 == field)
     else {
         return Err("unknown array field".into());
     };
@@ -460,7 +484,9 @@ pub fn update(
         set_param_value(&mut params, name, *value);
     }
     if array.kind == ArrayKind::Polar
-        && changes.iter().any(|(name, _)| matches!(*name, "Items" | "FillAngle"))
+        && changes
+            .iter()
+            .any(|(name, _)| matches!(*name, "Items" | "FillAngle"))
     {
         let fill = param_value(&params, "FillAngle").unwrap_or(std::f64::consts::TAU);
         let count = param_value(&params, "Items").unwrap_or(1.0).max(1.0);
@@ -475,12 +501,10 @@ pub fn update(
     }
     let normal = base_normal(document, array);
     let placements: Vec<([i32; 3], DMat4)> = match array.kind {
-        ArrayKind::Rectangular => {
-            rectangular_items(&params, column_axis(document, array), normal)
-                .into_iter()
-                .map(|(location, offset)| (location, DMat4::from_translation(offset)))
-                .collect()
-        }
+        ArrayKind::Rectangular => rectangular_items(&params, column_axis(document, array), normal)
+            .into_iter()
+            .map(|(location, offset)| (location, DMat4::from_translation(offset)))
+            .collect(),
         _ => polar_items(&params, center, normal),
     };
     let current = body(document, array.body).ok_or("array body missing")?;
@@ -547,7 +571,9 @@ pub fn update(
         .iter_mut()
         .find(|record| record.handle == array.source_block)
     {
-        record.insert_handles.retain(|handle| !old_items.contains(handle));
+        record
+            .insert_handles
+            .retain(|handle| !old_items.contains(handle));
         record.insert_handles.extend(new_handles);
     }
     let values_in_action = action(document, array.action).is_some_and(|a| !a.values.is_empty());
@@ -581,11 +607,36 @@ const ARRAY_CLASSES: &[(&str, &str, i32, i32)] = &[
     ("ACDBASSOCNETWORK", "AcDbAssocNetwork", 27, 45),
     ("ACDBASSOCACTION", "AcDbAssocAction", 27, 45),
     ("ACDBASSOCDEPENDENCY", "AcDbAssocDependency", 27, 50),
-    ("ACDBASSOCVERTEXACTIONPARAM", "AcDbAssocVertexActionParam", 27, 50),
-    ("ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam", 27, 50),
-    ("ACDBASSOCARRAYACTIONBODY", "AcDbAssocArrayActionBody", 29, 55),
-    ("ACDBASSOCARRAYRECTANGULARPARAMETERS", "AcDbAssocArrayRectangularParameters", 29, 55),
-    ("ACDBASSOCARRAYPOLARPARAMETERS", "AcDbAssocArrayPolarParameters", 29, 55),
+    (
+        "ACDBASSOCVERTEXACTIONPARAM",
+        "AcDbAssocVertexActionParam",
+        27,
+        50,
+    ),
+    (
+        "ACDBASSOCEDGEACTIONPARAM",
+        "AcDbAssocEdgeActionParam",
+        27,
+        50,
+    ),
+    (
+        "ACDBASSOCARRAYACTIONBODY",
+        "AcDbAssocArrayActionBody",
+        29,
+        55,
+    ),
+    (
+        "ACDBASSOCARRAYRECTANGULARPARAMETERS",
+        "AcDbAssocArrayRectangularParameters",
+        29,
+        55,
+    ),
+    (
+        "ACDBASSOCARRAYPOLARPARAMETERS",
+        "AcDbAssocArrayPolarParameters",
+        29,
+        55,
+    ),
 ];
 
 fn register_array_classes(document: &mut CadDocument) {
@@ -644,9 +695,12 @@ fn dictionary_entry(document: &CadDocument, dictionary: Handle, key: &str) -> Op
 
 /// A dictionary stored under `key` in `parent`, created when absent.
 fn child_dictionary(document: &mut CadDocument, parent: Handle, key: &str) -> Handle {
-    if let Some(handle) = dictionary_entry(document, parent, key)
-        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::Dictionary(_))))
-    {
+    if let Some(handle) = dictionary_entry(document, parent, key).filter(|handle| {
+        matches!(
+            document.objects.get(handle),
+            Some(ObjectType::Dictionary(_))
+        )
+    }) {
         return handle;
     }
     let handle = document.allocate_handle();
@@ -654,7 +708,9 @@ fn child_dictionary(document: &mut CadDocument, parent: Handle, key: &str) -> Ha
     dictionary.handle = handle;
     dictionary.owner = parent;
     dictionary.reactors.push(parent);
-    document.objects.insert(handle, ObjectType::Dictionary(dictionary));
+    document
+        .objects
+        .insert(handle, ObjectType::Dictionary(dictionary));
     if let Some(ObjectType::Dictionary(parent)) = document.objects.get_mut(&parent) {
         parent.add_entry(key, handle);
     }
@@ -679,7 +735,12 @@ fn model_space_network(document: &mut CadDocument) -> Handle {
     }
     let root_holder = child_dictionary(document, document.header.named_objects_dict_handle, KEY);
     let root = match dictionary_entry(document, root_holder, KEY) {
-        Some(root) if matches!(document.objects.get(&root), Some(ObjectType::Associative(_))) => {
+        Some(root)
+            if matches!(
+                document.objects.get(&root),
+                Some(ObjectType::Associative(_))
+            ) =>
+        {
             root
         }
         _ => {
@@ -896,7 +957,10 @@ pub fn create(
     scene.define_block_raw(
         &array_name,
         codec::types::Vector3::ZERO,
-        placements.iter().map(|(_, placement)| item(*placement)).collect(),
+        placements
+            .iter()
+            .map(|(_, placement)| item(*placement))
+            .collect(),
     );
     let record = |document: &CadDocument, name: &str| {
         document
@@ -930,8 +994,11 @@ pub fn create(
     let [action, body, write_dep, read_dep, both_dep] =
         std::array::from_fn(|_| document.allocate_handle());
     let mut owned_parameters = Vec::new();
-    let vertex_params =
-        [("BaseNormal", normal), ("Origin", DVec3::ZERO), ("basePoint", DVec3::ZERO)];
+    let vertex_params = [
+        ("BaseNormal", normal),
+        ("Origin", DVec3::ZERO),
+        ("basePoint", DVec3::ZERO),
+    ];
     for (name, point) in vertex_params {
         let handle = document.allocate_handle();
         document.objects.insert(
@@ -1109,7 +1176,14 @@ pub fn create_from_spec(
                 offset.truncate().length(),
                 offset.y.atan2(offset.x),
             );
-            create(scene, sources, source_point, center, ArrayKind::Polar, params)
+            create(
+                scene,
+                sources,
+                source_point,
+                center,
+                ArrayKind::Polar,
+                params,
+            )
         }
     }
 }

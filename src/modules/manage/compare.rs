@@ -74,7 +74,12 @@ impl CadCommand for CompareCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        match text.trim().trim_start_matches('_').to_ascii_uppercase().as_str() {
+        match text
+            .trim()
+            .trim_start_matches('_')
+            .to_ascii_uppercase()
+            .as_str()
+        {
             "" | "N" | "NEXT" => Some(self.show(true)),
             "P" | "PREVIOUS" => Some(self.show(false)),
             "X" | "EXIT" => Some(CmdResult::Cancel),
@@ -101,4 +106,6 @@ impl CadCommand for CompareCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["COMPARE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["COMPARE"]
+});

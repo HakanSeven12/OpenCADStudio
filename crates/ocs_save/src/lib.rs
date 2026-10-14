@@ -28,7 +28,9 @@ pub const PROTOCOL_VERSION: u16 = 5;
 /// owns that app-side half of the pipeline.
 pub fn serialize_document(doc: &CadDocument, ext: &str) -> Result<Vec<u8>, String> {
     match ext.to_lowercase().as_str() {
-        "dxf" => DxfWriter::new(doc).write_to_vec().map_err(|e| e.to_string()),
+        "dxf" => DxfWriter::new(doc)
+            .write_to_vec()
+            .map_err(|e| e.to_string()),
         _ => {
             let mut buf = std::io::Cursor::new(Vec::new());
             DwgWriter::write_to_writer(&mut buf, doc).map_err(|e| e.to_string())?;
@@ -214,21 +216,18 @@ mod tests {
         let common = point.common();
         assert_eq!(common.layer, "RUNTIME-FIELDS");
         assert_eq!(common.linetype_handle.map(|h| h.value()), Some(0xABCD));
-        assert_eq!(
-            common.color_book_handle.map(|h| h.value()),
-            Some(0x101)
-        );
+        assert_eq!(common.color_book_handle.map(|h| h.value()), Some(0x101));
         assert_eq!(common.material_flags, 0b11);
         assert_eq!(common.material_handle.map(|h| h.value()), Some(0x202));
         assert_eq!(common.plotstyle_flags, 0b11);
-        assert_eq!(
-            common.plotstyle_handle.map(|h| h.value()),
-            Some(0x303)
-        );
+        assert_eq!(common.plotstyle_handle.map(|h| h.value()), Some(0x303));
         assert_eq!(common.shadow_flags, 7);
         assert_eq!(common.entity_mode, Some(2));
         assert!(common.has_ds_data);
-        assert_eq!(common.graphic_data.as_deref(), Some(&[0xDE, 0xAD, 0xBE, 0xEF][..]));
+        assert_eq!(
+            common.graphic_data.as_deref(),
+            Some(&[0xDE, 0xAD, 0xBE, 0xEF][..])
+        );
     }
 
     #[test]
@@ -237,9 +236,10 @@ mod tests {
             .expect("decode")
             .expect("inner ok");
         assert_eq!(ok, vec![1, 2, 3]);
-        let err = decode_response(&encode_response(Err("writer failed".to_string())).expect("encode"))
-            .expect("decode")
-            .expect_err("inner err");
+        let err =
+            decode_response(&encode_response(Err("writer failed".to_string())).expect("encode"))
+                .expect("decode")
+                .expect_err("inner err");
         assert_eq!(err, "writer failed");
     }
 
@@ -270,7 +270,10 @@ mod tests {
         doc.version = codec::DxfVersion::AC1032;
         let dxf = serialize_document(&doc, "dxf").expect("dxf bytes");
         assert!(!dxf.is_empty());
-        assert!(dxf.starts_with(b"  0") || dxf.starts_with(b"0\n"), "not a DXF header");
+        assert!(
+            dxf.starts_with(b"  0") || dxf.starts_with(b"0\n"),
+            "not a DXF header"
+        );
         let dwg = serialize_document(&doc, "dwg").expect("dwg bytes");
         assert!(dwg.starts_with(b"AC10"), "not a DWG sentinel");
         // Case-insensitive: the tab state and save dialog both pass through.

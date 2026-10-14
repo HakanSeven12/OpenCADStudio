@@ -37,7 +37,11 @@ impl OpenCADStudio {
             .collect();
         let name_of = |list: &[(String, Handle)], handle: Handle| {
             (!handle.is_null())
-                .then(|| list.iter().find(|(_, h)| *h == handle).map(|(name, _)| name.clone()))
+                .then(|| {
+                    list.iter()
+                        .find(|(_, h)| *h == handle)
+                        .map(|(name, _)| name.clone())
+                })
                 .flatten()
         };
         let views = document
@@ -57,24 +61,25 @@ impl OpenCADStudio {
             })
             .collect();
         let scene = &self.tabs[i].scene;
-        let sheet_viewports = (scene.current_layout != "Model" && scene.active_viewport.is_none()).then(|| {
-            scene
-                .layout_content_viewports()
-                .iter()
-                .filter_map(|handle| match document.get_entity(*handle) {
-                    Some(codec::EntityType::Viewport(value)) => Some((
-                        handle.value(),
-                        [
-                            value.center.x - value.width / 2.0,
-                            value.center.y - value.height / 2.0,
-                            value.center.x + value.width / 2.0,
-                            value.center.y + value.height / 2.0,
-                        ],
-                    )),
-                    _ => None,
-                })
-                .collect()
-        });
+        let sheet_viewports = (scene.current_layout != "Model" && scene.active_viewport.is_none())
+            .then(|| {
+                scene
+                    .layout_content_viewports()
+                    .iter()
+                    .filter_map(|handle| match document.get_entity(*handle) {
+                        Some(codec::EntityType::Viewport(value)) => Some((
+                            handle.value(),
+                            [
+                                value.center.x - value.width / 2.0,
+                                value.center.y - value.height / 2.0,
+                                value.center.x + value.width / 2.0,
+                                value.center.y + value.height / 2.0,
+                            ],
+                        )),
+                        _ => None,
+                    })
+                    .collect()
+            });
         ViewNames {
             views,
             visual_styles: visual_styles.into_iter().map(|(name, _)| name).collect(),
@@ -115,7 +120,11 @@ impl OpenCADStudio {
                 let want = glam::Vec3::new(x, y, 1.0).normalize();
                 (18..26)
                     .map(CubeRegion::Corner)
-                    .max_by(|a, b| a.snap_direction().dot(want).total_cmp(&b.snap_direction().dot(want)))
+                    .max_by(|a, b| {
+                        a.snap_direction()
+                            .dot(want)
+                            .total_cmp(&b.snap_direction().dot(want))
+                    })
                     .expect("the cube has corners")
             }
         };
@@ -133,7 +142,8 @@ impl OpenCADStudio {
                 self.commit_active_ucs_change(i, "-VIEW");
             }
         }
-        self.command_line.push_output(crate::t!("Regenerating model.").as_ref());
+        self.command_line
+            .push_output(crate::t!("Regenerating model.").as_ref());
         self.snap_view_preset(region)
     }
 
@@ -150,7 +160,12 @@ impl OpenCADStudio {
             "PRESET" => return self.apply_view_preset(arg),
             "DELETE" => {
                 let doomed: Vec<String> = view_cmd::matching(
-                    self.tabs[i].scene.document.views.iter().map(|view| view.name.as_str()),
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .views
+                        .iter()
+                        .map(|view| view.name.as_str()),
                     arg,
                 )
                 .into_iter()
@@ -166,7 +181,10 @@ impl OpenCADStudio {
                                 view.background_handle,
                             );
                         }
-                        self.tabs[i].scene.document.delete_layer_state(&snapshot_name(name));
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .delete_layer_state(&snapshot_name(name));
                     }
                     self.tabs[i].dirty = true;
                 }
@@ -220,13 +238,15 @@ impl OpenCADStudio {
                     self.commit_active_ucs_change(i, "-VIEW");
                 }
                 if self.tabs[i].scene.active_gaze_dir().dot(before) < 0.9999 {
-                    self.command_line.push_output(crate::t!("Regenerating model.").as_ref());
+                    self.command_line
+                        .push_output(crate::t!("Regenerating model.").as_ref());
                 }
             }
             "SAVE" => {
                 let mut view = self.tabs[i].scene.current_as_named_view(arg);
                 if view_cmd::ucs_view() {
-                    self.command_line.push_output("UCSVIEW = 1  UCS will be saved with view");
+                    self.command_line
+                        .push_output("UCSVIEW = 1  UCS will be saved with view");
                     self.store_ucs_in_view(i, &mut view);
                 }
                 self.save_named_view(i, view);
@@ -237,18 +257,32 @@ impl OpenCADStudio {
                     let (x, y) = s.split_once(',')?;
                     Some((x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?))
                 };
-                match (parts.first(), parts.get(1).and_then(|s| corner(s)), parts.get(2).and_then(|s| corner(s))) {
+                match (
+                    parts.first(),
+                    parts.get(1).and_then(|s| corner(s)),
+                    parts.get(2).and_then(|s| corner(s)),
+                ) {
                     (Some(name), Some(a), Some(b)) if a.0 != b.0 && a.1 != b.1 => {
                         // A plan view of the window between the corners; the
                         // reference keeps no UCS with a window view.
                         let mut view = self.tabs[i].scene.current_as_named_view(name);
-                        view.target = Vector3 { x: (a.0 + b.0) / 2.0, y: (a.1 + b.1) / 2.0, z: 0.0 };
-                        view.direction = Vector3 { x: 0.0, y: 0.0, z: 1.0 };
+                        view.target = Vector3 {
+                            x: (a.0 + b.0) / 2.0,
+                            y: (a.1 + b.1) / 2.0,
+                            z: 0.0,
+                        };
+                        view.direction = Vector3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 1.0,
+                        };
                         view.width = (b.0 - a.0).abs();
                         view.height = (b.1 - a.1).abs();
                         self.save_named_view(i, view);
                     }
-                    _ => self.command_line.push_output("Invalid window specification."),
+                    _ => self
+                        .command_line
+                        .push_output("Invalid window specification."),
                 }
             }
             "SETTINGS" => settings_again = true,
@@ -307,12 +341,21 @@ impl OpenCADStudio {
     /// A model-space view restored in the entered paper-space viewport, with
     /// its background and visual style.
     fn restore_view_in_active_viewport(&mut self, i: usize, view: &codec::tables::View) {
-        let Some(viewport) = self.tabs[i].scene.active_viewport else { return };
-        self.tabs[i].scene.restore_named_view_in_viewport(view, viewport);
-        if let Some(ObjectType::VisualStyle(style)) =
-            self.tabs[i].scene.document.objects.get(&view.visual_style_handle)
+        let Some(viewport) = self.tabs[i].scene.active_viewport else {
+            return;
+        };
+        self.tabs[i]
+            .scene
+            .restore_named_view_in_viewport(view, viewport);
+        if let Some(ObjectType::VisualStyle(style)) = self.tabs[i]
+            .scene
+            .document
+            .objects
+            .get(&view.visual_style_handle)
         {
-            if let Some((mode, _)) = crate::modules::view::visual_style::mode_for_style_name(&style.description) {
+            if let Some((mode, _)) =
+                crate::modules::view::visual_style::mode_for_style_name(&style.description)
+            {
                 self.tabs[i].scene.set_active_viewport_render_mode(mode);
                 self.tabs[i].scene.bump_geometry_no_blocks();
             }
@@ -368,11 +411,15 @@ impl OpenCADStudio {
             view.handle = document.allocate_handle();
         }
         let find = |list: Vec<(String, Handle)>| {
-            list.into_iter().find(|(entry, _)| entry.eq_ignore_ascii_case(value)).map_or(Handle::NULL, |(_, h)| h)
+            list.into_iter()
+                .find(|(entry, _)| entry.eq_ignore_ascii_case(value))
+                .map_or(Handle::NULL, |(_, h)| h)
         };
         match setting {
             "BACKGROUND" => replaced = std::mem::replace(&mut view.background_handle, Handle::NULL),
-            "VISUALSTYLE" => view.visual_style_handle = find(crate::io::visual_styles::offered(document)),
+            "VISUALSTYLE" => {
+                view.visual_style_handle = find(crate::io::visual_styles::offered(document))
+            }
             "SECTION" => {
                 let sections: Vec<(String, Handle)> = document
                     .entities()
@@ -406,10 +453,18 @@ impl OpenCADStudio {
                     let text = |record: &codec::objects::XRecord, code: i32| {
                         record.get_string(code).unwrap_or_default().to_string()
                     };
-                    let category = if setting == "CATEGORIZE" { value.to_string() } else { text(record, 300) };
+                    let category = if setting == "CATEGORIZE" {
+                        value.to_string()
+                    } else {
+                        text(record, 300)
+                    };
                     let layers = layer_name.unwrap_or_else(|| text(record, 302));
-                    let mut rest: Vec<_> =
-                        record.entries.iter().filter(|entry| !matches!(entry.code, 300 | 302)).cloned().collect();
+                    let mut rest: Vec<_> = record
+                        .entries
+                        .iter()
+                        .filter(|entry| !matches!(entry.code, 300 | 302))
+                        .cloned()
+                        .collect();
                     if rest.is_empty() {
                         rest = vec![
                             codec::objects::XRecordEntry::bool(293, false),
@@ -467,7 +522,10 @@ impl OpenCADStudio {
             canvas: [0, 1, 2].map(|k| (canvas[k].clamp(0.0, 1.0) * 255.0).round() as u8),
         };
         let document = &self.tabs[i].scene.document;
-        let current = document.views.get(view).map_or(Handle::NULL, |v| v.background_handle);
+        let current = document
+            .views
+            .get(view)
+            .map_or(Handle::NULL, |v| v.background_handle);
         if let Some(ObjectType::ClassObject(object)) = document.objects.get(&current) {
             match &object.data {
                 D::SolidBackground(value) => state.solid = unpack(value.color),
@@ -490,8 +548,10 @@ impl OpenCADStudio {
                         BgPosition::Center
                     };
                     state.aspect = value.maintain_aspect_ratio;
-                    state.offset = [value.offset.x, value.offset.y].map(crate::ui::window::pdf_dialogs::short);
-                    state.scale = [value.scale.x, value.scale.y].map(crate::ui::window::pdf_dialogs::short);
+                    state.offset =
+                        [value.offset.x, value.offset.y].map(crate::ui::window::pdf_dialogs::short);
+                    state.scale =
+                        [value.scale.x, value.scale.y].map(crate::ui::window::pdf_dialogs::short);
                     state.scale_base = [value.scale.x, value.scale.y];
                     state.preview = crate::ui::window::pdf_dialogs::bg_preview(&value.filename);
                 }
@@ -536,13 +596,23 @@ impl OpenCADStudio {
             }
             M::BgStep(field, dir) => {
                 use crate::ui::window::pdf_dialogs::{bg_step, short};
-                let current = |text: &String, default: f64| text.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(default);
+                let current = |text: &String, default: f64| {
+                    text.trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite())
+                        .unwrap_or(default)
+                };
                 if field < 2 {
                     let k = field as usize;
                     state.offset[k] = short(bg_step(field, current(&state.offset[k], 0.0), dir));
                 } else {
                     let k = field as usize - 2;
-                    let next = short(bg_step(field, current(&state.scale[k], state.scale_base[k]), dir));
+                    let next = short(bg_step(
+                        field,
+                        current(&state.scale[k], state.scale_base[k]),
+                        dir,
+                    ));
                     if state.aspect {
                         state.scale = [next.clone(), next];
                     } else {
@@ -629,24 +699,32 @@ impl OpenCADStudio {
                     }
                     BgKind::Image => {
                         if !std::path::Path::new(state.image.trim()).is_file() {
-                            self.command_line.push_error("Invalid Background Image File!");
+                            self.command_line
+                                .push_error("Invalid Background Image File!");
                             return Task::none();
                         }
                         use crate::ui::window::pdf_dialogs::{BG_OFFSET_LIMIT, BG_SCALE_LIMIT};
-                        let number = |text: &String| text.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+                        let number = |text: &String| {
+                            text.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+                        };
                         let (Some(ox), Some(oy), Some(sx), Some(sy)) = (
                             number(&state.offset[0]),
                             number(&state.offset[1]),
                             number(&state.scale[0]),
                             number(&state.scale[1]),
                         ) else {
-                            self.command_line.push_error(crate::t!("Requires a number.").as_ref());
+                            self.command_line
+                                .push_error(crate::t!("Requires a number.").as_ref());
                             return Task::none();
                         };
                         // Within the reference's slider ranges; a zero scale
                         // is ignored there, so the image keeps its scale.
                         let scale = |value: f64, base: f64| {
-                            if value.abs() < 1e-9 { base } else { value.clamp(-BG_SCALE_LIMIT, BG_SCALE_LIMIT) }
+                            if value.abs() < 1e-9 {
+                                base
+                            } else {
+                                value.clamp(-BG_SCALE_LIMIT, BG_SCALE_LIMIT)
+                            }
                         };
                         Some(D::ImageBackground(ImageBackground {
                             class_version: 1,
@@ -695,8 +773,11 @@ impl OpenCADStudio {
         if self.tabs[i].scene.current_layout != "Model" {
             return;
         }
-        let Some(ObjectType::VisualStyle(style)) =
-            self.tabs[i].scene.document.objects.get(&view.visual_style_handle)
+        let Some(ObjectType::VisualStyle(style)) = self.tabs[i]
+            .scene
+            .document
+            .objects
+            .get(&view.visual_style_handle)
         else {
             return;
         };
@@ -705,7 +786,11 @@ impl OpenCADStudio {
             return;
         };
         // A style of its own keeps its name; the render modes keep theirs.
-        let label = if named { style.description.clone() } else { visual_style::label_for(mode).to_string() };
+        let label = if named {
+            style.description.clone()
+        } else {
+            visual_style::label_for(mode).to_string()
+        };
         self.apply_render_mode(i, mode, &label);
     }
 }

@@ -33,8 +33,9 @@ pub fn set_ucs_view(on: bool) {
 }
 
 /// The standard orthographic and isometric view presets.
-pub const PRESETS: [&str; 10] =
-    ["TOP", "BOTTOM", "FRONT", "BACK", "LEFT", "RIGHT", "SWISO", "SEISO", "NEISO", "NWISO"];
+pub const PRESETS: [&str; 10] = [
+    "TOP", "BOTTOM", "FRONT", "BACK", "LEFT", "RIGHT", "SWISO", "SEISO", "NEISO", "NWISO",
+];
 
 /// The orthographic UCS an orthographic preset sets while UCSORTHO is on:
 /// its name, X and Y axes and ORTHOGRAPHIC type, as the reference sets them.
@@ -152,17 +153,27 @@ fn keyword(input: &str, options: &[&'static str]) -> Option<&'static str> {
             .find(|word| word.chars().any(|c| c.is_ascii_uppercase()))
             .unwrap_or(option);
         let capitals: String = word.chars().filter(char::is_ascii_uppercase).collect();
-        let reach = word.rfind(|c: char| c.is_ascii_uppercase()).map_or(1, |at| at + 1);
+        let reach = word
+            .rfind(|c: char| c.is_ascii_uppercase())
+            .map_or(1, |at| at + 1);
         input == capitals || (word.to_ascii_uppercase().starts_with(&input) && input.len() >= reach)
     })
 }
 
 /// The names in `names` that one of the comma-separated wildcard patterns matches.
 pub fn matching<'a>(names: impl IntoIterator<Item = &'a str>, patterns: &str) -> Vec<&'a str> {
-    let patterns: Vec<&str> = patterns.split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
+    let patterns: Vec<&str> = patterns
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
     names
         .into_iter()
-        .filter(|name| patterns.iter().any(|pattern| crate::io::xref_model::wildcard_match(name, pattern)))
+        .filter(|name| {
+            patterns
+                .iter()
+                .any(|pattern| crate::io::xref_model::wildcard_match(name, pattern))
+        })
         .collect()
 }
 
@@ -176,23 +187,36 @@ pub fn view_listing(views: &[(String, bool)]) -> String {
     }
     out.push_str("\nView name                        Space");
     for (name, paper) in views {
-        out.push_str(&format!("\n{:<35}{}", format!("\"{name}\""), if *paper { "P" } else { "M" }));
+        out.push_str(&format!(
+            "\n{:<35}{}",
+            format!("\"{name}\""),
+            if *paper { "P" } else { "M" }
+        ));
     }
     out
 }
 
 impl DashViewCommand {
     pub fn new(names: ViewNames) -> Self {
-        Self { names, step: Step::Main }
+        Self {
+            names,
+            step: Step::Main,
+        }
     }
 
     /// The command back at its settings prompt, after a setting was applied.
     pub fn settings(names: ViewNames) -> Self {
-        Self { names, step: Step::Settings }
+        Self {
+            names,
+            step: Step::Settings,
+        }
     }
 
     fn view(&self, name: &str) -> Option<&ViewInfo> {
-        self.names.views.iter().find(|view| view.name.eq_ignore_ascii_case(name))
+        self.names
+            .views
+            .iter()
+            .find(|view| view.name.eq_ignore_ascii_case(name))
     }
 
     fn end(message: &str) -> CmdResult {
@@ -200,19 +224,35 @@ impl DashViewCommand {
     }
 
     fn list_views(&self, pattern: &str) -> String {
-        let pattern = if pattern.trim().is_empty() { "*" } else { pattern };
-        let names: Vec<&str> = self.names.views.iter().map(|view| view.name.as_str()).collect();
-        let found: Vec<(String, bool)> =
-            matching(names, pattern).into_iter().map(|name| (name.to_string(), false)).collect();
+        let pattern = if pattern.trim().is_empty() {
+            "*"
+        } else {
+            pattern
+        };
+        let names: Vec<&str> = self
+            .names
+            .views
+            .iter()
+            .map(|view| view.name.as_str())
+            .collect();
+        let found: Vec<(String, bool)> = matching(names, pattern)
+            .into_iter()
+            .map(|name| (name.to_string(), false))
+            .collect();
         view_listing(&found)
     }
 
     fn value_prompt(&self, setting: Setting, view: &str) -> String {
         let info = self.view(view).cloned().unwrap_or_default();
         match setting {
-            Setting::Background => "Specify background type [Color/Gradient/Image/None]<None>:".into(),
+            Setting::Background => {
+                "Specify background type [Color/Gradient/Image/None]<None>:".into()
+            }
             Setting::Categorize => {
-                format!("Enter category name or * for none, or [?]: <\"{}\">", info.category)
+                format!(
+                    "Enter category name or * for none, or [?]: <\"{}\">",
+                    info.category
+                )
             }
             Setting::LayerSnapshot => "Enter an option [Save/Delete] <Cancel>:".into(),
             Setting::LiveSection => format!(
@@ -229,7 +269,10 @@ impl DashViewCommand {
     /// Hand a setting to the inline handler, which applies it and starts the
     /// settings prompt again.
     fn apply(setting: Setting, view: &str, value: &str) -> CmdResult {
-        CmdResult::Dispatch(format!("-VIEW >SET {}\u{1f}{view}\u{1f}{value}", setting.verb()))
+        CmdResult::Dispatch(format!(
+            "-VIEW >SET {}\u{1f}{view}\u{1f}{value}",
+            setting.verb()
+        ))
     }
 
     fn on_setting_value(&mut self, setting: Setting, view: String, text: &str) -> CmdResult {
@@ -302,7 +345,11 @@ impl DashViewCommand {
     }
 
     fn value_listing(&self, setting: Setting, pattern: &str) -> String {
-        let pattern = if pattern.trim().is_empty() { "*" } else { pattern };
+        let pattern = if pattern.trim().is_empty() {
+            "*"
+        } else {
+            pattern
+        };
         match setting {
             Setting::Categorize => {
                 let mut categories: Vec<&str> = self
@@ -401,7 +448,18 @@ impl CadCommand for DashViewCommand {
                 if let Some(preset) = PRESETS.iter().find(|preset| **preset == word) {
                     return Some(CmdResult::Dispatch(format!("-VIEW >PRESET {preset}")));
                 }
-                match keyword(t, &["?", "Delete", "Orthographic", "Restore", "Save", "sEttings", "Window"]) {
+                match keyword(
+                    t,
+                    &[
+                        "?",
+                        "Delete",
+                        "Orthographic",
+                        "Restore",
+                        "Save",
+                        "sEttings",
+                        "Window",
+                    ],
+                ) {
                     Some("?") => self.step = Step::List,
                     Some("Delete") => self.step = Step::Delete,
                     Some("Orthographic") => self.step = Step::Orthographic,
@@ -415,7 +473,9 @@ impl CadCommand for DashViewCommand {
             }
             Step::Orthographic => {
                 match keyword(t, &["Top", "Bottom", "Front", "BAck", "Left", "Right"]) {
-                    Some(face) => CmdResult::Dispatch(format!("-VIEW >PRESET {}", face.to_ascii_uppercase())),
+                    Some(face) => {
+                        CmdResult::Dispatch(format!("-VIEW >PRESET {}", face.to_ascii_uppercase()))
+                    }
                     None => {
                         self.step = Step::Orthographic;
                         CmdResult::ReportError("Invalid option keyword.".into())
@@ -424,7 +484,12 @@ impl CadCommand for DashViewCommand {
             }
             Step::List => CmdResult::Measurement(self.list_views(t)),
             Step::Delete => {
-                let names: Vec<&str> = self.names.views.iter().map(|view| view.name.as_str()).collect();
+                let names: Vec<&str> = self
+                    .names
+                    .views
+                    .iter()
+                    .map(|view| view.name.as_str())
+                    .collect();
                 if matching(names, t).is_empty() {
                     Self::end("No matching view names found.")
                 } else {
@@ -450,11 +515,20 @@ impl CadCommand for DashViewCommand {
                 self.step = Step::WindowFirst(t.to_string());
                 CmdResult::NeedPoint
             }
-            Step::WindowFirst(_) | Step::WindowSecond(..) => Self::end("Invalid window specification."),
+            Step::WindowFirst(_) | Step::WindowSecond(..) => {
+                Self::end("Invalid window specification.")
+            }
             Step::Settings => {
                 match keyword(
                     t,
-                    &["Background", "Categorize", "Layer snapshot", "live Section", "Ucs", "Visual style"],
+                    &[
+                        "Background",
+                        "Categorize",
+                        "Layer snapshot",
+                        "live Section",
+                        "Ucs",
+                        "Visual style",
+                    ],
                 ) {
                     Some("Background") => self.step = Step::SettingView(Setting::Background),
                     Some("Categorize") => self.step = Step::SettingView(Setting::Categorize),
@@ -496,7 +570,9 @@ impl CadCommand for DashViewCommand {
                 CmdResult::ReportMeasurement(listing)
             }
             Step::Ucs => match keyword(t, &["Yes", "No"]) {
-                Some(answer) => CmdResult::Dispatch(format!("-VIEW >UCSVIEW {}", u8::from(answer == "Yes"))),
+                Some(answer) => {
+                    CmdResult::Dispatch(format!("-VIEW >UCSVIEW {}", u8::from(answer == "Yes")))
+                }
                 None => {
                     self.step = Step::Ucs;
                     CmdResult::ReportError("Invalid option keyword.".into())
@@ -520,13 +596,23 @@ impl CadCommand for DashViewCommand {
                 // pick well inside a viewport selects nothing, as in the
                 // reference.
                 let tol = self.names.sheet_pick_tolerance.max(0.0);
-                let hit = self.names.sheet_viewports.iter().flatten().rev().find(|(_, [x0, y0, x1, y1])| {
-                    let outside = pt.x < x0 - tol || pt.x > x1 + tol || pt.y < y0 - tol || pt.y > y1 + tol;
-                    let inside = pt.x > x0 + tol && pt.x < x1 - tol && pt.y > y0 + tol && pt.y < y1 - tol;
-                    !outside && !inside
-                });
+                let hit = self.names.sheet_viewports.iter().flatten().rev().find(
+                    |(_, [x0, y0, x1, y1])| {
+                        let outside = pt.x < x0 - tol
+                            || pt.x > x1 + tol
+                            || pt.y < y0 - tol
+                            || pt.y > y1 + tol;
+                        let inside = pt.x > x0 + tol
+                            && pt.x < x1 - tol
+                            && pt.y > y0 + tol
+                            && pt.y < y1 - tol;
+                        !outside && !inside
+                    },
+                );
                 match hit {
-                    Some((handle, _)) => CmdResult::Dispatch(format!("-VIEW >RESTOREVP {name}\u{1f}{handle:X}")),
+                    Some((handle, _)) => {
+                        CmdResult::Dispatch(format!("-VIEW >RESTOREVP {name}\u{1f}{handle:X}"))
+                    }
                     None => {
                         self.step = Step::RestoreViewport(name);
                         CmdResult::NeedPoint
@@ -542,12 +628,17 @@ impl CadCommand for DashViewCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match std::mem::replace(&mut self.step, Step::Main) {
-            Step::Main | Step::Delete | Step::Restore | Step::RestoreViewport(_) | Step::Save | Step::WindowName => {
-                CmdResult::Dispatch("-VIEW >END".into())
-            }
+            Step::Main
+            | Step::Delete
+            | Step::Restore
+            | Step::RestoreViewport(_)
+            | Step::Save
+            | Step::WindowName => CmdResult::Dispatch("-VIEW >END".into()),
             Step::Orthographic => CmdResult::Dispatch("-VIEW >PRESET TOP".into()),
             Step::List => CmdResult::Measurement(self.list_views("*")),
-            Step::WindowFirst(_) | Step::WindowSecond(..) => Self::end("Invalid window specification."),
+            Step::WindowFirst(_) | Step::WindowSecond(..) => {
+                Self::end("Invalid window specification.")
+            }
             // Enter at the settings prompt goes back to the main prompt.
             Step::Settings => CmdResult::NeedPoint,
             Step::SettingView(_) | Step::Ucs => {

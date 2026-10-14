@@ -174,9 +174,8 @@ fn percent_decode(value: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        let escape = (bytes[index] == b'%' && index + 2 < bytes.len()).then(|| {
-            (hex(bytes[index + 1]), hex(bytes[index + 2]))
-        });
+        let escape = (bytes[index] == b'%' && index + 2 < bytes.len())
+            .then(|| (hex(bytes[index + 1]), hex(bytes[index + 2])));
         match escape {
             Some((Some(high), Some(low))) => {
                 out.push(high * 16 + low);
@@ -248,7 +247,10 @@ fn enqueue_or_full(name: String, bytes: Vec<u8>) -> LinkOutcome {
 /// built inline in the poll arm and mention images); the classification
 /// itself is shared via `RemoteFetchError`.
 #[cfg(target_arch = "wasm32")]
-fn fetch_error_text(url: &str, error: crate::scene::model::image_model::RemoteFetchError) -> String {
+fn fetch_error_text(
+    url: &str,
+    error: crate::scene::model::image_model::RemoteFetchError,
+) -> String {
     use crate::scene::model::image_model::RemoteFetchError;
     match error {
         RemoteFetchError::Network => format!(
@@ -402,7 +404,10 @@ mod tests {
             "?file=https%3A%2F%2Fexample.com%2F..dwgx",
         ] {
             assert!(
-                matches!(parse_link(search), ParsedLink::Ignored(LinkRefusal::NotDrawing, _)),
+                matches!(
+                    parse_link(search),
+                    ParsedLink::Ignored(LinkRefusal::NotDrawing, _)
+                ),
                 "{search} must be refused as not a drawing"
             );
         }
@@ -461,10 +466,7 @@ mod tests {
     fn scheme_prefix_matches_rfc3986_shape_only() {
         assert_eq!(scheme_prefix("https://x"), Some("https".to_string()));
         assert_eq!(scheme_prefix("c:\\x"), Some("c".to_string()));
-        assert_eq!(
-            scheme_prefix("x1+2-3.4:rest"),
-            Some("x1+2-3.4".to_string())
-        );
+        assert_eq!(scheme_prefix("x1+2-3.4:rest"), Some("x1+2-3.4".to_string()));
         // A colon after a non-scheme character (space, slash, digit start)
         // is not a scheme.
         assert_eq!(scheme_prefix("plan.dwg"), None);

@@ -178,7 +178,10 @@ mod browser {
     /// inside the picker) — what save bookkeeping should use.
     pub fn handle_name(tab_id: u64) -> Option<String> {
         SAVE_HANDLES.with(|handles| {
-            handles.borrow().get(&tab_id).map(|handle| handle.name.clone())
+            handles
+                .borrow()
+                .get(&tab_id)
+                .map(|handle| handle.name.clone())
         })
     }
 
@@ -197,10 +200,8 @@ mod browser {
     /// the bytes against the retained handle (`write_or_download`).
     pub fn begin_web_save(tab_id: u64, ext: &str) {
         PENDING_SAVE_EXTS.with(|exts| {
-            exts.borrow_mut().insert(
-                tab_id,
-                ext.trim_start_matches('.').to_ascii_lowercase(),
-            );
+            exts.borrow_mut()
+                .insert(tab_id, ext.trim_start_matches('.').to_ascii_lowercase());
         });
         WEB_SAVE_IN_FLIGHT.with(|in_flight| in_flight.borrow_mut().replace(tab_id));
     }
@@ -264,10 +265,11 @@ mod browser {
         let window = web_sys::window().ok_or_else(|| "browser window unavailable".to_string())?;
         // Dynamic call — see the module docs for why the typed web-sys
         // binding (`show_save_file_picker_with_options`) is not used.
-        let picker = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("showSaveFilePicker"))
-            .ok()
-            .and_then(|picker| picker.dyn_into::<js_sys::Function>().ok())
-            .ok_or_else(|| "showSaveFilePicker unavailable".to_string())?;
+        let picker =
+            js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("showSaveFilePicker"))
+                .ok()
+                .and_then(|picker| picker.dyn_into::<js_sys::Function>().ok())
+                .ok_or_else(|| "showSaveFilePicker unavailable".to_string())?;
         let options = picker_options(suggested_name, ext);
         let promise = picker
             .call1(window.as_ref(), &options)
@@ -315,7 +317,10 @@ mod browser {
     /// the same way for the rest of the session.
     pub async fn write_handle(tab_id: u64, bytes: &[u8]) -> Result<(), String> {
         let handle = SAVE_HANDLES.with(|handles| {
-            handles.borrow().get(&tab_id).map(|save| save.handle.clone())
+            handles
+                .borrow()
+                .get(&tab_id)
+                .map(|save| save.handle.clone())
         });
         let Some(handle) = handle else {
             return Err("no retained save destination for this drawing".to_string());
@@ -362,7 +367,10 @@ mod browser {
         };
         let accept = js_sys::Object::new();
         let extensions = js_sys::Array::new();
-        extensions.push(&JsValue::from_str(&format!(".{}", ext.trim_start_matches('.'))));
+        extensions.push(&JsValue::from_str(&format!(
+            ".{}",
+            ext.trim_start_matches('.')
+        )));
         set(&accept, super::accept_mime(ext), &extensions);
         let type_entry = js_sys::Object::new();
         set(
@@ -378,7 +386,11 @@ mod browser {
         let types = js_sys::Array::new();
         types.push(&type_entry);
         let options = js_sys::Object::new();
-        set(&options, "suggestedName", &JsValue::from_str(suggested_name));
+        set(
+            &options,
+            "suggestedName",
+            &JsValue::from_str(suggested_name),
+        );
         set(&options, "types", &types);
         options
     }
@@ -398,7 +410,10 @@ mod tests {
     /// whatever handle state the tab happens to hold.
     #[test]
     fn unsupported_browsers_always_download() {
-        assert_eq!(save_route(false, true, Some("dwg"), "dwg"), SaveRoute::Download);
+        assert_eq!(
+            save_route(false, true, Some("dwg"), "dwg"),
+            SaveRoute::Download
+        );
         assert_eq!(save_route(false, false, None, "dxf"), SaveRoute::Download);
     }
 
@@ -406,30 +421,51 @@ mod tests {
     /// in place — no picker, no download.
     #[test]
     fn plain_save_with_matching_handle_writes_in_place() {
-        assert_eq!(save_route(true, true, Some("dwg"), "dwg"), SaveRoute::WriteInPlace);
-        assert_eq!(save_route(true, true, Some("dxf"), "dxf"), SaveRoute::WriteInPlace);
+        assert_eq!(
+            save_route(true, true, Some("dwg"), "dwg"),
+            SaveRoute::WriteInPlace
+        );
+        assert_eq!(
+            save_route(true, true, Some("dxf"), "dxf"),
+            SaveRoute::WriteInPlace
+        );
     }
 
     /// Extension comparison is case-insensitive and dot-tolerant — the
     /// registry stores the normalized form, the format table's is bare.
     #[test]
     fn handle_ext_match_ignores_case_and_dot() {
-        assert_eq!(save_route(true, true, Some(".DWG"), "dwg"), SaveRoute::WriteInPlace);
-        assert_eq!(save_route(true, true, Some("dwg"), ".DWG"), SaveRoute::WriteInPlace);
+        assert_eq!(
+            save_route(true, true, Some(".DWG"), "dwg"),
+            SaveRoute::WriteInPlace
+        );
+        assert_eq!(
+            save_route(true, true, Some("dwg"), ".DWG"),
+            SaveRoute::WriteInPlace
+        );
     }
 
     /// A plain Save targeting the other format must re-pick: writing DXF
     /// bytes through a .dwg handle would corrupt the file's identity.
     #[test]
     fn mismatched_format_re_picks() {
-        assert_eq!(save_route(true, true, Some("dwg"), "dxf"), SaveRoute::PickHandle);
-        assert_eq!(save_route(true, true, Some("dxf"), "dwg"), SaveRoute::PickHandle);
+        assert_eq!(
+            save_route(true, true, Some("dwg"), "dxf"),
+            SaveRoute::PickHandle
+        );
+        assert_eq!(
+            save_route(true, true, Some("dxf"), "dwg"),
+            SaveRoute::PickHandle
+        );
     }
 
     /// Save As never reuses the handle — the user asked for a destination.
     #[test]
     fn save_as_with_existing_handle_re_picks() {
-        assert_eq!(save_route(true, false, Some("dwg"), "dwg"), SaveRoute::PickHandle);
+        assert_eq!(
+            save_route(true, false, Some("dwg"), "dwg"),
+            SaveRoute::PickHandle
+        );
     }
 
     /// No handle yet (first save, or the previous write dropped it): pick.

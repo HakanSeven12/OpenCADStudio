@@ -474,10 +474,7 @@ pub(super) fn requested_save_target(
 }
 
 fn is_generated_dimension_block_name(name: &str) -> bool {
-    let Some(suffix) = name
-        .strip_prefix("*D")
-        .or_else(|| name.strip_prefix("*d"))
-    else {
+    let Some(suffix) = name.strip_prefix("*D").or_else(|| name.strip_prefix("*d")) else {
         return false;
     };
     !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
@@ -488,9 +485,10 @@ fn is_generated_dimension_block_name(name: &str) -> bool {
 /// logical drawing entities; named block members remain part of the manifest.
 fn is_dimension_display_entity(document: &codec::CadDocument, entity: &codec::EntityType) -> bool {
     let owner = entity.common().owner_handle;
-    document.block_records.iter().any(|block| {
-        block.handle == owner && is_generated_dimension_block_name(&block.name)
-    })
+    document
+        .block_records
+        .iter()
+        .any(|block| block.handle == owner && is_generated_dimension_block_name(&block.name))
 }
 
 fn document_manifest(document: &codec::CadDocument) -> Value {
@@ -1795,17 +1793,13 @@ mod tests {
         detail.handle = document.allocate_handle();
         let detail_handle = detail.handle;
         document.block_records.add(detail).unwrap();
-        let mut detail_line = Line::from_points(
-            Vector3::new(20.0, 0.0, 0.0),
-            Vector3::new(30.0, 0.0, 0.0),
-        );
+        let mut detail_line =
+            Line::from_points(Vector3::new(20.0, 0.0, 0.0), Vector3::new(30.0, 0.0, 0.0));
         detail_line.common.owner_handle = detail_handle;
         document.add_entity(EntityType::Line(detail_line)).unwrap();
 
-        let mut dimension = DimensionLinear::new(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        );
+        let mut dimension =
+            DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
         dimension.definition_point = Vector3::new(0.0, 5.0, 0.0);
         dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
         document
@@ -1826,10 +1820,8 @@ mod tests {
 
         let mut app = super::OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        let mut dimension = DimensionLinear::new(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        );
+        let mut dimension =
+            DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
         dimension.definition_point = Vector3::new(0.0, 5.0, 0.0);
         dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
         app.tabs[app.active_tab]
@@ -1865,10 +1857,8 @@ mod tests {
 
         let mut app = super::OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        let mut dimension = DimensionLinear::new(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        );
+        let mut dimension =
+            DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
         dimension.definition_point = Vector3::new(0.0, 5.0, 0.0);
         dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
         let i = app.active_tab;
@@ -1900,9 +1890,8 @@ mod tests {
         let captured = crate::io::edit_lock::FileFingerprint::capture(&path).unwrap();
         assert_eq!(app.tabs[i].disk_fingerprint.as_ref(), Some(&captured));
 
-        let ordinary = app.automation_op(
-            &serde_json::json!({"op":"save", "path":path}).to_string(),
-        );
+        let ordinary =
+            app.automation_op(&serde_json::json!({"op":"save", "path":path}).to_string());
         assert_eq!(ordinary["ok"], true, "{ordinary}");
         assert!(!ordinary["error"]
             .as_str()
@@ -3838,7 +3827,10 @@ mod tests {
         // Snapper is now forced on with only Midpoint enabled
         assert!(app.snapper.snap_enabled);
         assert_eq!(app.snapper.enabled.len(), 1);
-        assert!(app.snapper.enabled.contains(&crate::snap::SnapType::Midpoint));
+        assert!(app
+            .snapper
+            .enabled
+            .contains(&crate::snap::SnapType::Midpoint));
 
         // Submit first point (0,0)
         let _ = app.update(Message::CommandInput("0,0".to_string()));
@@ -3851,7 +3843,10 @@ mod tests {
         let _ = app.update(Message::CommandInput("END".to_string()));
         let _ = app.update(Message::CommandSubmit);
         assert!(app.snapper.snap_enabled);
-        assert!(app.snapper.enabled.contains(&crate::snap::SnapType::Endpoint));
+        assert!(app
+            .snapper
+            .enabled
+            .contains(&crate::snap::SnapType::Endpoint));
 
         // Escape cancels LINE and clears unconsumed snap override
         let _ = app.update(Message::CommandEscape);

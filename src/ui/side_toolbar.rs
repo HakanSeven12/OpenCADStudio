@@ -72,24 +72,30 @@ pub fn refedit_header(name: &str, count: usize) -> Element<'static, Message> {
                 ..Default::default()
             }
         });
-    let tip = container(text(name.to_string()).size(11)).padding([2, 6]).style(|theme: &Theme| {
-        let palette = theme.palette();
-        container::Style {
-            background: Some(Background::Color(palette.background.strong.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            text_color: Some(palette.background.strong.text),
-            ..Default::default()
-        }
-    });
+    let tip = container(text(name.to_string()).size(11))
+        .padding([2, 6])
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.strong.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                text_color: Some(palette.background.strong.text),
+                ..Default::default()
+            }
+        });
     column![
         tooltip(pill, tip, tooltip::Position::Left).gap(6),
-        text(format!("{} {}", count, crate::tr!("ref-edit", "toolbar-objects")))
-            .size(9)
-            .style(crate::ui::style::common::muted_style),
+        text(format!(
+            "{} {}",
+            count,
+            crate::tr!("ref-edit", "toolbar-objects")
+        ))
+        .size(9)
+        .style(crate::ui::style::common::muted_style),
     ]
     .spacing(2)
     .align_x(iced::Center)
@@ -126,9 +132,16 @@ pub fn view_sections(
     if let Some(header) = header {
         col = col.push(header);
     }
-    let tools = groups.iter().filter(|g| !g.is_empty()).enumerate().flat_map(|(group, tools)| {
-        tools.iter().enumerate().map(move |(k, t)| (group > 0 && k == 0, t))
-    });
+    let tools = groups
+        .iter()
+        .filter(|g| !g.is_empty())
+        .enumerate()
+        .flat_map(|(group, tools)| {
+            tools
+                .iter()
+                .enumerate()
+                .map(move |(k, t)| (group > 0 && k == 0, t))
+        });
     for (starts_group, t) in tools {
         if starts_group {
             col = col.push(
@@ -136,7 +149,9 @@ pub fn view_sections(
                     .width(Length::Fixed(BTN_SIZE - 4.0))
                     .height(Length::Fixed(1.0))
                     .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(theme.palette().background.neutral.color)),
+                        background: Some(Background::Color(
+                            theme.palette().background.neutral.color,
+                        )),
                         ..Default::default()
                     }),
             );

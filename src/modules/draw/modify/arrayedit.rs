@@ -56,7 +56,12 @@ impl CadCommand for ArrayEditCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let array = self.array?;
-        match text.trim().trim_start_matches('_').to_ascii_uppercase().as_str() {
+        match text
+            .trim()
+            .trim_start_matches('_')
+            .to_ascii_uppercase()
+            .as_str()
+        {
             "S" | "SOURCE" => Some(CmdResult::Dispatch(format!(
                 "ARRAYEDIT_SOURCE:{}",
                 array.value()
@@ -75,4 +80,6 @@ impl CadCommand for ArrayEditCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["ARRAYEDIT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["ARRAYEDIT"]
+});

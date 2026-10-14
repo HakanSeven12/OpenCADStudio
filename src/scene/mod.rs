@@ -7,12 +7,10 @@
 //   cache   — block-definition and property caches
 pub mod annotative;
 pub mod assoc_array;
-pub mod block_visibility;
-pub mod compare;
-pub mod section_cull;
-pub mod sub_select;
 pub mod block_service;
+pub mod block_visibility;
 pub mod cache;
+pub mod compare;
 pub mod convert;
 pub mod creation_style;
 pub(crate) mod frame;
@@ -20,6 +18,8 @@ pub mod model;
 pub mod pick;
 pub mod pipeline;
 pub(crate) mod render_graph;
+pub mod section_cull;
+pub mod sub_select;
 pub mod text;
 pub mod view;
 
@@ -4867,10 +4867,14 @@ impl Scene {
     /// Fit a layout's sheet viewport to its page. (Taking the sheet out
     /// instead would leave a viewport onto the model looking like the sheet.)
     pub fn fit_layout_sheet(&mut self, layout_name: &str) {
-        let layout = self.document.objects.values().find_map(|object| match object {
-            ObjectType::Layout(layout) if layout.name == layout_name => Some(layout.clone()),
-            _ => None,
-        });
+        let layout = self
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::Layout(layout) if layout.name == layout_name => Some(layout.clone()),
+                _ => None,
+            });
         let Some(layout) = layout else {
             return;
         };
@@ -7422,8 +7426,8 @@ impl Scene {
         let t_patch = iced::time::Instant::now();
         // A patch whose set will not equal the memo's runs leaves the memo
         // holding its own copies, taken while the set is still whole.
-        let shareable = self.uses_resident_memo(block, frozen_layers)
-            && self.resident_runs_match_memo(block);
+        let shareable =
+            self.uses_resident_memo(block, frozen_layers) && self.resident_runs_match_memo(block);
         if self.uses_resident_memo(block, frozen_layers) && !shareable {
             self.detach_memo_backing();
         }
@@ -7966,8 +7970,9 @@ impl Scene {
             apply_mode(&mut wires, mode);
             model_wires.extend(wires);
         }
-        let paper = crate::scene::model::instance_model::expand_stubs(&self.paper_sheet_wires_arc())
-            .into_owned();
+        let paper =
+            crate::scene::model::instance_model::expand_stubs(&self.paper_sheet_wires_arc())
+                .into_owned();
         (paper, model_wires)
     }
 
@@ -10653,7 +10658,7 @@ impl Scene {
             let clip = view_rot * (cursor - eye).as_vec3().extend(1.0);
             if !clip.is_finite() || clip.w <= 1e-6 {
                 return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
-                .materialize_stubs();
+                    .materialize_stubs();
             }
             let ndc = clip.truncate() / clip.w;
             let screen = iced::Point::new(
@@ -13204,13 +13209,21 @@ pub(crate) fn drop_layout_viewports(document: &mut codec::CadDocument, block: Ha
     for handle in &viewports {
         document.remove_entity(*handle);
     }
-    if let Some(record) = document.block_records.iter_mut().find(|record| record.handle == block) {
-        record.entity_handles.retain(|handle| !viewports.contains(handle));
+    if let Some(record) = document
+        .block_records
+        .iter_mut()
+        .find(|record| record.handle == block)
+    {
+        record
+            .entity_handles
+            .retain(|handle| !viewports.contains(handle));
     }
     for object in document.objects.values_mut() {
         if let ObjectType::Layout(layout) = object {
             if layout.block_record == block {
-                layout.viewports.retain(|handle| !viewports.contains(handle));
+                layout
+                    .viewports
+                    .retain(|handle| !viewports.contains(handle));
                 if viewports.contains(&layout.viewport) {
                     layout.viewport = Handle::NULL;
                 }
@@ -13220,7 +13233,8 @@ pub(crate) fn drop_layout_viewports(document: &mut codec::CadDocument, block: Ha
 }
 
 /// LAYOUTCREATEVIEWPORT: a layout opened for the first time gets a viewport.
-static LAYOUT_CREATE_VIEWPORT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static LAYOUT_CREATE_VIEWPORT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 
 pub fn layout_create_viewport() -> bool {
     LAYOUT_CREATE_VIEWPORT.load(std::sync::atomic::Ordering::Relaxed)

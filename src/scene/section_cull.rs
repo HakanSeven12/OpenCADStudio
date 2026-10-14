@@ -71,7 +71,11 @@ impl Scene {
                     )
             )
         };
-        if let Some(handle) = self.selected_handles_in_order().into_iter().find(is_section) {
+        if let Some(handle) = self
+            .selected_handles_in_order()
+            .into_iter()
+            .find(is_section)
+        {
             return Some(handle);
         }
         let block = self.current_layout_block_handle();
@@ -102,25 +106,15 @@ impl Scene {
         let codec::entities::ExtendedEntityData::SectionObject(data) = &extended.data else {
             return None;
         };
-        let slice_depth = crate::entities::extended::section_is_slice(extended).then(|| {
-            crate::entities::extended::section_slice_depth(extended).unwrap_or(0.0)
-        });
+        let slice_depth = crate::entities::extended::section_is_slice(extended)
+            .then(|| crate::entities::extended::section_slice_depth(extended).unwrap_or(0.0));
         let planes = Self::section_planes(data, slice_depth, None)?;
 
         // Every drawn point of every object in the space, from its wires and
         // its shaded mesh.
         let block = self.current_layout_block_handle();
         let mut points: FxHashMap<Handle, Vec<[f64; 3]>> = FxHashMap::default();
-        let wires = self.wires_for_block_culled(
-            block,
-            None,
-            None,
-            None,
-            None,
-            None,
-            true,
-            None,
-        );
+        let wires = self.wires_for_block_culled(block, None, None, None, None, None, true, None);
         for wire in &wires {
             let Some(handle) = Self::handle_from_wire_name(&wire.name) else {
                 continue;

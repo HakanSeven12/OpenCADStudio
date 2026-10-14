@@ -15,7 +15,11 @@ use std::collections::HashSet;
 
 /// `** Command not allowed, NAME already checked out for editing **`
 fn already_checked_out(name: &str) -> String {
-    crate::tf!("** Command not allowed, {} already checked out for editing **", name).into_owned()
+    crate::tf!(
+        "** Command not allowed, {} already checked out for editing **",
+        name
+    )
+    .into_owned()
 }
 
 impl OpenCADStudio {
@@ -24,12 +28,15 @@ impl OpenCADStudio {
             "REFEDIT" | "-REFEDIT" => Some(self.start_refedit(i, cmd == "-REFEDIT")),
             "REFSET" | "REFSET_ADD" | "REFSET_REMOVE" => {
                 if self.tabs[i].refedit_session.is_none() {
-                    self.command_line.push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
+                    self.command_line
+                        .push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
                     return Some(Task::none());
                 }
                 self.command_line.push_info(
-                    crate::t!("Transfer objects between the RefEdit working set and host drawing...")
-                        .as_ref(),
+                    crate::t!(
+                        "Transfer objects between the RefEdit working set and host drawing..."
+                    )
+                    .as_ref(),
                 );
                 // The side toolbar's Add / Remove go straight to the selection.
                 let command = match cmd {
@@ -44,7 +51,8 @@ impl OpenCADStudio {
             }
             "REFCLOSE" => {
                 if self.tabs[i].refedit_session.is_none() {
-                    self.command_line.push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
+                    self.command_line
+                        .push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
                     return Some(Task::none());
                 }
                 let command = RefCloseCommand::new();
@@ -106,10 +114,7 @@ impl OpenCADStudio {
         if let [handle] = selected[..] {
             if references.contains(&handle) {
                 self.tabs[i].scene.deselect_all();
-                self.refedit_picked(
-                    i,
-                    &format!("{}:{}", command_line as u8, handle.value()),
-                );
+                self.refedit_picked(i, &format!("{}:{}", command_line as u8, handle.value()));
                 return Task::none();
             }
         }
@@ -124,7 +129,11 @@ impl OpenCADStudio {
     fn refedit_picked(&mut self, i: usize, args: &str) {
         let parts: Vec<&str> = args.split(':').collect();
         let command_line = parts.first() == Some(&"1");
-        let Some(top) = parts.get(1).and_then(|v| v.parse::<u64>().ok()).map(Handle::new) else {
+        let Some(top) = parts
+            .get(1)
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(Handle::new)
+        else {
             return;
         };
         let point = (parts.len() >= 5)
@@ -178,7 +187,10 @@ impl OpenCADStudio {
                     wires: scene.block_preview_wires(&level.block_name),
                     has_attdefs: record.is_some_and(|br| {
                         br.entity_handles.iter().any(|h| {
-                            matches!(document.get_entity(*h), Some(EntityType::AttributeDefinition(_)))
+                            matches!(
+                                document.get_entity(*h),
+                                Some(EntityType::AttributeDefinition(_))
+                            )
                         })
                     }),
                     xref_path: record
@@ -202,7 +214,10 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::RefEdit);
     }
 
-    pub(in crate::app) fn update_refedit_dialog(&mut self, message: RefEditDialogMsg) -> Task<Message> {
+    pub(in crate::app) fn update_refedit_dialog(
+        &mut self,
+        message: RefEditDialogMsg,
+    ) -> Task<Message> {
         let Some(state) = self.refedit_dialog.as_mut() else {
             return Task::none();
         };
@@ -390,9 +405,12 @@ impl OpenCADStudio {
         self.tabs[i].refedit_session = Some(session);
         self.tabs[i].refedit_closed.clear();
         // Fade everything outside the working set by XFADECTL. (#136)
-        self.tabs[i]
-            .scene
-            .set_refedit_keep(Some(temp_handles.iter().copied().collect::<rustc_hash::FxHashSet<_>>()));
+        self.tabs[i].scene.set_refedit_keep(Some(
+            temp_handles
+                .iter()
+                .copied()
+                .collect::<rustc_hash::FxHashSet<_>>(),
+        ));
         self.tabs[i].scene.refedit_lock = lock;
         self.tabs[i].scene.deselect_all();
         self.tabs[i].dirty = true;
@@ -404,7 +422,8 @@ impl OpenCADStudio {
     /// REFSET Add / Remove on the current selection.
     fn apply_refset(&mut self, i: usize, add: bool) {
         let Some(mut session) = self.tabs[i].refedit_session.take() else {
-            self.command_line.push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
+            self.command_line
+                .push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
             return;
         };
         let picked: Vec<Handle> = self.tabs[i]
@@ -450,7 +469,8 @@ impl OpenCADStudio {
     /// REFCLOSE Save (`save`) or Discard.
     fn close_refedit(&mut self, i: usize, save: bool) {
         let Some(session) = self.tabs[i].refedit_session.take() else {
-            self.command_line.push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
+            self.command_line
+                .push_error(crate::t!(NOT_CHECKED_OUT).as_ref());
             return;
         };
         self.push_undo_snapshot(i, "REFCLOSE");
@@ -495,8 +515,8 @@ impl OpenCADStudio {
         use crate::modules::draw::modify::explode::normalize_entity_for_block;
         let originals: HashSet<Handle> = session.temp_handles.iter().copied().collect();
         let added_count = working.iter().filter(|h| !originals.contains(h)).count();
-        let removed_count = session.extracted.len()
-            - working.iter().filter(|h| originals.contains(h)).count();
+        let removed_count =
+            session.extracted.len() - working.iter().filter(|h| originals.contains(h)).count();
         let edited: Vec<EntityType> = working
             .iter()
             .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
@@ -690,7 +710,10 @@ impl OpenCADStudio {
         }
         crate::io::save(&source, &path)?;
         let keys: rustc_hash::FxHashSet<Handle> = [session.br_handle].into_iter().collect();
-        self.tabs[i].xref_stat_cache.0.remove(&session.br_handle.value());
+        self.tabs[i]
+            .xref_stat_cache
+            .0
+            .remove(&session.br_handle.value());
         let _ = crate::io::xref::resolve_xrefs_for_keys(
             &mut self.tabs[i].scene.document,
             &base_dir,
@@ -766,9 +789,21 @@ impl OpenCADStudio {
             .layers
             .iter()
             .map(|r| (SymbolKind::Layer, r.name.clone()))
-            .chain(deps.linetypes.iter().map(|r| (SymbolKind::Linetype, r.name.clone())))
-            .chain(deps.text_styles.iter().map(|r| (SymbolKind::TextStyle, r.name.clone())))
-            .chain(deps.blocks.iter().map(|b| (SymbolKind::Block, b.name.clone())))
+            .chain(
+                deps.linetypes
+                    .iter()
+                    .map(|r| (SymbolKind::Linetype, r.name.clone())),
+            )
+            .chain(
+                deps.text_styles
+                    .iter()
+                    .map(|r| (SymbolKind::TextStyle, r.name.clone())),
+            )
+            .chain(
+                deps.blocks
+                    .iter()
+                    .map(|b| (SymbolKind::Block, b.name.clone())),
+            )
             .collect();
         let mut names = RefEditNames::default();
         for (kind, original) in wanted {

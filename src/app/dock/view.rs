@@ -381,20 +381,22 @@ impl OpenCADStudio {
         };
         match id {
             crate::ui::dock::PanelId::Properties => tab.properties.view(width, chrome),
-            crate::ui::dock::PanelId::GraphicAttributes => crate::ui::window::graphic_attributes::view(
-                &self.graphic_attributes,
-                &tab.scene,
-                &tab.properties,
-                width,
-                chrome,
-                self.dock
-                    .location(id)
-                    .map_or(crate::app::config::DockSide::Right, |(side, _)| side),
-                matches!(
-                    self.color_pick_target,
-                    Some((crate::app::ColorPickTarget::Gradient(_), _))
-                ),
-            ),
+            crate::ui::dock::PanelId::GraphicAttributes => {
+                crate::ui::window::graphic_attributes::view(
+                    &self.graphic_attributes,
+                    &tab.scene,
+                    &tab.properties,
+                    width,
+                    chrome,
+                    self.dock
+                        .location(id)
+                        .map_or(crate::app::config::DockSide::Right, |(side, _)| side),
+                    matches!(
+                        self.color_pick_target,
+                        Some((crate::app::ColorPickTarget::Gradient(_), _))
+                    ),
+                )
+            }
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, chrome)
             }

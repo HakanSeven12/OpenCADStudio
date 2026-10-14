@@ -1798,7 +1798,8 @@ impl canvas::Program<Message> for SelectionCanvas {
                                     },
                                     ..canvas::Stroke::default().with_color(marker).with_width(1.0)
                                 };
-                                let tip = Point::new(sp.x + dx / len * 18.0, sp.y + dy / len * 18.0);
+                                let tip =
+                                    Point::new(sp.x + dx / len * 18.0, sp.y + dy / len * 18.0);
                                 // `base` is a projected entity endpoint: clip before
                                 // stroking (see `clip_seg`).
                                 if let Some((a, b)) = clip_seg(base, tip, bounds) {

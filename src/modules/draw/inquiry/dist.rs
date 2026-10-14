@@ -65,7 +65,9 @@ impl CadCommand for DistCommand {
             let ctx = unit_context();
             let sign = if ctx.angdir_cw { -1.0 } else { 1.0 };
             let turn = std::f64::consts::TAU;
-            let angle_xy = (sign * (dy.atan2(dx) - ctx.angbase)).rem_euclid(turn).to_degrees();
+            let angle_xy = (sign * (dy.atan2(dx) - ctx.angbase))
+                .rem_euclid(turn)
+                .to_degrees();
             // Angle from XY plane toward Z (elevation angle)
             let dist_xy = dx.hypot(dy);
             let angle_z = dz.atan2(dist_xy).to_degrees();

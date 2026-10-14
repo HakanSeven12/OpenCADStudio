@@ -836,9 +836,9 @@ impl Grippable for Hatch {
         use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         if let Some(point) = vertex_point_at(self, grip_id) {
             let removable = match point {
-                BoundaryPoint::LineVertex { ending, starting, .. } => {
-                    ending.is_some() && starting.is_some()
-                }
+                BoundaryPoint::LineVertex {
+                    ending, starting, ..
+                } => ending.is_some() && starting.is_some(),
                 _ => true,
             };
             let mut items = vec![
@@ -1009,13 +1009,32 @@ impl FallbackTess for Hatch {
 /// Where one boundary grip's point lives.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum BoundaryPoint {
-    PolylineVertex { path: usize, edge: usize, vertex: usize },
+    PolylineVertex {
+        path: usize,
+        edge: usize,
+        vertex: usize,
+    },
     /// A corner of a chain of line edges: the end of `ending` and the start
     /// of `starting`, kept together so moving it never opens the boundary.
-    LineVertex { path: usize, ending: Option<usize>, starting: Option<usize> },
-    ArcCenter { path: usize, edge: usize },
-    EllipseCenter { path: usize, edge: usize },
-    SplinePoint { path: usize, edge: usize, index: usize, fit: bool },
+    LineVertex {
+        path: usize,
+        ending: Option<usize>,
+        starting: Option<usize>,
+    },
+    ArcCenter {
+        path: usize,
+        edge: usize,
+    },
+    EllipseCenter {
+        path: usize,
+        edge: usize,
+    },
+    SplinePoint {
+        path: usize,
+        edge: usize,
+        index: usize,
+        fit: bool,
+    },
 }
 
 fn same_point(a: &codec::types::Vector2, b: &codec::types::Vector2) -> bool {
@@ -1139,9 +1158,17 @@ fn boundary_points(hatch: &Hatch) -> Vec<(BoundaryPoint, [f64; 2])> {
         if let Some(last) = pending_end {
             let end = line(last).unwrap().end.clone();
             match first_start.map(|slot| (slot, &mut out[slot])) {
-                Some((_, (BoundaryPoint::LineVertex { ending, starting: Some(0), .. }, _)))
-                    if ending.is_none() && same_point(&line(0).unwrap().start, &end) =>
-                {
+                Some((
+                    _,
+                    (
+                        BoundaryPoint::LineVertex {
+                            ending,
+                            starting: Some(0),
+                            ..
+                        },
+                        _,
+                    ),
+                )) if ending.is_none() && same_point(&line(0).unwrap().start, &end) => {
                     *ending = Some(last);
                 }
                 _ => out.push((
@@ -1167,7 +1194,11 @@ fn set_boundary_point(hatch: &mut Hatch, point: BoundaryPoint, x: f64, y: f64) {
                 polyline.vertices[vertex].y = y;
             }
         }
-        BoundaryPoint::LineVertex { path, ending, starting } => {
+        BoundaryPoint::LineVertex {
+            path,
+            ending,
+            starting,
+        } => {
             if let Some(edge) = ending {
                 if let BoundaryEdge::Line(line) = &mut hatch.paths[path].edges[edge] {
                     line.end = codec::types::Vector2::new(x, y);
@@ -1191,7 +1222,12 @@ fn set_boundary_point(hatch: &mut Hatch, point: BoundaryPoint, x: f64, y: f64) {
                 ellipse.center.y = y;
             }
         }
-        BoundaryPoint::SplinePoint { path, edge, index, fit } => {
+        BoundaryPoint::SplinePoint {
+            path,
+            edge,
+            index,
+            fit,
+        } => {
             if let BoundaryEdge::Spline(spline) = &mut hatch.paths[path].edges[edge] {
                 if fit {
                     if let Some(point) = spline.fit_points.get_mut(index) {
@@ -1241,7 +1277,9 @@ fn edit_boundary_vertex(
                 A::AddVertex => {
                     if vertex + 1 == n && !polyline.is_closed {
                         let last = polyline.vertices[vertex].clone();
-                        polyline.vertices.push(codec::types::Vector3::new(last.x, last.y, 0.0));
+                        polyline
+                            .vertices
+                            .push(codec::types::Vector3::new(last.x, last.y, 0.0));
                         return;
                     }
                     let a = polyline.vertices[vertex].clone();
@@ -1265,7 +1303,11 @@ fn edit_boundary_vertex(
                 _ => {}
             }
         }
-        BoundaryPoint::LineVertex { path, ending, starting } => {
+        BoundaryPoint::LineVertex {
+            path,
+            ending,
+            starting,
+        } => {
             let edges = &mut hatch.paths[path].edges;
             match (action, ending, starting) {
                 (A::AddVertex, _, Some(edge)) => {

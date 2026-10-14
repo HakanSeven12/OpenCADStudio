@@ -236,7 +236,10 @@ const LIN_SOURCE: &str = include_str!("../../assets/linetypes/OpenCADStudio.lin"
 fn lin_source() -> &'static str {
     static SOURCE: OnceLock<String> = OnceLock::new();
     SOURCE.get_or_init(|| {
-        format!("{LIN_SOURCE}\n{}", crate::io::patterns::user_definitions("linetypes", "lin"))
+        format!(
+            "{LIN_SOURCE}\n{}",
+            crate::io::patterns::user_definitions("linetypes", "lin")
+        )
     })
 }
 

@@ -14,8 +14,11 @@ impl OpenCADStudio {
             .map(|session| session.br_handle);
         if block.is_none() {
             self.command_line.push_error(
-                crate::tf!("{}: open the block in the Block Editor first (BEDIT).", command)
-                    .as_ref(),
+                crate::tf!(
+                    "{}: open the block in the Block Editor first (BEDIT).",
+                    command
+                )
+                .as_ref(),
             );
         }
         block
@@ -29,10 +32,12 @@ impl OpenCADStudio {
             .block_records
             .iter()
             .find(|record| record.handle == block)
-            .and_then(|record| match document.get_entity(record.block_entity_handle) {
-                Some(EntityType::Block(begin)) => Some(begin.base_point),
-                _ => None,
-            })
+            .and_then(
+                |record| match document.get_entity(record.block_entity_handle) {
+                    Some(EntityType::Block(begin)) => Some(begin.base_point),
+                    _ => None,
+                },
+            )
             .unwrap_or(codec::types::Vector3::ZERO);
         visibility::create(document, block, base)
     }
@@ -40,10 +45,15 @@ impl OpenCADStudio {
     /// The state the block shows in the editor.
     fn visibility_current(&self, i: usize, block: Handle) -> usize {
         let scene = &self.tabs[i].scene;
-        scene.visibility_states.get(&block).copied().unwrap_or_else(|| {
-            visibility::parameter(&scene.document, block)
-                .map_or(0, |parameter| visibility::shown_state(&scene.document, parameter.handle))
-        })
+        scene
+            .visibility_states
+            .get(&block)
+            .copied()
+            .unwrap_or_else(|| {
+                visibility::parameter(&scene.document, block).map_or(0, |parameter| {
+                    visibility::shown_state(&scene.document, parameter.handle)
+                })
+            })
     }
 
     fn show_visibility_state(&mut self, i: usize, block: Handle, parameter: Handle, state: usize) {
@@ -51,8 +61,8 @@ impl OpenCADStudio {
         self.tabs[i].scene.visibility_states.insert(block, state);
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
-        if let Some(name) = visibility::state_names(&self.tabs[i].scene.document, parameter)
-            .get(state)
+        if let Some(name) =
+            visibility::state_names(&self.tabs[i].scene.document, parameter).get(state)
         {
             self.command_line
                 .push_output(crate::tf!("Current visibility state: {}", name).as_ref());

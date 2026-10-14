@@ -153,25 +153,37 @@ pub fn view<'a>(
         const MAX: usize = 64;
         let count = path.chars().count();
         let shown = if count > MAX {
-            format!("…{}", path.chars().skip(count - (MAX - 1)).collect::<String>())
+            format!(
+                "…{}",
+                path.chars().skip(count - (MAX - 1)).collect::<String>()
+            )
         } else {
             path.to_string()
         };
         about = about.push(
-            text(format!("{} {}", crate::tr!("ref-edit", "dialog-path"), shown))
-                .size(11)
-                .style(muted_style),
+            text(format!(
+                "{} {}",
+                crate::tr!("ref-edit", "dialog-path"),
+                shown
+            ))
+            .size(11)
+            .style(muted_style),
         );
     }
     let reference = card(
         crate::tr!("ref-edit", "dialog-reference"),
         row![
             preview,
-            column![iced::widget::scrollable(chips).direction(
-                iced::widget::scrollable::Direction::Horizontal(
-                    iced::widget::scrollable::Scrollbar::new().width(4).scroller_width(4)
-                )
-            ), about]
+            column![
+                iced::widget::scrollable(chips).direction(
+                    iced::widget::scrollable::Direction::Horizontal(
+                        iced::widget::scrollable::Scrollbar::new()
+                            .width(4)
+                            .scroller_width(4)
+                    )
+                ),
+                about
+            ]
             .spacing(8)
             .width(Fill)
         ]

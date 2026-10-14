@@ -10,8 +10,7 @@ use codec::entities::{EntityCommon, Hatch, HatchGradientPattern};
 use codec::types::{Color as AcadColor, LineWeight, Transparency};
 use codec::{CadDocument, EntityType, Handle};
 use iced::widget::{
-    button, image, column, combo_box, container, row, slider, text, text_input, tooltip,
-    Space,
+    button, column, combo_box, container, image, row, slider, text, text_input, tooltip, Space,
 };
 use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -171,7 +170,11 @@ impl GraphicAttributesState {
 
     /// The fills and fill kind of `selected`, from an index of associative
     /// fills that is rebuilt only when the scene's geometry changes.
-    pub(crate) fn fills(&self, scene: &Scene, selected: &[Handle]) -> (Vec<Handle>, GraphicAttribute) {
+    pub(crate) fn fills(
+        &self,
+        scene: &Scene,
+        selected: &[Handle],
+    ) -> (Vec<Handle>, GraphicAttribute) {
         // Geometry epochs are unique across all scenes, so the epoch alone
         // identifies both the tab and the state of its drawing.
         let key = scene.geometry_epoch;
@@ -213,13 +216,25 @@ impl GraphicAttributesState {
         let same = |handles: &[Handle]| {
             handles.len() == selected.len() && selected.iter().all(|h| handles.contains(h))
         };
-        if self.gradient_editor.as_ref().is_some_and(|e| !same(&e.handles)) {
+        if self
+            .gradient_editor
+            .as_ref()
+            .is_some_and(|e| !same(&e.handles))
+        {
             self.gradient_editor = None;
         }
-        if self.hatch_editor.as_ref().is_some_and(|e| !same(&e.handles)) {
+        if self
+            .hatch_editor
+            .as_ref()
+            .is_some_and(|e| !same(&e.handles))
+        {
             self.hatch_editor = None;
         }
-        if self.pending_fill_close.as_ref().is_some_and(|p| !same(&p.selection)) {
+        if self
+            .pending_fill_close
+            .as_ref()
+            .is_some_and(|p| !same(&p.selection))
+        {
             self.pending_fill_close = None;
         }
     }
@@ -227,8 +242,10 @@ impl GraphicAttributesState {
     pub fn fill_close_prompt(&self) -> Option<String> {
         let count = self.pending_fill_close.as_ref()?.open_boundaries.len();
         Some(if count == 1 {
-            crate::t!("The selected object is open. Close it before creating the fill? [Yes / No] <Yes>")
-                .into_owned()
+            crate::t!(
+                "The selected object is open. Close it before creating the fill? [Yes / No] <Yes>"
+            )
+            .into_owned()
         } else {
             crate::tf!(
                 "{count} selected objects are open. Close them before creating the fill? [Yes / No] <Yes>"
@@ -367,7 +384,9 @@ fn shared_value<'a, T: PartialEq>(
     draw_depth: &DrawDepth,
     value: impl Fn(&EntityCommon) -> T,
 ) -> Option<(&'a EntityCommon, T, bool)> {
-    let top = document.get_entity(top_handle(handles, draw_depth)?)?.common();
+    let top = document
+        .get_entity(top_handle(handles, draw_depth)?)?
+        .common();
     let shared = value(top);
     let varies = handles.iter().any(|handle| {
         document
@@ -469,10 +488,13 @@ impl TransparencyInfo {
     }
 }
 
-fn color_info(document: &CadDocument, handles: &[Handle], draw_depth: &DrawDepth) -> Option<ColorInfo> {
+fn color_info(
+    document: &CadDocument,
+    handles: &[Handle],
+    draw_depth: &DrawDepth,
+) -> Option<ColorInfo> {
     let (top, color, varies) = shared_value(document, handles, draw_depth, |c| c.color)?;
-    let rgba =
-        crate::scene::view::render::render_style_for_common_viewport(document, top, None).0;
+    let rgba = crate::scene::view::render::render_style_for_common_viewport(document, top, None).0;
     Some(ColorInfo {
         color,
         display: iced::Color::from_rgba(rgba[0], rgba[1], rgba[2], 1.0),
@@ -576,8 +598,8 @@ fn linetype_preview_art(document: &CadDocument, linetype: &str) -> String {
             .filter(|character| matches!(character, '_' | '.' | '-' | '/' | '\\' | '|' | '~'))
             .count()
             >= 2)
-        .then(|| art.find(part))
-        .flatten()
+            .then(|| art.find(part))
+            .flatten()
     });
     let pattern = pattern_start.map_or(art.as_str(), |start| &art[start..]);
     if pattern.is_empty() {
@@ -746,7 +768,10 @@ fn color_control<'a>(
         vec![
             ("ByLayer".into(), msg(changed(AcadColor::ByLayer))),
             ("ByBlock".into(), msg(changed(AcadColor::ByBlock))),
-            (crate::t!("Custom…"), Message::OpenColorWindow(target, info.color)),
+            (
+                crate::t!("Custom…"),
+                Message::OpenColorWindow(target, info.color),
+            ),
         ],
     );
     row![swatch, more].spacing(4).align_y(iced::Center).into()
@@ -791,7 +816,11 @@ fn transparency_control<'a>(
     row![control, more].spacing(4).align_y(iced::Center).into()
 }
 
-fn header_menu(side: DockSide, open: bool, fill_on_current_layer: bool) -> Element<'static, Message> {
+fn header_menu(
+    side: DockSide,
+    open: bool,
+    fill_on_current_layer: bool,
+) -> Element<'static, Message> {
     let menu_button = button(crate::ui::icons::themed_secondary(
         crate::ui::icons::MENU,
         12.0,
@@ -817,10 +846,22 @@ fn header_menu(side: DockSide, open: bool, fill_on_current_layer: bool) -> Eleme
             .padding([4, 8])
     };
     let popup = container(column![
-        item("Set all attributes ByLayer", GraphicAttributesMsg::SetAllByLayer),
-        item("Set all attributes ByBlock", GraphicAttributesMsg::SetAllByBlock),
-        item("Remove ByLayer / ByBlock", GraphicAttributesMsg::RemoveReferences),
-        item("Create Layer with active settings", GraphicAttributesMsg::CreateLayer),
+        item(
+            "Set all attributes ByLayer",
+            GraphicAttributesMsg::SetAllByLayer
+        ),
+        item(
+            "Set all attributes ByBlock",
+            GraphicAttributesMsg::SetAllByBlock
+        ),
+        item(
+            "Remove ByLayer / ByBlock",
+            GraphicAttributesMsg::RemoveReferences
+        ),
+        item(
+            "Create Layer with active settings",
+            GraphicAttributesMsg::CreateLayer
+        ),
         container(iced::widget::rule::horizontal(1)).padding([2, 4]),
         container(
             iced::widget::checkbox(fill_on_current_layer)
@@ -944,7 +985,11 @@ fn preview_row<'a>(
         })
         .height(COMPACT_BUTTON_HEIGHT)
         .padding([1, 3]);
-    let edit = tooltip(edit, text(tooltip_label).size(10), tooltip::Position::Bottom);
+    let edit = tooltip(
+        edit,
+        text(tooltip_label).size(10),
+        tooltip::Position::Bottom,
+    );
     let edit: Element<'a, Message> = match flyout {
         Some((popup, width, height)) => {
             let mut drop_down = iced_aw::DropDown::new(edit, popup, true)
@@ -1011,8 +1056,14 @@ fn linetype_row<'a>(
         open_menu,
         COMPACT_BUTTON_HEIGHT,
         vec![
-            ("ByLayer".into(), msg(GraphicAttributesMsg::LineLinetype("ByLayer".into()))),
-            ("ByBlock".into(), msg(GraphicAttributesMsg::LineLinetype("ByBlock".into()))),
+            (
+                "ByLayer".into(),
+                msg(GraphicAttributesMsg::LineLinetype("ByLayer".into())),
+            ),
+            (
+                "ByBlock".into(),
+                msg(GraphicAttributesMsg::LineLinetype("ByBlock".into())),
+            ),
         ],
     );
     row![crate::ui::wide_menu::wide_menu(combo, 220.0), more]
@@ -1108,8 +1159,14 @@ fn lineweight_field<'a>(
         open_menu,
         COMPACT_BUTTON_HEIGHT,
         vec![
-            ("ByLayer".into(), msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByLayer))),
-            ("ByBlock".into(), msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByBlock))),
+            (
+                "ByLayer".into(),
+                msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByLayer)),
+            ),
+            (
+                "ByBlock".into(),
+                msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByBlock)),
+            ),
         ],
     );
     row![
@@ -1142,15 +1199,22 @@ fn line_section<'a>(
     }
     let layer = top_layer(document, handles, draw_depth).to_string();
     let header = &document.header;
-    let (linetype, linetype_varies) = shared_value(document, handles, draw_depth, |c| {
-        c.linetype.clone()
-    })
-    .map_or_else(
-        || (current_linetype_name(document).to_string(), false),
-        |(_, value, varies)| (if value.is_empty() { "ByLayer".into() } else { value }, varies),
-    );
-    let (scale, scale_varies) =
-        shared_value(document, handles, draw_depth, |c| c.linetype_scale).map_or(
+    let (linetype, linetype_varies) =
+        shared_value(document, handles, draw_depth, |c| c.linetype.clone()).map_or_else(
+            || (current_linetype_name(document).to_string(), false),
+            |(_, value, varies)| {
+                (
+                    if value.is_empty() {
+                        "ByLayer".into()
+                    } else {
+                        value
+                    },
+                    varies,
+                )
+            },
+        );
+    let (scale, scale_varies) = shared_value(document, handles, draw_depth, |c| c.linetype_scale)
+        .map_or(
             (header.current_entity_linetype_scale, false),
             |(_, value, varies)| (value, varies),
         );
@@ -1159,10 +1223,15 @@ fn line_section<'a>(
             (LineWeight::from_value(header.current_line_weight), false),
             |(_, value, varies)| (value, varies),
         );
-    let color = color_info(document, handles, draw_depth)
-        .unwrap_or_else(|| current_color_info(document));
+    let color =
+        color_info(document, handles, draw_depth).unwrap_or_else(|| current_color_info(document));
     let transparency = transparency_info(document, handles, draw_depth).unwrap_or_else(|| {
-        TransparencyInfo::new(document, &layer, document.current_entity_transparency(), false)
+        TransparencyInfo::new(
+            document,
+            &layer,
+            document.current_entity_transparency(),
+            false,
+        )
     });
     let continuous =
         !linetype_varies && is_continuous(effective_linetype(document, &layer, &linetype));

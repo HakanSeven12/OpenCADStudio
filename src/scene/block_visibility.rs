@@ -35,11 +35,23 @@ const NO_VALUE: i16 = -9999;
 /// (DXF name, class, DWG maintenance version) of the classes used here.
 const CLASSES: &[(&str, &str, i32)] = &[
     ("ACAD_EVALUATION_GRAPH", "AcDbEvalGraph", 55),
-    ("BLOCKVISIBILITYPARAMETER", "AcDbBlockVisibilityParameter", 55),
+    (
+        "BLOCKVISIBILITYPARAMETER",
+        "AcDbBlockVisibilityParameter",
+        55,
+    ),
     ("BLOCKVISIBILITYGRIP", "AcDbBlockVisibilityGrip", 55),
     ("BLOCKGRIPLOCATIONCOMPONENT", "AcDbBlockGripExpr", 20),
-    ("ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION", "AcDbDynamicBlockPurgePreventer", 61),
-    ("ACDB_BLOCKREPRESENTATION_DATA", "AcDbBlockRepresentationData", 58),
+    (
+        "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
+        "AcDbDynamicBlockPurgePreventer",
+        61,
+    ),
+    (
+        "ACDB_BLOCKREPRESENTATION_DATA",
+        "AcDbBlockRepresentationData",
+        58,
+    ),
 ];
 
 /// Register the classes with the flags and versions the reference writes
@@ -240,8 +252,7 @@ pub fn create(document: &mut CadDocument, definition: Handle, location: Vector3)
         ensure_app_id(document, app);
     }
     let dictionary = document.ensure_extension_dictionary(definition);
-    let [graph, parameter, grip, x, y, preventer] =
-        [(); 6].map(|_| document.allocate_handle());
+    let [graph, parameter, grip, x, y, preventer] = [(); 6].map(|_| document.allocate_handle());
 
     store(
         document,
@@ -326,16 +337,15 @@ pub fn create(document: &mut CadDocument, definition: Handle, location: Vector3)
         node_data,
         active_cycles: None,
     };
-    let edge = |id: i32, source_node: i32, destination_node: i32, outgoing_edges| {
-        BlockEvaluationEdge {
+    let edge =
+        |id: i32, source_node: i32, destination_node: i32, outgoing_edges| BlockEvaluationEdge {
             id,
             next_id: 0,
             incoming_edge: 1,
             source_node,
             destination_node,
             outgoing_edges,
-        }
-    };
+        };
     let mut graph_object = dynamic(
         graph,
         dictionary,
@@ -393,9 +403,11 @@ pub fn create(document: &mut CadDocument, definition: Handle, location: Vector3)
 /// The names of the states of `parameter`, in list order.
 pub fn state_names(document: &CadDocument, parameter: Handle) -> Vec<String> {
     match document.objects.get(&parameter) {
-        Some(ObjectType::BlockVisibilityParameter(parameter)) => {
-            parameter.states.iter().map(|state| state.name.clone()).collect()
-        }
+        Some(ObjectType::BlockVisibilityParameter(parameter)) => parameter
+            .states
+            .iter()
+            .map(|state| state.name.clone())
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -597,7 +609,11 @@ impl Scene {
         let Some(EntityType::Insert(reference)) = self.document.get_entity(insert) else {
             return None;
         };
-        let definition = self.document.block_records.get(&reference.block_name)?.handle;
+        let definition = self
+            .document
+            .block_records
+            .get(&reference.block_name)?
+            .handle;
         parameter(&self.document, definition)?;
         let name = {
             let next = self
@@ -614,10 +630,12 @@ impl Scene {
             .block_records
             .iter()
             .find(|record| record.handle == definition)
-            .and_then(|record| match self.document.get_entity(record.block_entity_handle) {
-                Some(EntityType::Block(block)) => Some(block.base_point),
-                _ => None,
-            })
+            .and_then(
+                |record| match self.document.get_entity(record.block_entity_handle) {
+                    Some(EntityType::Block(block)) => Some(block.base_point),
+                    _ => None,
+                },
+            )
             .unwrap_or(Vector3::ZERO);
         let originals = members(&self.document, definition);
         let copies: Vec<EntityType> = originals
@@ -701,7 +719,10 @@ mod tests {
             Vector3::ZERO,
             vec![
                 EntityType::Line(Line::from_coords(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)),
-                EntityType::Circle(Circle::from_center_radius(Vector3::new(0.5, 0.5, 0.0), 0.25)),
+                EntityType::Circle(Circle::from_center_radius(
+                    Vector3::new(0.5, 0.5, 0.0),
+                    0.25,
+                )),
             ],
         );
         let definition = scene.document.block_records.get("door").unwrap().handle;
@@ -732,7 +753,11 @@ mod tests {
             let (found, parameter) = read
                 .dynamic_visibility_for_insert(insert)
                 .unwrap_or_else(|| panic!("{ext}: no visibility parameter"));
-            let record = read.block_records.iter().find(|r| r.handle == found).unwrap();
+            let record = read
+                .block_records
+                .iter()
+                .find(|r| r.handle == found)
+                .unwrap();
             assert_eq!(record.name, "door", "{ext}");
             let names: Vec<&str> = parameter.states.iter().map(|s| s.name.as_str()).collect();
             assert_eq!(names, ["VisibilityState0", "Open"], "{ext}");

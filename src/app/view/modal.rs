@@ -38,7 +38,9 @@ impl OpenCADStudio {
             Some(K::ViewBackground) => format!(
                 "{} — {}",
                 crate::tr!("view-background", "title"),
-                self.view_background.as_ref().map_or("", |s| s.view.as_str())
+                self.view_background
+                    .as_ref()
+                    .map_or("", |s| s.view.as_str())
             ),
             Some(K::ImageAdjust) => crate::tr!("image-adjust", "title"),
             Some(K::RefEdit) => crate::tr!("ref-edit", "dialog-title"),
@@ -2173,13 +2175,14 @@ fn autosave_restore_dialog_window(
     .size(14)]
     .spacing(0);
     if let Some(count) = session_drawings {
-        body = body
-            .push(iced::widget::Space::new().height(4))
-            .push(
-                text(crate::tf!("Session had {count} open drawing(s).", count = count))
-                    .size(12)
-                    .style(dialog_muted_text_style),
-            );
+        body = body.push(iced::widget::Space::new().height(4)).push(
+            text(crate::tf!(
+                "Session had {count} open drawing(s).",
+                count = count
+            ))
+            .size(12)
+            .style(dialog_muted_text_style),
+        );
     }
     body = body
         .push(iced::widget::Space::new().height(4))

@@ -10,7 +10,19 @@ use codec::types::Color;
 /// (name, type, face lighting model, face lighting quality, face color
 /// mode, face modifier, edge model, edge style, internal only, extended
 /// lighting model, properties)
-type Row = (&'static str, i16, i16, i16, i16, i32, i32, i32, bool, i16, &'static str);
+type Row = (
+    &'static str,
+    i16,
+    i16,
+    i16,
+    i16,
+    i32,
+    i32,
+    i32,
+    bool,
+    i16,
+    &'static str,
+);
 
 const STYLES: &[Row] = &[
     ("2dWireframe", 4, 0, 2, 0, 0, 1, 4, false, 3,
@@ -103,7 +115,9 @@ pub fn populate_document(document: &mut codec::CadDocument) {
         if present {
             continue;
         }
-        let Some(properties) = props.split(' ').map(property).collect::<Option<Vec<_>>>() else { continue };
+        let Some(properties) = props.split(' ').map(property).collect::<Option<Vec<_>>>() else {
+            continue;
+        };
         let handle = document.allocate_handle();
         let mut style = VisualStyle::new();
         style.handle = handle;
@@ -120,7 +134,9 @@ pub fn populate_document(document: &mut codec::CadDocument) {
         style.internal_use_only = internal;
         style.extended_lighting_model = elm;
         style.properties = properties;
-        document.objects.insert(handle, ObjectType::VisualStyle(style));
+        document
+            .objects
+            .insert(handle, ObjectType::VisualStyle(style));
         if let Some(ObjectType::Dictionary(entries)) = document.objects.get_mut(&dictionary) {
             entries.add_entry(name, handle);
         }
@@ -130,7 +146,10 @@ pub fn populate_document(document: &mut codec::CadDocument) {
 /// The visual styles offered by name (not the internal ones), as the
 /// reference lists them: the 2D wireframe style shows as "2D Wireframe".
 pub fn offered(document: &codec::CadDocument) -> Vec<(String, codec::types::Handle)> {
-    let Some(ObjectType::Dictionary(entries)) = document.objects.get(&document.header.acad_visualstyle_dict_handle) else {
+    let Some(ObjectType::Dictionary(entries)) = document
+        .objects
+        .get(&document.header.acad_visualstyle_dict_handle)
+    else {
         return Vec::new();
     };
     entries
@@ -141,7 +160,11 @@ pub fn offered(document: &codec::CadDocument) -> Vec<(String, codec::types::Hand
             _ => false,
         })
         .map(|(name, handle)| {
-            let shown = if name.eq_ignore_ascii_case("2dWireframe") { "2D Wireframe".to_string() } else { name.clone() };
+            let shown = if name.eq_ignore_ascii_case("2dWireframe") {
+                "2D Wireframe".to_string()
+            } else {
+                name.clone()
+            };
             (shown, *handle)
         })
         .collect()

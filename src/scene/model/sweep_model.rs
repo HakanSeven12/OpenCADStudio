@@ -12,7 +12,12 @@ use kernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use kernel::space::{PlanarCurve, Plane, Vec3};
 
 pub use super::sweep_command_model::{
-    is_sweep_path, is_sweep_profile, scaled_sweep_path_refusal, spatial_profile, spatial_sweep_record, surface_sweep_record, sweep_expressions, link_sweep_expressions, link_sweep_sources, sweep_sources, SWEEP_SOURCES_APP, resweep_from_sources, surface_associativity, set_surface_associativity, assoc_edge_curve, assoc_source_supported, region_edge_curves, AssocCurve, sweep_record, sweep_refusal_code, sweep_selection_options, swept_surface_entity, swept_with_options,
+    assoc_edge_curve, assoc_source_supported, is_sweep_path, is_sweep_profile,
+    link_sweep_expressions, link_sweep_sources, region_edge_curves, resweep_from_sources,
+    scaled_sweep_path_refusal, set_surface_associativity, spatial_profile, spatial_sweep_record,
+    surface_associativity, surface_sweep_record, sweep_expressions, sweep_record,
+    sweep_refusal_code, sweep_selection_options, sweep_sources, swept_surface_entity,
+    swept_with_options, AssocCurve, SWEEP_SOURCES_APP,
 };
 use crate::entities::curve::entity_curve;
 
@@ -68,12 +73,16 @@ pub fn extrusion_profile_of(entity: &EntityType) -> Option<(Profile, bool)> {
 /// edges (its display wires hold one wire per edge), a lone closed edge split
 /// as a closed curve is.
 fn region_loop(entity: &EntityType) -> Option<Profile> {
-    let EntityType::Region(region) = entity else { return None };
+    let EntityType::Region(region) = entity else {
+        return None;
+    };
     if !region.acis_data.has_data() {
         return None;
     }
     let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
-    let [boundary] = loops.as_slice() else { return None };
+    let [boundary] = loops.as_slice() else {
+        return None;
+    };
     let single = boundary.len() == 1;
     let pieces = boundary
         .iter()
@@ -85,7 +94,8 @@ fn region_loop(entity: &EntityType) -> Option<Profile> {
 
 /// Whether a region has more than one boundary loop.
 fn region_with_holes(entity: &EntityType) -> bool {
-    matches!(entity, EntityType::Region(_)) && region_profiles(entity).is_some_and(|(_, loops)| loops.len() > 1)
+    matches!(entity, EntityType::Region(_))
+        && region_profiles(entity).is_some_and(|(_, loops)| loops.len() > 1)
 }
 
 fn profile_pieces(curve: &Curve, closed: bool) -> Option<Vec<Curve>> {
@@ -665,12 +675,16 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
 /// polyline in its own coordinate system about the region's normal, read
 /// from the region's modeler edges.
 pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
-    let EntityType::Region(region) = entity else { return None };
+    let EntityType::Region(region) = entity else {
+        return None;
+    };
     if !region.acis_data.has_data() {
         return None;
     }
     let (plane, loops, _) = super::presspull_model::profile_geometry(entity)?;
-    let [boundary] = loops.as_slice() else { return None };
+    let [boundary] = loops.as_slice() else {
+        return None;
+    };
     let world = |v: [f64; 3]| Vector3::new(v[0], v[1], v[2]);
     let normal = world(plane.normal()?);
     let identity = glam::DMat4::IDENTITY.to_cols_array();
@@ -715,18 +729,31 @@ pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f
     }
     // Walk the loop head to tail; an arc run against its direction turns
     // clockwise (negative bulge).
-    let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-9 * (1.0 + a[0].abs().max(a[1].abs()));
+    let close = |a: [f64; 2], b: [f64; 2]| {
+        (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-9 * (1.0 + a[0].abs().max(a[1].abs()))
+    };
     let ends = |piece: &Curve| match piece {
         Curve::Line(line) => Some((line.start, line.end, 0.0)),
         Curve::Arc(arc) => {
-            let at = |angle: f64| [arc.centre[0] + arc.radius * angle.cos(), arc.centre[1] + arc.radius * angle.sin()];
-            Some((at(arc.start_angle), at(arc.end_angle), (arc.sweep() / 4.0).tan()))
+            let at = |angle: f64| {
+                [
+                    arc.centre[0] + arc.radius * angle.cos(),
+                    arc.centre[1] + arc.radius * angle.sin(),
+                ]
+            };
+            Some((
+                at(arc.start_angle),
+                at(arc.end_angle),
+                (arc.sweep() / 4.0).tan(),
+            ))
         }
         _ => None,
     };
     let (first_start, first_end, _) = ends(boundary.first()?)?;
     let second = boundary.get(1).and_then(ends);
-    let mut at = if second.is_some_and(|(start, end, _)| close(first_start, start) || close(first_start, end)) {
+    let mut at = if second
+        .is_some_and(|(start, end, _)| close(first_start, start) || close(first_start, end))
+    {
         first_end
     } else {
         first_start
@@ -740,7 +767,13 @@ pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f
     polyline.elevation = glam::DVec3::from_array(plane.origin).dot(axis_normal);
     for piece in boundary {
         let (start, end, bulge) = ends(piece)?;
-        let (from, to, bulge) = if close(start, at) { (start, end, bulge) } else if close(end, at) { (end, start, -bulge) } else { return None };
+        let (from, to, bulge) = if close(start, at) {
+            (start, end, bulge)
+        } else if close(end, at) {
+            (end, start, -bulge)
+        } else {
+            return None;
+        };
         let point = glam::DVec3::from_array(plane.point_at(from));
         let mut vertex = LwVertex::new(Vector2::new(point.dot(axis_x), point.dot(axis_y)));
         vertex.bulge = bulge;

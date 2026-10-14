@@ -114,14 +114,14 @@ impl OpenCADStudio {
                     }
                 }
                 let created = match history {
-                    Some(history) => {
-                        self.add_surface_model_with_history(surface, body, history)
-                    }
+                    Some(history) => self.add_surface_model_with_history(surface, body, history),
                     None => self.add_surface_model(surface, body),
                 };
                 // An associative surface keeps reading its profile.
                 if sweep_model::surface_associativity() && path.is_none() && !created.is_null() {
-                    use crate::scene::model::surface_sources::{link_surface_sources, SurfaceSources};
+                    use crate::scene::model::surface_sources::{
+                        link_surface_sources, SurfaceSources,
+                    };
                     let (height, given) = match extent {
                         ExtrudeExtent::Height(height) => (height, None),
                         _ => (direction.length(), Some(direction)),
@@ -129,7 +129,12 @@ impl OpenCADStudio {
                     link_surface_sources(
                         &mut self.tabs[i].scene.document,
                         created,
-                        &SurfaceSources::Extrude { profile: *handle, height, direction: given, taper: taper_angle },
+                        &SurfaceSources::Extrude {
+                            profile: *handle,
+                            height,
+                            direction: given,
+                            taper: taper_angle,
+                        },
                     );
                     associative_sources.push(*handle);
                 }
@@ -385,18 +390,14 @@ impl OpenCADStudio {
                     continue;
                 };
                 let created = self.add_surface_model(
-                    empty_revolved_surface(
-                        &entity,
-                        axis_start,
-                        axis_end,
-                        angle,
-                        start_angle,
-                    ),
+                    empty_revolved_surface(&entity, axis_start, axis_end, angle, start_angle),
                     body,
                 );
                 // An associative surface keeps reading its profile and axis.
                 if sweep_model::surface_associativity() && !created.is_null() {
-                    use crate::scene::model::surface_sources::{link_surface_sources, SurfaceSources};
+                    use crate::scene::model::surface_sources::{
+                        link_surface_sources, SurfaceSources,
+                    };
                     link_surface_sources(
                         &mut self.tabs[i].scene.document,
                         created,
@@ -758,7 +759,9 @@ impl OpenCADStudio {
                             crate::scene::model::surface_sources::link_surface_sources(
                                 &mut self.tabs[i].scene.document,
                                 handle,
-                                &crate::scene::model::surface_sources::SurfaceSources::Loft { sections: single },
+                                &crate::scene::model::surface_sources::SurfaceSources::Loft {
+                                    sections: single,
+                                },
                             );
                             associative = true;
                         }

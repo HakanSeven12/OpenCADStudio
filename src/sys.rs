@@ -743,10 +743,13 @@ pub fn download_bytes(name: &str, bytes: &[u8]) {
 pub fn save_hook() -> Option<js_sys::Function> {
     use wasm_bindgen::JsCast;
     let window = web_sys::window()?;
-    js_sys::Reflect::get(window.as_ref(), &wasm_bindgen::JsValue::from_str("openCadStudioSaveFile"))
-        .ok()?
-        .dyn_into::<js_sys::Function>()
-        .ok()
+    js_sys::Reflect::get(
+        window.as_ref(),
+        &wasm_bindgen::JsValue::from_str("openCadStudioSaveFile"),
+    )
+    .ok()?
+    .dyn_into::<js_sys::Function>()
+    .ok()
 }
 
 /// Show a plot preview as an in-page overlay. The plotted PDF arrives already

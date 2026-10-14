@@ -160,7 +160,11 @@ fn mesh_nodes(mesh: &MeshModel, index: usize) -> Option<([Node; 3], [Node; 3])> 
             continue;
         }
         // The last corner of a polygon is stored as its bitwise complement.
-        polygon_indices.extend([triangle[0] as i32, triangle[1] as i32, !(triangle[2] as i32)]);
+        polygon_indices.extend([
+            triangle[0] as i32,
+            triangle[1] as i32,
+            !(triangle[2] as i32),
+        ]);
         for _ in 0..3 {
             normals.extend(n.map(|value| value / length));
         }
@@ -173,10 +177,18 @@ fn mesh_nodes(mesh: &MeshModel, index: usize) -> Option<([Node; 3], [Node; 3])> 
     let name = format!("Mesh{}", index + 1);
     let geometry = node(
         "Geometry",
-        vec![Prop::I64(geometry_id), s(&format!("{name}\x00\x01Geometry")), s("Mesh")],
+        vec![
+            Prop::I64(geometry_id),
+            s(&format!("{name}\x00\x01Geometry")),
+            s("Mesh"),
+        ],
         vec![
             node("Vertices", vec![Prop::F64s(points.concat())], Vec::new()),
-            node("PolygonVertexIndex", vec![Prop::I32s(polygon_indices)], Vec::new()),
+            node(
+                "PolygonVertexIndex",
+                vec![Prop::I32s(polygon_indices)],
+                Vec::new(),
+            ),
             node("GeometryVersion", vec![Prop::I32(124)], Vec::new()),
             node(
                 "LayerElementNormal",
@@ -184,7 +196,11 @@ fn mesh_nodes(mesh: &MeshModel, index: usize) -> Option<([Node; 3], [Node; 3])> 
                 vec![
                     node("Version", vec![Prop::I32(101)], Vec::new()),
                     node("Name", vec![s("")], Vec::new()),
-                    node("MappingInformationType", vec![s("ByPolygonVertex")], Vec::new()),
+                    node(
+                        "MappingInformationType",
+                        vec![s("ByPolygonVertex")],
+                        Vec::new(),
+                    ),
                     node("ReferenceInformationType", vec![s("Direct")], Vec::new()),
                     node("Normals", vec![Prop::F64s(normals)], Vec::new()),
                 ],
@@ -196,7 +212,11 @@ fn mesh_nodes(mesh: &MeshModel, index: usize) -> Option<([Node; 3], [Node; 3])> 
                     node("Version", vec![Prop::I32(101)], Vec::new()),
                     node("Name", vec![s("")], Vec::new()),
                     node("MappingInformationType", vec![s("AllSame")], Vec::new()),
-                    node("ReferenceInformationType", vec![s("IndexToDirect")], Vec::new()),
+                    node(
+                        "ReferenceInformationType",
+                        vec![s("IndexToDirect")],
+                        Vec::new(),
+                    ),
                     node("Materials", vec![Prop::I32s(vec![0])], Vec::new()),
                 ],
             ),
@@ -227,7 +247,11 @@ fn mesh_nodes(mesh: &MeshModel, index: usize) -> Option<([Node; 3], [Node; 3])> 
     );
     let model = node(
         "Model",
-        vec![Prop::I64(model_id), s(&format!("{name}\x00\x01Model")), s("Mesh")],
+        vec![
+            Prop::I64(model_id),
+            s(&format!("{name}\x00\x01Model")),
+            s("Mesh"),
+        ],
         vec![
             node("Version", vec![Prop::I32(232)], Vec::new()),
             node("Properties70", Vec::new(), Vec::new()),
@@ -328,7 +352,12 @@ pub fn build_fbx(meshes: &[&MeshModel], unit_cm: f64) -> Option<Vec<u8>> {
                         axis("FrontAxisSign", -1),
                         axis("CoordAxis", 0),
                         axis("CoordAxisSign", 1),
-                        p("UnitScaleFactor", "double", "Number", vec![Prop::F64(unit_cm)]),
+                        p(
+                            "UnitScaleFactor",
+                            "double",
+                            "Number",
+                            vec![Prop::F64(unit_cm)],
+                        ),
                     ],
                 ),
             ],
@@ -437,7 +466,10 @@ mod tests {
 
     #[test]
     fn a_triangle_writes_a_well_formed_file() {
-        let triangle = mesh(vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![0, 1, 2]);
+        let triangle = mesh(
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        );
         let bytes = build_fbx(&[&triangle], 0.1).expect("fbx");
         assert!(bytes.starts_with(HEADER));
         assert_eq!(

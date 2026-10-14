@@ -553,7 +553,11 @@ impl CommandLine {
         let fade = self.fade_secs();
         let now = Instant::now();
         for entry in &mut self.history {
-            if since.saturating_duration_since(entry.created_at).as_secs_f32() < fade {
+            if since
+                .saturating_duration_since(entry.created_at)
+                .as_secs_f32()
+                < fade
+            {
                 entry.created_at = now;
             }
         }

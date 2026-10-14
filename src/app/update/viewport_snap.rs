@@ -72,10 +72,19 @@ impl OpenCADStudio {
             return None;
         }
         let typed = token.trim().trim_start_matches('_').to_uppercase();
-        let offered = self.tabs[i].active_cmd.as_ref()?.options().iter().any(|option| {
-            option.keyword.eq_ignore_ascii_case(&typed)
-                || option.label.to_uppercase().replace(' ', "").starts_with(&typed)
-        });
+        let offered = self.tabs[i]
+            .active_cmd
+            .as_ref()?
+            .options()
+            .iter()
+            .any(|option| {
+                option.keyword.eq_ignore_ascii_case(&typed)
+                    || option
+                        .label
+                        .to_uppercase()
+                        .replace(' ', "")
+                        .starts_with(&typed)
+            });
         (!offered).then_some(kind)
     }
 

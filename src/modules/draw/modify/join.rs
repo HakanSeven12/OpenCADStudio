@@ -473,7 +473,10 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
             let (Some(pa), Some(pb)) = (&ends[a], &ends[b]) else {
                 continue;
             };
-            if pa.iter().any(|p| pb.iter().any(|q| p.distance(*q) <= JOIN_EPS)) {
+            if pa
+                .iter()
+                .any(|p| pb.iter().any(|q| p.distance(*q) <= JOIN_EPS))
+            {
                 let (ra, rb) = (root(&mut group, a), root(&mut group, b));
                 group[ra] = rb;
             }
@@ -483,7 +486,10 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
         Default::default();
     for (index, entity) in entities.iter().enumerate() {
         if ends[index].is_some() {
-            chains.entry(root(&mut group, index)).or_default().push(*entity);
+            chains
+                .entry(root(&mut group, index))
+                .or_default()
+                .push(*entity);
         }
     }
     let (mut removed, mut merged) = (Vec::new(), Vec::new());
@@ -797,8 +803,10 @@ mod join_tests {
                 line(o, o + size, o, o, 0.0),
             ]
         };
-        let lines: Vec<EntityType> =
-            square(0.0, 10.0).into_iter().chain(square(2.0, 6.0)).collect();
+        let lines: Vec<EntityType> = square(0.0, 10.0)
+            .into_iter()
+            .chain(square(2.0, 6.0))
+            .collect();
         let lone = line(50.0, 0.0, 60.0, 0.0, 0.0);
         let mut pairs: Vec<(Handle, &EntityType)> = lines
             .iter()

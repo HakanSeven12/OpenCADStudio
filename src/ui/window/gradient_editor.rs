@@ -31,7 +31,16 @@ pub struct GradientEditorState {
     preview: std::cell::RefCell<Option<(PreviewKey, Option<iced::widget::image::Handle>)>>,
 }
 
-type PreviewKey = (GradientColorMode, AcadColor, AcadColor, u32, GradientKind, bool, String, bool);
+type PreviewKey = (
+    GradientColorMode,
+    AcadColor,
+    AcadColor,
+    u32,
+    GradientKind,
+    bool,
+    String,
+    bool,
+);
 
 #[derive(Debug, Clone)]
 pub enum GradientMsg {
@@ -54,10 +63,7 @@ fn msg(message: GradientMsg) -> Message {
 }
 
 impl GradientEditorState {
-    pub fn from_hatch(
-        handles: Vec<codec::Handle>,
-        hatch: &codec::entities::Hatch,
-    ) -> Self {
+    pub fn from_hatch(handles: Vec<codec::Handle>, hatch: &codec::entities::Hatch) -> Self {
         let color = |index: usize| {
             hatch
                 .gradient_color
@@ -124,9 +130,7 @@ impl GradientEditorState {
 fn rgb(color: &AcadColor) -> Color {
     let (r, g, b) = match color {
         AcadColor::Rgb { r, g, b } => (*r, *g, *b),
-        AcadColor::Index(i) => {
-            codec::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128))
-        }
+        AcadColor::Index(i) => codec::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128)),
         _ => (255, 255, 255),
     };
     Color::from_rgb8(r, g, b)
@@ -192,7 +196,9 @@ fn preview_sized(
             });
         }
     }
-    Some(iced::widget::image::Handle::from_rgba(width, height, pixels))
+    Some(iced::widget::image::Handle::from_rgba(
+        width, height, pixels,
+    ))
 }
 
 fn preview(state: &GradientEditorState) -> Element<'static, Message> {
@@ -219,7 +225,9 @@ pub(crate) fn compact_preview(
     preview_sized(&GradientEditorState::from_hatch(Vec::new(), hatch), 256, 26)
 }
 
-pub(crate) fn preview_image(handle: Option<iced::widget::image::Handle>) -> Element<'static, Message> {
+pub(crate) fn preview_image(
+    handle: Option<iced::widget::image::Handle>,
+) -> Element<'static, Message> {
     match handle {
         Some(handle) => image(handle)
             .width(Fill)
@@ -357,20 +365,20 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         ));
     }
     let invert_selected = state.inverted && state.kind != GradientKind::Linear;
-    let invert = button(column![text("⇄").size(18), text(crate::t!("Invert")).size(9)].align_x(iced::Center))
-        .on_press_maybe(
-            (state.kind != GradientKind::Linear).then(|| msg(GradientMsg::InvertToggled)),
-        )
-        .width(42)
-        .height(48)
-        .style(move |theme: &Theme, status| {
-            let mut style = button::secondary(theme, status);
-            if invert_selected {
-                style.border.color = theme.palette().primary.base.color;
-                style.border.width = 1.0;
-            }
-            style
-        });
+    let invert = button(
+        column![text("⇄").size(18), text(crate::t!("Invert")).size(9)].align_x(iced::Center),
+    )
+    .on_press_maybe((state.kind != GradientKind::Linear).then(|| msg(GradientMsg::InvertToggled)))
+    .width(42)
+    .height(48)
+    .style(move |theme: &Theme, status| {
+        let mut style = button::secondary(theme, status);
+        if invert_selected {
+            style.border.color = theme.palette().primary.base.color;
+            style.border.width = 1.0;
+        }
+        style
+    });
     let separator =
         container(Space::new().width(1).height(36)).style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.neutral.color)),

@@ -150,7 +150,10 @@ fn sysvar_batches_validate_atomically_and_undo_as_one_step() {
         r#"{{"protocol":1,"op":"sysvar","request_id":"sv-atomic-ok","document_id":{doc},"set":{{"ltscale":2.5,"clayer":"Walls"}}}}"#
     ));
     assert_eq!(r["ok"], true, "{}", r["error"]);
-    assert_eq!(app.tabs[i].scene.document.header.current_layer_name, "Walls");
+    assert_eq!(
+        app.tabs[i].scene.document.header.current_layer_name,
+        "Walls"
+    );
     assert_eq!(app.tabs[i].scene.document.header.linetype_scale, 2.5);
     assert_eq!(app.tabs[i].active_layer, "Walls");
     assert_eq!(app.tabs[i].layers.current_layer, "Walls");
@@ -165,7 +168,10 @@ fn sysvar_batches_validate_atomically_and_undo_as_one_step() {
     assert_eq!(r["ok"], false);
     assert_eq!(r["code"], "invalid_sysvar_value");
     assert_eq!(app.tabs[i].scene.document.header.linetype_scale, 2.5);
-    assert_eq!(app.tabs[i].scene.document.header.current_layer_name, "Walls");
+    assert_eq!(
+        app.tabs[i].scene.document.header.current_layer_name,
+        "Walls"
+    );
     assert_eq!(app.tabs[i].history.undo_stack.len(), history_before + 1);
 
     // One undo restores both header variables and all current-layer mirrors.
@@ -459,7 +465,10 @@ fn entities_create_supports_control_and_fit_point_splines() {
         .find(|entity| entity["layer"] == "CURVES")
         .unwrap();
     assert_eq!(control_entity["degree"], 2, "{control_entity}");
-    assert_eq!(control_entity["control_points"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        control_entity["control_points"].as_array().unwrap().len(),
+        3
+    );
     assert_eq!(control_entity["weights"], json!([1.0, 2.0, 1.0]));
 }
 

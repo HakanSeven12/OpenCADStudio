@@ -156,7 +156,9 @@ impl PanelId {
     pub fn icon(self) -> &'static [u8] {
         match self {
             PanelId::Properties => include_bytes!("../../assets/icons/properties.svg"),
-            PanelId::GraphicAttributes => include_bytes!("../../assets/icons/graphic_attributes.svg"),
+            PanelId::GraphicAttributes => {
+                include_bytes!("../../assets/icons/graphic_attributes.svg")
+            }
             PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
             PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
             PanelId::Browser => include_bytes!("../../assets/icons/content_browser.svg"),

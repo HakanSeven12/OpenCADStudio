@@ -270,7 +270,11 @@ pub(super) fn keytip_items(id: &str) -> Vec<(&'static str, &'static str, bool)> 
         .tools
         .iter()
         .filter(|tool| tool.command == id)
-        .flat_map(|tool| tool.options.iter().map(|(cmd, _)| (tool.command, *cmd, false)))
+        .flat_map(|tool| {
+            tool.options
+                .iter()
+                .map(|(cmd, _)| (tool.command, *cmd, false))
+        })
         .collect()
 }
 

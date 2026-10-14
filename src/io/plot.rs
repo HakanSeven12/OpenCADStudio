@@ -7,9 +7,9 @@
 // the historical `Pdf*` names as aliases so existing call sites keep working.
 
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::WireModel;
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::image_model::ImageModel;
+use crate::scene::WireModel;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]

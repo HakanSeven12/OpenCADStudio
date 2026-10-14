@@ -8,9 +8,10 @@ pub mod edit_lock;
 // Same split as web_session/web_autosave: the save-routing decision (and
 // its tests) is pure and compiles everywhere; the showSaveFilePicker half
 // inside is wasm-only.
-pub(crate) mod fs_access;
+pub mod fbx;
 pub mod file_association;
 pub mod font_repo;
+pub(crate) mod fs_access;
 pub mod line_read;
 pub mod linetypes;
 pub mod obj;
@@ -25,7 +26,6 @@ pub mod print_to_printer;
 pub mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod single_instance;
-pub mod fbx;
 pub mod step;
 pub mod stl;
 pub mod svg_export;
@@ -38,9 +38,9 @@ pub(crate) mod web_recent;
 // the native host; the OPFS half inside is wasm-only.
 pub(crate) mod web_autosave;
 #[cfg(target_arch = "wasm32")]
-mod web_worker;
-#[cfg(target_arch = "wasm32")]
 pub(crate) mod web_drop;
+#[cfg(target_arch = "wasm32")]
+mod web_worker;
 // Same split as web_autosave: the ?file= deep-link parser (and its tests) are
 // pure and compile everywhere; the fetch/open half is wasm-only.
 pub(crate) mod web_link;
@@ -57,9 +57,9 @@ use codec::entities::EntityType;
 // parse worker / the xref bytes registry instead.
 #[cfg(not(target_arch = "wasm32"))]
 use codec::io::dwg::DwgReader;
+use codec::{CadDocument, DwgWriter, DxfWriter};
 #[cfg(not(target_arch = "wasm32"))]
 use codec::{DwgReadOptions, DxfReader, DxfReaderConfiguration};
-use codec::{CadDocument, DwgWriter, DxfWriter};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -293,7 +293,10 @@ pub async fn pick_linetype_file_web() -> Option<(String, String)> {
 pub async fn pick_datalink_csv_web() -> Option<(String, Vec<u8>)> {
     let Some(handle) = crate::sys::file_dialog()
         .set_title(crate::t!("Link a CSV data source").as_ref())
-        .add_filter(crate::t!("CSV Files").as_ref(), &["csv", "txt", "CSV", "TXT"])
+        .add_filter(
+            crate::t!("CSV Files").as_ref(),
+            &["csv", "txt", "CSV", "TXT"],
+        )
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
         .await
@@ -2003,8 +2006,7 @@ pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, Str
     {
         let path = crate::sys::handle_path(&handle);
         let table = plot_style::PlotStyleTable::load(&path)?;
-        if let (Ok(dir), Some(file_name)) =
-            (plot_style::ensure_plot_styles_dir(), path.file_name())
+        if let (Ok(dir), Some(file_name)) = (plot_style::ensure_plot_styles_dir(), path.file_name())
         {
             let destination = dir.join(file_name);
             let same_place = path.parent().is_some_and(|parent| {
@@ -3534,10 +3536,8 @@ mod prepare_save_tests {
     fn prepare_bakes_missing_dimension_blocks() {
         let mut doc = CadDocument::new();
         crate::io::linetypes::populate_document(&mut doc);
-        let mut dim = DimensionLinear::new(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        );
+        let mut dim =
+            DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
         dim.definition_point = Vector3::new(5.0, 7.0, 0.0);
         dim.base.definition_point = Vector3::ZERO;
         dim.base.common.handle = doc.allocate_handle();
@@ -3546,8 +3546,7 @@ mod prepare_save_tests {
             .unwrap();
 
         let prepared = prepare_document_for_save(doc.clone(), doc.version);
-        let EntityType::Dimension(Dimension::Linear(linear)) =
-            prepared.get_entity(handle).unwrap()
+        let EntityType::Dimension(Dimension::Linear(linear)) = prepared.get_entity(handle).unwrap()
         else {
             panic!("dimension missing from prepared clone");
         };
@@ -3556,13 +3555,14 @@ mod prepare_save_tests {
             "anonymous dimension block not baked: {}",
             linear.base.block_name
         );
-        assert!(prepared.block_records.get(&linear.base.block_name).is_some());
+        assert!(prepared
+            .block_records
+            .get(&linear.base.block_name)
+            .is_some());
         assert_eq!(linear.base.definition_point, linear.definition_point);
 
         // The live document is untouched: no block name, stale group-10.
-        let EntityType::Dimension(Dimension::Linear(live)) =
-            doc.get_entity(handle).unwrap()
-        else {
+        let EntityType::Dimension(Dimension::Linear(live)) = doc.get_entity(handle).unwrap() else {
             panic!("dimension missing from live document");
         };
         assert!(live.base.block_name.is_empty());
@@ -3576,10 +3576,8 @@ mod prepare_save_tests {
     fn save_to_bytes_equals_prepare_then_shared_serialize() {
         let mut doc = CadDocument::new();
         crate::io::linetypes::populate_document(&mut doc);
-        let mut dim = DimensionLinear::new(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        );
+        let mut dim =
+            DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
         dim.base.common.handle = doc.allocate_handle();
         doc.add_entity(EntityType::Dimension(Dimension::Linear(dim)))
             .unwrap();
@@ -3587,7 +3585,10 @@ mod prepare_save_tests {
             let inline = save_to_bytes(&doc, ext, codec::DxfVersion::AC1032).expect("inline");
             let prepared = prepare_document_for_save(doc.clone(), codec::DxfVersion::AC1032);
             let shared = ocs_save::serialize_document(&prepared, ext).expect("shared");
-            assert_eq!(inline, shared, "inline and shared serialize diverge for {ext}");
+            assert_eq!(
+                inline, shared,
+                "inline and shared serialize diverge for {ext}"
+            );
         }
     }
 }

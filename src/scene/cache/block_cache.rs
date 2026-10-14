@@ -1068,29 +1068,27 @@ pub fn expand_insert(
         LocalSub::Wire(wire) => wire.canvas_color,
         LocalSub::Nested(_) => false,
     });
-    let prototype_key = if !ins.is_array()
-        && !has_masks
-        && cache.prototype_blocks.contains(&ins.block_name)
-    {
-        Some(expansion_prototype_key(
-            ins,
-            &xform,
-            ins_resolved_color,
-            ins_pat_len,
-            ins_pat,
-            ins_lw_px,
-            ins_layer,
-            ins_layer_plottable,
-            selected,
-            pslt_factor,
-            is_xref,
-            bg_color,
-            anno_scale,
-            suppress_root_points,
-        ))
-    } else {
-        None
-    };
+    let prototype_key =
+        if !ins.is_array() && !has_masks && cache.prototype_blocks.contains(&ins.block_name) {
+            Some(expansion_prototype_key(
+                ins,
+                &xform,
+                ins_resolved_color,
+                ins_pat_len,
+                ins_pat,
+                ins_lw_px,
+                ins_layer,
+                ins_layer_plottable,
+                selected,
+                pslt_factor,
+                is_xref,
+                bg_color,
+                anno_scale,
+                suppress_root_points,
+            ))
+        } else {
+            None
+        };
     let prototype_slot = prototype_key.as_ref().map(|key| {
         let mut prototypes = cache
             .expansion_prototypes
@@ -1344,15 +1342,17 @@ pub(crate) fn translated_prototype_wire(
     let mut wire = source.clone();
     wire.name = name.to_string();
     if let Some(stub) = &source.stub {
-        wire.stub = Some(Arc::new(crate::scene::model::instance_model::InstanceStub {
-            prototype: Arc::clone(&stub.prototype),
-            delta: [
-                stub.delta[0] + delta[0],
-                stub.delta[1] + delta[1],
-                stub.delta[2] + delta[2],
-            ],
-            depth_delta: stub.depth_delta,
-        }));
+        wire.stub = Some(Arc::new(
+            crate::scene::model::instance_model::InstanceStub {
+                prototype: Arc::clone(&stub.prototype),
+                delta: [
+                    stub.delta[0] + delta[0],
+                    stub.delta[1] + delta[1],
+                    stub.delta[2] + delta[2],
+                ],
+                depth_delta: stub.depth_delta,
+            },
+        ));
     }
     if let Some(instance) = wire.render_instance.as_mut() {
         for axis in 0..3 {

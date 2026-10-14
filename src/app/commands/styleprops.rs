@@ -1464,9 +1464,18 @@ impl OpenCADStudio {
                     }
                     if name == "LAYOUTCREATEVIEWPORT" {
                         // A profile switch shown and taken as ON / OFF or 1 / 0.
-                        let current = if crate::scene::layout_create_viewport() { "ON" } else { "OFF" };
+                        let current = if crate::scene::layout_create_viewport() {
+                            "ON"
+                        } else {
+                            "OFF"
+                        };
                         let parsed = value.as_deref().map(|v| {
-                            match v.trim().trim_start_matches('_').to_ascii_uppercase().as_str() {
+                            match v
+                                .trim()
+                                .trim_start_matches('_')
+                                .to_ascii_uppercase()
+                                .as_str()
+                            {
                                 "1" | "ON" => Some(true),
                                 "0" | "OFF" => Some(false),
                                 _ => None,
@@ -1483,13 +1492,15 @@ impl OpenCADStudio {
                                 self.command_line.push_error(
                                     crate::t!("Requires 0 or 1 only, or option keyword.").as_ref(),
                                 );
-                                self.command_line
-                                    .push_output(&format!("Enter new value for {name} <{current}>:"));
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for {name} <{current}>:"
+                                ));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line
-                                    .push_output(&format!("Enter new value for {name} <{current}>:"));
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for {name} <{current}>:"
+                                ));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1497,8 +1508,15 @@ impl OpenCADStudio {
                     }
                     if matches!(name.as_str(), "UCSORTHO" | "UCSVIEW") {
                         use crate::modules::view::view_cmd;
-                        let current = i16::from(if name == "UCSORTHO" { view_cmd::ucs_ortho() } else { view_cmd::ucs_view() });
-                        match value.as_deref().map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v))) {
+                        let current = i16::from(if name == "UCSORTHO" {
+                            view_cmd::ucs_ortho()
+                        } else {
+                            view_cmd::ucs_view()
+                        });
+                        match value
+                            .as_deref()
+                            .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
+                        {
                             Some(Some(mode)) => {
                                 if current != mode {
                                     if name == "UCSORTHO" {
@@ -1510,12 +1528,17 @@ impl OpenCADStudio {
                                 }
                             }
                             Some(None) => {
-                                self.command_line.push_error(crate::t!("Requires 0 or 1 only.").as_ref());
-                                self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                                self.command_line
+                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for {name} <{current}>:"
+                                ));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for {name} <{current}>:"
+                                ));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -3393,10 +3416,11 @@ impl OpenCADStudio {
                 let path = std::path::PathBuf::from(cmd.trim_start_matches("COMPARE").trim());
                 match crate::io::load_file(&path) {
                     Ok(other) => {
-                        let comparison =
-                            crate::scene::compare::compare(&self.tabs[i].scene, other);
+                        let comparison = crate::scene::compare::compare(&self.tabs[i].scene, other);
                         // The overlay shows at once, before the cursor moves.
-                        self.tabs[i].scene.set_preview_wires(comparison.overlay.clone());
+                        self.tabs[i]
+                            .scene
+                            .set_preview_wires(comparison.overlay.clone());
                         let command =
                             crate::modules::manage::compare::CompareCommand::new(comparison);
                         self.command_line.push_info(&command.prompt());

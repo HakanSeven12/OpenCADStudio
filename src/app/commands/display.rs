@@ -2153,16 +2153,17 @@ impl OpenCADStudio {
         }
         let doc = &self.tabs[i].scene.document;
         let current_style = doc.header.current_table_style_name.clone();
-        table.table_style_handle = doc.objects.iter().find_map(|(handle, object)| {
-            match object {
+        table.table_style_handle = doc
+            .objects
+            .iter()
+            .find_map(|(handle, object)| match object {
                 codec::objects::ObjectType::TableStyle(style)
                     if style.name.eq_ignore_ascii_case(&current_style) =>
                 {
                     Some(*handle)
                 }
                 _ => None,
-            }
-        });
+            });
         let command =
             crate::modules::annotate::data_link::DataLinkPlaceCommand::new(table, link_path);
         self.command_line

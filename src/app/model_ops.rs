@@ -225,7 +225,9 @@ fn subtract_bodies(
     Ok(result)
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["SECTIONCULL"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["SECTIONCULL"]
+});
 
 fn entity_with_boolean_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
     let document = crate::scene::convert::acis_export::solid_to_sat(body)?;
@@ -1812,7 +1814,11 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::t!("SLICE: created %{count} result object(s).", count = results.len()).as_ref(),
+            crate::t!(
+                "SLICE: created %{count} result object(s).",
+                count = results.len()
+            )
+            .as_ref(),
         );
         Some(results)
     }
@@ -1883,7 +1889,10 @@ impl super::OpenCADStudio {
 
         let keep_positive = if let Some(point) = keep_point {
             let tolerance = kernel::brep::operation_tolerance(
-                &handles.iter().map(|handle| &bodies[handle]).collect::<Vec<_>>(),
+                &handles
+                    .iter()
+                    .map(|handle| &bodies[handle])
+                    .collect::<Vec<_>>(),
             );
             let Some(distance) = tool.side(point.to_array()) else {
                 self.command_line

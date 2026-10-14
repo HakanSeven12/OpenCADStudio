@@ -49,7 +49,12 @@ pub fn stubbable(wire: &WireModel) -> bool {
 /// The XY box a prototype's wires cover, before any copy's offset.
 pub fn prototype_aabb(prototype: &[WireModel]) -> [f32; 4] {
     prototype.iter().fold(
-        [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY],
+        [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ],
         |acc, wire| {
             [
                 acc[0].min(wire.aabb[0]),

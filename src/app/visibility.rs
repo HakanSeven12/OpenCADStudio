@@ -191,9 +191,9 @@ impl OpenCADStudio {
         let direct = {
             let doc = &self.tabs[i].scene.document;
             matches!(doc.get_entity(insert_handle), Some(EntityType::Insert(ins))
-                if doc.block_records.get(&ins.block_name).is_some_and(|record| {
-                    crate::scene::block_visibility::parameter(doc, record.handle).is_some()
-                }))
+            if doc.block_records.get(&ins.block_name).is_some_and(|record| {
+                crate::scene::block_visibility::parameter(doc, record.handle).is_some()
+            }))
         };
         if direct {
             self.push_undo_snapshot(i, "Visibility State");

@@ -1088,9 +1088,9 @@ impl OpenCADStudio {
         // viewport, the picker drives that viewport entity's own
         // render mode; the model-layout tab style is untouched.
         if self.tabs[i].scene.set_active_viewport_render_mode(mode) {
-            self.tabs[i]
-                .scene
-                .set_active_visual_style_named(crate::modules::view::visual_style::style_name_for(mode));
+            self.tabs[i].scene.set_active_visual_style_named(
+                crate::modules::view::visual_style::style_name_for(mode),
+            );
             self.tabs[i].scene.bump_geometry_no_blocks();
             self.tabs[i].dirty = true;
             self.command_line
@@ -1099,9 +1099,9 @@ impl OpenCADStudio {
         }
         self.apply_render_mode(i, mode, label);
         // The viewport record carries the style the mode is saved as.
-        self.tabs[i]
-            .scene
-            .set_active_visual_style_named(crate::modules::view::visual_style::style_name_for(mode));
+        self.tabs[i].scene.set_active_visual_style_named(
+            crate::modules::view::visual_style::style_name_for(mode),
+        );
         self.command_line
             .push_output(crate::tf!("Visual style: {label}").as_ref());
         // The point cloud move gizmo follows the visual style.
@@ -3597,8 +3597,14 @@ impl OpenCADStudio {
         let aperture = crate::ui::overlay::pick_box_aperture_px(self.pick_box);
         let world = self.cursor_model_point(i, edit_cam, p, bounds);
         let scene = &self.tabs[i].scene;
-        let candidates = scene
-            .interaction_hover_candidates_near(wires, world, view_rot, eye, bounds, aperture * 2.0);
+        let candidates = scene.interaction_hover_candidates_near(
+            wires,
+            world,
+            view_rot,
+            eye,
+            bounds,
+            aperture * 2.0,
+        );
         scene::pick::hit_test::click_hit(
             p,
             &candidates,
@@ -5983,8 +5989,12 @@ properties={:.1}ms picked={}",
                     // Zoom about the fingers once the drawing area's place in
                     // the window is known; until then about the first finger.
                     if let Some(offset) = self.touch_offset {
-                        self.tabs[i].scene.selection.borrow_mut().input.last_move_pos =
-                            Some(centre - offset);
+                        self.tabs[i]
+                            .scene
+                            .selection
+                            .borrow_mut()
+                            .input
+                            .last_move_pos = Some(centre - offset);
                     }
                     tasks.push(self.zoom_view_at_cursor(pinch_zoom_steps(factor - 1.0)));
                 }
@@ -6241,7 +6251,12 @@ properties={:.1}ms picked={}",
         self.snap_view_region_as(region, glam::Mat4::IDENTITY, false)
     }
 
-    fn snap_view_region_as(&mut self, region: CubeRegion, r_ucs: glam::Mat4, cube: bool) -> Task<Message> {
+    fn snap_view_region_as(
+        &mut self,
+        region: CubeRegion,
+        r_ucs: glam::Mat4,
+        cube: bool,
+    ) -> Task<Message> {
         let i = self.active_tab;
         self.clear_navigation_hover(i);
         self.tabs[i].scene.remember_current_view();
@@ -6807,7 +6822,8 @@ properties={:.1}ms picked={}",
                 // LAYOUTCREATEVIEWPORT is off.
                 if crate::scene::layout_create_viewport() {
                     let name = new_name.clone();
-                    self.command_line.push_output(crate::tf!("Layout '{name}' created.").as_ref());
+                    self.command_line
+                        .push_output(crate::tf!("Layout '{name}' created.").as_ref());
                 } else {
                     self.command_line.push_output(
                         crate::tf!("Layout \"{new_name}\" created — use MVIEW to add a viewport")

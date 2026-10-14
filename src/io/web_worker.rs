@@ -212,11 +212,9 @@ pub(super) async fn serialize_document(encoded_request: Vec<u8>) -> Result<Vec<u
 async fn serialize_document_via_worker(encoded_request: &[u8]) -> Result<Vec<u8>, String> {
     let options = WorkerOptions::new();
     options.set_type(WorkerType::Module);
-    let worker =
-        Worker::new_with_options(WORKER_URL, &options).map_err(|error| js_error(error))?;
+    let worker = Worker::new_with_options(WORKER_URL, &options).map_err(|error| js_error(error))?;
 
-    let (sender, receiver) =
-        iced::futures::channel::oneshot::channel::<Result<Vec<u8>, String>>();
+    let (sender, receiver) = iced::futures::channel::oneshot::channel::<Result<Vec<u8>, String>>();
     let sender = Rc::new(RefCell::new(Some(sender)));
     let message_sender = sender.clone();
     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {

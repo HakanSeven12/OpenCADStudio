@@ -34,7 +34,10 @@ fn associative_option(on: bool) -> crate::command::CmdOption {
 
 /// Typed `AS` / `ASSOCIATIVE` flips the Associative option.
 fn is_associative_keyword(text: &str) -> bool {
-    matches!(text.trim().to_ascii_uppercase().as_str(), "AS" | "ASSOCIATIVE" | "_AS")
+    matches!(
+        text.trim().to_ascii_uppercase().as_str(),
+        "AS" | "ASSOCIATIVE" | "_AS"
+    )
 }
 
 /// Associative arrays are built in world axes; a rotated working plane

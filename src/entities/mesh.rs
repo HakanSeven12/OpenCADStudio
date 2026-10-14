@@ -1159,7 +1159,9 @@ pub(crate) fn clipped_mesh(
             if (da > 0.0 && db < 0.0) || (da < 0.0 && db > 0.0) {
                 let t = da / (da - db);
                 let (pa, pb) = (vertices[a], vertices[b]);
-                loop_points.push(std::array::from_fn(|axis| pa[axis] + (pb[axis] - pa[axis]) * t));
+                loop_points.push(std::array::from_fn(|axis| {
+                    pa[axis] + (pb[axis] - pa[axis]) * t
+                }));
             }
         }
         if loop_points.len() < 3 {

@@ -1794,14 +1794,14 @@ fn qselect_content<'a>(
             iced::widget::pick_list(Some(type_sel), type_options, |value| {
                 qselect_type_label(value)
             })
-                .on_select(|s: String| {
-                    if s == QSELECT_ANY_TYPE {
-                        Message::QSelectSetType(None)
-                    } else {
-                        Message::QSelectSetType(Some(s))
-                    }
-                })
-                .width(field_width),
+            .on_select(|s: String| {
+                if s == QSELECT_ANY_TYPE {
+                    Message::QSelectSetType(None)
+                } else {
+                    Message::QSelectSetType(Some(s))
+                }
+            })
+            .width(field_width),
         ]
         .align_y(iced::Alignment::Center)
         .spacing(8)

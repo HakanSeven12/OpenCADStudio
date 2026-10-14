@@ -206,7 +206,10 @@ impl AdjustCommand {
     fn apply(&self, prop: Prop, value: u8) -> CmdResult {
         if let Subject::Underlay { .. } = self.subject {
             if let Ok(mut last) = LAST_UNDERLAY.lock() {
-                last.0 = UNDERLAY_OPTIONS.iter().position(|p| *p == prop).unwrap_or(0);
+                last.0 = UNDERLAY_OPTIONS
+                    .iter()
+                    .position(|p| *p == prop)
+                    .unwrap_or(0);
                 match prop {
                     Prop::Fade => last.1 = value,
                     Prop::Contrast => last.2 = value,
@@ -341,8 +344,12 @@ impl CadCommand for AdjustCommand {
                         t!("Value must be an integer between 0 and 100.").into_owned(),
                     )),
                     (None, Subject::Underlay { .. }) => Some(CmdResult::ReportError(
-                        crate::tf!("Requires an integer between {min} and {max}.", min = 0, max = 100)
-                            .into_owned(),
+                        crate::tf!(
+                            "Requires an integer between {min} and {max}.",
+                            min = 0,
+                            max = 100
+                        )
+                        .into_owned(),
                     )),
                 }
             }
@@ -359,5 +366,11 @@ impl CadCommand for AdjustCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["IMAGEADJUST", "-IMAGEADJUST", "PDFADJUST", "DWFADJUST", "DGNADJUST"]
+    names: &[
+        "IMAGEADJUST",
+        "-IMAGEADJUST",
+        "PDFADJUST",
+        "DWFADJUST",
+        "DGNADJUST"
+    ]
 });

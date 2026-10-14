@@ -1171,7 +1171,9 @@ impl OpenCADStudio {
                     _ => None,
                 };
                 rgb.map(|rgb| {
-                    Message::PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg::BgColor(slot, rgb))
+                    Message::PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg::BgColor(
+                        slot, rgb,
+                    ))
                 })
             }
             Some(crate::app::ColorPickTarget::GraphicAttributesLine) => Some(

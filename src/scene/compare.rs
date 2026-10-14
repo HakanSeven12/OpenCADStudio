@@ -140,7 +140,11 @@ pub fn compare(current: &Scene, other: CadDocument) -> Comparison {
         b.1.y
             .partial_cmp(&a.1.y)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.0.x.partial_cmp(&b.0.x).unwrap_or(std::cmp::Ordering::Equal))
+            .then(
+                a.0.x
+                    .partial_cmp(&b.0.x)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
     });
     Comparison {
         added,

@@ -159,8 +159,6 @@ pub async fn snapshot(name: &str, bytes: &[u8], thumbnail: Option<&[u8]>) -> Res
     Ok(())
 }
 
-
-
 #[cfg(target_arch = "wasm32")]
 pub async fn read(name: &str) -> Result<Vec<u8>, String> {
     let directory = autosave_directory(false).await?;
@@ -250,9 +248,7 @@ fn thumbnail_key(name: &str) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn read_index(
-    directory: &web_sys::FileSystemDirectoryHandle,
-) -> Result<Vec<String>, String> {
+async fn read_index(directory: &web_sys::FileSystemDirectoryHandle) -> Result<Vec<String>, String> {
     let bytes = match super::web_recent::read_entry(directory, INDEX_KEY).await {
         Ok(bytes) => bytes,
         // A missing index is a fresh store.
@@ -317,7 +313,10 @@ mod tests {
         // empty-stem fallback reinstated the unsanitized input, breaking
         // idempotence across crash cycles.
         let once = recovered_name("a.b/c");
-        assert_eq!(once, "c (recovered).dxf", "final path component, no separator survives");
+        assert_eq!(
+            once, "c (recovered).dxf",
+            "final path component, no separator survives"
+        );
         assert_eq!(recovered_name(&once), once, "idempotent");
         let dotfile = recovered_name("/.dwg");
         assert_eq!(dotfile, ".dwg (recovered).dwg");
@@ -355,10 +354,7 @@ mod tests {
             "plan (recovered).dwg"
         );
         // Extensionless stacked names de-stack too, then gain ".dxf".
-        assert_eq!(
-            recovered_name("plan (recovered)"),
-            "plan (recovered).dxf"
-        );
+        assert_eq!(recovered_name("plan (recovered)"), "plan (recovered).dxf");
         // A marker embedded in the middle (not a suffix) is left alone.
         assert_eq!(
             recovered_name("(recovered) plan.dwg"),
@@ -407,7 +403,9 @@ mod tests {
         ];
         let plan = restore_all_plan(&entries);
         assert_eq!(
-            plan.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            plan.iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
             [
                 "new (recovered).dwg",
                 "mid (recovered).dwg",

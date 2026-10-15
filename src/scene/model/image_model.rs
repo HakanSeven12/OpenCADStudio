@@ -293,6 +293,7 @@ impl ImageModel {
         def: &codec::entities::UnderlayDefinition,
         background: [f32; 4],
         world_per_pixel: Option<f64>,
+        thin_pdf_lines: bool,
     ) -> Option<Self> {
         use super::pdf_raster;
         use codec::entities::{UnderlayDisplayFlags, UnderlayType};
@@ -317,18 +318,13 @@ impl ImageModel {
                 // Hidden PDF layers come from the underlay's layer overrides.
                 let source = super::pdf_layers::underlay_source(u, &def.file_path);
                 let inches = (rect[2] - rect[0]).max(rect[3] - rect[1]);
-                let raster = match screen_side {
-                    Some(side)
-                        if inches > 0.0 && side / inches < pdf_raster::DISPLAY_DPI as f64 =>
-                    {
-                        pdf_raster::rasterize_page_display_at(
-                            &source,
-                            page,
-                            (side / inches).max(8.0) as f32,
-                        )?
-                    }
-                    _ => pdf_raster::rasterize_page_display(&source, page)?,
+                let display_dpi = match screen_side {
+                    Some(side) if inches > 0.0 => (side / inches).max(8.0) as f32,
+                    _ => pdf_raster::DISPLAY_DPI,
                 };
+                let raster = pdf_raster::rasterize_page_display_mode(
+                    &source, page, display_dpi, thin_pdf_lines,
+                )?;
                 (source, raster)
             }
             // DWF sheets and DGN models are drawn as vector wires

@@ -26,7 +26,7 @@ const RASTER_DPI: f32 = 150.0;
 const MAX_PRINT_RASTER_PIXELS: f64 = 268_435_456.0;
 
 /// Source path, page, DPI bits and whether the page background is transparent.
-type PageKey = (String, String, u32, bool);
+type PageKey = (String, String, u32, bool, bool);
 
 fn page_cache() -> &'static Mutex<HashMap<PageKey, Option<Arc<PdfPage>>>> {
     static CACHE: OnceLock<Mutex<HashMap<PageKey, Option<Arc<PdfPage>>>>> = OnceLock::new();
@@ -60,7 +60,7 @@ pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
     page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .retain(|(cached_path, _, _, _), _| cached_path != path);
+        .retain(|(cached_path, _, _, _, _), _| cached_path != path);
     adjusted_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -74,6 +74,31 @@ pub(crate) fn register_derived_source(key: &str, bytes: Arc<Vec<u8>>) {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .insert(key.to_string(), bytes);
+}
+
+/// A display-only copy of a vector PDF with its stroked paths set to PDF
+/// hairlines (zero-width strokes, rendered at device-pixel width). The source
+/// bytes are never modified. If the parser cannot preserve a document, the
+/// caller keeps its existing rasterisation path.
+fn hairline_pdf_source(bytes: &[u8]) -> Option<Arc<Vec<u8>>> {
+    let mut warnings = Vec::new();
+    let mut doc = printpdf::PdfDocument::parse(
+        bytes,
+        &printpdf::PdfParseOptions::default(),
+        &mut warnings,
+    ).ok()?;
+    for page in &mut doc.pages {
+        // PDF's initial linewidth is 1 user-space unit. Override it even
+        // when a page does not contain any explicit "w" operators.
+        page.ops.insert(0, printpdf::Op::SetOutlineThickness { pt: printpdf::Pt(0.0) });
+        for op in &mut page.ops {
+            if let printpdf::Op::SetOutlineThickness { pt } = op {
+                *pt = printpdf::Pt(0.0);
+            }
+        }
+    }
+    let mut warnings = Vec::new();
+    Some(Arc::new(doc.save(&printpdf::PdfSaveOptions::default(), &mut warnings)))
 }
 
 /// Rasterise a 1-based PDF page, memoised by source path and page name.
@@ -91,24 +116,31 @@ pub fn rasterize_page_at_dpi(path: &str, page: &str, dpi: f32) -> Option<Arc<Pdf
 /// outside the drawn content) and straight, not premultiplied, alpha — the
 /// page is drawn over the drawing background like its vector content.
 pub fn rasterize_page_display(path: &str, page: &str) -> Option<Arc<PdfPage>> {
-    rasterize_cached(path, page, RASTER_DPI, true)
+    rasterize_cached(path, page, RASTER_DPI, true, false)
 }
 
 /// The display raster at a lower DPI for a page shown small on screen
 /// (never above the on-screen 150 DPI).
 pub fn rasterize_page_display_at(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
-    rasterize_cached(path, page, dpi.clamp(1.0, RASTER_DPI), true)
+    rasterize_cached(path, page, dpi.clamp(1.0, RASTER_DPI), true, false)
+}
+
+/// Render the PDF as device hairlines for display only. Export and printing
+/// continue through the normal rendering path.
+pub fn rasterize_page_display_mode(path: &str, page: &str, dpi: f32, thin: bool) -> Option<Arc<PdfPage>> {
+    rasterize_cached(path, page, dpi.clamp(1.0, RASTER_DPI), true, thin)
 }
 
 /// The DPI of the full-size display raster.
 pub const DISPLAY_DPI: f32 = RASTER_DPI;
 
-fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Option<Arc<PdfPage>> {
+fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool, thin: bool) -> Option<Arc<PdfPage>> {
     let key = (
         path.to_string(),
         page.to_string(),
         dpi.to_bits(),
         transparent,
+        thin,
     );
     if let Some(hit) = page_cache()
         .lock()
@@ -119,7 +151,7 @@ fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Opti
         return hit;
     }
 
-    let built = rasterize_uncached(path, page, dpi, transparent);
+    let built = rasterize_uncached(path, page, dpi, transparent, thin);
     page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -131,12 +163,13 @@ fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Opti
 /// print job, whose 300 DPI page would otherwise stay cached for the whole
 /// session (tens of megabytes per sheet).
 pub fn rasterize_page_at_dpi_uncached(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
-    rasterize_uncached(path, page, dpi, false)
+    rasterize_uncached(path, page, dpi, false, false)
 }
 
-fn rasterize_uncached(path: &str, page: &str, dpi: f32, transparent: bool) -> Option<Arc<PdfPage>> {
+fn rasterize_uncached(path: &str, page: &str, dpi: f32, transparent: bool, thin: bool) -> Option<Arc<PdfPage>> {
     let bytes = source_bytes(path)?;
-    let pdf = Pdf::new(bytes).ok()?;
+    let render_bytes = if thin { hairline_pdf_source(&bytes).unwrap_or_else(|| bytes.clone()) } else { bytes };
+    let pdf = Pdf::new(render_bytes).ok()?;
     let page_no = page.trim().parse::<usize>().unwrap_or(1).max(1);
     raster_pdf_page(&pdf, page_no - 1, dpi, transparent)
 }

@@ -4952,7 +4952,10 @@ impl OpenCADStudio {
                 if i < self.tabs.len() {
                     let h = &mut self.tabs[i].scene.document.header;
                     h.lineweight_display = !h.lineweight_display;
-                    // No retessellate — the wire shader reads the flag from uniforms.
+                    // Native CAD wires read the flag from shader uniforms.
+                    // PDF underlays are image-backed: rebuild their display
+                    // raster models so they pick the right lineweight mode.
+                    self.tabs[i].scene.populate_images_from_document();
                     self.tabs[i].dirty = true;
                 }
                 Task::none()

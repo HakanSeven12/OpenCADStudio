@@ -535,6 +535,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn thin_mode_overrides_explicit_pdf_stroke_weights_without_changing_source() {
+        use printpdf::{Op, Pt, PdfParseOptions};
+
+        let mut document = PdfDocument::new("hairline");
+        document.pages.push(OutputPage::new(Mm(25.4), Mm(25.4), vec![
+            Op::SetOutlineThickness { pt: Pt(8.0) },
+        ]));
+        let original = document.save(&PdfSaveOptions::default(), &mut Vec::new());
+        let modified = hairline_pdf_source(&original).expect("parseable PDF");
+        assert_ne!(modified.as_ref(), &original);
+        let mut warnings = Vec::new();
+        let parsed = PdfDocument::parse(&modified, &PdfParseOptions::default(), &mut warnings)
+            .expect("hairline copy should parse");
+        assert_eq!(parsed.pages.len(), 1);
+        assert!(parsed.pages[0].ops.iter().any(|op| matches!(
+            op, Op::SetOutlineThickness { pt } if pt.0 == 0.0
+        )));
+        assert!(!parsed.pages[0].ops.iter().any(|op| matches!(
+            op, Op::SetOutlineThickness { pt } if pt.0 > 0.0
+        )));
+        // Original PDF remains untouched, for printing and export.
+        let mut warnings = Vec::new();
+        let original_doc = PdfDocument::parse(&original, &PdfParseOptions::default(), &mut warnings)
+            .expect("source should parse");
+        assert!(original_doc.pages[0].ops.iter().any(|op| matches!(
+            op, Op::SetOutlineThickness { pt } if pt.0 == 8.0
+        )));
+    }
+
+    #[test]
+    fn thin_and_normal_display_rasters_have_separate_cache_entries() {
+        use printpdf::{Op, Pt};
+        let mut document = PdfDocument::new("hairline cache");
+        document.pages.push(OutputPage::new(Mm(25.4), Mm(25.4), vec![
+            Op::SetOutlineThickness { pt: Pt(8.0) },
+        ]));
+        let path = "memory://thin-line-cache-test.pdf";
+        register_source(path, Arc::new(document.save(&PdfSaveOptions::default(), &mut Vec::new())));
+        let normal = rasterize_page_display_mode(path, "1", 75.0, false).unwrap();
+        let thin = rasterize_page_display_mode(path, "1", 75.0, true).unwrap();
+        assert!(!Arc::ptr_eq(&normal, &thin), "different modes must not share raster");
+        let thin_again = rasterize_page_display_mode(path, "1", 75.0, true).unwrap();
+        assert!(Arc::ptr_eq(&thin, &thin_again), "same mode should reuse cached raster");
+    }
+
+    #[test]
     fn registered_pdf_bytes_render_without_a_filesystem_path() {
         let mut document = PdfDocument::new("PDF underlay test");
         document

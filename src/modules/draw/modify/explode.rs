@@ -11,6 +11,8 @@
 //     Insert      → constituent entities (via opencadcodec explode_from_document)
 //     MLine       → Lines (spine + offset lines per miter direction)
 //     Dimension   → Lines (extension + dimension + arrows) + Text
+//     MText       → Text lines
+//     Region      → Lines, Arcs, Circles, Ellipses, Splines (from ACIS B-Rep loops or wires)
 //
 //   Unsupported entity types are skipped silently.
 
@@ -106,6 +108,7 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
         EntityType::MLine(ml) => explode_mline(ml),
         EntityType::Dimension(dim) => explode_dimension(dim, document),
         EntityType::MText(t) => crate::entities::mtext::explode_mtext(t, document),
+        EntityType::Region(region) => explode_region(region),
         _ => vec![],
     }
 }
@@ -425,6 +428,446 @@ fn explode_mline(ml: &MLine) -> Vec<EntityType> {
     }
 
     result
+}
+
+// ── Region explode ─────────────────────────────────────────────────────────
+
+fn region_piece_common(region: &codec::entities::Region) -> EntityCommon {
+    let mut common = region.common.clone();
+    common.handle = Handle::NULL;
+    common.owner_handle = Handle::NULL;
+    common.xdictionary_handle = None;
+    common.reactors.clear();
+    common
+}
+
+fn explode_region(region: &codec::entities::Region) -> Vec<EntityType> {
+    let common = region_piece_common(region);
+    let mut out = Vec::new();
+
+    if region.acis_data.has_data() {
+        let sat = region.parse_sat().or_else(|| {
+            (region.acis_data.is_binary && !region.acis_data.sab_data.is_empty())
+                .then(|| codec::entities::acis::SabReader::read(&region.acis_data.sab_data).ok())
+                .flatten()
+        });
+        if let Some(sat) = sat {
+            let (bodies, _loss) = kernel::acis::lift(&sat);
+            for body in &bodies {
+                for face in body.face_keys() {
+                    if let Some(profile) = kernel::brep::planar_face_profile(body, face) {
+                        append_region_loops(&profile.plane, &profile.loops, &common, &mut out);
+                    }
+                }
+            }
+        }
+        if out.is_empty() {
+            if let Some((plane, loops, _)) = crate::scene::model::presspull_model::profile_geometry(
+                &EntityType::Region(region.clone()),
+            ) {
+                append_region_loops(&plane, &loops, &common, &mut out);
+            }
+        }
+        return out;
+    }
+
+    // Fallback for synthetic/legacy wire-only regions without ACIS payload.
+    for wire in &region.wires {
+        for pair in wire.points.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            if (b - a).length() <= 1e-12 {
+                continue;
+            }
+            out.push(EntityType::Line(LineEnt {
+                common: common.clone(),
+                start: a,
+                end: b,
+                ..LineEnt::new()
+            }));
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone)]
+struct CircularPiece {
+    centre: [f64; 2],
+    radius: f64,
+    start_pt: [f64; 2],
+    mid_pt: [f64; 2],
+    end_pt: [f64; 2],
+    sweep: f64,
+}
+
+fn as_circular_piece(curve: &kernel::geom2d::Curve) -> Option<CircularPiece> {
+    use kernel::geom2d::Curve;
+    match curve {
+        Curve::Circle(circle) if circle.radius > 1e-12 => {
+            let centre = circle.centre;
+            let radius = circle.radius;
+            let start_pt = [centre[0] + radius, centre[1]];
+            let mid_pt = [centre[0] - radius, centre[1]];
+            let end_pt = start_pt;
+            Some(CircularPiece {
+                centre,
+                radius,
+                start_pt,
+                mid_pt,
+                end_pt,
+                sweep: std::f64::consts::TAU,
+            })
+        }
+        Curve::Arc(arc) if arc.radius > 1e-12 => {
+            let centre = arc.centre;
+            let radius = arc.radius;
+            let pt_at = |ang: f64| [centre[0] + radius * ang.cos(), centre[1] + radius * ang.sin()];
+            let start_pt = pt_at(arc.start_angle);
+            let end_pt = pt_at(arc.end_angle);
+            let diff = (arc.end_angle - arc.start_angle).abs();
+            let sweep = if diff <= 1e-12 || (diff - std::f64::consts::TAU).abs() <= 1e-6 {
+                std::f64::consts::TAU
+            } else {
+                diff
+            };
+            let mid_pt = if (sweep - std::f64::consts::TAU).abs() <= 1e-6 {
+                pt_at(arc.start_angle + std::f64::consts::PI)
+            } else {
+                pt_at((arc.start_angle + arc.end_angle) * 0.5)
+            };
+            Some(CircularPiece {
+                centre,
+                radius,
+                start_pt,
+                mid_pt,
+                end_pt,
+                sweep,
+            })
+        }
+        Curve::Ellipse(arc) => {
+            let maj = arc.ellipse.major_radius;
+            let min = arc.ellipse.minor_radius;
+            if maj > 1e-12 && (min - maj).abs() <= 1e-6 * (1.0 + maj) {
+                let centre = arc.ellipse.centre;
+                let radius = (maj + min) * 0.5;
+                let start_pt = arc.ellipse.point_at(arc.start_parameter);
+                let end_pt = arc.ellipse.point_at(arc.end_parameter);
+                let diff = (arc.end_parameter - arc.start_parameter).abs();
+                let sweep = if (arc.sweep() - std::f64::consts::TAU).abs() <= 1e-6
+                    || diff <= 1e-12
+                    || (diff - std::f64::consts::TAU).abs() <= 1e-6
+                {
+                    std::f64::consts::TAU
+                } else {
+                    diff
+                };
+                let mid_pt = if (sweep - std::f64::consts::TAU).abs() <= 1e-6 {
+                    arc.ellipse.point_at(arc.start_parameter + std::f64::consts::PI)
+                } else {
+                    arc.ellipse.point_at((arc.start_parameter + arc.end_parameter) * 0.5)
+                };
+                Some(CircularPiece {
+                    centre,
+                    radius,
+                    start_pt,
+                    mid_pt,
+                    end_pt,
+                    sweep,
+                })
+            } else {
+                None
+            }
+        }
+        Curve::Nurbs(nurbs) => {
+            let p0 = nurbs.point_at(0.0);
+            let p1 = nurbs.point_at(0.5);
+            let p2 = nurbs.point_at(1.0);
+            let d = 2.0 * (p0[0] * (p1[1] - p2[1]) + p1[0] * (p2[1] - p0[1]) + p2[0] * (p0[1] - p1[1]));
+            if d.abs() > 1e-12 {
+                let p0_sq = p0[0] * p0[0] + p0[1] * p0[1];
+                let p1_sq = p1[0] * p1[0] + p1[1] * p1[1];
+                let p2_sq = p2[0] * p2[0] + p2[1] * p2[1];
+                let cx = (p0_sq * (p1[1] - p2[1]) + p1_sq * (p2[1] - p0[1]) + p2_sq * (p0[1] - p1[1])) / d;
+                let cy = (p0_sq * (p2[0] - p1[0]) + p1_sq * (p0[0] - p2[0]) + p2_sq * (p1[0] - p0[0])) / d;
+                let r = (p0[0] - cx).hypot(p0[1] - cy);
+                if r > 1e-12 {
+                    let tol = 1e-5 * (1.0 + r);
+                    let mut is_circle = true;
+                    for step in 1..16 {
+                        let t = step as f64 / 16.0;
+                        let pt = nurbs.point_at(t);
+                        if ((pt[0] - cx).hypot(pt[1] - cy) - r).abs() > tol {
+                            is_circle = false;
+                            break;
+                        }
+                    }
+                    if is_circle {
+                        let th0 = (p0[1] - cy).atan2(p0[0] - cx);
+                        let th1 = (p1[1] - cy).atan2(p1[0] - cx);
+                        let th2 = (p2[1] - cy).atan2(p2[0] - cx);
+                        let ccw_span = |from: f64, to: f64| {
+                            let mut s = to - from;
+                            while s < 0.0 {
+                                s += std::f64::consts::TAU;
+                            }
+                            while s >= std::f64::consts::TAU {
+                                s -= std::f64::consts::TAU;
+                            }
+                            s
+                        };
+                        let sweep = if ccw_span(th0, th1) <= ccw_span(th0, th2) {
+                            ccw_span(th0, th2)
+                        } else {
+                            ccw_span(th2, th0)
+                        };
+                        let sweep = if sweep <= 1e-12 {
+                            std::f64::consts::TAU
+                        } else {
+                            sweep
+                        };
+                        return Some(CircularPiece {
+                            centre: [cx, cy],
+                            radius: r,
+                            start_pt: p0,
+                            mid_pt: p1,
+                            end_pt: p2,
+                            sweep,
+                        });
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn append_region_loops(
+    plane: &kernel::space::Plane,
+    loops: &[Vec<kernel::geom2d::Curve>],
+    common: &EntityCommon,
+    out: &mut Vec<EntityType>,
+) {
+    use kernel::geom2d::Curve;
+    let Some(normal_arr) = plane.normal() else {
+        return;
+    };
+    let normal = Vector3::new(normal_arr[0], normal_arr[1], normal_arr[2]);
+    let normal_tuple = (normal.x, normal.y, normal.z);
+    let (ax, ay) = crate::scene::view::transform::ocs_axes(normal_tuple);
+    let ocs_x = DVec3::new(ax.0, ax.1, ax.2);
+    let ocs_y = DVec3::new(ay.0, ay.1, ay.2);
+
+    let make_circle = |centre: [f64; 2], radius: f64| -> EntityType {
+        let wcs_c = plane.point_at(centre);
+        let (ox, oy, oz) = crate::scene::view::transform::wcs_point_to_ocs(
+            (wcs_c[0], wcs_c[1], wcs_c[2]),
+            normal_tuple,
+        );
+        let mut circle = CircleEnt::new();
+        circle.common = common.clone();
+        circle.center = Vector3::new(ox, oy, oz);
+        circle.radius = radius;
+        circle.normal = normal;
+        EntityType::Circle(circle)
+    };
+
+    let make_ellipse = |ellipse: &kernel::geom2d::Ellipse, start_param: f64, end_param: f64| -> Option<EntityType> {
+        if ellipse.major_radius <= 1e-12 || ellipse.minor_radius <= 1e-12 {
+            return None;
+        }
+        let wcs_c = plane.point_at(ellipse.centre);
+        let tip = plane.point_at([
+            ellipse.centre[0] + ellipse.major_axis[0] * ellipse.major_radius,
+            ellipse.centre[1] + ellipse.major_axis[1] * ellipse.major_radius,
+        ]);
+        let mut ent = codec::entities::Ellipse::new();
+        ent.common = common.clone();
+        ent.center = Vector3::new(wcs_c[0], wcs_c[1], wcs_c[2]);
+        ent.major_axis = Vector3::new(tip[0] - wcs_c[0], tip[1] - wcs_c[1], tip[2] - wcs_c[2]);
+        ent.minor_axis_ratio = ellipse.minor_radius / ellipse.major_radius;
+        ent.start_parameter = start_param;
+        ent.end_parameter = end_param;
+        ent.normal = normal;
+        Some(EntityType::Ellipse(ent))
+    };
+
+    let make_arc_from_piece = |piece: &CircularPiece| -> EntityType {
+        let wcs_c = DVec3::from_array(plane.point_at(piece.centre));
+        let (ox, oy, oz) = crate::scene::view::transform::wcs_point_to_ocs(
+            (wcs_c.x, wcs_c.y, wcs_c.z),
+            normal_tuple,
+        );
+        let wcs_start = DVec3::from_array(plane.point_at(piece.start_pt));
+        let wcs_mid = DVec3::from_array(plane.point_at(piece.mid_pt));
+        let wcs_end = DVec3::from_array(plane.point_at(piece.end_pt));
+
+        let start_dir = wcs_start - wcs_c;
+        let mid_dir = wcs_mid - wcs_c;
+        let end_dir = wcs_end - wcs_c;
+
+        let ang_start = norm_angle(start_dir.dot(ocs_y).atan2(start_dir.dot(ocs_x)));
+        let ang_mid = norm_angle(mid_dir.dot(ocs_y).atan2(mid_dir.dot(ocs_x)));
+        let ang_end = norm_angle(end_dir.dot(ocs_y).atan2(end_dir.dot(ocs_x)));
+
+        let ccw_span = |from: f64, to: f64| {
+            let mut d = to - from;
+            while d < 0.0 {
+                d += std::f64::consts::TAU;
+            }
+            while d >= std::f64::consts::TAU {
+                d -= std::f64::consts::TAU;
+            }
+            d
+        };
+
+        let total_ccw = ccw_span(ang_start, ang_end);
+        let mid_ccw = ccw_span(ang_start, ang_mid);
+
+        let (start_angle, end_angle) = if mid_ccw <= total_ccw {
+            (ang_start, ang_end)
+        } else {
+            (ang_end, ang_start)
+        };
+
+        let mut arc = ArcEnt::new();
+        arc.common = common.clone();
+        arc.center = Vector3::new(ox, oy, oz);
+        arc.radius = piece.radius;
+        arc.start_angle = start_angle;
+        arc.end_angle = end_angle;
+        arc.normal = normal;
+        EntityType::Arc(arc)
+    };
+
+    for ring in loops {
+        // Collapse a closed loop of circular arcs/curves into one Circle.
+        let circular_pieces: Vec<CircularPiece> = ring.iter().filter_map(as_circular_piece).collect();
+        if circular_pieces.len() == ring.len() && !circular_pieces.is_empty() {
+            let first = &circular_pieces[0];
+            let tol = 1e-5 * (1.0 + first.radius);
+            let same_circle = circular_pieces.iter().all(|p| {
+                (p.centre[0] - first.centre[0]).hypot(p.centre[1] - first.centre[1]) <= tol
+                    && (p.radius - first.radius).abs() <= tol
+            });
+            let total_sweep: f64 = circular_pieces.iter().map(|p| p.sweep).sum();
+            if same_circle && (total_sweep - std::f64::consts::TAU).abs() <= 1e-4 {
+                out.push(make_circle(first.centre, first.radius));
+                continue;
+            }
+        }
+
+        // Collapse a closed loop of coaxial equal-axes elliptical arcs into one full Ellipse.
+        if let [Curve::Ellipse(first), rest @ ..] = ring.as_slice() {
+            let tol = 1e-6 * (1.0 + first.ellipse.major_radius);
+            let same_ellipse = rest.iter().all(|piece| {
+                matches!(
+                    piece,
+                    Curve::Ellipse(arc)
+                        if (arc.ellipse.centre[0] - first.ellipse.centre[0])
+                            .hypot(arc.ellipse.centre[1] - first.ellipse.centre[1])
+                            <= tol
+                            && (arc.ellipse.major_radius - first.ellipse.major_radius).abs() <= tol
+                            && (arc.ellipse.minor_radius - first.ellipse.minor_radius).abs() <= tol
+                            && (arc.ellipse.major_axis[0] * first.ellipse.major_axis[0]
+                                + arc.ellipse.major_axis[1] * first.ellipse.major_axis[1]
+                                - 1.0)
+                                .abs()
+                                <= 1e-6
+                )
+            });
+            let total_sweep: f64 = ring
+                .iter()
+                .map(|piece| match piece {
+                    Curve::Ellipse(arc) => {
+                        let diff = (arc.end_parameter - arc.start_parameter).abs();
+                        if (arc.sweep() - std::f64::consts::TAU).abs() <= 1e-6
+                            || diff <= 1e-12
+                            || (diff - std::f64::consts::TAU).abs() <= 1e-6
+                        {
+                            std::f64::consts::TAU
+                        } else {
+                            diff
+                        }
+                    }
+                    _ => 0.0,
+                })
+                .sum();
+            if same_ellipse && (total_sweep - std::f64::consts::TAU).abs() <= 1e-5 {
+                if let Some(ent) = make_ellipse(&first.ellipse, 0.0, std::f64::consts::TAU) {
+                    out.push(ent);
+                    continue;
+                }
+            }
+        }
+
+        for piece in ring {
+            if let Some(circ) = as_circular_piece(piece) {
+                if (circ.sweep - std::f64::consts::TAU).abs() <= 1e-6 {
+                    out.push(make_circle(circ.centre, circ.radius));
+                } else {
+                    out.push(make_arc_from_piece(&circ));
+                }
+                continue;
+            }
+            match piece {
+                Curve::Line(line) => {
+                    let start = plane.point_at(line.start);
+                    let end = plane.point_at(line.end);
+                    let s = Vector3::new(start[0], start[1], start[2]);
+                    let e = Vector3::new(end[0], end[1], end[2]);
+                    if (e - s).length() <= 1e-12 {
+                        continue;
+                    }
+                    out.push(EntityType::Line(LineEnt {
+                        common: common.clone(),
+                        start: s,
+                        end: e,
+                        normal,
+                        ..LineEnt::new()
+                    }));
+                }
+                Curve::Ellipse(arc) => {
+                    let (start_param, end_param) =
+                        if (arc.sweep() - std::f64::consts::TAU).abs() <= 1e-6 {
+                            (0.0, std::f64::consts::TAU)
+                        } else if arc.end_parameter > arc.start_parameter {
+                            (arc.start_parameter, arc.end_parameter)
+                        } else {
+                            (
+                                arc.start_parameter,
+                                arc.end_parameter + std::f64::consts::TAU,
+                            )
+                        };
+                    if let Some(ent) = make_ellipse(&arc.ellipse, start_param, end_param) {
+                        out.push(ent);
+                    }
+                }
+                Curve::Nurbs(nurbs) => {
+                    let mut spline = codec::entities::Spline::new();
+                    spline.common = common.clone();
+                    spline.degree = nurbs.degree() as i32;
+                    spline.knots = nurbs.knots().to_vec();
+                    spline.control_points = nurbs
+                        .control_points()
+                        .iter()
+                        .map(|&uv| {
+                            let p = plane.point_at(uv);
+                            Vector3::new(p[0], p[1], p[2])
+                        })
+                        .collect();
+                    if nurbs.is_rational() {
+                        spline.weights = nurbs.weights().to_vec();
+                        spline.flags.rational = true;
+                    }
+                    spline.flags.planar = true;
+                    spline.flags.closed = nurbs.is_closed();
+                    spline.normal = normal;
+                    out.push(EntityType::Spline(spline));
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 // ── Dimension explode ──────────────────────────────────────────────────────

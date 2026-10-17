@@ -467,3 +467,405 @@ fn apply_explode_replacements_matches_legacy_loop() {
     )];
     assert_eq!(explode_batch(&items, &scene_batched.document), vec![vec![]]);
 }
+
+#[test]
+fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
+    use codec::entities::acis::{SabWriter, SatDocument};
+    use codec::entities::{AcisData, Region};
+    use kernel::brep;
+    use kernel::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
+    use kernel::space::Plane;
+
+    let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let outer = vec![
+        KCurve::Line(KLine {
+            start: [0.0, 0.0],
+            end: [20.0, 0.0],
+        }),
+        KCurve::Line(KLine {
+            start: [20.0, 0.0],
+            end: [20.0, 10.0],
+        }),
+        KCurve::Line(KLine {
+            start: [20.0, 10.0],
+            end: [0.0, 10.0],
+        }),
+        KCurve::Line(KLine {
+            start: [0.0, 10.0],
+            end: [0.0, 0.0],
+        }),
+    ];
+    let hole: Vec<KCurve> = (0..4)
+        .map(|q| {
+            let start = std::f64::consts::FRAC_PI_2 * q as f64;
+            KCurve::Arc(KArc {
+                centre: [10.0, 5.0],
+                radius: 2.0,
+                start_angle: start,
+                end_angle: start + std::f64::consts::FRAC_PI_2,
+            })
+        })
+        .collect();
+
+    let body = brep::planar_region(plane, &[outer, hole]).expect("planar region with hole");
+    let mut sat = SatDocument::new();
+    kernel::acis::append(&body, &mut sat).expect("sat append");
+    let sat_text = sat.to_sat_string();
+    let parsed_sat = SatDocument::parse(&sat_text).expect("sat parse");
+    let sab_bytes = SabWriter::write(&parsed_sat);
+
+    let doc = CadDocument::new();
+
+    for (label, acis_data) in [
+        ("SAT", AcisData::from_sat(&sat_text)),
+        (
+            "SAB",
+            AcisData {
+                is_binary: true,
+                sab_data: sab_bytes,
+                ..AcisData::default()
+            },
+        ),
+    ] {
+        let mut region = Region::new();
+        region.acis_data = acis_data;
+        region.common.layer = "REGIONS".to_string();
+        region.common.color = codec::types::Color::from_index(3);
+        region.common.linetype = "DASHED".to_string();
+        region.common.xdictionary_handle = Some(Handle::new(999));
+
+        let pieces = explode_entity(&EntityType::Region(region), &doc);
+        let lines: Vec<_> = pieces
+            .iter()
+            .filter_map(|p| match p {
+                EntityType::Line(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+        let circles: Vec<_> = pieces
+            .iter()
+            .filter_map(|p| match p {
+                EntityType::Circle(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(lines.len(), 4, "{label}: outer rectangle must yield 4 lines");
+        assert_eq!(circles.len(), 1, "{label}: circular hole must yield 1 circle");
+        assert!((circles[0].radius - 2.0).abs() < 1e-6);
+        assert!((circles[0].center.x - 10.0).abs() < 1e-6);
+        assert!((circles[0].center.y - 5.0).abs() < 1e-6);
+
+        for piece in &pieces {
+            let c = piece.common();
+            assert_eq!(c.layer, "REGIONS", "{label}: layer preserved");
+            assert_eq!(c.color, codec::types::Color::from_index(3), "{label}: color preserved");
+            assert_eq!(c.linetype, "DASHED", "{label}: linetype preserved");
+            assert!(c.handle.is_null(), "{label}: handle cleared");
+            assert!(c.owner_handle.is_null(), "{label}: owner_handle cleared");
+            assert!(c.xdictionary_handle.is_none(), "{label}: xdict must not leak");
+        }
+    }
+}
+
+#[test]
+fn explode_region_tilted_plane_arc_and_multi_island() {
+    use codec::entities::acis::SatDocument;
+    use codec::entities::{AcisData, Region};
+    use kernel::brep;
+    use kernel::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
+    use kernel::space::Plane;
+
+    // Semicircle + closing chord on tilted plane (XZ plane at y = 4.0).
+    let plane = Plane::from_axes([0.0, 4.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    let d_loop = vec![
+        KCurve::Line(KLine {
+            start: [-5.0, 0.0],
+            end: [5.0, 0.0],
+        }),
+        KCurve::Arc(KArc {
+            centre: [0.0, 0.0],
+            radius: 5.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::PI,
+        }),
+    ];
+    let body = brep::planar_region(plane, &[d_loop]).expect("tilted D region");
+    let mut sat = SatDocument::new();
+    kernel::acis::append(&body, &mut sat).expect("sat append");
+    let mut region = Region::new();
+    region.acis_data = AcisData::from_sat(&sat.to_sat_string());
+
+    let doc = CadDocument::new();
+    let pieces = explode_entity(&EntityType::Region(region), &doc);
+    assert_eq!(pieces.len(), 2, "D-region must explode to 1 Line + 1 Arc");
+
+    let line = pieces
+        .iter()
+        .find_map(|p| match p {
+            EntityType::Line(l) => Some(l),
+            _ => None,
+        })
+        .expect("expected Line");
+    assert!((line.start.y - 4.0).abs() < 1e-6 && (line.end.y - 4.0).abs() < 1e-6);
+
+    let arc = pieces
+        .iter()
+        .find_map(|p| match p {
+            EntityType::Arc(a) => Some(a),
+            _ => None,
+        })
+        .expect("expected Arc");
+    let arc_planar = OpenCADStudio::entities::curve::arc_curve(arc);
+    let mid = arc_planar.point_at(0.5);
+    assert!(
+        (mid[0] - 0.0).abs() < 1e-6 && (mid[1] - 4.0).abs() < 1e-6 && (mid[2] - 5.0).abs() < 1e-6,
+        "exploded arc midpoint in WCS should sit at (0, 4, 5), got {mid:?}"
+    );
+
+    // Multi-island region (two disjoint rectangles unioned in one Region B-Rep).
+    let xy = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let rect_loop = |x0: f64, x1: f64| {
+        vec![
+            KCurve::Line(KLine {
+                start: [x0, 0.0],
+                end: [x1, 0.0],
+            }),
+            KCurve::Line(KLine {
+                start: [x1, 0.0],
+                end: [x1, 5.0],
+            }),
+            KCurve::Line(KLine {
+                start: [x1, 5.0],
+                end: [x0, 5.0],
+            }),
+            KCurve::Line(KLine {
+                start: [x0, 5.0],
+                end: [x0, 0.0],
+            }),
+        ]
+    };
+    let r1 = brep::planar_region(xy, &[rect_loop(0.0, 5.0)]).unwrap();
+    let r2 = brep::planar_region(xy, &[rect_loop(10.0, 15.0)]).unwrap();
+    let union_body = brep::union_planar_regions(&[r1, r2], 1e-6).unwrap();
+    let mut union_sat = SatDocument::new();
+    kernel::acis::append(&union_body, &mut union_sat).unwrap();
+    let mut multi_region = Region::new();
+    multi_region.acis_data = AcisData::from_sat(&union_sat.to_sat_string());
+    let multi_pieces = explode_entity(&EntityType::Region(multi_region), &doc);
+    assert_eq!(
+        multi_pieces.len(),
+        8,
+        "two-island region must explode to 8 lines"
+    );
+
+    // Wire-only fallback region (no ACIS data, display wires present).
+    let mut wire_region = Region::new();
+    wire_region.wires = vec![codec::entities::Wire::from_points(vec![
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::new(4.0, 0.0, 0.0),
+        Vector3::new(4.0, 3.0, 0.0),
+        Vector3::new(0.0, 0.0, 0.0),
+    ])];
+    let wire_pieces = explode_entity(&EntityType::Region(wire_region), &doc);
+    assert_eq!(
+        wire_pieces.len(),
+        3,
+        "wire-only triangle region must explode to 3 lines"
+    );
+}
+
+#[test]
+fn explode_region_acis_with_body_transform() {
+    use codec::entities::acis::SatDocument;
+    use codec::entities::{AcisData, Region};
+    use kernel::brep;
+    use kernel::geom2d::{Curve as KCurve, Line as KLine};
+    use kernel::space::Plane;
+
+    let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let rect = vec![
+        KCurve::Line(KLine {
+            start: [0.0, 0.0],
+            end: [10.0, 0.0],
+        }),
+        KCurve::Line(KLine {
+            start: [10.0, 0.0],
+            end: [10.0, 5.0],
+        }),
+        KCurve::Line(KLine {
+            start: [10.0, 5.0],
+            end: [0.0, 5.0],
+        }),
+        KCurve::Line(KLine {
+            start: [0.0, 5.0],
+            end: [0.0, 0.0],
+        }),
+    ];
+    let body = brep::planar_region(plane, &[rect]).expect("planar region");
+    let mut sat = SatDocument::new();
+    kernel::acis::append(&body, &mut sat).expect("sat append");
+
+    // AutoCAD writes a body transform record for placed regions.
+    // Translate by [50.0, 100.0, 0.0].
+    sat.set_placement(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        [50.0, 100.0, 0.0],
+        1.0,
+    );
+
+    let mut region = Region::new();
+    region.acis_data = AcisData::from_sat(&sat.to_sat_string());
+    region.common.layer = "TRANSFORMED".to_string();
+
+    let doc = CadDocument::new();
+    let pieces = explode_entity(&EntityType::Region(region), &doc);
+    assert_eq!(pieces.len(), 4, "placed region must explode to 4 lines");
+
+    let lines: Vec<_> = pieces
+        .iter()
+        .filter_map(|p| match p {
+            EntityType::Line(l) => Some(l),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lines.len(), 4);
+
+    // Verify all line endpoints were shifted by [50, 100, 0]
+    for l in &lines {
+        assert!(l.start.x >= 50.0 - 1e-6 && l.start.x <= 60.0 + 1e-6);
+        assert!(l.start.y >= 100.0 - 1e-6 && l.start.y <= 105.0 + 1e-6);
+        assert!(l.end.x >= 50.0 - 1e-6 && l.end.x <= 60.0 + 1e-6);
+        assert!(l.end.y >= 100.0 - 1e-6 && l.end.y <= 105.0 + 1e-6);
+        assert_eq!(l.common.layer, "TRANSFORMED");
+        assert!(l.common.handle.is_null());
+    }
+}
+
+#[test]
+fn explode_region_elliptical_and_spline_boundaries() {
+    use codec::entities::acis::SatDocument;
+    use codec::entities::{AcisData, Region};
+    use kernel::brep;
+    use kernel::geom2d::{
+        Curve as KCurve, Ellipse as KEllipse, EllipseArc as KEllipseArc, Line as KLine,
+        NurbsCurve as KNurbs,
+    };
+    use kernel::space::Plane;
+
+    let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let doc = CadDocument::new();
+
+    // 1. Full non-circular ellipse region (major 8.0, minor 4.0).
+    let ell_loop = vec![KCurve::Ellipse(KEllipseArc::full(KEllipse {
+        centre: [15.0, 20.0],
+        major_radius: 8.0,
+        minor_radius: 4.0,
+        major_axis: [1.0, 0.0],
+    }))];
+    let body = brep::planar_region(plane, &[ell_loop]).expect("ellipse region");
+    let mut sat = SatDocument::new();
+    kernel::acis::append(&body, &mut sat).expect("sat append");
+    let mut region = Region::new();
+    region.acis_data = AcisData::from_sat(&sat.to_sat_string());
+    region.common.layer = "ELLIPSES".to_string();
+
+    let pieces = explode_entity(&EntityType::Region(region), &doc);
+    assert_eq!(
+        pieces.len(),
+        1,
+        "full ellipse region must explode to 1 Ellipse"
+    );
+    let ell = match &pieces[0] {
+        EntityType::Ellipse(e) => e,
+        other => panic!("expected Ellipse entity, got {other:?}"),
+    };
+    assert!((ell.center.x - 15.0).abs() < 1e-6);
+    assert!((ell.center.y - 20.0).abs() < 1e-6);
+    assert!((ell.major_axis_length() - 8.0).abs() < 1e-6);
+    assert!((ell.minor_axis_ratio - 0.5).abs() < 1e-6);
+    assert_eq!(ell.common.layer, "ELLIPSES");
+    assert!(ell.common.handle.is_null());
+
+    // 2. Region with a cubic NURBS/Spline edge closed by a straight line.
+    let nurbs = KNurbs::new(
+        3,
+        vec![
+            [0.0, 0.0],
+            [3.0, 5.0],
+            [7.0, -2.0],
+            [10.0, 0.0],
+        ],
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        None,
+    )
+    .expect("valid cubic nurbs");
+    let spline_loop = vec![
+        KCurve::Nurbs(nurbs),
+        KCurve::Line(KLine {
+            start: [10.0, 0.0],
+            end: [0.0, 0.0],
+        }),
+    ];
+    let body_spline = brep::planar_region(plane, &[spline_loop]).expect("spline region");
+    let mut sat_spline = SatDocument::new();
+    kernel::acis::append(&body_spline, &mut sat_spline).expect("sat append");
+    let mut region_spline = Region::new();
+    region_spline.acis_data = AcisData::from_sat(&sat_spline.to_sat_string());
+    region_spline.common.layer = "SPLINES".to_string();
+
+    let pieces_spline = explode_entity(&EntityType::Region(region_spline), &doc);
+    assert_eq!(
+        pieces_spline.len(),
+        2,
+        "spline region must explode to 1 Spline and 1 Line"
+    );
+    let has_line = pieces_spline.iter().any(|p| matches!(p, EntityType::Line(_)));
+    let has_spline = pieces_spline.iter().any(|p| matches!(p, EntityType::Spline(_)));
+    assert!(has_line, "must contain a Line");
+    assert!(has_spline, "must contain a Spline");
+    for p in &pieces_spline {
+        assert_eq!(p.common().layer, "SPLINES");
+        assert!(p.common().handle.is_null());
+    }
+
+    // 3. Region with a circular arc represented as equal-radii Ellipse arc + lines.
+    let equal_ell_arc = KCurve::Ellipse(KEllipseArc {
+        ellipse: KEllipse {
+            centre: [0.0, 0.0],
+            major_radius: 5.0,
+            minor_radius: 5.0,
+            major_axis: [1.0, 0.0],
+        },
+        start_parameter: 0.0,
+        end_parameter: std::f64::consts::FRAC_PI_2,
+    });
+    let d_equal_loop = vec![
+        KCurve::Line(KLine {
+            start: [0.0, 0.0],
+            end: [5.0, 0.0],
+        }),
+        equal_ell_arc,
+        KCurve::Line(KLine {
+            start: [0.0, 5.0],
+            end: [0.0, 0.0],
+        }),
+    ];
+    let body_arc = brep::planar_region(plane, &[d_equal_loop]).expect("equal-radii ellipse region");
+    let mut sat_arc = SatDocument::new();
+    kernel::acis::append(&body_arc, &mut sat_arc).expect("sat append");
+    let mut region_arc = Region::new();
+    region_arc.acis_data = AcisData::from_sat(&sat_arc.to_sat_string());
+
+    let pieces_arc = explode_entity(&EntityType::Region(region_arc), &doc);
+    assert_eq!(pieces_arc.len(), 3, "must yield 2 lines and 1 arc");
+    let arc_piece = pieces_arc
+        .iter()
+        .find_map(|p| match p {
+            EntityType::Arc(a) => Some(a),
+            _ => None,
+        })
+        .expect("equal-radii ellipse arc must emit EntityType::Arc");
+    assert!((arc_piece.radius - 5.0).abs() < 1e-6);
+}
+

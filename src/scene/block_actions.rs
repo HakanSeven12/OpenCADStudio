@@ -433,8 +433,16 @@ pub(crate) fn create_with_frame(
     location: DVec3,
     frame: Option<[DVec3; 2]>,
 ) -> Result<Handle, &'static str> {
-    create_with_options(
-        doc, definition, kind, parameter, None, targets, location, frame, None,
+    create_with_frame_points(
+        doc,
+        definition,
+        kind,
+        parameter,
+        None,
+        targets,
+        location,
+        frame.as_ref().map(|points| points.as_slice()),
+        None,
     )
 }
 

@@ -315,6 +315,9 @@ pub struct Pipeline {
     /// frame they are present (small), drawn on top of the base wire pass — so
     /// a live drag never re-uploads the resident base buffer.
     pub(in crate::scene) gpu_preview_wires: Vec<WireGpu>,
+    /// Expanded INSERT/block preview wires use the instanced block pipeline,
+    /// not the ordinary wire buffer (which drops them during a live drag).
+    pub(in crate::scene) gpu_preview_block_wires: Vec<BlockWireGpu>,
     pub(in crate::scene) gpu_preview_circles: Vec<CircleGpu>,
     pub(in crate::scene) gpu_preview_ellipses: Vec<EllipseGpu>,
     /// Wipeout masks — solid fills rendered after wires in a separate pass via
@@ -2494,6 +2497,7 @@ impl Pipeline {
             gpu_selected_ellipses: vec![],
             gpu_selected_block_wires: vec![],
             gpu_preview_wires: vec![],
+            gpu_preview_block_wires: vec![],
             gpu_preview_circles: vec![],
             gpu_preview_ellipses: vec![],
             gpu_wipeouts: vec![],
@@ -3147,6 +3151,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
     ) {
         if wires.is_empty() {
             self.gpu_preview_wires.clear();
+            self.gpu_preview_block_wires.clear();
             self.gpu_preview_circles.clear();
             self.gpu_preview_ellipses.clear();
         } else {
@@ -3163,6 +3168,25 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     depth_map,
                     false,
                     self.wire_const_bgl.as_ref(),
+                )
+            };
+            // `partition_wires` separates instanced block expansions from
+            // regular wires. Keep these in the live overlay as well: otherwise
+            // STRETCH hides the source INSERT but draws no moving replacement.
+            self.gpu_preview_block_wires = if partitioned.instanced.is_empty() {
+                vec![]
+            } else {
+                BlockWireGpu::from_wires(
+                    device,
+                    queue,
+                    &partitioned.instanced,
+                    depth_map,
+                    None,
+                    wire_gpu::BlockWireTarget {
+                        const_bgl: &self.block_wire_const_bgl,
+                        mode: self.block_wire_mode,
+                    },
+                    None,
                 )
             };
             self.gpu_preview_circles = if partitioned.circle_instances.is_empty() {
@@ -5020,6 +5044,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 .iter()
                 .any(|wire| wire.instance_count > 0)
                 || self
+                    .gpu_preview_block_wires
+                    .iter()
+                    .any(|wire| wire.instance_count > 0)
+                || self
                     .gpu_preview_circles
                     .iter()
                     .any(|circle| circle.instance_count > 0)
@@ -5079,6 +5107,19 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                             0..6,
                             wire.first_instance..wire.first_instance + wire.instance_count,
                         );
+                    }
+                }
+
+                if self
+                    .gpu_preview_block_wires
+                    .iter()
+                    .any(|wire| wire.instance_count > 0)
+                {
+                    pass.set_pipeline(&self.block_wire_xray_pipeline);
+                    for wire in &self.gpu_preview_block_wires {
+                        if wire.instance_count > 0 {
+                            bind_and_draw_block_wire(&mut pass, wire);
+                        }
                     }
                 }
 
@@ -5450,6 +5491,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.gpu_selected_circles.clear();
         self.gpu_selected_ellipses.clear();
         self.gpu_preview_wires.clear();
+        self.gpu_preview_block_wires.clear();
         self.gpu_preview_circles.clear();
         self.gpu_preview_ellipses.clear();
         self.hatch_gpu.clear();

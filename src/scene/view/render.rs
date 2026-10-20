@@ -474,7 +474,13 @@ impl shader::Primitive for Primitive {
                 // The direct pass draws straight into `surface_dest`, so it
                 // lines up with the cached scene only when that rectangle is
                 // the whole pixel-aligned raster (not cropped off the window).
+                // Instanced block previews need the block-wire MSAA pass;
+                // the direct surface overlay can draw only ordinary wires.
                 inner.preview_overlay_direct = placement.surface_matches_raster()
+                    && inner
+                        .gpu_preview_block_wires
+                        .iter()
+                        .all(|wire| wire.instance_count == 0)
                     && inner
                         .gpu_preview_circles
                         .iter()

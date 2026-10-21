@@ -2673,7 +2673,7 @@ pub fn tessellate(
         }
         _ => (Vec::new(), Vec::new()),
     };
-    vec![WireModel {
+    let mut wires = vec![WireModel {
         bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
@@ -2709,7 +2709,39 @@ pub fn tessellate(
         fill_tris_low: Vec::new(),
 
         ..Default::default()
-    }]
+    }];
+    if matches!(entity, EntityType::Region(_)) {
+        // Reuse the analytical boundary decomposition without applying EXPLODE:
+        // the document stays untouched and every piece retains the REGION's
+        // source handle. Separate wires keep holes and disconnected edges from
+        // acquiring fictitious joining segments or chord midpoint snaps.
+        for piece in crate::modules::draw::modify::explode::explode_entity(entity, document) {
+            let mut boundary = tessellate(
+                document,
+                handle,
+                &piece,
+                selected,
+                entity_color,
+                pattern_length,
+                pattern,
+                line_weight_px,
+                anno_scale,
+                annotation_scale_handle,
+                world_per_pixel,
+                bg_color,
+                force_text_strokes,
+            );
+            for wire in &mut boundary {
+                // The mesh still owns display, picking and plotting. These
+                // wires only supply the normal 2D object-snap engine.
+                wire.display_visible = false;
+                wire.plot_visible = false;
+                wire.snap_only = true;
+            }
+            wires.extend(boundary);
+        }
+    }
+    wires
 }
 
 #[derive(Clone)]

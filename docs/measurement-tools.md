@@ -27,6 +27,19 @@ As the cursor moves, the nearest geometry along the working plane's X and Y axes
 
 Object snaps remain available. Length values use the drawing's existing length-formatting settings.
 
+### Snapping to regions
+
+A `REGION` exposes its outer and inner boundaries to ordinary object snaps (F3),
+without requiring EXPLODE or enabling 3D object snaps (F4). Use these references
+when specifying points for lines, dimensions, or measurements.
+
+Boundary pieces use the same snap modes as ordinary lines, arcs, circles,
+ellipses, and splines: enable the modes appropriate to the geometry. For example,
+a circular boundary provides Center, Quadrant, and Tangent, not artificial
+endpoints along its display tessellation. Holes and inclined regions retain their
+own boundary coordinates. Region rendering, selection, and plotted output are
+unchanged. This does not add persistent dimension associativity to region edges.
+
 ### Radius — `MEASURERADIUS`
 
 1. Move the cursor over a circle or circular arc to preview its radius and diameter.

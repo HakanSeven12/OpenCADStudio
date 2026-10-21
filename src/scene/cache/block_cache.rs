@@ -86,6 +86,8 @@ pub struct LocalWire {
     /// shader band grows with a scaled insert. `0.0` = a normal wire.
     pub world_width: f32,
     pub plinegen: bool,
+    /// Hidden reference geometry must retain its snap-only role in INSERTs.
+    pub snap_only: bool,
     pub plot_visible: bool,
     pub plot_l0: bool,
     pub hide_unselected: bool,
@@ -903,7 +905,10 @@ fn tessellate_sub_local(
             pattern_stations: wire.pattern_stations,
             world_width: wire.world_width,
             plinegen: wire.plinegen,
-            plot_visible: frame_mode.is_none_or(|mode| mode == 1) && (on_l0 || layer_plottable),
+            snap_only: wire.snap_only,
+            plot_visible: !wire.snap_only
+                && frame_mode.is_none_or(|mode| mode == 1)
+                && (on_l0 || layer_plottable),
             plot_l0: on_l0,
             hide_unselected: frame_mode == Some(0),
             is_fill_only,
@@ -1602,6 +1607,7 @@ struct StyleKey {
     /// switchable after block geometry is merged by style.
     fill_is_2d_solid: bool,
     fill_is_3d: bool,
+    snap_only: bool,
     plot_visible: bool,
     hide_unselected: bool,
     /// Bit-cast composed block-local depth for band wires (`0` = no override).
@@ -1652,6 +1658,7 @@ struct BatchEntry {
     fill_tris_low: Vec<[f32; 3]>,
     fill_is_3d: bool,
     fill_is_2d_solid: bool,
+    snap_only: bool,
     plot_visible: bool,
     hide_unselected: bool,
     /// Accumulated thickness-wall pick geometry, paired high/low like
@@ -1835,8 +1842,8 @@ impl Batches {
                     pattern_stations: b.pattern_stations,
                     world_width: b.world_width,
                     depth_override: b.local_depth,
-                    display_visible: !b.hide_unselected || selected,
-                    snap_only: false,
+                    display_visible: !b.snap_only && (!b.hide_unselected || selected),
+                    snap_only: b.snap_only,
                     reference_only: false,
                     plot_visible: b.plot_visible,
                     fill_is_3d: b.fill_is_3d,
@@ -1935,6 +1942,7 @@ fn style_key(
         is_fill_only,
         fill_is_2d_solid,
         fill_is_3d,
+        snap_only: false,
         plot_visible,
         hide_unselected,
         depth_bits: local_depth.map_or(0, f32::to_bits),
@@ -2640,8 +2648,8 @@ fn emit_wire(
                     pattern_stations: Vec::new(),
                     world_width: 0.0,
                     depth_override: local_depth,
-                    display_visible: !lw.hide_unselected || ctx.selected,
-                    snap_only: false,
+                    display_visible: !lw.snap_only && (!lw.hide_unselected || ctx.selected),
+                    snap_only: lw.snap_only,
                     plot_visible: lw.plot_visible,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
@@ -2761,7 +2769,7 @@ fn emit_wire(
         && (has_stations
             || transformed_stations.is_some()
             || lw.points.iter().any(|point| point[0].is_nan()));
-    let key = style_key(
+    let mut key = style_key(
         final_color,
         lw.contrast_bg,
         lw.preserve_color,
@@ -2781,8 +2789,12 @@ fn emit_wire(
         lw.hide_unselected,
         local_depth,
     );
+    // Never fold reference-only boundaries into a visible geometry batch.
+    key.snap_only = lw.snap_only;
 
-    if transformed_stations.is_some() {
+    // Keep snap-only edges separate: concatenating key_vertices across
+    // disconnected boundaries would invent midpoint references between them.
+    if lw.snap_only || transformed_stations.is_some() {
         if let Some(closed) = out.by_style.remove(&key) {
             out.closed.push(closed);
         }
@@ -2819,6 +2831,7 @@ fn emit_wire(
         )
     });
     entry.local_depth = local_depth;
+    entry.snap_only = lw.snap_only;
     if let Some(data) = &transformed_stations {
         entry.pattern_station_pieces.clone_from(&data.pieces);
     }

@@ -40,6 +40,11 @@ endpoints along its display tessellation. Holes and inclined regions retain thei
 own boundary coordinates. Region rendering, selection, and plotted output are
 unchanged. This does not add persistent dimension associativity to region edges.
 
+During point selection, rapid pointer movement defers full snap evaluation until
+the cursor settles; clicks still resolve the exact clicked position. OTRACK
+(F11) remains available: pause over a stable snap to acquire a tracking reference.
+Once acquired, its tracking guides use the full snap path.
+
 ### Radius — `MEASURERADIUS`
 
 1. Move the cursor over a circle or circular arc to preview its radius and diameter.

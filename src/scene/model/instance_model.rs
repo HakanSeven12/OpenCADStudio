@@ -169,56 +169,75 @@ pub fn shift_depth(wire: &mut WireModel, delta: f32) {
 }
 
 
-/// Produce lightweight selection/drag outlines for extreme numbers of
-/// repeated two-dimensional block stubs. A preview of thousands of identical
-/// plants otherwise uploads millions of block-line instances on *every mouse
-/// move*, despite the source geometry already being cached. The returned names
-/// identify only stubs fully represented by one conservative world-XY box.
-/// Ordinary wires (including guides and non-stub geometry) stay exact.
+/// A per-INSERT, conservative 2-D bounding preview for extreme selections.
+/// Only handles containing block-instance stubs qualify; once a handle
+/// qualifies we include *all* its visible child wires in the bounding box,
+/// including analytic arcs and ordinary wires. Suppressing only the stub left
+/// five other child models per palm and defeated the fast path (#2057).
+///
+/// Any child without a trustworthy 2-D extent keeps that INSERT on the exact
+/// rendering path; small selections likewise remain exact.
 pub fn mass_stub_outlines<'a>(
     wires: impl IntoIterator<Item = &'a WireModel>,
     min_stub_wires: usize,
 ) -> (Vec<WireModel>, rustc_hash::FxHashSet<String>) {
     use rustc_hash::{FxHashMap, FxHashSet};
-    // name -> (conservative XY bounding rectangle, original colour/selection)
+    let all: Vec<&WireModel> = wires.into_iter().collect();
+    // name -> (conservative XY bounds, representative colour, selected)
     let mut groups: FxHashMap<String, ([f32; 4], [f32; 4], bool)> =
         FxHashMap::default();
     let mut unsafe_names: FxHashSet<String> = FxHashSet::default();
     let mut stubs = 0usize;
-    for wire in wires {
+    let good_bounds = |b: &[f32; 4]| {
+        b.iter().all(|v| v.is_finite() && v.abs() < 1.0e15)
+            && b[0] <= b[2]
+            && b[1] <= b[3]
+    };
+    for &wire in &all {
         if wire.stub.is_none() || wire.name.is_empty() {
             continue;
         }
         stubs += 1;
         let b = wire.aabb;
-        // 3-D stubs, malformed coordinates, and sentinel AABBs must keep
-        // their original exact preview. This is intentionally 2-D only.
         if wire.fill_is_3d
             || wire.stub.as_ref().is_some_and(|stub| stub.delta[2].abs() > 1e-7)
-            || !b.iter().all(|v| v.is_finite() && v.abs() < 1.0e15)
-            || b[0] > b[2]
-            || b[1] > b[3]
+            || !good_bounds(&b)
         {
             unsafe_names.insert(wire.name.clone());
             continue;
         }
         groups
             .entry(wire.name.clone())
-            .and_modify(|(box_xy, _, _)| {
-                box_xy[0] = box_xy[0].min(b[0]);
-                box_xy[1] = box_xy[1].min(b[1]);
-                box_xy[2] = box_xy[2].max(b[2]);
-                box_xy[3] = box_xy[3].max(b[3]);
+            .and_modify(|(rect, _, _)| {
+                rect[0] = rect[0].min(b[0]);
+                rect[1] = rect[1].min(b[1]);
+                rect[2] = rect[2].max(b[2]);
+                rect[3] = rect[3].max(b[3]);
             })
             .or_insert((b, wire.color, wire.selected));
     }
-
-    // Tiny previews use the exact path. Do not silently degrade a regular
-    // block or a small STRETCH selection just to save a small upload.
     if stubs < min_stub_wires || groups.len() < 256 {
         return (Vec::new(), FxHashSet::default());
     }
-
+    // The other wires of the same INSERT are not necessarily stubs. Expand
+    // the proxy's bounds to cover every visible child that will be dropped.
+    for &wire in &all {
+        let Some((rect, _, _)) = groups.get_mut(&wire.name) else {
+            continue;
+        };
+        if wire.snap_only || !wire.display_visible {
+            continue;
+        }
+        if wire.fill_is_3d || !good_bounds(&wire.aabb) {
+            unsafe_names.insert(wire.name.clone());
+            continue;
+        }
+        let b = wire.aabb;
+        rect[0] = rect[0].min(b[0]);
+        rect[1] = rect[1].min(b[1]);
+        rect[2] = rect[2].max(b[2]);
+        rect[3] = rect[3].max(b[3]);
+    }
     let mut replaced = FxHashSet::default();
     let mut outlines = Vec::with_capacity(groups.len());
     for (name, (b, color, selected)) in groups {
@@ -275,6 +294,35 @@ mod mass_stub_outline_tests {
         let first = outlines.iter().find(|w| w.name == "1").unwrap();
         assert_eq!(first.aabb, [0.0, 0.0, 3.0, 9.0]);
         assert_eq!(first.points.len(), 5);
+    }
+
+    #[test]
+    fn proxies_cover_non_stub_wires_belonging_to_each_insert() {
+        let proto = Arc::new(vec![WireModel::default()]);
+        let mut refs = Vec::new();
+        for i in 0..300 {
+            let mut a = stub_wire(
+                Arc::clone(&proto), [0.0, 0.0, 1.0, 1.0],
+                [i as f64 * 5.0, 0.0, 0.0], 0.0,
+            );
+            a.name = i.to_string();
+            refs.push(a);
+            for k in 0..7 {
+                let mut extra = WireModel::solid(
+                    i.to_string(), vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                    WireModel::WHITE, false,
+                );
+                extra.aabb = [i as f32 * 5.0 - 2.0, -(k as f32),
+                    i as f32 * 5.0 + 3.0, 2.0];
+                refs.push(extra);
+            }
+        }
+        let (outlines, names) = mass_stub_outlines(refs.iter(), 256);
+        assert_eq!(outlines.len(), 300);
+        assert_eq!(names.len(), 300);
+        let first = outlines.iter().find(|w| w.name == "0").unwrap();
+        assert_eq!(first.aabb, [-2.0, -6.0, 3.0, 2.0]);
+        assert_eq!(refs.iter().filter(|wire| !names.contains(&wire.name)).count(), 0);
     }
 
     #[test]

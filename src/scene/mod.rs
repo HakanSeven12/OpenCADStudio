@@ -10445,10 +10445,10 @@ impl Scene {
         let layer_hidden =
             |layer: &str| self.layer_hidden(layer) || self.interaction_layer_frozen(layer);
         let mut out: HashMap<Handle, Vec<HatchModel>> = HashMap::default();
-        // The initial hover/click index used to re-tessellate every translated
-        // copy of every hatch in every INSERT. Cache the block-local seed once
-        // per leaf handle; each hit-test instance receives just new anchors.
-        let mut translated_sources: HashMap<Handle, Option<HatchModel>> = HashMap::default();
+        // Reuse one tessellated hatch per leaf handle + affine linear
+        // transform. Plants may be rotated/scaled even when copied without
+        // further edits, so pure translation alone is insufficient.
+        let mut affine_sources: HashMap<(Handle, [u64; 9]), Option<HatchModel>> = HashMap::default();
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
         let mut reuse_hits = 0usize;
         let mut reuse_unique = 0usize;
@@ -10524,15 +10524,20 @@ impl Scene {
                             self.current_bg(),
                         );
                         let model = if context.clips.is_empty() {
-                            Self::hatch_translation_offset(&context.transform).and_then(|offset| {
-                                if translated_sources.contains_key(&source.common.handle) {
+                            Self::hatch_affine_parts(&context.transform).and_then(|(linear, offset)| {
+                                let key = (source.common.handle, linear);
+                                if affine_sources.contains_key(&key) {
                                     reuse_hits += 1;
                                 } else {
                                     reuse_unique += 1;
                                 }
-                                translated_sources
-                                    .entry(source.common.handle)
-                                    .or_insert_with(|| Self::hatch_model_from_dxf(source, color))
+                                affine_sources
+                                    .entry(key)
+                                    .or_insert_with(|| {
+                                        Self::hatch_affine_source_model(
+                                            source, &context.transform, color,
+                                        )
+                                    })
                                     .as_ref()
                                     .map(|model| model.translated_for_render(offset, color))
                             })

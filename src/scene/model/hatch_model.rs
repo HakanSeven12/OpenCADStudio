@@ -273,6 +273,35 @@ pub struct HatchModel {
 }
 
 impl HatchModel {
+    /// Reposition a cached block-local hatch for an INSERT whose full affine
+    /// transform is a pure translation. The local polygon and PAT families
+    /// remain unchanged, so the expensive DXF boundary tessellation is shared
+    /// between identical block instances. This is for screen rendering only:
+    /// export and editing require fully transformed persistence paths.
+    pub(crate) fn translated_for_render(&self, delta: [f64; 3], color: [f32; 4]) -> Self {
+        let mut placed = self.clone();
+        placed.world_origin[0] += delta[0];
+        placed.world_origin[1] += delta[1];
+        if let Some(origin) = &mut placed.pattern_origin {
+            origin[0] += delta[0];
+            origin[1] += delta[1];
+        }
+        if let Some(plane) = &mut placed.fill_plane {
+            for (coordinate, delta) in plane.origin.iter_mut().zip(delta) {
+                *coordinate += delta;
+            }
+        }
+        // These paths still refer to the block-local DXF entity. Do not
+        // misrepresent them as world-space persistence data on this path.
+        placed.boundary_paths = None;
+        if matches!(placed.pattern, HatchPattern::Gradient { .. }) {
+            placed.set_alpha(color[3]);
+        } else {
+            placed.color = color;
+        }
+        placed
+    }
+
     /// Apply an entity's resolved opacity to every colour stop. Gradient stop
     /// colours come from the HATCH payload, but transparency remains a common
     /// entity property and must affect both ends equally.
@@ -594,5 +623,47 @@ impl HatchModel {
             }
         }
         segments
+    }
+}
+
+#[cfg(test)]
+mod translated_hatch_tests {
+    use super::*;
+
+    #[test]
+    fn pure_translation_reuses_local_geometry_and_moves_world_anchors() {
+        let boundary = Arc::new(vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]]);
+        let model = HatchModel {
+            pattern_origin: Some([3.0, 4.0]),
+            render_instance: None,
+            boundary: Arc::clone(&boundary),
+            boundary_wcs: None,
+            fill_plane: Some(FillPlane {
+                origin: [3.0, 4.0, 5.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+            }),
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: codec::entities::HatchStyleType::Normal,
+            pattern: HatchPattern::Solid,
+            name: "SOLID".into(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            aci: 7,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            world_origin: [4.0, 5.0],
+            draw_depth: 0.0,
+        };
+        let placed = model.translated_for_render([20.0, -3.0, 7.0], [0.0, 1.0, 0.0, 0.8]);
+        assert!(Arc::ptr_eq(&model.boundary, &placed.boundary));
+        assert_eq!(placed.world_origin, [24.0, 2.0]);
+        assert_eq!(placed.pattern_origin, Some([23.0, 1.0]));
+        assert_eq!(placed.fill_plane.unwrap().origin, [23.0, 1.0, 12.0]);
+        assert_eq!(placed.color, [0.0, 1.0, 0.0, 0.8]);
+        assert_eq!(model.world_origin, [4.0, 5.0]);
     }
 }

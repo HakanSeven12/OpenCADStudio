@@ -11633,6 +11633,53 @@ impl Scene {
         }
     }
 
+    /// Rectangular selection-specific candidate path. For a crossing box in
+    /// a top/down, axis-aligned view, a completely enclosed instanced block
+    /// stub is guaranteed to hit the box; do not materialize all its leaves.
+    /// Other view orientations and enclosing-window selection stay on the
+    /// original exact hit-test path.
+    pub fn interaction_candidates_for_box(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        screen_rect: [f32; 4],
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        crossing: bool,
+    ) -> crate::scene::pick::interaction_index::InteractionCandidates {
+        let axis_aligned_top =
+            view_rot.z_axis.x.abs() < 1e-9
+            && view_rot.z_axis.y.abs() < 1e-9
+            && view_rot.x_axis.y.abs() < 1e-9
+            && view_rot.y_axis.x.abs() < 1e-9
+            && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
+        if !crossing || !axis_aligned_top
+            || !self.interaction_source_is_resident(&wires, bounds.height)
+            || !self.interaction_index_worthwhile(&wires)
+        {
+            return self.interaction_candidates_in_aabb(
+                wires, aabb, screen_rect, view_rot, eye, bounds,
+            );
+        }
+        let pad_px = self.indexed_interaction_pick_radius(
+            &wires, 0.0, bounds.height, true,
+        );
+        let scale_x = ((view_rot.x_axis.x * bounds.width * 0.5).powi(2)
+            + (view_rot.x_axis.y * bounds.height * 0.5).powi(2)).sqrt();
+        let scale_y = ((view_rot.y_axis.x * bounds.width * 0.5).powi(2)
+            + (view_rot.y_axis.y * bounds.height * 0.5).powi(2)).sqrt();
+        let scale = scale_x.min(scale_y);
+        let pad = if scale > 1e-6 { pad_px as f64 / scale as f64 } else { 0.0 };
+        self.indexed_interaction_candidates_xy_stubbed(
+            wires,
+            [aabb[0]-pad, aabb[1]-pad, aabb[2]+pad, aabb[3]+pad],
+            false,
+            true,
+            None,
+        ).materialize_stubs_for_crossing_xy_box(aabb)
+    }
+
     pub fn interaction_candidate_handles(
         &self,
         candidates: &crate::scene::pick::interaction_index::InteractionCandidates,

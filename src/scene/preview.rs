@@ -50,6 +50,28 @@ impl Scene {
             }
         }
 
+        // Highlighting thousands of vegetation INSERTs by overlaying all
+        // child hatch fills doubles the GPU placement stream. In the reported
+        // DWG 9,216 selected plants expanded to 543,744 preview hatches,
+        // consuming ~600ms to upload and ~100ms on every preview frame.
+        // Above this limit the standard selected-wire highlight remains blue
+        // and fully interactive; command/grip preview hatches are unaffected.
+        // Long-term the tint should live in the resident instance shader.
+        const MAX_FILLED_SELECTION_HANDLES: usize = 512;
+        if self.selected.len() > MAX_FILLED_SELECTION_HANDLES {
+            let models = std::sync::Arc::new(Vec::new());
+            crate::perf_record!(
+                "[perf] hatch-selection-overlay wire-only selected={} threshold={MAX_FILLED_SELECTION_HANDLES}",
+                self.selected.len(),
+            );
+            *self.selected_hatch_overlay_cache.borrow_mut() = Some((
+                self.geometry_epoch,
+                selection_sig,
+                std::sync::Arc::clone(&models),
+            ));
+            return models;
+        }
+
         let started = crate::perf::enabled().then(iced::time::Instant::now);
         let depth_map = self.draw_depth_map();
         let target_block = self.content_render_block_handle();

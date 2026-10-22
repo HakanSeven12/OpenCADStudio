@@ -10711,6 +10711,42 @@ impl Scene {
     }
 
     /// Return a stable build key when this source needs its large
+    /// A cold click/window must be exact even when the asynchronous spatial
+    /// index has not finished. For large drawings, building that index once is
+    /// much cheaper than expanding millions of stubbed block segments for
+    /// every unindexed hit test. Hover and snap keep their nonblocking path.
+    fn on_demand_pick_index(
+        &self,
+        wires: &Arc<Vec<WireModel>>,
+        allow_pending_empty: bool,
+        snap: Option<SnapQueryCategory>,
+    ) -> Option<Arc<InteractionIndex>> {
+        if allow_pending_empty || snap.is_some() || !self.interaction_index_worthwhile(wires) {
+            return None;
+        }
+        // A click should not spend time indexing a handful of plain wires.
+        // "estimated_work" also catches large compound / block-stub geometry.
+        if wires.len() < Self::INTERACTION_INDEX_MIN_WIRES
+            && InteractionIndex::estimated_work(wires) < Self::INTERACTION_INDEX_MIN_WORK
+        {
+            return None;
+        }
+        if let Some(existing) = self.cached_interaction_index(wires) {
+            return Some(existing);
+        }
+        let started = crate::perf::enabled().then(iced::time::Instant::now);
+        let index = Arc::new(InteractionIndex::build(wires));
+        self.cache_interaction_index(self.geometry_epoch, Arc::clone(wires), Arc::clone(&index));
+        if let Some(started) = started {
+            crate::perf_record!(
+                "[perf] interaction-pick-cold-index build={:.1}ms source_wires={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                wires.len()
+            );
+        }
+        Some(index)
+    }
+
     /// interaction index. The app uses it to deduplicate background builds.
     pub fn interaction_index_build_key(
         &self,
@@ -11046,7 +11082,9 @@ impl Scene {
             }
             return result;
         }
-        if let Some(index) = self.cached_interaction_index(&wires) {
+        if let Some(index) = self.cached_interaction_index(&wires).or_else(|| {
+            self.on_demand_pick_index(&wires, allow_pending_empty, snap)
+        }) {
             direct(&index, wires)
         } else {
             self.unindexed_interaction_candidates(wires, allow_pending_empty, snap)
@@ -11220,7 +11258,9 @@ impl Scene {
             }
             return result;
         }
-        if let Some(index) = self.cached_interaction_index(&wires) {
+        if let Some(index) = self.cached_interaction_index(&wires).or_else(|| {
+            self.on_demand_pick_index(&wires, allow_pending_empty, snap)
+        }) {
             direct(&index, wires)
         } else {
             self.unindexed_interaction_candidates(wires, allow_pending_empty, snap)

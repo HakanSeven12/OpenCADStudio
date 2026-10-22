@@ -71,6 +71,11 @@ pub struct RotateCommand {
 
 impl RotateCommand {
     pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        // The actual edit/commit uses CAD handles, never this visual cache.
+        // For extreme 2-D selections keep only the whole group's live
+        // bounding box: no per-frame expansion of complex repeated INSERTs.
+        let wire_models = crate::scene::model::instance_model::
+            cached_command_preview_for_large_2d_selection(handles.len(), wire_models);
         Self {
             handles,
             wire_models,
@@ -84,9 +89,16 @@ impl RotateCommand {
 
     /// 3DROTATE: any objects, about any axis through a base point.
     pub fn new_3d(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        // A 3-D rotation needs exact spatial geometry even when its top-view
+        // projection looks 2-D. Do not use the XY-only bounding-box LOD.
         Self {
+            handles,
+            wire_models,
+            step: Step::Center,
+            default_angle: defaults::get_rotate_angle(),
+            plane: WorkingPlane::default(),
             spatial: true,
-            ..Self::new(handles, wire_models)
+            axis_chosen: false,
         }
     }
 

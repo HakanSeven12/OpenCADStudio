@@ -3405,3 +3405,70 @@ impl Scene {
         }
     }
 }
+
+#[cfg(test)]
+mod translated_block_hatch_tests {
+    use super::*;
+    use codec::entities::hatch::{BoundaryEdge, BoundaryPath, HatchPatternLine, LineEdge};
+    use codec::types::{Transform, Vector2, Vector3};
+
+    #[test]
+    fn translated_source_pattern_matches_full_dxf_transform() {
+        let mut hatch = codec::entities::Hatch::new();
+        hatch.is_solid = false;
+        hatch.pattern.name = "ANSI31".into();
+        hatch.pattern_scale = 3.0;
+        hatch.pattern.lines.push(HatchPatternLine {
+            angle: std::f64::consts::FRAC_PI_4,
+            base_point: Vector2::new(1.0, 2.0),
+            offset: Vector2::new(-0.5, 0.5),
+            dash_lengths: vec![],
+        });
+        let mut path = BoundaryPath::new();
+        for ((x0, y0), (x1, y1)) in [
+            ((0.0, 0.0), (6.0, 0.0)),
+            ((6.0, 0.0), (6.0, 5.0)),
+            ((6.0, 5.0), (0.0, 5.0)),
+            ((0.0, 5.0), (0.0, 0.0)),
+        ] {
+            path.edges.push(BoundaryEdge::Line(LineEdge {
+                start: Vector2::new(x0, y0),
+                end: Vector2::new(x1, y1),
+            }));
+        }
+        hatch.paths.push(path);
+        let color = [0.2, 0.5, 0.7, 0.8];
+        let source = Scene::hatch_model_from_dxf(&hatch, color).unwrap();
+        let delta = [29.0, -17.0, 0.0];
+        let cached = source.translated_for_render(delta, color);
+
+        let mut transformed = EntityType::Hatch(Box::new(hatch));
+        transformed.apply_transform(&Transform::from_translation(Vector3::new(
+            delta[0], delta[1], delta[2],
+        )));
+        let EntityType::Hatch(dxf) = transformed else {
+            unreachable!();
+        };
+        let direct = Scene::hatch_model_from_dxf(&dxf, color).unwrap();
+        for (a, b) in cached.world_origin.iter().zip(direct.world_origin) {
+            assert!((*a - b).abs() < 1e-5, "world origin mismatch {a} vs {b}");
+        }
+        assert_eq!(cached.boundary.len(), direct.boundary.len());
+        for (a, b) in cached.boundary.iter().zip(direct.boundary.iter()) {
+            for (component_a, component_b) in a.iter().zip(b.iter()) {
+                assert!((*component_a - component_b).abs() < 1e-4);
+            }
+        }
+        let (model::hatch_model::HatchPattern::Pattern(cached_families),
+            model::hatch_model::HatchPattern::Pattern(direct_families)) =
+            (&cached.pattern, &direct.pattern)
+        else {
+            panic!("expected both models to keep the stored PAT lines");
+        };
+        assert_eq!(cached_families.len(), direct_families.len());
+        for (a, b) in cached_families.iter().zip(direct_families.iter()) {
+            assert!((a.x0 - b.x0).abs() < 1e-4, "pattern x phase differs");
+            assert!((a.y0 - b.y0).abs() < 1e-4, "pattern y phase differs");
+        }
+    }
+}

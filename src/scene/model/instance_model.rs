@@ -289,6 +289,30 @@ pub fn mass_stub_wire_is_proxied(
         && wire.aabb[1] <= wire.aabb[3]
 }
 
+/// Cache just the one bounding proxy in the command at creation time.
+//// This avoids constructing, translating, rotating and allocating 80k child
+//// preview wires on *every* pointer move and snap-dwell tick. The authoritative
+//// command remains handle-based; only its disposable ghost changes LOD.
+pub fn cached_command_preview_for_large_2d_selection(
+    handles: usize,
+    wires: Vec<WireModel>,
+) -> Vec<WireModel> {
+    const MIN_SELECTED: usize = 512;
+    const MIN_WIRES: usize = 2048;
+    if handles <= MIN_SELECTED || wires.len() < MIN_WIRES {
+        return wires;
+    }
+    if let Some(proxy) = mass_transform_group_preview(&wires, MIN_WIRES) {
+        crate::perf_record!(
+            "[perf] mass-command-preview-cache selected={} original_wires={} proxy_wires={}",
+            handles, wires.len(), proxy.len()
+        );
+        proxy
+    } else {
+        wires
+    }
+}
+
 /// Emergency LOD for a very large interactive transform preview.
 //// No document geometry, entity handles, or snap sources are changed.
 //// Convert thousands of preview children into *one* overall XY extent
@@ -315,9 +339,11 @@ pub fn mass_transform_group_preview(
         if wire.snap_only || !wire.display_visible {
             continue;
         }
-        // Never flatten volumetric objects to XY: keep exact 3D preview.
+        // Never flatten spatial geometry to XY: keep exact 3-D preview,
+        // including wires at a nonzero constant elevation.
         if wire.fill_is_3d
             || wire.stub.as_ref().is_some_and(|stub| stub.delta[2].abs() > 1e-7)
+            || wire.points.iter().any(|p| !p[2].is_finite() || p[2].abs() > 1e-5)
         {
             return None;
         }

@@ -939,13 +939,14 @@ impl OpenCADStudio {
         };
         let mut timing = BoxSelectTiming::default();
         let t_sel = crate::perf::enabled().then(Instant::now);
-        let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
+        let area_candidates = self.tabs[i].scene.interaction_candidates_for_box(
             all_wires,
             world_aabb,
             [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)],
             view_rot,
             eye,
             bounds,
+            crossing,
         );
         timing.candidates = elapsed(t_sel);
         let t_hit = crate::perf::enabled().then(Instant::now);

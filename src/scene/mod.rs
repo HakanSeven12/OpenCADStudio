@@ -16336,3 +16336,37 @@ mod world_box_handle_tests {
         assert!(!handles.contains(&far_line), "far line joined the box");
     }
 }
+
+#[cfg(test)]
+mod cold_wire_block_pick_index_tests {
+    use super::*;
+
+    #[test]
+    fn cold_large_pick_builds_and_reuses_exact_spatial_index() {
+        let scene = Scene::new();
+        let wires = Arc::new((0..4096).map(|i| {
+            let x = i as f32 * 10.0;
+            WireModel {
+                name: (i + 1).to_string(),
+                points: vec![[x, 0.0, 0.0], [x + 2.0, 0.0, 0.0]],
+                aabb: [x, 0.0, x + 2.0, 0.0],
+                ..WireModel::default()
+            }
+        }).collect::<Vec<_>>());
+
+        // Background hover must not block waiting to build the expensive index.
+        assert!(scene.on_demand_pick_index(&wires, true, None).is_none());
+        assert!(scene.cached_interaction_index(&wires).is_none());
+
+        // Actual click cannot silently miss a candidate: construct and cache
+        // the complete spatial index before querying.
+        let first = scene.on_demand_pick_index(&wires, false, None).unwrap();
+        let second = scene.on_demand_pick_index(&wires, false, None).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        let near = first.query_xy(Arc::clone(&wires), [19.0, -1.0, 23.0, 1.0]);
+        assert!(near.len() > 0);
+        assert!(near.len() < wires.len());
+        let far = first.query_xy(Arc::clone(&wires), [-10000.0, -10000.0, -9990.0, -9990.0]);
+        assert_eq!(far.len(), 0, "spatial broad phase must exclude distant wires");
+    }
+}

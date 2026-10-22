@@ -10525,14 +10525,16 @@ impl Scene {
                         );
                         let model = if context.clips.is_empty() {
                             Self::hatch_translation_offset(&context.transform).and_then(|offset| {
-                                let seed = translated_sources.entry(source.common.handle).or_insert_with(|| {
-                                    reuse_unique += 1;
-                                    Self::hatch_model_from_dxf(source, color)
-                                });
-                                if reuse_unique > 0 {
+                                if translated_sources.contains_key(&source.common.handle) {
                                     reuse_hits += 1;
+                                } else {
+                                    reuse_unique += 1;
                                 }
-                                seed.as_ref().map(|model| model.translated_for_render(offset, color))
+                                translated_sources
+                                    .entry(source.common.handle)
+                                    .or_insert_with(|| Self::hatch_model_from_dxf(source, color))
+                                    .as_ref()
+                                    .map(|model| model.translated_for_render(offset, color))
                             })
                         } else {
                             None

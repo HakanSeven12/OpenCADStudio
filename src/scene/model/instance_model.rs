@@ -289,6 +289,91 @@ pub fn mass_stub_wire_is_proxied(
         && wire.aabb[1] <= wire.aabb[3]
 }
 
+/// Emergency LOD for a very large interactive transform preview.
+//// No document geometry, entity handles, or snap sources are changed.
+//// Convert thousands of preview children into *one* overall XY extent
+//// while preserving lightweight acquisition/tracking guide wires.
+//// All expensive command preview entry points (normal pointer movement
+//// and deferred SNAP_DWELL refresh) can use this same helper.
+pub fn mass_transform_group_preview(
+    wires: &[WireModel],
+    min_wires: usize,
+) -> Option<Vec<WireModel>> {
+    if wires.len() < min_wires {
+        return None;
+    }
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    let mut counted = 0usize;
+    let mut guides = Vec::new();
+    for wire in wires {
+        // Tracking aids are not part of the entity extents. Their endpoints
+        // can be intentionally thousands of world units away.
+        if wire.name.starts_with("__") {
+            guides.push(wire.clone());
+            continue;
+        }
+        if wire.snap_only || !wire.display_visible {
+            continue;
+        }
+        // Never flatten volumetric objects to XY: keep exact 3D preview.
+        if wire.fill_is_3d
+            || wire.stub.as_ref().is_some_and(|stub| stub.delta[2].abs() > 1e-7)
+        {
+            return None;
+        }
+        let bb = wire.aabb.map(f64::from);
+        if bb.iter().all(|v| v.is_finite() && v.abs() < 1e15)
+            && bb[0] <= bb[2] && bb[1] <= bb[3]
+        {
+            b[0] = b[0].min(bb[0]);
+            b[1] = b[1].min(bb[1]);
+            b[2] = b[2].max(bb[2]);
+            b[3] = b[3].max(bb[3]);
+            counted += 1;
+        } else {
+            // A SENTINEL/UNBOUNDED AABB on an analytic child should not
+            // enlarge the whole preview to +/- infinity. Its explicit
+            // points, if present, are still good conservative extents.
+            for p in &wire.points {
+                let x = f64::from(p[0]);
+                let y = f64::from(p[1]);
+                if x.is_finite() && y.is_finite()
+                    && x.abs() < 1e15 && y.abs() < 1e15
+                {
+                    b[0] = b[0].min(x);
+                    b[1] = b[1].min(y);
+                    b[2] = b[2].max(x);
+                    b[3] = b[3].max(y);
+                    counted += 1;
+                }
+            }
+        }
+    }
+    if counted == 0
+        || b.iter().any(|v| !v.is_finite())
+        || b[2] <= b[0]
+        || b[3] <= b[1]
+    {
+        return None;
+    }
+    let mut box_wire = WireModel::solid_f64(
+        "__mass_transform_group_extent__".to_owned(),
+        vec![
+            [b[0], b[1], 0.0],
+            [b[2], b[1], 0.0],
+            [b[2], b[3], 0.0],
+            [b[0], b[3], 0.0],
+            [b[0], b[1], 0.0],
+        ],
+        WireModel::SELECTED,
+        false,
+    );
+    // Mark as an ordinary visual-only overlay, not an editable entity.
+    box_wire.selected = false;
+    guides.push(box_wire);
+    Some(guides)
+}
+
 #[cfg(test)]
 mod mass_stub_outline_tests {
     use super::*;
@@ -384,6 +469,49 @@ mod mass_stub_outline_tests {
         ).collect();
         assert_eq!(remaining.len(), 300);
         assert!(remaining.iter().all(|wire| wire.aabb == WireModel::UNBOUNDED_AABB));
+    }
+
+    #[test]
+    fn one_group_proxy_covers_all_heavy_instances_and_ignores_distant_guides() {
+        let proto = Arc::new(vec![WireModel::default()]);
+        let mut refs = Vec::new();
+        for i in 0..700 {
+            let mut w = stub_wire(
+                Arc::clone(&proto), [0.0, 0.0, 1.0, 1.0],
+                [i as f64 * 2.0, 0.0, 0.0], 0.0,
+            );
+            w.name = i.to_string();
+            refs.push(w);
+        }
+        let guide = WireModel::solid_f64(
+            "__otrack_guide__".to_string(),
+            vec![[-1e5, -1e5, 0.0], [1e5, 1e5, 0.0]],
+            WireModel::WHITE, false,
+        );
+        refs.push(guide);
+        let result = mass_transform_group_preview(&refs, 512).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "__otrack_guide__");
+        assert_eq!(result[1].points.len(), 5);
+        assert!((result[1].points[2][0] as f64 - 1399.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn group_proxy_only_enters_after_threshold_and_skips_3d() {
+        let mut many = Vec::new();
+        for i in 0..1000 {
+            let mut w = WireModel::solid_f64(
+                i.to_string(),
+                vec![[i as f64, 0.0, 0.0], [i as f64+1.0, 1.0, 0.0]],
+                WireModel::WHITE, false,
+            );
+            w.aabb = [i as f32, 0.0, i as f32+1.0, 1.0];
+            many.push(w);
+        }
+        assert!(mass_transform_group_preview(&many, 2000).is_none());
+        assert_eq!(mass_transform_group_preview(&many, 512).unwrap().len(), 1);
+        many[5].fill_is_3d = true;
+        assert!(mass_transform_group_preview(&many, 512).is_none());
     }
 
     #[test]

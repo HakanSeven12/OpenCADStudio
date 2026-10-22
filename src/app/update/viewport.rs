@@ -3972,41 +3972,11 @@ impl OpenCADStudio {
             self.tabs[i]
                 .scene
                 .set_command_preview_hidden(&preview_hidden);
-            // A massive MOVE/COPY of repeated 2-D blocks must not upload
-            // millions of full-resolution leaf instances every mouse move.
-            // When enough block-copy stubs are present, use their exact
-            // conservative per-INSERT bounding boxes for the live *visual*
-            // preview. The command, snaps, document and committed result
-            // continue to use the original unsimplified CAD entities.
-            if self.tabs[i].scene.selected.len() > 512
-                && previews.len() >= 2048
-                && self.tabs[i].scene.preview_hatches.is_empty()
-            {
-                let (outlines, replaced) =
-                    crate::scene::model::instance_model::mass_stub_outlines(
-                        previews.iter(),
-                        2048,
-                    );
-                if !replaced.is_empty() {
-                    let before = previews.len();
-                    // Each INSERT also emits non-stub nested geometry.
-                    // Keeping those leaves meant before == after and still
-                    // uploaded 81,650 preview wires per pointer move.
-                    // The proxy groups cover the complete INSERT handle.
-                    previews.retain(|wire| {
-                        !crate::scene::model::instance_model::mass_stub_wire_is_proxied(
-                            wire, &replaced
-                        )
-                    });
-                    previews.extend(outlines);
-                    crate::perf_record!(
-                        "[perf] mass-block-preview before={} after={} proxies={} exact_geometry_on_commit=true",
-                        before,
-                        previews.len(),
-                        replaced.len(),
-                    );
-                }
-            }
+            // The central scene setter applies the *same* massive-command
+            // single-group preview to pointer movement and deferred SNAP_DWELL
+            // refreshes. Do not perform a different per-block simplification
+            // here: alternating representations caused repeated 320MiB
+            // geometry uploads and visible flicker.
             self.tabs[i].scene.set_preview_wires(previews);
             let preview_ms = crate::perf::elapsed_ms(preview_started);
             if perf_move && preview_ms >= 1.0 {

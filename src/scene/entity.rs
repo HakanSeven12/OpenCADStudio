@@ -132,20 +132,47 @@ pub(crate) fn gradient_tint_color(base: [f32; 4], target: f32) -> [f32; 4] {
 }
 
 impl Scene {
-    /// Return the f64 translation of an INSERT with an identity linear part.
-    /// Rotation, scale, shear and perspective must take the full DXF path.
-    pub(super) fn hatch_translation_offset(transform: &codec::types::Transform) -> Option<[f64; 3]> {
+    /// Fingerprint the linear portion of an affine INSERT independently of
+    /// position. CAD vegetation libraries commonly store rotation and uniform
+    /// or nonuniform scaling on every instance: a pure-translation gate misses
+    /// all of those copies and rebuilds tens of thousands of hatch boundaries.
+    pub(super) fn hatch_affine_parts(
+        transform: &codec::types::Transform,
+    ) -> Option<([u64; 9], [f64; 3])> {
         let m = &transform.matrix.m;
-        if m[0][0] != 1.0 || m[1][1] != 1.0 || m[2][2] != 1.0 || m[3][3] != 1.0
-            || m[0][1] != 0.0 || m[0][2] != 0.0
-            || m[1][0] != 0.0 || m[1][2] != 0.0
-            || m[2][0] != 0.0 || m[2][1] != 0.0
-            || m[3][0] != 0.0 || m[3][1] != 0.0 || m[3][2] != 0.0
-            || !m[0][3].is_finite() || !m[1][3].is_finite() || !m[2][3].is_finite()
+        if m[3][0] != 0.0 || m[3][1] != 0.0
+            || m[3][2] != 0.0 || m[3][3] != 1.0
+            || !m.iter().flatten().all(|component| component.is_finite())
         {
             return None;
         }
-        Some([m[0][3], m[1][3], m[2][3]])
+        let linear = [
+            m[0][0].to_bits(), m[0][1].to_bits(), m[0][2].to_bits(),
+            m[1][0].to_bits(), m[1][1].to_bits(), m[1][2].to_bits(),
+            m[2][0].to_bits(), m[2][1].to_bits(), m[2][2].to_bits(),
+        ];
+        Some((linear, [m[0][3], m[1][3], m[2][3]]))
+    }
+
+    /// Build one block-local model for a given affine linear transform.
+    /// Splitting the translation before expensive tessellation permits cached
+    /// boundaries/plane-local patterns to be shared by all matching INSERTs.
+    /// This is an in-memory rendering/picking model, never persisted to DWG.
+    pub(super) fn hatch_affine_source_model(
+        source: &codec::entities::Hatch,
+        transform: &codec::types::Transform,
+        color: [f32; 4],
+    ) -> Option<HatchModel> {
+        let mut without_translation = transform.clone();
+        without_translation.matrix.m[0][3] = 0.0;
+        without_translation.matrix.m[1][3] = 0.0;
+        without_translation.matrix.m[2][3] = 0.0;
+        let mut placed = EntityType::Hatch(Box::new(source.clone()));
+        placed.apply_transform(&without_translation);
+        match placed {
+            EntityType::Hatch(hatch) => Self::hatch_model_from_dxf(&hatch, color),
+            _ => None,
+        }
     }
     // ── Entity management ─────────────────────────────────────────────────
 
@@ -1898,14 +1925,11 @@ impl Scene {
         let mut hatch_block_memo = std::collections::HashMap::new();
         let mut models = Vec::new();
         let mut hatch_sources = rustc_hash::FxHashMap::default();
-        // A translated INSERT must not re-tessellate every leaf hatch. Keep
-        // one source model per block-definition entity for this build. Arc
-        // boundaries/patterns are shared by cloned placements. Only the
-        // translation-only, unclipped on-screen path uses this fast path,
-        // including selection previews. Plotting, XCLIP and non-translation
-        // transforms retain the exact transformed-DXF construction below.
-        let mut translated_hatch_sources: rustc_hash::FxHashMap<
-            Handle,
+        // Memoize each hatch leaf by definition handle AND full affine linear
+        // transform (rotation / scale / shear). Repeated INSERTs typically
+        // differ only by translation. Keep XCLIP/plotting on the exact path.
+        let mut transformed_hatch_sources: rustc_hash::FxHashMap<
+            (Handle, [u64; 9]),
             Option<HatchModel>,
         > = rustc_hash::FxHashMap::default();
         let measure_reuse = crate::perf::enabled();
@@ -1975,27 +1999,27 @@ impl Scene {
                 };
 
                 let matrix = &context.transform.matrix.m;
-                // All on-screen block fills, including selected INSERT overlays,
-                // can share block-local hatch geometry for pure translations.
-                // Retain the full DXF path for plot, XCLIP and other transforms.
-                let translation = (!plot_only && context.clips.is_empty())
-                    .then(|| Self::hatch_translation_offset(&context.transform))
+                let affine = (!plot_only && context.clips.is_empty())
+                    .then(|| Self::hatch_affine_parts(&context.transform))
                     .flatten();
-                let model = if let Some(offset) = translation {
+                let model = if let Some((linear, offset)) = affine {
+                    let key = (source_hatch.common.handle, linear);
                     if measure_reuse {
-                        if translated_hatch_sources.contains_key(&source_hatch.common.handle) {
+                        if transformed_hatch_sources.contains_key(&key) {
                             translation_reused += 1;
                         } else {
                             translation_unique += 1;
                         }
                     }
-                    translated_hatch_sources
-                        .entry(source_hatch.common.handle)
-                        .or_insert_with(|| Self::hatch_model_from_dxf(source_hatch, color))
-                        .as_ref()
-                        .map(|source| {
-                            source.translated_for_render(offset, color)
+                    transformed_hatch_sources
+                        .entry(key)
+                        .or_insert_with(|| {
+                            Self::hatch_affine_source_model(
+                                source_hatch, &context.transform, color,
+                            )
                         })
+                        .as_ref()
+                        .map(|source| source.translated_for_render(offset, color))
                 } else {
                     let mut placed = EntityType::Hatch(source_hatch.clone());
                     placed.apply_transform(&context.transform);
@@ -2075,10 +2099,10 @@ impl Scene {
                 let key = (
                     source_hatch.common.handle.value(),
                     linear,
-                    // A translated instance has the exact same leaf
-                    // boundary as every other placement of this handle.
-                    // Avoid hashing/copying thousands of vertices per plant.
-                    if translation.is_some() {
+                    // Instances with the same source handle and linear part
+                    // share the identical leaf polygon. The key already
+                    // includes that linear transform; do not copy its vertices.
+                    if affine.is_some() {
                         Vec::new()
                     } else {
                         model

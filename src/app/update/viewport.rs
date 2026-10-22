@@ -3989,9 +3989,11 @@ impl OpenCADStudio {
                     );
                 if !replaced.is_empty() {
                     let before = previews.len();
-                    previews.retain(|wire| {
-                        wire.stub.is_none() || !replaced.contains(&wire.name)
-                    });
+                    // Each INSERT also emits non-stub nested geometry.
+                    // Keeping those leaves meant before == after and still
+                    // uploaded 81,650 preview wires per pointer move.
+                    // The proxy groups cover the complete INSERT handle.
+                    previews.retain(|wire| !replaced.contains(&wire.name));
                     previews.extend(outlines);
                     crate::perf_record!(
                         "[perf] mass-block-preview before={} after={} proxies={} exact_geometry_on_commit=true",

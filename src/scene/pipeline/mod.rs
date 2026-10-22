@@ -2958,9 +2958,10 @@ impl Pipeline {
                 );
             if !replaced.is_empty() {
                 let before = selected_wires.len();
-                selected_wires.retain(|wire| {
-                    wire.stub.is_none() || !replaced.contains(&wire.name)
-                });
+                // The complete INSERT contains ordinary/analytic child
+                // wires alongside the stubs. The one-per-INSERT proxy covers
+                // all of them, otherwise we still double-highlight the leaves.
+                selected_wires.retain(|wire| !replaced.contains(&wire.name));
                 mass_selected_proxy_storage = outlines;
                 selected_wires.extend(mass_selected_proxy_storage.iter());
                 crate::perf_record!(

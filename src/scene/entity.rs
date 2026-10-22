@@ -1893,6 +1893,9 @@ impl Scene {
             Handle,
             Option<HatchModel>,
         > = rustc_hash::FxHashMap::default();
+        let measure_reuse = crate::perf::enabled();
+        let mut translation_reused = 0usize;
+        let mut translation_unique = 0usize;
         graph.walk_root(
             self.render_scene_root(layout_block),
             |entity, context| {
@@ -1980,6 +1983,13 @@ impl Scene {
                     && matrix[1][3].is_finite()
                     && matrix[2][3].is_finite();
                 let model = if translate_only {
+                    if measure_reuse {
+                        if translated_hatch_sources.contains_key(&source_hatch.common.handle) {
+                            translation_reused += 1;
+                        } else {
+                            translation_unique += 1;
+                        }
+                    }
                     translated_hatch_sources
                         .entry(source_hatch.common.handle)
                         .or_insert_with(|| Self::hatch_model_from_dxf(source_hatch, color))
@@ -2090,6 +2100,12 @@ impl Scene {
                 models.push(model);
             },
         );
+        if measure_reuse && translation_reused + translation_unique > 0 {
+            crate::perf_record!(
+                "[perf] hatch-source-reuse reused={translation_reused} unique={translation_unique} total={}",
+                models.len(),
+            );
+        }
         models
     }
 

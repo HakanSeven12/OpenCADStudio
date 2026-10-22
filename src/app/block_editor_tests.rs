@@ -6054,6 +6054,54 @@ fn block_alignment_runtime_grip_events_preview_history_and_native_roundtrips() {
 }
 
 #[test]
+fn block_alignment_runtime_off_target_flip_preview_and_history() {
+    use glam::DVec3;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.run_command_line("BPARAMETER ALIGNMENT 0,0 10,0");
+    let definition = app.tabs[app.active_tab].active_block_edit_session().unwrap().br_handle;
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    let i = app.active_tab;
+    app.tabs[i].scene.select_entity(reference, true);
+    app.tabs[i].selected_handle = Some(reference);
+    let alignment = app.tabs[i].scene.alignment_grips(reference).remove(0);
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    assert!(app.start_test_action_grip(reference, alignment.id));
+    let cursor = DVec3::new(100., 80., 7.);
+    let destination = DVec3::new(100., 80., 0.);
+    let command = app.tabs[i].active_cmd.as_mut().unwrap();
+    assert!(command.on_text_input("Flip").is_some());
+    let preview = command.preview_entities(&before, cursor);
+    assert_eq!(preview.len(), 1);
+    let mut preview_doc = before.clone();
+    *preview_doc.get_entity_mut(reference).unwrap() = preview[0].clone();
+    let preview_grip = crate::scene::block_alignment::grips(&preview_doc, definition, reference).remove(0);
+    assert!(preview_grip.anchor.distance(destination) < 1e-8);
+    assert!(preview_grip.direction.distance(-alignment.direction) < 1e-8, "off-target Flip must reverse preview direction by PI");
+    assert_eq!(app.tabs[i].scene.document, before);
+    let result = app.tabs[i].active_cmd.as_mut().unwrap().on_point(cursor);
+    let _ = app.handle_block_alignment(result);
+    assert!(app.tabs[i].active_cmd.is_none());
+    let committed = app.tabs[i].scene.alignment_grips(reference).remove(0);
+    assert!(committed.anchor.distance(destination) < 1e-8);
+    assert!(committed.direction.distance(preview_grip.direction) < 1e-8);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    for entity in before.entities() {
+        if entity.common().handle != reference {
+            assert_eq!(app.tabs[i].scene.document.get_entity(entity.common().handle), Some(entity));
+        }
+    }
+    assert_eq!(app.tabs[i].scene.document.objects, before.objects);
+    let changed = app.tabs[i].scene.document.get_entity(reference).unwrap().clone();
+    app.undo_steps(1);
+    assert_eq!(app.tabs[i].scene.document.get_entity(reference), before.get_entity(reference));
+    app.redo_steps(1);
+    assert_eq!(app.tabs[i].scene.document.get_entity(reference), Some(&changed));
+}
+
+#[test]
 fn block_alignment_runtime_rejects_stale_sources_and_reevaluates_targets() {
     use glam::DVec3;
     let (mut app, reference) = fixture();

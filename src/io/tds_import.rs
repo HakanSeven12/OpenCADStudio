@@ -448,6 +448,38 @@ fn view_height(distance: f64, lens: f64) -> f64 {
     distance * 17.6141 / lens
 }
 
+#[test]
+fn tds_convert_cancelled_mesh_preserves_reference_messages() {
+    let scene = TdsScene {
+        materials: vec![],
+        objects: vec![("Stopped".into(), TdsObject::Mesh(TdsMesh {
+            vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+            faces: vec![[0, 1, 2]],
+            groups: vec![("Material".into(), vec![0])],
+            color: Some(3),
+        }))],
+    };
+    let options = TdsOptions {
+        selected: vec!["Stopped".into()],
+        layers: LayerMode::ByObject,
+        multi: HashMap::new(),
+        compact: false,
+        single_layer: "0".into(),
+        stop_at: Some("Stopped".into()),
+    };
+    let out = convert(&scene, &options);
+    assert_eq!(out.messages, ["Processing object Stopped", "Import stopped at Stopped"]);
+    assert!(out.parts.is_empty());
+    assert!(out.steps.is_empty());
+    assert!(out.materials.is_empty());
+    assert!(out.views.is_empty());
+    assert!(!out.globals);
+    // The converter borrows the input immutably; repeated conversion is identical.
+    let again = convert(&scene, &options);
+    assert_eq!(again.messages, out.messages);
+    assert!(again.parts.is_empty() && again.steps.is_empty() && again.materials.is_empty());
+}
+
 pub fn convert(scene: &TdsScene, options: &TdsOptions) -> TdsImport {
     let mut out = TdsImport {
         parts: Vec::new(),
@@ -466,7 +498,8 @@ pub fn convert(scene: &TdsScene, options: &TdsOptions) -> TdsImport {
             continue;
         }
         if options.stop_at.as_ref() == Some(name) {
-            // The mesh the cancelled material question stopped at.
+            // Upstream 8b40bc707 (PR #1937) intentionally prints both reference
+            // lines for the mesh whose material question was cancelled.
             out.messages.push(format!("Processing object {name}"));
             out.messages.push(format!("Import stopped at {name}"));
             return out;

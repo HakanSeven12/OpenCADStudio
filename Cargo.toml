@@ -229,3 +229,7 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+# Keep direct and transitive codec users on the two verified fork fixes.
+[patch."https://github.com/HakanSeven12/opencadcodec.git"]
+acadrust = { git = "https://github.com/sclMAX/opencadcodec.git", rev = "cb96711852f97db10811a4e8d632824c940a1134" }

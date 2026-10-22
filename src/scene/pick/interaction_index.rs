@@ -1929,6 +1929,8 @@ impl InteractionCandidates {
         if !self.iter().any(|wire| wire.stub.is_some()) {
             return self;
         }
+        let started = crate::perf::enabled().then(iced::time::Instant::now);
+        let source_count = self.len();
         let mut wires = Vec::new();
         for wire in self.iter() {
             crate::scene::model::instance_model::expand_stub_near_into(
@@ -1936,6 +1938,15 @@ impl InteractionCandidates {
                 self.query_aabb,
                 &mut wires,
             );
+        }
+        if let Some(started) = started {
+            let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+            if elapsed_ms >= 16.7 {
+                crate::perf_record!(
+                    "[perf] interaction-stub-expand {:.1}ms source_wires={} expanded_wires={} query_xy={}",
+                    elapsed_ms, source_count, wires.len(), self.query_aabb.is_some(),
+                );
+            }
         }
         Self {
             query_aabb: self.query_aabb,

@@ -1883,6 +1883,16 @@ impl Scene {
         let mut hatch_block_memo = std::collections::HashMap::new();
         let mut models = Vec::new();
         let mut hatch_sources = rustc_hash::FxHashMap::default();
+        // A translated INSERT must not re-tessellate every leaf hatch. Keep
+        // one source model per block-definition entity for this build. Arc
+        // boundaries/patterns are shared by cloned placements. Only the
+        // translation-only, unclipped on-screen path uses this fast path;
+        // plotting, XCLIP, previews and non-translation transforms retain
+        // the exact transformed-DXF construction below.
+        let mut translated_hatch_sources: rustc_hash::FxHashMap<
+            Handle,
+            Option<HatchModel>,
+        > = rustc_hash::FxHashMap::default();
         graph.walk_root(
             self.render_scene_root(layout_block),
             |entity, context| {
@@ -1946,12 +1956,72 @@ impl Scene {
                     crate::scene::view::render::adapt_to_bg(style.0, hatch_bg)
                 };
 
-                let mut placed = EntityType::Hatch(source_hatch.clone());
-                placed.apply_transform(&context.transform);
-                let EntityType::Hatch(hatch) = placed else {
-                    return;
+                let matrix = &context.transform.matrix.m;
+                // An affine translation leaves hatch boundary offsets,
+                // island roles and pattern-family phase unchanged. The f64
+                // world/plane origins are the only geometry that must move.
+                let translate_only = !plot_only
+                    && targets.is_none()
+                    && context.clips.is_empty()
+                    && matrix[0][0] == 1.0
+                    && matrix[1][1] == 1.0
+                    && matrix[2][2] == 1.0
+                    && matrix[3][3] == 1.0
+                    && matrix[0][1] == 0.0
+                    && matrix[0][2] == 0.0
+                    && matrix[1][0] == 0.0
+                    && matrix[1][2] == 0.0
+                    && matrix[2][0] == 0.0
+                    && matrix[2][1] == 0.0
+                    && matrix[3][0] == 0.0
+                    && matrix[3][1] == 0.0
+                    && matrix[3][2] == 0.0
+                    && matrix[0][3].is_finite()
+                    && matrix[1][3].is_finite()
+                    && matrix[2][3].is_finite();
+                let model = if translate_only {
+                    translated_hatch_sources
+                        .entry(source_hatch.common.handle)
+                        .or_insert_with(|| Self::hatch_model_from_dxf(source_hatch, color))
+                        .as_ref()
+                        .map(|source| {
+                            let mut model = source.clone();
+                            let (dx, dy, dz) = (matrix[0][3], matrix[1][3], matrix[2][3]);
+                            model.world_origin[0] += dx;
+                            model.world_origin[1] += dy;
+                            if let Some(origin) = &mut model.pattern_origin {
+                                origin[0] += dx;
+                                origin[1] += dy;
+                            }
+                            if let Some(plane) = &mut model.fill_plane {
+                                plane.origin[0] += dx;
+                                plane.origin[1] += dy;
+                                plane.origin[2] += dz;
+                            }
+                            // The original DXF paths are in block-local space.
+                            // Do not expose them as placed paths on this render-
+                            // only fast path. Plotting and edit previews still
+                            // use the fully transformed paths.
+                            model.boundary_paths = None;
+                            if matches!(
+                                model.pattern,
+                                model::hatch_model::HatchPattern::Gradient { .. }
+                            ) {
+                                model.set_alpha(color[3]);
+                            } else {
+                                model.color = color;
+                            }
+                            model
+                        })
+                } else {
+                    let mut placed = EntityType::Hatch(source_hatch.clone());
+                    placed.apply_transform(&context.transform);
+                    match placed {
+                        EntityType::Hatch(hatch) => Self::hatch_model_from_dxf(&hatch, color),
+                        _ => None,
+                    }
                 };
-                let Some(mut model) = Self::hatch_model_from_dxf(&hatch, color) else {
+                let Some(mut model) = model else {
                     return;
                 };
                 model.aci = style.4;

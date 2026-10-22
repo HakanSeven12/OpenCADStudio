@@ -365,21 +365,12 @@ impl OpenCADStudio {
     }
 
     pub(super) fn commit_authoring_name(&mut self) -> Task<Message> {
+        self.commit_authoring_metadata("authoring_name")
+    }
+
+    pub(super) fn commit_authoring_metadata(&mut self, key: &'static str) -> Task<Message> {
+        use crate::scene::block_authoring::metadata;
         let i = self.active_tab;
-        let key = crate::ui::properties::FieldKey::Geom("authoring_name");
-        let Some(name) = self.tabs[i]
-            .properties
-            .edit_buf
-            .remove(&key)
-            .map(|s| s.trim().to_owned())
-        else {
-            return Task::none();
-        };
-        if name.is_empty() {
-            self.command_line
-                .push_error(crate::t!("Parameter name cannot be empty.").as_ref());
-            return Task::none();
-        }
         let Some(handle) = self.tabs[i].selected_authoring else {
             return Task::none();
         };
@@ -387,76 +378,45 @@ impl OpenCADStudio {
             return Task::none();
         };
         let definition = session.br_handle;
-        let doc = &self.tabs[i].scene.document;
-        if edit::items(doc, definition)
-            .iter()
-            .any(|item| item.handle != handle && item.name.eq_ignore_ascii_case(&name))
-        {
-            self.command_line
-                .push_error(crate::t!("Parameter names must be unique.").as_ref());
-            return Task::none();
-        }
-        let mut staged = doc.clone();
-        let changed = match staged.objects.get_mut(&handle) {
-            Some(codec::objects::ObjectType::BlockVisibilityParameter(parameter)) => {
-                parameter.name = name;
-                true
-            }
-            Some(codec::objects::ObjectType::DynamicBlock(object)) => match &mut object.data {
-                codec::objects::DynamicBlockData::PointParameter(p) => {
-                    p.position_name = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::LinearParameter(p) => {
-                    p.distance_name = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::PolarParameter(p) => {
-                    p.distance_name = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::XYParameter(p) => {
-                    p.x_label = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::RotationParameter(p) => {
-                    p.angle_name = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::AlignmentParameter(p) => {
-                    p.parameter.parameter.element.name = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::FlipParameter(p) => {
-                    p.flip_label = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::BasePointParameter(p) => {
-                    p.parameter.parameter.element.name = name;
-                    true
-                }
-                codec::objects::DynamicBlockData::LookupParameter(p) => {
-                    p.lookup_name = name;
-                    true
-                }
-                _ => false,
-            },
-            _ => false,
+        let mut staged = self.tabs[i].scene.document.clone();
+        let result = if key == "authoring_show_properties" {
+            metadata::read(&staged, definition, handle)
+                .and_then(|m| {
+                    m.visible
+                        .ok_or("This parameter has no supported reference property row.")
+                })
+                .and_then(|visible| {
+                    metadata::set_visible(&mut staged, definition, handle, !visible)
+                })
+        } else {
+            let Some(field) = metadata::Field::from_key(key) else {
+                return Task::none();
+            };
+            let Some(input) = self.tabs[i]
+                .properties
+                .edit_buf
+                .get(&crate::ui::properties::FieldKey::Geom(key))
+            else {
+                return Task::none();
+            };
+            metadata::set_text(&mut staged, definition, handle, field, input)
         };
-        if changed {
-            if let Some(codec::objects::ObjectType::BlockVisibilityParameter(parameter)) =
-                staged.objects.get(&handle)
-            {
-                staged
-                    .block_visibility_params
-                    .insert(handle, parameter.clone());
+        match result {
+            Ok(changed) => {
+                if changed {
+                    self.push_undo_snapshot(i, "Edit block parameter metadata");
+                    self.tabs[i].scene.document = staged;
+                    self.tabs[i].dirty = true;
+                    self.tabs[i].scene.bump_geometry();
+                    self.finish_pending_history(i);
+                }
+                self.tabs[i]
+                    .properties
+                    .edit_buf
+                    .remove(&crate::ui::properties::FieldKey::Geom(key));
+                self.refresh_properties();
             }
-            self.push_undo_snapshot(i, "Rename block parameter");
-            self.tabs[i].scene.document = staged;
-            self.tabs[i].dirty = true;
-            self.tabs[i].scene.bump_geometry();
-            self.finish_pending_history(i);
-            self.refresh_properties();
+            Err(error) => self.command_line.push_error(crate::t!(error).as_ref()),
         }
         Task::none()
     }

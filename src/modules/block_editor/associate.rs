@@ -71,7 +71,7 @@ impl AssociateCommand {
     fn choose_parameter(&mut self, index: usize, clicked_key: Option<XyKeyPoint>) -> CmdResult {
         self.parameter = Some(index);
         let kind = self.candidates[self.action.unwrap()].kind;
-        if matches!(kind, Kind::Move | Kind::Stretch) && !self.parameters[index].point {
+        if matches!(kind, Kind::Move | Kind::Stretch | Kind::PolarStretch) && !self.parameters[index].point {
             clicked_key.map_or(CmdResult::NeedPoint, |key| self.finish(Some(key)))
         } else {
             self.finish(None)

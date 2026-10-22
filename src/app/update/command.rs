@@ -3986,6 +3986,9 @@ impl OpenCADStudio {
         if field == "authoring_name" {
             return self.commit_authoring_name();
         }
+        if crate::scene::block_authoring::metadata::Field::from_key(field).is_some() {
+            return self.commit_authoring_metadata(field);
+        }
         if field.starts_with("authoring_set_") {
             return self.commit_authoring_value_set(field);
         }

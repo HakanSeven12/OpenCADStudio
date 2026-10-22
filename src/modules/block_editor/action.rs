@@ -161,6 +161,10 @@ impl CadCommand for ActionCommand {
             .into_owned();
         }
         if self.kind.is_some_and(actions::needs_frame) && self.frame.is_empty() {
+            if self.kind == Some(Kind::PolarStretch) {
+                let point = if self.xy_key_point == Some(XyKeyPoint::Base) { "Base" } else { "End" };
+                return crate::tf!("BACTION  Specify first corner of action frame or [CPolygon/Base/End] <{point}>:").into_owned();
+            }
             if let Some(point) = self.xy_key_point {
                 let point = match point {
                     XyKeyPoint::Base => "base",
@@ -240,7 +244,11 @@ impl CadCommand for ActionCommand {
                     CmdOption::new("Close", "Close"),
                 ]
             } else if self.frame.is_empty() {
-                vec![CmdOption::new("CPolygon", "CPolygon")]
+                let mut options = vec![CmdOption::new("CPolygon", "CPolygon")];
+                if self.kind == Some(Kind::PolarStretch) {
+                    options.extend([CmdOption::new("Base", "Base"), CmdOption::new("End", "End")]);
+                }
+                options
             } else {
                 vec![]
             }
@@ -262,6 +270,14 @@ impl CadCommand for ActionCommand {
         }
     }
     fn on_text_input(&mut self, s: &str) -> Option<CmdResult> {
+        if self.parameter.is_some() && self.kind == Some(Kind::PolarStretch) && self.frame.is_empty() && !self.frame_done {
+            let key = match s.trim().to_ascii_uppercase().as_str() {
+                "BASE" | "B" => Some(XyKeyPoint::Base),
+                "END" | "E" => Some(XyKeyPoint::End),
+                _ => None,
+            };
+            if let Some(key) = key { self.xy_key_point = Some(key); return Some(CmdResult::NeedPoint); }
+        }
         if self.parameter.is_some()
             && self.kind.is_some_and(actions::needs_frame)
             && !self.frame_done

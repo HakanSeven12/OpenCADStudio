@@ -7925,6 +7925,9 @@ impl OpenCADStudio {
             }
 
             Message::PropBoolToggle(field) => {
+                if field == "authoring_show_properties" {
+                    return self.commit_authoring_metadata(field);
+                }
                 if field == "authoring_action_base_dependent" {
                     return self.commit_authoring_action_base(field);
                 }

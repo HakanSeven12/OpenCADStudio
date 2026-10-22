@@ -2498,13 +2498,20 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                     panel.title = item.name.clone();
                     panel.sections = vec![PropSection {
                         title: crate::t!("Geometry").into_owned(),
-                        props: std::iter::once(Property {
-                            label: crate::t!("Parameter name").into_owned(),
-                            field: "authoring_name",
-                            value: if matches!(self.tabs[i].scene.document.objects.get(&item.handle), Some(codec::objects::ObjectType::DynamicBlock(object)) if matches!(object.data, codec::objects::DynamicBlockData::PropertiesTable(_))) {
-                                PropValue::ReadOnly(item.name.clone())
-                            } else { PropValue::PlainText(item.name.clone()) },
-                        })
+                        props: self.tabs[i].active_block_edit_session()
+                            .and_then(|session| crate::scene::block_authoring::metadata::read(&self.tabs[i].scene.document, session.br_handle, item.handle).ok())
+                            .map(|metadata| {
+                                let mut props: Vec<Property> = metadata.text.into_iter().map(|text| Property {
+                                    label: crate::t!(text.label).into_owned(), field: text.field.key(),
+                                    value: PropValue::PlainText(text.value.to_owned()),
+                                }).collect();
+                                if let Some(visible) = metadata.visible {
+                                    props.push(Property { label: crate::t!("Show in Properties").into_owned(), field: "authoring_show_properties", value: PropValue::BoolToggle { field: "authoring_show_properties", value: visible } });
+                                }
+                                props
+                            }).unwrap_or_else(|| vec![Property {
+                                label: crate::t!("Parameter name").into_owned(), field: "authoring_name", value: PropValue::ReadOnly(item.name.clone()),
+                            }]).into_iter()
                         .chain(item.grips.into_iter().map(|(part, point)| {
                             Property {
                                 label: crate::t!(match part {

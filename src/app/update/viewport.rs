@@ -5110,10 +5110,18 @@ impl OpenCADStudio {
                 self.last_vp_click_time = Some(now);
                 self.last_vp_click_pos = Some(p);
                 if is_double && self.authoring_name_is_editable(handle) {
-                    let key = crate::ui::properties::FieldKey::Geom("authoring_name");
+                    use crate::scene::block_authoring::metadata::{self, Field};
+                    let (field, name) = self.tabs[i].active_block_edit_session()
+                        .and_then(|session| metadata::read(&self.tabs[i].scene.document, session.br_handle, handle).ok())
+                        .and_then(|metadata| {
+                            let text = metadata.text.iter().find(|text| matches!(text.field, Field::Name | Field::SecondaryName) && text.value == name)
+                                .or_else(|| metadata.text.iter().find(|text| text.field == Field::Name))?;
+                            Some((text.field.key(), text.value.to_owned()))
+                        }).unwrap_or(("authoring_name", name));
+                    let key = crate::ui::properties::FieldKey::Geom(field);
                     self.tabs[i].properties.edit_buf.insert(key, name);
                     self.tabs[i].properties.active_field = None;
-                    let id = crate::ui::properties::prop_geom_field_id("authoring_name");
+                    let id = crate::ui::properties::prop_geom_field_id(field);
                     return Task::batch([
                         iced::widget::operation::focus(id.clone()),
                         iced::widget::operation::select_all(id),

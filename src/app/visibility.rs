@@ -328,13 +328,14 @@ impl OpenCADStudio {
             return None;
         };
         let (def_block, param) = doc.dynamic_visibility_for_insert(handle)?;
+        if !param.show_properties { return None; }
         let options: Vec<String> = param.states.iter().map(|s| s.name.clone()).collect();
         let current = Self::current_visibility_state(doc, def_block, &ins.block_name, param);
         // An unnamed parameter takes the name a new one gets in the file.
-        let label = if param.element_name.trim().is_empty() {
+        let label = if param.name.trim().is_empty() {
             "Visibility1".to_string()
         } else {
-            param.element_name.clone()
+            param.name.clone()
         };
         Some(crate::scene::model::object::Property {
             label,

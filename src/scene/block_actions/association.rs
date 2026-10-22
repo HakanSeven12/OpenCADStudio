@@ -32,7 +32,7 @@ pub(crate) fn associate(
         .into_iter()
         .find(|p| p.handle == parameter && compatible(p, kind))
         .ok_or("Select a compatible parameter for this action.")?;
-    if key_point.is_some() && !matches!(kind, Kind::Move | Kind::Stretch) {
+    if key_point.is_some() && !matches!(kind, Kind::Move | Kind::Stretch | Kind::PolarStretch) {
         return Err("This action does not use a parameter key point.");
     }
     if !p.xy && matches!(key_point, Some(XyKeyPoint::X | XyKeyPoint::Y)) {
@@ -57,15 +57,8 @@ pub(crate) fn associate(
                 stretch::bind_existing(doc, &native.action.dependencies, &native.points, p.end.z)?;
         }
         DynamicBlockData::PolarStretchAction(native) => {
-            native.connections = [
-                "BaseXDelta",
-                "BaseYDelta",
-                "Base",
-                "End",
-                "UpdatedBase",
-                "UpdatedEnd",
-            ]
-            .map(connection);
+            let key_point = key_point.or_else(|| stretch::polar_key_point(native).ok());
+            native.connections = polar_connections(&p, key_point);
             let stretching = native.action.dependencies.iter().copied().filter(|handle| !native.handles.contains(handle)).collect::<Vec<_>>();
             native.bindings =
                 stretch::bind_existing(doc, &stretching, &native.points, p.end.z)?;

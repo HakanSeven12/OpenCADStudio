@@ -13,6 +13,7 @@ pub(crate) mod feedback;
 pub(crate) mod association;
 mod representation;
 mod stretch;
+mod targets;
 pub(crate) mod options;
 
 /// Smallest signed distance between two angles in radians, accounting for the
@@ -26,6 +27,8 @@ mod tests;
 mod frame_tests;
 #[cfg(test)]
 mod frame_evaluation_tests;
+#[cfg(test)]
+mod polar_frame_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -517,7 +520,7 @@ pub(crate) fn create_with_frame_points(
         .find(|p| p.handle == parameter)
         .ok_or("Select a compatible parameter belonging to this block.")?;
     if xy_key_point.is_some_and(|point| {
-        !matches!(kind, Kind::Move | Kind::Stretch)
+        !matches!(kind, Kind::Move | Kind::Stretch | Kind::PolarStretch)
             || (p.xy
                 && !matches!(
                     point,
@@ -647,18 +650,7 @@ pub(crate) fn create_with_frame_points(
             let (points, bindings) = polar_binding.unwrap();
             DynamicBlockData::PolarStretchAction(BlockPolarStretchAction {
                 action,
-                connections: std::array::from_fn(|i| BlockConnection {
-                    code: p.id,
-                    name: [
-                        "BaseXDelta",
-                        "BaseYDelta",
-                        "Base",
-                        "End",
-                        "UpdatedBase",
-                        "UpdatedEnd",
-                    ][i]
-                        .into(),
-                }),
+                connections: polar_connections(&p, xy_key_point),
                 points,
                 handles: vec![],
                 bindings,
@@ -737,6 +729,13 @@ fn move_connections(p: &Parameter, key_point: Option<XyKeyPoint>) -> [BlockConne
     })
 }
 
+fn polar_connections(p: &Parameter, key_point: Option<XyKeyPoint>) -> [BlockConnection; 6] {
+    let (x, y) = if key_point == Some(XyKeyPoint::Base) {
+        ("BaseXDelta", "BaseYDelta")
+    } else { ("EndXDelta", "EndYDelta") };
+    [x, y, "Base", "End", "UpdatedBase", "UpdatedEnd"].map(|name| BlockConnection { code: p.id, name: name.into() })
+}
+
 fn action_move_delta(
     parameter: &Parameter,
     current_base: DVec3,
@@ -813,6 +812,9 @@ pub(crate) fn retarget_frame_points(
         return Err("Select supported drawing objects belonging to this block.");
     }
     let old_targets = action.dependencies.clone();
+    let old_geometry = targets::geometry(doc, definition, kind, id, &old_targets)?;
+    let bookkeeping = old_targets.iter().copied().filter(|handle| !old_geometry.contains(handle)).collect::<Vec<_>>();
+    let requested_targets = targets.clone();
     let mut staged = doc.clone();
     let ObjectType::DynamicBlock(o) = staged.objects.get_mut(&handle).unwrap() else {
         unreachable!()
@@ -834,7 +836,7 @@ pub(crate) fn retarget_frame_points(
                 a.handles.retain(|h| targets.contains(&h.handle));
                 let mut retained = a.clone();
                 retained.action.dependencies.retain(|h| targets.contains(h));
-                stretch::validate(doc, &retained)?;
+                stretch::validate(doc, definition, &retained)?;
                 let added = targets
                     .iter()
                     .copied()
@@ -847,7 +849,7 @@ pub(crate) fn retarget_frame_points(
             a.action.dependencies = targets;
         }
         DynamicBlockData::PolarStretchAction(a) => {
-            stretch::validate_polar(doc, a)?;
+            stretch::validate_polar(doc, definition, a)?;
             let plane = parameters(doc, definition, Kind::PolarStretch)
                 .into_iter()
                 .find(|p| p.id == id)
@@ -881,6 +883,13 @@ pub(crate) fn retarget_frame_points(
         }
         DynamicBlockData::ArrayAction(a) => a.action.dependencies = targets,
         _ => return Err("This action's selection cannot be edited yet."),
+    }
+    if !bookkeeping.is_empty() {
+        let action = targets::action_mut(&mut o.data).unwrap();
+        action.dependencies = old_targets.iter().copied().filter(|handle| bookkeeping.contains(handle) || requested_targets.contains(handle)).collect();
+        for handle in requested_targets {
+            if !action.dependencies.contains(&handle) { action.dependencies.push(handle); }
+        }
     }
     if frame.is_some() && !needs_frame(kind) {
         return Err("Only Stretch actions have an action frame.");
@@ -949,9 +958,15 @@ pub(crate) fn actions(
 }
 /// Drop erased objects from action targets without replacing graph nodes.
 pub(crate) fn prune_erased_targets(doc: &mut CadDocument, definition: Handle) {
-    let live = authoring::members(doc, definition)
+    let mut live = authoring::members(doc, definition)
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
+    if let Ok(Some(graph)) = authoring::graph(doc, definition) {
+        live.extend(doc.objects.iter().filter_map(|(handle, object)| match object {
+            ObjectType::DynamicBlock(object) if object.owner == graph => Some(*handle),
+            _ => None,
+        }));
+    }
     let handles = actions(doc, definition)
         .into_iter()
         .map(|(h, _, _, _)| h)
@@ -1357,25 +1372,153 @@ fn evaluate_impl(
     }
     let all = actions(baseline, definition);
     let mut affected = std::collections::BTreeSet::new();
-    for (h, a, kind, _) in &all {
+    let mut geometric_targets = std::collections::BTreeMap::new();
+    let mut prepared = std::collections::BTreeMap::new();
+    for (action_handle, a, kind, id) in &all {
         if *kind == Kind::Stretch {
-            let ObjectType::DynamicBlock(o) = &baseline.objects[h] else {
+            let ObjectType::DynamicBlock(o) = &baseline.objects[action_handle] else {
                 unreachable!()
             };
             let DynamicBlockData::StretchAction(s) = &o.data else {
                 unreachable!()
             };
-            stretch::validate(baseline, s)?;
+            stretch::validate(baseline, definition, s)?;
         } else if *kind == Kind::PolarStretch {
-            let ObjectType::DynamicBlock(o) = &baseline.objects[h] else {
+            let ObjectType::DynamicBlock(o) = &baseline.objects[action_handle] else {
                 unreachable!()
             };
             let DynamicBlockData::PolarStretchAction(s) = &o.data else {
                 unreachable!()
             };
-            stretch::validate_polar(baseline, s)?;
+            stretch::validate_polar(baseline, definition, s)?;
         }
-        affected.extend(a.dependencies.iter().copied());
+        let geometric = targets::geometry(baseline, definition, *kind, *id, &a.dependencies)?;
+        affected.extend(geometric.iter().copied());
+        geometric_targets.insert(*action_handle, geometric);
+        if *kind == Kind::Array || a.dependencies.is_empty() { continue; }
+        let q = parameters(baseline, definition, *kind)
+            .into_iter()
+            .find(|p| p.id == *id)
+            .ok_or("An action has an unsupported parameter binding.")?;
+        if !supported_parameter(baseline, q.handle) {
+            return Err("This parameter uses value constraints or chaining not supported yet.");
+        }
+        let end = current(&staged, &q);
+        let base = base_for(&q);
+        let ObjectType::DynamicBlock(action_object) = &baseline.objects[action_handle] else {
+            unreachable!()
+        };
+        let move_translation = match &action_object.data {
+            DynamicBlockData::MoveAction(move_action) => {
+                Some(action_move_delta(&q, base, end, &move_action.connections)
+                    .map(|delta| options::displacement(&move_action.offsets, delta)).transpose()?)
+            }
+            _ => None,
+        };
+        let transform = match kind {
+            Kind::Move => crate::command::EntityTransform::Translate(
+                move_translation
+                    .flatten()
+                    .ok_or("This Move action uses unsupported parameter connections.")?,
+            ),
+            Kind::Stretch => {
+                let DynamicBlockData::StretchAction(action) = &action_object.data else { unreachable!() };
+                let delta = action_move_delta(&q, base, end, &action.connections)
+                    .ok_or("This Stretch action uses unsupported parameter connections.")?;
+                crate::command::EntityTransform::Translate(options::displacement(&action.offsets, delta)?)
+            }
+            Kind::PolarStretch => crate::command::EntityTransform::Translate(end - q.end),
+            Kind::Rotate => {
+                let a = end - base;
+                let b = q.end - q.base;
+                crate::command::EntityTransform::Rotate {
+                    center: options::pivot(options::base(baseline, *action_handle).ok_or("The Rotate action base is unavailable.")?, q.base)?,
+                    axis: DVec3::Z,
+                    angle_rad: a.y.atan2(a.x) - b.y.atan2(b.x),
+                }
+            }
+            Kind::Flip => {
+                if value(&staged, &q)? == Value::Flip(false) {
+                    crate::command::EntityTransform::Translate(DVec3::ZERO)
+                } else {
+                    crate::command::EntityTransform::Mirror {
+                        p1: q.base,
+                        p2: q.end,
+                        working_normal: DVec3::Z,
+                    }
+                }
+            }
+            Kind::Scale => {
+                let factor = end.distance(base) / q.end.distance(q.base);
+                if !factor.is_finite() || factor < 1e-9 {
+                    return Err("Specify a positive scale distance.");
+                }
+                crate::command::EntityTransform::Scale {
+                    center: options::pivot(options::base(baseline, *action_handle).ok_or("The Scale action base is unavailable.")?, q.base)?,
+                    factor,
+                }
+            }
+            Kind::Array => unreachable!(),
+        };
+        // Do not silently ignore retained native action chains.
+        if !a.action_ids.is_empty() {
+            return Err("Chained actions are not supported yet.");
+        }
+        let o = action_object;
+        match &o.data {
+            DynamicBlockData::MoveAction(m)
+                if action_move_delta(&q, base, end, &m.connections).is_none() =>
+            {
+                return Err("This Move action uses options not supported yet.");
+            }
+            DynamicBlockData::FlipAction(f)
+                if f.connections
+                    != ["Flip", "UpdatedFlip", "UpdatedBase", "UpdatedEnd"].map(|name| {
+                        BlockConnection {
+                            code: q.id,
+                            name: name.into(),
+                        }
+                    }) =>
+            {
+                return Err("This Flip action uses options not supported yet.");
+            }
+            DynamicBlockData::RotateAction(r)
+                if r.connections
+                        != vec![BlockConnection {
+                            code: q.id,
+                            name: "AngleDelta".into(),
+                        }]
+                    || r.action.connections
+                        != ["UpdatedBaseX", "UpdatedBaseY"].map(|name| BlockConnection {
+                            code: q.id,
+                            name: name.into(),
+                        }) =>
+            {
+                return Err("This Rotate action uses options not supported yet.");
+            }
+            DynamicBlockData::ScaleAction(s)
+                if s.connections
+                        != ["Scale", "XScale", "YScale"].map(|name| BlockConnection {
+                            code: q.id,
+                            name: name.into(),
+                        })
+                    || s.action.connections
+                        != ["UpdatedBaseX", "UpdatedBaseY"].map(|name| BlockConnection {
+                            code: q.id,
+                            name: name.into(),
+                        }) =>
+            {
+                return Err("This Scale action uses options not supported yet.");
+            }
+            _ => {}
+        }
+        if *kind == Kind::PolarStretch {
+            let (old_length, new_length) = (q.end.distance(q.base), end.distance(base));
+            if !old_length.is_finite() || !new_length.is_finite() || old_length <= 1e-9 || new_length <= 1e-9 {
+                return Err("The Polar parameter needs a nonzero distance.");
+            }
+        }
+        prepared.insert(*action_handle, (q, base, end, transform));
     }
     for h in affected {
         let mut entity = baseline
@@ -1389,126 +1532,16 @@ fn evaluate_impl(
         if let Some(e) = staged.get_entity(h) {
             entity.common_mut().invisible = e.common().invisible;
         }
-        for (action_handle, a, kind, id) in &all {
+        for (action_handle, a, kind, _id) in &all {
             if !a.dependencies.contains(&h) || *kind == Kind::Array {
                 continue;
             }
-            let q = parameters(baseline, definition, *kind)
-                .into_iter()
-                .find(|p| p.id == *id)
-                .ok_or("An action has an unsupported parameter binding.")?;
-            if !supported_parameter(baseline, q.handle) {
-                return Err("This parameter uses value constraints or chaining not supported yet.");
-            }
-            let end = current(&staged, &q);
-            let base = base_for(&q);
-            let ObjectType::DynamicBlock(action_object) = &baseline.objects[action_handle] else {
-                unreachable!()
-            };
-            let move_translation = match &action_object.data {
-                DynamicBlockData::MoveAction(move_action) => {
-                    Some(action_move_delta(&q, base, end, &move_action.connections)
-                        .map(|delta| options::displacement(&move_action.offsets, delta)).transpose()?)
-                }
-                _ => None,
-            };
-            let transform = match kind {
-                Kind::Move => crate::command::EntityTransform::Translate(
-                    move_translation
-                        .flatten()
-                        .ok_or("This Move action uses unsupported parameter connections.")?,
-                ),
-                Kind::Stretch | Kind::PolarStretch => {
-                    crate::command::EntityTransform::Translate(end - q.end)
-                }
-                Kind::Rotate => {
-                    let a = end - base;
-                    let b = q.end - q.base;
-                    crate::command::EntityTransform::Rotate {
-                        center: options::pivot(options::base(baseline, *action_handle).ok_or("The Rotate action base is unavailable.")?, q.base)?,
-                        axis: DVec3::Z,
-                        angle_rad: a.y.atan2(a.x) - b.y.atan2(b.x),
-                    }
-                }
-                Kind::Flip => {
-                    if value(&staged, &q)? == Value::Flip(false) {
-                        crate::command::EntityTransform::Translate(DVec3::ZERO)
-                    } else {
-                        crate::command::EntityTransform::Mirror {
-                            p1: q.base,
-                            p2: q.end,
-                            working_normal: DVec3::Z,
-                        }
-                    }
-                }
-                Kind::Scale => {
-                    let factor = end.distance(base) / q.end.distance(q.base);
-                    if !factor.is_finite() || factor < 1e-9 {
-                        return Err("Specify a positive scale distance.");
-                    }
-                    crate::command::EntityTransform::Scale {
-                        center: options::pivot(options::base(baseline, *action_handle).ok_or("The Scale action base is unavailable.")?, q.base)?,
-                        factor,
-                    }
-                }
-                Kind::Array => unreachable!(),
-            };
-            // Do not silently ignore retained native action chains.
-            if !a.action_ids.is_empty() {
-                return Err("Chained actions are not supported yet.");
-            }
-            let o = action_object;
-            match &o.data {
-                DynamicBlockData::MoveAction(m)
-                    if action_move_delta(&q, base, end, &m.connections).is_none() =>
-                {
-                    return Err("This Move action uses options not supported yet.");
-                }
-                DynamicBlockData::FlipAction(f)
-                    if f.connections
-                        != ["Flip", "UpdatedFlip", "UpdatedBase", "UpdatedEnd"].map(|name| {
-                            BlockConnection {
-                                code: q.id,
-                                name: name.into(),
-                            }
-                        }) =>
-                {
-                    return Err("This Flip action uses options not supported yet.");
-                }
-                DynamicBlockData::RotateAction(r)
-                    if r.connections
-                            != vec![BlockConnection {
-                                code: q.id,
-                                name: "AngleDelta".into(),
-                            }]
-                        || r.action.connections
-                            != ["UpdatedBaseX", "UpdatedBaseY"].map(|name| BlockConnection {
-                                code: q.id,
-                                name: name.into(),
-                            }) =>
-                {
-                    return Err("This Rotate action uses options not supported yet.");
-                }
-                DynamicBlockData::ScaleAction(s)
-                    if s.connections
-                            != ["Scale", "XScale", "YScale"].map(|name| BlockConnection {
-                                code: q.id,
-                                name: name.into(),
-                            })
-                        || s.action.connections
-                            != ["UpdatedBaseX", "UpdatedBaseY"].map(|name| BlockConnection {
-                                code: q.id,
-                                name: name.into(),
-                            }) =>
-                {
-                    return Err("This Scale action uses options not supported yet.");
-                }
-                _ => {}
-            }
+            let (q, base, end, transform) = prepared.get(action_handle).unwrap();
+            let (base, end) = (*base, *end);
+            let ObjectType::DynamicBlock(o) = &baseline.objects[action_handle] else { unreachable!() };
             if let DynamicBlockData::StretchAction(s) = &o.data {
-                let delta = action_move_delta(&q, base, end, &s.connections)
-                    .ok_or("This Stretch action uses unsupported parameter connections.")?;
-                stretch::apply(&mut entity, s, options::displacement(&s.offsets, delta)?)?;
+                let crate::command::EntityTransform::Translate(delta) = transform else { unreachable!() };
+                stretch::apply(&mut entity, s, *delta)?;
             } else if let DynamicBlockData::PolarStretchAction(s) = &o.data {
                 if s.connections.iter().any(|c| c.code != q.id) {
                     return Err("This Polar Stretch action uses a different parameter binding.");
@@ -1517,10 +1550,9 @@ fn evaluate_impl(
                 if direction.length() <= 1e-9 {
                     return Err("The Polar parameter needs a nonzero distance.");
                 }
-                stretch::apply_polar(&mut entity, s, q.base, q.end, q.base + (end - base))?;
-                super::view::dispatch::apply_transform(&mut entity, &crate::command::EntityTransform::Translate(base - q.base));
+                stretch::apply_polar_frame(&mut entity, s, q.base, q.end, base, end)?;
             } else {
-                super::view::dispatch::apply_transform(&mut entity, &transform);
+                super::view::dispatch::apply_transform(&mut entity, transform);
             }
             if matches!(kind, Kind::Rotate | Kind::Scale)
                 && options::base(baseline, *action_handle).is_some_and(|action| action.dependent)
@@ -1615,7 +1647,7 @@ fn evaluate_impl(
                 .collect()
         };
         for (k, disp) in displacements {
-            for target_h in &a.dependencies {
+            for target_h in &geometric_targets[action_handle] {
                 let mut clone = staged
                     .get_entity(*target_h)
                     .cloned()

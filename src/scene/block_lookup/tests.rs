@@ -257,6 +257,14 @@ fn lookup_reverse_selection_evaluates_saved_reference_geometry() {
         .add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO)))
         .unwrap();
 
+    let mut hidden = document.clone();
+    let grips = crate::scene::block_grips::config::locations(&hidden, definition, lookup).unwrap().into_iter().map(|g| (g.role, g.handle, g.point, g.key_point, g.direction)).collect::<Vec<_>>();
+    crate::scene::block_authoring::metadata::set_visible(&mut hidden, definition, lookup, false).unwrap();
+    assert!(reference_property(&hidden, insert).is_none());
+    assert_eq!(crate::scene::block_grips::config::locations(&hidden, definition, lookup).unwrap().into_iter().map(|g| (g.role, g.handle, g.point, g.key_point, g.direction)).collect::<Vec<_>>(), grips);
+    let hidden_evaluated = evaluate_reference_choice(&hidden, insert, "Large").unwrap().unwrap();
+    assert!(reference_property(&hidden_evaluated, insert).is_none());
+
     let initial = reference_property(&document, insert).unwrap();
     let crate::scene::model::object::PropValue::Choice { selected, options } = initial.value else {
         panic!("Lookup property should be a choice.")

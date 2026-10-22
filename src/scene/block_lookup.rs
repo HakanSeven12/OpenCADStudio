@@ -295,6 +295,7 @@ pub(crate) fn reference_property(
 ) -> Option<crate::scene::model::object::Property> {
     let definition = super::block_actions::instance::definition(document, insert)?;
     for (parameter, lookup) in parameters(document, definition) {
+        if !lookup.parameter.parameter.show_properties { continue; }
         let Some((_, table)) = table(document, definition, parameter).ok().flatten() else {
             continue;
         };

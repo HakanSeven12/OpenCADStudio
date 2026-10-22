@@ -100,13 +100,14 @@ pub(crate) fn set_rotate_only(
     let DynamicBlockData::PolarStretchAction(native) = &object.data else {
         unreachable!()
     };
-    super::stretch::validate_polar(doc, native)?;
+    super::stretch::validate_polar(doc, definition, native)?;
+    let geometric = super::targets::geometry(doc, definition, Kind::PolarStretch, native.connections[0].code, &native.action.dependencies)?;
     let mut targets = targets.to_vec();
     targets.sort();
     targets.dedup();
     if targets
         .iter()
-        .any(|handle| !native.action.dependencies.contains(handle))
+        .any(|handle| !geometric.contains(handle))
     {
         return Err("Select rotate-only objects from this action's selection set.");
     }
@@ -129,7 +130,7 @@ pub(crate) fn set_rotate_only(
     });
     staged.bindings.extend(added);
     staged.bindings.sort_by_key(|binding| binding.handle);
-    super::stretch::validate_polar(doc, &staged)?;
+    super::stretch::validate_polar(doc, definition, &staged)?;
     let Some(ObjectType::DynamicBlock(object)) = doc.objects.get_mut(&action) else {
         unreachable!()
     };

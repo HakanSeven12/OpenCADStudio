@@ -194,14 +194,28 @@ impl MeasureGeomCommand {
         }
     }
 
-    /// Extract (radius) from a Circle or Arc; `None` for anything else.
-    fn radius_of(entity: &EntityType) -> Option<f64> {
-        let radius = match entity {
-            EntityType::Circle(circle) => circle.radius,
-            EntityType::Arc(arc) => arc.radius,
-            _ => return None,
-        };
-        (radius.is_finite() && radius > 0.0 && (radius * 2.0).is_finite()).then_some(radius)
+    fn radius_at(entity: &EntityType, point: DVec3) -> Option<f64> {
+        match entity {
+            EntityType::Circle(circle) => {
+                let radius = circle.radius;
+                (radius.is_finite() && radius > 0.0 && (radius * 2.0).is_finite()).then_some(radius)
+            }
+            EntityType::Arc(arc) => {
+                let radius = arc.radius;
+                (radius.is_finite() && radius > 0.0 && (radius * 2.0).is_finite()).then_some(radius)
+            }
+            EntityType::Region(_) => {
+                let source = crate::scene::dimension_assoc::radial_source_at(
+                    entity,
+                    codec::types::Vector3::new(point.x, point.y, point.z),
+                )?;
+                (source.radius.is_finite()
+                    && source.radius > 0.0
+                    && (source.radius * 2.0).is_finite())
+                .then_some(source.radius)
+            }
+            _ => None,
+        }
     }
 
     /// DISTANCE readout for the two collected points.
@@ -407,7 +421,9 @@ impl CadCommand for MeasureGeomCommand {
                 1 => t!("MEASUREGEOM  Specify first ray point:").into_owned(),
                 _ => t!("MEASUREGEOM  Specify second ray point:").into_owned(),
             },
-            Mode::Radius => t!("MEASUREGEOM  Select arc or circle:").into_owned(),
+            Mode::Radius => {
+                t!("MEASUREGEOM  Select arc, circle, or circular region edge:").into_owned()
+            }
             Mode::AngleLines => {
                 return if self.first_line.is_none() {
                     crate::tr!("measurement", "first-line", command = self.name)
@@ -455,7 +471,7 @@ impl CadCommand for MeasureGeomCommand {
             Mode::Radius => self
                 .hovered
                 .as_ref()
-                .and_then(|(_, e)| Self::radius_of(e))
+                .and_then(|(_, e)| Self::radius_at(e, cursor))
                 .map(Self::radius_msg),
             Mode::AngleLines => {
                 let (first_handle, first) = self.first_line?;
@@ -581,14 +597,14 @@ impl CadCommand for MeasureGeomCommand {
         Vec::new()
     }
 
-    fn on_entity_pick(&mut self, handle: Handle, _point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
         // Never reuse an entity injected for a previous pick.
         let picked = self.picked.take();
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
         match self.mode {
-            Mode::Radius => match picked.as_ref().and_then(Self::radius_of) {
+            Mode::Radius => match picked.as_ref().and_then(|e| Self::radius_at(e, point)) {
                 Some(radius) => CmdResult::Measurement(Self::radius_msg(radius)),
                 None => CmdResult::ReportError(crate::tr!("measurement", "invalid-radius")),
             },
@@ -743,6 +759,46 @@ mod measurement_tests {
     }
     fn line(end: Vector3) -> EntityType {
         EntityType::Line(Line::from_points(Vector3::ZERO, end))
+    }
+
+    #[test]
+    fn region_radius_uses_the_hovered_and_picked_boundary() {
+        units();
+        use kernel::geom2d::{Circle as KernelCircle, Curve};
+        let region = crate::scene::model::presspull_model::region_from_loops(
+            &[
+                vec![Curve::Circle(KernelCircle {
+                    centre: [0.0, 0.0],
+                    radius: 10.0,
+                })],
+                vec![Curve::Circle(KernelCircle {
+                    centre: [0.0, 0.0],
+                    radius: 2.0,
+                })],
+            ],
+            WorkingPlane::default(),
+        )
+        .unwrap();
+        let before = format!("{region:?}");
+        let mut command = MeasureGeomCommand::radius();
+        let handle = Handle::new(1);
+        command.inject_hover_entity(handle, region.clone());
+        for radius in [10.0, 2.0] {
+            let point = DVec3::X * radius;
+            command.on_hover_entity(handle, point);
+            assert_eq!(
+                command.measurement_readout(point),
+                Some(MeasureGeomCommand::radius_msg(radius))
+            );
+            command.inject_picked_entity(region.clone());
+            assert_eq!(
+                result(command.on_entity_pick(handle, point)),
+                MeasureGeomCommand::radius_msg(radius)
+            );
+        }
+        assert_eq!(format!("{region:?}"), before);
+        command.on_hover_entity(Handle::NULL, DVec3::ZERO);
+        assert!(command.measurement_readout(DVec3::ZERO).is_none());
     }
 
     #[test]

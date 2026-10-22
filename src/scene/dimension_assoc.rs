@@ -116,7 +116,255 @@ fn dpoint(point: Vector3) -> DPoint {
     [point.x, point.y, point.z]
 }
 
+struct RegionBoundaryPiece {
+    curve: KernelCurve,
+    radial: Option<RadialSourceGeometry>,
+}
+
+fn certified_rational_quadratic_circle(
+    nurbs: &kernel::geom2d::NurbsCurve,
+) -> Option<([f64; 2], f64, f64, f64)> {
+    if nurbs.degree() != 2 {
+        return None;
+    }
+    let knots = nurbs.knots();
+    if knots.len() != 6 {
+        return None;
+    }
+    let t0 = knots[0];
+    let t1 = knots[5];
+    let knot_tol = 1e-12 * (1.0 + t0.abs().max(t1.abs()));
+    if (knots[1] - t0).abs() > knot_tol
+        || (knots[2] - t0).abs() > knot_tol
+        || (knots[3] - t1).abs() > knot_tol
+        || (knots[4] - t1).abs() > knot_tol
+        || t1 <= t0 + knot_tol
+    {
+        return None;
+    }
+    let cps = nurbs.control_points();
+    let weights = nurbs.weights();
+    if cps.len() != 3 || weights.len() != 3 {
+        return None;
+    }
+    let w0 = weights[0];
+    let w1_raw = weights[1];
+    let w2 = weights[2];
+    if !w0.is_finite()
+        || !w1_raw.is_finite()
+        || !w2.is_finite()
+        || w0 <= 0.0
+        || w1_raw <= 0.0
+        || w2 <= 0.0
+    {
+        return None;
+    }
+    let w_scale = (w0 * w2).sqrt();
+    let weight_tol = 1e-7 * (w0 + w2);
+    if (w0 - w2).abs() > weight_tol {
+        return None;
+    }
+    let w = w1_raw / w_scale;
+    if w <= 1e-9 || w >= 1.0 - 1e-12 {
+        return None;
+    }
+
+    let p0 = cps[0];
+    let p1 = cps[1];
+    let p2 = cps[2];
+    let v1 = [p1[0] - p0[0], p1[1] - p0[1]];
+    let v2 = [p2[0] - p0[0], p2[1] - p0[1]];
+    let t1 = [v2[0] - v1[0], v2[1] - v1[1]];
+
+    let l0_sq = v1[0] * v1[0] + v1[1] * v1[1];
+    let l1_sq = t1[0] * t1[0] + t1[1] * t1[1];
+    let l0 = l0_sq.sqrt();
+    let l1 = l1_sq.sqrt();
+    let geom_scale = l0.max(l1);
+    if geom_scale <= 1e-12 {
+        return None;
+    }
+
+    // Isosceles control triangle (equal tangent lengths)
+    let geom_tol = 1e-7 * geom_scale;
+    if (l0 - l1).abs() > geom_tol {
+        return None;
+    }
+
+    // Non-degenerate chord
+    let chord_sq = v2[0] * v2[0] + v2[1] * v2[1];
+    let chord = chord_sq.sqrt();
+    if chord <= 1e-12 {
+        return None;
+    }
+
+    // Midpoint symmetry: (P1 - M) . (P2 - P0) == 0
+    let m_rel = [v2[0] * 0.5, v2[1] * 0.5];
+    let p1_minus_m = [v1[0] - m_rel[0], v1[1] - m_rel[1]];
+    let dot = p1_minus_m[0] * v2[0] + p1_minus_m[1] * v2[1];
+    if dot.abs() > 1e-6 * geom_scale * chord {
+        return None;
+    }
+
+    // Conic circle identity: w = chord / (2 * l0)
+    let expected_w = chord / (2.0 * l0);
+    if (w - expected_w).abs() > 1e-6 {
+        return None;
+    }
+
+    // Center in local coordinates relative to P0
+    let w_sq = w * w;
+    let denom = 1.0 - w_sq;
+    if denom <= 1e-12 {
+        return None;
+    }
+    let c_rel = [
+        (m_rel[0] - w_sq * v1[0]) / denom,
+        (m_rel[1] - w_sq * v1[1]) / denom,
+    ];
+    let center = [p0[0] + c_rel[0], p0[1] + c_rel[1]];
+    let radius = c_rel[0].hypot(c_rel[1]);
+    if radius <= 1e-12 {
+        return None;
+    }
+
+    // Verify distance from center to P2 equals radius within relative tolerance
+    let p2_rel = [v2[0] - c_rel[0], v2[1] - c_rel[1]];
+    let r2 = p2_rel[0].hypot(p2_rel[1]);
+    if (r2 - radius).abs() > 1e-6 * radius {
+        return None;
+    }
+
+    // Angles
+    let th0 = (-c_rel[1]).atan2(-c_rel[0]);
+    let th2 = (p2_rel[1]).atan2(p2_rel[0]);
+    let shoulder_denom = 2.0 * (1.0 + w);
+    let shoulder_rel = [
+        (2.0 * w * v1[0] + v2[0]) / shoulder_denom - c_rel[0],
+        (2.0 * w * v1[1] + v2[1]) / shoulder_denom - c_rel[1],
+    ];
+    let th_mid = shoulder_rel[1].atan2(shoulder_rel[0]);
+    let span_0_mid = (th_mid - th0).rem_euclid(TAU);
+    let span_0_2 = (th2 - th0).rem_euclid(TAU);
+    let (start_angle, end_angle) = if span_0_mid <= span_0_2 {
+        (th0, th2)
+    } else {
+        (th2, th0)
+    };
+
+    Some((center, radius, start_angle, end_angle))
+}
+
+fn curve_as_circular(curve: &KernelCurve) -> Option<([f64; 2], f64, f64, f64, bool)> {
+    match curve {
+        KernelCurve::Circle(circle) => Some((circle.centre, circle.radius, 0.0, 0.0, true)),
+        KernelCurve::Arc(arc) => Some((
+            arc.centre,
+            arc.radius,
+            arc.start_angle,
+            arc.end_angle,
+            false,
+        )),
+        KernelCurve::Nurbs(nurbs) => {
+            let (center, radius, start, end) = certified_rational_quadratic_circle(nurbs)?;
+            Some((center, radius, start, end, false))
+        }
+        _ => None,
+    }
+}
+
+fn loop_is_full_circle(pieces: &[KernelCurve]) -> bool {
+    if pieces.is_empty() {
+        return false;
+    }
+    if pieces.len() == 1 {
+        if let KernelCurve::Circle(_) = &pieces[0] {
+            return true;
+        }
+    }
+    let mut total_sweep = 0.0;
+    let mut expected_center: Option<[f64; 2]> = None;
+    let mut expected_radius = 0.0;
+    for piece in pieces {
+        let Some((center, radius, start, end, full)) = curve_as_circular(piece) else {
+            return false;
+        };
+        if full {
+            return true;
+        }
+        if let Some(c0) = expected_center {
+            if (c0[0] - center[0]).hypot(c0[1] - center[1]) > 1e-4
+                || (expected_radius - radius).abs() > 1e-4
+            {
+                return false;
+            }
+        } else {
+            expected_center = Some(center);
+            expected_radius = radius;
+        }
+        total_sweep += positive_sweep(start, end);
+    }
+    (total_sweep - TAU).abs() <= 1e-3
+}
+
+fn region_boundary_pieces(entity: &EntityType) -> Option<(Plane, Vec<RegionBoundaryPiece>)> {
+    let (plane, loops, _) = crate::scene::model::presspull_model::profile_geometry(entity)?;
+    let unit = Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
+    let transform = kernel::geom2d::Transform {
+        origin: unit.project(plane.origin)?.into(),
+        x_axis: unit.project_vector(plane.x_axis)?.into(),
+        y_axis: unit.project_vector(plane.y_axis)?.into(),
+    };
+    let mut pieces = Vec::new();
+    for loop_curves in loops {
+        let transformed_loop: Vec<KernelCurve> = loop_curves
+            .into_iter()
+            .map(|curve| curve.transformed(&transform))
+            .collect::<Option<Vec<_>>>()?;
+        let is_circle_loop = loop_is_full_circle(&transformed_loop);
+        for curve in transformed_loop {
+            let marker = pieces.len() as i32;
+            let radial = curve_as_circular(&curve).map(|(center, radius, start, end, full)| {
+                let limited = !full && !is_circle_loop;
+                let (start_angle, end_angle) = if limited { (start, end) } else { (0.0, 0.0) };
+                RadialSourceGeometry {
+                    plane: unit,
+                    center,
+                    radius,
+                    start_angle,
+                    end_angle,
+                    limited,
+                    marker,
+                }
+            });
+            pieces.push(RegionBoundaryPiece { curve, radial });
+        }
+    }
+    Some((unit, pieces))
+}
+
+fn curve_distance_squared_to(plane: &Plane, curve: &KernelCurve, point: DPoint) -> f64 {
+    let Some(projected) = plane.project(point) else {
+        return f64::INFINITY;
+    };
+    let planar = closest_point(curve, projected).distance;
+    let world = plane.point_at(projected);
+    let dx = world[0] - point[0];
+    let dy = world[1] - point[1];
+    let dz = world[2] - point[2];
+    planar * planar + dx * dx + dy * dy + dz * dz
+}
+
 fn radial_candidates(entity: &EntityType) -> Vec<RadialSourceGeometry> {
+    if matches!(entity, EntityType::Region(_)) {
+        let Some((_, pieces)) = region_boundary_pieces(entity) else {
+            return Vec::new();
+        };
+        return pieces
+            .into_iter()
+            .filter_map(|piece| piece.radial)
+            .collect();
+    }
     let Some(planar) = crate::entities::curve::entity_curve(entity) else {
         return Vec::new();
     };
@@ -166,6 +414,15 @@ pub(crate) fn radial_source_at(
     entity: &EntityType,
     point: Vector3,
 ) -> Option<RadialSourceGeometry> {
+    if matches!(entity, EntityType::Region(_)) {
+        let (plane, pieces) = region_boundary_pieces(entity)?;
+        let pt = dpoint(point);
+        let nearest = pieces.iter().min_by(|first, second| {
+            curve_distance_squared_to(&plane, &first.curve, pt)
+                .total_cmp(&curve_distance_squared_to(&plane, &second.curve, pt))
+        })?;
+        return nearest.radial;
+    }
     radial_candidates(entity)
         .into_iter()
         .min_by(|first, second| {
@@ -176,6 +433,11 @@ pub(crate) fn radial_source_at(
 }
 
 fn radial_source_for_marker(entity: &EntityType, marker: i32) -> Option<RadialSourceGeometry> {
+    if matches!(entity, EntityType::Region(_)) {
+        let (_, pieces) = region_boundary_pieces(entity)?;
+        let index = usize::try_from(marker).ok()?;
+        return pieces.get(index).and_then(|piece| piece.radial);
+    }
     radial_candidates(entity)
         .into_iter()
         .find(|candidate| candidate.marker == marker)
@@ -570,10 +832,10 @@ pub fn resolve_reference_chain(
         }
     }
     let legacy = reference.main_subent_type != 2
-        && matches!(
+        && (matches!(
             reference.osnap_type,
             chain::osnap::NONE | chain::osnap::END | chain::osnap::START_POINT
-        );
+        ) || matches!(entity, EntityType::Region(_)));
     let local = if reference.osnap_type == chain::osnap::PERP && !walked.block_path.is_empty() {
         from_space
             .and_then(|from| {
@@ -636,8 +898,15 @@ fn resolve_local_by_marker(
         return Some(radial.point_at_angle(angle));
     }
     if reference.main_gs_marker == POLYLINE_ARC_CENTER_MARKER {
-        let segment = reference.osnap_distance.round().max(0.0) as usize;
-        return polyline_arc_center(entity, segment);
+        let segment = reference.osnap_distance.round().max(0.0) as i32;
+        if matches!(entity, EntityType::Region(_)) {
+            return radial_source_for_marker(entity, segment).map(|r| r.center_world());
+        }
+        return polyline_arc_center(entity, segment as usize);
+    }
+    if matches!(entity, EntityType::Region(_)) && reference.main_gs_marker >= 0 {
+        let radial = radial_source_for_marker(entity, reference.main_gs_marker)?;
+        return Some(radial.point_at_angle(reference.osnap_distance));
     }
     if reference.main_gs_marker == -3 {
         return match entity {
@@ -2337,6 +2606,18 @@ fn feature_reference(
             }
             if matches!(entity, EntityType::Circle(_) | EntityType::Arc(_)) {
                 return source_reference(entity, point);
+            }
+            if matches!(entity, EntityType::Region(_)) && kind == S::Center {
+                if let Some((_, pieces)) = region_boundary_pieces(entity) {
+                    for (index, piece) in pieces.iter().enumerate() {
+                        if let Some(radial) = piece.radial {
+                            let center = radial.center_world();
+                            if point_distance_squared(center, point) < 1e-12 {
+                                return Some((POLYLINE_ARC_CENTER_MARKER, index as f64));
+                            }
+                        }
+                    }
+                }
             }
             let planar = crate::entities::curve::entity_curve(entity)?;
             if let KernelCurve::Polyline(polyline) = &planar.curve {

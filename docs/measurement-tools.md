@@ -47,10 +47,14 @@ Once acquired, its tracking guides use the full snap path.
 
 ### Radius — `MEASURERADIUS`
 
-1. Move the cursor over a circle or circular arc to preview its radius and diameter.
+1. Move the cursor over a circle, circular arc, or circular edge of a `REGION` to preview its radius and diameter.
 2. Select the entity to complete the measurement.
 
-Other entity types and invalid radii are rejected; the command stays active so another entity can be selected. Moving off a valid entity clears its preview rather than retaining a stale value.
+When measuring a `REGION`, the nearest actual boundary edge under the cursor
+(including inner holes) is evaluated. Straight or non-circular region edges, other
+unsupported entity types, and invalid radii are rejected; the command stays active
+so another entity can be selected. Moving off a valid entity clears its preview
+rather than retaining a stale value.
 
 ### Angle — `MEASUREANGLE`
 

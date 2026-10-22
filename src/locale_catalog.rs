@@ -2093,7 +2093,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MEASURE: entity type not supported or distance too large." => Some(("common", "measure-entity-type-not-supported-or-distance")),
         "MEASURE: {count} point(s) placed." => Some(("common", "measure-count-point-s-placed")),
         "MEASUREGEOM  Enter an option [Quick/Distance/Radius/Angle/ARea]:" => Some(("inquiry", "measuregeom-enter-an-option-distance-radius-an")),
-        "MEASUREGEOM  Select arc or circle:" => Some(("inquiry", "measuregeom-select-arc-or-circle")),
+        "MEASUREGEOM  Select arc, circle, or circular region edge:" => Some(("inquiry", "measuregeom-select-arc-or-circle")),
         "MEASUREGEOM  Specify first corner point (Enter to cancel):" => Some(("inquiry", "measuregeom-specify-first-corner-point-enter-t")),
         "MEASUREGEOM  Specify first point:" => Some(("inquiry", "measuregeom-specify-first-point")),
         "MEASUREGEOM  Specify first ray point:" => Some(("inquiry", "measuregeom-specify-first-ray-point")),

@@ -132,6 +132,21 @@ pub(crate) fn gradient_tint_color(base: [f32; 4], target: f32) -> [f32; 4] {
 }
 
 impl Scene {
+    /// Return the f64 translation of an INSERT with an identity linear part.
+    /// Rotation, scale, shear and perspective must take the full DXF path.
+    pub(super) fn hatch_translation_offset(transform: &codec::types::Transform) -> Option<[f64; 3]> {
+        let m = &transform.matrix.m;
+        if m[0][0] != 1.0 || m[1][1] != 1.0 || m[2][2] != 1.0 || m[3][3] != 1.0
+            || m[0][1] != 0.0 || m[0][2] != 0.0
+            || m[1][0] != 0.0 || m[1][2] != 0.0
+            || m[2][0] != 0.0 || m[2][1] != 0.0
+            || m[3][0] != 0.0 || m[3][1] != 0.0 || m[3][2] != 0.0
+            || !m[0][3].is_finite() || !m[1][3].is_finite() || !m[2][3].is_finite()
+        {
+            return None;
+        }
+        Some([m[0][3], m[1][3], m[2][3]])
+    }
     // ── Entity management ─────────────────────────────────────────────────
 
     /// Register `name` in the layer table if it isn't already there, giving the
@@ -1960,29 +1975,13 @@ impl Scene {
                 };
 
                 let matrix = &context.transform.matrix.m;
-                // An affine translation leaves hatch boundary offsets,
-                // island roles and pattern-family phase unchanged. The f64
-                // world/plane origins are the only geometry that must move.
-                let translate_only = !plot_only
-                    && targets.is_none()
-                    && context.clips.is_empty()
-                    && matrix[0][0] == 1.0
-                    && matrix[1][1] == 1.0
-                    && matrix[2][2] == 1.0
-                    && matrix[3][3] == 1.0
-                    && matrix[0][1] == 0.0
-                    && matrix[0][2] == 0.0
-                    && matrix[1][0] == 0.0
-                    && matrix[1][2] == 0.0
-                    && matrix[2][0] == 0.0
-                    && matrix[2][1] == 0.0
-                    && matrix[3][0] == 0.0
-                    && matrix[3][1] == 0.0
-                    && matrix[3][2] == 0.0
-                    && matrix[0][3].is_finite()
-                    && matrix[1][3].is_finite()
-                    && matrix[2][3].is_finite();
-                let model = if translate_only {
+                // All on-screen block fills, including selected INSERT overlays,
+                // can share block-local hatch geometry for pure translations.
+                // Retain the full DXF path for plot, XCLIP and other transforms.
+                let translation = (!plot_only && context.clips.is_empty())
+                    .then(|| Self::hatch_translation_offset(&context.transform))
+                    .flatten();
+                let model = if let Some(offset) = translation {
                     if measure_reuse {
                         if translated_hatch_sources.contains_key(&source_hatch.common.handle) {
                             translation_reused += 1;
@@ -1995,10 +1994,7 @@ impl Scene {
                         .or_insert_with(|| Self::hatch_model_from_dxf(source_hatch, color))
                         .as_ref()
                         .map(|source| {
-                            source.translated_for_render(
-                                [matrix[0][3], matrix[1][3], matrix[2][3]],
-                                color,
-                            )
+                            source.translated_for_render(offset, color)
                         })
                 } else {
                     let mut placed = EntityType::Hatch(source_hatch.clone());

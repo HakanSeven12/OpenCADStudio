@@ -3993,7 +3993,11 @@ impl OpenCADStudio {
                     // Keeping those leaves meant before == after and still
                     // uploaded 81,650 preview wires per pointer move.
                     // The proxy groups cover the complete INSERT handle.
-                    previews.retain(|wire| !replaced.contains(&wire.name));
+                    previews.retain(|wire| {
+                        !crate::scene::model::instance_model::mass_stub_wire_is_proxied(
+                            wire, &replaced
+                        )
+                    });
                     previews.extend(outlines);
                     crate::perf_record!(
                         "[perf] mass-block-preview before={} after={} proxies={} exact_geometry_on_commit=true",

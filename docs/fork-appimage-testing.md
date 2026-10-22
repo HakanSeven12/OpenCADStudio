@@ -6,6 +6,7 @@ This integration branch combines current upstream OpenCADStudio with REGION obje
 
 - Application upstream base: `ea4537429dfbdda6a94ea31dbc6c5cc684363f26`.
 - REGION snap and OTRACK changes retain their separate work-unit commits on this branch.
+- Throttled cursor drafting reuses upstream's authoritative Ortho/Polar calculation, including elevated planes and UCS Z tracking in 3D views.
 - Codec: `sclMAX/opencadcodec` at `cb96711852f97db10811a4e8d632824c940a1134`, published as `integration/dwg2010-fixes`. A source-wide Cargo patch also redirects transitive codec users; no machine-local source override is required.
 - The codec commit contains the independently submitted associative-arc and REGION-tail fixes. The pending upstream PRs are independent of this test-build branch.
 

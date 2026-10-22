@@ -2909,31 +2909,28 @@ impl OpenCADStudio {
                         .and_then(|command| command.cursor_plane())
                         .is_some();
                     if !uses_command_cursor_plane {
+                        let mut drafted_elevation = false;
                         if let Some(base) = self.last_point {
-                            let ucs_xf = self.tabs[i].ucs_xform();
-                            if self.ortho_mode {
-                                pt = drafting_constrain(
-                                    pt,
-                                    base,
-                                    &ucs_xf,
-                                    self.isometric_drafting,
-                                    self.iso_plane,
-                                    self.snap_angle_deg,
-                                );
-                            } else if self.polar_mode {
-                                pt = polar_constrain_near(
-                                    pt,
-                                    base,
-                                    self.polar_increment_deg,
-                                    view_rot,
-                                    eye,
-                                    bounds,
-                                    self.snapper.osnap_radius_px,
-                                    &ucs_xf,
-                                );
+                            // Match the authoritative Ortho/Polar path, including
+                            // elevated drafting planes and the UCS Z direction.
+                            if let Some((point, on_z)) =
+                                self.drafting_point(i, p, pt, base, view_rot, eye, bounds)
+                            {
+                                pt = point;
+                                drafted_elevation = true;
+                                let up = (point - base).dot(self.tabs[i].ucs_xform().axes().3);
+                                if on_z && up != 0.0 {
+                                    self.otrack_active = Some((base, (point - base).normalize()));
+                                    self.otrack_cross = None;
+                                    self.otrack_kind = Some(if up > 0.0 {
+                                        crate::snap::TrackingKind::PlusZ
+                                    } else {
+                                        crate::snap::TrackingKind::MinusZ
+                                    });
+                                }
                             }
                         }
-                        if self.tabs[i].active_ucs.is_none() {
+                        if self.tabs[i].active_ucs.is_none() && !drafted_elevation {
                             pt.z = 0.0;
                         }
                     }
@@ -8751,6 +8748,74 @@ mod rapid_drawing_tests {
             preview_has_endpoint(&app, 88.0, 42.0),
             "fast cursor move must update the STRETCH geometry, not hide it"
         );
+    }
+
+    #[test]
+    fn rapid_drafting_polar_matches_authoritative_point() {
+        for (target, engaged) in [
+            (glam::DVec3::new(40.0, 0.25, 0.0), true),
+            (glam::DVec3::new(40.0, 20.0, 0.0), false),
+        ] {
+            let exercise = |force_full: bool| {
+                let mut app = drawing_app("LINE");
+                let i = app.active_tab;
+                let start = screen(&app, glam::DVec3::ZERO);
+                let _ = app.update(Message::ViewportLeftPressAt(start));
+                app.polar_mode = true;
+                app.polar_increment_deg = 90.0;
+                let first = screen(&app, glam::DVec3::new(20.0, 0.0, 0.0));
+                let _ = app.update(Message::ViewportMove(first));
+                assert!(app.snap_dwell.is_some());
+                if force_full { app.snap_dwell = None; }
+                let at = screen(&app, target);
+                let _ = app.update(Message::ViewportMove(at));
+                assert_eq!(app.last_point, Some(glam::DVec3::ZERO));
+                assert!(app.tabs[i].active_cmd.is_some());
+                if !force_full {
+                    assert!(!app.snap_dwell.as_ref().unwrap().snap_resolved);
+                }
+                app.tabs[i].last_cursor_world
+            };
+            let full = exercise(true);
+            let rapid = exercise(false);
+            assert!(rapid.distance(full) < 0.001, "engaged={engaged}: {rapid:?} != {full:?}");
+            if engaged {
+                assert!(rapid.y.abs() < 0.001);
+            } else {
+                assert!(rapid.distance(target) < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn rapid_drafting_3d_matches_authoritative_z_axis() {
+        for polar in [false, true] {
+            let exercise = |force_full: bool| {
+                let mut app = drawing_app("LINE");
+                let i = app.active_tab;
+                let _ = app.apply_view_preset("SWISO");
+                let start = screen(&app, glam::DVec3::ZERO);
+                let _ = app.update(Message::ViewportLeftPressAt(start));
+                let anchor = app.last_point.expect("initial LINE point");
+                app.ortho_mode = !polar;
+                app.polar_mode = polar;
+                app.polar_increment_deg = 90.0;
+                let first = screen(&app, glam::DVec3::new(0.0, 0.0, 10.0));
+                let _ = app.update(Message::ViewportMove(first));
+                assert!(app.snap_dwell.is_some());
+                if force_full { app.snap_dwell = None; }
+                let at = screen(&app, glam::DVec3::new(0.0, 0.0, 20.0));
+                let _ = app.update(Message::ViewportMove(at));
+                assert_eq!(app.last_point, Some(anchor));
+                (app.tabs[i].last_cursor_world, app.otrack_kind)
+            };
+            let full = exercise(true);
+            let rapid = exercise(false);
+            assert!(rapid.0.distance(full.0) < 0.001, "polar={polar}: {rapid:?} != {full:?}");
+            assert_eq!(rapid.1, full.1);
+            assert!(rapid.0.distance(glam::DVec3::new(0.0, 0.0, 20.0)) < 0.001);
+            assert_eq!(rapid.1, Some(crate::snap::TrackingKind::PlusZ));
+        }
     }
 
     #[test]

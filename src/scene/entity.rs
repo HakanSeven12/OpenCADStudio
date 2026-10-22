@@ -3499,3 +3499,59 @@ mod translated_block_hatch_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod affine_hatch_cache_tests {
+    use super::*;
+    use codec::entities::hatch::{BoundaryEdge, BoundaryPath, LineEdge};
+    use codec::types::Vector2;
+
+    #[test]
+    fn scaled_rotated_translated_hatch_matches_direct_dxf_placement() {
+        let mut hatch = codec::entities::Hatch::new();
+        hatch.is_solid = true;
+        let mut path = BoundaryPath::new();
+        for ((x0, y0), (x1, y1)) in [
+            ((0.0, 0.0), (7.0, 0.0)),
+            ((7.0, 0.0), (7.0, 3.0)),
+            ((7.0, 3.0), (0.0, 3.0)),
+            ((0.0, 3.0), (0.0, 0.0)),
+        ] {
+            path.edges.push(BoundaryEdge::Line(LineEdge {
+                start: Vector2::new(x0, y0),
+                end: Vector2::new(x1, y1),
+            }));
+        }
+        hatch.paths.push(path);
+        let mut transform = codec::types::Transform::identity();
+        let (sin, cos) = (0.5_f64, 0.8660254037844386_f64);
+        let m = &mut transform.matrix.m;
+        m[0][0] = cos * 1.7;
+        m[0][1] = -sin * 0.6;
+        m[1][0] = sin * 1.7;
+        m[1][1] = cos * 0.6;
+        m[0][3] = 120.0;
+        m[1][3] = -39.0;
+
+        let (linear, offset) = Scene::hatch_affine_parts(&transform).unwrap();
+        assert_ne!(linear[0], 1.0_f64.to_bits());
+        let color = [0.3, 0.6, 0.7, 1.0];
+        let shared = Scene::hatch_affine_source_model(&hatch, &transform, color).unwrap();
+        let cached = shared.translated_for_render(offset, color);
+
+        let mut directly_placed = EntityType::Hatch(Box::new(hatch));
+        directly_placed.apply_transform(&transform);
+        let EntityType::Hatch(dxf) = directly_placed else { unreachable!() };
+        let direct = Scene::hatch_model_from_dxf(&dxf, color).unwrap();
+        assert_eq!(cached.boundary.len(), direct.boundary.len());
+        for (&a, &b) in cached.boundary.iter().zip(direct.boundary.iter()) {
+            if a[0].is_nan() && b[0].is_nan() { continue; }
+            let cached_x = cached.world_origin[0] + a[0] as f64;
+            let cached_y = cached.world_origin[1] + a[1] as f64;
+            let direct_x = direct.world_origin[0] + b[0] as f64;
+            let direct_y = direct.world_origin[1] + b[1] as f64;
+            assert!((cached_x-direct_x).abs() < 1e-3, "{cached_x} != {direct_x}");
+            assert!((cached_y-direct_y).abs() < 1e-3, "{cached_y} != {direct_y}");
+        }
+    }
+}

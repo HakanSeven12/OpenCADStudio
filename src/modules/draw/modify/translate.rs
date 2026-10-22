@@ -181,6 +181,39 @@ mod tests {
     }
 
     #[test]
+    fn huge_move_uses_one_live_box_but_commits_every_original_handle() {
+        let handles: Vec<Handle> = (1..=600).map(Handle::new).collect();
+        let mut wires = Vec::new();
+        for h in &handles {
+            for _ in 0..4 {
+                let x = h.value() as f64;
+                let mut w = WireModel::solid_f64(
+                    h.value().to_string(),
+                    vec![[x, 0.0, 0.0], [x+1.0, 2.0, 0.0]],
+                    WireModel::WHITE, false,
+                );
+                w.aabb = [x as f32, 0.0, x as f32+1.0, 2.0];
+                wires.push(w);
+            }
+        }
+        let mut cmd = MoveCommand::new(handles.clone(), wires);
+        // The full 2400 preview children are discarded at command creation.
+        assert_eq!(cmd.wire_models.len(), 1);
+        assert_eq!(cmd.wire_models[0].points.len(), 5);
+        assert!(matches!(cmd.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        let preview = cmd.on_preview_wires(DVec3::new(10.0, 5.0, 0.0));
+        assert_eq!(preview.len(), 2, "group bounding box + rubber band");
+        assert!((preview[0].points[0][0] - 11.0).abs() < 0.001);
+        match cmd.on_point(DVec3::new(10.0, 5.0, 0.0)) {
+            CmdResult::TransformSelected(committed, EntityTransform::Translate(delta)) => {
+                assert_eq!(committed, handles);
+                assert_eq!(delta, DVec3::new(10.0, 5.0, 0.0));
+            }
+            _ => panic!("expected exact MOVE of every selected handle"),
+        }
+    }
+
+    #[test]
     fn enter_at_second_point_uses_base_as_displacement() {
         let mut cmd = MoveCommand::new(vec![Handle::new(1)], vec![]);
         cmd.on_point(DVec3::new(5.0, -2.0, 0.0));

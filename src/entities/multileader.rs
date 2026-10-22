@@ -2346,6 +2346,7 @@ impl MultiLeaderTess for MultiLeader {
                         depth_override: None,
                         display_visible: true,
                         snap_only: false,
+                        region_boundary_click: false,
                         reference_only: false,
                         plot_visible: true,
                         fill_is_3d: false,

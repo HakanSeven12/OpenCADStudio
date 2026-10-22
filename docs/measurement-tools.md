@@ -37,8 +37,10 @@ Boundary pieces use the same snap modes as ordinary lines, arcs, circles,
 ellipses, and splines: enable the modes appropriate to the geometry. For example,
 a circular boundary provides Center, Quadrant, and Tangent, not artificial
 endpoints along its display tessellation. Holes and inclined regions retain their
-own boundary coordinates. Region rendering, selection, and plotted output are
-unchanged. Non-circular region edges do not support persistent radial associativity;
+own boundary coordinates. Click an outer or inner boundary to select the Region,
+including imported binary ACIS Regions without display wires. Boundary acquisition
+does not select empty holes or add visible or plotted geometry. Region rendering
+and plotted output are unchanged. Non-circular region edges do not support persistent radial associativity;
 exact circular region edges support associative radial (`DIMRADIUS`/`DIMDIAMETER`)
 and arc-length (`DIMARC`) dimensions. Specifically, circular arc edges of a region
 support arc-length dimensions (`DIMARC`), whereas full circular region loops (such as
@@ -53,7 +55,8 @@ Once acquired, its tracking guides use the full snap path.
 ### Radius — `MEASURERADIUS`
 
 1. Move the cursor over a circle, circular arc, or circular edge of a `REGION` to preview its radius and diameter.
-2. Select the entity to complete the measurement.
+2. Click the circular boundary to complete the measurement. For `DIMRADIUS` or
+   `DIMDIAMETER`, click the desired Region boundary, then place the dimension.
 
 When measuring a `REGION`, the nearest actual boundary edge under the cursor
 (including inner holes) is evaluated. Straight or non-circular region edges, other
@@ -117,6 +120,10 @@ Additional recommended checks:
 - Check live previews with object snaps, `DYN` on and off, different precision settings, and large coordinates.
 - Reject invalid radius selections, repeated lines, zero-length rays, and unsupported entity types without ending the command unexpectedly.
 - Verify `AREA` object selection and **Add/Subtract** with multiple regions.
+- With a generated annular Region and an imported binary ACIS Region, use actual
+  mouse clicks on outer and inner circular boundaries for `MEASURERADIUS` and
+  `DIMRADIUS`. Confirm that clicking a hole center or outside misses. Explicit
+  entity-ID input checks radius computation and association, not mouse acquisition.
 - After finishing a measurement, move the cursor, click through the result label, press `Esc`, and switch between document tabs.
 - Check both light and dark themes, viewport corners, and an open command line.
 - Verify that measurement alone leaves the drawing unchanged and that result labels are not persisted when saving and reopening a DWG.

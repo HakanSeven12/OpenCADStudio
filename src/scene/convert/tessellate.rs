@@ -1808,6 +1808,7 @@ pub fn tessellate(
                         depth_override: None,
                         display_visible: true,
                         snap_only: false,
+                        region_boundary_click: false,
                         reference_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
@@ -1975,6 +1976,7 @@ pub fn tessellate(
                         depth_override: None,
                         display_visible: true,
                         snap_only: false,
+                        region_boundary_click: false,
                         reference_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
@@ -2732,11 +2734,13 @@ pub fn tessellate(
                 force_text_strokes,
             );
             for wire in &mut boundary {
-                // The mesh still owns display, picking and plotting. These
-                // wires only supply the normal 2D object-snap engine.
+                // The mesh still owns display and plotting. Exact boundary
+                // pieces supply ordinary snaps and edge-only acquisition even
+                // when a command does not accept mesh surface hits.
                 wire.display_visible = false;
                 wire.plot_visible = false;
                 wire.snap_only = true;
+                wire.region_boundary_click = true;
             }
             wires.extend(boundary);
         }

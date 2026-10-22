@@ -269,7 +269,7 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(segment.wire) else {
                 continue;
             };
-            if wire.snap_only || wire.reference_only {
+            if (wire.snap_only && !wire.region_boundary_click) || wire.reference_only {
                 continue;
             }
             if wire.point_marker.is_some() {
@@ -302,7 +302,7 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     } else {
         // Q: lazy projection — no Vec allocation per wire; NaN resets the segment chain.
         for wire in wires.iter() {
-            if wire.snap_only || wire.reference_only {
+            if (wire.snap_only && !wire.region_boundary_click) || wire.reference_only {
                 continue;
             }
             if wire.point_marker.is_some() {

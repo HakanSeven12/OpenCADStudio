@@ -84,9 +84,9 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
                 !boundaries.is_empty(),
                 "INSERT must retain REGION snap-only metadata"
             );
-            assert!(boundaries
-                .iter()
-                .all(|wire| !wire.display_visible && !wire.plot_visible));
+            assert!(boundaries.iter().all(|wire| {
+                !wire.display_visible && !wire.plot_visible && wire.region_boundary_click
+            }));
             assert!(boundaries.iter().any(|wire| !wire.points.is_empty()));
             let visible: Vec<_> = expanded
                 .iter()
@@ -102,6 +102,16 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
             let hit = snap(&expanded, kind, point, None).expect("region reference inside INSERT");
             assert!(hit.world.distance(point) < 1e-6);
             assert_eq!(hit.source_handle(), Some(handle));
+            let picked = click_at(&expanded, point).expect("Region boundary inside INSERT");
+            assert_eq!(
+                crate::scene::Scene::handle_from_wire_name(picked),
+                Some(handle)
+            );
+            let indexed = InteractionIndex::build(&expanded).query_xy(
+                std::sync::Arc::new(expanded.clone()),
+                [point.x - 1.0, point.y - 1.0, point.x + 1.0, point.y + 1.0],
+            );
+            assert_eq!(click_at(&indexed, point), Some(picked));
             assert!(
                 snap(
                     &expanded,
@@ -152,6 +162,235 @@ fn wires(entity: &EntityType) -> Vec<WireModel> {
         [0.0; 4],
         false,
     )
+}
+
+#[test]
+fn native_region_binary_without_wires_is_pickable_at_circular_boundary() {
+    use codec::entities::acis::{SabWriter, SatDocument};
+    use codec::entities::{AcisData, Region};
+    let loops = vec![
+        vec![Curve::Circle(Circle {
+            centre: [0.0, 0.0],
+            radius: 20.0,
+        })],
+        vec![Curve::Circle(Circle {
+            centre: [0.0, 0.0],
+            radius: 5.0,
+        })],
+    ];
+    let body = kernel::brep::planar_region(
+        kernel::space::Plane::from_axes([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        &loops,
+    )
+    .unwrap();
+    let mut sat = SatDocument::new();
+    kernel::acis::append(&body, &mut sat).unwrap();
+    let parsed = SatDocument::parse(&sat.to_sat_string()).unwrap();
+    let mut region = Region::new();
+    region.acis_data = AcisData {
+        is_binary: true,
+        sab_data: SabWriter::write(&parsed),
+        ..Default::default()
+    };
+    assert!(region.wires.is_empty() && region.silhouettes.is_empty());
+    assert_region_boundary_clicks(&EntityType::Region(region));
+}
+
+#[test]
+fn region_snap_seeded_region_is_pickable_at_circular_boundary() {
+    let region = region_from_loops(
+        &[
+            vec![Curve::Circle(Circle {
+                centre: [0.0, 0.0],
+                radius: 20.0,
+            })],
+            vec![Curve::Circle(Circle {
+                centre: [0.0, 0.0],
+                radius: 5.0,
+            })],
+        ],
+        WorkingPlane::default(),
+    )
+    .unwrap();
+    assert_region_boundary_clicks(&region);
+}
+
+fn assert_region_boundary_clicks(entity: &EntityType) {
+    use crate::scene::pick::hit_test::click_hit;
+    let wires = wires(entity);
+    let mut scene = crate::scene::Scene::new();
+    let handle = scene.add_entity(entity.clone());
+    let bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 1000.0,
+        height: 1000.0,
+    };
+    for (point, expected) in [
+        (DVec3::new(20.0, 0.0, 0.0), Some("123")),
+        (DVec3::new(5.0, 0.0, 0.0), Some("123")),
+        (DVec3::ZERO, None),
+        (DVec3::new(30.0, 0.0, 0.0), None),
+    ] {
+        let cursor = Point::new(500.0 + point.x as f32 * 10.0, 500.0 - point.y as f32 * 10.0);
+        let view = Mat4::from_scale(Vec3::splat(0.02));
+        let depth = Default::default();
+        assert_eq!(
+            click_hit(
+                cursor,
+                &wires,
+                view,
+                DVec3::ZERO,
+                bounds,
+                false,
+                5.0,
+                &depth
+            ),
+            expected,
+            "direct click at {point:?}"
+        );
+        let candidates = InteractionIndex::build(&wires).query_xy(
+            std::sync::Arc::new(wires.clone()),
+            [point.x - 1.0, point.y - 1.0, point.x + 1.0, point.y + 1.0],
+        );
+        assert_eq!(
+            click_hit(
+                cursor,
+                &candidates,
+                view,
+                DVec3::ZERO,
+                bounds,
+                false,
+                5.0,
+                &depth
+            ),
+            expected,
+            "indexed click at {point:?}"
+        );
+        let scene_candidates = scene.interaction_pick_candidates_near(
+            scene.hit_test_wires(),
+            point,
+            view,
+            DVec3::ZERO,
+            bounds,
+            5.0,
+        );
+        let scene_hit =
+            click_at(&scene_candidates, point).and_then(crate::scene::Scene::handle_from_wire_name);
+        assert_eq!(
+            scene_hit,
+            expected.map(|_| handle),
+            "Scene acquisition at {point:?}"
+        );
+        let mut stub = crate::scene::model::instance_model::stub_wire(
+            std::sync::Arc::new(wires.clone()),
+            [-20.0, -20.0, 20.0, 20.0],
+            [10.0, 3.0, 0.0],
+            0.0,
+        );
+        stub.name = "789".into();
+        let moved = point + DVec3::new(10.0, 3.0, 0.0);
+        let materialized = scene.interaction_pick_candidates_near(
+            std::sync::Arc::new(vec![stub]),
+            moved,
+            view,
+            DVec3::ZERO,
+            bounds,
+            5.0,
+        );
+        assert_eq!(
+            click_at(&materialized, moved),
+            expected.map(|_| "789"),
+            "translated stub acquisition at {moved:?}"
+        );
+    }
+}
+
+fn click_at<W: WireSource + ?Sized>(wires: &W, point: DVec3) -> Option<&str> {
+    crate::scene::pick::hit_test::click_hit(
+        Point::new(500.0 + point.x as f32 * 10.0, 500.0 - point.y as f32 * 10.0),
+        wires,
+        Mat4::from_scale(Vec3::splat(0.02)),
+        DVec3::ZERO,
+        Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        },
+        false,
+        5.0,
+        &Default::default(),
+    )
+}
+
+#[test]
+fn region_snap_click_opt_in_preserves_ordinary_and_snap_only_wires() {
+    for points in [
+        vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+        vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
+    ] {
+        let wire = WireModel::solid("456".into(), points, [1.0; 4], false);
+        assert!(!wire.region_boundary_click);
+        for snap_only in [false, true] {
+            let mut wire = wire.clone();
+            wire.snap_only = snap_only;
+            wire.display_visible = !snap_only;
+            let wires = vec![wire];
+            let point = DVec3::new(5.0, 0.0, 0.0);
+            let expected = (!snap_only).then_some("456");
+            assert_eq!(click_at(&wires, point), expected);
+            let indexed = InteractionIndex::build(&wires)
+                .query_xy(std::sync::Arc::new(wires.clone()), [4.0, -1.0, 6.0, 1.0]);
+            assert_eq!(click_at(&indexed, point), expected);
+        }
+    }
+}
+
+#[test]
+fn region_snap_click_boundaries_do_not_bridge_concave_or_disconnected_voids() {
+    for (loops, hit, miss) in [
+        (
+            vec![ring(&[
+                [0.0, 0.0],
+                [20.0, 0.0],
+                [20.0, 5.0],
+                [5.0, 5.0],
+                [5.0, 20.0],
+                [0.0, 20.0],
+            ])],
+            DVec3::new(10.0, 0.0, 0.0),
+            DVec3::new(10.0, 10.0, 0.0),
+        ),
+        (
+            vec![
+                ring(&[[-20.0, -5.0], [-10.0, -5.0], [-10.0, 5.0], [-20.0, 5.0]]),
+                ring(&[[10.0, -5.0], [20.0, -5.0], [20.0, 5.0], [10.0, 5.0]]),
+            ],
+            DVec3::new(-15.0, -5.0, 0.0),
+            DVec3::ZERO,
+        ),
+    ] {
+        // Separate planar components share the same source handle; the region
+        // constructor treats additional loops as holes, not disconnected faces.
+        let wires: Vec<_> = loops
+            .iter()
+            .flat_map(|boundary| {
+                let entity =
+                    region_from_loops(std::slice::from_ref(boundary), WorkingPlane::default())
+                        .unwrap();
+                wires(&entity)
+            })
+            .collect();
+        for (point, expected) in [(hit, Some("123")), (miss, None)] {
+            assert_eq!(click_at(&wires, point), expected);
+            let indexed = InteractionIndex::build(&wires).query_xy(
+                std::sync::Arc::new(wires.clone()),
+                [point.x - 1.0, point.y - 1.0, point.x + 1.0, point.y + 1.0],
+            );
+            assert_eq!(click_at(&indexed, point), expected);
+        }
+    }
 }
 
 fn snap<W: WireSource + ?Sized>(

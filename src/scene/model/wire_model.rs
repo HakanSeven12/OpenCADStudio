@@ -818,10 +818,14 @@ pub struct WireModel {
     pub depth_override: Option<f32>,
     /// Whether this wire is drawn in the normal viewport pass.
     pub display_visible: bool,
-    /// Geometry that is never picked: the content of an underlay. Hidden
-    /// (`display_visible` false) it is what object snaps find; drawn, it is
-    /// display only and snaps skip it too ([`Self::is_display_only`]).
+    /// Reference geometry excluded from ordinary picking, such as underlays.
+    /// Hidden (`display_visible` false) it is what object snaps find; drawn,
+    /// it is display only and snaps skip it too ([`Self::is_display_only`]).
+    /// REGION boundary edge clicks opt in separately below.
     pub snap_only: bool,
+    /// Exact decomposed REGION boundary: hidden snap geometry also eligible
+    /// for edge clicks. Does not enable surface hits or other snap-only wires.
+    pub region_boundary_click: bool,
     /// Plugin-owned reference-only source (API v9): the entity is display
     /// geometry the built-in edit paths must not pick — clicks fall through
     /// to the editable entity underneath. Rendering and snapping are
@@ -915,6 +919,7 @@ impl WireModel {
             depth_override: None,
             display_visible: true,
             snap_only: false,
+            region_boundary_click: false,
             reference_only: false,
             plot_visible: true,
             fill_is_3d: false,
@@ -1385,6 +1390,7 @@ impl Default for WireModel {
             depth_override: None,
             display_visible: true,
             snap_only: false,
+            region_boundary_click: false,
             reference_only: false,
             plot_visible: true,
             fill_is_3d: false,

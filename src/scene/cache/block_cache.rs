@@ -88,6 +88,7 @@ pub struct LocalWire {
     pub plinegen: bool,
     /// Hidden reference geometry must retain its snap-only role in INSERTs.
     pub snap_only: bool,
+    pub region_boundary_click: bool,
     pub plot_visible: bool,
     pub plot_l0: bool,
     pub hide_unselected: bool,
@@ -906,6 +907,7 @@ fn tessellate_sub_local(
             world_width: wire.world_width,
             plinegen: wire.plinegen,
             snap_only: wire.snap_only,
+            region_boundary_click: wire.region_boundary_click,
             plot_visible: !wire.snap_only
                 && frame_mode.is_none_or(|mode| mode == 1)
                 && (on_l0 || layer_plottable),
@@ -1608,6 +1610,7 @@ struct StyleKey {
     fill_is_2d_solid: bool,
     fill_is_3d: bool,
     snap_only: bool,
+    region_boundary_click: bool,
     plot_visible: bool,
     hide_unselected: bool,
     /// Bit-cast composed block-local depth for band wires (`0` = no override).
@@ -1659,6 +1662,7 @@ struct BatchEntry {
     fill_is_3d: bool,
     fill_is_2d_solid: bool,
     snap_only: bool,
+    region_boundary_click: bool,
     plot_visible: bool,
     hide_unselected: bool,
     /// Accumulated thickness-wall pick geometry, paired high/low like
@@ -1844,6 +1848,7 @@ impl Batches {
                     depth_override: b.local_depth,
                     display_visible: !b.snap_only && (!b.hide_unselected || selected),
                     snap_only: b.snap_only,
+                    region_boundary_click: b.region_boundary_click,
                     reference_only: false,
                     plot_visible: b.plot_visible,
                     fill_is_3d: b.fill_is_3d,
@@ -1943,6 +1948,7 @@ fn style_key(
         fill_is_2d_solid,
         fill_is_3d,
         snap_only: false,
+        region_boundary_click: false,
         plot_visible,
         hide_unselected,
         depth_bits: local_depth.map_or(0, f32::to_bits),
@@ -2650,6 +2656,7 @@ fn emit_wire(
                     depth_override: local_depth,
                     display_visible: !lw.snap_only && (!lw.hide_unselected || ctx.selected),
                     snap_only: lw.snap_only,
+                    region_boundary_click: lw.region_boundary_click,
                     plot_visible: lw.plot_visible,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
@@ -2791,6 +2798,7 @@ fn emit_wire(
     );
     // Never fold reference-only boundaries into a visible geometry batch.
     key.snap_only = lw.snap_only;
+    key.region_boundary_click = lw.region_boundary_click;
 
     // Keep snap-only edges separate: concatenating key_vertices across
     // disconnected boundaries would invent midpoint references between them.
@@ -2832,6 +2840,7 @@ fn emit_wire(
     });
     entry.local_depth = local_depth;
     entry.snap_only = lw.snap_only;
+    entry.region_boundary_click = lw.region_boundary_click;
     if let Some(data) = &transformed_stations {
         entry.pattern_station_pieces.clone_from(&data.pieces);
     }

@@ -2900,6 +2900,8 @@ impl Pipeline {
         }
         // Gather borrowed highlighted wires via the prebuilt index —
         // O(highlighted), no per-wire string parse or deep geometry clone.
+        // Keep proxy storage alive through classification and upload.
+        let mut mass_selected_proxy_storage: Vec<WireModel> = Vec::new();
         let mut selected_wires: Vec<&WireModel> = Vec::new();
         let mut hover_wires: Vec<&WireModel> = Vec::new();
         for h in selected {
@@ -2942,6 +2944,31 @@ impl Pipeline {
                 selected_wires.push(wire);
             } else {
                 hover_wires.push(wire);
+            }
+        }
+        // Avoid a second 320+ MiB block arena for 13,000 selected palms.
+        // For extreme 2-D selections, render one blue conservative outline per
+        // instance instead of duplicating all resident block segment geometry.
+        // Individual and moderate selections still get exact blue leaves.
+        if selected.len() > 512 && selected_tint.is_some() {
+            let (outlines, replaced) =
+                crate::scene::model::instance_model::mass_stub_outlines(
+                    selected_wires.iter().copied(),
+                    2048,
+                );
+            if !replaced.is_empty() {
+                let before = selected_wires.len();
+                selected_wires.retain(|wire| {
+                    wire.stub.is_none() || !replaced.contains(&wire.name)
+                });
+                mass_selected_proxy_storage = outlines;
+                selected_wires.extend(mass_selected_proxy_storage.iter());
+                crate::perf_record!(
+                    "[perf] mass-block-highlight input_wires={} output_wires={} outlines={}",
+                    before,
+                    selected_wires.len(),
+                    replaced.len(),
+                );
             }
         }
         let t_gather = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);

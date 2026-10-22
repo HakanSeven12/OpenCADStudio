@@ -644,18 +644,56 @@ impl StorageHatchBatch {
         })
     }
 
-    /// Push the CPU `visibility` slice to GPU. Call when any
-    /// element changes (typically per-frame from compute_hatch_lod).
-    pub(super) fn upload_visibility(&self, queue: &wgpu::Queue) {
-        queue.write_buffer(
-            &self.placement_buffer,
-            0,
-            bytemuck::cast_slice(&self.placements),
-        );
-        queue.write_buffer(
+    /// A viewport pan typically changes visibility at just a small fraction
+    /// of the boundary placements. Upload only dirty pages instead of writing
+    /// the complete (potentially million-element) placement buffer each pan.
+    /// The caller records page IDs while scanning in ascending index order.
+    pub(super) fn upload_visibility_pages(
+        &self,
+        queue: &wgpu::Queue,
+        placement_pages: &[usize],
+        source_pages: &[usize],
+    ) {
+        fn upload_dirty<T: bytemuck::Pod>(
+            queue: &wgpu::Queue,
+            buffer: &wgpu::Buffer,
+            values: &[T],
+            pages: &[usize],
+        ) {
+            const PAGE: usize = 1024;
+            if pages.is_empty() || values.is_empty() {
+                return;
+            }
+            // Too many small transfers cost more than one linear upload.
+            if pages.len().saturating_mul(PAGE) >= values.len() / 2 {
+                queue.write_buffer(buffer, 0, bytemuck::cast_slice(values));
+                return;
+            }
+            // Contiguous dirty pages are merged into a single write.
+            let mut start = pages[0];
+            let mut end = start + 1;
+            for &page in pages.iter().skip(1).chain(std::iter::once(&usize::MAX)) {
+                if page == end {
+                    end += 1;
+                    continue;
+                }
+                let lo = start * PAGE;
+                let hi = (end * PAGE).min(values.len());
+                queue.write_buffer(
+                    buffer,
+                    (lo * std::mem::size_of::<T>()) as u64,
+                    bytemuck::cast_slice(&values[lo..hi]),
+                );
+                start = page;
+                end = page.saturating_add(1);
+            }
+        }
+        upload_dirty(queue, &self.placement_buffer, &self.placements, placement_pages);
+        upload_dirty(
+            queue,
             &self.visibility_buffer,
-            0,
-            bytemuck::cast_slice(&self.source_visibility),
+            &self.source_visibility,
+            source_pages,
         );
     }
 

@@ -257,7 +257,7 @@ fn block_actions_rotate_flip_test_baseline_reversible_and_invalid_atomic() {
     let DynamicBlockData::RotateAction(a) = &mut o.data else {
         panic!()
     };
-    a.action.offset = Vector3::UNIT_X;
+    a.action.offset = Vector3::new(f64::INFINITY, 0., 0.);
     let unsupported = doc.clone();
     assert!(evaluate(&mut doc, &unsupported, def, r, DVec3::new(0., 10., 0.)).is_err());
     assert_eq!(doc, unsupported);

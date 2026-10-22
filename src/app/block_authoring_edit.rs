@@ -152,10 +152,12 @@ impl OpenCADStudio {
         let Some(handle) = self.tabs[i].selected_authoring else { return Task::none() };
         let Some(before) = options::base(&self.tabs[i].scene.document, handle) else { return Task::none() };
         let key = crate::ui::properties::FieldKey::Geom(field);
-        let mut point = DVec3::new(before.base_point.x, before.base_point.y, before.base_point.z);
+        let editing_offset = matches!(field, "authoring_action_base_offset_x" | "authoring_action_base_offset_y");
+        let mut point = if editing_offset { DVec3::new(before.offset.x, before.offset.y, before.offset.z) }
+            else { DVec3::new(before.base_point.x, before.base_point.y, before.base_point.z) };
         let dependent = if field == "authoring_action_base_dependent" { !before.dependent } else { before.dependent };
         let point = if field == "authoring_action_base_dependent" { None } else {
-            if dependent { return Task::none() }
+            if editing_offset != dependent { return Task::none() }
             let Some(input) = self.tabs[i].properties.edit_buf.get(&key) else { return Task::none() };
             let Ok(value) = crate::app::expr_eval::eval_to_string(input).parse::<f64>() else {
                 self.command_line.push_error(crate::t!("Specify a finite action base point.").as_ref());
@@ -164,12 +166,17 @@ impl OpenCADStudio {
             match field {
                 "authoring_action_base_x" => point.x = value,
                 "authoring_action_base_y" => point.y = value,
+                "authoring_action_base_offset_x" => point.x = value,
+                "authoring_action_base_offset_y" => point.y = value,
                 _ => return Task::none(),
             }
             Some(point)
         };
         let mut staged = self.tabs[i].scene.document.clone();
-        match options::set_base(&mut staged, definition, handle, dependent, point) {
+        let result = if editing_offset {
+            options::set_base_offset(&mut staged, definition, handle, point.unwrap())
+        } else { options::set_base(&mut staged, definition, handle, dependent, point) };
+        match result {
             Ok(true) => match instance::refresh(&staged, definition) {
                 Ok(staged) => {
                     self.push_undo_snapshot(i, "Edit block action base point");

@@ -630,6 +630,7 @@ impl OpenCADStudio {
                 });
             }
         }
+        grips.extend(self.alignment_grip_markers(test.insert, wo));
         let handle = test.insert;
         let tab = &mut self.tabs[i];
         for grip in grips {
@@ -641,6 +642,7 @@ impl OpenCADStudio {
         if !is_test_grip(id) {
             return false;
         }
+        if self.start_alignment_grip(handle, id) { return true; }
         let i = self.active_tab;
         let tab = &self.tabs[i];
         let Some(test) = tab.block_test.as_ref() else {
@@ -722,6 +724,7 @@ impl OpenCADStudio {
                 });
             }
         }
+        grips.extend(self.alignment_grip_markers(handle, wo));
         for grip in grips {
             self.tabs[i].selected_grips.push(grip);
             self.tabs[i].selected_grip_handles.push(handle);

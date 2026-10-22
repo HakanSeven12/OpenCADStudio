@@ -61,6 +61,137 @@ fn roundtrips(doc: &CadDocument) -> Vec<CadDocument> {
 }
 
 #[test]
+fn block_action_base_offsets_follow_frames_and_survive_native_rebuilds() {
+    for kind in [Kind::Rotate, Kind::Scale] {
+        for offset in [DVec3::new(3., 2., 0.), DVec3::new(-4., -3., 0.)] {
+            let (mut doc, def, targets) = super::tests::fixture();
+            let p = if kind == Kind::Scale {
+                distance(&mut doc, def, distance::Kind::Linear)
+            } else {
+                crate::scene::block_orientation_parameter::create(
+                    &mut doc,
+                    def,
+                    crate::scene::block_orientation_parameter::Kind::Rotation,
+                    Vector3::ZERO,
+                    Vector3::new(10., 0., 0.),
+                    Vector3::new(10., 0., 0.),
+                )
+                .unwrap()
+            };
+            let action = create(
+                &mut doc,
+                def,
+                kind,
+                p,
+                &targets[..1],
+                DVec3::new(7., 8., 0.),
+            )
+            .unwrap();
+            assert!(options::set_base_offset(&mut doc, def, action, offset).unwrap());
+            assert!(!options::set_base_offset(&mut doc, def, action, offset).unwrap());
+            let native = options::base(&doc, action).unwrap().clone();
+            let before = doc.clone();
+            for invalid in [DVec3::NAN, DVec3::INFINITY, DVec3::new(1., 2., 1.)] {
+                assert!(options::set_base_offset(&mut doc, def, action, invalid).is_err());
+                assert_eq!(doc, before);
+            }
+            assert!(options::set_base_offset(&mut doc, Handle::NULL, action, offset).is_err());
+            let a = insert(&mut doc);
+            let b = insert(&mut doc);
+            let p = parameter(&doc, def, p);
+            let base = DVec3::new(4., 5., 0.);
+            let frame = ParameterFrame {
+                base,
+                end: base
+                    + if kind == Kind::Scale {
+                        DVec3::new(20., 0., 0.)
+                    } else {
+                        DVec3::new(0., 10., 0.)
+                    },
+            };
+            let expected = if kind == Kind::Scale {
+                DVec3::X * 2. - offset + base
+            } else {
+                offset + DVec3::new(offset.y, 1. - offset.x, 0.) + base
+            };
+            let scratch = instance::evaluate_test_value(
+                &doc,
+                &doc,
+                def,
+                a,
+                p.handle,
+                Value::Frame {
+                    base: frame.base,
+                    end: frame.end,
+                },
+            )
+            .unwrap()
+            .unwrap();
+            assert!(v(line(&scratch, a).start).distance(expected) < 1e-8);
+            let reset_scratch = instance::evaluate_test_value(
+                &scratch,
+                &doc,
+                def,
+                a,
+                p.handle,
+                Value::Frame {
+                    base: p.base,
+                    end: p.end,
+                },
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(line(&reset_scratch, a).start, Vector3::UNIT_X);
+            let changed = instance::evaluate_frame(&doc, a, p.handle, frame)
+                .unwrap()
+                .unwrap();
+            assert_eq!(changed.get_entity(targets[0]), doc.get_entity(targets[0]));
+            for saved in roundtrips(&changed) {
+                assert!(v(line(&saved, a).start).distance(expected) < 1e-8);
+                assert_eq!(line(&saved, b).start, Vector3::UNIT_X);
+                let EntityType::Line(source) = saved.get_entity(targets[0]).unwrap() else {
+                    panic!()
+                };
+                assert_eq!(source.start, Vector3::UNIT_X);
+                assert_eq!(source.end, Vector3::new(2., 0., 0.));
+                assert_eq!(options::base(&saved, action), Some(&native));
+                let refreshed = instance::refresh(&saved, def).unwrap();
+                assert!(v(line(&refreshed, a).start).distance(expected) < 1e-8);
+                assert!(instance::evaluate_frame(&saved, a, p.handle, frame)
+                    .unwrap()
+                    .is_none());
+                let reset = instance::evaluate_frame(
+                    &saved,
+                    a,
+                    p.handle,
+                    ParameterFrame {
+                        base: p.base,
+                        end: p.end,
+                    },
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(line(&reset, a).start, Vector3::UNIT_X);
+                let again = instance::evaluate_frame(&reset, a, p.handle, frame)
+                    .unwrap()
+                    .unwrap();
+                assert!(v(line(&again, a).start).distance(expected) < 1e-8);
+            }
+            // Switching to an independent base preserves the current definition pivot.
+            assert!(options::set_base(&mut doc, def, action, false, None).unwrap());
+            let independent = options::base(&doc, action).unwrap();
+            assert_eq!(v(independent.base_point), offset);
+            assert_eq!(v(independent.offset), offset);
+            assert!(options::set_base_offset(&mut doc, def, action, DVec3::ZERO).is_err());
+            let independent = instance::evaluate_frame(&doc, a, p.handle, frame)
+                .unwrap()
+                .unwrap();
+            assert!(v(line(&independent, a).start).distance(expected - base) < 1e-8);
+        }
+    }
+}
+
+#[test]
 fn block_frame_move_and_stretch_evaluate_base_end_and_xy_corner_bindings() {
     for family in [
         distance::Kind::Linear,

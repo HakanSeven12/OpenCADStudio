@@ -1,6 +1,5 @@
 use super::{Message, OpenCADStudio};
 use crate::command::CadCommand;
-use crate::scene::Scene;
 use iced::Task;
 use std::path::PathBuf;
 

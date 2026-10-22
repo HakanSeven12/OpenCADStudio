@@ -2555,7 +2555,12 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                             field: "authoring_action_base_dependent",
                             value: PropValue::BoolToggle { field: "authoring_action_base_dependent", value: base.dependent },
                         }];
-                        if !base.dependent {
+                        if base.dependent {
+                            props.extend([
+                                Property { label: crate::t!("Base offset X").into_owned(), field: "authoring_action_base_offset_x", value: PropValue::EditText(base.offset.x.to_string()) },
+                                Property { label: crate::t!("Base offset Y").into_owned(), field: "authoring_action_base_offset_y", value: PropValue::EditText(base.offset.y.to_string()) },
+                            ]);
+                        } else {
                             props.extend([
                                 Property { label: crate::t!("Base X").into_owned(), field: "authoring_action_base_x", value: PropValue::EditText(base.base_point.x.to_string()) },
                                 Property { label: crate::t!("Base Y").into_owned(), field: "authoring_action_base_y", value: PropValue::EditText(base.base_point.y.to_string()) },

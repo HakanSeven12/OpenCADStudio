@@ -42,6 +42,9 @@ impl OpenCADStudio {
                 |row| format!("{label}: {}", row + 1),
             ));
         }
+        if let Some(alignment) = self.tabs[self.active_tab].scene.alignment_grips(handle).into_iter().find(|grip| grip.id == id) {
+            return Some(crate::tf!("Alignment: {}", crate::t!(if alignment.perpendicular { "Perpendicular" } else { "Tangent" })).into_owned());
+        }
         let (parameter, value) = self.dynamic_grip_value(handle, id)?;
         let base = match value { actions::Value::Frame { base, .. } => base, _ => parameter.base };
         let value = match value {

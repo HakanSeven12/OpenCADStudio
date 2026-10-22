@@ -785,6 +785,7 @@ impl OpenCADStudio {
     /// dangling from the previous `last_point` until the user actually
     /// moves the mouse. See #32.
     pub(in crate::app) fn refresh_active_cmd_preview(&mut self, i: usize) {
+        self.refresh_command_point_pick_context(i);
         let perf_preview = crate::perf::enabled();
         let preview_started = perf_preview.then(Instant::now);
         if self.tabs[i].active_cmd.is_none() {

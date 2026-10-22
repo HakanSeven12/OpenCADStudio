@@ -154,11 +154,12 @@ pub(crate) fn pivot(
     base: &BlockActionWithBasePoint,
     parameter_base: DVec3,
 ) -> Result<DVec3, &'static str> {
-    if base.offset != Vector3::ZERO {
-        return Err("This action uses an unsupported base-point offset.");
-    }
     let point = if base.dependent {
-        parameter_base
+        let offset = super::v(base.offset);
+        if !offset.is_finite() || offset.z.abs() > 1e-8 {
+            return Err("Specify a finite action base offset in the parameter plane.");
+        }
+        parameter_base + offset
     } else {
         DVec3::new(base.base_point.x, base.base_point.y, base.base_point.z)
     };
@@ -186,14 +187,53 @@ pub(crate) fn set_base(
     let before = base(doc, handle).ok_or("This action has no configurable base point.")?;
     let mut updated = before.clone();
     updated.dependent = dependent;
-    if let Some(point) =
-        point.or_else(|| (before.dependent && !dependent).then_some(parameter.base))
-    {
+    let point = if point.is_none() && before.dependent && !dependent {
+        Some(pivot(before, parameter.base)?)
+    } else {
+        point
+    };
+    if let Some(point) = point {
         if !point.is_finite() || (point.z - parameter.base.z).abs() > 1e-8 {
             return Err("Specify a finite action base point in the parameter plane.");
         }
         updated.base_point = Vector3::new(point.x, point.y, point.z);
     }
+    pivot(&updated, parameter.base)?;
+    if *before == updated {
+        return Ok(false);
+    }
+    let Some(ObjectType::DynamicBlock(object)) = doc.objects.get_mut(&handle) else {
+        unreachable!()
+    };
+    match &mut object.data {
+        DynamicBlockData::RotateAction(action) | DynamicBlockData::ScaleAction(action) => {
+            action.action = updated
+        }
+        _ => unreachable!(),
+    }
+    Ok(true)
+}
+
+pub(crate) fn set_base_offset(
+    doc: &mut CadDocument,
+    definition: Handle,
+    handle: Handle,
+    offset: DVec3,
+) -> Result<bool, &'static str> {
+    let (_, _, kind, id) = actions(doc, definition)
+        .into_iter()
+        .find(|(h, ..)| *h == handle)
+        .ok_or("Select an action belonging to the active block definition.")?;
+    let parameter = parameters(doc, definition, kind)
+        .into_iter()
+        .find(|p| p.id == id)
+        .ok_or("This action has an unsupported parameter binding.")?;
+    let before = base(doc, handle).ok_or("This action has no configurable base point.")?;
+    if !before.dependent {
+        return Err("Base offsets require a dependent action base point.");
+    }
+    let mut updated = before.clone();
+    updated.offset = super::native(offset);
     pivot(&updated, parameter.base)?;
     if *before == updated {
         return Ok(false);

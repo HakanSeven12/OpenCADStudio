@@ -584,6 +584,7 @@ impl OpenCADStudio {
             CmdResult::SetBlockActionBars { document,definition,mode,parameters } => {
                 return self.set_action_bars(document,definition,mode,parameters);
             }
+            result @ CmdResult::AlignBlockReference { .. } => { return self.handle_block_alignment(result); }
             result @ (CmdResult::PlaceBlockAction { .. }
             | CmdResult::EditBlockActionSet { .. }
             | CmdResult::AssociateBlockAction { .. }

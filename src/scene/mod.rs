@@ -15,6 +15,7 @@ pub(crate) mod block_basepoint;
 pub(crate) mod block_lookup;
 pub(crate) mod block_properties_table;
 pub(crate) mod block_actions;
+pub(crate) mod block_alignment;
 pub(crate) mod block_grips;
 pub(crate) mod block_action_bars;
 pub(crate) mod block_point_parameter;

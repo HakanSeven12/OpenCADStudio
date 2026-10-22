@@ -1809,8 +1809,10 @@ impl MultiLeaderTess for MultiLeader {
 
         let stored_context_scale = ml.context.scale_factor as f32;
 
+        // An annotative MLEADER ignores its overall scale (greyed out in the
+        // properties panel); only the annotation scale resizes the context.
         let context_scale_correction = if annotative && stored_context_scale.abs() > 1.0e-12 {
-            let correction = (base_scale * anno_scale) / stored_context_scale;
+            let correction = anno_scale / stored_context_scale;
 
             if correction.is_finite() && correction > 0.0 {
                 correction
@@ -1821,7 +1823,7 @@ impl MultiLeaderTess for MultiLeader {
             1.0
         };
 
-        let fallback_content_scale = base_scale * if annotative { anno_scale } else { 1.0 };
+        let fallback_content_scale = if annotative { anno_scale } else { base_scale };
 
         // The active context stores the resolved world-space arrow size.
         // Reapplying the entity scale here makes context-sized arrows grow twice.
@@ -2640,6 +2642,63 @@ mod tests {
         assert!(
             !text_wire.fill_tris.is_empty(),
             "Arabic text must emit shaped vector fill triangles"
+        );
+    }
+
+    /// Vertical extent of everything a tessellated MLEADER draws.
+    fn drawn_height(wires: &[crate::scene::model::wire_model::WireModel]) -> f32 {
+        let ys = wires.iter().flat_map(|w| {
+            w.points
+                .iter()
+                .chain(w.fill_tris.iter())
+                .map(|p| p[1])
+                .chain(w.text_verts.iter().map(|v| v.pos[1]))
+                .filter(|y| y.is_finite())
+                .collect::<Vec<_>>()
+        });
+        let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+        hi - lo
+    }
+
+    #[test]
+    fn test_annotative_mleader_ignores_overall_scale() {
+        // AutoCAD greys out the overall scale of an annotative MLEADER and
+        // draws it at its context height. A file with overall scale 50 at a
+        // 1:50 annotation scale rendered its text 50× too large.
+        let doc = CadDocument::default();
+        let make = |overall: f64| {
+            let mut ml = MultiLeader::default();
+            ml.content_type = LeaderContentType::MText;
+            ml.context.text_string = "22x2.0".to_string();
+            ml.enable_annotation_scale = true;
+            ml.scale_factor = overall;
+            ml.context.scale_factor = 50.0;
+            ml.context.text_height = 250.0;
+            ml
+        };
+        let height = |ml: &MultiLeader| {
+            drawn_height(&ml.tessellate(
+                &doc,
+                codec::Handle::default(),
+                false,
+                [1.0, 1.0, 1.0, 1.0],
+                1.0,
+                50.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                [0.0, 0.0, 0.0, 1.0],
+            ))
+        };
+
+        let unit = height(&make(1.0));
+        let scaled = height(&make(50.0));
+        assert!(unit > 0.0, "the text must be drawn");
+        assert!(
+            (scaled - unit).abs() <= unit * 1.0e-3,
+            "overall scale must not resize an annotative MLEADER: {unit} vs {scaled}"
         );
     }
 }

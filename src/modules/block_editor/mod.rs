@@ -6,6 +6,7 @@ use crate::modules::parametric::ParametricModule;
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
 pub mod action;
+pub(crate) mod alignment;
 pub(crate) mod action_bar;
 pub mod action_set;
 pub(crate) mod grip_set;

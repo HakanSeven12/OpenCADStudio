@@ -466,6 +466,8 @@ pub fn convert(scene: &TdsScene, options: &TdsOptions) -> TdsImport {
             continue;
         }
         if options.stop_at.as_ref() == Some(name) {
+            // The mesh the cancelled material question stopped at.
+            out.messages.push(format!("Processing object {name}"));
             out.messages.push(format!("Import stopped at {name}"));
             return out;
         }

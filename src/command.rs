@@ -1751,6 +1751,13 @@ pub enum CmdResult {
         displacement_overrides: Option<(f64, f64)>,
         rotate_only: Vec<Handle>,
     },
+    AlignBlockReference {
+        document: u64,
+        alignment: Box<crate::scene::block_alignment::Alignment>,
+        cursor: DVec3,
+        context: Option<PointPickContext>,
+        flipped: bool,
+    },
     EvaluateBlockParameter {
         insert: Option<Handle>,
         document: u64,

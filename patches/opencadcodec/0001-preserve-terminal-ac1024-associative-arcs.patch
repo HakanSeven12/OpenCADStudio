@@ -1,0 +1,213 @@
+From 58eb8bab76482186367ee7a8b3fba9c24c1b4308 Mon Sep 17 00:00:00 2001
+From: sclMAX <maxi.indumatics@gmail.com>
+Date: Wed, 21 Oct 2026 15:07:19 -0300
+Subject: [PATCH] fix(dwg): preserve terminal AC1024 associative arcs
+
+---
+ CHANGELOG.md                                  |   4 +
+ .../object_reader/associative.rs              |  15 +-
+ tests/dwg_assoc_edge_arc.rs                   | 154 ++++++++++++++++++
+ 3 files changed, 172 insertions(+), 1 deletion(-)
+ create mode 100644 tests/dwg_assoc_edge_arc.rs
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 8a2a7d3..d333575 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -18,6 +18,10 @@
+   The serialized structs gain fields; positional formats require a separate
+   compatibility strategy.
+ 
++- **DWG 2010 associative arcs** - Preserve the observed terminal AC1024
++  three-scalar edge-arc layout without synthesizing a fourth value. Modern
++  four-scalar arcs and nested curve layouts retain their existing contracts.
++
+ - **Genuine DXF R12 output** - `DxfWriter::with_version(DxfVersion::AC1009)`
+   writes a real R12 file: no handles, CLASSES or OBJECTS, R12 table records,
+   and R12 entities only. LWPOLYLINE becomes a 2D POLYLINE with its bulges,
+diff --git a/src/io/dwg/dwg_stream_readers/object_reader/associative.rs b/src/io/dwg/dwg_stream_readers/object_reader/associative.rs
+index 5e3e72b..f494692 100644
+--- a/src/io/dwg/dwg_stream_readers/object_reader/associative.rs
++++ b/src/io/dwg/dwg_stream_readers/object_reader/associative.rs
+@@ -20,7 +20,20 @@ fn read_edge_curve(
+             for _ in 0..3 {
+                 out.push(point(reader));
+             }
+-            for _ in 0..if curve_type == 11 { 4 } else { 5 } {
++            let scalar_count = if curve_type == 11 { 4 } else { 5 };
++            for index in 0..scalar_count {
++                // Only the terminal AC1024 edge arc has an observed layout
++                // without the fourth scalar. Never infer a missing value in
++                // nested curves, other versions, or a partially read scalar.
++                if curve_type == 11
++                    && index == 3
++                    && depth == 0
++                    && reader.dxf_version() == DxfVersion::AC1024
++                    && !reader.has_error()
++                    && reader.main_remaining_bits() == 0
++                {
++                    break;
++                }
+                 out.push(real(reader));
+             }
+         }
+diff --git a/tests/dwg_assoc_edge_arc.rs b/tests/dwg_assoc_edge_arc.rs
+new file mode 100644
+index 0000000..d55f483
+--- /dev/null
++++ b/tests/dwg_assoc_edge_arc.rs
+@@ -0,0 +1,154 @@
++use std::io::Cursor;
++
++use acadrust::objects::{
++    AssocCurveValue, AssocEdgeActionParam, AssocSubcurveKind, AssociativeData, AssociativeObject,
++    ObjectType,
++};
++use acadrust::types::{DxfVersion, Vector3};
++use acadrust::{CadDocument, DwgReader, DwgWriter};
++
++fn arc() -> AssocEdgeActionParam {
++    AssocEdgeActionParam {
++        has_action: true,
++        action_type: 11,
++        subcurve_kind: AssocSubcurveKind::Arc,
++        curve: vec![
++            AssocCurveValue::Point(Vector3::new(2.0, 3.0, 4.0)),
++            AssocCurveValue::Point(Vector3::new(0.0, 0.0, 1.0)),
++            AssocCurveValue::Point(Vector3::new(1.0, 0.0, 0.0)),
++            AssocCurveValue::Real(5.0),
++            AssocCurveValue::Real(0.25),
++            AssocCurveValue::Real(2.5),
++        ],
++        ..Default::default()
++    }
++}
++
++fn encode(version: DxfVersion, edge: &AssocEdgeActionParam) -> Vec<u8> {
++    let mut document = CadDocument::new();
++    document.version = version;
++    let handle = document.allocate_handle();
++    document.objects.insert(
++        handle,
++        ObjectType::Associative(AssociativeObject {
++            handle,
++            owner: document.header.named_objects_dict_handle,
++            dxf_name: "ASSOCEDGEACTIONPARAM".to_string(),
++            cpp_class_name: "AcDbAssocEdgeActionParam".to_string(),
++            data: AssociativeData::EdgeActionParam(edge.clone()),
++            ..Default::default()
++        }),
++    );
++    DwgWriter::write_to_vec(&document).expect("write synthetic edge")
++}
++
++fn round_trip(version: DxfVersion, edge: &AssocEdgeActionParam) {
++    let decoded = DwgReader::from_stream(Cursor::new(encode(version, edge)))
++        .read_with_stats()
++        .expect("read synthetic edge");
++    assert_eq!(decoded.stats.recovered_errors, 0, "{:?}", decoded.stats);
++    assert_eq!(
++        decoded.stats.skipped_source_records, 0,
++        "{:?}",
++        decoded.stats
++    );
++    let actual = decoded
++        .document
++        .objects
++        .values()
++        .find_map(|object| match object {
++            ObjectType::Associative(AssociativeObject {
++                data: AssociativeData::EdgeActionParam(value),
++                ..
++            }) => Some(value),
++            _ => None,
++        });
++    assert_eq!(actual, Some(edge));
++}
++
++#[test]
++fn terminal_ac1024_arc_preserves_three_scalars() {
++    round_trip(DxfVersion::AC1024, &arc());
++}
++
++#[test]
++fn four_scalar_arcs_preserve_nonzero_fourth_value() {
++    let mut edge = arc();
++    edge.curve.push(AssocCurveValue::Real(7.25));
++    for version in [DxfVersion::AC1024, DxfVersion::AC1027, DxfVersion::AC1032] {
++        round_trip(version, &edge);
++    }
++}
++
++#[test]
++fn ellipse_and_lines_keep_their_layouts() {
++    for version in [DxfVersion::AC1024, DxfVersion::AC1032] {
++        let mut edge = arc();
++        edge.action_type = 17;
++        edge.subcurve_kind = AssocSubcurveKind::Ellipse;
++        edge.curve
++            .extend([AssocCurveValue::Real(3.5), AssocCurveValue::Real(4.5)]);
++        round_trip(version, &edge);
++        for (kind, subcurve) in [
++            (19, AssocSubcurveKind::Line),
++            (23, AssocSubcurveKind::LineSegment3d),
++        ] {
++            edge.action_type = kind;
++            edge.subcurve_kind = subcurve;
++            edge.curve.truncate(2);
++            round_trip(version, &edge);
++        }
++    }
++}
++
++#[test]
++fn composite_arc_keeps_four_scalars_and_following_line() {
++    let mut edge = arc();
++    let mut curve = vec![AssocCurveValue::Int(2), AssocCurveValue::Int(11)];
++    curve.extend(edge.curve.clone());
++    curve.push(AssocCurveValue::Real(8.5));
++    curve.push(AssocCurveValue::Int(19));
++    curve.extend(edge.curve[..2].iter().cloned());
++    edge.action_type = 47;
++    edge.subcurve_kind = AssocSubcurveKind::None;
++    edge.curve = curve;
++    for version in [DxfVersion::AC1024, DxfVersion::AC1032] {
++        round_trip(version, &edge);
++    }
++}
++
++#[test]
++fn incomplete_arcs_are_not_accepted_as_typed_edges() {
++    let mut short = arc();
++    short.curve.pop();
++    let mut nested = arc();
++    nested.action_type = 47;
++    nested.subcurve_kind = AssocSubcurveKind::None;
++    nested
++        .curve
++        .splice(0..0, [AssocCurveValue::Int(1), AssocCurveValue::Int(11)]);
++    for (version, edge) in [
++        (DxfVersion::AC1024, short),
++        (DxfVersion::AC1024, nested),
++        (DxfVersion::AC1027, arc()),
++        (DxfVersion::AC1032, arc()),
++    ] {
++        let result = DwgReader::from_stream(Cursor::new(encode(version, &edge))).read_with_stats();
++        // The public reader can preserve a rejected record as opaque data;
++        // that must not mask acceptance as a successfully decoded edge.
++        if let Ok(outcome) = result {
++            assert!(!outcome.document.objects.values().any(|object| matches!(
++                object,
++                ObjectType::Associative(AssociativeObject {
++                    data: AssociativeData::EdgeActionParam(_),
++                    ..
++                })
++            )));
++            assert!(
++                outcome.stats.recovered_errors > 0
++                    || outcome.stats.skipped_source_records > 0
++                    || !outcome.stats.diagnostics.is_empty()
++            );
++        }
++    }
++}

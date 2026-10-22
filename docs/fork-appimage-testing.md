@@ -4,11 +4,12 @@ This integration branch combines current upstream OpenCADStudio with REGION obje
 
 ## Source boundaries
 
-- Application upstream base: `ea4537429dfbdda6a94ea31dbc6c5cc684363f26`.
+- Consolidation upstream base: `0ed854ec7` (full identity is recorded by the merge parent). This includes application PRs [#1986](https://github.com/HakanSeven12/OpenCADStudio/pull/1986) and [#1987](https://github.com/HakanSeven12/OpenCADStudio/pull/1987). REGION EXPLODE from PR #1857 was integrated separately as `758ab2863`.
 - REGION snap and OTRACK changes retain their separate work-unit commits on this branch.
 - Throttled cursor drafting reuses upstream's authoritative Ortho/Polar calculation, including elevated planes and UCS Z tracking in 3D views.
 - Codec: `sclMAX/opencadcodec` at `cb96711852f97db10811a4e8d632824c940a1134`, published as `integration/dwg2010-fixes`. A source-wide Cargo patch also redirects transitive codec users; no machine-local source override is required.
-- The codec commit contains the independently submitted associative-arc and REGION-tail fixes. The pending upstream PRs are independent of this test-build branch.
+- The codec commit contains the associative-arc and REGION-tail fixes, now merged upstream through [codec PR #128](https://github.com/HakanSeven12/opencadcodec/pull/128) and [#129](https://github.com/HakanSeven12/opencadcodec/pull/129), as `369054b80b9dddb35f879600713d825c1bedb459`. The application upstream base still pins `ff75fdd`, before these fixes. Keep the existing fork pin during consolidation; upgrading to a newer upstream codec is a separate compatibility change.
+- Historical transport and recipes are retained in [the checkpoint archive](checkpoints/dwg2010-codec-integration.md). They are not part of the active dependency resolution. Existing memory snapshots remain on their original branches; consolidation does not import them into the live memory database.
 
 ## Build from this branch
 
@@ -38,4 +39,4 @@ Confirm both sides of the integration: affected DWGs open without recovery and r
 
 ## Limits
 
-This is a native Linux test build. It does not establish Windows/macOS behavior, resolve the previously observed Windows print-spooler test failure, or imply upstream merges. Host-linked Linux packages may require a recent glibc; inspect the actual artifact requirements before transferring it to another distribution. Record build identity and artifact checksum with the local test results. No application main-branch merge, public release or installed application replacement is implied.
+This is a native Linux test build. It does not establish Windows/macOS behavior, resolve the previously observed Windows print-spooler test failure, or establish new GUI acceptance for this consolidation. Host-linked Linux packages may require a recent glibc; inspect the actual artifact requirements before transferring it to another distribution. Record build identity and artifact checksum with the local test results. Local main consolidation does not authorize a public release, push or installed application replacement.

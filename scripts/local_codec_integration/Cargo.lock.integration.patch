@@ -1,0 +1,12 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 70de84e27..08bb578d5 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -98,7 +98,6 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
+ [[package]]
+ name = "acadrust"
+ version = "0.6.4"
+-source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=ff75fdd#ff75fddc322bda4cf817c5f68535c5c2b316b9c4"
+ dependencies = [
+  "anyhow",
+  "bitflags 2.13.1",

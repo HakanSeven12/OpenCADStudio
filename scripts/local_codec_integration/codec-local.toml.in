@@ -1,0 +1,2 @@
+[patch."https://github.com/HakanSeven12/opencadcodec.git"]
+acadrust = { path = "__LOCAL_CODEC_PATH__" }

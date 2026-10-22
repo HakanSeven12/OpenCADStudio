@@ -44,3 +44,10 @@ __pycache__/
 
 # macOS Finder metadata
 .DS_Store
+
+# Private DWG diagnostic samples and reference exports
+/diagnostics/region-dwg/
+
+# Local memory and ODD session tracking (not public source)
+/.engram/
+/odd/

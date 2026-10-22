@@ -1,0 +1,268 @@
+From cb96711852f97db10811a4e8d632824c940a1134 Mon Sep 17 00:00:00 2001
+From: sclMAX <6246024+sclMAX@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 21:18:24 -0300
+Subject: [PATCH] fix(dwg): preserve empty silhouette counts in AC1024 modeler
+ tails
+
+---
+ CHANGELOG.md                                  |   4 +
+ .../object_reader/entities.rs                 |  44 ++++--
+ tests/dwg2010_region_tail.rs                  | 149 ++++++++++++++++++
+ 3 files changed, 181 insertions(+), 16 deletions(-)
+ create mode 100644 tests/dwg2010_region_tail.rs
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d333575..785ca0c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,10 @@
+ 
+ ### Unreleased
+ 
++- **DWG 2010 REGION tails** - Read an empty silhouette count retained after
++  an absent isoline cache when the complete bounded material tail validates.
++  Preserve the count-free layout and existing truncated-stream checks.
++
+ - **Serde reference and provenance retention** - With the `serde` feature,
+   `EntityCommon` now includes `layer_handle`, `linetype_handle`,
+   `color_book_handle`, `face_visual_style_handle`, `edge_visual_style_handle`,
+diff --git a/src/io/dwg/dwg_stream_readers/object_reader/entities.rs b/src/io/dwg/dwg_stream_readers/object_reader/entities.rs
+index 70f4c5c..26eddb3 100644
+--- a/src/io/dwg/dwg_stream_readers/object_reader/entities.rs
++++ b/src/io/dwg/dwg_stream_readers/object_reader/entities.rs
+@@ -5099,22 +5099,22 @@ pub struct SurfaceEntityData {
+ 
+ /// Writers disagree on whether an absent isoline cache still stores an
+ /// empty silhouette count: some files keep a zero BL there, others go
+-/// straight to the modeler tail. Take the count only when the AcDs tail
+-/// (empty-body bit, material bindings, revision) fills the main stream
+-/// after it and not without it.
+-fn skip_empty_silhouette_count(reader: &mut DwgMergedReader) {
++/// straight to the modeler tail. Take the count only when the complete tail
++/// (empty-body bit, material bindings, and optional revision) fills the main
++/// stream after it and not without it. Never infer a missing material count.
++fn skip_empty_silhouette_count(reader: &mut DwgMergedReader, with_revision: bool) {
+     let end = reader.position_in_bits() + reader.main_remaining_bits();
+     let here = reader.main().clone();
+-    if acds_modeler_tail_fits(here.clone(), end) {
++    if modeler_tail_fits(here.clone(), end, with_revision) {
+         return;
+     }
+     let mut after = here;
+-    if after.read_bit_long() == 0 && acds_modeler_tail_fits(after, end) {
++    if after.read_bit_long() == 0 && modeler_tail_fits(after, end, with_revision) {
+         reader.read_bit_long();
+     }
+ }
+ 
+-fn acds_modeler_tail_fits(mut probe: DwgBitReader, end: i64) -> bool {
++fn modeler_tail_fits(mut probe: DwgBitReader, end: i64, with_revision: bool) -> bool {
+     // A cleared bit means an extra modeler body follows; not probed here.
+     if !probe.read_bit() {
+         return false;
+@@ -5127,12 +5127,14 @@ fn acds_modeler_tail_fits(mut probe: DwgBitReader, end: i64) -> bool {
+         probe.read_bit_long();
+         probe.read_bit_long();
+     }
+-    probe.read_bit();
+-    probe.read_bit_long();
+-    probe.read_bit_short();
+-    probe.read_bit_short();
+-    probe.read_bytes(8);
+-    probe.read_bit_long();
++    if with_revision {
++        probe.read_bit();
++        probe.read_bit_long();
++        probe.read_bit_short();
++        probe.read_bit_short();
++        probe.read_bytes(8);
++        probe.read_bit_long();
++    }
+     !probe.has_error() && probe.position_in_bits() == end
+ }
+ 
+@@ -5455,7 +5457,17 @@ fn read_acis_entity_impl(
+             && version.r2013_plus(dxf_version)
+             && inline_end.is_none()
+         {
+-            skip_empty_silhouette_count(reader);
++            skip_empty_silhouette_count(reader, true);
++        } else if !isoline_present
++            && dxf_version == DxfVersion::AC1024
++            && acis_version == 2
++            && !has_ds_data
++            && !inline_layout
++            && inline_end.is_none()
++        {
++            // Native DWG 2010 REGIONs can retain BL(0) silhouettes despite
++            // an absent isoline cache. Require the exact material-tail bound.
++            skip_empty_silhouette_count(reader, false);
+         }
+         if isoline_present {
+             let num_wires = safe_count(reader.read_bit_long(), reader);
+@@ -5463,8 +5475,8 @@ fn read_acis_entity_impl(
+                 wires.push(read_wire(reader));
+             }
+ 
+-            // Both cache arrays are absent when isoline_present is false.
+-            // Reading a count then consumes the extra-body or revision tail.
++            // Populated cache arrays require isoline_present. Optional empty
++            // silhouette counts with no isoline cache were bounded above.
+             let num_silhouettes = safe_count(reader.read_bit_long(), reader);
+             for _ in 0..num_silhouettes {
+                 // Native R2010+ silhouettes store a BLL viewport identity.
+diff --git a/tests/dwg2010_region_tail.rs b/tests/dwg2010_region_tail.rs
+new file mode 100644
+index 0000000..31daf3b
+--- /dev/null
++++ b/tests/dwg2010_region_tail.rs
+@@ -0,0 +1,149 @@
++use acadrust::entities::acis::primitives::build_box;
++use acadrust::entities::solid3d::AcisMaterial;
++use acadrust::io::dwg::dwg_reference_type::DwgReferenceType;
++use acadrust::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader;
++use acadrust::io::dwg::dwg_stream_readers::merged_reader::DwgMergedReader;
++use acadrust::io::dwg::dwg_stream_readers::object_reader::entities::read_acis_entity;
++use acadrust::io::dwg::dwg_stream_writers::bit_writer::DwgBitWriter;
++use acadrust::io::dwg::DwgVersion;
++use acadrust::{DxfVersion, Handle, SabWriter};
++
++// Encode independently of the entity writer: both native AC1024 cache
++// layouts exist. An absent isoline cache may still carry BL(0) silhouettes.
++fn record(
++    offset: i64,
++    silhouettes: Option<i32>,
++    materials: i32,
++) -> (DwgMergedReader, Vec<u8>, i64) {
++    let version = DwgVersion::AC24;
++    let dxf = DxfVersion::AC1024;
++    let sab = SabWriter::write(&build_box([1.0, 2.0, 3.0], 2.0, 3.0, 4.0));
++    let mut main = DwgBitWriter::new(version, dxf);
++    let mut handles = DwgBitWriter::new(version, dxf);
++    for _ in 0..offset {
++        main.write_bit(true);
++    }
++    main.write_bit(false); // nonempty inline SAB
++    main.write_bit(false);
++    main.write_bit_short(2);
++    main.write_bytes(&sab);
++    main.write_bit(true); // wireframe header
++    main.write_bit(false); // no reference point
++    main.write_bit_long(0); // isolines
++    main.write_bit(false); // no isoline cache
++    if let Some(count) = silhouettes {
++        main.write_bit_long(count);
++    }
++    main.write_bit(true); // no extra modeler body
++    main.write_bit_long(materials);
++    for _ in 0..materials.max(0) {
++        main.write_bit_long(7);
++        main.write_bit_long(9);
++        handles.write_handle(DwgReferenceType::HardPointer, 0x1234);
++    }
++    let end = main.position_in_bits();
++    let mut reader = DwgMergedReader::from_readers(
++        DwgBitReader::new(main.into_bytes(), version, dxf),
++        None,
++        Some(DwgBitReader::new(handles.into_bytes(), version, dxf)),
++        dxf,
++    );
++    reader.set_main_data_end(end);
++    reader.set_position_in_bits(offset);
++    (reader, sab, end)
++}
++
++#[test]
++fn ac1024_empty_silhouette_count_preserves_geometry_and_materials() {
++    for offset in 0..8 {
++        for silhouettes in [None, Some(0)] {
++            for materials in [0, 1] {
++                let (mut reader, sab, end) = record(offset, silhouettes, materials);
++                let data =
++                    read_acis_entity(&mut reader, DwgVersion::AC24, DxfVersion::AC1024, false);
++                reader.check_error().unwrap_or_else(|error| {
++                    panic!("offset={offset}, silhouettes={silhouettes:?}, materials={materials}: {error}")
++                });
++                assert_eq!(reader.position_in_bits(), end);
++                assert_eq!(data.sab_data, sab);
++                assert_eq!(data.version, 2);
++                assert!(data.is_binary);
++                assert!(data.wireframe_data_present);
++                assert!(!data.wireframe_point_present);
++                assert!(!data.wireframe_isoline_present);
++                assert_eq!(data.isolines, 0);
++                assert!(data.wires.is_empty());
++                assert!(data.silhouettes.is_empty());
++                assert!(data.acis_empty_bit);
++                assert!(data.extra_acis_data.is_none());
++                let expected = if materials == 0 {
++                    vec![]
++                } else {
++                    vec![AcisMaterial {
++                        array_index: 7,
++                        absolute_reference: 9,
++                        material_handle: Some(Handle::new(0x1234)),
++                    }]
++                };
++                assert_eq!(data.materials, expected);
++            }
++        }
++    }
++}
++
++#[test]
++fn ac1024_silhouette_probe_does_not_accept_truncation_or_invalid_counts() {
++    for offset in 0..8 {
++        for silhouettes in [None, Some(0)] {
++            for materials in [0, 1] {
++                let (mut reader, _, end) = record(offset, silhouettes, materials);
++                reader.set_main_data_end(end - 1);
++                read_acis_entity(&mut reader, DwgVersion::AC24, DxfVersion::AC1024, false);
++                assert!(
++                    reader.check_error().is_err() || reader.position_in_bits() != end - 1,
++                    "truncated tail accepted completely: offset={offset}, silhouettes={silhouettes:?}, materials={materials}"
++                );
++            }
++            let (mut reader, _, end) = record(offset, silhouettes, -1);
++            read_acis_entity(&mut reader, DwgVersion::AC24, DxfVersion::AC1024, false);
++            assert!(
++                reader.check_error().is_err() || reader.position_in_bits() != end,
++                "negative material count accepted completely"
++            );
++        }
++        let (mut reader, _, end) = record(offset, Some(1), 0);
++        read_acis_entity(&mut reader, DwgVersion::AC24, DxfVersion::AC1024, false);
++        assert!(
++            reader.check_error().is_err() || reader.position_in_bits() != end,
++            "nonempty absent cache accepted completely"
++        );
++    }
++}
++
++#[test]
++fn missing_material_count_is_not_a_complete_record() {
++    for offset in 0..8 {
++        for silhouettes in [None, Some(0)] {
++            let (mut reader, _, end) = record(offset, silhouettes, 0);
++            let bound = end - 2; // Remove mandatory BL(0), retaining physical bytes.
++            reader.set_main_data_end(bound);
++            read_acis_entity(&mut reader, DwgVersion::AC24, DxfVersion::AC1024, false);
++            assert!(reader.check_error().is_err() || reader.position_in_bits() != bound);
++        }
++    }
++}
++
++#[test]
++fn multiple_material_bindings_are_preserved() {
++    for silhouettes in [None, Some(0)] {
++        let (mut reader, sab, end) = record(3, silhouettes, 2);
++        let data = read_acis_entity(&mut reader, DwgVersion::AC24, DxfVersion::AC1024, false);
++        reader.check_error().unwrap();
++        assert_eq!(reader.position_in_bits(), end);
++        assert_eq!(data.sab_data, sab);
++        assert_eq!(data.materials.len(), 2);
++        assert!(data.materials.iter().all(|m| m.array_index == 7
++            && m.absolute_reference == 9
++            && m.material_handle == Some(Handle::new(0x1234))));
++    }
++}

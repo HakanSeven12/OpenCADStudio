@@ -13,6 +13,35 @@ impl Scene {
         // tessellate the whole model on every rubber-band frame. The overlay
         // forces a GPU wire re-upload on its own (the `has_overlay` content-id
         // path), and iced redraws after the message that set the preview.
+        // One stable group-outline mode for extreme MOVE/COPY/ROTATE/SCALE
+        // previews. This must run *here*, not only in on_viewport_move:
+        // SNAP_DWELL and refresh_active_cmd_preview also publish full geometry
+        // and previously replaced the cheap preview with 81,000 leaf wires,
+        // causing 650-890ms GPU rebuilds and visually intermittent movement.
+        //
+        // The guard leaves ordinary drawing commands, STRETCH's deformation
+        // previews, grip edits, and filled/3D work on their original paths.
+        const MIN_SELECTED: usize = 512;
+        const MIN_WIRES: usize = 2048;
+        if self.selected.len() > MIN_SELECTED
+            && wires.len() >= MIN_WIRES
+            && self.preview_hidden.is_empty()
+            && self.command_preview_hidden.is_empty()
+            && self.preview_hatches.is_empty()
+        {
+            if let Some(group) =
+                crate::scene::model::instance_model::mass_transform_group_preview(
+                    &wires, MIN_WIRES,
+                )
+            {
+                crate::perf_record!(
+                    "[perf] mass-group-preview input_wires={} output_wires={} selected={} lod=single-box",
+                    wires.len(), group.len(), self.selected.len(),
+                );
+                self.preview_wires = group;
+                return;
+            }
+        }
         self.preview_wires = wires;
     }
 

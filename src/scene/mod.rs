@@ -10445,6 +10445,13 @@ impl Scene {
         let layer_hidden =
             |layer: &str| self.layer_hidden(layer) || self.interaction_layer_frozen(layer);
         let mut out: HashMap<Handle, Vec<HatchModel>> = HashMap::default();
+        // The initial hover/click index used to re-tessellate every translated
+        // copy of every hatch in every INSERT. Cache the block-local seed once
+        // per leaf handle; each hit-test instance receives just new anchors.
+        let mut translated_sources: HashMap<Handle, Option<HatchModel>> = HashMap::default();
+        let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
+        let mut reuse_hits = 0usize;
+        let mut reuse_unique = 0usize;
         // Skip block subtrees that contain no hatch at all. The presence test
         // is memoised across instances.
         let mut hatch_memo: std::collections::HashMap<String, bool> =
@@ -10512,16 +10519,36 @@ impl Scene {
                         let EntityType::Hatch(source) = entity else {
                             return;
                         };
-                        let mut placed = EntityType::Hatch(source.clone());
-                        placed.apply_transform(&context.transform);
-                        let EntityType::Hatch(hatch) = placed else {
-                            return;
-                        };
                         let color = crate::scene::view::render::adapt_to_bg(
                             context.style_for(&self.document, entity).0,
                             self.current_bg(),
                         );
-                        let Some(mut model) = Self::hatch_model_from_dxf(&hatch, color) else {
+                        let model = if context.clips.is_empty() {
+                            Self::hatch_translation_offset(&context.transform).and_then(|offset| {
+                                let seed = translated_sources.entry(source.common.handle).or_insert_with(|| {
+                                    reuse_unique += 1;
+                                    Self::hatch_model_from_dxf(source, color)
+                                });
+                                if reuse_unique > 0 {
+                                    reuse_hits += 1;
+                                }
+                                seed.as_ref().map(|model| model.translated_for_render(offset, color))
+                            })
+                        } else {
+                            None
+                        };
+                        let model = match model {
+                            Some(model) => Some(model),
+                            None => {
+                                let mut placed = EntityType::Hatch(source.clone());
+                                placed.apply_transform(&context.transform);
+                                match placed {
+                                    EntityType::Hatch(hatch) => Self::hatch_model_from_dxf(&hatch, color),
+                                    _ => None,
+                                }
+                            }
+                        };
+                        let Some(mut model) = model else {
                             return;
                         };
                         for clip in &context.clips {
@@ -10545,6 +10572,15 @@ impl Scene {
             }
         }
         let arc = Arc::new(out);
+        if let Some(started) = perf_started {
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            if ms >= 1.0 {
+                crate::perf_record!(
+                    "[perf] insert-hatch-pick-cache build={ms:.1}ms unique={reuse_unique} reused={reuse_hits} hosts={}",
+                    arc.len(),
+                );
+            }
+        }
         *self.insert_hatch_cache.borrow_mut() =
             Some((self.geometry_epoch, space_key, Arc::clone(&arc)));
         arc

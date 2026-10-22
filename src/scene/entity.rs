@@ -1901,9 +1901,9 @@ impl Scene {
         // A translated INSERT must not re-tessellate every leaf hatch. Keep
         // one source model per block-definition entity for this build. Arc
         // boundaries/patterns are shared by cloned placements. Only the
-        // translation-only, unclipped on-screen path uses this fast path;
-        // plotting, XCLIP, previews and non-translation transforms retain
-        // the exact transformed-DXF construction below.
+        // translation-only, unclipped on-screen path uses this fast path,
+        // including selection previews. Plotting, XCLIP and non-translation
+        // transforms retain the exact transformed-DXF construction below.
         let mut translated_hatch_sources: rustc_hash::FxHashMap<
             Handle,
             Option<HatchModel>,
@@ -2075,11 +2075,18 @@ impl Scene {
                 let key = (
                     source_hatch.common.handle.value(),
                     linear,
-                    model
-                        .boundary
-                        .iter()
-                        .flat_map(|point| point.map(f32::to_bits))
-                        .collect::<Vec<_>>(),
+                    // A translated instance has the exact same leaf
+                    // boundary as every other placement of this handle.
+                    // Avoid hashing/copying thousands of vertices per plant.
+                    if translation.is_some() {
+                        Vec::new()
+                    } else {
+                        model
+                            .boundary
+                            .iter()
+                            .flat_map(|point| point.map(f32::to_bits))
+                            .collect::<Vec<_>>()
+                    },
                     model.color.map(f32::to_bits),
                     model.angle_offset.to_bits(),
                     model.scale.to_bits(),

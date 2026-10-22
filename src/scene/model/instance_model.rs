@@ -228,8 +228,11 @@ pub fn mass_stub_outlines<'a>(
         if wire.snap_only || !wire.display_visible {
             continue;
         }
+        // Do not cancel the whole INSERT proxy when one *non-stub* leaf
+        // has an unbounded/sentinel AABB or is 3-D. Those leaves remain
+        // untouched in the preview/highlight, while the expensive valid
+        // block stubs can still be represented by their own bounds.
         if wire.fill_is_3d || !good_bounds(&wire.aabb) {
-            unsafe_names.insert(wire.name.clone());
             continue;
         }
         let b = wire.aabb;
@@ -262,6 +265,28 @@ pub fn mass_stub_outlines<'a>(
         replaced.insert(name);
     }
     (outlines, replaced)
+}
+
+/// Whether an ordinary selected/preview wire has been covered by a
+/// conservative per-INSERT proxy. Non-stub leaves with invalid bounds,
+/// 3-D geometry, or invisible/snap-only duties must remain intact. Never
+/// discard a leaf merely because its handle matches a proxied block.
+pub fn mass_stub_wire_is_proxied(
+    wire: &WireModel,
+    replaced: &rustc_hash::FxHashSet<String>,
+) -> bool {
+    if !replaced.contains(&wire.name) {
+        return false;
+    }
+    if wire.stub.is_some() {
+        return true;
+    }
+    wire.display_visible
+        && !wire.snap_only
+        && !wire.fill_is_3d
+        && wire.aabb.iter().all(|v| v.is_finite() && v.abs() < 1.0e15)
+        && wire.aabb[0] <= wire.aabb[2]
+        && wire.aabb[1] <= wire.aabb[3]
 }
 
 #[cfg(test)]
@@ -323,6 +348,42 @@ mod mass_stub_outline_tests {
         let first = outlines.iter().find(|w| w.name == "0").unwrap();
         assert_eq!(first.aabb, [-2.0, -6.0, 3.0, 2.0]);
         assert_eq!(refs.iter().filter(|wire| !names.contains(&wire.name)).count(), 0);
+    }
+
+    #[test]
+    fn non_stub_unbounded_or_3d_children_remain_exact_and_do_not_disable_stubs() {
+        let proto = Arc::new(vec![WireModel::default()]);
+        let mut wires = Vec::new();
+        for i in 0..300 {
+            let mut stub = stub_wire(
+                Arc::clone(&proto), [0.0, 0.0, 1.0, 1.0],
+                [i as f64 * 5.0, 0.0, 0.0], 0.0,
+            );
+            stub.name = i.to_string();
+            wires.push(stub);
+            let mut unbounded = WireModel::solid(
+                i.to_string(),
+                vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                WireModel::WHITE, false,
+            );
+            unbounded.aabb = WireModel::UNBOUNDED_AABB;
+            wires.push(unbounded);
+            let mut regular = WireModel::solid(
+                i.to_string(),
+                vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                WireModel::WHITE, false,
+            );
+            regular.aabb = [i as f32 * 5.0, 0.0, i as f32 * 5.0+1.0, 1.0];
+            wires.push(regular);
+        }
+        let (proxies, replaced) = mass_stub_outlines(wires.iter(), 256);
+        assert_eq!(replaced.len(), 300);
+        assert_eq!(proxies.len(), 300);
+        let remaining: Vec<_> = wires.iter().filter(
+            |wire| !mass_stub_wire_is_proxied(wire, &replaced)
+        ).collect();
+        assert_eq!(remaining.len(), 300);
+        assert!(remaining.iter().all(|wire| wire.aabb == WireModel::UNBOUNDED_AABB));
     }
 
     #[test]

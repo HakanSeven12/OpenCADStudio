@@ -3971,6 +3971,35 @@ impl OpenCADStudio {
             self.tabs[i]
                 .scene
                 .set_command_preview_hidden(&preview_hidden);
+            // A massive MOVE/COPY of repeated 2-D blocks must not upload
+            // millions of full-resolution leaf instances every mouse move.
+            // When enough block-copy stubs are present, use their exact
+            // conservative per-INSERT bounding boxes for the live *visual*
+            // preview. The command, snaps, document and committed result
+            // continue to use the original unsimplified CAD entities.
+            if self.tabs[i].scene.selected.len() > 512
+                && previews.len() >= 2048
+                && self.tabs[i].scene.preview_hatches.is_empty()
+            {
+                let (outlines, replaced) =
+                    crate::scene::model::instance_model::mass_stub_outlines(
+                        previews.iter(),
+                        2048,
+                    );
+                if !replaced.is_empty() {
+                    let before = previews.len();
+                    previews.retain(|wire| {
+                        wire.stub.is_none() || !replaced.contains(&wire.name)
+                    });
+                    previews.extend(outlines);
+                    crate::perf_record!(
+                        "[perf] mass-block-preview before={} after={} proxies={} exact_geometry_on_commit=true",
+                        before,
+                        previews.len(),
+                        replaced.len(),
+                    );
+                }
+            }
             self.tabs[i].scene.set_preview_wires(previews);
             let preview_ms = crate::perf::elapsed_ms(preview_started);
             if perf_move && preview_ms >= 1.0 {

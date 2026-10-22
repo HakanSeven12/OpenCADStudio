@@ -2744,6 +2744,43 @@ mod area_query_tests {
         );
     }
 
+    #[test]
+    fn covered_stub_shortcut_preserves_exact_boundary_stubs() {
+        use crate::scene::model::instance_model::stub_wire;
+        let mut proto_line = WireModel::solid(
+            "leaf".into(),
+            vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
+                 [1.0, 0.5, 0.0], [1.0, 1.0, 0.0]],
+            WireModel::WHITE,
+            false,
+        );
+        proto_line.aabb = [0.0, 0.0, 1.0, 1.0];
+        let prototype = Arc::new(vec![proto_line]);
+        let mut wholly_inside = stub_wire(
+            Arc::clone(&prototype), [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0], 0.0,
+        );
+        wholly_inside.name = "11".into();
+        let mut touches_edge = stub_wire(
+            prototype, [0.0, 0.0, 1.0, 1.0],
+            [1.0, 0.0, 0.0], 0.0,
+        );
+        touches_edge.name = "12".into();
+        let candidates = InteractionCandidates::all(Arc::new(vec![
+            wholly_inside, touches_edge,
+        ]));
+        let quick = candidates.materialize_stubs_for_crossing_xy_box(
+            [-0.1, -0.1, 1.1, 1.1],
+        );
+        assert_eq!(quick.len(), 2);
+        assert_eq!(quick.get(0).unwrap().name, "11");
+        assert_eq!(quick.get(0).unwrap().points.len(), 2,
+            "fully contained block becomes one crossing carrier");
+        assert_eq!(quick.get(1).unwrap().name, "12");
+        assert_eq!(quick.get(1).unwrap().points.len(), 4,
+            "boundary block must retain the exact leaf");
+    }
+
     // World (x,y) → screen ((x+1)*100, (1-y)*100) over a 200×200 viewport, the
     // same identity ortho view the hit-test tests use.
     #[test]

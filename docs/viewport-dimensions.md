@@ -64,6 +64,10 @@ Unsupported cases preserve saved dimensions:
   requiring a coupled solve.
 - Imported viewport scaling without OCS scale metadata or
   `ACAD_DIMASSOC_CALC_DIMLFAC` identifying the saved compensation.
+- Non-circular `REGION` boundaries (straight, elliptical, or spline edges) do not
+  support radial or arc-length associativity; closed circular region loops reject
+  `DIMARC`. Modifying a region's topology or edge ordering does not guarantee
+  persistent edge identity across refreshes.
 
 ## Tests
 

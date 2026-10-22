@@ -246,7 +246,12 @@ fn annotative_dimension_text_follows_the_scale_once() {
     // drew its text at the square of that scale.
     let (mut app, i) = app();
     let _ = app.dispatch_command("CANNOSCALE 1:1");
-    app.dimstyle_selected = app.tabs[i].scene.document.header.current_dimstyle_name.clone();
+    app.dimstyle_selected = app.tabs[i]
+        .scene
+        .document
+        .header
+        .current_dimstyle_name
+        .clone();
     app.load_dimstyle_bufs(i);
     app.apply_ds_toggle(crate::app::DsField::Annotative);
     app.apply_dimstyle_bufs(i);
@@ -259,14 +264,429 @@ fn annotative_dimension_text_follows_the_scale_once() {
     let at_one = rendered_text_height(&app, dimension);
     app.annotation_auto_scale = 4;
     let _ = app.dispatch_command("CANNOSCALE 1:2");
-    let scales: Vec<_> = crate::scene::annotative::object_scale_memberships(
-        &app.tabs[i].scene.document,
-        dimension,
-    )
-    .into_iter()
-    .map(|(name, _)| name)
-    .collect();
+    let scales: Vec<_> =
+        crate::scene::annotative::object_scale_memberships(&app.tabs[i].scene.document, dimension)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
     assert_eq!(scales, ["1:1", "1:2"]);
     let ratio = rendered_text_height(&app, dimension) / at_one;
     assert!((ratio - 2.0).abs() < 1.0e-3, "text grew {ratio}x at 1:2");
+}
+
+#[test]
+fn region_radial_dimensions_exact_radius_and_diameter_preview_matches_commit() {
+    use kernel::geom2d::{Circle as KernelCircle, Curve};
+    let (mut app, i) = app();
+    let region = crate::scene::model::presspull_model::region_from_loops(
+        &[
+            vec![Curve::Circle(KernelCircle {
+                centre: [0.0, 0.0],
+                radius: 10.0,
+            })],
+            vec![Curve::Circle(KernelCircle {
+                centre: [0.0, 0.0],
+                radius: 2.0,
+            })],
+        ],
+        crate::command::WorkingPlane::default(),
+    )
+    .unwrap();
+    let handle = app.tabs[i].scene.add_entity(region);
+
+    // DIMRADIUS outer edge (radius 10)
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(handle, DVec3::new(10.0, 0.0, 0.0)));
+    let dim_r_outer = commit_and_compare(&mut app, i, DVec3::new(15.0, 10.0, 0.0));
+    assert_eq!(text(&app, &dim_r_outer), "R10");
+
+    // DIMRADIUS inner edge (hole, radius 2)
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(handle, DVec3::new(2.0, 0.0, 0.0)));
+    let dim_r_inner = commit_and_compare(&mut app, i, DVec3::new(5.0, 5.0, 0.0));
+    assert_eq!(text(&app, &dim_r_inner), "R2");
+
+    // DIMDIAMETER outer edge (diameter 20)
+    let _ = app.dispatch_command("DIMDIAMETER");
+    let _ = app.feed_command(StepInput::EntityPick(handle, DVec3::new(0.0, 10.0, 0.0)));
+    let dim_d_outer = commit_and_compare(&mut app, i, DVec3::new(10.0, 15.0, 0.0));
+    assert_eq!(text(&app, &dim_d_outer), "∅20");
+
+    // DIMDIAMETER inner edge (hole, diameter 4)
+    let _ = app.dispatch_command("DIMDIAMETER");
+    let _ = app.feed_command(StepInput::EntityPick(handle, DVec3::new(0.0, 2.0, 0.0)));
+    let dim_d_inner = commit_and_compare(&mut app, i, DVec3::new(4.0, 4.0, 0.0));
+    assert_eq!(text(&app, &dim_d_inner), "∅4");
+}
+
+#[test]
+fn region_arc_length_preview_and_commit_for_circular_arc_edges() {
+    use kernel::geom2d::{Arc as KernelArc, Circle as KernelCircle, Curve, Line as KernelLine};
+    let (mut app, i) = app();
+    let arc_loop = vec![
+        Curve::Arc(KernelArc {
+            centre: [0.0, 0.0],
+            radius: 20.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+        }),
+        Curve::Line(KernelLine {
+            start: [0.0, 20.0],
+            end: [0.0, 0.0],
+        }),
+        Curve::Line(KernelLine {
+            start: [0.0, 0.0],
+            end: [20.0, 0.0],
+        }),
+    ];
+    let region = crate::scene::model::presspull_model::region_from_loops(
+        &[arc_loop],
+        crate::command::WorkingPlane::default(),
+    )
+    .unwrap();
+    let handle = app.tabs[i].scene.add_entity(region);
+
+    // DIMARC on the circular arc edge (radius 20, sweep pi/2 -> arc length ~31.4159)
+    let mid_angle = std::f64::consts::FRAC_PI_4;
+    let on_arc = DVec3::new(20.0 * mid_angle.cos(), 20.0 * mid_angle.sin(), 0.0);
+    let _ = app.dispatch_command("DIMARC");
+    let _ = app.feed_command(StepInput::EntityPick(handle, on_arc));
+    let committed_dim = commit_and_compare(&mut app, i, DVec3::new(25.0, 25.0, 0.0));
+    let measured_text = text(&app, &committed_dim);
+    assert!(
+        measured_text.contains("31,4"),
+        "expected arc length ~31.4, got {measured_text}"
+    );
+
+    // Closed circular edge should be rejected by DIMARC
+    let circle_region = crate::scene::model::presspull_model::region_from_loops(
+        &[vec![Curve::Circle(KernelCircle {
+            centre: [0.0, 0.0],
+            radius: 10.0,
+        })]],
+        crate::command::WorkingPlane::default(),
+    )
+    .unwrap();
+    let circle_handle = app.tabs[i].scene.add_entity(circle_region);
+    let before_count = committed(&app).len();
+    let _ = app.dispatch_command("DIMARC");
+    let _ = app.feed_command(StepInput::EntityPick(
+        circle_handle,
+        DVec3::new(10.0, 0.0, 0.0),
+    ));
+    assert!(app
+        .dimension_preview_entities(i, DVec3::new(15.0, 0.0, 0.0))
+        .is_none());
+    let _ = app.feed_command(StepInput::Point(DVec3::new(15.0, 0.0, 0.0)));
+    assert_eq!(committed(&app).len(), before_count);
+}
+
+#[test]
+fn region_dimension_association_refreshes_after_same_topology_change() {
+    use kernel::geom2d::{Arc as KernelArc, Circle as KernelCircle, Curve, Line as KernelLine};
+    let (mut app, i) = app();
+    app.tabs[i].scene.document.header.dimension_associativity = 2;
+    let initial_region = crate::scene::model::presspull_model::region_from_loops(
+        &[
+            vec![
+                Curve::Arc(KernelArc {
+                    centre: [0.0, 0.0],
+                    radius: 20.0,
+                    start_angle: 0.0,
+                    end_angle: std::f64::consts::FRAC_PI_2,
+                }),
+                Curve::Line(KernelLine {
+                    start: [0.0, 20.0],
+                    end: [0.0, 0.0],
+                }),
+                Curve::Line(KernelLine {
+                    start: [0.0, 0.0],
+                    end: [20.0, 0.0],
+                }),
+            ],
+            vec![Curve::Circle(KernelCircle {
+                centre: [5.0, 5.0],
+                radius: 2.0,
+            })],
+        ],
+        crate::command::WorkingPlane::default(),
+    )
+    .unwrap();
+    let handle = app.tabs[i].scene.add_entity(initial_region);
+
+    // Commit DIMRADIUS on inner circle
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(handle, DVec3::new(7.0, 5.0, 0.0)));
+    let rad_dim = commit_and_compare(&mut app, i, DVec3::new(10.0, 10.0, 0.0));
+    assert_eq!(text(&app, &rad_dim), "R2");
+
+    // Commit DIMARC on outer arc
+    let mid_angle = std::f64::consts::FRAC_PI_4;
+    let on_arc = DVec3::new(20.0 * mid_angle.cos(), 20.0 * mid_angle.sin(), 0.0);
+    let _ = app.dispatch_command("DIMARC");
+    let _ = app.feed_command(StepInput::EntityPick(handle, on_arc));
+    let _ = commit_and_compare(&mut app, i, DVec3::new(25.0, 25.0, 0.0));
+
+    // Update the region with modified radii (same topology: outer radius 30.0, hole radius 4.0)
+    let mut updated_region = crate::scene::model::presspull_model::region_from_loops(
+        &[
+            vec![
+                Curve::Arc(KernelArc {
+                    centre: [0.0, 0.0],
+                    radius: 30.0,
+                    start_angle: 0.0,
+                    end_angle: std::f64::consts::FRAC_PI_2,
+                }),
+                Curve::Line(KernelLine {
+                    start: [0.0, 30.0],
+                    end: [0.0, 0.0],
+                }),
+                Curve::Line(KernelLine {
+                    start: [0.0, 0.0],
+                    end: [30.0, 0.0],
+                }),
+            ],
+            vec![Curve::Circle(KernelCircle {
+                centre: [5.0, 5.0],
+                radius: 4.0,
+            })],
+        ],
+        crate::command::WorkingPlane::default(),
+    )
+    .unwrap();
+    match &mut updated_region {
+        EntityType::Region(r) => r.common.handle = handle,
+        _ => unreachable!(),
+    }
+    assert!(app.tabs[i].scene.update_entity(updated_region));
+
+    // Verify refreshed dimension values
+    let refreshed_dims = committed(&app);
+    let refreshed_rad = refreshed_dims.iter().find(|d| matches!(d, EntityType::Dimension(dim) if matches!(**dim, codec::entities::Dimension::Radius(_)))).unwrap();
+    assert_eq!(text(&app, refreshed_rad), "R4");
+
+    let refreshed_arc = refreshed_dims.iter().find(|d| matches!(d, EntityType::Dimension(dim) if matches!(**dim, codec::entities::Dimension::Arc(_)))).unwrap();
+    let new_arc_text = text(&app, refreshed_arc);
+    assert!(
+        new_arc_text.contains("47,1"),
+        "expected ~47.1, got {new_arc_text}"
+    );
+}
+
+#[test]
+fn region_dimension_rejection_for_straight_and_noncircular_edges() {
+    use kernel::geom2d::{Arc as KernelArc, Curve, Line as KernelLine};
+    let (mut app, i) = app();
+    let loop_pieces = vec![
+        Curve::Arc(KernelArc {
+            centre: [0.0, 0.0],
+            radius: 20.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+        }),
+        Curve::Line(KernelLine {
+            start: [0.0, 20.0],
+            end: [0.0, 0.0],
+        }),
+        Curve::Line(KernelLine {
+            start: [0.0, 0.0],
+            end: [20.0, 0.0],
+        }),
+    ];
+    let region = crate::scene::model::presspull_model::region_from_loops(
+        &[loop_pieces],
+        crate::command::WorkingPlane::default(),
+    )
+    .unwrap();
+    let handle = app.tabs[i].scene.add_entity(region);
+
+    let before_count = committed(&app).len();
+    let straight_pt = DVec3::new(0.0, 10.0, 0.0);
+
+    // DIMRADIUS on straight edge
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(handle, straight_pt));
+    assert!(app
+        .dimension_preview_entities(i, DVec3::new(10.0, 10.0, 0.0))
+        .is_none());
+    let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
+    assert_eq!(committed(&app).len(), before_count);
+
+    // DIMDIAMETER on straight edge
+    let _ = app.dispatch_command("DIMDIAMETER");
+    let _ = app.feed_command(StepInput::EntityPick(handle, straight_pt));
+    assert!(app
+        .dimension_preview_entities(i, DVec3::new(10.0, 10.0, 0.0))
+        .is_none());
+    let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
+    assert_eq!(committed(&app).len(), before_count);
+
+    // DIMARC on straight edge
+    let _ = app.dispatch_command("DIMARC");
+    let _ = app.feed_command(StepInput::EntityPick(handle, straight_pt));
+    assert!(app
+        .dimension_preview_entities(i, DVec3::new(10.0, 10.0, 0.0))
+        .is_none());
+    let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
+    assert_eq!(committed(&app).len(), before_count);
+}
+
+#[test]
+fn region_inclined_plane_radial_dimension_reports_world_radius() {
+    use kernel::geom2d::{Circle as KernelCircle, Curve};
+    let (mut app, i) = app();
+    let inclined_plane = crate::command::WorkingPlane::new(
+        DVec3::new(100.0, 100.0, 0.0),
+        DVec3::new(1.0, 0.0, 0.0),
+        DVec3::new(0.0, 1.0, 1.0).normalize(),
+    );
+    let region = crate::scene::model::presspull_model::region_from_loops(
+        &[vec![Curve::Circle(KernelCircle {
+            centre: [0.0, 0.0],
+            radius: 15.0,
+        })]],
+        inclined_plane,
+    )
+    .unwrap();
+    let handle = app.tabs[i].scene.add_entity(region);
+
+    let pick_pt = inclined_plane.to_world(DVec3::new(15.0, 0.0, 0.0));
+    let place_pt = inclined_plane.to_world(DVec3::new(25.0, 10.0, 0.0));
+
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(handle, pick_pt));
+    let dim = commit_and_compare(&mut app, i, place_pt);
+    assert_eq!(text(&app, &dim), "R15");
+}
+
+#[test]
+fn baseline_circle_and_arc_dimensions_preserved() {
+    let (mut app, i) = app();
+    let mut circle = Circle::new();
+    circle.center = Vector3::ZERO;
+    circle.radius = 25.0;
+    let circle_h = app.tabs[i].scene.add_entity(EntityType::Circle(circle));
+
+    let mut arc = Arc::new();
+    arc.center = Vector3::ZERO;
+    arc.radius = 25.0;
+    arc.start_angle = 0.0;
+    arc.end_angle = std::f64::consts::PI;
+    let arc_h = app.tabs[i].scene.add_entity(EntityType::Arc(arc));
+
+    // Circle DIMRADIUS
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(circle_h, DVec3::new(25.0, 0.0, 0.0)));
+    let r_dim = commit_and_compare(&mut app, i, DVec3::new(35.0, 10.0, 0.0));
+    assert_eq!(text(&app, &r_dim), "R25");
+
+    // Circle DIMDIAMETER
+    let _ = app.dispatch_command("DIMDIAMETER");
+    let _ = app.feed_command(StepInput::EntityPick(circle_h, DVec3::new(0.0, 25.0, 0.0)));
+    let d_dim = commit_and_compare(&mut app, i, DVec3::new(10.0, 35.0, 0.0));
+    assert_eq!(text(&app, &d_dim), "∅50");
+
+    // Arc DIMARC
+    let _ = app.dispatch_command("DIMARC");
+    let _ = app.feed_command(StepInput::EntityPick(arc_h, DVec3::new(0.0, 25.0, 0.0)));
+    let a_dim = commit_and_compare(&mut app, i, DVec3::new(0.0, 35.0, 0.0));
+    assert!(text(&app, &a_dim).contains("78,5"));
+}
+
+#[test]
+fn region_dimension_rejection_for_noncircular_and_near_circle_nurbs_edges() {
+    use kernel::geom2d::{Curve, Line as KernelLine, NurbsCurve};
+    let (mut app, i) = app();
+    // Near-circular rational quadratic NURBS:
+    // P0 = [10.0, 0.0], P1 = [10.0, 9.9995], P2 = [0.0, 9.9995], w = [1.0, 1/sqrt(2), 1.0].
+    // Tangent lengths 9.9995 != 10.0. The 7-sample test would pass because 0.0005 < 1e-4*(1+10),
+    // but the analytical certificate must reject this near-circular curve.
+    let near_circle_nurbs = NurbsCurve::new(
+        2,
+        vec![[10.0, 0.0], [10.0, 9.9995], [0.0, 9.9995]],
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        Some(vec![1.0, std::f64::consts::FRAC_1_SQRT_2, 1.0]),
+    )
+    .unwrap();
+    let closing_lines = vec![
+        Curve::Nurbs(near_circle_nurbs),
+        Curve::Line(KernelLine {
+            start: [0.0, 9.9995],
+            end: [0.0, 0.0],
+        }),
+        Curve::Line(KernelLine {
+            start: [0.0, 0.0],
+            end: [10.0, 0.0],
+        }),
+    ];
+    let region = crate::scene::model::presspull_model::region_from_loops(
+        &[closing_lines],
+        crate::command::WorkingPlane::default(),
+    )
+    .unwrap();
+    let handle = app.tabs[i].scene.add_entity(region);
+    let before_count = committed(&app).len();
+    let pick_pt = DVec3::new(7.07, 7.07, 0.0);
+
+    // DIMRADIUS on near-circle NURBS must be rejected
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(handle, pick_pt));
+    assert!(app
+        .dimension_preview_entities(i, DVec3::new(15.0, 15.0, 0.0))
+        .is_none());
+    let _ = app.feed_command(StepInput::Point(DVec3::new(15.0, 15.0, 0.0)));
+    assert_eq!(committed(&app).len(), before_count);
+
+    // DIMDIAMETER on near-circle NURBS must be rejected
+    let _ = app.dispatch_command("DIMDIAMETER");
+    let _ = app.feed_command(StepInput::EntityPick(handle, pick_pt));
+    assert!(app
+        .dimension_preview_entities(i, DVec3::new(15.0, 15.0, 0.0))
+        .is_none());
+    let _ = app.feed_command(StepInput::Point(DVec3::new(15.0, 15.0, 0.0)));
+    assert_eq!(committed(&app).len(), before_count);
+
+    // DIMARC on near-circle NURBS must be rejected
+    let _ = app.dispatch_command("DIMARC");
+    let _ = app.feed_command(StepInput::EntityPick(handle, pick_pt));
+    assert!(app
+        .dimension_preview_entities(i, DVec3::new(15.0, 15.0, 0.0))
+        .is_none());
+    let _ = app.feed_command(StepInput::Point(DVec3::new(15.0, 15.0, 0.0)));
+    assert_eq!(committed(&app).len(), before_count);
+}
+
+#[test]
+fn region_radial_dimensions_large_translated_coordinates_certified() {
+    use kernel::geom2d::{Circle as KernelCircle, Curve};
+    let (mut app, i) = app();
+    let large_plane = crate::command::WorkingPlane::new(
+        DVec3::new(1_000_000.0, 1_000_000.0, 0.0),
+        DVec3::new(1.0, 0.0, 0.0),
+        DVec3::new(0.0, 1.0, 0.0),
+    );
+    let region = crate::scene::model::presspull_model::region_from_loops(
+        &[vec![Curve::Circle(KernelCircle {
+            centre: [0.0, 0.0],
+            radius: 25.0,
+        })]],
+        large_plane,
+    )
+    .unwrap();
+    let handle = app.tabs[i].scene.add_entity(region);
+
+    let pick_pt = DVec3::new(1_000_025.0, 1_000_000.0, 0.0);
+    let place_pt = DVec3::new(1_000_040.0, 1_000_020.0, 0.0);
+
+    // DIMRADIUS
+    let _ = app.dispatch_command("DIMRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(handle, pick_pt));
+    let dim_r = commit_and_compare(&mut app, i, place_pt);
+    assert_eq!(text(&app, &dim_r), "R25");
+
+    // DIMDIAMETER
+    let _ = app.dispatch_command("DIMDIAMETER");
+    let _ = app.feed_command(StepInput::EntityPick(handle, pick_pt));
+    let dim_d = commit_and_compare(&mut app, i, place_pt);
+    assert_eq!(text(&app, &dim_d), "∅50");
 }

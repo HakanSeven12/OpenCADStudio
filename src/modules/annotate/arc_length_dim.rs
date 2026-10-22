@@ -30,6 +30,7 @@ pub fn tool() -> ToolDef {
 enum SourceBinding {
     Arc,
     PolylineSegment(i32),
+    RegionEdge(i32),
 }
 
 #[derive(Clone, Copy)]
@@ -133,7 +134,7 @@ impl ArcSelection {
                     parameter(self.end_angle),
                 )),
             ],
-            SourceBinding::PolylineSegment(segment) => {
+            SourceBinding::PolylineSegment(segment) | SourceBinding::RegionEdge(segment) => {
                 let point_marker = polyline_arc_point_marker(segment);
                 vec![
                     Some(DimensionAssociationSource::explicit(
@@ -283,7 +284,8 @@ impl CadCommand for ArcLengthDimensionCommand {
         }
         match self.step {
             Step::SelectObject => {
-                crate::t!("DIMARC  Select arc or polyline arc segment:").into_owned()
+                crate::t!("DIMARC  Select arc, polyline arc segment, or circular region arc edge:")
+                    .into_owned()
             }
             Step::DimLine(selection) => {
                 let leader_option = if selection.sweep() > std::f64::consts::FRAC_PI_2 {
@@ -488,6 +490,7 @@ impl CadCommand for ArcLengthDimensionCommand {
             EntityType::LwPolyline(_) | EntityType::Polyline2D(_) => {
                 SourceBinding::PolylineSegment(source.marker)
             }
+            EntityType::Region(_) => SourceBinding::RegionEdge(source.marker),
             _ => return CmdResult::NeedPoint,
         };
         let Some(selection) = ArcSelection::new(source, binding) else {

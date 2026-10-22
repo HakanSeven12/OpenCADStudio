@@ -137,7 +137,8 @@ impl CadCommand for RadiusDimensionCommand {
         }
         match self.step {
             Step::SelectObject => {
-                t!("DIMRADIUS  Select arc, circle, or polyline arc:").into_owned()
+                t!("DIMRADIUS  Select arc, circle, polyline arc, or circular region edge:")
+                    .into_owned()
             }
             Step::DimLine(_) => {
                 t!("DIMRADIUS  Specify dimension line location  [Mtext/Text/Angle]:").into_owned()

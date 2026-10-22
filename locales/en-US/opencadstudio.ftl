@@ -3530,7 +3530,7 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE  No base dimension found. Place a dimension first.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE  Specify a second extension line origin (Enter to exit):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER  Enter dimension text (blank = measured value):
-    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  Select arc, circle, or polyline arc:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  Select arc, circle, polyline arc, or circular region edge:
     .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER  Specify dimension line location  [Mtext/Text/Angle]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER  Specify point on circle:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER  Specify text angle (degrees):
@@ -3557,7 +3557,7 @@ annotate =
     .dimordinate-specify-leader-endpoint = DIMORDINATE  Specify leader endpoint [Xdatum/Ydatum/Mtext/Text/Angle]:
     .dimordinate-specify-text-angle-degrees = DIMORDINATE  Specify text angle (degrees):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Enter dimension text (blank = measured value):
-    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Select arc, circle, or polyline arc:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Select arc, circle, polyline arc, or circular region edge:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  Specify dimension line location  [Mtext/Text/Angle]:
     .dimradius-specify-radius-point = DIMRADIUS  Specify radius point:
     .dimradius-specify-text-angle-degrees = DIMRADIUS  Specify text angle (degrees):
@@ -3662,7 +3662,7 @@ annotate =
 
     .dimarc-enter-dimension-text-blank-measured-value = DIMARC  Enter dimension text (blank = measured value):
     .dimarc-specify-text-angle-degrees = DIMARC  Specify text angle (degrees):
-    .dimarc-select-arc-or-polyline-arc-segment = DIMARC  Select arc or polyline arc segment:
+    .dimarc-select-arc-or-polyline-arc-segment = DIMARC  Select arc, polyline arc segment, or circular region arc edge:
     .dimarc-specify-arc-length-dimension-location-mtext-text-angle-partial = DIMARC  Specify arc length dimension location [Mtext/Text/Angle/Partial__ocs_fmt_0__]:
     .dimarc-specify-first-point-of-partial-arc = DIMARC  Specify first point of partial arc:
     .dimarc-specify-second-point-of-partial-arc = DIMARC  Specify second point of partial arc:

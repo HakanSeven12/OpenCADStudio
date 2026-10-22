@@ -38,7 +38,12 @@ ellipses, and splines: enable the modes appropriate to the geometry. For example
 a circular boundary provides Center, Quadrant, and Tangent, not artificial
 endpoints along its display tessellation. Holes and inclined regions retain their
 own boundary coordinates. Region rendering, selection, and plotted output are
-unchanged. This does not add persistent dimension associativity to region edges.
+unchanged. Non-circular region edges do not support persistent radial associativity;
+exact circular region edges support associative radial (`DIMRADIUS`/`DIMDIAMETER`)
+and arc-length (`DIMARC`) dimensions. Specifically, circular arc edges of a region
+support arc-length dimensions (`DIMARC`), whereas full circular region loops (such as
+cylindrical holes or closed circular outer boundaries) are intentionally rejected by
+`DIMARC`, consistent with standalone `CIRCLE` entities.
 
 During point selection, rapid pointer movement defers full snap evaluation until
 the cursor settles; clicks still resolve the exact clicked position. OTRACK

@@ -184,7 +184,23 @@ pub fn compact_mass_transform_preview(
         FxHashMap::default();
     let mut order = Vec::new();
     for wire in &wires {
-        let b = wire.aabb;
+        // Some block-instanced wires have an unset or unbounded cached AABB.
+        // Recover a finite preview envelope from their wire positions rather
+        // than disabling LOD for the entire 13k-block selection.
+        let mut b = wire.aabb;
+        if !b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
+            || b[0] > b[2] || b[1] > b[3]
+        {
+            b = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+            for p in &wire.points {
+                if p[0].is_finite() && p[1].is_finite() {
+                    b[0] = b[0].min(p[0]);
+                    b[1] = b[1].min(p[1]);
+                    b[2] = b[2].max(p[0]);
+                    b[3] = b[3].max(p[1]);
+                }
+            }
+        }
         if !wire.display_visible
             || wire.fill_is_3d
             || !wire.fill_tris.is_empty()
@@ -192,9 +208,10 @@ pub fn compact_mass_transform_preview(
             || !wire.pick_tris.is_empty()
             || wire.point_marker.is_some()
             || !b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
-            || b[0] > b[2]
-            || b[1] > b[3]
+            || b[0] > b[2] || b[1] > b[3]
         {
+            // Preview LOD must not invent coordinates for unsupported items.
+            // Preserve the original preview for these mixed selections.
             return wires;
         }
         let item = grouped.entry(wire.name.clone()).or_insert_with(|| {

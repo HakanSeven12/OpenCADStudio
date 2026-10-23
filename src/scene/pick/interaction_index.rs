@@ -2077,7 +2077,9 @@ impl InteractionCandidates {
             screen_rect: self.screen_rect,
             screen_view: self.screen_view,
             ..Self::all(Arc::new(wires))
-        
+        }
+    }
+
     /// Leave out every wire `drop` matches, with the segments, points and
     /// triangles that belong to it.
     pub(crate) fn exclude_wires(&mut self, drop: impl Fn(&WireModel) -> bool) {

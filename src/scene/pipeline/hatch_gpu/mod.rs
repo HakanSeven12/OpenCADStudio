@@ -239,22 +239,47 @@ impl HatchGpu {
         let HatchBackend::Storage { resident, .. } = &mut self.backend else {
             return 0;
         };
+        const DIRTY_PAGE_ITEMS: usize = 1024;
         let mut updated = 0;
         for batch in resident {
+            // Keep the existing CPU frustum and sub-pixel calculations, but
+            // transfer only the placement/source pages whose flags changed.
+            let mut source_pages = Vec::new();
             for index in 0..batch.unique_source_count {
-                batch.source_visibility[index] = u32::from(is_visible(batch.source_aabbs[index]));
+                let next = u32::from(is_visible(batch.source_aabbs[index]));
+                if batch.source_visibility[index] != next {
+                    batch.source_visibility[index] = next;
+                    let page = index / DIRTY_PAGE_ITEMS;
+                    if source_pages.last().copied() != Some(page) {
+                        source_pages.push(page);
+                    }
+                }
             }
             for index in batch.unique_source_count..batch.source_visibility.len() {
-                batch.source_visibility[index] = 1;
+                if batch.source_visibility[index] != 1 {
+                    batch.source_visibility[index] = 1;
+                    let page = index / DIRTY_PAGE_ITEMS;
+                    if source_pages.last().copied() != Some(page) {
+                        source_pages.push(page);
+                    }
+                }
             }
+            let mut placement_pages = Vec::new();
             for (index, aabb) in batch.instance_aabbs.iter().copied().enumerate() {
-                batch.placements[index].visible = if index == 0 && batch.unique_source_count > 0 {
+                let next = if index == 0 && batch.unique_source_count > 0 {
                     1
                 } else {
                     u32::from(is_visible(aabb))
                 };
+                if batch.placements[index].visible != next {
+                    batch.placements[index].visible = next;
+                    let page = index / DIRTY_PAGE_ITEMS;
+                    if placement_pages.last().copied() != Some(page) {
+                        placement_pages.push(page);
+                    }
+                }
             }
-            batch.upload_visibility(queue);
+            batch.upload_visibility_pages(queue, &placement_pages, &source_pages);
             updated += batch.instance_aabbs.len() + batch.unique_source_count;
         }
         updated

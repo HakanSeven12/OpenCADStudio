@@ -51,25 +51,42 @@ impl OpenCADStudio {
         if handles.is_empty() {
             return Some(Task::none());
         }
+        let perf_start = crate::perf::enabled().then(std::time::Instant::now);
         let label = self.history_label_from_active_cmd(i, "COPY");
         // Copying a dimension clones a *D block record, so gate delta on
         // the selection being dimension-free.
         let delta_safe = self.delta_copy_safe(i, &handles);
         let pending = self.begin_undo(i, label, handles.len(), delta_safe);
+        let undo_begin_ms = perf_start.map_or(0.0, |start| start.elapsed().as_secs_f64() * 1e3);
+        let copy_started = std::time::Instant::now();
         let new_handles = self.tabs[i].scene.copy_entities(&handles, &transform);
+        let clone_ms = copy_started.elapsed().as_secs_f64() * 1e3;
+        let copied = new_handles.len();
         self.tabs[i].dirty = true;
-        self.tabs[i].scene.deselect_all();
-        for h in new_handles {
-            self.tabs[i].scene.select_entity(h, false);
-        }
+        // Avoid N independent selection mutations and GPU highlight
+        // invalidations when COPY produces thousands of new INSERTs.
+        let selection_started = std::time::Instant::now();
+        self.tabs[i].scene.select_entities_exclusive(&new_handles);
+        let selection_ms = selection_started.elapsed().as_secs_f64() * 1e3;
         self.tabs[i].scene.clear_preview_wire();
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
         if let Some(p) = prompt {
             self.command_line.push_info(&p);
         }
+        let properties_started = std::time::Instant::now();
         self.refresh_properties();
+        let properties_ms = properties_started.elapsed().as_secs_f64() * 1e3;
+        let commit_started = std::time::Instant::now();
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
+        }
+        if let Some(started) = perf_start {
+            let total_ms = started.elapsed().as_secs_f64() * 1e3;
+            crate::perf_record!(
+                "[perf] bulk-copy-commit total={total_ms:.1}ms source={} added={copied} begin_undo={undo_begin_ms:.1}ms clone={clone_ms:.1}ms selection={selection_ms:.1}ms properties={properties_ms:.1}ms undo_commit={:.1}ms",
+                handles.len(),
+                commit_started.elapsed().as_secs_f64() * 1e3,
+            );
         }
         None
     }

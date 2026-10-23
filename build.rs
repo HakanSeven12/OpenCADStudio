@@ -20,11 +20,21 @@ fn main() {
     // Rerun on commit and branch switch only. Watching `.git/index` as well
     // would keep the dirty flag fresh, but Cargo recompiles the crate every
     // time this script reruns, and `git status` rewrites the index.
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
-        if let Some(reference) = head.trim().strip_prefix("ref: ") {
-            println!("cargo:rerun-if-changed=.git/{reference}");
+    // Git worktrees store .git as a pointer file; watching .git/HEAD in
+    // that case names a nonexistent file and forces Cargo to rebuild *every*
+    // time, even if nothing changed.
+    if let Some(head_path) = git_output(&["rev-parse", "--git-path", "HEAD"]) {
+        println!("cargo:rerun-if-changed={head_path}");
+        if let Ok(head) = std::fs::read_to_string(&head_path) {
+            if let Some(reference) = head.trim().strip_prefix("ref: ") {
+                if let Some(ref_path) = git_output(&["rev-parse", "--git-path", reference]) {
+                    println!("cargo:rerun-if-changed={ref_path}");
+                }
+            }
         }
+    } else {
+        // Outside a git checkout, watch the actual manifest instead.
+        println!("cargo:rerun-if-changed=Cargo.toml");
     }
     let revision =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".to_string());

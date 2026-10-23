@@ -6,6 +6,27 @@ use crate::scene::model::hatch_model::HatchPattern;
 impl Scene {
     // ── Preview wire ──────────────────────────────────────────────────────
 
+    /// Rasterize heavy 2-D selections exactly once when MOVE/COPY/ROTATE/
+    /// SCALE starts. This bitmap never affects the document or snapping.
+    pub fn prepare_raster_command_preview(
+        &mut self,
+        selected_handles: usize,
+        wires: &[WireModel],
+    ) {
+        self.raster_preview_source = None;
+        self.raster_preview_image = None;
+        if self.current_layout != "Model"
+            || self.model_tiles.borrow().len() != 1
+            || !self.preview_hatches.is_empty()
+        {
+            return;
+        }
+        self.raster_preview_source =
+            crate::scene::model::raster_preview::rasterize_selection(
+                wires, selected_handles,
+            );
+    }
+
     pub fn set_preview_wires(&mut self, wires: Vec<WireModel>) {
         // Preview wires are an overlay appended to the cached base wire set in
         // `build_primitive`; they are NOT part of the tessellation cache. So a
@@ -13,6 +34,18 @@ impl Scene {
         // tessellate the whole model on every rubber-band frame. The overlay
         // forces a GPU wire re-upload on its own (the `has_overlay` content-id
         // path), and iced redraws after the message that set the preview.
+        if let Some(source) = &self.raster_preview_source {
+            if let Some(extent) = wires.iter().find(|w| w.name == "__mass_transform_group_extent__") {
+                if let Some(image) = source.image_at(extent) {
+                    self.raster_preview_image = Some(Arc::new(image));
+                    self.preview_wires = wires.into_iter()
+                        .filter(|w| w.name != "__mass_transform_group_extent__")
+                        .collect();
+                    return;
+                }
+            }
+        }
+        self.raster_preview_image = None;
         self.preview_wires = wires;
     }
 

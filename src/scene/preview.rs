@@ -25,6 +25,12 @@ impl Scene {
             crate::scene::model::raster_preview::rasterize_selection(
                 wires, selected_handles,
             );
+        if selected_handles >= 512 && crate::perf::enabled() {
+            crate::perf_record!(
+                "[perf] command-raster-setup selected={} wires={} active={}",
+                selected_handles, wires.len(), self.raster_preview_source.is_some()
+            );
+        }
     }
 
     pub fn has_raster_command_preview(&self) -> bool {

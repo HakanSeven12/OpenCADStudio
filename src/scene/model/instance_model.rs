@@ -210,8 +210,14 @@ pub fn compact_mass_transform_preview(
             || !b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
             || b[0] > b[2] || b[1] > b[3]
         {
-            // Preview LOD must not invent coordinates for unsupported items.
-            // Preserve the original preview for these mixed selections.
+            // Preserve exact rendering when a mixed selection is unsupported.
+            crate::perf_record!(
+                "[perf] compact-mass-transform-preview fallback handles={} wires={} name={} visible={} fill3d={} fill={} text={} pick={} marker={} bounds={:?}",
+                handles, wires.len(), wire.name, wire.display_visible,
+                wire.fill_is_3d, !wire.fill_tris.is_empty(),
+                !wire.text_verts.is_empty(), !wire.pick_tris.is_empty(),
+                wire.point_marker.is_some(), b
+            );
             return wires;
         }
         let item = grouped.entry(wire.name.clone()).or_insert_with(|| {
@@ -225,6 +231,10 @@ pub fn compact_mass_transform_preview(
     }
     // Never replace many separate selections by one misleading group box.
     if grouped.len() < handles / 2 || grouped.len() >= wires.len() / 3 {
+        crate::perf_record!(
+            "[perf] compact-mass-transform-preview insufficient-reduction handles={} wires={} groups={}",
+            handles, wires.len(), grouped.len()
+        );
         return wires;
     }
     let mut result = Vec::with_capacity(grouped.len());

@@ -167,3 +167,202 @@ pub fn shift_depth(wire: &mut WireModel, delta: f32) {
         });
     }
 }
+
+/// Emergency preview LOD for extremely large 2-D transform commands.
+/// Keep a separate outline for each CAD entity rather than reducing the whole
+/// selection to one anonymous bounding rectangle. Exact document geometry
+/// and command results are unchanged.
+pub fn compact_mass_transform_preview(
+    handles: usize,
+    wires: Vec<WireModel>,
+) -> Vec<WireModel> {
+    if handles < 1024 || wires.len() < 20_000 {
+        return wires;
+    }
+    use rustc_hash::FxHashMap;
+    let mut grouped: FxHashMap<String, ([f32; 4], [f32; 4], bool)> =
+        FxHashMap::default();
+    let mut order = Vec::new();
+    for wire in &wires {
+        // Some block-instanced wires have an unset or unbounded cached AABB.
+        // Recover a finite preview envelope from their wire positions rather
+        // than disabling LOD for the entire 13k-block selection.
+        let mut b = wire.aabb;
+        if !b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
+            || b[0] > b[2] || b[1] > b[3]
+        {
+            b = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+            for p in &wire.points {
+                if p[0].is_finite() && p[1].is_finite() {
+                    b[0] = b[0].min(p[0]);
+                    b[1] = b[1].min(p[1]);
+                    b[2] = b[2].max(p[0]);
+                    b[3] = b[3].max(p[1]);
+                }
+            }
+        }
+        // An INSERT stub may have no own points and an unbounded AABB.
+        // It can still be represented by the union of its *other* wires
+        // with the same name. Do not abort the entire batch on that stub.
+        if wire.stub.is_some()
+            && (!b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
+                || b[0] > b[2] || b[1] > b[3])
+        {
+            continue;
+        }
+        if !wire.display_visible
+            || wire.fill_is_3d
+            || !wire.fill_tris.is_empty()
+            || !wire.text_verts.is_empty()
+            || !wire.pick_tris.is_empty()
+            || wire.point_marker.is_some()
+            || !b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
+            || b[0] > b[2] || b[1] > b[3]
+        {
+            // Preserve exact rendering when a mixed selection is unsupported.
+            crate::perf_record!(
+                "[perf] compact-mass-transform-preview fallback handles={} wires={} name={} visible={} fill3d={} fill={} text={} pick={} marker={} bounds={:?}",
+                handles, wires.len(), wire.name, wire.display_visible,
+                wire.fill_is_3d, !wire.fill_tris.is_empty(),
+                !wire.text_verts.is_empty(), !wire.pick_tris.is_empty(),
+                wire.point_marker.is_some(), b
+            );
+            return wires;
+        }
+        let item = grouped.entry(wire.name.clone()).or_insert_with(|| {
+            order.push(wire.name.clone());
+            (b, wire.color, wire.selected)
+        });
+        item.0[0] = item.0[0].min(b[0]);
+        item.0[1] = item.0[1].min(b[1]);
+        item.0[2] = item.0[2].max(b[2]);
+        item.0[3] = item.0[3].max(b[3]);
+    }
+    // Never replace many separate selections by one misleading group box.
+    // Never silently omit an INSERT whose only wire was an unbounded stub.
+    // Require enough distinct bounded representatives for the selected
+    // handles; otherwise preserve the exact preview.
+    if grouped.len() < handles || grouped.len() >= wires.len() / 3 {
+        crate::perf_record!(
+            "[perf] compact-mass-transform-preview insufficient-reduction handles={} wires={} groups={}",
+            handles, wires.len(), grouped.len()
+        );
+        return wires;
+    }
+    let mut result = Vec::with_capacity(grouped.len());
+    for name in order {
+        if let Some(([x0, y0, x1, y1], color, selected)) = grouped.remove(&name) {
+            let mut outline = WireModel::solid_f64(
+                name,
+                vec![
+                    [x0 as f64, y0 as f64, 0.0],
+                    [x1 as f64, y0 as f64, 0.0],
+                    [x1 as f64, y1 as f64, 0.0],
+                    [x0 as f64, y1 as f64, 0.0],
+                    [x0 as f64, y0 as f64, 0.0],
+                ],
+                color,
+                selected,
+            );
+            outline.aabb = [x0, y0, x1, y1];
+            result.push(outline);
+        }
+    }
+    crate::perf_record!(
+        "[perf] compact-mass-transform-preview original={} outlines={} handles={}",
+        wires.len(),
+        result.len(),
+        handles
+    );
+    result
+}
+
+pub fn mass_transform_group_preview(
+    wires: &[WireModel],
+    min_wires: usize,
+) -> Option<Vec<WireModel>> {
+    if wires.len() < min_wires {
+        return None;
+    }
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    let mut counted = 0usize;
+    let mut guides = Vec::new();
+    for wire in wires {
+        // Tracking aids are not part of the entity extents. Their endpoints
+        // can be intentionally thousands of world units away.
+        if wire.name.starts_with("__") {
+            guides.push(wire.clone());
+            continue;
+        }
+        if wire.snap_only || !wire.display_visible {
+            continue;
+        }
+        // Never flatten spatial geometry to XY: keep exact 3-D preview,
+        // including wires at a nonzero constant elevation.
+        if wire.fill_is_3d
+            || wire.stub.as_ref().is_some_and(|stub| stub.delta[2].abs() > 1e-7)
+            || wire.points.iter().any(|p| !p[2].is_finite() || p[2].abs() > 1e-5)
+        {
+            crate::perf_record!(
+                "[perf] mass-preview-reject reason=nonplanar name={} fill3d={} stub_z={:?} points={}",
+                wire.name, wire.fill_is_3d,
+                wire.stub.as_ref().map(|stub| stub.delta[2]), wire.points.len()
+            );
+            return None;
+        }
+        let bb = wire.aabb.map(f64::from);
+        if bb.iter().all(|v| v.is_finite() && v.abs() < 1e15)
+            && bb[0] <= bb[2] && bb[1] <= bb[3]
+        {
+            b[0] = b[0].min(bb[0]);
+            b[1] = b[1].min(bb[1]);
+            b[2] = b[2].max(bb[2]);
+            b[3] = b[3].max(bb[3]);
+            counted += 1;
+        } else {
+            // A SENTINEL/UNBOUNDED AABB on an analytic child should not
+            // enlarge the whole preview to +/- infinity. Its explicit
+            // points, if present, are still good conservative extents.
+            for p in &wire.points {
+                let x = f64::from(p[0]);
+                let y = f64::from(p[1]);
+                if x.is_finite() && y.is_finite()
+                    && x.abs() < 1e15 && y.abs() < 1e15
+                {
+                    b[0] = b[0].min(x);
+                    b[1] = b[1].min(y);
+                    b[2] = b[2].max(x);
+                    b[3] = b[3].max(y);
+                    counted += 1;
+                }
+            }
+        }
+    }
+    if counted == 0
+        || b.iter().any(|v| !v.is_finite())
+        || b[2] <= b[0]
+        || b[3] <= b[1]
+    {
+        crate::perf_record!(
+            "[perf] mass-preview-reject reason=invalid-extent counted={} bounds={:?} wires={}",
+            counted, b, wires.len()
+        );
+        return None;
+    }
+    let mut box_wire = WireModel::solid_f64(
+        "__mass_transform_group_extent__".to_owned(),
+        vec![
+            [b[0], b[1], 0.0],
+            [b[2], b[1], 0.0],
+            [b[2], b[3], 0.0],
+            [b[0], b[3], 0.0],
+            [b[0], b[1], 0.0],
+        ],
+        WireModel::SELECTED,
+        false,
+    );
+    // Mark as an ordinary visual-only overlay, not an editable entity.
+    box_wire.selected = false;
+    guides.push(box_wire);
+    Some(guides)
+}

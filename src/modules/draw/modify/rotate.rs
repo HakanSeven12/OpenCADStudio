@@ -71,6 +71,8 @@ pub struct RotateCommand {
 
 impl RotateCommand {
     pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        let wire_models = crate::scene::model::instance_model::
+            compact_mass_transform_preview(handles.len(), wire_models);
         Self {
             handles,
             wire_models,
@@ -85,8 +87,13 @@ impl RotateCommand {
     /// 3DROTATE: any objects, about any axis through a base point.
     pub fn new_3d(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
         Self {
+            handles,
+            wire_models,
+            step: Step::Center,
+            default_angle: defaults::get_rotate_angle(),
+            plane: WorkingPlane::default(),
             spatial: true,
-            ..Self::new(handles, wire_models)
+            axis_chosen: false,
         }
     }
 

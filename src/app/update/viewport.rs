@@ -950,6 +950,7 @@ impl OpenCADStudio {
             view_rot,
             eye,
             bounds,
+            crossing,
         );
         timing.candidates = elapsed(t_sel);
         let t_hit = crate::perf::enabled().then(Instant::now);
@@ -6347,9 +6348,10 @@ impl OpenCADStudio {
                             self.tabs[i].scene.deselect_entities(&handles);
                         } else {
                             if !selection_pick_add && !handles.is_empty() {
-                                self.tabs[i].scene.deselect_all();
+                                self.tabs[i].scene.select_entities_exclusive(&handles);
+                            } else {
+                                self.tabs[i].scene.select_entities(&handles);
                             }
-                            self.tabs[i].scene.select_entities(&handles);
                             self.tabs[i].scene.expand_selection_for_groups(&handles);
                         }
                         self.pick_authoring_box(a, p, crossing);
@@ -6410,10 +6412,11 @@ properties={:.1}ms picked={}",
                         // the selection (empty results still leave it
                         // alone, matching the box rule).
                         if !selection_pick_add && !handles.is_empty() {
-                            self.tabs[i].scene.deselect_all();
-                        }
-                        self.tabs[i].scene.select_entities(&handles);
-                        self.tabs[i].scene.expand_selection_for_groups(&handles);
+                                self.tabs[i].scene.select_entities_exclusive(&handles);
+                            } else {
+                                self.tabs[i].scene.select_entities(&handles);
+                            }
+                            self.tabs[i].scene.expand_selection_for_groups(&handles);
                     }
                     self.refresh_properties();
                     selection_just_completed = true;
@@ -6745,10 +6748,11 @@ was_selected={}",
                         self.tabs[i].scene.deselect_entities(&handles);
                     } else {
                         if !selection_pick_add && !handles.is_empty() {
-                            self.tabs[i].scene.deselect_all();
-                        }
-                        self.tabs[i].scene.select_entities(&handles);
-                        self.tabs[i].scene.expand_selection_for_groups(&handles);
+                                self.tabs[i].scene.select_entities_exclusive(&handles);
+                            } else {
+                                self.tabs[i].scene.select_entities(&handles);
+                            }
+                            self.tabs[i].scene.expand_selection_for_groups(&handles);
                     }
                     let apply_ms = t_apply.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                     let t_props = crate::perf::enabled().then(Instant::now);

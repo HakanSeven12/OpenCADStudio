@@ -143,6 +143,7 @@ pub struct Pipeline {
     /// them show through the blend instead of failing the depth test.
     hatch_translucent_gpu: hatch_gpu::HatchGpu,
     image_pipeline: wgpu::RenderPipeline,
+    image_preview_overlay_pipeline: wgpu::RenderPipeline,
     point_cloud_pipeline: wgpu::RenderPipeline,
     /// SDF text-quad pipeline (Phase 2b): draws per-glyph quads sampling the
     /// shared glyph atlas. Fed only when `OCS_TEXT_SDF` is set (else no verts).
@@ -327,6 +328,8 @@ pub struct Pipeline {
     /// viewport rect. Recomputed by `compute_wipeout_lod`.
     wipeout_skip_flags: Vec<bool>,
     gpu_images: Vec<ImageGpu>,
+    pub(in crate::scene) raster_preview_gpu: Vec<ImageGpu>,
+    raster_preview_pixels_key: usize,
     gpu_point_clouds: point_cloud_gpu::PointCloudGpu,
     /// Batched mesh geometry — every solid's LOD0 concatenated into a few large
     /// buffers so the whole set draws in a handful of calls instead of one per
@@ -2166,6 +2169,40 @@ impl Pipeline {
             cache: None,
         });
 
+        let image_preview_overlay_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("raster.selection.preview_overlay"),
+                layout: Some(&image_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[
+                        image_gpu::ImageVertex::layout(),
+                        image_gpu::ImageInstance::layout(),
+                    ],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+
         // ── Point cloud sprites ────────────────────────────────────────────
         let point_cloud_bgl1 = point_cloud_gpu::params_layout(device);
         let point_cloud_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2408,6 +2445,7 @@ impl Pipeline {
             hatch_gpu,
             hatch_translucent_gpu,
             image_pipeline,
+            image_preview_overlay_pipeline,
             point_cloud_pipeline,
             text_pipeline,
             block_text_pipeline,
@@ -2503,6 +2541,8 @@ impl Pipeline {
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
             gpu_images: vec![],
+            raster_preview_gpu: vec![],
+            raster_preview_pixels_key: 0,
             gpu_point_clouds,
             gpu_mesh_batch: Default::default(),
             gpu_mesh_dynamic: vec![],
@@ -5430,6 +5470,16 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     wire.first_instance..wire.first_instance + wire.instance_count,
                 );
             }
+            if !self.raster_preview_gpu.is_empty() {
+                pass.set_pipeline(&self.image_preview_overlay_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                for image in &self.raster_preview_gpu {
+                    pass.set_bind_group(1, &image.bind_group, &[]);
+                    pass.set_vertex_buffer(0, image.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, image.instance_buffer.slice(..));
+                    pass.draw(0..image.vertex_count, 0..image.instance_count);
+                }
+            }
         }
     }
 
@@ -6454,5 +6504,52 @@ mod highlight_classification_tests {
             WireModel::HOVER,
             "without a tint the extractor's own colour stands",
         );
+    }
+}
+
+
+impl Pipeline {
+    /// A massive selection raster is uploaded ONCE. Subsequent pointer moves
+    /// modify only six quad vertices (a few bytes), not its RGBA pixels.
+    pub(in crate::scene) fn update_raster_preview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        image: Option<&ImageModel>,
+    ) {
+        let Some(image) = image else {
+            self.raster_preview_gpu.clear();
+            self.raster_preview_pixels_key = 0;
+            return;
+        };
+        let pixel_key = std::sync::Arc::as_ptr(&image.pixels) as usize;
+        if self.raster_preview_pixels_key != pixel_key || self.raster_preview_gpu.is_empty() {
+            self.raster_preview_gpu = ImageGpu::from_models(
+                device, queue, std::slice::from_ref(image), &self.image_bgl1,
+            );
+            self.raster_preview_pixels_key = pixel_key;
+            crate::perf_record!(
+                "[perf] raster-preview-gpu-upload pixels={} size={}x{} quads={}",
+                image.pixels.len(), image.width, image.height, self.raster_preview_gpu.len(),
+            );
+            return;
+        }
+        // Small textures are always a single tile. Large / malformed sources
+        // are never emitted by rasterize_selection (max 1536 pixels).
+        if self.raster_preview_gpu.len() != 1 {
+            return;
+        }
+        let vertices: Vec<image_gpu::ImageVertex> = image.verts.iter().map(|v| {
+            image_gpu::ImageVertex {
+                pos: v.pos, uv: v.uv, pos_low: v.pos_low,
+            }
+        }).collect();
+        if vertices.len() == self.raster_preview_gpu[0].vertex_count as usize {
+            queue.write_buffer(
+                &self.raster_preview_gpu[0].vertex_buffer,
+                0,
+                bytemuck::cast_slice(&vertices),
+            );
+        }
     }
 }

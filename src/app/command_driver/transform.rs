@@ -58,10 +58,10 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, label, handles.len(), delta_safe);
         let new_handles = self.tabs[i].scene.copy_entities(&handles, &transform);
         self.tabs[i].dirty = true;
-        self.tabs[i].scene.deselect_all();
-        for h in new_handles {
-            self.tabs[i].scene.select_entity(h, false);
-        }
+        // One selection transaction for all newly copied entities.
+        // Per-handle select_entity invalidated selection and GPU highlight
+        // thousands of times when COPY committed large block selections.
+        self.tabs[i].scene.select_entities_exclusive(&new_handles);
         self.tabs[i].scene.clear_preview_wire();
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
         if let Some(p) = prompt {

@@ -2488,6 +2488,8 @@ pub struct Scene {
     pub selection_filter: HashSet<String>,
     /// In-progress preview wires while a command is active (rubber-band + object ghosts).
     pub preview_wires: Vec<WireModel>,
+    pub(crate) raster_preview_source: Option<model::raster_preview::RasterSelectionPreview>,
+    pub(crate) raster_preview_image: Option<Arc<model::image_model::ImageModel>>,
     /// Candidate wireframes produced by editable solid-history grips. The
     /// resident body remains untouched until the grip is committed.
     solid_history_preview_wires: HashMap<Handle, Vec<WireModel>>,
@@ -3129,6 +3131,8 @@ impl Scene {
             model_lineweight_scale: 1.0,
             selection_filter: HashSet::default(),
             preview_wires: vec![],
+            raster_preview_source: None,
+            raster_preview_image: None,
             solid_history_preview_wires: HashMap::default(),
             preview_hatches: Arc::new(Vec::new()),
             preview_text: vec![],
@@ -11602,6 +11606,7 @@ impl Scene {
         view_rot: glam::Mat4,
         eye: glam::DVec3,
         bounds: iced::Rectangle,
+        crossing: bool,
     ) -> crate::scene::pick::interaction_index::InteractionCandidates {
         let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
             && view_rot.z_axis.y.abs() < 1e-9
@@ -11609,8 +11614,16 @@ impl Scene {
         if !self.interaction_source_is_resident(&wires, bounds.height)
             || !self.interaction_index_worthwhile(&wires)
         {
-            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
-                .materialize_stubs();
+            let candidates = crate::scene::pick::interaction_index::InteractionCandidates::all(wires);
+            return if flat_ortho {
+                if crossing {
+                    candidates.materialize_stubs_for_crossing_xy_box(aabb)
+                } else {
+                    candidates.materialize_stubs_for_enclosing_xy_box(aabb)
+                }
+            } else {
+                candidates.materialize_stubs()
+            };
         }
         let pad_px = self.indexed_interaction_pick_radius(&wires, 0.0, bounds.height, true);
         if flat_ortho {
@@ -11626,13 +11639,18 @@ impl Scene {
             } else {
                 0.0
             };
-            self.indexed_interaction_candidates_xy(
+            let candidates = self.indexed_interaction_candidates_xy_stubbed(
                 wires,
                 [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad],
                 false,
                 true,
                 None,
-            )
+            );
+            if crossing {
+                candidates.materialize_stubs_for_crossing_xy_box(aabb)
+            } else {
+                candidates.materialize_stubs_for_enclosing_xy_box(aabb)
+            }
         } else {
             self.indexed_interaction_candidates_screen(
                 wires,
@@ -11858,6 +11876,7 @@ impl Scene {
             view_rot,
             eye,
             bounds,
+            crossing,
         );
         let candidate_handles = self.interaction_candidate_handles(&area_candidates);
         let wire_hits = if open_fence {

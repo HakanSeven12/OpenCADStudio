@@ -163,6 +163,27 @@ impl Scene {
         }
     }
 
+    /// Replace large paste selections in one transaction. The expansion still
+    /// preserves leader annotations and clipped-viewport companions.
+    pub fn select_entities_exclusive(&mut self, handles: &[Handle]) {
+        let expanded = self.handles_expanded_for_leader_annotations(handles);
+        let mut selected = HashSet::with_capacity_and_hasher(expanded.len(), Default::default());
+        let mut order = Vec::with_capacity(expanded.len());
+        for handle in expanded {
+            if selected.insert(handle) {
+                order.push(handle);
+            }
+        }
+        let changed = self.selected != selected || self.selected_order != order;
+        self.selected_constraint = None;
+        self.sub_segments.clear();
+        if changed {
+            self.selected = selected;
+            self.selected_order = order;
+            self.bump_selection_set();
+        }
+    }
+
     pub fn deselect_all(&mut self) {
         self.selected_constraint = None;
         self.sub_segments.clear();

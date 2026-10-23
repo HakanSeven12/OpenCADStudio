@@ -201,6 +201,15 @@ pub fn compact_mass_transform_preview(
                 }
             }
         }
+        // An INSERT stub may have no own points and an unbounded AABB.
+        // It can still be represented by the union of its *other* wires
+        // with the same name. Do not abort the entire batch on that stub.
+        if wire.stub.is_some()
+            && (!b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
+                || b[0] > b[2] || b[1] > b[3])
+        {
+            continue;
+        }
         if !wire.display_visible
             || wire.fill_is_3d
             || !wire.fill_tris.is_empty()
@@ -230,7 +239,10 @@ pub fn compact_mass_transform_preview(
         item.0[3] = item.0[3].max(b[3]);
     }
     // Never replace many separate selections by one misleading group box.
-    if grouped.len() < handles / 2 || grouped.len() >= wires.len() / 3 {
+    // Never silently omit an INSERT whose only wire was an unbounded stub.
+    // Require enough distinct bounded representatives for the selected
+    // handles; otherwise preserve the exact preview.
+    if grouped.len() < handles || grouped.len() >= wires.len() / 3 {
         crate::perf_record!(
             "[perf] compact-mass-transform-preview insufficient-reduction handles={} wires={} groups={}",
             handles, wires.len(), grouped.len()

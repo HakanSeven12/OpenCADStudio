@@ -24,7 +24,12 @@ fn bounds_valid(b: [f64; 4]) -> bool {
 /// The image is capped at 1536 pixels on its long side (~9 MiB), avoiding
 /// CPU↔GPU readback or a full-scene screen grab (which would capture neighbors).
 pub fn rasterize_selection(wires: &[WireModel], selected: usize) -> Option<RasterSelectionPreview> {
-    if selected <= 512 || wires.len() < 2048 {
+    // A safe comparison/fallback switch for real-DWG benchmarking:
+    // OCS_DISABLE_SELECTION_RASTER=1 cargo run --release
+    // retains the proven single-box LOD when image capture is expensive.
+    if std::env::var_os("OCS_DISABLE_SELECTION_RASTER").is_some()
+        || selected <= 512 || wires.len() < 2048
+    {
         return None;
     }
     let outlines = super::instance_model::mass_transform_group_preview(wires, 2048)?;

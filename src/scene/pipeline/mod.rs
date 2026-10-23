@@ -332,7 +332,7 @@ pub struct Pipeline {
     /// viewport rect. Recomputed by `compute_wipeout_lod`.
     wipeout_skip_flags: Vec<bool>,
     gpu_images: Vec<ImageGpu>,
-    raster_preview_gpu: Vec<ImageGpu>,
+    pub(in crate::scene) raster_preview_gpu: Vec<ImageGpu>,
     raster_preview_pixels_key: usize,
     gpu_point_clouds: point_cloud_gpu::PointCloudGpu,
     /// Batched mesh geometry — every solid's LOD0 concatenated into a few large

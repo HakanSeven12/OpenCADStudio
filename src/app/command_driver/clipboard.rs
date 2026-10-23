@@ -623,6 +623,14 @@ pub(crate) fn merge_block_defs(
 ) -> usize {
     let mut created = Vec::new();
     for def in blocks {
+        // Same-document PASTECLIP often carries hundreds of large vegetation
+        // block definitions, all already present. define_block_raw_doc is a
+        // no-op in that case: avoid first cloning every child entity just
+        // to discard the clone. Genuine cross-drawing imports still run
+        // the identical definition/graph creation code below.
+        if doc.block_records.get(&def.name).is_some() {
+            continue;
+        }
         let before = doc.block_records.len();
         let mut entities = def.entities.clone();
         for entity in &mut entities {

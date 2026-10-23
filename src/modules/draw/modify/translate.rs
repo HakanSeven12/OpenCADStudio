@@ -41,11 +41,6 @@ pub struct MoveCommand {
 
 impl MoveCommand {
     pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
-        // The actual edit/commit uses CAD handles, never this visual cache.
-        // For extreme 2-D selections keep only the whole group's live
-        // bounding box: no per-frame expansion of complex repeated INSERTs.
-        let wire_models = crate::scene::model::instance_model::
-            cached_command_preview_for_large_2d_selection(handles.len(), wire_models);
         Self {
             handles,
             wire_models,

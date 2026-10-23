@@ -628,6 +628,7 @@ impl OpenCADStudio {
                 } else {
                     use crate::modules::draw::modify::translate::MoveCommand;
                     let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    self.tabs[i].scene.prepare_raster_command_preview(handles.len(), &wires);
                     let new_cmd = MoveCommand::new(handles, wires);
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -649,6 +650,7 @@ impl OpenCADStudio {
                 } else {
                     use crate::modules::draw::modify::copy::CopyCommand;
                     let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    self.tabs[i].scene.prepare_raster_command_preview(handles.len(), &wires);
                     let new_cmd = CopyCommand::new(handles, wires);
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));

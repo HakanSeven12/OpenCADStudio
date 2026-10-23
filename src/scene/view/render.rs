@@ -136,6 +136,7 @@ pub struct ViewportData {
     /// the main `wires` buffer so a drag re-uploads only this small set each
     /// frame, never the resident base buffer. Drawn on top in the wire pass.
     pub(in crate::scene) preview_wires: Arc<Vec<WireModel>>,
+    pub(in crate::scene) raster_preview_image: Option<Arc<ImageModel>>,
     /// Non-current scale representations of selected or hovered annotative
     /// entities. Uploaded with the xray highlight instead of the resident set.
     pub(in crate::scene) annotation_context_wires: Arc<Vec<WireModel>>,
@@ -456,6 +457,7 @@ impl shader::Primitive for Primitive {
             // drawing size. The ViewCube is excluded from the signature and
             // keeps updating in its own always-on pass, so cube hover still
             // tracks while the scene is cached.
+            inner.update_raster_preview(device, queue, vp.raster_preview_image.as_deref());
             // Upload simple wire previews before checking the base-scene cache.
             // Their dedicated overlay pass can then follow a cached resolve
             // without making the resident geometry dirty on every cursor move.
@@ -5159,6 +5161,7 @@ impl Scene {
             wires: Arc::downgrade(&all_wires),
             clip_boundary_ndc,
             preview_wires,
+            raster_preview_image: if show_live_overlay { self.raster_preview_image.clone() } else { None },
             annotation_context_wires,
             preview_hatches,
             face3d_wires,

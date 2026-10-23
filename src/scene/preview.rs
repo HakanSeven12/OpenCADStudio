@@ -27,6 +27,10 @@ impl Scene {
             );
     }
 
+    pub fn has_raster_command_preview(&self) -> bool {
+        self.raster_preview_source.is_some()
+    }
+
     pub fn set_preview_wires(&mut self, wires: Vec<WireModel>) {
         // Preview wires are an overlay appended to the cached base wire set in
         // `build_primitive`; they are NOT part of the tessellation cache. So a
@@ -371,6 +375,8 @@ impl Scene {
     }
 
     pub fn clear_preview_wire(&mut self) {
+        self.raster_preview_source = None;
+        self.raster_preview_image = None;
         // No geometry bump — see `set_preview_wires`. Dropping the overlay
         // flips the wire content id back to the base tessellation id, which
         // re-uploads the base wires (without the preview) on the next frame.

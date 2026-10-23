@@ -5557,6 +5557,19 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     }
                 }
             }
+            // Render one semi-transparent, screen-resolution bitmap of all
+            // heavy selected wires. The image texture never changes during
+            // MOVE/COPY/ROTATE/SCALE: only its 6-vertex quad moves.
+            if !self.raster_preview_gpu.is_empty() {
+                pass.set_pipeline(&self.image_preview_overlay_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                for image in &self.raster_preview_gpu {
+                    pass.set_bind_group(1, &image.bind_group, &[]);
+                    pass.set_vertex_buffer(0, image.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, image.instance_buffer.slice(..));
+                    pass.draw(0..image.vertex_count, 0..image.instance_count);
+                }
+            }
         }
     }
 

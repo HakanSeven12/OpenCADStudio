@@ -303,6 +303,11 @@ pub fn mass_transform_group_preview(
             || wire.stub.as_ref().is_some_and(|stub| stub.delta[2].abs() > 1e-7)
             || wire.points.iter().any(|p| !p[2].is_finite() || p[2].abs() > 1e-5)
         {
+            crate::perf_record!(
+                "[perf] mass-preview-reject reason=nonplanar name={} fill3d={} stub_z={:?} points={}",
+                wire.name, wire.fill_is_3d,
+                wire.stub.as_ref().map(|stub| stub.delta[2]), wire.points.len()
+            );
             return None;
         }
         let bb = wire.aabb.map(f64::from);
@@ -338,6 +343,10 @@ pub fn mass_transform_group_preview(
         || b[2] <= b[0]
         || b[3] <= b[1]
     {
+        crate::perf_record!(
+            "[perf] mass-preview-reject reason=invalid-extent counted={} bounds={:?} wires={}",
+            counted, b, wires.len()
+        );
         return None;
     }
     let mut box_wire = WireModel::solid_f64(

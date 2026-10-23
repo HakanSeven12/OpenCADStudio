@@ -6583,3 +6583,49 @@ mod highlight_classification_tests {
         );
     }
 }
+
+impl Pipeline {
+    /// A massive selection raster is uploaded ONCE. Subsequent pointer moves
+    /// modify only six quad vertices (a few bytes), not its RGBA pixels.
+    pub(in crate::scene) fn update_raster_preview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        image: Option<&ImageModel>,
+    ) {
+        let Some(image) = image else {
+            self.raster_preview_gpu.clear();
+            self.raster_preview_pixels_key = 0;
+            return;
+        };
+        let pixel_key = std::sync::Arc::as_ptr(&image.pixels) as usize;
+        if self.raster_preview_pixels_key != pixel_key || self.raster_preview_gpu.is_empty() {
+            self.raster_preview_gpu = ImageGpu::from_models(
+                device, queue, std::slice::from_ref(image), &self.image_bgl1,
+            );
+            self.raster_preview_pixels_key = pixel_key;
+            crate::perf_record!(
+                "[perf] raster-preview-gpu-upload pixels={} size={}x{} quads={}",
+                image.pixels.len(), image.width, image.height, self.raster_preview_gpu.len(),
+            );
+            return;
+        }
+        // Small textures are always a single tile. Large / malformed sources
+        // are never emitted by rasterize_selection (max 1536 pixels).
+        if self.raster_preview_gpu.len() != 1 {
+            return;
+        }
+        let vertices: Vec<image_gpu::ImageVertex> = image.verts.iter().map(|v| {
+            image_gpu::ImageVertex {
+                pos: v.pos, uv: v.uv, pos_low: v.pos_low,
+            }
+        }).collect();
+        if vertices.len() == self.raster_preview_gpu[0].vertex_count as usize {
+            queue.write_buffer(
+                &self.raster_preview_gpu[0].vertex_buffer,
+                0,
+                bytemuck::cast_slice(&vertices),
+            );
+        }
+    }
+}

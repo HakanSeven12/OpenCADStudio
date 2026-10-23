@@ -1652,4 +1652,21 @@ mod tests {
         assert!(!scene.selection_fingerprint_dirty);
         assert_eq!(scene.selection_fingerprint(), fingerprint);
     }
+    #[test]
+    fn bulk_exclusive_selection_invalidates_once_for_many_handles() {
+        let mut scene = Scene::default();
+        let handles: Vec<Handle> = (1..=13_608).map(Handle::new).collect();
+        let generation = scene.selection_generation;
+        scene.select_entities_exclusive(&handles);
+        assert_eq!(scene.selected_handles_in_order(), handles);
+        assert_eq!(scene.selection_generation, generation + 1);
+        scene.select_entities_exclusive(&handles);
+        assert_eq!(scene.selection_generation, generation + 1);
+        scene.select_entities_exclusive(&handles[..3]);
+        assert_eq!(scene.selection_generation, generation + 2);
+        scene.select_entities_exclusive(&[]);
+        assert!(scene.selected.is_empty());
+        assert_eq!(scene.selection_generation, generation + 3);
+    }
+
 }

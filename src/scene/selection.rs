@@ -163,6 +163,30 @@ impl Scene {
         }
     }
 
+    /// Replace the selected set after a bulk COPY/PASTE with one coherent
+    /// invalidation. Previously COPY called `deselect_all` then
+    /// `select_entity` for every new handle, causing thousands of selection
+    /// generations and leader/reactor queries. Preserve each entity's
+    /// leader and clipped-viewport companions.
+    pub fn select_entities_exclusive(&mut self, handles: &[Handle]) {
+        let expanded = self.handles_expanded_for_leader_annotations(handles);
+        let mut selected = HashSet::with_capacity(expanded.len());
+        let mut order = Vec::with_capacity(expanded.len());
+        for handle in expanded {
+            if selected.insert(handle) {
+                order.push(handle);
+            }
+        }
+        let changed = self.selected != selected || self.selected_order != order;
+        self.selected_constraint = None;
+        self.sub_segments.clear();
+        if changed {
+            self.selected = selected;
+            self.selected_order = order;
+            self.bump_selection_set();
+        }
+    }
+
     pub fn deselect_all(&mut self) {
         self.selected_constraint = None;
         self.sub_segments.clear();
@@ -1630,5 +1654,31 @@ mod tests {
         scene.set_hover_highlight(Some(Handle::new(3)));
         assert!(!scene.selection_fingerprint_dirty);
         assert_eq!(scene.selection_fingerprint(), fingerprint);
+    }
+}
+
+#[cfg(test)]
+mod bulk_copy_selection_tests {
+    use super::*;
+
+    #[test]
+    fn exclusive_bulk_copy_selection_invalidates_once_and_retains_handles() {
+        let mut scene = Scene::new();
+        let new_handles: Vec<Handle> = (1..=13_608).map(Handle::new).collect();
+        let initial_generation = scene.selection_generation;
+        scene.select_entities_exclusive(&new_handles);
+        assert_eq!(scene.selected_handles_in_order(), new_handles);
+        assert_eq!(scene.selected.len(), 13_608);
+        assert_eq!(scene.selection_generation, initial_generation + 1);
+        scene.select_entities_exclusive(&new_handles);
+        assert_eq!(scene.selection_generation, initial_generation + 1,
+            "same handles must not cause another selection invalidation");
+        let next = &new_handles[0..3];
+        scene.select_entities_exclusive(next);
+        assert_eq!(scene.selected_handles_in_order(), next);
+        assert_eq!(scene.selection_generation, initial_generation + 2);
+        scene.select_entities_exclusive(&[]);
+        assert!(scene.selected.is_empty());
+        assert_eq!(scene.selection_generation, initial_generation + 3);
     }
 }

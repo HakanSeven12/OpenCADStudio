@@ -2080,6 +2080,66 @@ impl InteractionCandidates {
         }
     }
 
+    pub(crate) fn materialize_stubs_for_enclosing_xy_box(
+        self,
+        box_xy: [f64; 4],
+    ) -> Self {
+        if !self.iter().any(|wire| wire.stub.is_some()) {
+            return self;
+        }
+        let started = crate::perf::enabled().then(iced::time::Instant::now);
+        let source_count = self.len();
+        let mut wires = Vec::new();
+        let mut skipped = 0usize;
+        for wire in self.iter() {
+            let b = wire.aabb.map(f64::from);
+            let covered = wire.stub.is_some()
+                && wire.display_visible
+                && !wire.reference_only
+                && b.iter().all(|n| n.is_finite() && n.abs() < 1.0e15)
+                && b[0] <= b[2] && b[1] <= b[3]
+                && b[0] >= box_xy[0] && b[1] >= box_xy[1]
+                && b[2] <= box_xy[2] && b[3] <= box_xy[3];
+            if covered {
+                // An enclosing window needs every corner inside, not a single segment.
+                // This is never used for the enclosing-window semantics.
+                let mut carrier = WireModel::solid_f64(
+                    wire.name.clone(),
+                    vec![[b[0], b[1], 0.0], [b[2], b[1], 0.0],
+                         [b[2], b[3], 0.0], [b[0], b[3], 0.0],
+                         [b[0], b[1], 0.0]],
+                    wire.color,
+                    wire.selected,
+                );
+                carrier.reference_only = wire.reference_only;
+                carrier.snap_only = false;
+                wires.push(carrier);
+                skipped += 1;
+            } else {
+                crate::scene::model::instance_model::expand_stub_near_into(
+                    wire,
+                    self.query_aabb,
+                    &mut wires,
+                );
+            }
+        }
+        if let Some(started) = started {
+            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+            if elapsed >= 1.0 {
+                crate::perf_record!(
+                    "[perf] enclosing-stub-coverage {:.1}ms source_wires={} expanded_wires={} enclosed_stubs={}",
+                    elapsed, source_count, wires.len(), skipped,
+                );
+            }
+        }
+        Self {
+            query_aabb: self.query_aabb,
+            screen_rect: self.screen_rect,
+            screen_view: self.screen_view,
+            ..Self::all(Arc::new(wires))
+        }
+    }
+
     /// Leave out every wire `drop` matches, with the segments, points and
     /// triangles that belong to it.
     pub(crate) fn exclude_wires(&mut self, drop: impl Fn(&WireModel) -> bool) {

@@ -206,7 +206,8 @@ pub fn compact_mass_transform_preview(
         item.0[2] = item.0[2].max(b[2]);
         item.0[3] = item.0[3].max(b[3]);
     }
-    if grouped.len() >= wires.len() / 3 {
+    // Never replace many separate selections by one misleading group box.
+    if grouped.len() < handles / 2 || grouped.len() >= wires.len() / 3 {
         return wires;
     }
     let mut result = Vec::with_capacity(grouped.len());

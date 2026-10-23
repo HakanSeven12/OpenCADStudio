@@ -146,6 +146,8 @@ pub struct Pipeline {
     /// them show through the blend instead of failing the depth test.
     hatch_translucent_gpu: hatch_gpu::HatchGpu,
     image_pipeline: wgpu::RenderPipeline,
+    /// Single-sample alpha-blended overlay: one RGBA ghost quad atop cached scene.
+    image_preview_overlay_pipeline: wgpu::RenderPipeline,
     point_cloud_pipeline: wgpu::RenderPipeline,
     /// SDF text-quad pipeline (Phase 2b): draws per-glyph quads sampling the
     /// shared glyph atlas. Fed only when `OCS_TEXT_SDF` is set (else no verts).
@@ -330,6 +332,8 @@ pub struct Pipeline {
     /// viewport rect. Recomputed by `compute_wipeout_lod`.
     wipeout_skip_flags: Vec<bool>,
     gpu_images: Vec<ImageGpu>,
+    raster_preview_gpu: Vec<ImageGpu>,
+    raster_preview_pixels_key: usize,
     gpu_point_clouds: point_cloud_gpu::PointCloudGpu,
     /// Batched mesh geometry — every solid's LOD0 concatenated into a few large
     /// buffers so the whole set draws in a handful of calls instead of one per
@@ -2202,6 +2206,42 @@ impl Pipeline {
             cache: None,
         });
 
+        // Preview image is composited AFTER the cached MSAA resolve, so
+        // neither selection rasterization nor the full scene reruns per move.
+        let image_preview_overlay_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("raster.selection.preview_overlay"),
+                layout: Some(&image_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[
+                        image_gpu::ImageVertex::layout(),
+                        image_gpu::ImageInstance::layout(),
+                    ],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+
         // ── Point cloud sprites ────────────────────────────────────────────
         let point_cloud_bgl1 = point_cloud_gpu::params_layout(device);
         let point_cloud_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2445,6 +2485,7 @@ impl Pipeline {
             hatch_gpu,
             hatch_translucent_gpu,
             image_pipeline,
+            image_preview_overlay_pipeline,
             point_cloud_pipeline,
             text_pipeline,
             block_text_pipeline,
@@ -2540,6 +2581,8 @@ impl Pipeline {
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
             gpu_images: vec![],
+            raster_preview_gpu: vec![],
+            raster_preview_pixels_key: 0,
             gpu_point_clouds,
             gpu_mesh_batch: Default::default(),
             gpu_mesh_dynamic: vec![],

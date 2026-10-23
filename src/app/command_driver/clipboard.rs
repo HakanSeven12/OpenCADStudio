@@ -283,20 +283,38 @@ impl OpenCADStudio {
             self.command_line
                 .push_error(crate::t!("Clipboard is empty.").as_ref());
         } else {
+            let perf_start = crate::perf::enabled().then(std::time::Instant::now);
             let delta = base_pt - self.clipboard_base;
             let translate = crate::command::EntityTransform::Translate(delta);
             self.push_undo_snapshot(i, "PASTECLIP");
+            let undo_ms = perf_start.map_or(0.0, |start| start.elapsed().as_secs_f64() * 1e3);
             let count = self.clipboard.len();
+            let kernel_started = std::time::Instant::now();
             let by_index = self.finalize_paste(i, Some(translate));
-            self.tabs[i].scene.deselect_all();
-            for h in by_index.iter().copied().filter(|h| !h.is_null()) {
-                self.tabs[i].scene.select_entity(h, false);
-            }
+            let kernel_ms = kernel_started.elapsed().as_secs_f64() * 1e3;
+            // Keep all pasted handles selected while triggering only ONE
+            // highlight invalidation, not one for every new plant INSERT.
+            let new_handles: Vec<_> = by_index
+                .iter().copied().filter(|h| !h.is_null()).collect();
+            let select_started = std::time::Instant::now();
+            self.tabs[i].scene.select_entities_exclusive(&new_handles);
+            let select_ms = select_started.elapsed().as_secs_f64() * 1e3;
             self.tabs[i].dirty = true;
             // Surface any layers the paste brought in (cross-drawing)
             // in the layer manager and the layer dropdown.
+            let panel_started = std::time::Instant::now();
             self.refresh_layer_panel();
+            let panel_ms = panel_started.elapsed().as_secs_f64() * 1e3;
+            let props_started = std::time::Instant::now();
             self.refresh_properties();
+            let props_ms = props_started.elapsed().as_secs_f64() * 1e3;
+            if let Some(start) = perf_start {
+                let total_ms = start.elapsed().as_secs_f64() * 1e3;
+                crate::perf_record!(
+                    "[perf] paste-commit total={total_ms:.1}ms clipboard={} added={} snapshot={undo_ms:.1}ms kernel={kernel_ms:.1}ms selection={select_ms:.1}ms layers={panel_ms:.1}ms properties={props_ms:.1}ms",
+                    count, new_handles.len(),
+                );
+            }
             self.command_line
                 .push_info(crate::tf!("{count} object(s) pasted.").as_ref());
         }

@@ -948,6 +948,16 @@ impl OpenCADStudio {
             eye,
             bounds,
         );
+        // A fully enclosed INSERT is necessarily a crossing hit. Keep the
+        // original exact tests for border-touching stubs and non-top views.
+        let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
+            && view_rot.z_axis.y.abs() < 1e-9
+            && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
+        let area_candidates = if crossing && flat_ortho {
+            area_candidates.materialize_stubs_for_crossing_xy_box(world_aabb)
+        } else {
+            area_candidates
+        };
         timing.candidates = elapsed(t_sel);
         let t_hit = crate::perf::enabled().then(Instant::now);
         let scene = &self.tabs[i].scene;

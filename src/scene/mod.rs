@@ -11561,6 +11561,7 @@ impl Scene {
         view_rot: glam::Mat4,
         eye: glam::DVec3,
         bounds: iced::Rectangle,
+        crossing: bool,
     ) -> crate::scene::pick::interaction_index::InteractionCandidates {
         let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
             && view_rot.z_axis.y.abs() < 1e-9
@@ -11568,8 +11569,12 @@ impl Scene {
         if !self.interaction_source_is_resident(&wires, bounds.height)
             || !self.interaction_index_worthwhile(&wires)
         {
-            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
-                .materialize_stubs();
+            let candidates = crate::scene::pick::interaction_index::InteractionCandidates::all(wires);
+            return if crossing && flat_ortho {
+                candidates.materialize_stubs_for_crossing_xy_box(aabb)
+            } else {
+                candidates.materialize_stubs()
+            };
         }
         let pad_px = self.indexed_interaction_pick_radius(&wires, 0.0, bounds.height, true);
         if flat_ortho {
@@ -11585,13 +11590,18 @@ impl Scene {
             } else {
                 0.0
             };
-            self.indexed_interaction_candidates_xy(
+            let candidates = self.indexed_interaction_candidates_xy_stubbed(
                 wires,
                 [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad],
                 false,
                 true,
                 None,
-            )
+            );
+            if crossing {
+                candidates.materialize_stubs_for_crossing_xy_box(aabb)
+            } else {
+                candidates.materialize_stubs()
+            }
         } else {
             self.indexed_interaction_candidates_screen(
                 wires,
@@ -11817,6 +11827,7 @@ impl Scene {
             view_rot,
             eye,
             bounds,
+            crossing,
         );
         let candidate_handles = self.interaction_candidate_handles(&area_candidates);
         let wire_hits = if open_fence {

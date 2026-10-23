@@ -136,6 +136,9 @@ pub struct ViewportData {
     /// the main `wires` buffer so a drag re-uploads only this small set each
     /// frame, never the resident base buffer. Drawn on top in the wire pass.
     pub(in crate::scene) preview_wires: Arc<Vec<WireModel>>,
+    /// One reusable RGBA snapshot of a massive command selection. Transformed
+    /// as a textured quad, outside the cached resident scene.
+    pub(in crate::scene) raster_preview_image: Option<Arc<ImageModel>>,
     /// Non-current scale representations of selected or hovered annotative
     /// entities. Uploaded with the xray highlight instead of the resident set.
     pub(in crate::scene) annotation_context_wires: Arc<Vec<WireModel>>,
@@ -5160,6 +5163,11 @@ impl Scene {
             wires: Arc::downgrade(&all_wires),
             clip_boundary_ndc,
             preview_wires,
+            raster_preview_image: if show_live_overlay {
+                self.raster_preview_image.clone()
+            } else {
+                None
+            },
             annotation_context_wires,
             preview_hatches,
             face3d_wires,

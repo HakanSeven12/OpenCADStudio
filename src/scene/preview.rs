@@ -15,10 +15,17 @@ impl Scene {
     ) {
         self.raster_preview_source = None;
         self.raster_preview_image = None;
-        if self.current_layout != "Model"
-            || self.model_tiles.borrow().len() != 1
-            || !self.preview_hatches.is_empty()
-        {
+        // The number of cached Model tiles is not the number of visible
+        // viewports. A previously split/loaded model can retain multiple
+        // tiles even when just one viewport is shown; rejecting raster here
+        // silently forces the costly full wire preview.
+        if self.current_layout != "Model" || !self.preview_hatches.is_empty() {
+            if selected_handles >= 512 && crate::perf::enabled() {
+                crate::perf_record!(
+                    "[perf] command-raster-setup rejected layout={} hatches={}",
+                    self.current_layout, self.preview_hatches.len()
+                );
+            }
             return;
         }
         self.raster_preview_source =

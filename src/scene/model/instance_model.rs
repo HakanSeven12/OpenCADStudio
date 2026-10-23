@@ -276,3 +276,84 @@ pub fn compact_mass_transform_preview(
     );
     result
 }
+
+pub fn mass_transform_group_preview(
+    wires: &[WireModel],
+    min_wires: usize,
+) -> Option<Vec<WireModel>> {
+    if wires.len() < min_wires {
+        return None;
+    }
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    let mut counted = 0usize;
+    let mut guides = Vec::new();
+    for wire in wires {
+        // Tracking aids are not part of the entity extents. Their endpoints
+        // can be intentionally thousands of world units away.
+        if wire.name.starts_with("__") {
+            guides.push(wire.clone());
+            continue;
+        }
+        if wire.snap_only || !wire.display_visible {
+            continue;
+        }
+        // Never flatten spatial geometry to XY: keep exact 3-D preview,
+        // including wires at a nonzero constant elevation.
+        if wire.fill_is_3d
+            || wire.stub.as_ref().is_some_and(|stub| stub.delta[2].abs() > 1e-7)
+            || wire.points.iter().any(|p| !p[2].is_finite() || p[2].abs() > 1e-5)
+        {
+            return None;
+        }
+        let bb = wire.aabb.map(f64::from);
+        if bb.iter().all(|v| v.is_finite() && v.abs() < 1e15)
+            && bb[0] <= bb[2] && bb[1] <= bb[3]
+        {
+            b[0] = b[0].min(bb[0]);
+            b[1] = b[1].min(bb[1]);
+            b[2] = b[2].max(bb[2]);
+            b[3] = b[3].max(bb[3]);
+            counted += 1;
+        } else {
+            // A SENTINEL/UNBOUNDED AABB on an analytic child should not
+            // enlarge the whole preview to +/- infinity. Its explicit
+            // points, if present, are still good conservative extents.
+            for p in &wire.points {
+                let x = f64::from(p[0]);
+                let y = f64::from(p[1]);
+                if x.is_finite() && y.is_finite()
+                    && x.abs() < 1e15 && y.abs() < 1e15
+                {
+                    b[0] = b[0].min(x);
+                    b[1] = b[1].min(y);
+                    b[2] = b[2].max(x);
+                    b[3] = b[3].max(y);
+                    counted += 1;
+                }
+            }
+        }
+    }
+    if counted == 0
+        || b.iter().any(|v| !v.is_finite())
+        || b[2] <= b[0]
+        || b[3] <= b[1]
+    {
+        return None;
+    }
+    let mut box_wire = WireModel::solid_f64(
+        "__mass_transform_group_extent__".to_owned(),
+        vec![
+            [b[0], b[1], 0.0],
+            [b[2], b[1], 0.0],
+            [b[2], b[3], 0.0],
+            [b[0], b[3], 0.0],
+            [b[0], b[1], 0.0],
+        ],
+        WireModel::SELECTED,
+        false,
+    );
+    // Mark as an ordinary visual-only overlay, not an editable entity.
+    box_wire.selected = false;
+    guides.push(box_wire);
+    Some(guides)
+}

@@ -143,6 +143,7 @@ pub struct Pipeline {
     /// them show through the blend instead of failing the depth test.
     hatch_translucent_gpu: hatch_gpu::HatchGpu,
     image_pipeline: wgpu::RenderPipeline,
+    image_preview_overlay_pipeline: wgpu::RenderPipeline,
     point_cloud_pipeline: wgpu::RenderPipeline,
     /// SDF text-quad pipeline (Phase 2b): draws per-glyph quads sampling the
     /// shared glyph atlas. Fed only when `OCS_TEXT_SDF` is set (else no verts).
@@ -2168,6 +2169,40 @@ impl Pipeline {
             cache: None,
         });
 
+        let image_preview_overlay_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("raster.selection.preview_overlay"),
+                layout: Some(&image_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[
+                        image_gpu::ImageVertex::layout(),
+                        image_gpu::ImageInstance::layout(),
+                    ],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+
         // ── Point cloud sprites ────────────────────────────────────────────
         let point_cloud_bgl1 = point_cloud_gpu::params_layout(device);
         let point_cloud_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2410,6 +2445,7 @@ impl Pipeline {
             hatch_gpu,
             hatch_translucent_gpu,
             image_pipeline,
+            image_preview_overlay_pipeline,
             point_cloud_pipeline,
             text_pipeline,
             block_text_pipeline,

@@ -496,7 +496,14 @@ impl shader::Primitive for Primitive {
                         .iter()
                         .any(|wire| wire.instance_count > 0);
             } else {
-                inner.preview_overlay_direct = false;
+                inner.preview_overlay_direct = placement.surface_matches_raster()
+                    && vp.preview_hatches.is_empty()
+                    && vp.preview_text_verts.is_empty()
+                    && vp.clip_boundary_ndc.is_empty()
+                    && !inner.raster_preview_gpu.is_empty();
+            }
+            if !inner.raster_preview_gpu.is_empty() && placement.surface_matches_raster() {
+                inner.preview_overlay_direct = true;
             }
             let sig = render_signature(vp, &placement, inner.preview_overlay_direct);
             // REDRAW bypass: pin render_sig to force a full pass this frame

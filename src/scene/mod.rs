@@ -2481,6 +2481,8 @@ pub struct Scene {
     pub selection_filter: HashSet<String>,
     /// In-progress preview wires while a command is active (rubber-band + object ghosts).
     pub preview_wires: Vec<WireModel>,
+    pub(crate) raster_preview_source: Option<model::raster_preview::RasterSelectionPreview>,
+    pub(crate) raster_preview_image: Option<Arc<model::image_model::ImageModel>>,
     /// Candidate wireframes produced by editable solid-history grips. The
     /// resident body remains untouched until the grip is committed.
     solid_history_preview_wires: HashMap<Handle, Vec<WireModel>>,
@@ -3120,6 +3122,8 @@ impl Scene {
             model_lineweight_scale: 1.0,
             selection_filter: HashSet::default(),
             preview_wires: vec![],
+            raster_preview_source: None,
+            raster_preview_image: None,
             solid_history_preview_wires: HashMap::default(),
             preview_hatches: Arc::new(Vec::new()),
             preview_text: vec![],

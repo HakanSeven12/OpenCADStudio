@@ -1342,6 +1342,36 @@ mod clipboard_xdict_clone_tests {
 }
 
 #[cfg(test)]
+mod paste_existing_block_definition_tests {
+    use super::*;
+
+    #[test]
+    fn reusing_clipboard_block_does_not_create_or_replace_its_definition() {
+        let mut document = codec::CadDocument::new();
+        let def = crate::app::BlockDef {
+            name: "TEST_PALM_BLOCK".into(),
+            base_point: codec::types::Vector3::ZERO,
+            entities: vec![codec::EntityType::Line(
+                codec::entities::Line::new(),
+            )],
+            source: codec::Handle::new(911),
+            graph: None,
+        };
+        let apps = rustc_hash::FxHashMap::default();
+        assert_eq!(merge_block_defs(&mut document, &[def.clone()], &apps), 1);
+        let before = document.block_records.len();
+        let record_before = document.block_records.get(&def.name).unwrap().entity_handles.clone();
+        assert_eq!(merge_block_defs(&mut document, &[def], &apps), 0);
+        assert_eq!(document.block_records.len(), before);
+        assert_eq!(
+            document.block_records.get("TEST_PALM_BLOCK").unwrap().entity_handles,
+            record_before,
+            "existing source definition must remain identical on same-document paste",
+        );
+    }
+}
+
+#[cfg(test)]
 mod copy_to_clipboard_kernel_tests {
     use super::copy_to_clipboard_kernel;
 

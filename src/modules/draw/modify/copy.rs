@@ -49,6 +49,8 @@ pub struct CopyCommand {
 
 impl CopyCommand {
     pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        let wire_models = crate::scene::model::instance_model::
+            compact_mass_transform_preview(handles.len(), wire_models);
         Self {
             handles,
             wire_models,

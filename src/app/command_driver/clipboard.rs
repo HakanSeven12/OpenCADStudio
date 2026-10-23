@@ -377,6 +377,11 @@ impl OpenCADStudio {
             }
             None => PasteSpace::Model,
         };
+        // Clipboard dependencies normally include definitions already in
+        // this very drawing. Their presence must NOT trigger a full-scene
+        // retessellation on every Ctrl+V. Only actual new block records
+        // (including newly baked dimension *D blocks) need that rebuild.
+        let block_records_before = self.tabs[i].scene.document.block_records.len();
         let (by_index, handle_map) = paste_entities_kernel(
             &mut self.tabs[i].scene.document,
             &clipboard,
@@ -389,7 +394,16 @@ impl OpenCADStudio {
         // instead of once per entity. Block-definition merges (and pasted
         // Block/BlockEnd sentinels) need the full geometry rebuild, matching
         // the `bump_geometry` tails the Scene helpers used to run.
-        let mut needs_geometry_bump = !deps.blocks.is_empty();
+        let mut needs_geometry_bump =
+            self.tabs[i].scene.document.block_records.len() != block_records_before;
+        if crate::perf::enabled() && !deps.blocks.is_empty() {
+            crate::perf_record!(
+                "[perf] paste-block-definitions clipboard_defs={} records_before={} records_after={} full_rebuild={}",
+                deps.blocks.len(), block_records_before,
+                self.tabs[i].scene.document.block_records.len(),
+                needs_geometry_bump,
+            );
+        }
         let mut changes = Vec::new();
         for &handle in &by_index {
             if handle.is_null() {

@@ -11574,8 +11574,12 @@ impl Scene {
             || !self.interaction_index_worthwhile(&wires)
         {
             let candidates = crate::scene::pick::interaction_index::InteractionCandidates::all(wires);
-            return if crossing && flat_ortho {
-                candidates.materialize_stubs_for_crossing_xy_box(aabb)
+            return if flat_ortho {
+                if crossing {
+                    candidates.materialize_stubs_for_crossing_xy_box(aabb)
+                } else {
+                    candidates.materialize_stubs_for_enclosing_xy_box(aabb)
+                }
             } else {
                 candidates.materialize_stubs()
             };
@@ -11604,7 +11608,7 @@ impl Scene {
             if crossing {
                 candidates.materialize_stubs_for_crossing_xy_box(aabb)
             } else {
-                candidates.materialize_stubs()
+                candidates.materialize_stubs_for_enclosing_xy_box(aabb)
             }
         } else {
             self.indexed_interaction_candidates_screen(

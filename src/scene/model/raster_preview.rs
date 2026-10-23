@@ -39,7 +39,7 @@ pub fn rasterize_selection(wires: &[WireModel], selected: usize) -> Option<Raste
     let width = (width_world * scale).ceil().max(16.0).min(MAX_SIDE) as u32;
     let height = (height_world * scale).ceil().max(16.0).min(MAX_SIDE) as u32;
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    let start = crate::perf::enabled().then(std::time::Instant::now());
+    let start = crate::perf::enabled().then(std::time::Instant::now);
     let mut segments = 0usize;
 
     // Full bitmap, not a recolored selection bounding box. The nested wire

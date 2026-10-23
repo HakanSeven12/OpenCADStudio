@@ -13,6 +13,24 @@ impl Scene {
         // tessellate the whole model on every rubber-band frame. The overlay
         // forces a GPU wire re-upload on its own (the `has_overlay` content-id
         // path), and iced redraws after the message that set the preview.
+        // Avoid per-frame expansion of enormous 2-D edit previews.
+        // STRETCH, hidden selections, 3-D geometry and fill previews
+        // continue through their existing exact-geometry paths.
+        if self.selected.len() > 512
+            && wires.len() >= 2048
+            && self.preview_hidden.is_empty()
+            && self.command_preview_hidden.is_empty()
+            && self.preview_hatches.is_empty()
+        {
+            if let Some(group) =
+                crate::scene::model::instance_model::mass_transform_group_preview(
+                    &wires, 2048,
+                )
+            {
+                self.preview_wires = group;
+                return;
+            }
+        }
         self.preview_wires = wires;
     }
 

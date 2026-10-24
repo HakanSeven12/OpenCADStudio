@@ -7925,7 +7925,11 @@ impl Scene {
             let strong = Arc::strong_count(&entry.wires);
             if strong != 1 {
                 if perf {
-                    crate::perf_record!("[perf] resident-shared strong={strong}");
+                    crate::perf_record!(
+                        "[perf] resident-patch-skip reason=shared strong={} cached_epoch={} current_epoch={} memo_shareable={} layout_present={}",
+                        strong, entry.epoch, self.geometry_epoch, shareable,
+                        entry.layout.is_some(),
+                    );
                 }
                 return None;
             }

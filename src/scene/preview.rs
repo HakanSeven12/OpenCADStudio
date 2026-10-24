@@ -119,6 +119,7 @@ impl Scene {
 
         let started = crate::perf::enabled().then(iced::time::Instant::now);
         let depth_map = self.draw_depth_map();
+        let depth_ms = crate::perf::elapsed_ms(started);
         let target_block = self.content_render_block_handle();
         let annotation_scale = self.displayed_annotation_scale_handle();
         let all_visible = self.annotation_all_visible();
@@ -144,6 +145,8 @@ impl Scene {
                 .1
             })
             .collect();
+        let direct_hatch_ms = crate::perf::elapsed_ms(started);
+        let direct_hatch_count = models.len();
         let selected_inserts: Vec<Handle> = self
             .selected
             .iter()
@@ -159,7 +162,19 @@ impl Scene {
                     && !self.layer_hidden(&common.layer)
             })
             .collect();
+        let insert_scan_ms = crate::perf::elapsed_ms(started);
         models.extend(self.preview_insert_hatch_models(&selected_inserts));
+        let insert_models_ms = crate::perf::elapsed_ms(started);
+        if insert_models_ms >= 5.0 {
+            crate::perf_record!(
+                "[perf] hatch-selection-stages depth={depth_ms:.1}ms direct={:.1}ms direct_models={} insert_scan={:.1}ms inserts={} insert_models={:.1}ms",
+                direct_hatch_ms - depth_ms,
+                direct_hatch_count,
+                insert_scan_ms - direct_hatch_ms,
+                selected_inserts.len(),
+                insert_models_ms - insert_scan_ms,
+            );
+        }
         let models = std::sync::Arc::new(models);
         let elapsed_ms = crate::perf::elapsed_ms(started);
         if elapsed_ms >= 1.0 {

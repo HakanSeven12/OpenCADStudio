@@ -384,6 +384,55 @@ impl OpenCADStudio {
                         .filter_map(|element| element.complex.as_ref())
                         .map(|complex| complex.style_handle)
                         .collect();
+                    // Multileaders and their styles, and table styles, reach
+                    // their text styles by handle (a table style also by name).
+                    let object_text_styles: rustc_hash::FxHashSet<codec::Handle> = {
+                        let doc = &self.tabs[i].scene.document;
+                        let leaders = doc.entities().filter_map(|e| match e {
+                            codec::EntityType::MultiLeader(m) => Some(m),
+                            _ => None,
+                        });
+                        leaders
+                            .flat_map(|m| [m.text_style_handle, m.context.text_style_handle])
+                            .chain(doc.objects.values().flat_map(|o| {
+                                match o {
+                                    codec::objects::ObjectType::MultiLeaderStyle(style) => {
+                                        vec![style.text_style_handle]
+                                    }
+                                    codec::objects::ObjectType::TableStyle(style) => [
+                                        &style.data_row_style,
+                                        &style.header_row_style,
+                                        &style.title_row_style,
+                                    ]
+                                    .iter()
+                                    .map(|row| row.text_style_handle)
+                                    .collect(),
+                                    _ => vec![],
+                                }
+                            }))
+                            .flatten()
+                            .filter(|h| !h.is_null())
+                            .collect()
+                    };
+                    let table_style_text_styles: rustc_hash::FxHashSet<String> = self.tabs[i]
+                        .scene
+                        .document
+                        .objects
+                        .values()
+                        .filter_map(|o| match o {
+                            codec::objects::ObjectType::TableStyle(style) => Some(style),
+                            _ => None,
+                        })
+                        .flat_map(|style| {
+                            [
+                                &style.data_row_style,
+                                &style.header_row_style,
+                                &style.title_row_style,
+                            ]
+                        })
+                        .filter(|row| !row.text_style_name.is_empty())
+                        .map(|row| row.text_style_name.to_uppercase())
+                        .collect();
                     // Dimension styles reach their dimension and extension line
                     // linetypes by handle.
                     let dimstyle_linetypes: rustc_hash::FxHashSet<codec::Handle> = self.tabs[i]
@@ -462,6 +511,8 @@ impl OpenCADStudio {
                                     && !xref_dependent(&s.name, s.xref_dependent)
                                     && !used_text_styles.contains(&s.name.to_uppercase())
                                     && !linetype_styles.contains(&s.handle)
+                                    && !object_text_styles.contains(&s.handle)
+                                    && !table_style_text_styles.contains(&s.name.to_uppercase())
                             })
                             .map(|s| s.name.clone())
                             .collect()

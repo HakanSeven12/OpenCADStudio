@@ -1363,6 +1363,38 @@ fn purge_keeps_the_current_layer_and_dimstyle_linetypes() {
 }
 
 #[test]
+fn purge_keeps_text_styles_used_only_by_leader_and_table_styles() {
+    use codec::objects::{MultiLeaderStyle, ObjectType, TableStyle};
+    use codec::tables::TextStyle;
+    let mut app = app();
+    let i = tab(&app);
+    {
+        let doc = &mut app.tabs[i].scene.document;
+        let mut leader_text = TextStyle::new("LEADER_TEXT");
+        leader_text.handle = doc.allocate_handle();
+        let leader_text_handle = leader_text.handle;
+        doc.text_styles.add(leader_text).unwrap();
+        doc.text_styles.add(TextStyle::new("TABLE_TEXT")).unwrap();
+        doc.text_styles.add(TextStyle::new("UNUSED_TEXT")).unwrap();
+        let mut leader_style = MultiLeaderStyle::new("BO_LEADER");
+        leader_style.handle = doc.allocate_handle();
+        leader_style.text_style_handle = Some(leader_text_handle);
+        doc.objects
+            .insert(leader_style.handle, ObjectType::MultiLeaderStyle(leader_style));
+        let mut table_style = TableStyle::new("BO_TABLE");
+        table_style.handle = doc.allocate_handle();
+        table_style.data_row_style.text_style_name = "TABLE_TEXT".to_string();
+        doc.objects
+            .insert(table_style.handle, ObjectType::TableStyle(table_style));
+    }
+    let _ = app.dispatch_command("PURGE ALL");
+    let doc = &app.tabs[i].scene.document;
+    assert!(doc.text_styles.get("LEADER_TEXT").is_some(), "purged a multileader style's text style");
+    assert!(doc.text_styles.get("TABLE_TEXT").is_some(), "purged a table style's text style");
+    assert!(doc.text_styles.get("UNUSED_TEXT").is_none(), "a plain unused text style still purges");
+}
+
+#[test]
 fn locked_purge_keeps_a_model_space_referenced_block() {
     let mut app = app();
     let model_space = fixture_model_space_reference(&mut app);

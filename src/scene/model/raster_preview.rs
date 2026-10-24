@@ -72,7 +72,24 @@ pub fn rasterize_selection(wires: &[WireModel], selected: usize) -> Option<Raste
             return None;
         }
     };
-    let b = extent.aabb.map(f64::from);
+    // The generated outline's cached AABB may remain a sentinel even when
+    // solid_f64 supplied five perfectly valid corners. Use the actual
+    // outline points instead of rejecting this otherwise valid snapshot.
+    let mut b = extent.aabb.map(f64::from);
+    if !bounds_valid(b) {
+        b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for (i, point) in extent.points.iter().enumerate() {
+            let low = extent.points_low.get(i).copied().unwrap_or([0.0; 3]);
+            let x = point[0] as f64 + low[0] as f64;
+            let y = point[1] as f64 + low[1] as f64;
+            if x.is_finite() && y.is_finite() {
+                b[0] = b[0].min(x);
+                b[1] = b[1].min(y);
+                b[2] = b[2].max(x);
+                b[3] = b[3].max(y);
+            }
+        }
+    }
     if !bounds_valid(b) {
         crate::perf_record!("[perf] raster-reject reason=invalid-bounds bounds={:?} selected={}", b, selected);
         return None;

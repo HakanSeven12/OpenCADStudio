@@ -1491,9 +1491,8 @@ fn parse_attachment(s: &str) -> TextAttachmentType {
 fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
     crate::scene::view::transform::apply_standard_entity_transform(ml, t, |entity, p1, p2| {
         // Reflect every point on the leader (line points, connection points,
-        // break-point endpoints) AND every direction vector that drives the
-        // text orientation. Without the direction reflection text would keep
-        // its original rotation while the leader appears mirrored.
+        // break-point endpoints) and the leader directions; the content
+        // orientation follows AutoCAD (`mirror_content_orientation`).
         for root in &mut entity.context.leader_roots {
             for line in &mut root.lines {
                 for p in &mut line.points {
@@ -1536,26 +1535,41 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
                 );
             }
         }
-        crate::scene::view::transform::reflect_xy_point(
-            &mut entity.context.text_location.x,
-            &mut entity.context.text_location.y,
-            p1,
-            p2,
-        );
-        entity.context.content_base_point = entity.context.text_location;
-        reflect_xy_direction(
-            &mut entity.context.text_direction.x,
-            &mut entity.context.text_direction.y,
-            p1,
-            p2,
-        );
-        reflect_xy_direction(
-            &mut entity.context.base_direction.x,
-            &mut entity.context.base_direction.y,
-            p1,
-            p2,
-        );
+        for point in [
+            &mut entity.context.text_location,
+            &mut entity.context.content_base_point,
+            &mut entity.context.block_content_location,
+        ] {
+            crate::scene::view::transform::reflect_xy_point(&mut point.x, &mut point.y, p1, p2);
+        }
+        mirror_content_orientation(entity, p1, p2);
     });
+}
+
+/// MIRROR of the content, as AutoCAD does it. MTEXT stays readable whatever
+/// MIRRTEXT says: its direction and rotation are kept and the text moves to
+/// the other side of its location. Block content becomes a true mirror
+/// image: X scale negated, rotation `2·axis + 180° − rotation`.
+fn mirror_content_orientation(ml: &mut MultiLeader, p1: DVec3, p2: DVec3) {
+    use codec::entities::multileader::TextAttachmentPointType;
+    // AutoCAD changes only the drawn (context) content; the entity-level
+    // values are style overrides and keep their values.
+    let (attachment, alignment) = match ml.context.text_attachment_point {
+        TextAttachmentPointType::Left => (TextAttachmentPointType::Right, TextAlignmentType::Right),
+        TextAttachmentPointType::Right => (TextAttachmentPointType::Left, TextAlignmentType::Left),
+        TextAttachmentPointType::Center => {
+            (TextAttachmentPointType::Center, ml.context.text_alignment)
+        }
+    };
+    ml.context.text_attachment_point = attachment;
+    if ml.context.text_alignment != TextAlignmentType::Center {
+        ml.context.text_alignment = alignment;
+    }
+    ml.property_override_flags |= MultiLeaderPropertyOverrideFlags::TEXT_ALIGNMENT;
+    let axis = (p2.y - p1.y).atan2(p2.x - p1.x);
+    ml.context.block_content_scale.x = -ml.context.block_content_scale.x;
+    ml.context.block_rotation = (2.0 * axis + std::f64::consts::PI - ml.context.block_rotation)
+        .rem_euclid(std::f64::consts::TAU);
 }
 
 /// Reflect a direction (not position) vector across the mirror line p1→p2.
@@ -2993,6 +3007,60 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// MIRROR about x = 0, values as AutoCAD writes them: text stays readable
+    /// and moves to the other side, block content is mirrored in place.
+    #[test]
+    fn mirror_matches_autocad() {
+        use codec::entities::multileader::TextAttachmentPointType;
+        use codec::types::Vector3;
+        let mut ml = MultiLeader::default();
+        ml.context.text_location = Vector3::new(60.0, 81.18, 0.0);
+        ml.context.text_direction = Vector3::new(1.0, 0.0, 0.0);
+        ml.context.base_direction = Vector3::new(1.0, 0.0, 0.0);
+        ml.context.text_attachment_point = TextAttachmentPointType::Left;
+        ml.context.text_alignment = TextAlignmentType::Left;
+        ml.text_attachment_point = TextAttachmentPointType::Left;
+        ml.context.content_base_point = Vector3::new(65.0, 41.0, 0.0);
+        ml.context.block_content_location = Vector3::new(60.0, 40.0, 0.0);
+        let mirror = EntityTransform::Mirror {
+            p1: DVec3::ZERO,
+            p2: DVec3::Y,
+            working_normal: DVec3::Z,
+        };
+        apply_transform(&mut ml, &mirror);
+        let ctx = &ml.context;
+        assert_eq!((ctx.text_location.x, ctx.text_location.y), (-60.0, 81.18));
+        assert_eq!(
+            ctx.text_direction,
+            Vector3::new(1.0, 0.0, 0.0),
+            "text stays readable"
+        );
+        assert_eq!(ctx.base_direction, Vector3::new(1.0, 0.0, 0.0));
+        assert_eq!(ctx.text_attachment_point, TextAttachmentPointType::Right);
+        assert_eq!(ctx.text_alignment, TextAlignmentType::Right);
+        assert!(ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::TEXT_ALIGNMENT));
+        assert_eq!(
+            (ctx.content_base_point.x, ctx.content_base_point.y),
+            (-65.0, 41.0)
+        );
+        assert_eq!(
+            (ctx.block_content_location.x, ctx.block_content_location.y),
+            (-60.0, 40.0)
+        );
+        assert_eq!(ctx.block_content_scale.x, -1.0);
+        let rotation = ctx.block_rotation;
+        assert!(
+            rotation.sin().abs() < 1e-9 && rotation.cos() > 0.0,
+            "rotation {rotation}"
+        );
+        // AutoCAD keeps the entity-level overrides.
+        assert_eq!(ml.block_scale.x, 1.0);
+        assert_eq!(ml.block_rotation, 0.0);
+        assert_eq!(ml.text_attachment_point, TextAttachmentPointType::Left);
     }
 }
 

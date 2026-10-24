@@ -97,15 +97,16 @@ fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
 }
 
 /// MIRRTEXT on: a real MIRROR makes text a true glyph mirror. `apply_transform`
-/// already reflects the baseline rotation; toggling *both* group-71 bits
-/// (backward `0x2` + upside-down `0x4`) then renders the exact geometric
-/// reflection (the renderer XORs these flags into the effective width-factor
-/// sign / 180° flip). Toggling — not setting — keeps a double mirror an
-/// involution. Only single-line TEXT carries group 71; MTEXT / Shape keep the
-/// reflected rotation (readable-but-rotated), which is standard-conforming.
+/// already reflects the baseline rotation to `2·axis − rot`; the reflected glyph
+/// frame is that rotation plus 180° with the backward bit (`0x2`) toggled, which
+/// is what AutoCAD writes (upside-down `0x4` untouched). Toggling — not setting —
+/// keeps a double mirror an involution. Only single-line TEXT carries group 71;
+/// MTEXT / Shape keep the reflected rotation (readable-but-rotated), which is
+/// standard-conforming.
 fn mirror_true_text_flags(e: &mut EntityType) {
     if let EntityType::Text(t) = e {
-        t.generation_flags ^= 0x2 | 0x4;
+        t.generation_flags ^= 0x2;
+        t.rotation = (t.rotation + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
     }
 }
 
@@ -2826,6 +2827,67 @@ fn remap_copied_xdict_cross_refs(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod mirror_text_tests {
+    use super::*;
+    use glam::DVec3;
+
+    fn mirror(p2: DVec3) -> EntityTransform {
+        EntityTransform::Mirror {
+            p1: DVec3::ZERO,
+            p2,
+            working_normal: DVec3::Z,
+        }
+    }
+
+    fn text(scene: &mut Scene, rotation_deg: f64) -> Handle {
+        let mut t = codec::entities::Text::new();
+        t.value = "ABC".to_string();
+        t.rotation = rotation_deg.to_radians();
+        scene.document.add_entity(EntityType::Text(t)).unwrap()
+    }
+
+    fn orient(scene: &Scene, handle: Handle) -> (f64, i16) {
+        match scene.document.get_entity(handle) {
+            Some(EntityType::Text(t)) => (t.rotation.to_degrees(), t.generation_flags),
+            other => panic!("expected a text, got {other:?}"),
+        }
+    }
+
+    /// MIRRTEXT on: rotation and group 71 as AutoCAD writes them, for a
+    /// vertical, horizontal and sloped axis through the origin.
+    #[test]
+    fn mirrtext_on_matches_autocad() {
+        let cases = [
+            (DVec3::Y, 0.0, 0.0),
+            (DVec3::Y, 30.0, 330.0),
+            (DVec3::X, 0.0, 180.0),
+            (DVec3::X, 30.0, 150.0),
+            (DVec3::new(1.0, 1.0, 0.0), 0.0, 270.0),
+            (DVec3::new(2.0, 1.0, 0.0), 90.0, 143.130),
+        ];
+        for (axis, rotation, expected) in cases {
+            let mut scene = Scene::new();
+            scene.document.header.mirror_text = true;
+            let moved = text(&mut scene, rotation);
+            scene.transform_entities(&[moved], &mirror(axis));
+            let source = text(&mut scene, rotation);
+            let copy = scene.copy_entities(&[source], &mirror(axis))[0];
+            for handle in [moved, copy] {
+                let (got, flags) = orient(&scene, handle);
+                assert!(
+                    (got - expected).abs() < 1e-3,
+                    "rot {rotation} about {axis:?}: got {got}, AutoCAD {expected}"
+                );
+                assert_eq!(
+                    flags, 2,
+                    "rot {rotation} about {axis:?}: only backward is set"
+                );
+            }
         }
     }
 }

@@ -58,10 +58,23 @@ pub fn rasterize_selection(wires: &[WireModel], selected: usize) -> Option<Raste
     }
     // Do not impose the old 2048 top-level wire minimum after the complexity
     // test: one massive nested block is a valid raster preview candidate.
-    let outlines = super::instance_model::mass_transform_group_preview(wires, 0)?;
-    let extent = outlines.iter().find(|w| w.name == "__mass_transform_group_extent__")?;
+    let outlines = match super::instance_model::mass_transform_group_preview(wires, 0) {
+        Some(outlines) => outlines,
+        None => {
+            crate::perf_record!("[perf] raster-reject reason=missing-mass-extent selected={} wires={}", selected, wires.len());
+            return None;
+        }
+    };
+    let extent = match outlines.iter().find(|w| w.name == "__mass_transform_group_extent__") {
+        Some(extent) => extent,
+        None => {
+            crate::perf_record!("[perf] raster-reject reason=no-extent-wire selected={} wires={}", selected, wires.len());
+            return None;
+        }
+    };
     let b = extent.aabb.map(f64::from);
     if !bounds_valid(b) {
+        crate::perf_record!("[perf] raster-reject reason=invalid-bounds bounds={:?} selected={}", b, selected);
         return None;
     }
     let (width_world, height_world) = (b[2] - b[0], b[3] - b[1]);
@@ -127,6 +140,10 @@ pub fn rasterize_selection(wires: &[WireModel], selected: usize) -> Option<Raste
         raster_wire(wire, [0.0,0.0], b, (width,height), &mut pixels, &mut segments, 0);
     }
     if segments == 0 {
+        crate::perf_record!(
+            "[perf] raster-reject reason=no-segments selected={} source_wires={} bounds={:?} texture={}x{}",
+            selected, wires.len(), b, width, height
+        );
         return None;
     }
     if let Some(start) = start {

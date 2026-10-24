@@ -54,6 +54,7 @@ impl Scene {
         if let Some(source) = &self.raster_preview_source {
             if let Some(extent) = wires.iter().find(|w| w.name == "__mass_transform_group_extent__") {
                 if let Some(image) = source.image_at(extent) {
+                    crate::perf_record!("[perf] command-raster-quad-ready source_wires={} overlay_wires={}", wires.len(), wires.len().saturating_sub(1));
                     self.raster_preview_image = Some(Arc::new(image));
                     self.preview_wires = wires.into_iter()
                         .filter(|w| w.name != "__mass_transform_group_extent__")
@@ -387,8 +388,15 @@ impl Scene {
         self.preview_text = verts;
     }
 
-    pub fn clear_preview_wire(&mut self) {
+    /// Drop the cached raster only when the command actually ends.
+    pub fn clear_raster_command_preview(&mut self) {
         self.raster_preview_source = None;
+        self.raster_preview_image = None;
+    }
+
+    pub fn clear_preview_wire(&mut self) {
+        // A preview-wire clear also occurs between the base and target
+        // points. Keep the fixed texture alive across that step.
         self.raster_preview_image = None;
         // No geometry bump — see `set_preview_wires`. Dropping the overlay
         // flips the wire content id back to the base tessellation id, which

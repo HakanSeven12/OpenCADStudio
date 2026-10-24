@@ -63,6 +63,14 @@ impl Scene {
                 }
             }
         }
+        if self.raster_preview_source.is_some() && !wires.is_empty() {
+            crate::perf_record!(
+                "[perf] command-raster-fallback preview_wires={} has_extent={} first_name={:?}",
+                wires.len(),
+                wires.iter().any(|w| w.name == "__mass_transform_group_extent__"),
+                wires.first().map(|w| w.name.as_str())
+            );
+        }
         self.raster_preview_image = None;
         self.preview_wires = wires;
     }

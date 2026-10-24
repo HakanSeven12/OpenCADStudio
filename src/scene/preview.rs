@@ -44,6 +44,14 @@ impl Scene {
         self.raster_preview_source.is_some()
     }
 
+    fn is_raster_extent_preview_name(name: &str) -> bool {
+        // Some commands prefix visual-only wires with "preview_" after
+        // translating them. Recognize the original extent without mistaking
+        // an unrelated user entity for the generated temporary quad.
+        name == "__mass_transform_group_extent__"
+            || name == "preview___mass_transform_group_extent__"
+    }
+
     pub fn set_preview_wires(&mut self, wires: Vec<WireModel>) {
         // Preview wires are an overlay appended to the cached base wire set in
         // `build_primitive`; they are NOT part of the tessellation cache. So a
@@ -52,12 +60,12 @@ impl Scene {
         // forces a GPU wire re-upload on its own (the `has_overlay` content-id
         // path), and iced redraws after the message that set the preview.
         if let Some(source) = &self.raster_preview_source {
-            if let Some(extent) = wires.iter().find(|w| w.name == "__mass_transform_group_extent__") {
+            if let Some(extent) = wires.iter().find(|w| Self::is_raster_extent_preview_name(&w.name)) {
                 if let Some(image) = source.image_at(extent) {
                     crate::perf_record!("[perf] command-raster-quad-ready source_wires={} overlay_wires={}", wires.len(), wires.len().saturating_sub(1));
                     self.raster_preview_image = Some(Arc::new(image));
                     self.preview_wires = wires.into_iter()
-                        .filter(|w| w.name != "__mass_transform_group_extent__")
+                        .filter(|w| !Self::is_raster_extent_preview_name(&w.name))
                         .collect();
                     return;
                 }
@@ -67,7 +75,7 @@ impl Scene {
             crate::perf_record!(
                 "[perf] command-raster-fallback preview_wires={} has_extent={} first_name={:?}",
                 wires.len(),
-                wires.iter().any(|w| w.name == "__mass_transform_group_extent__"),
+                wires.iter().any(|w| Self::is_raster_extent_preview_name(&w.name)),
                 wires.first().map(|w| w.name.as_str())
             );
         }

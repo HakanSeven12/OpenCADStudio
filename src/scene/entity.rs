@@ -1904,17 +1904,8 @@ impl Scene {
                     return false;
                 }
                 if let Some(targets) = targets {
-                    if !matches!(entity, EntityType::Insert(_))
-                        || !targets.contains(&common.handle)
-                    {
-                        return false;
-                    }
-                    // The selected-insert overlay must not descend into every
-                    // selected definition when none of its active block uses
-                    // contains a hatch. This predicate is also used by the
-                    // normal hatch renderer and memoizes nested definitions.
-                    // The old target path bypassed it, traversing tens of
-                    // thousands of entirely hatch-free inserts each selection.
+                    return matches!(entity, EntityType::Insert(_))
+                        && targets.contains(&common.handle);
                 }
                 let block_uses: Vec<_> = crate::scene::render_graph::entity_render_block_uses(
                     &self.document,
@@ -1925,10 +1916,7 @@ impl Scene {
                 .filter(|block_use| block_use.active)
                 .collect();
                 if block_uses.is_empty() {
-                    // Preserve the generic graph-rendering behavior for
-                    // non-insert entities. A selected INSERT with no active
-                    // render uses has no nested hatch to highlight.
-                    targets.is_none()
+                    true
                 } else {
                     block_uses.into_iter().any(|block_use| {
                         crate::scene::render_graph::block_contains_hatch(

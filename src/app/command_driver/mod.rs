@@ -204,6 +204,7 @@ impl OpenCADStudio {
         // command an ADDSELECTED launched, revert the template-property override
         // so CLAYER / CECOLOR / … are left unchanged (#239). No-op otherwise.
         if was_active && self.tabs[i].active_cmd.is_none() {
+            self.tabs[i].scene.clear_raster_command_preview();
             self.tabs[i].scene.set_hover_highlight(None);
             self.command_line.set_step_options(Vec::new());
             self.command_line.clear_contextual_suggestions();
@@ -1232,6 +1233,7 @@ impl OpenCADStudio {
         self.tabs[i].pending_action_pair = None;
         self.tabs[i].measurement.clear();
         let space_changed = matches!(cancel, CmdResult::CancelForSpaceChange);
+        self.tabs[i].scene.clear_raster_command_preview();
         self.tabs[i].scene.clear_preview_wire();
         if !space_changed && self.tabs[i].suspended_cmd.is_some() {
             self.tabs[i].active_cmd = self.tabs[i].suspended_cmd.take();

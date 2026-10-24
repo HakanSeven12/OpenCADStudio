@@ -2783,6 +2783,12 @@ impl OpenCADStudio {
                     && command.cursor_axis().is_none()
             })
             && !self.shift_down
+            // The discrete-snap throttle skips live tracking guide creation.
+            // During a transform that suppressed POLAR and OTRACK lines even
+            // while the snapped point itself remained constrained. Keep those
+            // modes on the authoritative tracking/preview path.
+            && !self.polar_mode
+            && !self.snapper.otrack_enabled
             && self.angle_override.is_none()
             && self.axis_lock_dir.is_none()
             && !(self.snapper.grid_snap()

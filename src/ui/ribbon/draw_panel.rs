@@ -1,10 +1,12 @@
-//! Additional drawing tools, reached from the Draw panel's title.
+//! The slide-outs under panel titles and the panels' dialog launchers, drawn
+//! from the registry in `extras`.
 
 use std::time::Duration;
 
 use iced::widget::{button, column, container, row, scrollable, text, tooltip};
 use iced::{Element, Fill, Theme};
 
+use super::extras::{self, Layout, MoreTool, PanelExtras};
 use super::widgets::{
     make_icon, make_tip, muted_text_style, popup_panel_style, popup_row_style, tip_style,
     tool_btn_style, LARGE_DROPDOWN_ARROW_SIZE,
@@ -15,233 +17,28 @@ use crate::modules::IconKind;
 use crate::t;
 use crate::ui::{icons, wrap_bar::PosReport};
 
-pub(super) const PANEL_ID: &str = "draw_extension";
-const TITLE_ID: &str = "draw_extension_title";
 const SCALE: f32 = 0.7;
 const CELL: f32 = 36.0 * SCALE;
 const GAP: f32 = 3.0 * SCALE;
 const OPTION_HEIGHT: f32 = 30.0 * SCALE;
 const GROUP_TITLE_ARROW_SIZE: f32 = LARGE_DROPDOWN_ARROW_SIZE * 1.5;
 
-pub(super) struct Tool {
-    pub command: &'static str,
-    pub label: &'static str,
-    pub icon: &'static [u8],
-    pub options: &'static [(&'static str, &'static str)],
-}
-
-const TOOLS: &[Tool] = &[
-    Tool {
-        command: "SPLINE",
-        label: "Spline Fit",
-        icon: include_bytes!("../../../assets/icons/spline.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "SPLINECV",
-        label: "Spline CV",
-        icon: include_bytes!("../../../assets/icons/spline_cv.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "XLINE",
-        label: "Construction Line",
-        icon: include_bytes!("../../../assets/icons/xline.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "RAY",
-        label: "Ray",
-        icon: include_bytes!("../../../assets/icons/ray.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "DIVIDE",
-        label: "Divide",
-        icon: include_bytes!("../../../assets/icons/divide.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "MEASURE",
-        label: "Measure",
-        icon: include_bytes!("../../../assets/icons/measure.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "REGION",
-        label: "Region",
-        icon: include_bytes!("../../../assets/icons/region.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "BOUNDARY",
-        label: "Boundary",
-        icon: include_bytes!("../../../assets/icons/boundary.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "HELIX",
-        label: "Helix",
-        icon: include_bytes!("../../../assets/icons/helix.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "DONUT",
-        label: "Donut",
-        icon: include_bytes!("../../../assets/icons/donut.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "MULTIPOINT",
-        label: "Multiple Points",
-        icon: include_bytes!("../../../assets/icons/multipoint.svg"),
-        options: &[
-            ("POINT", "Single Point"),
-            ("MULTIPOINT", "Multiple Points"),
-            ("DDPTYPE", "Point Style"),
-        ],
-    },
-];
-
-#[derive(Clone, Copy)]
-struct Panel {
-    id: &'static str,
-    /// A command the owning ribbon group must hold, for titles more than one
-    /// tab uses ("Block" on Home and Insert).
-    anchor: Option<&'static str>,
-    title_id: &'static str,
-    title: &'static str,
-    tools: &'static [Tool],
-}
-
-/// The Reference panel's slide-out: Edit Reference, then the xref fading
-/// switch and amount (drawn by `reference_overlay`).
-const REFERENCE_TOOLS: &[Tool] = &[Tool {
-    command: "REFEDIT",
-    label: "Edit Reference",
-    icon: include_bytes!("../../../assets/icons/edit_block.svg"),
-    options: &[],
-}];
-pub(super) const REFERENCE_PANEL_ID: &str = "reference_extension";
-/// Insert > Block Definition slide-out: its tools are listed with labels.
-const BLOCK_DEFINITION_PANEL_ID: &str = "block_definition_extension";
-
-const fn icon_tool(command: &'static str, label: &'static str, icon: &'static [u8]) -> Tool {
-    Tool {
-        command,
-        label,
-        icon,
-        options: &[],
-    }
-}
-
-/// Home > Block slide-out.
-const HOME_BLOCK_TOOLS: &[Tool] = &[
-    icon_tool(
-        "ATTDEF",
-        "Define Attributes",
-        include_bytes!("../../../assets/icons/attdef.svg"),
-    ),
-    icon_tool(
-        "ATTMAN",
-        "Manage Attributes",
-        include_bytes!("../../../assets/icons/attman.svg"),
-    ),
-    icon_tool(
-        "ATTSYNC",
-        "Synchronize",
-        include_bytes!("../../../assets/icons/attsync.svg"),
-    ),
-    icon_tool(
-        "BASE",
-        "Set Base Point",
-        include_bytes!("../../../assets/icons/base_point.svg"),
-    ),
-];
-
-/// Insert > Block Definition slide-out.
-const BLOCK_DEFINITION_TOOLS: &[Tool] = &[
-    icon_tool(
-        "BASE",
-        "Set Base Point",
-        include_bytes!("../../../assets/icons/base_point.svg"),
-    ),
-    icon_tool(
-        "ATTSYNC",
-        "Synchronize",
-        include_bytes!("../../../assets/icons/attsync.svg"),
-    ),
-];
-
-/// Insert > Import slide-out, its tools named beside their icons.
-const IMPORT_TOOLS: &[Tool] = &[icon_tool(
-    "LANDXMLIMPORT",
-    "Land XML",
-    include_bytes!("../../../assets/icons/landxml.svg"),
-)];
-const IMPORT_PANEL_ID: &str = "import_extension";
-
-const PANELS: &[Panel] = &[
-    Panel {
-        id: PANEL_ID,
-        anchor: None,
-        title_id: TITLE_ID,
-        title: "Draw",
-        tools: TOOLS,
-    },
-    Panel {
-        id: "modify_extension",
-        anchor: None,
-        title_id: "modify_extension_title",
-        title: "Modify",
-        tools: super::modify_panel::TOOLS,
-    },
-    Panel {
-        id: REFERENCE_PANEL_ID,
-        anchor: None,
-        title_id: "reference_extension_title",
-        title: "Reference",
-        tools: REFERENCE_TOOLS,
-    },
-    Panel {
-        id: "home_block_extension",
-        anchor: Some("BEDIT"),
-        title_id: "home_block_extension_title",
-        title: "Block",
-        tools: HOME_BLOCK_TOOLS,
-    },
-    Panel {
-        id: BLOCK_DEFINITION_PANEL_ID,
-        anchor: None,
-        title_id: "block_definition_extension_title",
-        title: "Block Definition",
-        tools: BLOCK_DEFINITION_TOOLS,
-    },
-    Panel {
-        id: IMPORT_PANEL_ID,
-        anchor: None,
-        title_id: "import_extension_title",
-        title: "Import",
-        tools: IMPORT_TOOLS,
-    },
-];
-
-/// Command, label and icon of every tool in the expanded Draw and Modify
-/// panels.
+/// Command, label and icon of every slide-out tool.
 pub(crate) fn tools() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
-    PANELS
-        .iter()
-        .flat_map(|panel| panel.tools)
-        .map(|tool| (tool.command, tool.label, tool.icon))
+    extras::all()
+        .flat_map(PanelExtras::tools)
+        .filter_map(|tool| match tool.tool.icon {
+            IconKind::Svg(icon) => Some((tool.command(), tool.tool.label, icon)),
+            IconKind::Glyph(_) => None,
+        })
 }
 
-fn panel_for_dropdown(id: &str) -> Option<Panel> {
-    PANELS.iter().copied().find(|panel| {
+fn panel_for_dropdown(id: &str) -> Option<&'static PanelExtras> {
+    extras::all().find(|panel| {
         panel.id == id
             || panel
-                .tools
-                .iter()
-                .any(|tool| tool.command == id && !tool.options.is_empty())
+                .tools()
+                .any(|tool| tool.command() == id && !tool.options.is_empty())
     })
 }
 
@@ -253,21 +50,23 @@ pub(super) fn parent_panel(id: &str) -> Option<&'static str> {
     panel_for_dropdown(id).map(|panel| panel.id)
 }
 
-/// The slide-out under the title of the ribbon group `title`, whose items
-/// are `group_ids`.
-fn panel_for_group(title: &str, group_ids: &[&'static str]) -> Option<Panel> {
-    PANELS.iter().copied().find(|panel| {
-        panel.title == title
-            && !panel.tools.is_empty()
-            && panel
-                .anchor
-                .is_none_or(|anchor| group_ids.contains(&anchor))
-    })
+/// The slide-out under the title of the panel `key`.
+fn panel_for_group(key: &str) -> Option<&'static PanelExtras> {
+    extras::for_panel(key).filter(|panel| panel.tools().next().is_some())
 }
 
-/// The slide-out under the group `title`, if it has one.
-pub(super) fn slide_out_id(title: &str, group_ids: &[&'static str]) -> Option<&'static str> {
-    panel_for_group(title, group_ids).map(|panel| panel.id)
+/// The slide-out under the panel `key`, if it has one.
+pub(super) fn slide_out_id(key: &str) -> Option<&'static str> {
+    panel_for_group(key).map(|panel| panel.id)
+}
+
+/// The message the dialog launcher of a panel sends: its command, run like a
+/// ribbon button's.
+pub(super) fn launcher_message(command: &'static str) -> Message {
+    Message::RibbonToolClick {
+        tool_id: command.to_string(),
+        event: crate::modules::ModuleEvent::Command(command.to_string()),
+    }
 }
 
 /// What the open slide-out or tool submenu `id` offers, as (dropdown id,
@@ -278,51 +77,39 @@ pub(super) fn keytip_items(id: &str) -> Vec<(&'static str, &'static str, bool)> 
     };
     if panel.id == id {
         return panel
-            .tools
-            .iter()
-            .map(|tool| (panel.id, tool.command, !tool.options.is_empty()))
+            .tools()
+            .map(|tool| (panel.id, tool.command(), !tool.options.is_empty()))
             .collect();
     }
     panel
-        .tools
-        .iter()
-        .filter(|tool| tool.command == id)
+        .tools()
+        .filter(|tool| tool.command() == id)
         .flat_map(|tool| {
             tool.options
                 .iter()
-                .map(|(cmd, _)| (tool.command, *cmd, false))
+                .map(|(cmd, _)| (tool.command(), *cmd, false))
         })
         .collect()
 }
 
-/// Every command the slide-out of the group `title` offers: each tool and
-/// each of its submenu options.
-pub(super) fn slide_out_commands(
-    title: &str,
-    group_ids: &[&'static str],
-) -> impl Iterator<Item = &'static str> {
-    panel_for_group(title, group_ids)
+/// Every command the slide-out of the panel `key` offers: each tool and each
+/// of its submenu options.
+pub(super) fn slide_out_commands(key: &str) -> impl Iterator<Item = &'static str> {
+    panel_for_group(key)
         .into_iter()
-        .flat_map(|panel| panel.tools)
+        .flat_map(PanelExtras::tools)
         .flat_map(|tool| {
-            std::iter::once(tool.command).chain(tool.options.iter().map(|(cmd, _)| *cmd))
+            std::iter::once(tool.command()).chain(tool.options.iter().map(|(cmd, _)| *cmd))
         })
-}
-
-/// A slide-out tool is lit while it or one of its submenu options runs.
-fn tool_is_active(tool: &Tool, active_tool: Option<&str>) -> bool {
-    active_tool.is_some_and(|active| {
-        tool.command == active || tool.options.iter().any(|(cmd, _)| *cmd == active)
-    })
 }
 
 pub(super) fn group_title<'a>(
     title: &'static str,
-    group_ids: &[&'static str],
+    key: &str,
     open: &Option<String>,
     active_tool: Option<&str>,
 ) -> Element<'a, Message> {
-    let Some(panel) = panel_for_group(title, group_ids) else {
+    let Some(panel) = panel_for_group(key) else {
         let label = keytips::label_anchor(
             || format!("title:{title}"),
             text(t!(title)).size(9).style(muted_text_style),
@@ -332,11 +119,7 @@ pub(super) fn group_title<'a>(
     let expanded = open.as_deref().and_then(parent_panel) == Some(panel.id);
     // A command running from the closed slide-out lights its title, the way a
     // dropdown lights while one of its items runs.
-    let lit = expanded
-        || panel
-            .tools
-            .iter()
-            .any(|tool| tool_is_active(tool, active_tool));
+    let lit = expanded || panel.tools().any(|tool| tool.is_active(active_tool));
     let arrow = if expanded {
         icons::themed_arrow_up(GROUP_TITLE_ARROW_SIZE)
     } else {
@@ -360,11 +143,10 @@ pub(super) fn group_title<'a>(
         .padding([1, 4]),
     )
     .into();
-    if panel.id != REFERENCE_PANEL_ID {
+    let Some(dialog) = panel.dialog else {
         return title_button;
-    }
-    // The corner arrow opens the External References palette, or closes it
-    // when it is open.
+    };
+    // The corner arrow runs the panel's dialog command.
     let launcher = tooltip(
         // A right arrow turned to point into the corner.
         button(
@@ -376,12 +158,12 @@ pub(super) fn group_title<'a>(
                     color: Some(theme.palette().background.base.text),
                 }),
         )
-        .on_press(Message::ToggleXrefManager)
+        .on_press(launcher_message(dialog))
         .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
         .padding([0, 3]),
         make_tip(format!(
-            "{}\n{} EXTERNALREFERENCES",
-            t!("External References"),
+            "{}\n{} {dialog}",
+            t!(panel.dialog_label),
             t!("Command:")
         )),
         tooltip::Position::Bottom,
@@ -396,11 +178,12 @@ pub(super) fn group_title<'a>(
         .into()
 }
 
-fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
-    let face = button(make_icon(IconKind::Svg(tool.icon), 23.0 * SCALE))
+fn tool_button(tool: &MoreTool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
+    let command = tool.command();
+    let face = button(make_icon(tool.tool.icon, 23.0 * SCALE))
         .on_press(Message::DropdownSelectItem {
             dropdown_id: panel_id,
-            cmd: tool.command,
+            cmd: command,
         })
         .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
         .width(if tool.options.is_empty() {
@@ -410,17 +193,17 @@ fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'st
         })
         .height(CELL)
         .padding(3.0 * SCALE);
-    let tip = format!("{}\n{} {}", t!(tool.label), t!("Command:"), tool.command);
+    let tip = format!("{}\n{} {}", t!(tool.tool.label), t!("Command:"), command);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
         .delay(Duration::from_millis(400))
         .style(tip_style)
         .into();
-    let face = keytips::anchor_with(|| keytips::item_anchor(panel_id, tool.command), face);
+    let face = keytips::anchor_with(|| keytips::item_anchor(panel_id, command), face);
     if !tool.options.is_empty() {
         row![
             face,
             button(icons::themed_arrow_down(6.0 * SCALE))
-                .on_press(Message::ToggleRibbonDropdown(tool.command.to_string()))
+                .on_press(Message::ToggleRibbonDropdown(command.to_string()))
                 .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
                 .width(11.0 * SCALE)
                 .height(CELL)
@@ -433,14 +216,14 @@ fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'st
 }
 
 /// A slide-out tool as one row: its icon, then its name.
-fn labeled_row(panel_id: &'static str, tool: &Tool) -> Element<'static, Message> {
-    let command = tool.command;
+fn labeled_row(panel_id: &'static str, tool: &MoreTool) -> Element<'static, Message> {
+    let command = tool.command();
     let row = button(
         row![
-            make_icon(IconKind::Svg(tool.icon), 16.0),
+            make_icon(tool.tool.icon, 16.0),
             keytips::label_anchor(
                 move || keytips::label_id(&keytips::item_anchor(panel_id, command)),
-                text(t!(tool.label)).size(11),
+                text(t!(tool.tool.label)).size(11),
             ),
         ]
         .spacing(6)
@@ -458,12 +241,15 @@ fn labeled_row(panel_id: &'static str, tool: &Tool) -> Element<'static, Message>
 
 /// The Reference slide-out: Edit Reference, and xref fading on/off with its
 /// amount (XDWGFADECTL; the switch keeps the amount as a negative value).
-fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Element<'a, Message> {
+fn reference_overlay<'a>(
+    ribbon: &Ribbon,
+    panel: &PanelExtras,
+    win: (f32, f32),
+) -> Element<'a, Message> {
     let width: f32 = 260.0_f32.min((win.0 - 8.0).max(120.0));
     let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
     let left = x.clamp(0.0, (win.0 - width).max(0.0));
     let top = anchor_top.min((win.1 - 80.0).max(0.0));
-    let edit = labeled_row(panel.id, &panel.tools[0]);
     let fade = ribbon.xref_fade;
     let on = fade > 0;
     let switch = button(make_icon(
@@ -502,7 +288,8 @@ fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elem
     ]
     .spacing(6)
     .align_y(iced::Center);
-    let body = container(column![edit, fading].spacing(4).padding(6))
+    let rows = panel.tools().map(|tool| labeled_row(panel.id, tool));
+    let body = container(column(rows).push(fading).spacing(4).padding(6))
         .width(width)
         .style(|theme: &Theme| {
             let mut style = popup_panel_style(theme);
@@ -513,19 +300,24 @@ fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elem
 }
 
 /// A slide-out listing each tool as icon and label, one per row.
-fn labeled_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Element<'a, Message> {
+fn labeled_overlay<'a>(
+    ribbon: &Ribbon,
+    panel: &PanelExtras,
+    win: (f32, f32),
+) -> Element<'a, Message> {
     let width: f32 = 200.0_f32.min((win.0 - 8.0).max(120.0));
     let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
     let left = x.clamp(0.0, (win.0 - width).max(0.0));
     let top = anchor_top.min((win.1 - 80.0).max(0.0));
-    let rows = panel.tools.iter().map(|tool| {
-        let active = tool_is_active(tool, ribbon.active_tool.as_deref());
+    let rows = panel.tools().map(|tool| {
+        let active = tool.is_active(ribbon.active_tool.as_deref());
+        let command = tool.command();
         let item = button(
             row![
-                make_icon(IconKind::Svg(tool.icon), 16.0),
+                make_icon(tool.tool.icon, 16.0),
                 keytips::label_anchor(
-                    || keytips::label_id(&keytips::item_anchor(panel.id, tool.command)),
-                    text(t!(tool.label)).size(11),
+                    || keytips::label_id(&keytips::item_anchor(panel.id, command)),
+                    text(t!(tool.tool.label)).size(11),
                 ),
             ]
             .spacing(6)
@@ -533,7 +325,7 @@ fn labeled_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elemen
         )
         .on_press(Message::DropdownSelectItem {
             dropdown_id: panel.id,
-            cmd: tool.command,
+            cmd: command,
         })
         .style(move |theme: &Theme, status| {
             if active {
@@ -544,7 +336,7 @@ fn labeled_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elemen
         })
         .width(Fill)
         .padding([3, 6]);
-        keytips::anchor_with(|| keytips::item_anchor(panel.id, tool.command), item)
+        keytips::anchor_with(|| keytips::item_anchor(panel.id, command), item)
     });
     let body = container(column(rows.collect::<Vec<_>>()).spacing(2).padding(6))
         .width(width)
@@ -558,13 +350,12 @@ fn labeled_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elemen
 
 pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
     let panel = panel_for_dropdown(id).expect("registered ribbon extension");
-    if panel.id == REFERENCE_PANEL_ID {
-        return reference_overlay(ribbon, panel, win);
+    match panel.layout {
+        Layout::Reference => return reference_overlay(ribbon, panel, win),
+        Layout::List => return labeled_overlay(ribbon, panel, win),
+        Layout::Grid => {}
     }
-    if panel.id == BLOCK_DEFINITION_PANEL_ID || panel.id == IMPORT_PANEL_ID {
-        return labeled_overlay(ribbon, panel, win);
-    }
-    let tools = panel.tools;
+    let tools: Vec<&MoreTool> = panel.tools().collect();
     let width = (7.0 * (CELL + GAP) - GAP + 12.0).min((win.0 - 8.0).max(CELL + 12.0));
     let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
     let anchor = crate::ui::wrap_bar::dropdown_bounds(panel.title_id);
@@ -576,7 +367,7 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
     let cols = (((width - 12.0 + GAP) / (CELL + GAP)).floor() as usize).clamp(1, 7);
     let option_tool = tools
         .iter()
-        .find(|tool| tool.command == id && !tool.options.is_empty());
+        .find(|tool| tool.command() == id && !tool.options.is_empty());
     let content_height = option_tool.map_or_else(
         || tools.len().div_ceil(cols) as f32 * (CELL + GAP) - GAP + 12.0,
         |tool| tool.options.len() as f32 * OPTION_HEIGHT,
@@ -588,14 +379,14 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
                 .map(|&(cmd, label)| {
                     let item = button(text(t!(label)).size(11))
                         .on_press(Message::DropdownSelectItem {
-                            dropdown_id: tool.command,
+                            dropdown_id: tool.command(),
                             cmd,
                         })
                         .style(popup_row_style)
                         .width(Fill)
                         .height(OPTION_HEIGHT)
                         .padding([3, 7]);
-                    keytips::anchor_with(|| keytips::item_anchor(tool.command, cmd), item)
+                    keytips::anchor_with(|| keytips::item_anchor(tool.command(), cmd), item)
                 })
                 .collect::<Vec<Element<'static, Message>>>(),
         )
@@ -610,7 +401,7 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
                         .map(|tool| {
                             tool_button(
                                 tool,
-                                tool_is_active(tool, ribbon.active_tool.as_deref()),
+                                tool.is_active(ribbon.active_tool.as_deref()),
                                 panel.id,
                             )
                         })
@@ -636,26 +427,13 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
 
 #[cfg(test)]
 mod tests {
-    use super::{parent_panel, PANEL_ID, TOOLS};
+    use super::extras::{DRAW_ID, MODIFY_ID};
+    use super::parent_panel;
 
     #[test]
     fn extension_submenus_resolve_to_their_parent_panel() {
-        assert_eq!(parent_panel("MULTIPOINT"), Some(PANEL_ID));
-        assert_eq!(parent_panel("DRAWORDER_FRONT"), Some("modify_extension"));
+        assert_eq!(parent_panel("MULTIPOINT"), Some(DRAW_ID));
+        assert_eq!(parent_panel("DRAWORDER_FRONT"), Some(MODIFY_ID));
         assert_eq!(parent_panel("unknown"), None);
-    }
-
-    #[test]
-    fn split_tools_follow_plain_tools() {
-        let first_split = TOOLS
-            .iter()
-            .position(|tool| !tool.options.is_empty())
-            .unwrap_or(TOOLS.len());
-        assert!(TOOLS[..first_split]
-            .iter()
-            .all(|tool| tool.options.is_empty()));
-        assert!(TOOLS[first_split..]
-            .iter()
-            .all(|tool| !tool.options.is_empty()));
     }
 }

@@ -23,11 +23,11 @@ use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{LinetypeItem, linetype_display_name, lw_options};
 
 mod draw_panel;
+pub(crate) mod extras;
 pub(crate) mod widgets;
 pub(crate) use draw_panel::tools as panel_tools;
 mod color_dropdown;
 mod context_tools;
-mod modify_panel;
 mod visibility_panel;
 pub use context_tools::{UnderlayContext, pdf_underlay_tools, point_cloud_tools, xref_tools};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
@@ -630,14 +630,18 @@ impl Ribbon {
     /// group's own tools.
     fn panel<'a>(
         &'a self,
+        module_id: &str,
         g: &'a RibbonGroup,
         ts: widgets::ToggleState,
         style_ctx: StyleContext<'a>,
     ) -> Panel<'a> {
+        let key = extras::panel_key(module_id, g.title);
+        let button_key = key.clone();
         let group = move |compact: bool| {
             render_group(
                 compact,
                 g,
+                &key,
                 Vec::new(),
                 &self.active_tool,
                 &self.open_dropdown,
@@ -654,6 +658,7 @@ impl Ribbon {
         let button = move |tight: bool| {
             collapse_button(
                 g,
+                &button_key,
                 self.last_panel_tool.get(g.title).copied(),
                 &self.active_tool,
                 &self.open_dropdown,
@@ -991,7 +996,7 @@ impl Ribbon {
                     {
                         visibility_panel::panel(visibility.clone())
                     } else {
-                        self.panel(g, ts, style_ctx)
+                        self.panel(self.modules[effective_active].id(), g, ts, style_ctx)
                     }
                 })
                 .collect();
@@ -1645,6 +1650,7 @@ impl Ribbon {
 fn render_group<'a>(
     compact: bool,
     group: &RibbonGroup,
+    key: &str,
     lead: Vec<Element<'a, Message>>,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
@@ -1704,12 +1710,7 @@ fn render_group<'a>(
 
     column![
         tools_el,
-        draw_panel::group_title(
-            group.title,
-            &group.tools.iter().filter_map(item_id).collect::<Vec<_>>(),
-            open_dd,
-            active_tool.as_deref(),
-        ),
+        draw_panel::group_title(group.title, key, open_dd, active_tool.as_deref()),
     ]
     .align_x(iced::Center)
     .spacing(0)
@@ -1774,6 +1775,7 @@ fn first_tool_icon(group: &RibbonGroup) -> Option<IconKind> {
 #[allow(clippy::too_many_arguments)]
 fn collapse_button<'a>(
     group: &RibbonGroup,
+    key: &str,
     last_used: Option<&str>,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
@@ -1795,7 +1797,7 @@ fn collapse_button<'a>(
     // A collapsed panel lights its opener while one of its hidden tools runs,
     // the way a dropdown lights while one of its items does.
     let active = active_tool.as_deref();
-    let holds = active.is_some_and(|id| locate::group_holds(group, id));
+    let holds = active.is_some_and(|id| locate::group_holds(key, group, id));
     let opener_style = move |lit: bool| {
         move |theme: &Theme, status| {
             if lit {

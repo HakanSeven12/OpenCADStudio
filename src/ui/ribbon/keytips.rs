@@ -17,7 +17,7 @@ use iced::{
     Theme, Vector,
 };
 
-use super::{draw_panel, item_id, Ribbon};
+use super::{draw_panel, extras, Ribbon};
 use crate::app::Message;
 use crate::modules::{RibbonItem, ToolDef};
 use crate::ui::wrap_bar::{fresh_bounds, PosReport};
@@ -751,7 +751,6 @@ impl Ribbon {
             // panel's slide-out. Both carry it; only the drawn one shows, and
             // the form the panel had in the last frame comes first, so the
             // code runs that one.
-            let ids: Vec<&'static str> = group.tools.iter().filter_map(item_id).collect();
             let collapsed = collapsed_anchor(group.title);
             let was_collapsed = crate::ui::wrap_bar::recent_bounds(&collapsed).is_some();
             let flyout = Tip {
@@ -760,7 +759,8 @@ impl Ribbon {
                 code: code(scope, group.title).map(str::to_string),
                 action: Action::Open(Message::ToggleRibbonPanel(group.title.to_string())),
             };
-            let Some(id) = draw_panel::slide_out_id(group.title, &ids) else {
+            let key = extras::panel_key(scope, group.title);
+            let Some(id) = draw_panel::slide_out_id(&key) else {
                 tips.push(flyout);
                 continue;
             };
@@ -776,12 +776,13 @@ impl Ribbon {
             } else {
                 tips.extend([slide_out, flyout]);
             }
-            if id == draw_panel::REFERENCE_PANEL_ID {
+            // Reference's is the only dialog launcher so far.
+            if let Some(dialog) = extras::for_panel(&key).and_then(|panel| panel.dialog) {
                 tips.push(Tip {
                     anchor: XREF_LAUNCHER.to_string(),
                     target: XREF_LAUNCHER,
                     code: code(scope, XREF_LAUNCHER).map(str::to_string),
-                    action: Action::Run(Message::ToggleXrefManager),
+                    action: Action::Run(draw_panel::launcher_message(dialog)),
                 });
             }
         }
@@ -831,7 +832,7 @@ impl Ribbon {
                 },
             })
             .collect();
-        if open == draw_panel::REFERENCE_PANEL_ID {
+        if open == extras::REFERENCE_ID {
             tips.push(Tip {
                 anchor: item_anchor(open, XREF_FADE),
                 target: XREF_FADE,

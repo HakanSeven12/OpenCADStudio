@@ -102,7 +102,7 @@ const PX_PER_UNIT: f32 = 6.0;
 /// to ±SPREAD_UNITS and linearly mapped to [0, 1] (0 -> 0.5). Also the tile
 /// margin: the tile extends this far past the ink so the field/AA is not
 /// clipped at the glyph edge.
-const SPREAD_UNITS: f32 = 1.5;
+pub(crate) const SPREAD_UNITS: f32 = 1.5;
 
 /// LFF stroke half-width, in glyph units. Stroke fonts have no intrinsic width
 /// (plotted at the current lineweight); this is the nominal pen the SDF band is

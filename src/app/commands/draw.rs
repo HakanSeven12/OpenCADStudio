@@ -676,6 +676,20 @@ impl OpenCADStudio {
                 }
             }
 
+            "TEXTALIGN" => {
+                use crate::modules::draw::modify::textalign::TextAlignCommand;
+                let handles = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, _)| handle)
+                    .collect();
+                let command = TextAlignCommand::new(handles);
+                self.command_line.push_info(&command.settings_message());
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
             "TORIENT" => {
                 let handles: Vec<_> = self.tabs[i]
                     .scene
@@ -2773,6 +2787,80 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+}
+
+#[cfg(test)]
+mod textalign_tests {
+    use crate::app::OpenCADStudio;
+    use crate::command::StepInput;
+    use codec::{entities::Text, types::Vector3, EntityType};
+    use glam::DVec3;
+
+    #[test]
+    fn textalign_alias_and_one_undo_restore_all_positions_in_model_and_paper_space() {
+        for paper in [false, true] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            app.import_alias_pgp(b"ALINEARTEXTO,*ALINEARTEXTO\n");
+            app.command_aliases = app.alias_editor_rows.iter().cloned().collect();
+            assert_eq!(
+                app.resolve_alias("ALINEARTEXTO").as_deref(),
+                Some("TEXTALIGN")
+            );
+            let i = app.active_tab;
+            if paper {
+                app.tabs[i].scene.add_layout("Text sheet").unwrap();
+                app.tabs[i].scene.set_current_layout("Text sheet".into());
+            }
+            let handles: Vec<_> = [("A", 0.0, 0.0), ("B", 0.0, 13.0), ("CCCCCC", 20.0, 30.0)]
+                .into_iter()
+                .map(|(value, x, y)| {
+                    app.tabs[i].scene.add_entity(EntityType::Text(Text {
+                        value: value.into(),
+                        height: 2.5,
+                        insertion_point: Vector3::new(x, y, 0.0),
+                        ..Default::default()
+                    }))
+                })
+                .collect();
+            let positions = |app: &OpenCADStudio| {
+                handles
+                    .iter()
+                    .map(|handle| {
+                        let EntityType::Text(text) =
+                            app.tabs[i].scene.document.get_entity(*handle).unwrap()
+                        else {
+                            panic!("TEXT")
+                        };
+                        (text.insertion_point, text.common.owner_handle)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let before = positions(&app);
+            let base_x = app.tabs[i]
+                .scene
+                .wire_models_for(&handles[..1])
+                .iter()
+                .flat_map(|wire| &wire.text_verts)
+                .map(|v| v.pos[0] as f64 + v.pos_low[0] as f64)
+                .fold(f64::INFINITY, f64::min);
+            app.tabs[i].scene.select_entities(&handles);
+            let _ = app.dispatch_command("ALINEARTEXTO");
+            assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().name(), "TEXTALIGN");
+            for keyword in ["I", "L", "O", "V"] {
+                let _ = app.feed_command(StepInput::Text(keyword.into()));
+            }
+            let _ = app.feed_command(StepInput::Enter);
+            let _ = app.feed_command(StepInput::EntityPick(handles[0], DVec3::ZERO));
+            let _ = app.feed_command(StepInput::Point(DVec3::new(base_x, 100.0, 0.0)));
+            let after = positions(&app);
+            assert_ne!(after[2].0.x, before[2].0.x);
+            assert_eq!(after[0], before[0]);
+            assert!(app.tabs[i].active_cmd.is_none());
+            app.undo_steps(1);
+            assert_eq!(positions(&app), before);
+        }
     }
 }
 

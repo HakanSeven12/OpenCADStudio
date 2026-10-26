@@ -206,6 +206,17 @@ fn panel_measure_key(
     hasher.finish()
 }
 
+/// The width of a contextual tab's outline and of the line along the top of
+/// its tool area. The design's 1.5 px draws as one faint pixel on a 1x
+/// screen; 2 px stays crisp.
+const CONTEXTUAL_LINE: f32 = 2.0;
+
+/// Whether module `id`'s tab is contextual: shown only while its context
+/// lasts (a block being edited).
+fn is_contextual(id: &str) -> bool {
+    id == "block_editor"
+}
+
 /// The quick-access file buttons before Undo and Redo: icon, label and
 /// command.
 static QUICK_ACCESS: [(&[u8], &str, &str); 5] = [
@@ -962,15 +973,13 @@ impl Ribbon {
                         UNDO_HISTORY_ID,
                         undo_count,
                         &self.open_dropdown,
-                    )
-                    .into(),
+                    ),
                     render_history_control(
                         "Redo",
                         REDO_HISTORY_ID,
                         redo_count,
                         &self.open_dropdown,
-                    )
-                    .into(),
+                    ),
                 ]),
         )
         .spacing(TOP_HIST_GAP)
@@ -998,7 +1007,7 @@ impl Ribbon {
                 }
 
                 let is_active = i == self.active;
-                let is_contextual = matches!(module.id(), "layout" | "block_editor");
+                let is_contextual = is_contextual(module.id());
                 let holds_tool = holding_tab == Some(i);
                 let btn = container(
                     button(
@@ -1011,21 +1020,11 @@ impl Ribbon {
                     .on_press(Message::RibbonSelectTab(i))
                     .style(move |theme: &Theme, status| {
                         let palette = theme.palette();
-                        let accent = if is_contextual {
-                            palette.warning.base
-                        } else {
-                            palette.primary.base
-                        };
+                        let accent = palette.primary.base;
                         let pair = match (is_active, status) {
                             (true, _) => palette.background.weakest,
                             (false, _) if holds_tool => palette.primary.weak,
-                            (false, button::Status::Hovered) => {
-                                if is_contextual {
-                                    palette.warning.weak
-                                } else {
-                                    palette.background.weak
-                                }
-                            }
+                            (false, button::Status::Hovered) => palette.background.weak,
                             _ => palette.background.base,
                         };
                         button::Style {
@@ -1041,18 +1040,21 @@ impl Ribbon {
                                 pair.text
                             } else if holds_tool {
                                 palette.background.base.text
-                            } else if is_contextual {
-                                accent.color
                             } else {
                                 palette.background.base.text.scale_alpha(0.72)
                             },
+                            // A contextual tab's outline is its container's.
                             border: Border {
-                                color: if is_active {
+                                color: if is_active && !is_contextual {
                                     accent.color
                                 } else {
                                     Color::TRANSPARENT
                                 },
-                                width: if is_active { 2.0 } else { 0.0 },
+                                width: if is_active && !is_contextual {
+                                    2.0
+                                } else {
+                                    0.0
+                                },
                                 radius: 0.0.into(),
                             },
                             shadow: iced::Shadow::default(),
@@ -1062,17 +1064,21 @@ impl Ribbon {
                     .padding([5, 14]),
                 )
                 .style(move |theme: &Theme| container::Style {
+                    // A contextual tab keeps its accent outline while another
+                    // tab is on show, so it is easy to find again.
                     border: Border {
-                        color: if is_active {
-                            if is_contextual {
-                                theme.palette().warning.base.color
-                            } else {
-                                theme.palette().primary.base.color
-                            }
+                        color: if is_active || is_contextual {
+                            crate::ui::style::chrome::accent(theme)
                         } else {
                             Color::TRANSPARENT
                         },
-                        width: if is_active { 2.0 } else { 0.0 },
+                        width: if is_contextual {
+                            CONTEXTUAL_LINE
+                        } else if is_active {
+                            2.0
+                        } else {
+                            0.0
+                        },
                         radius: 0.0.into(),
                     },
                     ..Default::default()
@@ -1302,6 +1308,26 @@ impl Ribbon {
             })
             .width(Length::Fill)
             .into();
+        // A contextual tab's tool area has an accent line along its top,
+        // drawn over the area's own border so its height stays.
+        let tool_bar = if self
+            .modules
+            .get(effective_active)
+            .is_some_and(|module| is_contextual(module.id()))
+        {
+            let line = container(
+                iced::widget::Space::new()
+                    .width(Fill)
+                    .height(CONTEXTUAL_LINE),
+            )
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(crate::ui::style::chrome::accent(theme))),
+                ..Default::default()
+            });
+            iced::widget::stack![tool_bar, line].into()
+        } else {
+            tool_bar
+        };
 
         if is_start {
             // The Start tab has no drawing context. One theme-aware shield

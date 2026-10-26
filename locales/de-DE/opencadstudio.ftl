@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Menüleiste anzeigen
     .hide-menu-bar = Menüleiste ausblenden
     .close-ribbon = Multifunktionsleiste schließen
+    .minimize-cycle = Multifunktionsleiste minimieren (Zyklus)
+    .minimize = Multifunktionsleiste minimieren
+    .show-full = Vollständige Multifunktionsleiste anzeigen
+    .minimize-to-tabs = Auf Registerkarten minimieren
+    .minimize-to-panel-titles = Auf Gruppentitel minimieren
+    .minimize-to-panel-buttons = Auf Gruppenschaltflächen minimieren
+    .cycle-through-all = Alle durchlaufen
+    .more-tools = Weitere Werkzeuge
 
 options =
     .language-section = Sprache

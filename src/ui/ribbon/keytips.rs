@@ -660,7 +660,7 @@ impl Ribbon {
         match tip.action.clone() {
             Action::Tab(index) => {
                 state.top = false;
-                self.select(index);
+                self.keytip_tab(index);
                 KeyTipStep::Stay
             }
             Action::Open(message) => KeyTipStep::Open(message),
@@ -1237,10 +1237,11 @@ fn draw_bar(renderer: &mut Renderer, theme: &Theme, parts: &[String; 3]) {
     };
     let (fill, edge, ink) = colors(theme);
     let font = bold(renderer);
-    let bar = Rectangle::new(
-        Point::new(ribbon.x, ribbon.y + ribbon.height),
-        Size::new(ribbon.width, BAR_H),
-    );
+    // Under a minimized ribbon's open popup, which hangs below the ribbon.
+    let top = fresh_bounds(super::minimize::POPUP_ID).map_or(ribbon.y + ribbon.height, |popup| {
+        (popup.y + popup.height).max(ribbon.y + ribbon.height)
+    });
+    let bar = Rectangle::new(Point::new(ribbon.x, top), Size::new(ribbon.width, BAR_H));
     renderer.fill_quad(
         renderer::Quad {
             bounds: bar,

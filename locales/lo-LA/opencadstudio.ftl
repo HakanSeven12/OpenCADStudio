@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = ສະແດງແຖບເມນູ
     .hide-menu-bar = ເຊື່ອງແຖບເມນູ
     .close-ribbon = ປິດແຖບໂບ
+    .minimize-cycle = ຫຍໍ້ແຖບໂບ (ໝູນວຽນ)
+    .minimize = ຫຍໍ້ແຖບໂບ
+    .show-full = ສະແດງແຖບໂບເຕັມ
+    .minimize-to-tabs = ຫຍໍ້ເປັນແທັບ
+    .minimize-to-panel-titles = ຫຍໍ້ເປັນຫົວຂໍ້ແຜງ
+    .minimize-to-panel-buttons = ຫຍໍ້ເປັນປຸ່ມແຜງ
+    .cycle-through-all = ໝູນວຽນທັງໝົດ
+    .more-tools = ເຄື່ອງມືເພີ່ມເຕີມ
 
 options =
     .language-section = ພາສາ

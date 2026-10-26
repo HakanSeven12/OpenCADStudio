@@ -2631,7 +2631,15 @@ impl OpenCADStudio {
             Message::SheetSet(message) => self.on_sheet_set(message),
             Message::KeyTip(input) => self.on_keytip(input),
             Message::RibbonSelectTab(idx) => {
-                self.ribbon.select(idx);
+                if self.ribbon.click_tab(idx, iced::time::Instant::now()) {
+                    self.save_config();
+                }
+                Task::none()
+            }
+            Message::RibbonMinimize(msg) => {
+                if self.ribbon.on_minimize(msg, iced::time::Instant::now()) {
+                    self.save_config();
+                }
                 Task::none()
             }
             Message::RibbonReorderPanels { module, titles } => {
@@ -2660,6 +2668,8 @@ impl OpenCADStudio {
             }
 
             Message::RibbonToolClick { tool_id, event } => {
+                // A tool clicked in a minimized ribbon's popup closes it.
+                self.ribbon.close_popup();
                 let sweep = self.sync_active_field_if_any();
                 Task::batch(vec![sweep, self.on_ribbon_tool_click(tool_id, event)])
             }
@@ -6908,7 +6918,9 @@ impl OpenCADStudio {
 
             // ── Ribbon dropdowns ──────────────────────────────────────────
             Message::ToggleRibbonDropdown(id) => {
-                if self.tabs[self.active_tab].is_start {
+                // The minimize button's menu works without a drawing.
+                if self.tabs[self.active_tab].is_start && id != crate::ui::ribbon::MINIMIZE_MENU_ID
+                {
                     self.ribbon.close_dropdown();
                 } else {
                     if id == crate::modules::insert::insert_block::GALLERY_ID {
@@ -6953,6 +6965,8 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::DropdownSelectItem { dropdown_id, cmd } => {
+                // A tool picked from a minimized ribbon's popup closes it.
+                self.ribbon.close_popup();
                 if self.tabs[self.active_tab].is_start {
                     self.ribbon.close_dropdown();
                     return Task::none();

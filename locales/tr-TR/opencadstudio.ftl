@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Menü çubuğunu göster
     .hide-menu-bar = Menü çubuğunu gizle
     .close-ribbon = Şeridi kapat
+    .minimize-cycle = Şeridi küçült (döngü)
+    .minimize = Şeridi küçült
+    .show-full = Şeridin tamamını göster
+    .minimize-to-tabs = Sekmelere küçült
+    .minimize-to-panel-titles = Panel başlıklarına küçült
+    .minimize-to-panel-buttons = Panel düğmelerine küçült
+    .cycle-through-all = Tümünde dolaş
+    .more-tools = Diğer araçlar
 
 options =
     .language-section = Dil

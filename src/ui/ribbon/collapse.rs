@@ -34,6 +34,11 @@ pub(crate) struct Panel<'a> {
 }
 
 impl<'a> Panel<'a> {
+    /// The panel at full size.
+    pub(crate) fn full(&self) -> Element<'a, Message> {
+        (self.build)(Level::Full)
+    }
+
     pub(crate) fn deferred(
         id: impl Into<String>,
         build: impl Fn(Level) -> Element<'a, Message> + 'a,

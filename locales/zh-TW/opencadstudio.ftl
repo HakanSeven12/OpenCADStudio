@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = 顯示功能表列
     .hide-menu-bar = 隱藏功能表列
     .close-ribbon = 關閉功能區
+    .minimize-cycle = 最小化功能區（循環）
+    .minimize = 最小化功能區
+    .show-full = 顯示完整功能區
+    .minimize-to-tabs = 最小化為頁籤
+    .minimize-to-panel-titles = 最小化為面板標題
+    .minimize-to-panel-buttons = 最小化為面板按鈕
+    .cycle-through-all = 循環切換全部
+    .more-tools = 更多工具
 
 options =
     .language-section = 語言

@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Zobrazit panel nabídek
     .hide-menu-bar = Skrýt panel nabídek
     .close-ribbon = Zavřít pás karet
+    .minimize-cycle = Minimalizovat pás karet (cyklicky)
+    .minimize = Minimalizovat pás karet
+    .show-full = Zobrazit celý pás karet
+    .minimize-to-tabs = Minimalizovat na karty
+    .minimize-to-panel-titles = Minimalizovat na názvy panelů
+    .minimize-to-panel-buttons = Minimalizovat na tlačítka panelů
+    .cycle-through-all = Cyklovat všemi
+    .more-tools = Další nástroje
 
 options =
     .language-section = Jazyk

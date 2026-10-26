@@ -51,7 +51,7 @@ pub(super) fn parent_panel(id: &str) -> Option<&'static str> {
 }
 
 /// The slide-out under the title of the panel `key`.
-fn panel_for_group(key: &str) -> Option<&'static PanelExtras> {
+pub(super) fn panel_for_group(key: &str) -> Option<&'static PanelExtras> {
     extras::for_panel(key).filter(|panel| panel.tools().next().is_some())
 }
 
@@ -143,9 +143,18 @@ pub(super) fn group_title<'a>(
         .padding([1, 4]),
     )
     .into();
-    let Some(dialog) = panel.dialog else {
+    let Some(launcher) = launcher(panel) else {
         return title_button;
     };
+    row![title_button, launcher]
+        .spacing(6)
+        .align_y(iced::Center)
+        .into()
+}
+
+/// The corner arrow that runs the dialog command of `panel`, if it has one.
+pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> {
+    let dialog = panel.dialog?;
     // The corner arrow runs the panel's dialog command.
     let launcher = tooltip(
         // A right arrow turned to point into the corner.
@@ -171,11 +180,7 @@ pub(super) fn group_title<'a>(
     .delay(Duration::from_millis(400))
     .style(tip_style);
     // Shrink-sized: a Fill here would make the panel claim the whole row.
-    let launcher = keytips::anchor(keytips::XREF_LAUNCHER, launcher);
-    row![title_button, launcher]
-        .spacing(6)
-        .align_y(iced::Center)
-        .into()
+    Some(keytips::anchor(keytips::XREF_LAUNCHER, launcher))
 }
 
 fn tool_button(tool: &MoreTool, active: bool, panel_id: &'static str) -> Element<'static, Message> {

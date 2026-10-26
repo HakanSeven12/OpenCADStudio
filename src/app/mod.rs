@@ -3037,6 +3037,8 @@ pub enum Message {
     RibbonSelectTab(usize),
     /// The ribbon's right-click menu.
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
+    /// The minimize button and the minimized ribbon's popups.
+    RibbonMinimize(crate::ui::ribbon::MinimizeMsg),
     /// Panels of a ribbon tab dropped in a new order: the shown panels'
     /// titles, in that order.
     RibbonReorderPanels {

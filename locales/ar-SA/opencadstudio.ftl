@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = إظهار شريط القوائم
     .hide-menu-bar = إخفاء شريط القوائم
     .close-ribbon = إغلاق الشريط
+    .minimize-cycle = تصغير الشريط (تدوير)
+    .minimize = تصغير الشريط
+    .show-full = إظهار الشريط كاملاً
+    .minimize-to-tabs = تصغير إلى علامات التبويب
+    .minimize-to-panel-titles = تصغير إلى عناوين اللوحات
+    .minimize-to-panel-buttons = تصغير إلى أزرار اللوحات
+    .cycle-through-all = التدوير عبر الكل
+    .more-tools = مزيد من الأدوات
 
 options =
     .language-section = اللغة

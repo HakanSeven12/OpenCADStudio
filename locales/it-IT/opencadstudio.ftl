@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Mostra barra dei menu
     .hide-menu-bar = Nascondi barra dei menu
     .close-ribbon = Chiudi barra multifunzione
+    .minimize-cycle = Riduci barra multifunzione (ciclo)
+    .minimize = Riduci barra multifunzione
+    .show-full = Mostra barra multifunzione completa
+    .minimize-to-tabs = Riduci a schede
+    .minimize-to-panel-titles = Riduci a titoli dei gruppi
+    .minimize-to-panel-buttons = Riduci a pulsanti dei gruppi
+    .cycle-through-all = Scorri tutti
+    .more-tools = Altri strumenti
 
 options =
     .language-section = Lingua

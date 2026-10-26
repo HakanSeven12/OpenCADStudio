@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Mostrar barra de menus
     .hide-menu-bar = Ocultar barra de menus
     .close-ribbon = Fechar faixa de opções
+    .minimize-cycle = Minimizar faixa de opções (ciclo)
+    .minimize = Minimizar faixa de opções
+    .show-full = Mostrar faixa de opções completa
+    .minimize-to-tabs = Minimizar para guias
+    .minimize-to-panel-titles = Minimizar para títulos dos painéis
+    .minimize-to-panel-buttons = Minimizar para botões dos painéis
+    .cycle-through-all = Percorrer todos
+    .more-tools = Mais ferramentas
 
 options =
     .language-section = Idioma

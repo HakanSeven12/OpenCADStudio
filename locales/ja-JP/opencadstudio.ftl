@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = メニュー バーを表示
     .hide-menu-bar = メニュー バーを非表示
     .close-ribbon = リボンを閉じる
+    .minimize-cycle = リボンを最小化 (循環)
+    .minimize = リボンを最小化
+    .show-full = リボン全体を表示
+    .minimize-to-tabs = タブに最小化
+    .minimize-to-panel-titles = パネル タイトルに最小化
+    .minimize-to-panel-buttons = パネル ボタンに最小化
+    .cycle-through-all = すべてを循環
+    .more-tools = その他のツール
 
 options =
     .language-section = 言語

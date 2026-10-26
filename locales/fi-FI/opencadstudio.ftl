@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Näytä valikkorivi
     .hide-menu-bar = Piilota valikkorivi
     .close-ribbon = Sulje valintanauha
+    .minimize-cycle = Pienennä valintanauha (kierrä)
+    .minimize = Pienennä valintanauha
+    .show-full = Näytä koko valintanauha
+    .minimize-to-tabs = Pienennä välilehdiksi
+    .minimize-to-panel-titles = Pienennä paneelien otsikoiksi
+    .minimize-to-panel-buttons = Pienennä paneelien painikkeiksi
+    .cycle-through-all = Kierrä kaikki
+    .more-tools = Lisää työkaluja
 
 options =
     .language-section = Kieli

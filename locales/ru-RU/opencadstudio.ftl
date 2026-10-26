@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Показать строку меню
     .hide-menu-bar = Скрыть строку меню
     .close-ribbon = Закрыть ленту
+    .minimize-cycle = Свернуть ленту (по кругу)
+    .minimize = Свернуть ленту
+    .show-full = Показать всю ленту
+    .minimize-to-tabs = Свернуть до вкладок
+    .minimize-to-panel-titles = Свернуть до заголовков панелей
+    .minimize-to-panel-buttons = Свернуть до кнопок панелей
+    .cycle-through-all = Перебирать все
+    .more-tools = Другие инструменты
 
 options =
     .language-section = Язык

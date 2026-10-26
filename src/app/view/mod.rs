@@ -2911,6 +2911,20 @@ bg={bg_ms:.1}ms n={view_count}"
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        // A minimized ribbon's popup lies over the drawing, under dropdowns.
+        let ribbon_popup_layer: Element<'_, Message> = if self.clean_screen || self.ribbon_closed {
+            None
+        } else {
+            self.ribbon.minimized_popup(
+                is_paper,
+                self.tabs[self.active_tab].is_start,
+                self.show_block_palette,
+                self.block_visibility_context(),
+                self.win_size,
+            )
+        }
+        .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
         let ribbon_menu_layer: Element<'_, Message> = self
             .ribbon
             .menu_overlay(self.win_size, self.show_menu_bar)
@@ -2927,6 +2941,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
         let composed = stack![
             main_ui,
+            ribbon_popup_layer,
             keytip_bar,
             dropdown_layer,
             ribbon_menu_layer,
@@ -3145,6 +3160,13 @@ impl OpenCADStudio {
             Subscription::none()
         };
         // Expire the QuickCalc status message ("Copied 870").
+        // Open or close a minimized ribbon's popup after its delay.
+        let ribbon_minimize = if self.ribbon.wants_tick() {
+            iced::time::every(std::time::Duration::from_millis(50))
+                .map(|_| Message::RibbonMinimize(crate::ui::ribbon::MinimizeMsg::Tick))
+        } else {
+            Subscription::none()
+        };
         let quick_calc_flash = if self.quick_calc.flash.is_some() {
             iced::time::every(crate::ui::window::quick_calc::QuickCalcPalette::flash_interval())
                 .map(|_| {
@@ -3442,6 +3464,7 @@ impl OpenCADStudio {
             capture_frame,
             caret_blink,
             quick_calc_flash,
+            ribbon_minimize,
             web_fonts,
             autosave,
             plugin_drain,

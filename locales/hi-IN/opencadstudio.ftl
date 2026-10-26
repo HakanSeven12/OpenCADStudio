@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = मेनू बार दिखाएँ
     .hide-menu-bar = मेनू बार छिपाएँ
     .close-ribbon = रिबन बंद करें
+    .minimize-cycle = रिबन छोटा करें (चक्र)
+    .minimize = रिबन छोटा करें
+    .show-full = पूरा रिबन दिखाएँ
+    .minimize-to-tabs = टैब तक छोटा करें
+    .minimize-to-panel-titles = पैनल शीर्षकों तक छोटा करें
+    .minimize-to-panel-buttons = पैनल बटनों तक छोटा करें
+    .cycle-through-all = सभी में चक्र करें
+    .more-tools = और टूल
 
 options =
     .language-section = भाषा

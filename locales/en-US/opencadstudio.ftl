@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Show Menu Bar
     .hide-menu-bar = Hide Menu Bar
     .close-ribbon = Close Ribbon
+    .minimize-cycle = Minimize ribbon (cycle)
+    .minimize = Minimize ribbon
+    .show-full = Show full ribbon
+    .minimize-to-tabs = Minimize to Tabs
+    .minimize-to-panel-titles = Minimize to Panel Titles
+    .minimize-to-panel-buttons = Minimize to Panel Buttons
+    .cycle-through-all = Cycle Through All
+    .more-tools = More tools
 
 options =
     .language-section = Language

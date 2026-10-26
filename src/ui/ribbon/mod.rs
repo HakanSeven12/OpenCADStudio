@@ -36,6 +36,7 @@ mod collapse;
 mod keytips;
 mod layout;
 mod locate;
+mod minimize;
 mod ribbon_menu;
 use crate::t;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
@@ -46,6 +47,7 @@ pub use keytips::{
     key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed,
 };
 pub use layout::{MinimizePref, RibbonLayout, RibbonMinimize};
+pub use minimize::{MinimizeMsg, Opener, MINIMIZE_MENU_ID};
 pub use ribbon_menu::{RibbonMenuMsg, Submenu};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
@@ -271,6 +273,8 @@ pub struct Ribbon {
     layout: RibbonLayout,
     /// The right-click menu, while open.
     menu: Option<ribbon_menu::MenuState>,
+    /// Popups of the minimized ribbon.
+    min: minimize::MinState,
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
@@ -410,6 +414,7 @@ impl Ribbon {
             collapse_mode: CollapseMode::default(),
             layout: RibbonLayout::default(),
             menu: None,
+            min: minimize::MinState::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
@@ -800,7 +805,9 @@ impl Ribbon {
             self.open_dropdown = None;
         } else {
             self.open_dropdown = Some(id.to_string());
-            if draw_panel::owns_dropdown(id) {
+            // A slide-out closes a collapsed panel's flyout, but opens from a
+            // minimized ribbon's panel popup, which stays.
+            if draw_panel::owns_dropdown(id) && self.layout.minimize == RibbonMinimize::Off {
                 self.collapsed_open = None;
             }
         }
@@ -1010,10 +1017,23 @@ impl Ribbon {
                     },
                     ..Default::default()
                 });
+                // Minimized to tabs, resting on a tab opens its tool area.
+                let btn: Element<'_, Message> = if self.layout.minimize == RibbonMinimize::Tabs {
+                    mouse_area(btn)
+                        .on_enter(Message::RibbonMinimize(MinimizeMsg::EnterOpener(
+                            Opener::Tab(i),
+                        )))
+                        .on_exit(Message::RibbonMinimize(MinimizeMsg::LeaveOpener))
+                        .into()
+                } else {
+                    btn.into()
+                };
                 acc.push(keytips::anchor_with(|| format!("tab:{}", module.id()), btn));
                 acc
             },
         );
+        let mut tab_items = tab_items;
+        tab_items.push(self.minimize_button());
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
         // down to -12px on a narrow (e.g. phone) tab row, tucking neighbours into
@@ -1062,6 +1082,50 @@ impl Ribbon {
             })
             .width(Length::Fill);
 
+        let tab_bar = PosReport::new(minimize::TAB_BAR_ID, tab_bar);
+        let mut ribbon = column![tab_bar];
+        match self.layout.minimize {
+            RibbonMinimize::Off => {
+                ribbon = ribbon.push(self.tool_area(
+                    is_paper,
+                    is_start,
+                    show_block_palette,
+                    visibility,
+                    self.collapse_mode,
+                ));
+            }
+            // The tab's tool area opens over the drawing (`minimized_popup`).
+            RibbonMinimize::Tabs => {}
+            RibbonMinimize::PanelTitles | RibbonMinimize::PanelButtons => {
+                ribbon = ribbon.push(self.minimized_row(is_start));
+            }
+        }
+        keytips::ribbon_area(ribbon_menu::RightPress::new(ribbon))
+    }
+
+    /// The style lists the style combos show.
+    fn style_context(&self) -> StyleContext<'_> {
+        StyleContext {
+            text_style_names: &self.text_style_names,
+            active_text_style: &self.active_text_style,
+            dim_style_names: &self.dim_style_names,
+            active_dim_style: &self.active_dim_style,
+            mleader_style_names: &self.mleader_style_names,
+            active_mleader_style: &self.active_mleader_style,
+            table_style_names: &self.table_style_names,
+            active_table_style: &self.active_table_style,
+        }
+    }
+
+    /// The tool area of the tab on show: its panels, sized by `mode`.
+    fn tool_area(
+        &self,
+        is_paper: bool,
+        is_start: bool,
+        show_block_palette: bool,
+        visibility: Option<crate::ui::window::block_visibility::RibbonContext>,
+        mode: CollapseMode,
+    ) -> Element<'_, Message> {
         // ── Tool area ─────────────────────────────────────────────────────
         let effective_active = if !is_paper
             && self
@@ -1076,23 +1140,14 @@ impl Ribbon {
         };
         let tool_area: Element<'_, Message> = if self.modules.get(effective_active).is_some() {
             let groups: Vec<_> = self.groups_for(effective_active).collect();
-            let style_ctx = StyleContext {
-                text_style_names: &self.text_style_names,
-                active_text_style: &self.active_text_style,
-                dim_style_names: &self.dim_style_names,
-                active_dim_style: &self.active_dim_style,
-                mleader_style_names: &self.mleader_style_names,
-                active_mleader_style: &self.active_mleader_style,
-                table_style_names: &self.table_style_names,
-                active_table_style: &self.active_table_style,
-            };
+            let style_ctx = self.style_context();
 
             // Adaptive tool area: panels sit on one row; when they don't all
             // fit they degrade from the right — a panel's large buttons first
             // shrink to compact icon columns, then it collapses to a ▾ flyout
             // button. See `CollapsePanels`.
             let ts = self.toggle_state(show_block_palette);
-            let measure_key = if self.collapse_mode == CollapseMode::Auto {
+            let measure_key = if mode == CollapseMode::Auto {
                 // Panels without titles are shorter: measure them afresh.
                 let mut hasher = DefaultHasher::new();
                 panel_measure_key(
@@ -1135,7 +1190,7 @@ impl Ribbon {
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
                 .report_tight(self.collapse_tight.clone())
-                .mode(self.collapse_mode)
+                .mode(mode)
                 .into()
         } else {
             text("").into()
@@ -1154,7 +1209,7 @@ impl Ribbon {
             .width(Length::Fill)
             .into();
 
-        let tool_bar = if is_start {
+        if is_start {
             // The Start tab has no drawing context. One theme-aware shield
             // fades and blocks only the tool area; the tabs and application
             // controls above it remain available and clearly identifiable.
@@ -1183,9 +1238,7 @@ impl Ribbon {
             iced::widget::stack![tool_bar, iced::widget::opaque(shield)].into()
         } else {
             tool_bar
-        };
-
-        keytips::ribbon_area(ribbon_menu::RightPress::new(column![tab_bar, tool_bar]))
+        }
     }
 
     // ── Dropdown overlay ──────────────────────────────────────────────────
@@ -1211,10 +1264,15 @@ impl Ribbon {
         is_start: bool,
         recent_colors: &[AcadColor],
     ) -> Option<Element<'_, Message>> {
+        let open_id = self.open_dropdown.as_deref()?;
+        // The minimize button belongs to the tab row, which the Start tab
+        // keeps; the tools' dropdowns need a drawing.
+        if open_id == minimize::MINIMIZE_MENU_ID {
+            return Some(self.minimize_menu(win));
+        }
         if is_start {
             return None;
         }
-        let open_id = self.open_dropdown.as_deref()?;
 
         if draw_panel::owns_dropdown(open_id) {
             return Some(draw_panel::overlay(self, open_id, win));

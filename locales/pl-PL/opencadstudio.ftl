@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Pokaż pasek menu
     .hide-menu-bar = Ukryj pasek menu
     .close-ribbon = Zamknij wstążkę
+    .minimize-cycle = Minimalizuj wstążkę (cyklicznie)
+    .minimize = Minimalizuj wstążkę
+    .show-full = Pokaż pełną wstążkę
+    .minimize-to-tabs = Minimalizuj do kart
+    .minimize-to-panel-titles = Minimalizuj do tytułów paneli
+    .minimize-to-panel-buttons = Minimalizuj do przycisków paneli
+    .cycle-through-all = Przełączaj cyklicznie
+    .more-tools = Więcej narzędzi
 
 options =
     .language-section = Język

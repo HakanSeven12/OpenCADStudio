@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Mostrar barra de menús
     .hide-menu-bar = Ocultar barra de menús
     .close-ribbon = Cerrar cinta de opciones
+    .minimize-cycle = Minimizar cinta de opciones (ciclo)
+    .minimize = Minimizar cinta de opciones
+    .show-full = Mostrar cinta de opciones completa
+    .minimize-to-tabs = Minimizar a fichas
+    .minimize-to-panel-titles = Minimizar a títulos de grupo
+    .minimize-to-panel-buttons = Minimizar a botones de grupo
+    .cycle-through-all = Recorrer todos
+    .more-tools = Más herramientas
 
 options =
     .language-section = Idioma

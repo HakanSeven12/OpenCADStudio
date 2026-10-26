@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Hiện thanh menu
     .hide-menu-bar = Ẩn thanh menu
     .close-ribbon = Đóng dải băng
+    .minimize-cycle = Thu nhỏ dải băng (luân phiên)
+    .minimize = Thu nhỏ dải băng
+    .show-full = Hiện toàn bộ dải băng
+    .minimize-to-tabs = Thu nhỏ thành tab
+    .minimize-to-panel-titles = Thu nhỏ thành tiêu đề bảng
+    .minimize-to-panel-buttons = Thu nhỏ thành nút bảng
+    .cycle-through-all = Luân phiên tất cả
+    .more-tools = Thêm công cụ
 
 options =
     .language-section = Ngôn ngữ

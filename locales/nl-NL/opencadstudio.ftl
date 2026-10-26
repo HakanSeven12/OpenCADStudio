@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Menubalk tonen
     .hide-menu-bar = Menubalk verbergen
     .close-ribbon = Lint sluiten
+    .minimize-cycle = Lint minimaliseren (rouleren)
+    .minimize = Lint minimaliseren
+    .show-full = Volledig lint tonen
+    .minimize-to-tabs = Minimaliseren tot tabbladen
+    .minimize-to-panel-titles = Minimaliseren tot paneeltitels
+    .minimize-to-panel-buttons = Minimaliseren tot paneelknoppen
+    .cycle-through-all = Alles rouleren
+    .more-tools = Meer gereedschappen
 
 options =
     .language-section = Taal

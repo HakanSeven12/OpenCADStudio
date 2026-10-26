@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Показване на лентата с менюта
     .hide-menu-bar = Скриване на лентата с менюта
     .close-ribbon = Затваряне на лентата
+    .minimize-cycle = Минимизиране на лентата (цикъл)
+    .minimize = Минимизиране на лентата
+    .show-full = Показване на цялата лента
+    .minimize-to-tabs = Минимизиране до разделите
+    .minimize-to-panel-titles = Минимизиране до заглавията на панелите
+    .minimize-to-panel-buttons = Минимизиране до бутоните на панелите
+    .cycle-through-all = Циклично през всички
+    .more-tools = Още инструменти
 
 options =
     .language-section = Език

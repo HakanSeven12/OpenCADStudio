@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = Menüsor megjelenítése
     .hide-menu-bar = Menüsor elrejtése
     .close-ribbon = Szalag bezárása
+    .minimize-cycle = Szalag kis méretre (körbe)
+    .minimize = Szalag kis méretre
+    .show-full = Teljes szalag megjelenítése
+    .minimize-to-tabs = Kicsinyítés lapokra
+    .minimize-to-panel-titles = Kicsinyítés panelcímekre
+    .minimize-to-panel-buttons = Kicsinyítés panelgombokra
+    .cycle-through-all = Mindegyik körbe
+    .more-tools = További eszközök
 
 options =
     .language-section = Nyelv

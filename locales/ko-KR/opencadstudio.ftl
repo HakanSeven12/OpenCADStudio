@@ -49,6 +49,14 @@ ribbon-menu =
     .show-menu-bar = 메뉴 막대 표시
     .hide-menu-bar = 메뉴 막대 숨기기
     .close-ribbon = 리본 닫기
+    .minimize-cycle = 리본 최소화(순환)
+    .minimize = 리본 최소화
+    .show-full = 전체 리본 표시
+    .minimize-to-tabs = 탭으로 최소화
+    .minimize-to-panel-titles = 패널 제목으로 최소화
+    .minimize-to-panel-buttons = 패널 버튼으로 최소화
+    .cycle-through-all = 모두 순환
+    .more-tools = 추가 도구
 
 options =
     .language-section = 언어

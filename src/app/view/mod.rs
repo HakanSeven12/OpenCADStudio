@@ -2681,22 +2681,25 @@ bg={bg_ms:.1}ms n={view_count}"
                     col = col.push(
                         row![
                             container(self.ribbon.logo_button(false)).padding([0, 6]),
-                            crate::ui::menu_bar::view(),
+                            crate::ui::menu_bar::view(self.open_drawings()),
                         ]
                         .align_y(iced::Center),
                     );
                 }
             } else {
-                col = col.push(self.ribbon.view(
-                    self.show_menu_bar.then(crate::ui::menu_bar::view),
-                    self.ribbon_closed,
-                    is_paper,
-                    self.tabs[self.active_tab].is_start,
-                    self.tabs[self.active_tab].history.undo_stack.len(),
-                    self.tabs[self.active_tab].history.redo_stack.len(),
-                    self.show_block_palette,
-                    self.block_visibility_context(),
-                ));
+                col = col.push(
+                    self.ribbon.view(
+                        self.show_menu_bar
+                            .then(|| crate::ui::menu_bar::view(self.open_drawings())),
+                        self.ribbon_closed,
+                        is_paper,
+                        self.tabs[self.active_tab].is_start,
+                        self.tabs[self.active_tab].history.undo_stack.len(),
+                        self.tabs[self.active_tab].history.redo_stack.len(),
+                        self.show_block_palette,
+                        self.block_visibility_context(),
+                    ),
+                );
             }
             // Split the `chrome` bucket so live `view-detail` traces show
             // ribbon vs status-bar construction separately (both gated on
@@ -3570,6 +3573,18 @@ fn doc_tab_context_menu(
         .padding([4, 0])
         .width(iced::Length::Fixed(MENU_W))
         .into()
+}
+
+impl OpenCADStudio {
+    /// The open drawings, as the Window menu lists them: tab index and name.
+    fn open_drawings(&self) -> Vec<(usize, String)> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| !tab.is_start)
+            .map(|(index, tab)| (index, tab.tab_display_name()))
+            .collect()
+    }
 }
 
 pub(super) fn doc_tab_bar<'a>(

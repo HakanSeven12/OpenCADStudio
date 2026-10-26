@@ -2654,6 +2654,19 @@ impl OpenCADStudio {
                 self.ribbon.tick(iced::time::Instant::now());
                 Task::none()
             }
+            Message::MenuCommand(line) => {
+                let sweep = self.sync_active_field_if_any();
+                self.ribbon.close_dropdown();
+                // A single word dispatches as a ribbon button does; a line
+                // with answers runs its command and feeds them to its
+                // prompts, leaving the command at its next one.
+                let run = if line.split_whitespace().nth(1).is_some() {
+                    self.run_command_line_streaming(&line, false)
+                } else {
+                    self.dispatch_ribbon_command(&line)
+                };
+                Task::batch([sweep, run])
+            }
             Message::RibbonReorderPanels { module, titles } => {
                 self.ribbon.reorder_panels(module, &titles);
                 self.save_config();

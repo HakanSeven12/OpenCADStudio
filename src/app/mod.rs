@@ -3037,6 +3037,10 @@ pub enum Message {
     RibbonSelectTab(usize),
     /// The ribbon's right-click menu.
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
+    /// A menu-bar entry: its command line, run like a ribbon button's. A
+    /// space separates the answers to the command's prompts, as in a menu
+    /// macro, and no Enter follows the last one.
+    MenuCommand(String),
     /// The minimize button and the minimized ribbon's popups.
     RibbonMinimize(crate::ui::ribbon::MinimizeMsg),
     /// The pointer and pins of the ribbon's slide-outs.

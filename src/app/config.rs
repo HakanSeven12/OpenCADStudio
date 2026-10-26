@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::settings::UserSettings;
-use crate::ui::ribbon::CollapseMode;
+use crate::ui::ribbon::{CollapseMode, RibbonLayout};
 use crate::ui::statusbar::statusbar_config::StatusBarConfig;
 use crate::ui::window::plot::PlotDialogState;
 
@@ -550,6 +550,10 @@ pub struct StartConfig {
 #[serde(default)]
 pub struct RibbonConfig {
     pub collapse: CollapseMode,
+    /// Hidden tabs and panels, panel order, panel titles, minimize state and
+    /// pinned slide-outs, stored as fields of this section.
+    #[serde(flatten)]
+    pub layout: RibbonLayout,
 }
 
 impl AppConfig {
@@ -724,6 +728,40 @@ mod tests {
         let serialized = serde_json::to_string(&original).expect("serialize config");
         let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
         assert!(restored.show_graphic_attributes);
+    }
+
+    #[test]
+    fn ribbon_layout_defaults_and_round_trips() {
+        use crate::ui::ribbon::{MinimizePref, RibbonMinimize};
+
+        // A config from before the layout settings keeps loading, with the
+        // collapse mode it had and the default layout.
+        let old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"collapse":"Compact"}}"#).expect("old config");
+        assert_eq!(old.ribbon.collapse, CollapseMode::Compact);
+        assert!(old.ribbon.layout == RibbonLayout::default());
+        assert!(old.ribbon.layout.show_panel_titles);
+
+        let mut original = AppConfig::default();
+        let layout = &mut original.ribbon.layout;
+        layout.hidden_tabs.insert("manage".into());
+        layout.hidden_panels.insert("draw/Groups".into());
+        layout.panel_order.insert(
+            "draw".into(),
+            vec!["draw/Modify".into(), "draw/Draw".into()],
+        );
+        layout.show_panel_titles = false;
+        layout.minimize = RibbonMinimize::PanelTitles;
+        layout.minimize_pref = MinimizePref::Tabs;
+        layout.pinned_slideouts.insert("draw/Draw".into());
+
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        // The fields sit directly in the ribbon section.
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
+        assert_eq!(value["ribbon"]["hidden_tabs"][0], "manage");
+        assert_eq!(value["ribbon"]["minimize"], "PanelTitles");
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.ribbon == original.ribbon);
     }
 
     #[test]

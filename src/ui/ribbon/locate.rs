@@ -124,7 +124,8 @@ impl Ribbon {
         {
             return None;
         }
-        (0..self.modules.len()).find(|i| self.modules[*i].id() != "layout" && holds(*i))
+        (0..self.modules.len())
+            .find(|i| self.modules[*i].id() != "layout" && !self.tab_hidden(*i) && holds(*i))
     }
 }
 

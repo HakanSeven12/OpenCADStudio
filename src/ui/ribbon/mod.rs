@@ -34,6 +34,7 @@ pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 use widgets::{StyleContext, *};
 mod collapse;
 mod keytips;
+mod layout;
 mod locate;
 use crate::t;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
@@ -43,6 +44,7 @@ pub use keytips::{
     KeyTipInput, KeyTipStep, active as keytips_active, key_pressed as keytip_key_pressed,
     key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed,
 };
+pub use layout::{MinimizePref, RibbonLayout, RibbonMinimize};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
     widgets::make_tip(text)
@@ -263,6 +265,8 @@ pub struct Ribbon {
     tool_bar_h: Arc<AtomicU32>,
     /// User-chosen panel density (persisted). `Auto` sizes by window width.
     collapse_mode: CollapseMode,
+    /// Hidden tabs and panels, panel order and the like (persisted).
+    layout: RibbonLayout,
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
@@ -400,6 +404,7 @@ impl Ribbon {
             tab_bar_h: Arc::new(AtomicU32::new(28.0f32.to_bits())),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
+            layout: RibbonLayout::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
@@ -420,6 +425,52 @@ impl Ribbon {
     /// The current tool-panel density (for saving into the app config).
     pub fn collapse_mode(&self) -> CollapseMode {
         self.collapse_mode
+    }
+
+    /// Apply a saved layout. Persistence is handled by the caller via the
+    /// consolidated app config (`save_config`).
+    pub fn set_layout(&mut self, layout: RibbonLayout) {
+        self.layout = layout;
+        self.show_a_visible_tab();
+    }
+
+    /// The current layout (for saving into the app config).
+    pub fn layout(&self) -> &RibbonLayout {
+        &self.layout
+    }
+
+    /// Whether the ribbon shows its default layout: panel order, hidden tabs
+    /// and panels, and panel titles.
+    #[allow(dead_code)]
+    pub fn is_default_layout(&self) -> bool {
+        self.layout.is_default(&self.modules)
+    }
+
+    /// Whether tab `index` is left out of the tab row because the user hid
+    /// it. The tab on show and the contextual tabs are never left out.
+    fn tab_hidden(&self, index: usize) -> bool {
+        index != self.active
+            && self.modules.get(index).is_some_and(|module| {
+                !matches!(module.id(), "layout" | "block_editor")
+                    && self.layout.hidden_tabs.contains(module.id())
+            })
+    }
+
+    /// Move off a tab the user hid onto the first one still shown.
+    fn show_a_visible_tab(&mut self) {
+        let hidden = |module: &dyn CadModule| self.layout.hidden_tabs.contains(module.id());
+        if !self
+            .modules
+            .get(self.active)
+            .is_some_and(|module| hidden(module.as_ref()))
+        {
+            return;
+        }
+        if let Some(index) = self.modules.iter().position(|module| {
+            !hidden(module.as_ref()) && !matches!(module.id(), "layout" | "block_editor")
+        }) {
+            self.active = index;
+        }
     }
 
     /// Current tab-bar height as last measured by the `WrapBar` widget.
@@ -529,15 +580,20 @@ impl Ribbon {
         }
     }
 
-    /// Contextual panels share their normal tab with the drawing tools.
+    /// The panels of tab `index` as the ribbon shows them: in the user's
+    /// order, without the hidden ones. Contextual panels share their normal
+    /// tab with the drawing tools.
     fn groups_for(&self, index: usize) -> impl Iterator<Item = &RibbonGroup> {
         let testing = self.block_testing.is_some();
-        self.modules.get(index).into_iter().flat_map(move |module| {
-            module
+        let groups = self.modules.get(index).map(|module| {
+            let groups = module
                 .ribbon_groups()
                 .iter()
-                .filter(move |group| module.id() != "draw" || group.title != "Close" || testing)
-        })
+                .filter(|group| module.id() != "draw" || group.title != "Close" || testing)
+                .collect();
+            self.layout.arrange(module.id(), groups)
+        });
+        groups.unwrap_or_default().into_iter()
     }
 
     pub fn select(&mut self, index: usize) {
@@ -555,6 +611,7 @@ impl Ribbon {
         }
         self.active_tool = None;
         self.open_dropdown = None;
+        self.show_a_visible_tab();
     }
     pub fn activate_tool(&mut self, id: &str) {
         self.active_tool = Some(id.to_string());
@@ -811,6 +868,7 @@ impl Ribbon {
                 // tools live in the right-edge side toolbar (see ui::side_toolbar).
                 if module.id() == "layout"
                     || (module.id() == "block_editor" && self.block_editing.is_none())
+                    || self.tab_hidden(i)
                 {
                     return acc;
                 }
@@ -1941,7 +1999,7 @@ impl Default for Ribbon {
 #[cfg(test)]
 mod tests {
     use super::widgets::is_active_tool;
-    use super::{CollapseMode, Ribbon, StyleContext, panel_measure_key};
+    use super::{CollapseMode, Ribbon, RibbonLayout, StyleContext, panel_measure_key};
     use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
     use rustc_hash::FxHashMap;
 
@@ -2053,6 +2111,49 @@ mod tests {
         assert!(is_active_tool("BLOCKPALETTE", &None, &on));
         let off = ribbon.toggle_state(false);
         assert!(!is_active_tool("BLOCKPALETTE", &None, &off));
+    }
+
+    #[test]
+    fn a_saved_layout_orders_and_hides_panels_and_tabs() {
+        let mut ribbon = Ribbon::default();
+        let index = |ribbon: &Ribbon, id: &str| {
+            ribbon
+                .modules
+                .iter()
+                .position(|module| module.id() == id)
+                .unwrap()
+        };
+        let draw = index(&ribbon, "draw");
+        let insert = index(&ribbon, "insert");
+        let titles = |ribbon: &Ribbon, tab: usize| -> Vec<&'static str> {
+            ribbon.groups_for(tab).map(|group| group.title).collect()
+        };
+        let default = titles(&ribbon, draw);
+        assert_eq!(&default[..2], ["Draw", "Modify"]);
+        assert!(ribbon.is_default_layout());
+
+        let mut layout = RibbonLayout::default();
+        layout.panel_order.insert(
+            "draw".into(),
+            vec!["draw/Modify".into(), "draw/Draw".into()],
+        );
+        layout.hidden_panels.insert("draw/Block".into());
+        layout.hidden_tabs.insert("draw".into());
+        ribbon.select(draw);
+        ribbon.set_layout(layout);
+        assert!(!ribbon.is_default_layout());
+
+        // The hidden tab on show gives way to the first tab still shown.
+        assert_ne!(ribbon.active, draw);
+        assert!(ribbon.tab_hidden(draw));
+        assert!(!ribbon.tab_hidden(insert));
+
+        let arranged = titles(&ribbon, draw);
+        assert_eq!(&arranged[..2], ["Modify", "Draw"]);
+        assert!(!arranged.contains(&"Block"));
+        assert_eq!(arranged.len(), default.len() - 1);
+        // Insert's own Block panel is a different panel and stays.
+        assert!(titles(&ribbon, insert).contains(&"Block"));
     }
 
     #[test]

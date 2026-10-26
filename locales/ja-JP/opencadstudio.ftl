@@ -6314,6 +6314,14 @@ dimstyle =
     .surveyors-units = 測量単位
 
 style-manager =
+    .import-styles = Import Styles
+    .select-drawing-to-import-styles-from = Select Drawing to Import Styles From
+    .select-the-styles-to-import = Select the styles to import
+    .style-name-conflict = A style with this name already exists. Overwrite it?
+    .no-styles-found = No styles found in this drawing.
+    .existing = Existing
+    .imported-styles-apply = Imported __ocs_fmt_0__ style(s). Apply to keep the changes.
+    .missing-style-references = Some imported styles reference arrow blocks, linetypes, or text styles unavailable in this drawing; defaults will be used.
     .alignment-spacing = 位置合わせ間隔
     .always-left-align = 常に左揃え
     .attachment-direction = アタッチ方向

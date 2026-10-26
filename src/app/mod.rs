@@ -3037,6 +3037,12 @@ pub enum Message {
     RibbonSelectTab(usize),
     /// The ribbon's right-click menu.
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
+    /// Panels of a ribbon tab dropped in a new order: the shown panels'
+    /// titles, in that order.
+    RibbonReorderPanels {
+        module: &'static str,
+        titles: Vec<String>,
+    },
     /// Ribbon key tips: Alt, typed codes and Esc.
     KeyTip(crate::ui::ribbon::KeyTipInput),
     /// Change the ribbon tool-panel density (persisted).

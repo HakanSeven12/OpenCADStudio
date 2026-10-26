@@ -2634,6 +2634,11 @@ impl OpenCADStudio {
                 self.ribbon.select(idx);
                 Task::none()
             }
+            Message::RibbonReorderPanels { module, titles } => {
+                self.ribbon.reorder_panels(module, &titles);
+                self.save_config();
+                Task::none()
+            }
             Message::RibbonMenu(msg) => {
                 use crate::ui::ribbon::RibbonMenuMsg;
                 let follow = match &msg {

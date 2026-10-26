@@ -608,6 +608,40 @@ impl Ribbon {
         groups.into_iter()
     }
 
+    /// Save the panels of module `module_id` in the order a drag left them.
+    /// `titles` are the panels shown, in their new order; hidden panels keep
+    /// their places.
+    pub fn reorder_panels(&mut self, module_id: &str, titles: &[String]) {
+        let Some(index) = self.modules.iter().position(|m| m.id() == module_id) else {
+            return;
+        };
+        let mut order: Vec<&'static str> = self
+            .ordered_groups(index)
+            .iter()
+            .map(|group| group.title)
+            .collect();
+        let slots: Vec<usize> = (0..order.len())
+            .filter(|&i| titles.iter().any(|title| title == order[i]))
+            .collect();
+        let moved: Vec<&'static str> = titles
+            .iter()
+            .filter_map(|title| order.iter().find(|t| *t == title).copied())
+            .collect();
+        if moved.len() != slots.len() {
+            return;
+        }
+        for (slot, title) in slots.into_iter().zip(moved) {
+            order[slot] = title;
+        }
+        self.layout.panel_order.insert(
+            module_id.to_string(),
+            order
+                .iter()
+                .map(|title| extras::panel_key(module_id, title))
+                .collect(),
+        );
+    }
+
     /// Height of the tool area at full density: shorter without panel titles.
     fn panel_h(&self) -> f32 {
         if self.layout.show_panel_titles {
@@ -1086,7 +1120,18 @@ impl Ribbon {
                     }
                 })
                 .collect();
+            // Panels drag by their title strips; without titles they stay put.
+            let module = self.modules[effective_active].id();
+            let strip = if self.layout.show_panel_titles {
+                PANEL_TITLE_H + PANEL_TITLE_PAD
+            } else {
+                0.0
+            };
             CollapsePanels::new(panels, self.collapsed_open.clone(), self.panel_h())
+                .draggable(strip, move |titles| Message::RibbonReorderPanels {
+                    module,
+                    titles,
+                })
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
                 .report_tight(self.collapse_tight.clone())
@@ -2193,6 +2238,36 @@ mod tests {
         assert_eq!(arranged.len(), default.len() - 1);
         // Insert's own Block panel is a different panel and stays.
         assert!(titles(&ribbon, insert).contains(&"Block"));
+    }
+
+    #[test]
+    fn a_drop_saves_the_new_order_and_hidden_panels_keep_their_place() {
+        let mut ribbon = Ribbon::default();
+        let draw = ribbon
+            .modules
+            .iter()
+            .position(|module| module.id() == "draw")
+            .unwrap();
+        let titles = |ribbon: &Ribbon| -> Vec<&'static str> {
+            ribbon.groups_for(draw).map(|group| group.title).collect()
+        };
+        let default = titles(&ribbon);
+        assert_eq!(&default[..3], ["Draw", "Modify", "Annotation"]);
+
+        // Modify is hidden; Annotation is dropped before Draw.
+        ribbon.layout.hidden_panels.insert("draw/Modify".into());
+        let mut shown: Vec<String> = titles(&ribbon).iter().map(|t| t.to_string()).collect();
+        let annotation = shown.remove(1);
+        shown.insert(0, annotation);
+        ribbon.reorder_panels("draw", &shown);
+
+        let saved = &ribbon.layout.panel_order["draw"];
+        assert_eq!(&saved[..3], ["draw/Annotation", "draw/Modify", "draw/Draw"]);
+        assert_eq!(saved.len(), default.len());
+        assert_eq!(&titles(&ribbon)[..2], ["Annotation", "Draw"]);
+
+        ribbon.layout.hidden_panels.clear();
+        assert_eq!(&titles(&ribbon)[..3], ["Annotation", "Modify", "Draw"]);
     }
 
     #[test]

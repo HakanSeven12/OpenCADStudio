@@ -1,4 +1,5 @@
 pub mod anno_object_scale;
+pub mod chrome;
 pub mod common;
 pub mod dimstyle;
 pub(crate) mod editor_table;

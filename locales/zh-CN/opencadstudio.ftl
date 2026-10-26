@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = 管理
     .view = 视图
 
+ribbon-menu =
+    .show-tabs = 显示选项卡
+    .show-panels = 显示面板
+    .reset = 重置为默认
+    .already-default = 功能区已是默认布局
+    .show-panel-titles = 显示面板标题
+    .show-menu-bar = 显示菜单栏
+    .hide-menu-bar = 隐藏菜单栏
+    .close-ribbon = 关闭功能区
+
 options =
     .language-section = 语言
     .language-label = 界面语言：

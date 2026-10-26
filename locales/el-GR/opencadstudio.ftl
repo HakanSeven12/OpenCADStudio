@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Διαχείριση
     .view = Προβολή
 
+ribbon-menu =
+    .show-tabs = Εμφάνιση καρτελών
+    .show-panels = Εμφάνιση πλαισίων
+    .reset = Επαναφορά προεπιλογών
+    .already-default = Η κορδέλα έχει ήδη την προεπιλεγμένη διάταξη
+    .show-panel-titles = Εμφάνιση τίτλων πλαισίων
+    .show-menu-bar = Εμφάνιση γραμμής μενού
+    .hide-menu-bar = Απόκρυψη γραμμής μενού
+    .close-ribbon = Κλείσιμο κορδέλας
+
 options =
     .language-section = Γλώσσα
     .language-label = Γλώσσα περιβάλλοντος:

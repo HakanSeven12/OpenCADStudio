@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Gerenciar
     .view = Exibir
 
+ribbon-menu =
+    .show-tabs = Mostrar guias
+    .show-panels = Mostrar painéis
+    .reset = Restaurar padrão
+    .already-default = A faixa de opções já corresponde ao layout padrão
+    .show-panel-titles = Mostrar títulos dos painéis
+    .show-menu-bar = Mostrar barra de menus
+    .hide-menu-bar = Ocultar barra de menus
+    .close-ribbon = Fechar faixa de opções
+
 options =
     .language-section = Idioma
     .language-label = Idioma da interface:

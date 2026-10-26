@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = 관리
     .view = 보기
 
+ribbon-menu =
+    .show-tabs = 탭 표시
+    .show-panels = 패널 표시
+    .reset = 기본값으로 재설정
+    .already-default = 리본이 이미 기본 배치와 같습니다
+    .show-panel-titles = 패널 제목 표시
+    .show-menu-bar = 메뉴 막대 표시
+    .hide-menu-bar = 메뉴 막대 숨기기
+    .close-ribbon = 리본 닫기
+
 options =
     .language-section = 언어
     .language-label = 인터페이스 언어:

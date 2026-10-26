@@ -2634,6 +2634,18 @@ impl OpenCADStudio {
                 self.ribbon.select(idx);
                 Task::none()
             }
+            Message::RibbonMenu(msg) => {
+                use crate::ui::ribbon::RibbonMenuMsg;
+                let follow = match &msg {
+                    RibbonMenuMsg::ShowMenuBar(shown) => Some(Message::MenuBarChanged(*shown)),
+                    RibbonMenuMsg::CloseRibbon => Some(Message::Command("RIBBONCLOSE".into())),
+                    _ => None,
+                };
+                if self.ribbon.on_menu(msg) {
+                    self.save_config();
+                }
+                follow.map_or_else(Task::none, Task::done)
+            }
 
             Message::SetRibbonCollapseMode(mode) => {
                 self.ribbon.set_collapse_mode(mode);

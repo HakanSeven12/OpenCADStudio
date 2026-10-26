@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Kezelés
     .view = Nézet
 
+ribbon-menu =
+    .show-tabs = Lapok megjelenítése
+    .show-panels = Panelek megjelenítése
+    .reset = Alapértelmezés visszaállítása
+    .already-default = A szalag már az alapértelmezett elrendezést mutatja
+    .show-panel-titles = Panelcímek megjelenítése
+    .show-menu-bar = Menüsor megjelenítése
+    .hide-menu-bar = Menüsor elrejtése
+    .close-ribbon = Szalag bezárása
+
 options =
     .language-section = Nyelv
     .language-label = Felület nyelve:

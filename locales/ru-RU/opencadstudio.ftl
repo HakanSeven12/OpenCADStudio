@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Управление
     .view = Просмотр
 
+ribbon-menu =
+    .show-tabs = Показать вкладки
+    .show-panels = Показать панели
+    .reset = Восстановить по умолчанию
+    .already-default = Лента уже соответствует расположению по умолчанию
+    .show-panel-titles = Показывать заголовки панелей
+    .show-menu-bar = Показать строку меню
+    .hide-menu-bar = Скрыть строку меню
+    .close-ribbon = Закрыть ленту
+
 options =
     .language-section = Язык
     .language-label = Язык интерфейса:

@@ -72,6 +72,8 @@ pub(super) const LARGE_ARR: f32 = ROW_H * 0.55;
 pub(super) const LARGE_DROPDOWN_ARROW_SIZE: f32 = 9.0;
 /// Total ribbon tool-area height = 3 × ROW_H + 6 px v-padding + 12 px group-label.
 pub(super) const TOOL_BAR_H: f32 = 3.0 * ROW_H + 18.0;
+/// Height of the group label strip under a panel's tools.
+pub(super) const PANEL_TITLE_H: f32 = 12.0;
 /// Height of a collapsed panel button's large representative face (big icon +
 /// its label). A collapsed button is this face plus the title opener, so it is
 /// shorter than a full 3-row panel — the ribbon height follows it down.

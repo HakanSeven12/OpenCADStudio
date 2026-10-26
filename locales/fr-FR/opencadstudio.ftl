@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Gérer
     .view = Affichage
 
+ribbon-menu =
+    .show-tabs = Afficher les onglets
+    .show-panels = Afficher les groupes de fonctions
+    .reset = Rétablir les valeurs par défaut
+    .already-default = Le ruban correspond déjà à la disposition par défaut
+    .show-panel-titles = Afficher les titres des groupes de fonctions
+    .show-menu-bar = Afficher la barre de menus
+    .hide-menu-bar = Masquer la barre de menus
+    .close-ribbon = Fermer le ruban
+
 options =
     .language-section = Langue
     .language-label = Langue de l'interface :

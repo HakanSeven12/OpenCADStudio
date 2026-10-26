@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = प्रबंधित करें
     .view = देखें
 
+ribbon-menu =
+    .show-tabs = टैब दिखाएँ
+    .show-panels = पैनल दिखाएँ
+    .reset = डिफ़ॉल्ट पर रीसेट करें
+    .already-default = रिबन पहले से डिफ़ॉल्ट लेआउट से मेल खाता है
+    .show-panel-titles = पैनल शीर्षक दिखाएँ
+    .show-menu-bar = मेनू बार दिखाएँ
+    .hide-menu-bar = मेनू बार छिपाएँ
+    .close-ribbon = रिबन बंद करें
+
 options =
     .language-section = भाषा
     .language-label = इंटरफ़ेस भाषा:

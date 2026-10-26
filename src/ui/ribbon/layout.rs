@@ -102,22 +102,19 @@ impl RibbonLayout {
         groups
     }
 
+    /// Back to the default panel order, every tab and panel shown and panel
+    /// titles on. The minimize state and pinned slide-outs stay.
+    pub(super) fn reset(&mut self) {
+        self.hidden_tabs.clear();
+        self.hidden_panels.clear();
+        self.panel_order.clear();
+        self.show_panel_titles = true;
+    }
+
     pub(super) fn panel_hidden(&self, module_id: &str, title: &str) -> bool {
         self.hidden_panels
             .iter()
             .any(|key| is_key(key, module_id, title))
-    }
-
-    /// `groups` of module `module_id` as the ribbon shows them: in the user's
-    /// order, without the hidden ones.
-    pub(super) fn arrange<'g>(
-        &self,
-        module_id: &str,
-        groups: Vec<&'g RibbonGroup>,
-    ) -> Vec<&'g RibbonGroup> {
-        let mut groups = self.order(module_id, groups);
-        groups.retain(|group| !self.panel_hidden(module_id, group.title));
-        groups
     }
 
     /// Whether `modules` show as they do by default: no tab or panel of
@@ -205,15 +202,14 @@ mod tests {
     }
 
     #[test]
-    fn hidden_panels_are_left_out() {
-        let (a, b, c) = (group("A"), group("B"), group("C"));
-        let mut layout = order_of(&["draw/C", "draw/A", "draw/B"]);
+    fn a_hidden_panel_is_named_by_tab_and_title() {
+        let mut layout = RibbonLayout::default();
         layout.hidden_panels.insert("draw/A".to_string());
         layout.hidden_panels.insert("insert/B".to_string());
-        assert_eq!(
-            titles(&layout.arrange("draw", vec![&a, &b, &c])),
-            ["C", "B"]
-        );
+        assert!(layout.panel_hidden("draw", "A"));
+        assert!(!layout.panel_hidden("draw", "B"));
+        assert!(!layout.panel_hidden("insert", "A"));
+        assert!(!layout.panel_hidden("dra", "w/A"));
     }
 
     #[test]

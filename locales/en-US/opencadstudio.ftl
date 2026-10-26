@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Manage
     .view = View
 
+ribbon-menu =
+    .show-tabs = Show Tabs
+    .show-panels = Show Panels
+    .reset = Reset to Default
+    .already-default = The ribbon already matches the default layout
+    .show-panel-titles = Show Panel Titles
+    .show-menu-bar = Show Menu Bar
+    .hide-menu-bar = Hide Menu Bar
+    .close-ribbon = Close Ribbon
+
 options =
     .language-section = Language
     .language-label = Interface language:

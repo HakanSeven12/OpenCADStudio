@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Správa
     .view = Zobrazení
 
+ribbon-menu =
+    .show-tabs = Zobrazit karty
+    .show-panels = Zobrazit panely
+    .reset = Obnovit výchozí
+    .already-default = Pás karet již odpovídá výchozímu rozvržení
+    .show-panel-titles = Zobrazit názvy panelů
+    .show-menu-bar = Zobrazit panel nabídek
+    .hide-menu-bar = Skrýt panel nabídek
+    .close-ribbon = Zavřít pás karet
+
 options =
     .language-section = Jazyk
     .language-label = Jazyk rozhraní:

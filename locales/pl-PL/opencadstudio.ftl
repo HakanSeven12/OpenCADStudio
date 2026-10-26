@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Zarządzaj
     .view = Widok
 
+ribbon-menu =
+    .show-tabs = Pokaż karty
+    .show-panels = Pokaż panele
+    .reset = Przywróć domyślne
+    .already-default = Wstążka ma już domyślny układ
+    .show-panel-titles = Pokaż tytuły paneli
+    .show-menu-bar = Pokaż pasek menu
+    .hide-menu-bar = Ukryj pasek menu
+    .close-ribbon = Zamknij wstążkę
+
 options =
     .language-section = Język
     .language-label = Język interfejsu:

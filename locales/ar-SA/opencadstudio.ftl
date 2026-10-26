@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = إدارة
     .view = عرض
 
+ribbon-menu =
+    .show-tabs = إظهار علامات التبويب
+    .show-panels = إظهار اللوحات
+    .reset = إعادة التعيين إلى الافتراضي
+    .already-default = يطابق الشريط التخطيط الافتراضي بالفعل
+    .show-panel-titles = إظهار عناوين اللوحات
+    .show-menu-bar = إظهار شريط القوائم
+    .hide-menu-bar = إخفاء شريط القوائم
+    .close-ribbon = إغلاق الشريط
+
 options =
     .language-section = اللغة
     .language-label = لغة الواجهة:

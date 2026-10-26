@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Administrar
     .view = Vista
 
+ribbon-menu =
+    .show-tabs = Mostrar fichas
+    .show-panels = Mostrar grupos
+    .reset = Restablecer valores por defecto
+    .already-default = La cinta de opciones ya coincide con la disposición por defecto
+    .show-panel-titles = Mostrar títulos de grupo
+    .show-menu-bar = Mostrar barra de menús
+    .hide-menu-bar = Ocultar barra de menús
+    .close-ribbon = Cerrar cinta de opciones
+
 options =
     .language-section = Idioma
     .language-label = Idioma de la interfaz:

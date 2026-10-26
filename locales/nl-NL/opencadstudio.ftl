@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Beheren
     .view = Beeld
 
+ribbon-menu =
+    .show-tabs = Tabbladen tonen
+    .show-panels = Panelen tonen
+    .reset = Standaard herstellen
+    .already-default = Het lint komt al overeen met de standaardindeling
+    .show-panel-titles = Paneeltitels tonen
+    .show-menu-bar = Menubalk tonen
+    .hide-menu-bar = Menubalk verbergen
+    .close-ribbon = Lint sluiten
+
 options =
     .language-section = Taal
     .language-label = Interfacetaal:

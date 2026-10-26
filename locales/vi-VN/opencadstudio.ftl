@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Quản lý
     .view = Xem
 
+ribbon-menu =
+    .show-tabs = Hiện các tab
+    .show-panels = Hiện các bảng
+    .reset = Đặt lại mặc định
+    .already-default = Dải băng đã khớp với bố cục mặc định
+    .show-panel-titles = Hiện tiêu đề bảng
+    .show-menu-bar = Hiện thanh menu
+    .hide-menu-bar = Ẩn thanh menu
+    .close-ribbon = Đóng dải băng
+
 options =
     .language-section = Ngôn ngữ
     .language-label = Ngôn ngữ giao diện:

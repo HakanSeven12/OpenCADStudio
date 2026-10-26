@@ -3035,6 +3035,8 @@ pub enum Message {
     SetProjection(bool),
     /// Select a ribbon module tab by index.
     RibbonSelectTab(usize),
+    /// The ribbon's right-click menu.
+    RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
     /// Ribbon key tips: Alt, typed codes and Esc.
     KeyTip(crate::ui::ribbon::KeyTipInput),
     /// Change the ribbon tool-panel density (persisted).

@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Gestisci
     .view = Vista
 
+ribbon-menu =
+    .show-tabs = Mostra schede
+    .show-panels = Mostra gruppi
+    .reset = Ripristina predefiniti
+    .already-default = La barra multifunzione corrisponde già al layout predefinito
+    .show-panel-titles = Mostra titoli dei gruppi
+    .show-menu-bar = Mostra barra dei menu
+    .hide-menu-bar = Nascondi barra dei menu
+    .close-ribbon = Chiudi barra multifunzione
+
 options =
     .language-section = Lingua
     .language-label = Lingua dell'interfaccia:

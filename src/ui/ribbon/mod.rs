@@ -36,6 +36,7 @@ mod collapse;
 mod keytips;
 mod layout;
 mod locate;
+mod ribbon_menu;
 use crate::t;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use collapse::CollapseMode;
@@ -45,6 +46,7 @@ pub use keytips::{
     key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed,
 };
 pub use layout::{MinimizePref, RibbonLayout, RibbonMinimize};
+pub use ribbon_menu::{RibbonMenuMsg, Submenu};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
     widgets::make_tip(text)
@@ -267,6 +269,8 @@ pub struct Ribbon {
     collapse_mode: CollapseMode,
     /// Hidden tabs and panels, panel order and the like (persisted).
     layout: RibbonLayout,
+    /// The right-click menu, while open.
+    menu: Option<ribbon_menu::MenuState>,
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
@@ -405,6 +409,7 @@ impl Ribbon {
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             layout: RibbonLayout::default(),
+            menu: None,
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
@@ -441,7 +446,6 @@ impl Ribbon {
 
     /// Whether the ribbon shows its default layout: panel order, hidden tabs
     /// and panels, and panel titles.
-    #[allow(dead_code)]
     pub fn is_default_layout(&self) -> bool {
         self.layout.is_default(&self.modules)
     }
@@ -580,10 +584,9 @@ impl Ribbon {
         }
     }
 
-    /// The panels of tab `index` as the ribbon shows them: in the user's
-    /// order, without the hidden ones. Contextual panels share their normal
-    /// tab with the drawing tools.
-    fn groups_for(&self, index: usize) -> impl Iterator<Item = &RibbonGroup> {
+    /// The panels of tab `index` in the user's order, hidden ones included.
+    /// Contextual panels share their normal tab with the drawing tools.
+    fn ordered_groups(&self, index: usize) -> Vec<&RibbonGroup> {
         let testing = self.block_testing.is_some();
         let groups = self.modules.get(index).map(|module| {
             let groups = module
@@ -591,9 +594,27 @@ impl Ribbon {
                 .iter()
                 .filter(|group| module.id() != "draw" || group.title != "Close" || testing)
                 .collect();
-            self.layout.arrange(module.id(), groups)
+            self.layout.order(module.id(), groups)
         });
-        groups.unwrap_or_default().into_iter()
+        groups.unwrap_or_default()
+    }
+
+    /// The panels of tab `index` as the ribbon shows them: in the user's
+    /// order, without the hidden ones.
+    fn groups_for(&self, index: usize) -> impl Iterator<Item = &RibbonGroup> {
+        let module_id = self.modules.get(index).map_or("", |module| module.id());
+        let mut groups = self.ordered_groups(index);
+        groups.retain(|group| !self.layout.panel_hidden(module_id, group.title));
+        groups.into_iter()
+    }
+
+    /// Height of the tool area at full density: shorter without panel titles.
+    fn panel_h(&self) -> f32 {
+        if self.layout.show_panel_titles {
+            TOOL_BAR_H
+        } else {
+            TOOL_BAR_H - PANEL_TITLE_H
+        }
     }
 
     pub fn select(&mut self, index: usize) {
@@ -694,11 +715,13 @@ impl Ribbon {
     ) -> Panel<'a> {
         let key = extras::panel_key(module_id, g.title);
         let button_key = key.clone();
+        let titles = self.layout.show_panel_titles;
         let group = move |compact: bool| {
             render_group(
                 compact,
                 g,
                 &key,
+                titles,
                 Vec::new(),
                 &self.active_tool,
                 &self.open_dropdown,
@@ -1036,6 +1059,8 @@ impl Ribbon {
             // button. See `CollapsePanels`.
             let ts = self.toggle_state(show_block_palette);
             let measure_key = if self.collapse_mode == CollapseMode::Auto {
+                // Panels without titles are shorter: measure them afresh.
+                let mut hasher = DefaultHasher::new();
                 panel_measure_key(
                     &groups,
                     &self.last_cmd,
@@ -1043,6 +1068,9 @@ impl Ribbon {
                     &style_ctx,
                     visibility.as_ref(),
                 )
+                .hash(&mut hasher);
+                self.layout.show_panel_titles.hash(&mut hasher);
+                hasher.finish()
             } else {
                 0
             };
@@ -1058,7 +1086,7 @@ impl Ribbon {
                     }
                 })
                 .collect();
-            CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
+            CollapsePanels::new(panels, self.collapsed_open.clone(), self.panel_h())
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
                 .report_tight(self.collapse_tight.clone())
@@ -1112,7 +1140,7 @@ impl Ribbon {
             tool_bar
         };
 
-        keytips::ribbon_area(column![tab_bar, tool_bar])
+        keytips::ribbon_area(ribbon_menu::RightPress::new(column![tab_bar, tool_bar]))
     }
 
     // ── Dropdown overlay ──────────────────────────────────────────────────
@@ -1709,6 +1737,7 @@ fn render_group<'a>(
     compact: bool,
     group: &RibbonGroup,
     key: &str,
+    titles: bool,
     lead: Vec<Element<'a, Message>>,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
@@ -1766,15 +1795,25 @@ fn render_group<'a>(
             r.push(e)
         });
 
-    column![
-        tools_el,
-        draw_panel::group_title(group.title, key, open_dd, active_tool.as_deref()),
-    ]
-    .align_x(iced::Center)
-    .spacing(0)
-    .padding([3u16, 4])
-    .height(Length::Fixed(TOOL_BAR_H))
-    .into()
+    let mut panel = column![tools_el];
+    if titles {
+        panel = panel.push(draw_panel::group_title(
+            group.title,
+            key,
+            open_dd,
+            active_tool.as_deref(),
+        ));
+    }
+    panel
+        .align_x(iced::Center)
+        .spacing(0)
+        .padding([3u16, 4])
+        .height(Length::Fixed(if titles {
+            TOOL_BAR_H
+        } else {
+            TOOL_BAR_H - PANEL_TITLE_H
+        }))
+        .into()
 }
 
 /// The top-level command id of a ribbon item, if it has one.

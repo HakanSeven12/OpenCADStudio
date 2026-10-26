@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = 管理
     .view = 表示
 
+ribbon-menu =
+    .show-tabs = タブを表示
+    .show-panels = パネルを表示
+    .reset = 既定値にリセット
+    .already-default = リボンは既に既定のレイアウトです
+    .show-panel-titles = パネル タイトルを表示
+    .show-menu-bar = メニュー バーを表示
+    .hide-menu-bar = メニュー バーを非表示
+    .close-ribbon = リボンを閉じる
+
 options =
     .language-section = 言語
     .language-label = インターフェイスの言語:

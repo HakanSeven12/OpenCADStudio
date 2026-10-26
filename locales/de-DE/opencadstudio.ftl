@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Verwalten
     .view = Ansicht
 
+ribbon-menu =
+    .show-tabs = Registerkarten anzeigen
+    .show-panels = Gruppen anzeigen
+    .reset = Auf Standard zurücksetzen
+    .already-default = Die Multifunktionsleiste entspricht bereits dem Standardlayout
+    .show-panel-titles = Gruppentitel anzeigen
+    .show-menu-bar = Menüleiste anzeigen
+    .hide-menu-bar = Menüleiste ausblenden
+    .close-ribbon = Multifunktionsleiste schließen
+
 options =
     .language-section = Sprache
     .language-label = Oberflächensprache:

@@ -2911,6 +2911,11 @@ bg={bg_ms:.1}ms n={view_count}"
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        let ribbon_menu_layer: Element<'_, Message> = self
+            .ribbon
+            .menu_overlay(self.win_size, self.show_menu_bar)
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
         // Key tips: the hint bar under the dropdowns, the codes above all.
         let (keytip_bar, keytip_layer): (Element<'_, Message>, Element<'_, Message>) =
             self.ribbon.keytip_layers().unwrap_or_else(|| {
@@ -2924,6 +2929,7 @@ bg={bg_ms:.1}ms n={view_count}"
             main_ui,
             keytip_bar,
             dropdown_layer,
+            ribbon_menu_layer,
             qselect_layer,
             snap_override_layer,
             open_progress_layer,

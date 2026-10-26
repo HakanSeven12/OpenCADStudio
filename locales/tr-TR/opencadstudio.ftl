@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Yönet
     .view = Görünüm
 
+ribbon-menu =
+    .show-tabs = Sekmeleri göster
+    .show-panels = Panelleri göster
+    .reset = Varsayılana sıfırla
+    .already-default = Şerit zaten varsayılan düzende
+    .show-panel-titles = Panel başlıklarını göster
+    .show-menu-bar = Menü çubuğunu göster
+    .hide-menu-bar = Menü çubuğunu gizle
+    .close-ribbon = Şeridi kapat
+
 options =
     .language-section = Dil
     .language-label = Arayüz dili:

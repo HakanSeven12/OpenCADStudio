@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = Hallinta
     .view = Näkymä
 
+ribbon-menu =
+    .show-tabs = Näytä välilehdet
+    .show-panels = Näytä paneelit
+    .reset = Palauta oletukset
+    .already-default = Valintanauha vastaa jo oletusasettelua
+    .show-panel-titles = Näytä paneelien otsikot
+    .show-menu-bar = Näytä valikkorivi
+    .hide-menu-bar = Piilota valikkorivi
+    .close-ribbon = Sulje valintanauha
+
 options =
     .language-section = Kieli
     .language-label = Käyttöliittymän kieli:

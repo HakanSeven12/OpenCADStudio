@@ -40,6 +40,16 @@ ribbon-tab =
     .manage = ຈັດການ
     .view = ມຸມມອງ
 
+ribbon-menu =
+    .show-tabs = ສະແດງແທັບ
+    .show-panels = ສະແດງແຜງ
+    .reset = ຕັ້ງຄືນເປັນຄ່າເລີ່ມຕົ້ນ
+    .already-default = ແຖບໂບກົງກັບການຈັດວາງເລີ່ມຕົ້ນແລ້ວ
+    .show-panel-titles = ສະແດງຫົວຂໍ້ແຜງ
+    .show-menu-bar = ສະແດງແຖບເມນູ
+    .hide-menu-bar = ເຊື່ອງແຖບເມນູ
+    .close-ribbon = ປິດແຖບໂບ
+
 options =
     .language-section = ພາສາ
     .language-label = ພາສາສ່ວນຕິດຕໍ່ຜູ້ໃຊ້:

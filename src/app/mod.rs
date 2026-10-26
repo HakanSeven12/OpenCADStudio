@@ -3039,6 +3039,10 @@ pub enum Message {
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
     /// The minimize button and the minimized ribbon's popups.
     RibbonMinimize(crate::ui::ribbon::MinimizeMsg),
+    /// The pointer and pins of the ribbon's slide-outs.
+    RibbonSlideOut(crate::ui::ribbon::SlideOutMsg),
+    /// Time for a ribbon popup or slide-out to open or close.
+    RibbonTick,
     /// Panels of a ribbon tab dropped in a new order: the shown panels'
     /// titles, in that order.
     RibbonReorderPanels {

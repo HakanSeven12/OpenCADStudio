@@ -42,6 +42,7 @@ use crate::t;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use collapse::CollapseMode;
 use collapse::{CollapsePanels, Panel};
+pub use draw_panel::SlideOutMsg;
 pub use keytips::{
     KeyTipInput, KeyTipStep, active as keytips_active, key_pressed as keytip_key_pressed,
     key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed,
@@ -275,6 +276,8 @@ pub struct Ribbon {
     menu: Option<ribbon_menu::MenuState>,
     /// Popups of the minimized ribbon.
     min: minimize::MinState,
+    /// Where the pointer is, for closing a slide-out.
+    slide: draw_panel::SlideState,
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
@@ -415,6 +418,7 @@ impl Ribbon {
             layout: RibbonLayout::default(),
             menu: None,
             min: minimize::MinState::default(),
+            slide: draw_panel::SlideState::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
@@ -755,12 +759,14 @@ impl Ribbon {
         let key = extras::panel_key(module_id, g.title);
         let button_key = key.clone();
         let titles = self.layout.show_panel_titles;
+        let look = self.slide_look(&key);
         let group = move |compact: bool| {
             render_group(
                 compact,
                 g,
                 &key,
                 titles,
+                look,
                 Vec::new(),
                 &self.active_tool,
                 &self.open_dropdown,
@@ -801,6 +807,8 @@ impl Ribbon {
     }
 
     pub fn toggle_dropdown(&mut self, id: &str) {
+        // A slide-out tool's submenu that was open goes.
+        self.slide.closed(false);
         if self.open_dropdown.as_deref() == Some(id) {
             self.open_dropdown = None;
         } else {
@@ -816,6 +824,7 @@ impl Ribbon {
         self.open_dropdown = None;
         self.collapsed_open = None;
         self.layer_filter.clear();
+        self.slide.closed(true);
     }
 
     pub fn escape_extension(&mut self) -> bool {
@@ -825,7 +834,12 @@ impl Ribbon {
         let Some(parent) = draw_panel::parent_panel(id) else {
             return false;
         };
-        if id == parent {
+        // From a submenu back to its slide-out, unless that one is pinned
+        // and shows anyway.
+        let pinned = draw_panel::panel_for_dropdown(parent)
+            .is_some_and(|panel| self.layout.pinned_slideouts.contains(panel.key));
+        self.slide.closed(false);
+        if id == parent || pinned {
             self.close_dropdown();
         } else {
             self.open_dropdown = Some(parent.to_string());
@@ -1841,6 +1855,7 @@ fn render_group<'a>(
     group: &RibbonGroup,
     key: &str,
     titles: bool,
+    look: draw_panel::SlideLook,
     lead: Vec<Element<'a, Message>>,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
@@ -1903,11 +1918,11 @@ fn render_group<'a>(
         panel = panel.push(draw_panel::group_title(
             group.title,
             key,
-            open_dd,
+            look,
             active_tool.as_deref(),
         ));
     }
-    panel
+    let panel = panel
         .align_x(iced::Center)
         .spacing(0)
         .padding([3u16, 4])
@@ -1915,8 +1930,26 @@ fn render_group<'a>(
             TOOL_BAR_H
         } else {
             TOOL_BAR_H - PANEL_TITLE_H
-        }))
-        .into()
+        }));
+    let Some(extras) = draw_panel::panel_for_group(key) else {
+        return panel.into();
+    };
+    // A panel with a slide-out reports its body, which the slide-out opens
+    // under, and where the pointer is, which closes it. While it is open
+    // and not pinned, the panel is lit like the slide-out.
+    let panel = container(panel).style(move |theme: &Theme| container::Style {
+        background: (look == draw_panel::SlideLook::Open)
+            .then(|| Background::Color(crate::ui::style::chrome::open_panel(theme))),
+        ..Default::default()
+    });
+    let panel = mouse_area(panel)
+        .on_enter(Message::RibbonSlideOut(
+            draw_panel::SlideOutMsg::EnterPanel(extras.key),
+        ))
+        .on_exit(Message::RibbonSlideOut(
+            draw_panel::SlideOutMsg::LeavePanel(extras.key),
+        ));
+    PosReport::owned(draw_panel::panel_box_id(key), panel).into()
 }
 
 /// The top-level command id of a ribbon item, if it has one.

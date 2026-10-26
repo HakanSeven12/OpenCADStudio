@@ -59,8 +59,6 @@ pub enum MinimizeMsg {
     LeavePopup,
     /// A panel title or button was clicked.
     Click(Opener),
-    /// Time for a pending popup to open or close.
-    Tick,
 }
 
 /// Popup state of the minimized ribbon.
@@ -136,9 +134,10 @@ impl Ribbon {
         open
     }
 
-    /// Whether a popup is due to open or close, so the app keeps time.
+    /// Whether a popup or slide-out is due to open or close, so the app
+    /// keeps time.
     pub fn wants_tick(&self) -> bool {
-        self.min.opening.is_some() || self.min.closing.is_some()
+        self.min.opening.is_some() || self.min.closing.is_some() || self.slide.closing.is_some()
     }
 
     fn open_popup(&mut self, opener: Opener) {
@@ -214,28 +213,29 @@ impl Ribbon {
                     self.open_popup(opener);
                 }
             }
-            MinimizeMsg::Tick => {
-                if let Some((opener, at)) = self.min.opening {
-                    if now >= at {
-                        self.open_popup(opener);
-                    }
-                }
-                if let Some(at) = self.min.closing {
-                    if now >= at {
-                        // An open dropdown, menu or key tips keep the popup.
-                        if self.open_dropdown.is_some()
-                            || self.menu_open()
-                            || self.keytips.is_some()
-                        {
-                            self.min.closing = Some(now + CLOSE_DELAY);
-                        } else {
-                            self.close_popup();
-                        }
-                    }
+        }
+        false
+    }
+
+    /// Open or close what is due: a popup of the minimized ribbon, or an
+    /// unpinned slide-out the pointer left.
+    pub fn tick(&mut self, now: Instant) {
+        if let Some((opener, at)) = self.min.opening {
+            if now >= at {
+                self.open_popup(opener);
+            }
+        }
+        if let Some(at) = self.min.closing {
+            if now >= at {
+                // An open dropdown, menu or key tips keep the popup.
+                if self.open_dropdown.is_some() || self.menu_open() || self.keytips.is_some() {
+                    self.min.closing = Some(now + CLOSE_DELAY);
+                } else {
+                    self.close_popup();
                 }
             }
         }
-        false
+        self.slide_out_tick(now);
     }
 
     /// A click on tab `index`: shows the tab, opens its tool area when the
@@ -487,6 +487,7 @@ impl Ribbon {
                 group,
                 &key,
                 false,
+                self.slide_look(&key),
                 Vec::new(),
                 &self.active_tool,
                 &self.open_dropdown,
@@ -571,9 +572,9 @@ mod tests {
         let insert = tab(&ribbon, "insert");
         let t0 = Instant::now();
         ribbon.on_minimize(MinimizeMsg::EnterOpener(Opener::Tab(insert)), t0);
-        ribbon.on_minimize(MinimizeMsg::Tick, t0 + Duration::from_millis(100));
+        ribbon.tick(t0 + Duration::from_millis(100));
         assert!(!ribbon.popup_open());
-        ribbon.on_minimize(MinimizeMsg::Tick, t0 + Duration::from_millis(160));
+        ribbon.tick(t0 + Duration::from_millis(160));
         assert!(ribbon.popup_open());
         assert_eq!(ribbon.active, insert);
 
@@ -581,17 +582,17 @@ mod tests {
         let t1 = t0 + Duration::from_millis(200);
         ribbon.on_minimize(MinimizeMsg::LeaveOpener, t1);
         ribbon.on_minimize(MinimizeMsg::EnterPopup, t1);
-        ribbon.on_minimize(MinimizeMsg::Tick, t1 + Duration::from_secs(2));
+        ribbon.tick(t1 + Duration::from_secs(2));
         assert!(ribbon.popup_open());
 
         // Leaving both closes it a second later, unless a dropdown is open.
         let t2 = t1 + Duration::from_secs(3);
         ribbon.on_minimize(MinimizeMsg::LeavePopup, t2);
         ribbon.open_dropdown = Some("CIRCLE".into());
-        ribbon.on_minimize(MinimizeMsg::Tick, t2 + Duration::from_millis(1100));
+        ribbon.tick(t2 + Duration::from_millis(1100));
         assert!(ribbon.popup_open());
         ribbon.open_dropdown = None;
-        ribbon.on_minimize(MinimizeMsg::Tick, t2 + Duration::from_millis(2200));
+        ribbon.tick(t2 + Duration::from_millis(2200));
         assert!(!ribbon.popup_open());
         assert!(!ribbon.wants_tick());
     }

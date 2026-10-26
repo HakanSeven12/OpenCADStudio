@@ -2925,6 +2925,15 @@ bg={bg_ms:.1}ms n={view_count}"
         }
         .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
+        // Pinned slide-outs hang under their panels, over the drawing.
+        let pinned_layer: Element<'_, Message> = if self.clean_screen || self.ribbon_closed {
+            None
+        } else {
+            self.ribbon
+                .pinned_slide_outs(self.tabs[self.active_tab].is_start, self.win_size)
+        }
+        .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
         let ribbon_menu_layer: Element<'_, Message> = self
             .ribbon
             .menu_overlay(self.win_size, self.show_menu_bar)
@@ -2941,6 +2950,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
         let composed = stack![
             main_ui,
+            pinned_layer,
             ribbon_popup_layer,
             keytip_bar,
             dropdown_layer,
@@ -3160,10 +3170,9 @@ impl OpenCADStudio {
             Subscription::none()
         };
         // Expire the QuickCalc status message ("Copied 870").
-        // Open or close a minimized ribbon's popup after its delay.
+        // Open or close a ribbon popup or slide-out after its delay.
         let ribbon_minimize = if self.ribbon.wants_tick() {
-            iced::time::every(std::time::Duration::from_millis(50))
-                .map(|_| Message::RibbonMinimize(crate::ui::ribbon::MinimizeMsg::Tick))
+            iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::RibbonTick)
         } else {
             Subscription::none()
         };

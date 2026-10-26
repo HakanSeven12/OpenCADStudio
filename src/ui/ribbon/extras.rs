@@ -15,11 +15,9 @@ pub(crate) fn panel_key(module_id: &str, title: &str) -> String {
 /// How a slide-out shows its tools.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Layout {
-    /// A grid of icon buttons.
+    /// Rows of icon buttons.
     Grid,
-    /// One row per tool: its icon, then its name.
-    List,
-    /// The tools as a list, then the xref fading switch and amount.
+    /// The icon buttons, then the xref fading switch and amount.
     Reference,
 }
 
@@ -46,8 +44,7 @@ impl MoreTool {
 
 /// A titled run of slide-out tools.
 pub(crate) struct MoreGroup {
-    /// Labels the group once a slide-out has more than one; not drawn yet.
-    #[allow(dead_code)]
+    /// Labels the group once a slide-out has more than one.
     pub title: &'static str,
     pub tools: Vec<MoreTool>,
 }
@@ -60,14 +57,21 @@ pub(crate) struct PanelExtras {
     pub dialog: Option<&'static str>,
     /// What the launcher's tooltip calls the dialog.
     pub(super) dialog_label: &'static str,
+    /// The panel key.
+    pub(super) key: &'static str,
     /// The slide-out's dropdown id, which key tips and anchors are keyed on.
     pub(super) id: &'static str,
-    /// Anchor of the panel title, which the grid slide-out centres on.
-    pub(super) title_id: &'static str,
     pub(super) layout: Layout,
 }
 
 impl PanelExtras {
+    /// The title of the panel.
+    pub fn title(&self) -> &'static str {
+        self.key
+            .split_once('/')
+            .map_or(self.key, |(_, title)| title)
+    }
+
     /// Every slide-out tool, in display order.
     pub fn tools(&self) -> impl Iterator<Item = &MoreTool> {
         self.more.iter().flat_map(|group| &group.tools)
@@ -103,7 +107,6 @@ fn tool(command: &'static str, label: &'static str, icon: &'static [u8]) -> More
 fn extras(
     title: &'static str,
     id: &'static str,
-    title_id: &'static str,
     layout: Layout,
     dialog: Option<(&'static str, &'static str)>,
     tools: Vec<MoreTool>,
@@ -112,8 +115,8 @@ fn extras(
         more: vec![MoreGroup { title, tools }],
         dialog: dialog.map(|(command, _)| command),
         dialog_label: dialog.map_or("", |(_, label)| label),
+        key: "",
         id,
-        title_id,
         layout,
     }
 }
@@ -321,32 +324,17 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
     vec![
         (
             "draw/Draw",
-            extras(
-                "Draw",
-                DRAW_ID,
-                "draw_extension_title",
-                Layout::Grid,
-                None,
-                draw_tools(),
-            ),
+            extras("Draw", DRAW_ID, Layout::Grid, None, draw_tools()),
         ),
         (
             "draw/Modify",
-            extras(
-                "Modify",
-                MODIFY_ID,
-                "modify_extension_title",
-                Layout::Grid,
-                None,
-                modify_tools(),
-            ),
+            extras("Modify", MODIFY_ID, Layout::Grid, None, modify_tools()),
         ),
         (
             "draw/Block",
             extras(
                 "Block",
                 "home_block_extension",
-                "home_block_extension_title",
                 Layout::Grid,
                 None,
                 vec![attdef(), attman(), attsync(), base()],
@@ -357,8 +345,7 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
             extras(
                 "Block Definition",
                 "block_definition_extension",
-                "block_definition_extension_title",
-                Layout::List,
+                Layout::Grid,
                 None,
                 vec![base(), attsync()],
             ),
@@ -370,7 +357,6 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
             extras(
                 "Reference",
                 REFERENCE_ID,
-                "reference_extension_title",
                 Layout::Reference,
                 Some(("EXTERNALREFERENCES", "External References")),
                 vec![tool(
@@ -385,8 +371,7 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
             extras(
                 "Import",
                 "import_extension",
-                "import_extension_title",
-                Layout::List,
+                Layout::Grid,
                 None,
                 vec![tool(
                     "LANDXMLIMPORT",
@@ -400,7 +385,15 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
 
 fn registry() -> &'static [(&'static str, PanelExtras)] {
     static REGISTRY: OnceLock<Vec<(&'static str, PanelExtras)>> = OnceLock::new();
-    REGISTRY.get_or_init(build)
+    REGISTRY.get_or_init(|| {
+        build()
+            .into_iter()
+            .map(|(key, mut extras)| {
+                extras.key = key;
+                (key, extras)
+            })
+            .collect()
+    })
 }
 
 /// The extras of the panel `key`, if it has any.
@@ -446,6 +439,17 @@ mod tests {
     }
 
     #[test]
+    fn every_entry_knows_its_key_and_title() {
+        let draw = for_panel("draw/Draw").unwrap();
+        assert_eq!(draw.key, "draw/Draw");
+        assert_eq!(draw.title(), "Draw");
+        assert_eq!(
+            for_panel("insert/Block Definition").unwrap().title(),
+            "Block Definition"
+        );
+    }
+
+    #[test]
     fn home_block_has_a_slide_out_and_insert_block_does_not() {
         assert!(for_panel("draw/Block").is_some());
         assert!(for_panel("insert/Block").is_none());
@@ -453,7 +457,7 @@ mod tests {
 
     #[test]
     fn slide_out_ids_are_unique() {
-        let ids: Vec<_> = all().flat_map(|e| [e.id, e.title_id]).collect();
+        let ids: Vec<_> = all().map(|e| e.id).collect();
         for (i, id) in ids.iter().enumerate() {
             assert!(!ids[..i].contains(id), "{id} is used twice");
         }

@@ -2642,6 +2642,16 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::RibbonSlideOut(msg) => {
+                if self.ribbon.on_slide_out(msg, iced::time::Instant::now()) {
+                    self.save_config();
+                }
+                Task::none()
+            }
+            Message::RibbonTick => {
+                self.ribbon.tick(iced::time::Instant::now());
+                Task::none()
+            }
             Message::RibbonReorderPanels { module, titles } => {
                 self.ribbon.reorder_panels(module, &titles);
                 self.save_config();

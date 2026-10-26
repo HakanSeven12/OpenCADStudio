@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Περισσότερα εργαλεία
     .plot = Σχεδίαση...
     .recent-drawings = Πρόσφατα σχέδια
+    .search-placeholder = Πληκτρολογήστε εντολή
+    .search-commands = Αναζήτηση εντολών
+    .collapse-search = Σύμπτυξη πλαισίου αναζήτησης
+    .best-matches = Καλύτερες αντιστοιχίες
+    .quick-access-toolbar = Γραμμή γρήγορης πρόσβασης
+    .application-menu = Μενού εφαρμογής
+    .ribbon = Κορδέλα
+    .menu-bar = Γραμμή μενού
+    .ribbon-tab = Καρτέλα κορδέλας
+    .no-matches = Δεν βρέθηκαν εντολές
 
 options =
     .language-section = Γλώσσα

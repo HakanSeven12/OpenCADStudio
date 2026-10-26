@@ -90,51 +90,7 @@ impl Ribbon {
     /// The application menu under the logo: the file commands and Options,
     /// then the recent drawings.
     pub(super) fn app_menu(&self, recent: &[PathBuf], win: (f32, f32)) -> Element<'_, Message> {
-        let commands: [(&'static [u8], String, &'static str, &'static str); 7] = [
-            (
-                icons::DOC_NEW,
-                crate::t!("New").into_owned(),
-                "Ctrl+N",
-                "QNEW",
-            ),
-            (
-                icons::FOLDER_OPEN,
-                crate::t!("Open...").into_owned(),
-                "Ctrl+O",
-                "OPEN",
-            ),
-            (
-                icons::SAVE,
-                crate::t!("Save").into_owned(),
-                "Ctrl+S",
-                "QSAVE",
-            ),
-            (
-                icons::FILE_EXPORT,
-                crate::t!("Save as...").into_owned(),
-                "",
-                "SAVEAS",
-            ),
-            (
-                icons::DOC,
-                crate::t!("Export PDF").into_owned(),
-                "",
-                "EXPORTPDF",
-            ),
-            (
-                icons::PRINT,
-                crate::tr!("ribbon-menu", "plot"),
-                "Ctrl+P",
-                "PLOT",
-            ),
-            (
-                icons::GEAR,
-                crate::t!("Options").into_owned(),
-                "",
-                "OPTIONS",
-            ),
-        ];
-        let mut rows: Vec<Element<'_, Message>> = commands
+        let mut rows: Vec<Element<'_, Message>> = commands()
             .into_iter()
             .map(|(icon, label, shortcut, command)| {
                 menu_row(icon, label, shortcut, Message::Command(command.to_string()))
@@ -179,6 +135,54 @@ impl Ribbon {
             .width(Length::Fixed(MENU_W));
         self.place_dropdown(APP_MENU_ID, panel.into(), MENU_W, win.0)
     }
+}
+
+/// The application menu's commands: icon, label, shortcut and command.
+pub(super) fn commands() -> [(&'static [u8], String, &'static str, &'static str); 7] {
+    [
+        (
+            icons::DOC_NEW,
+            crate::t!("New").into_owned(),
+            "Ctrl+N",
+            "QNEW",
+        ),
+        (
+            icons::FOLDER_OPEN,
+            crate::t!("Open...").into_owned(),
+            "Ctrl+O",
+            "OPEN",
+        ),
+        (
+            icons::SAVE,
+            crate::t!("Save").into_owned(),
+            "Ctrl+S",
+            "QSAVE",
+        ),
+        (
+            icons::FILE_EXPORT,
+            crate::t!("Save as...").into_owned(),
+            "",
+            "SAVEAS",
+        ),
+        (
+            icons::DOC,
+            crate::t!("Export PDF").into_owned(),
+            "",
+            "EXPORTPDF",
+        ),
+        (
+            icons::PRINT,
+            crate::tr!("ribbon-menu", "plot"),
+            "Ctrl+P",
+            "PLOT",
+        ),
+        (
+            icons::GEAR,
+            crate::t!("Options").into_owned(),
+            "",
+            "OPTIONS",
+        ),
+    ]
 }
 
 /// A 28 px menu row: icon, label, and the shortcut right-aligned in muted

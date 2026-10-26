@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Diğer araçlar
     .plot = Çizdir...
     .recent-drawings = Son çizimler
+    .search-placeholder = Bir komut yazın
+    .search-commands = Komut ara
+    .collapse-search = Arama kutusunu daralt
+    .best-matches = En iyi eşleşmeler
+    .quick-access-toolbar = Hızlı Erişim Araç Çubuğu
+    .application-menu = Uygulama Menüsü
+    .ribbon = Şerit
+    .menu-bar = Menü Çubuğu
+    .ribbon-tab = Şerit Sekmesi
+    .no-matches = Eşleşen komut yok
 
 options =
     .language-section = Dil

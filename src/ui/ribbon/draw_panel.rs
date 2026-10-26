@@ -417,7 +417,7 @@ fn slide_out<'a>(
     width: f32,
     pinned: bool,
 ) -> Element<'a, Message> {
-    let active = ribbon.active_tool.as_deref();
+    let active = ribbon.lit_tool().as_deref();
     let inner = (width - 2.0 * PAD).max(CELL + SPLIT_W);
     let labelled = panel.more.len() > 1;
     let mut groups = column![].spacing(4);

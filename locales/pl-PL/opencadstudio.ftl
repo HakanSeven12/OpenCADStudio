@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Więcej narzędzi
     .plot = Drukuj...
     .recent-drawings = Ostatnie rysunki
+    .search-placeholder = Wpisz polecenie
+    .search-commands = Szukaj poleceń
+    .collapse-search = Zwiń pole wyszukiwania
+    .best-matches = Najlepsze dopasowania
+    .quick-access-toolbar = Pasek narzędzi szybkiego dostępu
+    .application-menu = Menu aplikacji
+    .ribbon = Wstążka
+    .menu-bar = Pasek menu
+    .ribbon-tab = Karta wstążki
+    .no-matches = Brak pasujących poleceń
 
 options =
     .language-section = Język

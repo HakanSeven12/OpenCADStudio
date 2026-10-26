@@ -2654,6 +2654,28 @@ impl OpenCADStudio {
                 self.ribbon.tick(iced::time::Instant::now());
                 Task::none()
             }
+            Message::RibbonSearch(msg) => {
+                let out = self.ribbon.on_search(msg, iced::time::Instant::now());
+                if out.save {
+                    self.save_config();
+                }
+                let mut tasks = Vec::new();
+                if out.focus {
+                    tasks.push(iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::ribbon::SEARCH_INPUT_ID,
+                    )));
+                }
+                if let Some(y) = out.scroll_to {
+                    tasks.push(iced::widget::operation::scroll_to(
+                        crate::ui::ribbon::results_scroll_id(),
+                        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y },
+                    ));
+                }
+                if let Some(run) = out.run {
+                    tasks.push(self.update(run));
+                }
+                Task::batch(tasks)
+            }
             Message::MenuCommand(line) => {
                 let sweep = self.sync_active_field_if_any();
                 self.ribbon.close_dropdown();
@@ -3244,6 +3266,14 @@ impl OpenCADStudio {
                 shortcut,
                 extend_selection,
             } => {
+                // ↑/↓ step through the command search's results.
+                if self.ribbon.search_results_open()
+                    && matches!(direction, ArrowKey::Up | ArrowKey::Down)
+                {
+                    let down = matches!(direction, ArrowKey::Down);
+                    let step = crate::ui::ribbon::SearchMsg::Move(down);
+                    return self.update(Message::RibbonSearch(step));
+                }
                 if self.mtext_editor.is_some() {
                     match direction {
                         ArrowKey::Left => self.mtext_caret_move(-1, extend_selection),
@@ -5060,6 +5090,7 @@ impl OpenCADStudio {
             Message::WindowResized(w, h) => {
                 self.vp_size = ((w - 440.0).max(200.0), h);
                 self.win_size = (w, h);
+                self.ribbon.set_window_size((w, h));
                 Task::none()
             }
 

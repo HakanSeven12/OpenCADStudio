@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Thêm công cụ
     .plot = In...
     .recent-drawings = Bản vẽ gần đây
+    .search-placeholder = Nhập lệnh
+    .search-commands = Tìm lệnh
+    .collapse-search = Thu gọn ô tìm kiếm
+    .best-matches = Kết quả phù hợp nhất
+    .quick-access-toolbar = Thanh công cụ truy cập nhanh
+    .application-menu = Menu ứng dụng
+    .ribbon = Ruy-băng
+    .menu-bar = Thanh menu
+    .ribbon-tab = Thẻ ruy-băng
+    .no-matches = Không có lệnh phù hợp
 
 options =
     .language-section = Ngôn ngữ

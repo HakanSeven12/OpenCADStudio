@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Weitere Werkzeuge
     .plot = Plotten...
     .recent-drawings = Zuletzt verwendete Zeichnungen
+    .search-placeholder = Befehl eingeben
+    .search-commands = Befehle suchen
+    .collapse-search = Suchfeld einklappen
+    .best-matches = Beste Treffer
+    .quick-access-toolbar = Schnellzugriff-Werkzeugkasten
+    .application-menu = Anwendungsmenü
+    .ribbon = Multifunktionsleiste
+    .menu-bar = Menüleiste
+    .ribbon-tab = Multifunktionsleisten-Register
+    .no-matches = Keine passenden Befehle
 
 options =
     .language-section = Sprache

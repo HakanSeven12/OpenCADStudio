@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = További eszközök
     .plot = Nyomtatás...
     .recent-drawings = Legutóbbi rajzok
+    .search-placeholder = Írjon be egy parancsot
+    .search-commands = Parancsok keresése
+    .collapse-search = Keresőmező összecsukása
+    .best-matches = Legjobb találatok
+    .quick-access-toolbar = Gyorselérési eszköztár
+    .application-menu = Alkalmazásmenü
+    .ribbon = Szalag
+    .menu-bar = Menüsor
+    .ribbon-tab = Szalaglap
+    .no-matches = Nincs egyező parancs
 
 options =
     .language-section = Nyelv

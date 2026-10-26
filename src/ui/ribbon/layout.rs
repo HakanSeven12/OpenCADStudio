@@ -51,6 +51,8 @@ pub struct RibbonLayout {
     pub minimize_pref: MinimizePref,
     /// Panel keys of the slide-outs pinned open.
     pub pinned_slideouts: BTreeSet<String>,
+    /// The command search shows as its magnifier button only.
+    pub search_collapsed: bool,
 }
 
 impl Default for RibbonLayout {
@@ -63,6 +65,7 @@ impl Default for RibbonLayout {
             minimize: RibbonMinimize::default(),
             minimize_pref: MinimizePref::default(),
             pinned_slideouts: BTreeSet::new(),
+            search_collapsed: false,
         }
     }
 }

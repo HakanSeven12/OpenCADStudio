@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Meer gereedschappen
     .plot = Plotten...
     .recent-drawings = Recente tekeningen
+    .search-placeholder = Typ een opdracht
+    .search-commands = Opdrachten zoeken
+    .collapse-search = Zoekvak samenvouwen
+    .best-matches = Beste overeenkomsten
+    .quick-access-toolbar = Werkbalk Snelle toegang
+    .application-menu = Toepassingsmenu
+    .ribbon = Lint
+    .menu-bar = Menubalk
+    .ribbon-tab = Linttabblad
+    .no-matches = Geen overeenkomende opdrachten
 
 options =
     .language-section = Taal

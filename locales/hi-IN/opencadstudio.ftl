@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = और टूल
     .plot = प्लॉट...
     .recent-drawings = हाल के ड्रॉइंग
+    .search-placeholder = कमांड टाइप करें
+    .search-commands = कमांड खोजें
+    .collapse-search = खोज बॉक्स छोटा करें
+    .best-matches = सर्वोत्तम मिलान
+    .quick-access-toolbar = त्वरित पहुँच टूलबार
+    .application-menu = एप्लिकेशन मेनू
+    .ribbon = रिबन
+    .menu-bar = मेनू बार
+    .ribbon-tab = रिबन टैब
+    .no-matches = कोई मिलती-जुलती कमांड नहीं
 
 options =
     .language-section = भाषा

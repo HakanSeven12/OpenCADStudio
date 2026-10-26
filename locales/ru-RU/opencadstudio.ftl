@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Другие инструменты
     .plot = Печать...
     .recent-drawings = Недавние чертежи
+    .search-placeholder = Введите команду
+    .search-commands = Поиск команд
+    .collapse-search = Свернуть поле поиска
+    .best-matches = Лучшие совпадения
+    .quick-access-toolbar = Панель быстрого доступа
+    .application-menu = Меню приложения
+    .ribbon = Лента
+    .menu-bar = Строка меню
+    .ribbon-tab = Вкладка ленты
+    .no-matches = Нет подходящих команд
 
 options =
     .language-section = Язык

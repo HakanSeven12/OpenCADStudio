@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = その他のツール
     .plot = 印刷...
     .recent-drawings = 最近使用した図面
+    .search-placeholder = コマンドを入力
+    .search-commands = コマンドを検索
+    .collapse-search = 検索ボックスを折りたたむ
+    .best-matches = 最適な一致
+    .quick-access-toolbar = クイック アクセス ツールバー
+    .application-menu = アプリケーション メニュー
+    .ribbon = リボン
+    .menu-bar = メニュー バー
+    .ribbon-tab = リボン タブ
+    .no-matches = 一致するコマンドはありません
 
 options =
     .language-section = 言語

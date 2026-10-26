@@ -137,7 +137,10 @@ impl Ribbon {
     /// Whether a popup or slide-out is due to open or close, so the app
     /// keeps time.
     pub fn wants_tick(&self) -> bool {
-        self.min.opening.is_some() || self.min.closing.is_some() || self.slide.closing.is_some()
+        self.min.opening.is_some()
+            || self.min.closing.is_some()
+            || self.slide.closing.is_some()
+            || self.search_flashing()
     }
 
     fn open_popup(&mut self, opener: Opener) {
@@ -236,6 +239,7 @@ impl Ribbon {
             }
         }
         self.slide_out_tick(now);
+        self.search_tick(now);
     }
 
     /// A click on tab `index`: shows the tab, opens its tool area when the
@@ -489,7 +493,7 @@ impl Ribbon {
                 false,
                 self.slide_look(&key),
                 Vec::new(),
-                &self.active_tool,
+                self.lit_tool(),
                 &self.open_dropdown,
                 &self.last_cmd,
                 self.toggle_state(show_block_palette),

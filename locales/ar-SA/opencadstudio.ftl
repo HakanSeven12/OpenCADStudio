@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = مزيد من الأدوات
     .plot = طباعة...
     .recent-drawings = الرسومات الأخيرة
+    .search-placeholder = اكتب أمرًا
+    .search-commands = البحث عن الأوامر
+    .collapse-search = طي مربع البحث
+    .best-matches = أفضل التطابقات
+    .quick-access-toolbar = شريط أدوات الوصول السريع
+    .application-menu = قائمة التطبيق
+    .ribbon = الشريط
+    .menu-bar = شريط القوائم
+    .ribbon-tab = علامة تبويب الشريط
+    .no-matches = لا توجد أوامر مطابقة
 
 options =
     .language-section = اللغة

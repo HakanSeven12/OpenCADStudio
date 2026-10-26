@@ -39,6 +39,7 @@ mod layout;
 mod locate;
 mod minimize;
 mod ribbon_menu;
+mod search;
 use crate::t;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
@@ -52,6 +53,7 @@ pub use keytips::{
 pub use layout::{MinimizePref, RibbonLayout, RibbonMinimize};
 pub use minimize::{MinimizeMsg, Opener};
 pub use ribbon_menu::{RibbonMenuMsg, Submenu};
+pub use search::{results_scroll_id, SearchMsg, SearchOutcome, SEARCH_INPUT_ID};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
     widgets::make_tip(text)
@@ -204,6 +206,16 @@ fn panel_measure_key(
     hasher.finish()
 }
 
+/// The quick-access file buttons before Undo and Redo: icon, label and
+/// command.
+static QUICK_ACCESS: [(&[u8], &str, &str); 5] = [
+    (crate::ui::icons::DOC_NEW, "New", "QNEW"),
+    (crate::ui::icons::FOLDER_OPEN, "Open", "OPEN"),
+    (crate::ui::icons::SAVE, "Save", "SAVE"),
+    (crate::ui::icons::FILE_EXPORT, "Save As", "SAVEAS"),
+    (crate::ui::icons::PRINT, "Print", "PRINT"),
+];
+
 // ── Ribbon state ───────────────────────────────────────────────────────────
 
 pub struct Ribbon {
@@ -280,6 +292,11 @@ pub struct Ribbon {
     min: minimize::MinState,
     /// Where the pointer is, for closing a slide-out.
     slide: draw_panel::SlideState,
+    /// The command search.
+    search: search::SearchState,
+    /// The window size, for the search box and its results.
+    win_w: f32,
+    win_h: f32,
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
@@ -421,6 +438,9 @@ impl Ribbon {
             menu: None,
             min: minimize::MinState::default(),
             slide: draw_panel::SlideState::default(),
+            search: search::SearchState::default(),
+            win_w: f32::INFINITY,
+            win_h: f32::INFINITY,
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
@@ -430,6 +450,12 @@ impl Ribbon {
             xref_fade: 50,
             keytips: None,
         }
+    }
+
+    /// The window size changed.
+    pub fn set_window_size(&mut self, (w, h): (f32, f32)) {
+        self.win_w = w;
+        self.win_h = h;
     }
 
     /// Change the tool-panel density. Persistence is handled by the caller via
@@ -770,7 +796,7 @@ impl Ribbon {
                 titles,
                 look,
                 Vec::new(),
-                &self.active_tool,
+                self.lit_tool(),
                 &self.open_dropdown,
                 &self.last_cmd,
                 ts,
@@ -787,7 +813,7 @@ impl Ribbon {
                 g,
                 &button_key,
                 self.last_panel_tool.get(g.title).copied(),
-                &self.active_tool,
+                self.lit_tool(),
                 &self.open_dropdown,
                 &self.last_cmd,
                 ts,
@@ -926,15 +952,27 @@ impl Ribbon {
         visibility: Option<crate::ui::window::block_visibility::RibbonContext>,
     ) -> Element<'a, Message> {
         // ── Quick-access file commands + undo/redo, one merged flow ────────
-        let lead = iced::widget::Row::with_children(vec![
-            quick_access_btn(crate::ui::icons::DOC_NEW, "New", "QNEW").into(),
-            quick_access_btn(crate::ui::icons::FOLDER_OPEN, "Open", "OPEN").into(),
-            quick_access_btn(crate::ui::icons::SAVE, "Save", "SAVE").into(),
-            quick_access_btn(crate::ui::icons::FILE_EXPORT, "Save As", "SAVEAS").into(),
-            quick_access_btn(crate::ui::icons::PRINT, "Print", "PRINT").into(),
-            render_history_control("Undo", UNDO_HISTORY_ID, undo_count, &self.open_dropdown).into(),
-            render_history_control("Redo", REDO_HISTORY_ID, redo_count, &self.open_dropdown).into(),
-        ])
+        let lead = iced::widget::Row::with_children(
+            QUICK_ACCESS
+                .iter()
+                .map(|&(icon, label, cmd)| quick_access_btn(icon, label, cmd))
+                .chain([
+                    render_history_control(
+                        "Undo",
+                        UNDO_HISTORY_ID,
+                        undo_count,
+                        &self.open_dropdown,
+                    )
+                    .into(),
+                    render_history_control(
+                        "Redo",
+                        REDO_HISTORY_ID,
+                        redo_count,
+                        &self.open_dropdown,
+                    )
+                    .into(),
+                ]),
+        )
         .spacing(TOP_HIST_GAP)
         .align_y(iced::Center)
         .wrap()
@@ -1091,6 +1129,10 @@ impl Ribbon {
             )
             .width(Length::Fill),
         );
+        // Without the menu row the search box ends the tab row.
+        if menu_row.is_none() {
+            tab_row = tab_row.push(self.search_box());
+        }
         if !self.collapse_tight.load(Ordering::Relaxed) {
             tab_row = tab_row.push(mode_dd);
         }
@@ -1113,7 +1155,7 @@ impl Ribbon {
                     background: Some(Background::Color(crate::ui::style::chrome::bar(theme))),
                     ..Default::default()
                 }),
-                column![menu_row, tab_bar].width(Fill),
+                column![self.with_search_box(menu_row), tab_bar].width(Fill),
             ]
             .into(),
             None => tab_bar.into(),
@@ -1137,6 +1179,22 @@ impl Ribbon {
             }
         }
         keytips::ribbon_area(ribbon_menu::RightPress::new(ribbon))
+    }
+
+    /// The menu row with the search box at its right end.
+    pub fn with_search_box<'a>(&'a self, menu_row: Element<'a, Message>) -> Element<'a, Message> {
+        container(
+            row![
+                container(menu_row).width(Fill),
+                container(self.search_box()).padding([0, 6]),
+            ]
+            .align_y(iced::Center),
+        )
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(crate::ui::style::chrome::bar(theme))),
+            ..Default::default()
+        })
+        .into()
     }
 
     /// The style lists the style combos show.

@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Plus d'outils
     .plot = Tracer...
     .recent-drawings = Dessins récents
+    .search-placeholder = Tapez une commande
+    .search-commands = Rechercher des commandes
+    .collapse-search = Réduire la zone de recherche
+    .best-matches = Meilleurs résultats
+    .quick-access-toolbar = Barre d'outils d'accès rapide
+    .application-menu = Menu de l'application
+    .ribbon = Ruban
+    .menu-bar = Barre de menus
+    .ribbon-tab = Onglet du ruban
+    .no-matches = Aucune commande correspondante
 
 options =
     .language-section = Langue

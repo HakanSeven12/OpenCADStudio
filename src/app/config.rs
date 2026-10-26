@@ -741,6 +741,7 @@ mod tests {
         assert_eq!(old.ribbon.collapse, CollapseMode::Compact);
         assert!(old.ribbon.layout == RibbonLayout::default());
         assert!(old.ribbon.layout.show_panel_titles);
+        assert!(!old.ribbon.layout.search_collapsed);
 
         let mut original = AppConfig::default();
         let layout = &mut original.ribbon.layout;
@@ -754,12 +755,14 @@ mod tests {
         layout.minimize = RibbonMinimize::PanelTitles;
         layout.minimize_pref = MinimizePref::Tabs;
         layout.pinned_slideouts.insert("draw/Draw".into());
+        layout.search_collapsed = true;
 
         let serialized = serde_json::to_string(&original).expect("serialize config");
         // The fields sit directly in the ribbon section.
         let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
         assert_eq!(value["ribbon"]["hidden_tabs"][0], "manage");
         assert_eq!(value["ribbon"]["minimize"], "PanelTitles");
+        assert_eq!(value["ribbon"]["search_collapsed"], true);
         let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
         assert!(restored.ribbon == original.ribbon);
     }

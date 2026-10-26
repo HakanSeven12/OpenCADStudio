@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = ເຄື່ອງມືເພີ່ມເຕີມ
     .plot = ພິມ...
     .recent-drawings = ແບບແຕ້ມຫຼ້າສຸດ
+    .search-placeholder = ພິມຄຳສັ່ງ
+    .search-commands = ຄົ້ນຫາຄຳສັ່ງ
+    .collapse-search = ຫຍໍ້ກ່ອງຄົ້ນຫາ
+    .best-matches = ກົງກັນທີ່ສຸດ
+    .quick-access-toolbar = ແຖບເຄື່ອງມືເຂົ້າເຖິງດ່ວນ
+    .application-menu = ເມນູແອັບພລິເຄຊັນ
+    .ribbon = ໂບ
+    .menu-bar = ແຖບເມນູ
+    .ribbon-tab = ແຖບໂບ
+    .no-matches = ບໍ່ມີຄຳສັ່ງທີ່ກົງກັນ
 
 options =
     .language-section = ພາສາ

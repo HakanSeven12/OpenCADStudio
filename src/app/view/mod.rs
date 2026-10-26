@@ -2681,7 +2681,8 @@ bg={bg_ms:.1}ms n={view_count}"
                     col = col.push(
                         row![
                             container(self.ribbon.logo_button(false)).padding([0, 6]),
-                            crate::ui::menu_bar::view(self.open_drawings()),
+                            self.ribbon
+                                .with_search_box(crate::ui::menu_bar::view(self.open_drawings())),
                         ]
                         .align_y(iced::Center),
                     );
@@ -2948,6 +2949,11 @@ bg={bg_ms:.1}ms n={view_count}"
         }
         .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
+        let search_layer: Element<'_, Message> = self
+            .ribbon
+            .search_layer()
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
         let ribbon_menu_layer: Element<'_, Message> = self
             .ribbon
             .menu_overlay(self.win_size, self.show_menu_bar)
@@ -2968,6 +2974,7 @@ bg={bg_ms:.1}ms n={view_count}"
             ribbon_popup_layer,
             keytip_bar,
             dropdown_layer,
+            search_layer,
             ribbon_menu_layer,
             qselect_layer,
             snap_override_layer,

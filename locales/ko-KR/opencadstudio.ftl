@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = 추가 도구
     .plot = 플롯...
     .recent-drawings = 최근 도면
+    .search-placeholder = 명령 입력
+    .search-commands = 명령 검색
+    .collapse-search = 검색 상자 접기
+    .best-matches = 최적 일치
+    .quick-access-toolbar = 빠른 접근 도구막대
+    .application-menu = 응용프로그램 메뉴
+    .ribbon = 리본
+    .menu-bar = 메뉴 막대
+    .ribbon-tab = 리본 탭
+    .no-matches = 일치하는 명령이 없습니다
 
 options =
     .language-section = 언어

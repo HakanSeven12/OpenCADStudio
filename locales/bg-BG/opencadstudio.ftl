@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Още инструменти
     .plot = Печат...
     .recent-drawings = Последни чертежи
+    .search-placeholder = Въведете команда
+    .search-commands = Търсене на команди
+    .collapse-search = Свиване на полето за търсене
+    .best-matches = Най-добри съвпадения
+    .quick-access-toolbar = Лента за бърз достъп
+    .application-menu = Меню на приложението
+    .ribbon = Лента
+    .menu-bar = Лента с менюта
+    .ribbon-tab = Раздел на лентата
+    .no-matches = Няма съвпадащи команди
 
 options =
     .language-section = Език

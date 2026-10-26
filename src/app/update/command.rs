@@ -1286,7 +1286,8 @@ impl OpenCADStudio {
             self.resolve_user_select(false);
             return Task::none();
         }
-        if self.ribbon.close_menu()
+        if self.ribbon.escape_search()
+            || self.ribbon.close_menu()
             || self.ribbon.close_app_menu()
             || self.ribbon.escape_extension()
             || self.ribbon.close_popup()

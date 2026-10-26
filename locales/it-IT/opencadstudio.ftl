@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Altri strumenti
     .plot = Stampa...
     .recent-drawings = Disegni recenti
+    .search-placeholder = Digitare un comando
+    .search-commands = Cerca comandi
+    .collapse-search = Comprimi la casella di ricerca
+    .best-matches = Migliori corrispondenze
+    .quick-access-toolbar = Barra di accesso rapido
+    .application-menu = Menu dell'applicazione
+    .ribbon = Barra multifunzione
+    .menu-bar = Barra dei menu
+    .ribbon-tab = Scheda della barra multifunzione
+    .no-matches = Nessun comando corrispondente
 
 options =
     .language-section = Lingua

@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Další nástroje
     .plot = Vykreslit...
     .recent-drawings = Poslední výkresy
+    .search-placeholder = Zadejte příkaz
+    .search-commands = Hledat příkazy
+    .collapse-search = Sbalit pole hledání
+    .best-matches = Nejlepší shody
+    .quick-access-toolbar = Panel nástrojů Rychlý přístup
+    .application-menu = Nabídka aplikace
+    .ribbon = Pás karet
+    .menu-bar = Řádek nabídek
+    .ribbon-tab = Karta pásu
+    .no-matches = Žádné odpovídající příkazy
 
 options =
     .language-section = Jazyk

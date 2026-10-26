@@ -3047,6 +3047,8 @@ pub enum Message {
     RibbonSlideOut(crate::ui::ribbon::SlideOutMsg),
     /// Time for a ribbon popup or slide-out to open or close.
     RibbonTick,
+    /// The command search box and its results.
+    RibbonSearch(crate::ui::ribbon::SearchMsg),
     /// Panels of a ribbon tab dropped in a new order: the shown panels'
     /// titles, in that order.
     RibbonReorderPanels {

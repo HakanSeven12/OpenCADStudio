@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = More tools
     .plot = Plot...
     .recent-drawings = Recent drawings
+    .search-placeholder = Type a command
+    .search-commands = Search commands
+    .collapse-search = Collapse the search box
+    .best-matches = Best Matches
+    .quick-access-toolbar = Quick Access Toolbar
+    .application-menu = Application Menu
+    .ribbon = Ribbon
+    .menu-bar = Menu Bar
+    .ribbon-tab = Ribbon Tab
+    .no-matches = No matching commands
 
 options =
     .language-section = Language

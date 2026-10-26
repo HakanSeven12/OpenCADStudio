@@ -724,6 +724,41 @@ pub fn view<'a>(drawings: Vec<(usize, String)>) -> Element<'a, Message> {
         .into()
 }
 
+/// A menu item as the command search lists it.
+pub struct SearchEntry {
+    pub label: String,
+    /// The menu and submenus it is in, e.g. `File › Drawing Utilities`.
+    pub path: String,
+    /// Its command line.
+    pub line: &'static str,
+    pub icon: Option<&'static [u8]>,
+}
+
+/// Every menu item that runs a command, in menu order.
+pub fn search_entries() -> Vec<SearchEntry> {
+    fn walk(entries: &'static [Entry], path: &str, out: &mut Vec<SearchEntry>) {
+        for entry_def in entries {
+            match *entry_def {
+                Cmd(label, line, _) => out.push(SearchEntry {
+                    label: crate::t!(label).into_owned(),
+                    path: path.to_string(),
+                    line,
+                    icon: command_icon(line),
+                }),
+                Sep => {}
+                Sub(label, entries) => {
+                    walk(entries, &format!("{path} › {}", crate::t!(label)), out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for &(title, entries) in MENUS {
+        walk(entries, &crate::t!(title), &mut out);
+    }
+    out
+}
+
 fn menu<'a>(items: Vec<Item<'a, Message, Theme, Renderer>>) -> Menu<'a, Message, Theme, Renderer> {
     Menu::new(items).width(MENU_W).padding(2).offset(0.0)
 }

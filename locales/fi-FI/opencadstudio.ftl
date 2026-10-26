@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = Lisää työkaluja
     .plot = Tulosta...
     .recent-drawings = Viimeisimmät piirustukset
+    .search-placeholder = Kirjoita komento
+    .search-commands = Hae komentoja
+    .collapse-search = Pienennä hakukenttä
+    .best-matches = Parhaat osumat
+    .quick-access-toolbar = Pikatyökalurivi
+    .application-menu = Sovellusvalikko
+    .ribbon = Valintanauha
+    .menu-bar = Valikkorivi
+    .ribbon-tab = Valintanauhan välilehti
+    .no-matches = Ei vastaavia komentoja
 
 options =
     .language-section = Kieli

@@ -59,6 +59,16 @@ ribbon-menu =
     .more-tools = 更多工具
     .plot = 打印...
     .recent-drawings = 最近的图形
+    .search-placeholder = 输入命令
+    .search-commands = 搜索命令
+    .collapse-search = 折叠搜索框
+    .best-matches = 最佳匹配
+    .quick-access-toolbar = 快速访问工具栏
+    .application-menu = 应用程序菜单
+    .ribbon = 功能区
+    .menu-bar = 菜单栏
+    .ribbon-tab = 功能区选项卡
+    .no-matches = 没有匹配的命令
 
 options =
     .language-section = 语言

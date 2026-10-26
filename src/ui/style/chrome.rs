@@ -95,6 +95,17 @@ pub fn danger(theme: &Theme) -> Color {
     theme.palette().danger.base.color
 }
 
+/// Background of a lit button: the command it runs is running, or the
+/// switch it shows is on. The panel tinted with the accent.
+pub fn lit(theme: &Theme) -> Color {
+    mix(panel(theme), accent(theme), 0.25)
+}
+
+/// Outline of a lit button.
+pub fn lit_border(theme: &Theme) -> Color {
+    mix(panel(theme), accent(theme), 0.7)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

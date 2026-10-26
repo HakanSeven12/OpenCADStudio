@@ -18,6 +18,7 @@ use super::{
 };
 use crate::app::Message;
 use crate::ui::icons;
+use crate::ui::style::chrome;
 use crate::ui::wrap_bar::{dropdown_bounds, PosReport};
 
 /// The dropdown that picks what the minimize button does.
@@ -401,9 +402,9 @@ impl Ribbon {
         });
         container(row(openers).spacing(1).align_y(iced::Center))
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.weakest.color)),
+                background: Some(Background::Color(chrome::panel(theme))),
                 border: Border {
-                    color: theme.palette().background.neutral.color,
+                    color: chrome::page(theme),
                     width: 1.0,
                     radius: 0.0.into(),
                 },

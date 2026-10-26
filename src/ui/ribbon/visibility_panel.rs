@@ -3,10 +3,14 @@ use iced::widget::{button, column, container, pick_list, row, text, tooltip};
 use iced::{Element, Fill, Theme};
 
 use super::collapse::{Level, Panel};
-use super::widgets::{LARGE_ICON, LARGE_W, SMALL_ICON, TOOL_BAR_H, make_icon, tool_btn_style};
+use super::panel_frame::PanelFrame;
+use super::widgets::{
+    LARGE_H, LARGE_ICON, LARGE_W, PANEL_TITLE_H, PANEL_TITLE_SIZE, ROW_H, SMALL_ICON, SMALL_W,
+    TOOL_BAR_H, make_icon, tool_btn_style,
+};
 use crate::app::Message;
 use crate::modules::IconKind;
-use crate::ui::ROW_H;
+use crate::ui::style::chrome;
 use crate::ui::window::block_visibility::{Action, RibbonContext};
 
 fn tool(
@@ -28,7 +32,7 @@ fn tool(
         column![
             image,
             text(crate::t!(label).into_owned())
-                .size(10)
+                .size(12)
                 .align_x(iced::Center)
         ]
         .align_x(iced::Center)
@@ -49,9 +53,9 @@ fn tool(
         })
         .padding([3, 5]);
     control = if large {
-        control.width(LARGE_W + 8.0).height(3.0 * ROW_H)
+        control.width(LARGE_W + 8.0).height(LARGE_H)
     } else {
-        control.width(ROW_H + 4.0).height(ROW_H)
+        control.width(SMALL_W).height(ROW_H)
     };
     tooltip(
         super::keytips::anchor(id, container(control).id(id)),
@@ -129,11 +133,21 @@ fn view(context: Option<RibbonContext>, compact: bool) -> Element<'static, Messa
             .height(Fill)
             .into()
     };
-    column![controls, text(crate::t!("Visibility").into_owned()).size(9)]
-        .align_x(iced::Center)
-        .padding([3, 4])
-        .height(TOOL_BAR_H)
-        .into()
+    let title = container(
+        text(crate::t!("Visibility").into_owned())
+            .size(PANEL_TITLE_SIZE)
+            .style(|theme: &Theme| text::Style {
+                color: Some(chrome::title_text(theme)),
+            }),
+    )
+    .center_y(PANEL_TITLE_H);
+    let panel = column![
+        container(controls).padding([3, 4]).height(LARGE_H + 6.0),
+        title
+    ]
+    .align_x(iced::Center)
+    .height(TOOL_BAR_H);
+    PanelFrame::new(panel.into(), true, None).into()
 }
 
 fn collapsed(tight: bool) -> Element<'static, Message> {

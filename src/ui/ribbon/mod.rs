@@ -38,9 +38,11 @@ mod keytips;
 mod layout;
 mod locate;
 mod minimize;
+mod panel_frame;
 mod ribbon_menu;
 mod search;
 use crate::t;
+use crate::ui::style::chrome;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
@@ -204,6 +206,56 @@ fn panel_measure_key(
     }
     format!("{visibility:?}").hash(&mut hasher);
     hasher.finish()
+}
+
+fn title_text_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(chrome::title_text(theme)),
+    }
+}
+
+/// Height of a tab, and of the tab row it stands at the bottom of.
+const TAB_H: f32 = 22.0;
+const TAB_ROW_H: f32 = 28.0;
+const TAB_TEXT_SIZE: f32 = 12.5;
+/// Width of the accent outline of the active tab.
+const TAB_OUTLINE: f32 = 1.5;
+
+/// `tab` with an accent line along its top and sides.
+fn tab_outline(tab: Element<'_, Message>) -> Element<'_, Message> {
+    let line = |width: Length, height: Length| {
+        container(iced::widget::Space::new().width(width).height(height)).style(|theme: &Theme| {
+            container::Style {
+                background: Some(Background::Color(chrome::accent(theme))),
+                ..Default::default()
+            }
+        })
+    };
+    iced::widget::stack![
+        tab,
+        container(line(Fill, Length::Fixed(TAB_OUTLINE)))
+            .width(Fill)
+            .height(Fill)
+            .align_top(Fill),
+        container(line(Length::Fixed(TAB_OUTLINE), Fill))
+            .width(Fill)
+            .height(Fill)
+            .align_left(Fill),
+        container(line(Length::Fixed(TAB_OUTLINE), Fill))
+            .width(Fill)
+            .height(Fill)
+            .align_right(Fill),
+    ]
+    .into()
+}
+
+/// The height of the tool area, with or without panel titles.
+fn panel_height(titles: bool) -> f32 {
+    if titles {
+        TOOL_BAR_H
+    } else {
+        TOOL_BAR_H_UNTITLED
+    }
 }
 
 /// The width of a contextual tab's outline and of the line along the top of
@@ -683,11 +735,7 @@ impl Ribbon {
 
     /// Height of the tool area at full density: shorter without panel titles.
     fn panel_h(&self) -> f32 {
-        if self.layout.show_panel_titles {
-            TOOL_BAR_H
-        } else {
-            TOOL_BAR_H - PANEL_TITLE_H
-        }
+        panel_height(self.layout.show_panel_titles)
     }
 
     pub fn select(&mut self, index: usize) {
@@ -1000,80 +1048,50 @@ impl Ribbon {
                 let is_active = i == self.active;
                 let is_contextual = is_contextual(module.id());
                 let holds_tool = holding_tab == Some(i);
-                let btn = container(
-                    button(
+                let tab = button(
+                    container(
                         text(crate::i18n::ribbon_module_title(
                             module.id(),
                             module.title(),
                         ))
-                        .size(12),
+                        .size(TAB_TEXT_SIZE)
+                        .wrapping(iced::widget::text::Wrapping::None),
                     )
-                    .on_press(Message::RibbonSelectTab(i))
-                    .style(move |theme: &Theme, status| {
-                        let palette = theme.palette();
-                        let accent = palette.primary.base;
-                        let pair = match (is_active, status) {
-                            (true, _) => palette.background.weakest,
-                            (false, _) if holds_tool => palette.primary.weak,
-                            (false, button::Status::Hovered) => palette.background.weak,
-                            _ => palette.background.base,
-                        };
-                        button::Style {
-                            background: (is_active
-                                || holds_tool
-                                || matches!(status, button::Status::Hovered))
-                            .then_some(Background::Color(if holds_tool && !is_active {
-                                pair.color.scale_alpha(0.35)
-                            } else {
-                                pair.color
-                            })),
-                            text_color: if is_active {
-                                pair.text
-                            } else if holds_tool {
-                                palette.background.base.text
-                            } else {
-                                palette.background.base.text.scale_alpha(0.72)
-                            },
-                            // A contextual tab's outline is its container's.
-                            border: Border {
-                                color: if is_active && !is_contextual {
-                                    accent.color
-                                } else {
-                                    Color::TRANSPARENT
-                                },
-                                width: if is_active && !is_contextual {
-                                    2.0
-                                } else {
-                                    0.0
-                                },
-                                radius: 0.0.into(),
-                            },
-                            shadow: iced::Shadow::default(),
-                            snap: false,
-                        }
-                    })
-                    .padding([5, 14]),
+                    .center_y(Fill),
                 )
-                .style(move |theme: &Theme| container::Style {
-                    // A contextual tab keeps its accent outline while another
-                    // tab is on show, so it is easy to find again.
-                    border: Border {
-                        color: if is_active || is_contextual {
-                            crate::ui::style::chrome::accent(theme)
+                .on_press(Message::RibbonSelectTab(i))
+                .style(move |theme: &Theme, status| {
+                    let hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    let background = if is_active || hovered {
+                        Some(chrome::panel(theme))
+                    } else if holds_tool {
+                        Some(chrome::lit(theme))
+                    } else {
+                        None
+                    };
+                    button::Style {
+                        background: background.map(Background::Color),
+                        text_color: if is_active || hovered || holds_tool {
+                            chrome::strong(theme)
                         } else {
-                            Color::TRANSPARENT
+                            chrome::tab_text(theme)
                         },
-                        width: if is_contextual {
-                            CONTEXTUAL_LINE
-                        } else if is_active {
-                            2.0
-                        } else {
-                            0.0
-                        },
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                });
+                        ..Default::default()
+                    }
+                })
+                .height(TAB_H)
+                .padding([0, 9]);
+                // The active tab is outlined on three sides and open below,
+                // into the tool area; a contextual tab keeps its outline while
+                // another tab is on show, so it is easy to find again.
+                let tab: Element<'_, Message> = if is_active || is_contextual {
+                    tab_outline(tab.into())
+                } else {
+                    tab.into()
+                };
+                // Tabs stand on the bottom of the tab row, on the tool area.
+                let btn = container(tab).height(TAB_ROW_H).align_bottom(TAB_ROW_H);
                 // Minimized to tabs, resting on a tab opens its tool area.
                 let btn: Element<'_, Message> = if self.layout.minimize == RibbonMinimize::Tabs {
                     mouse_area(btn)
@@ -1097,9 +1115,9 @@ impl Ribbon {
         // each other's 14px side padding without overlapping the labels. When the
         // row has room the gap stays 6px, so wide/desktop layouts are unchanged.
         let tabs = WrapFlow::new(tab_items)
-            .spacing_x(6.0)
-            .min_spacing_x(-12.0)
-            .row_h(28.0);
+            .spacing_x(2.0)
+            .min_spacing_x(-6.0)
+            .row_h(TAB_ROW_H);
 
         let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
         if menu_row.is_none() {
@@ -1120,7 +1138,7 @@ impl Ribbon {
 
         let tab_bar = container(tab_row)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.base.color)),
+                background: Some(Background::Color(chrome::bar(theme))),
                 ..Default::default()
             })
             .padding(Padding {
@@ -1253,7 +1271,7 @@ impl Ribbon {
             // Panels drag by their title strips; without titles they stay put.
             let module = self.modules[effective_active].id();
             let strip = if self.layout.show_panel_titles {
-                PANEL_TITLE_H + PANEL_TITLE_PAD
+                PANEL_TITLE_H
             } else {
                 0.0
             };
@@ -1270,18 +1288,22 @@ impl Ribbon {
             text("").into()
         };
 
-        let tool_bar: Element<'_, Message> = container(tool_area)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.weakest.color)),
-                border: Border {
-                    color: theme.palette().background.neutral.color,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .width(Length::Fill)
-            .into();
+        // The tool area, with a line of `page` under it.
+        let tool_bar: Element<'_, Message> = column![
+            container(tool_area)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(chrome::panel(theme))),
+                    ..Default::default()
+                })
+                .width(Length::Fill),
+            container(iced::widget::Space::new().width(Fill).height(1)).style(|theme: &Theme| {
+                container::Style {
+                    background: Some(Background::Color(chrome::page(theme))),
+                    ..Default::default()
+                }
+            }),
+        ]
+        .into();
         // A contextual tab's tool area has an accent line along its top,
         // drawn over the area's own border so its height stays.
         let tool_bar = if self
@@ -1312,9 +1334,7 @@ impl Ribbon {
                     .width(Fill)
                     .height(Fill)
                     .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(
-                            theme.palette().background.strongest.color.scale_alpha(0.58),
-                        )),
+                        background: Some(Background::Color(chrome::page(theme).scale_alpha(0.6))),
                         ..Default::default()
                     }),
             )
@@ -1476,8 +1496,7 @@ impl Ribbon {
                     .size(11)
                     .wrapping(iced::advanced::text::Wrapping::None)
                     .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: (!is_current || disabled)
-                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
+                        color: (!is_current || disabled).then_some(chrome::muted(theme)),
                     });
                 let label_el = keytips::label_anchor(
                     || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
@@ -1563,7 +1582,7 @@ impl Ribbon {
                     .style(move |theme: &Theme| container::Style {
                         background: Some(Background::Color(lc)),
                         border: Border {
-                            color: theme.palette().background.strong.color,
+                            color: chrome::border(theme),
                             width: 1.0,
                             radius: 1.0.into(),
                         },
@@ -1595,8 +1614,7 @@ impl Ribbon {
                     crate::ui::icons::themed_check_cell(is_active);
                 let label = text(&info.name).size(11).style(move |theme: &Theme| {
                     iced::widget::text::Style {
-                        color: (!is_active)
-                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
+                        color: (!is_active).then_some(chrome::muted(theme)),
                     }
                 });
 
@@ -1652,7 +1670,7 @@ impl Ribbon {
                     .padding([3, 4])
                     .style(|theme: &Theme| container::Style {
                         border: Border {
-                            color: theme.palette().background.neutral.color,
+                            color: chrome::border(theme),
                             width: 1.0,
                             radius: 0.0.into(),
                         },
@@ -1722,9 +1740,7 @@ impl Ribbon {
                         checkmark,
                         text(name.clone()).size(11).style(move |theme: &Theme| {
                             iced::widget::text::Style {
-                                color: (!is_sel).then_some(
-                                    theme.palette().background.base.text.scale_alpha(0.72),
-                                ),
+                                color: (!is_sel).then_some(chrome::muted(theme)),
                             }
                         }),
                     ]
@@ -1814,8 +1830,7 @@ impl Ribbon {
                 let name_col = text(linetype_display_name(&lt.name))
                     .size(11)
                     .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: (!is_cur)
-                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
+                        color: (!is_cur).then_some(chrome::muted(theme)),
                     })
                     .width(Length::Fixed(90.0));
                 let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
@@ -1859,9 +1874,7 @@ impl Ribbon {
                         check,
                         text(label).size(11).style(move |theme: &Theme| {
                             iced::widget::text::Style {
-                                color: (!is_cur).then_some(
-                                    theme.palette().background.base.text.scale_alpha(0.72),
-                                ),
+                                color: (!is_cur).then_some(chrome::muted(theme)),
                             }
                         })
                     ]
@@ -1960,30 +1973,34 @@ fn render_group<'a>(
     }
     flush_small_col(&mut small_buf, &mut items_row);
 
-    let tools_el = items_row
-        .into_iter()
-        .fold(row![].spacing(2).height(Fill).align_y(iced::Top), |r, e| {
-            r.push(e)
-        });
+    let tools_el = items_row.into_iter().fold(
+        row![]
+            .spacing(2)
+            .height(Length::Fixed(LARGE_H))
+            .align_y(iced::Top),
+        |r, e| r.push(e),
+    );
 
-    let mut panel = column![tools_el];
+    // The tools sit 3 px from the title strip's top line and the tool area's
+    // top edge; without titles they are centred in the shorter area.
+    let body_pad = if titles {
+        3.0
+    } else {
+        (TOOL_BAR_H_UNTITLED - LARGE_H) / 2.0
+    };
+    let mut panel = column![container(tools_el).padding([body_pad, 4.0])];
+    let mut launcher = None;
     if titles {
-        panel = panel.push(draw_panel::group_title(
-            group.title,
-            key,
-            look,
-            active_tool.as_deref(),
-        ));
+        let (title, corner) =
+            draw_panel::group_title(group.title, key, look, active_tool.as_deref());
+        panel = panel.push(title);
+        launcher = corner;
     }
     let panel = panel
         .align_x(iced::Center)
         .spacing(0)
-        .padding([3u16, 4])
-        .height(Length::Fixed(if titles {
-            TOOL_BAR_H
-        } else {
-            TOOL_BAR_H - PANEL_TITLE_H
-        }));
+        .height(Length::Fixed(panel_height(titles)));
+    let panel = panel_frame::PanelFrame::new(panel.into(), titles, launcher);
     let Some(extras) = draw_panel::panel_for_group(key) else {
         return panel.into();
     };
@@ -2084,15 +2101,8 @@ fn collapse_button<'a>(
     // the way a dropdown lights while one of its items does.
     let active = active_tool.as_deref();
     let holds = active.is_some_and(|id| locate::group_holds(key, group, id));
-    let opener_style = move |lit: bool| {
-        move |theme: &Theme, status| {
-            if lit {
-                tool_btn_style(theme, true, status)
-            } else {
-                button::subtle(theme, status)
-            }
-        }
-    };
+    let opener_style =
+        move |lit: bool| move |theme: &Theme, status| tool_btn_style(theme, lit, status);
 
     // Tightest form: one button = the panel's FIRST tool icon + its title + ▾.
     // Clicking opens the flyout listing every tool; no tool runs directly at this
@@ -2109,11 +2119,11 @@ fn collapse_button<'a>(
                     keytips::label_anchor(
                         || keytips::label_id(&keytips::collapsed_anchor(title)),
                         text(localized_title.clone())
-                            .size(9)
+                            .size(PANEL_TITLE_SIZE)
                             .width(Fill)
                             .align_x(iced::Center)
                             .wrapping(iced::advanced::text::Wrapping::Word)
-                            .style(muted_text_style),
+                            .style(title_text_style),
                     ),
                     crate::ui::icons::themed_secondary_arrow_down(8.0),
                 ]
@@ -2184,11 +2194,11 @@ fn collapse_button<'a>(
             keytips::label_anchor(
                 || keytips::label_id(&keytips::collapsed_anchor(title)),
                 text(localized_title.clone())
-                    .size(9)
+                    .size(PANEL_TITLE_SIZE)
                     .width(Fill)
                     .align_x(iced::Center)
                     .wrapping(iced::advanced::text::Wrapping::Word)
-                    .style(muted_text_style),
+                    .style(title_text_style),
             ),
             crate::ui::icons::themed_secondary_arrow_down(8.0),
         ]

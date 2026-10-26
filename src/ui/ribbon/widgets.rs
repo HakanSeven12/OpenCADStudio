@@ -23,6 +23,7 @@ use crate::modules::{IconKind, ModuleEvent, RibbonItem, StyleKey, ToolDef};
 use crate::t;
 use crate::ui::icons;
 use crate::ui::properties::{acad_color_display, linetype_display_name, LwItem};
+use crate::ui::style::chrome;
 use crate::ui::wrap_bar::PosReport;
 
 use super::LayerInfo;
@@ -46,49 +47,61 @@ pub(super) struct ToggleState {
     pub show_layout_tabs: bool,
 }
 
-// ── Layout constants (single source of truth: ROW_H from ui::mod) ─────────
+// ── Layout constants ──────────────────────────────────────────────────────
 
-use crate::ui::ROW_H;
-
-/// Icon size inside a 3-row (large) button.
-pub(super) const LARGE_ICON: f32 = ROW_H * 1.5;
-/// Icon size inside a 1-row (small) button.
-pub(super) const SMALL_ICON: f32 = ROW_H * 0.7;
-/// Width of a 3-row (large) button.
-pub(super) const LARGE_W: f32 = ROW_H * 2.2;
+/// Height of a small (one-row) button; three rows and their gaps make the
+/// height of a large button.
+pub(super) const ROW_H: f32 = 20.0;
+/// Gap between the rows of small buttons.
+pub(super) const ROW_GAP: f32 = 2.0;
+/// Height of a large button: three small rows.
+pub(super) const LARGE_H: f32 = 3.0 * ROW_H + 2.0 * ROW_GAP;
+/// Icon size inside a large button.
+pub(super) const LARGE_ICON: f32 = 30.0;
+/// Icon size inside a small button.
+pub(super) const SMALL_ICON: f32 = 16.0;
+/// Narrowest large button.
+pub(super) const LARGE_W: f32 = 52.0;
 /// Horizontal button padding surrounding a large tool's label.
 const LARGE_LABEL_HPAD: f32 = 8.0;
 /// Large ribbon labels use at most two lines before their button grows.
 const LARGE_LABEL_LINES: f32 = 2.0;
-const LARGE_LABEL_SIZE: f32 = 10.0;
-/// Width of a 1-row (small) button.
-pub(super) const SMALL_W: f32 = ROW_H;
-const LABELED_SMALL_W: f32 = ROW_H * 4.0;
-/// Width of the ▾ strip on a small dropdown.
-pub(super) const ARROW_W: f32 = ROW_H * 0.4;
-/// Height of the ▾ strip at the bottom of a large dropdown.
-pub(super) const LARGE_ARR: f32 = ROW_H * 0.55;
+const LARGE_LABEL_SIZE: f32 = 12.0;
+/// Line height of a large button's label, relative to its size.
+const LARGE_LABEL_LINE: f32 = 1.15;
+/// Horizontal padding of a small button.
+const SMALL_PAD: f32 = 7.0;
+/// Width of an icon-only small button.
+pub(super) const SMALL_W: f32 = SMALL_ICON + 2.0 * SMALL_PAD;
+/// Width of the arrow part of a split button.
+pub(super) const ARROW_W: f32 = 12.0;
+/// Height of the arrow under a one-line label of a large split button.
+pub(super) const LARGE_ARR: f32 = 12.0;
 /// Arrow size used under large dropdown tools such as Circle.
-pub(super) const LARGE_DROPDOWN_ARROW_SIZE: f32 = 9.0;
-/// Total ribbon tool-area height = 3 × ROW_H + 6 px v-padding + 12 px group-label.
-pub(super) const TOOL_BAR_H: f32 = 3.0 * ROW_H + 18.0;
-/// Height of the group label strip under a panel's tools.
-pub(super) const PANEL_TITLE_H: f32 = 12.0;
-/// Space between the group label strip and the panel's bottom edge.
-pub(super) const PANEL_TITLE_PAD: f32 = 4.0;
-/// Height of a collapsed panel button's large representative face (big icon +
-/// its label). A collapsed button is this face plus the title opener, so it is
-/// shorter than a full 3-row panel — the ribbon height follows it down.
-pub(super) const COLLAPSED_FACE_H: f32 = LARGE_ICON + 20.0;
+pub(super) const LARGE_DROPDOWN_ARROW_SIZE: f32 = 8.0;
+/// Size of button labels.
+pub(super) const LABEL_SIZE: f32 = 12.0;
+/// Ribbon tool-area height with panel titles: the tools, 3 px above and below
+/// them, and the title strip.
+pub(super) const TOOL_BAR_H: f32 = LARGE_H + 6.0 + PANEL_TITLE_H;
+/// Ribbon tool-area height without panel titles.
+pub(super) const TOOL_BAR_H_UNTITLED: f32 = 80.0;
+/// Height of the title strip at the bottom of a panel.
+pub(super) const PANEL_TITLE_H: f32 = 19.0;
+/// Size of a panel title.
+pub(super) const PANEL_TITLE_SIZE: f32 = 11.5;
+/// Height of a collapsed panel button's large representative face. A collapsed
+/// button is this face plus the title opener.
+pub(super) const COLLAPSED_FACE_H: f32 = LARGE_H;
 
 /// Gap between the combo dropdown and the tool rows beneath it.
-const COMBO_ROW_SPACING: f32 = 3.0;
+const COMBO_ROW_SPACING: f32 = ROW_GAP;
 /// Shared padding of combo-style panels (Layers, Properties, style selectors).
 /// The top inset pins every primary dropdown to the same baseline regardless
 /// of how many icon rows sit underneath it.
 const COMBO_PANEL_PAD: Padding = Padding {
-    top: 6.0,
-    bottom: 4.0,
+    top: 0.0,
+    bottom: 0.0,
     left: 4.0,
     right: 4.0,
 };
@@ -121,7 +134,7 @@ fn ribbon_label_bounds(
             content: label,
             bounds: Size::new(width, f32::INFINITY),
             size: Pixels(LARGE_LABEL_SIZE),
-            line_height: advanced_text::LineHeight::default(),
+            line_height: advanced_text::LineHeight::Relative(LARGE_LABEL_LINE),
             font: renderer.default_font(),
             align_x: advanced_text::Alignment::Center,
             align_y: iced::alignment::Vertical::Center,
@@ -139,7 +152,7 @@ fn ribbon_label_bounds(
 /// changes do not rely on character-count estimates.
 fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
     let base_inner = (LARGE_W - LARGE_LABEL_HPAD).max(1.0);
-    let line_height = advanced_text::LineHeight::default()
+    let line_height = advanced_text::LineHeight::Relative(LARGE_LABEL_LINE)
         .to_absolute(Pixels(LARGE_LABEL_SIZE))
         .0;
     let max_label_height = line_height * LARGE_LABEL_LINES + 0.5;
@@ -177,27 +190,61 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
     (high + LARGE_LABEL_HPAD).ceil().max(LARGE_W)
 }
 
-fn automatic_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
+/// The width of a large split button: its label's lines unwrapped, the last
+/// one followed by the arrow when there are two.
+fn measure_split_width(renderer: &iced::Renderer, label: &str) -> f32 {
+    let (first, second) = split_label(label);
+    let natural = |line: &str| {
+        ribbon_label_bounds(renderer, line, f32::INFINITY, advanced_text::Wrapping::None).width
+    };
+    let widest = match second {
+        Some(second) => natural(first).max(natural(second) + 2.0 + LARGE_DROPDOWN_ARROW_SIZE),
+        None => natural(first),
+    };
+    (widest + LARGE_LABEL_HPAD).ceil().max(LARGE_W)
+}
+
+/// A large split button's label as its first line and, when it has an
+/// explicit break, its second.
+fn split_label(label: &str) -> (&str, Option<&str>) {
+    match label.split_once('\n') {
+        Some((first, second)) => (first, Some(second)),
+        None => (label, None),
+    }
+}
+
+fn automatic_large_width(renderer: &iced::Renderer, label: &str, split: bool) -> f32 {
     let generation = crate::sys::ui_font::generation();
+    // A split button's label is measured differently: key it apart.
+    let key = if split {
+        format!("\u{1}{label}")
+    } else {
+        label.to_string()
+    };
     if let Some(width) = LARGE_WIDTH_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.0 != generation {
             *cache = (generation, HashMap::default());
         }
-        cache.1.get(label).copied()
+        cache.1.get(&key).copied()
     }) {
         return width;
     }
 
-    let width = measure_large_width(renderer, label);
+    let width = if split {
+        measure_split_width(renderer, label)
+    } else {
+        measure_large_width(renderer, label)
+    };
     LARGE_WIDTH_CACHE.with(|cache| {
-        cache.borrow_mut().1.insert(label.to_string(), width);
+        cache.borrow_mut().1.insert(key, width);
     });
     width
 }
 
 struct AutomaticLargeWidth<'a> {
     label: String,
+    split: bool,
     content: Element<'a, Message>,
 }
 
@@ -224,7 +271,7 @@ impl Widget<Message, Theme, iced::Renderer> for AutomaticLargeWidth<'_> {
         renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let width = automatic_large_width(renderer, &self.label);
+        let width = automatic_large_width(renderer, &self.label, self.split);
         self.content
             .as_widget_mut()
             .layout(tree, renderer, &limits.width(Length::Fixed(width)))
@@ -303,7 +350,32 @@ pub(super) fn automatic_large_button<'a>(
     label: String,
     content: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    Element::new(AutomaticLargeWidth { label, content })
+    Element::new(AutomaticLargeWidth {
+        label,
+        split: false,
+        content,
+    })
+}
+
+/// A large split button sized to its label (see `measure_split_width`).
+fn automatic_split_button<'a>(
+    label: String,
+    content: Element<'a, Message>,
+) -> Element<'a, Message> {
+    Element::new(AutomaticLargeWidth {
+        label,
+        split: true,
+        content,
+    })
+}
+
+/// A large button's label: 12 px, centred, at most two lines.
+fn large_label<'a>(label: String) -> iced::widget::Text<'a, Theme, iced::Renderer> {
+    text(label)
+        .size(LARGE_LABEL_SIZE)
+        .line_height(LARGE_LABEL_LINE)
+        .width(Fill)
+        .align_x(iced::Center)
 }
 
 // ── Tab-bar constants ──────────────────────────────────────────────────────
@@ -311,6 +383,8 @@ pub(super) fn automatic_large_button<'a>(
 pub(super) const TOP_ARR_W: f32 = 12.0;
 pub(super) const TOP_HIST_W: f32 = 28.0;
 pub(super) const TOP_HIST_GAP: f32 = 4.0;
+/// Height of the quick-access buttons, the tabs' height.
+pub(super) const TOP_BUTTON_H: f32 = 22.0;
 
 // ── Dropdown / combo ID constants ─────────────────────────────────────────
 
@@ -364,7 +438,7 @@ pub(super) fn flush_small_col<'a>(
     if buf.is_empty() {
         return;
     }
-    let col = column(std::mem::take(buf)).spacing(1);
+    let col = column(std::mem::take(buf)).spacing(ROW_GAP);
     out.push(col.into());
 }
 
@@ -395,88 +469,133 @@ pub(super) fn is_active_tool(id: &str, active_tool: &Option<String>, state: &Tog
 
 // ── Button style ───────────────────────────────────────────────────────────
 
+/// A ribbon button: lit while its command runs or its switch is on, and on
+/// hover filled with `hover` inside a `hover_border` outline.
 pub(super) fn tool_btn_style(
     theme: &Theme,
     is_active: bool,
     status: button::Status,
 ) -> button::Style {
-    let palette = theme.palette();
-    let pair = match (is_active, status) {
-        (true, _) => palette.primary.weak,
-        (_, button::Status::Hovered) => palette.background.weak,
-        (_, button::Status::Pressed) => palette.primary.weak,
-        _ => palette.background.base,
+    let mut style = split_part_style(theme, is_active, status);
+    if matches!(status, button::Status::Hovered | button::Status::Pressed) && !is_active {
+        style.border.color = chrome::hover_border(theme);
+        style.border.width = 1.0;
+    }
+    style
+}
+
+/// One part of a split button. The parts fill on hover; the outline is the
+/// split button's own, around both parts (see `split_outline`).
+pub(super) fn split_part_style(
+    theme: &Theme,
+    is_active: bool,
+    status: button::Status,
+) -> button::Style {
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let background = if is_active {
+        Some(chrome::lit(theme))
+    } else if hovered {
+        Some(chrome::hover(theme))
+    } else {
+        None
     };
     button::Style {
-        background: is_active
-            .then_some(Background::Color(pair.color))
-            .or_else(|| {
-                matches!(status, button::Status::Hovered | button::Status::Pressed)
-                    .then_some(Background::Color(pair.color))
-            }),
-        text_color: pair.text,
+        background: background.map(Background::Color),
+        text_color: if is_active || hovered {
+            chrome::strong(theme)
+        } else {
+            chrome::text(theme)
+        },
         border: Border {
-            radius: 3.0.into(),
-            color: Color::TRANSPARENT,
-            width: 0.0,
+            radius: BUTTON_RADIUS.into(),
+            color: if is_active {
+                chrome::lit_border(theme)
+            } else {
+                Color::TRANSPARENT
+            },
+            width: if is_active { 1.0 } else { 0.0 },
         },
         shadow: iced::Shadow::default(),
         snap: false,
     }
 }
 
+/// Corner radius of ribbon buttons.
+pub(super) const BUTTON_RADIUS: f32 = 2.0;
+
+/// The outline a split button shows while the pointer is on either part.
+pub(super) fn split_outline<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
+    let outline = container(iced::widget::Space::new().width(Fill).height(Fill))
+        .width(Fill)
+        .height(Fill)
+        .style(|theme: &Theme| container::Style {
+            border: Border {
+                color: chrome::hover_border(theme),
+                width: 1.0,
+                radius: BUTTON_RADIUS.into(),
+            },
+            ..Default::default()
+        });
+    iced::widget::hover(content, outline)
+}
+
+/// A combo box in a panel (layer, colour, linetype, lineweight, styles).
 pub(super) fn combo_btn_style(
     theme: &Theme,
     is_open: bool,
     status: button::Status,
-    radius: f32,
+    _radius: f32,
 ) -> button::Style {
-    let palette = theme.palette();
-    let pair = if is_open {
-        palette.primary.weak
-    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        palette.background.weak
-    } else {
-        palette.background.weakest
-    };
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: Some(Background::Color(pair.color)),
-        text_color: pair.text,
+        background: Some(Background::Color(if hovered || is_open {
+            chrome::hover(theme)
+        } else {
+            chrome::bar(theme)
+        })),
+        text_color: chrome::text(theme),
         border: Border {
-            radius: radius.into(),
+            radius: BUTTON_RADIUS.into(),
             width: 1.0,
             color: if is_open {
-                palette.primary.base.color
+                chrome::accent(theme)
+            } else if hovered {
+                chrome::hover_border(theme)
             } else {
-                palette.background.neutral.color
+                chrome::border(theme)
             },
         },
         ..Default::default()
     }
 }
 
+/// A row of a ribbon popup or dropdown.
 pub(crate) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
-    let pair = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        palette.background.weak
-    } else {
-        palette.background.base
-    };
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: Some(Background::Color(pair.color)),
-        text_color: pair.text,
+        background: Some(Background::Color(if hovered {
+            chrome::hover(theme)
+        } else {
+            chrome::panel(theme)
+        })),
+        text_color: if hovered {
+            chrome::strong(theme)
+        } else {
+            chrome::text(theme)
+        },
         ..Default::default()
     }
 }
 
+/// A ribbon popup or dropdown: `panel` inside a 1 px `border`.
 pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
-    let palette = theme.palette();
     container::Style {
-        background: Some(Background::Color(palette.background.base.color)),
+        background: Some(Background::Color(chrome::panel(theme))),
+        text_color: Some(chrome::text(theme)),
         border: Border {
-            color: palette.background.neutral.color,
+            color: chrome::border(theme),
             width: 1.0,
-            radius: 3.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     }
@@ -484,7 +603,7 @@ pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
 
 pub(super) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.72)),
+        color: Some(chrome::muted(theme)),
     }
 }
 
@@ -521,15 +640,14 @@ fn tool_tip_text(label: &str, id: &str) -> String {
 }
 
 pub(super) fn tip_style(theme: &Theme) -> container::Style {
-    let palette = theme.palette();
     container::Style {
-        background: Some(Background::Color(palette.background.strong.color)),
+        background: Some(Background::Color(chrome::panel(theme))),
         border: Border {
-            color: palette.background.neutral.color,
+            color: chrome::border(theme),
             width: 1.0,
-            radius: 3.0.into(),
+            radius: BUTTON_RADIUS.into(),
         },
-        text_color: Some(palette.background.strong.text),
+        text_color: Some(chrome::text(theme)),
         ..Default::default()
     }
 }
@@ -557,7 +675,7 @@ pub(super) fn render_small<'a>(
                 .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
                 .width(Length::Fixed(SMALL_W))
                 .height(ROW_H)
-                .padding([4, 4]);
+                .padding([2.0, SMALL_PAD]);
             super::keytips::anchor(
                 t.id,
                 tooltip(btn, make_tip(tip_text), TipPos::Right)
@@ -573,21 +691,25 @@ pub(super) fn render_small<'a>(
             let tool_id = t.id.to_string();
             let label = t!(t.label).into_owned();
             let tip_text = tool_tip_text(&label, t.id);
+            // One row: a label's line break becomes a space.
+            let label = label.replace('\n', " ");
             let content = row![
-                container(make_icon(t.icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
+                make_icon(t.icon, SMALL_ICON),
                 super::keytips::label_anchor(
                     || super::keytips::label_id(t.id),
-                    text(label).size(10).wrapping(advanced_text::Wrapping::None),
+                    text(label)
+                        .size(LABEL_SIZE)
+                        .wrapping(advanced_text::Wrapping::None),
                 ),
             ]
-            .spacing(3)
+            .spacing(5)
             .align_y(iced::Center);
             let btn = button(content)
                 .on_press(Message::RibbonToolClick { tool_id, event })
                 .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-                .width(Length::Fixed(LABELED_SMALL_W + ARROW_W))
+                .width(Length::Shrink)
                 .height(ROW_H)
-                .padding([3, 4]);
+                .padding([0.0, SMALL_PAD]);
             super::keytips::anchor(
                 t.id,
                 tooltip(btn, make_tip(tip_text), TipPos::Right)
@@ -647,10 +769,10 @@ pub(super) fn render_small<'a>(
                     tool_id: last.to_string(),
                     event: ModuleEvent::Command(last.to_string()),
                 })
-                .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
+                .style(move |theme: &Theme, status| split_part_style(theme, active, status))
                 .width(Length::Fixed(SMALL_W))
                 .height(ROW_H)
-                .padding([4, 4]);
+                .padding([2.0, SMALL_PAD]);
 
             let arr_tip = format!("{} {}", t!(cur_label), t!("options"));
             let arr_btn = button(
@@ -661,7 +783,7 @@ pub(super) fn render_small<'a>(
                     .align_y(iced::Center),
             )
             .on_press(Message::ToggleRibbonDropdown(id.to_string()))
-            .style(move |theme: &Theme, status| tool_btn_style(theme, dd_open, status))
+            .style(move |theme: &Theme, status| split_part_style(theme, dd_open, status))
             .width(Length::Fixed(ARROW_W))
             .height(ROW_H)
             .padding(0);
@@ -677,7 +799,12 @@ pub(super) fn render_small<'a>(
 
             PosReport::new(
                 *id,
-                row![icon_with_tip, arr_with_tip].spacing(0).height(ROW_H),
+                split_outline(
+                    row![icon_with_tip, arr_with_tip]
+                        .spacing(0)
+                        .height(ROW_H)
+                        .into(),
+                ),
             )
             .into()
         }
@@ -716,15 +843,15 @@ pub(super) fn render_small<'a>(
                 t!(*label).into_owned()
             };
             let face = row![
-                container(make_icon(cur_icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
+                make_icon(cur_icon, SMALL_ICON),
                 super::keytips::label_anchor(
                     || super::keytips::label_id(id),
-                    text(localized_label.clone())
-                        .size(10)
+                    text(localized_label.replace('\n', " "))
+                        .size(LABEL_SIZE)
                         .wrapping(advanced_text::Wrapping::None),
                 ),
             ]
-            .spacing(3)
+            .spacing(5)
             .align_y(iced::Center);
             // A state that is only shown (not chosen) opens the list instead.
             let face_btn = button(face)
@@ -736,10 +863,15 @@ pub(super) fn render_small<'a>(
                         event: ModuleEvent::Command(last.to_string()),
                     }
                 })
-                .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
+                .style(move |theme: &Theme, status| split_part_style(theme, active, status))
                 .width(Length::Shrink)
                 .height(ROW_H)
-                .padding([3, 4]);
+                .padding(Padding {
+                    top: 0.0,
+                    right: 3.0,
+                    bottom: 0.0,
+                    left: SMALL_PAD,
+                });
             let arrow = button(
                 container(icons::themed_arrow_down(8.0))
                     .width(Fill)
@@ -748,28 +880,25 @@ pub(super) fn render_small<'a>(
                     .align_y(iced::Center),
             )
             .on_press(Message::ToggleRibbonDropdown(id.to_string()))
-            .style(move |theme: &Theme, status| tool_btn_style(theme, dd_open, status))
+            .style(move |theme: &Theme, status| split_part_style(theme, dd_open, status))
             .width(Length::Fixed(ARROW_W))
             .height(ROW_H)
             .padding(0);
             let face_tip = tool_tip_text(&localized_label, last);
             let arrow_tip = format!("{} {}", localized_label, t!("options"));
-            PosReport::new(
-                *id,
-                row![
-                    tooltip(face_btn, make_tip(face_tip), TipPos::Right)
-                        .gap(6.0)
-                        .delay(Duration::from_millis(400))
-                        .style(tip_style),
-                    tooltip(arrow, make_tip(arrow_tip), TipPos::Right)
-                        .gap(6.0)
-                        .delay(Duration::from_millis(400))
-                        .style(tip_style),
-                ]
-                .spacing(0)
-                .height(ROW_H),
-            )
-            .into()
+            let parts = row![
+                tooltip(face_btn, make_tip(face_tip), TipPos::Right)
+                    .gap(6.0)
+                    .delay(Duration::from_millis(400))
+                    .style(tip_style),
+                tooltip(arrow, make_tip(arrow_tip), TipPos::Right)
+                    .gap(6.0)
+                    .delay(Duration::from_millis(400))
+                    .style(tip_style),
+            ]
+            .spacing(0)
+            .height(ROW_H);
+            PosReport::new(*id, split_outline(parts.into())).into()
         }
 
         _ => text("").into(),
@@ -848,55 +977,64 @@ pub(super) fn render_large_dropdown<'a>(
     let tip_text = tool_tip_text(&t!(cur_label), last);
     let arr_tip = format!("{} {}", label, t!("options"));
 
-    // The label owns the bottom of the face. The icon's Fill container centers
-    // it in all remaining space between the button top and the label.
+    // The icon runs the current item; the label with its arrow opens the
+    // list. A one-line label has the arrow under it, a two-line one at the
+    // end of its second line.
     let top_btn = button(
-        column![
-            container(make_icon(cur_icon, LARGE_ICON))
-                .width(Fill)
-                .height(Fill)
-                .align_x(iced::Center)
-                .align_y(iced::Center),
-            super::keytips::label_anchor(
-                || super::keytips::label_id(id),
-                text(label.clone())
-                    .size(10)
-                    .width(Fill)
-                    .align_x(iced::Center)
-                    .wrapping(advanced_text::Wrapping::Word),
-            ),
-        ]
-        .align_x(iced::Center)
-        .spacing(0)
-        .width(Fill)
-        .height(Fill),
+        container(make_icon(cur_icon, LARGE_ICON))
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::Center)
+            .align_y(iced::Bottom),
     )
     .on_press(Message::RibbonToolClick {
         tool_id: last.to_string(),
         event: ModuleEvent::Command(last.to_string()),
     })
-    .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
+    .style(move |theme: &Theme, status| split_part_style(theme, active, status))
     .width(Fill)
-    .height(Fill)
+    .height(Length::Fixed(LARGE_ICON + 5.0))
     .padding(Padding {
-        top: 4.0,
+        top: 3.0,
         right: 4.0,
         bottom: 2.0,
         left: 4.0,
     });
 
-    let arr_btn = button(
-        container(icons::themed_arrow_down(LARGE_DROPDOWN_ARROW_SIZE))
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::Center)
+    let arrow = icons::themed_arrow_down(LARGE_DROPDOWN_ARROW_SIZE);
+    let (first, second) = split_label(&label);
+    let lines: Element<'_, Message> = match second {
+        Some(second) => column![
+            large_label(first.to_string()),
+            row![
+                text(second.to_string())
+                    .size(LARGE_LABEL_SIZE)
+                    .line_height(LARGE_LABEL_LINE),
+                arrow,
+            ]
+            .spacing(2)
             .align_y(iced::Center),
-    )
+        ]
+        .align_x(iced::Center)
+        .width(Fill)
+        .into(),
+        None => column![
+            large_label(first.to_string()).wrapping(advanced_text::Wrapping::None),
+            container(arrow).height(LARGE_ARR).center_y(LARGE_ARR),
+        ]
+        .align_x(iced::Center)
+        .width(Fill)
+        .into(),
+    };
+    let arr_btn = button(super::keytips::label_anchor(
+        || super::keytips::label_id(id),
+        lines,
+    ))
     .on_press(Message::ToggleRibbonDropdown(id.to_string()))
-    .style(move |theme: &Theme, status| tool_btn_style(theme, dd_open, status))
+    .style(move |theme: &Theme, status| split_part_style(theme, dd_open, status))
     .width(Fill)
-    .height(LARGE_ARR)
-    .padding(0);
+    .height(Fill)
+    .padding([0, 2]);
 
     let top_with_tip = tooltip(top_btn, make_tip(tip_text), TipPos::Right)
         .gap(6.0)
@@ -910,9 +1048,13 @@ pub(super) fn render_large_dropdown<'a>(
     let content = column![top_with_tip, arr_with_tip]
         .spacing(0)
         .width(Fill)
-        .height(Fill);
+        .height(Length::Fixed(LARGE_H));
 
-    PosReport::new(id, automatic_large_button(label, content.into())).into()
+    PosReport::new(
+        id,
+        automatic_split_button(label, split_outline(content.into())),
+    )
+    .into()
 }
 
 /// A row of small tool buttons beneath a combo dropdown. Shared by the
@@ -931,6 +1073,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
                 button(icon_el)
                     .on_press(msg)
                     .style(move |theme: &Theme, status| tool_btn_style(theme, is_active, status))
+                    .height(ROW_H)
                     .padding([2, 5]),
                 make_tip(tip.to_string()),
                 TipPos::Right,
@@ -982,31 +1125,25 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 column![
                     container(make_icon(t.icon, LARGE_ICON))
                         .width(Fill)
-                        .height(Fill)
-                        .align_x(iced::Center)
-                        .align_y(iced::Center),
+                        .height(LARGE_ICON)
+                        .align_x(iced::Center),
                     super::keytips::label_anchor(
                         || super::keytips::label_id(t.id),
-                        text(label.clone())
-                            .size(10)
-                            .width(Fill)
-                            .align_x(iced::Center)
-                            .wrapping(advanced_text::Wrapping::Word),
+                        large_label(label.clone()).wrapping(advanced_text::Wrapping::Word),
                     ),
                 ]
                 .align_x(iced::Center)
-                .spacing(0)
-                .width(Fill)
-                .height(Fill),
+                .spacing(2)
+                .width(Fill),
             )
             .on_press(Message::RibbonToolClick { tool_id, event })
             .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
             .width(Fill)
-            .height(Fill)
+            .height(Length::Fixed(LARGE_H))
             .padding(Padding {
-                top: 4.0,
+                top: 3.0,
                 right: 4.0,
-                bottom: 4.0,
+                bottom: 0.0,
                 left: 4.0,
             });
             super::keytips::anchor(
@@ -1044,7 +1181,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 row![].spacing(2).height(Fill).align_y(iced::Top),
                 |row, tools| {
                     let column = tools.iter().fold(
-                        column![].spacing(2).width(Length::Fixed(SMALL_W)),
+                        column![].spacing(ROW_GAP).width(Length::Fixed(SMALL_W)),
                         |column, tool| {
                             column.push(render_small(
                                 &RibbonItem::Tool(tool.clone()),
@@ -1095,7 +1232,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 .style(move |theme: &Theme| container::Style {
                     background: Some(Background::Color(lc)),
                     border: Border {
-                        color: theme.palette().background.strong.color,
+                        color: chrome::border(theme),
                         width: 1.0,
                         radius: 1.0.into(),
                     },
@@ -1131,7 +1268,8 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
             )
             .on_press(Message::ToggleRibbonDropdown(LAYER_COMBO_ID.to_string()))
             .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 3.0))
-            .padding([3, 8])
+            .padding([0, 8])
+            .height(ROW_H)
             .width(Fill);
 
             combo_panel_col(
@@ -1176,7 +1314,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                         .style(move |theme: &Theme| container::Style {
                             background: Some(Background::Color(c)),
                             border: Border {
-                                color: theme.palette().background.strong.color,
+                                color: chrome::border(theme),
                                 width: 1.0,
                                 radius: 1.0.into(),
                             },
@@ -1193,7 +1331,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                         swatch_el,
                         container(super::keytips::label_anchor(
                             || super::keytips::label_id(dd_id),
-                            text(label).size(10),
+                            text(label).size(11),
                         ))
                         .width(Fill)
                         .clip(true),
@@ -1208,7 +1346,8 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 )
                 .on_press(Message::ToggleRibbonDropdown(dd_id.to_string()))
                 .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 2.0))
-                .padding([3, 8])
+                .padding([0, 8])
+                .height(ROW_H)
                 .width(Length::Fixed(PROP_W))
             };
 
@@ -1250,7 +1389,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
 
             row![mp_el, combos]
                 .spacing(4)
-                .align_y(iced::Center)
+                .align_y(iced::Top)
                 .height(Fill)
                 .into()
         }
@@ -1285,7 +1424,8 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
             )
             .on_press(Message::ToggleRibbonDropdown(combo_id.to_string()))
             .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 3.0))
-            .padding([3, 8])
+            .padding([0, 8])
+            .height(ROW_H)
             .width(Fill);
 
             // The open style list renders as a floating overlay
@@ -1355,9 +1495,9 @@ pub(super) fn quick_access_btn<'a>(
             .align_y(iced::Center),
     )
     .on_press(Message::Command(cmd.to_string()))
-    .style(button::subtle)
+    .style(|theme: &Theme, status| top_hist_btn_style(theme, true, false, status))
     .width(Length::Fixed(TOP_HIST_W))
-    .height(24)
+    .height(TOP_BUTTON_H)
     .padding([2, 0]);
     super::keytips::anchor_with(
         || super::keytips::quick_access_anchor(cmd),
@@ -1392,7 +1532,7 @@ pub(super) fn render_history_control<'a>(
         )
         .style(move |theme: &Theme, status| top_hist_btn_style(theme, active, dd_open, status))
         .width(Length::Fixed(TOP_HIST_W))
-        .height(24)
+        .height(TOP_BUTTON_H)
         .padding([2, 0]);
         let btn = if active {
             if dropdown_id == UNDO_HISTORY_ID {
@@ -1431,7 +1571,7 @@ pub(super) fn render_history_control<'a>(
         )
         .style(move |theme: &Theme, status| top_hist_btn_style(theme, active, dd_open, status))
         .width(Length::Fixed(TOP_ARR_W))
-        .height(24)
+        .height(TOP_BUTTON_H)
         .padding(0);
         let btn = if active {
             btn.on_press(Message::ToggleRibbonDropdown(dropdown_id.to_string()))
@@ -1451,33 +1591,51 @@ pub(super) fn render_history_control<'a>(
     PosReport::new(dropdown_id, row![main_btn, arrow_btn].spacing(0)).into()
 }
 
+/// A quick-access button on the tab row; `active` is false while it has
+/// nothing to do (no undo step), `open` while its history list is.
 pub(super) fn top_hist_btn_style(
     theme: &Theme,
     active: bool,
     open: bool,
     status: button::Status,
 ) -> button::Style {
-    let palette = theme.palette();
-    let pair = match (active, open, status) {
-        (false, _, _) => palette.background.weakest,
-        (_, true, _) => palette.primary.weak,
-        (_, _, button::Status::Hovered) => palette.background.weak,
-        (_, _, button::Status::Pressed) => palette.primary.weak,
-        _ => palette.background.base,
-    };
+    let hovered = active && matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: (!active
-            || open
-            || matches!(status, button::Status::Hovered | button::Status::Pressed))
-        .then_some(Background::Color(pair.color)),
-        text_color: pair.text,
+        background: (open || hovered).then(|| Background::Color(chrome::hover(theme))),
+        text_color: if active {
+            chrome::text(theme)
+        } else {
+            chrome::muted(theme)
+        },
         border: Border {
-            radius: 3.0.into(),
-            color: Color::TRANSPARENT,
-            width: 0.0,
+            radius: BUTTON_RADIUS.into(),
+            color: if open || hovered {
+                chrome::hover_border(theme)
+            } else {
+                Color::TRANSPARENT
+            },
+            width: 1.0,
         },
         shadow: iced::Shadow::default(),
         snap: false,
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn the_ribbon_has_the_design_sizes() {
+        // Three 20 px rows make a 64 px large button.
+        assert_eq!(LARGE_H, 64.0);
+        assert_eq!(SMALL_W, 30.0);
+        // 89 px with panel titles, 80 px without.
+        assert_eq!(TOOL_BAR_H, 89.0);
+        assert_eq!(TOOL_BAR_H_UNTITLED, 80.0);
+        // Two label lines fit under the icon of a large button.
+        let line = LARGE_LABEL_SIZE * LARGE_LABEL_LINE;
+        assert!(3.0 + LARGE_ICON + 2.0 + LARGE_LABEL_LINES * line <= LARGE_H);
     }
 }
 

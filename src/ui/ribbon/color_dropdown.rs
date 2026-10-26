@@ -11,6 +11,7 @@ use super::widgets::{muted_text_style, popup_panel_style, popup_row_style};
 use crate::app::Message;
 use crate::t;
 use crate::ui::properties::acad_color_display;
+use crate::ui::style::chrome;
 use codec::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Background, Border, Element, Length, Padding, Theme};
@@ -97,17 +98,16 @@ fn swatch_btn<'a>(color: AcadColor, cur_color: AcadColor) -> Element<'a, Message
     )
     .on_press(Message::RibbonColorChanged(color))
     .style(move |theme: &Theme, status| {
-        let palette = theme.palette();
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
             background: Some(Background::Color(bg)),
             border: Border {
                 color: if selected {
-                    palette.primary.base.color
+                    chrome::accent(theme)
                 } else if hovered {
-                    palette.background.base.text
+                    chrome::strong(theme)
                 } else {
-                    palette.background.neutral.color
+                    chrome::border(theme)
                 },
                 width: if selected {
                     2.0
@@ -131,19 +131,14 @@ fn placeholder_swatch<'a>() -> Element<'a, Message> {
             .width(Length::Fixed(SWATCH_SIZE))
             .height(Length::Fixed(SWATCH_SIZE)),
     )
-    .style(|theme: &Theme| {
-        let palette = theme.palette();
-        container::Style {
-            background: Some(Background::Color(
-                palette.background.weak.color.scale_alpha(0.5),
-            )),
-            border: Border {
-                color: palette.background.neutral.color.scale_alpha(0.5),
-                width: 1.0,
-                radius: 1.0.into(),
-            },
-            ..Default::default()
-        }
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(chrome::hover(theme).scale_alpha(0.5))),
+        border: Border {
+            color: chrome::border(theme).scale_alpha(0.5),
+            width: 1.0,
+            radius: 1.0.into(),
+        },
+        ..Default::default()
     })
     .into()
 }
@@ -151,7 +146,7 @@ fn placeholder_swatch<'a>() -> Element<'a, Message> {
 fn divider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.neutral.color)),
+            background: Some(Background::Color(chrome::border(theme))),
             ..Default::default()
         })
         .into()
@@ -172,21 +167,18 @@ fn logical_row<'a>(
             .width(Length::Fixed(SWATCH_SIZE))
             .height(Length::Fixed(SWATCH_SIZE)),
     )
-    .style(move |theme: &Theme| {
-        let palette = theme.palette();
-        container::Style {
-            background: Some(Background::Color(bg)),
-            border: Border {
-                color: if selected {
-                    palette.primary.base.color
-                } else {
-                    palette.background.neutral.color
-                },
-                width: if selected { 2.0 } else { 1.0 },
-                radius: 1.0.into(),
+    .style(move |theme: &Theme| container::Style {
+        background: Some(Background::Color(bg)),
+        border: Border {
+            color: if selected {
+                chrome::accent(theme)
+            } else {
+                chrome::border(theme)
             },
-            ..Default::default()
-        }
+            width: if selected { 2.0 } else { 1.0 },
+            radius: 1.0.into(),
+        },
+        ..Default::default()
     });
 
     button(

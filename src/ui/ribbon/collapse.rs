@@ -822,7 +822,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                     shadow: Shadow::default(),
                     snap: true,
                 },
-                Background::Color(theme.palette().background.neutral.color),
+                Background::Color(chrome::page(theme)),
             );
         }
     }
@@ -956,7 +956,7 @@ impl overlay::Overlay<Message, Theme, Renderer> for GhostOverlay<'_, '_> {
         let b = layout.bounds();
         let top_left = cursor.position().unwrap_or(self.at) - self.grab;
         // The tool area's background (see `Ribbon::view`).
-        let background = theme.palette().background.weakest.color;
+        let background = chrome::panel(theme);
         let quad = |bounds| renderer::Quad {
             bounds,
             border: Border::default(),
@@ -1029,14 +1029,14 @@ impl overlay::Overlay<Message, Theme, Renderer> for FlyoutOverlay<'_, '_> {
             renderer::Quad {
                 bounds: b,
                 border: Border {
-                    color: theme.palette().background.neutral.color,
+                    color: chrome::border(theme),
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 shadow: Shadow::default(),
                 snap: true,
             },
-            Background::Color(theme.palette().background.weakest.color),
+            Background::Color(chrome::panel(theme)),
         );
         let child = layout.children().next().unwrap();
         self.content.as_widget().draw(

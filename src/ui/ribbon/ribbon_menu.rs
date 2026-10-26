@@ -16,11 +16,12 @@ use iced::{
     Size, Theme, Vector,
 };
 
-use super::widgets::{make_tip, tip_style};
+use super::widgets::{make_tip, popup_panel_style, tip_style};
 use super::{extras, Ribbon};
 use crate::app::Message;
 use crate::ui::icons;
 use crate::ui::popup::context_menu::{MENU_PAD_TOP, MENU_ROW_H, MENU_SEP_H, MENU_WIDTH};
+use crate::ui::style::chrome;
 
 /// Size of the check mark at the end of a checked row, as in the viewport
 /// menu.
@@ -357,10 +358,10 @@ fn panel(items: Vec<Element<'_, Message>>) -> Element<'_, Message> {
     panel_of_width(items, MENU_WIDTH)
 }
 
-/// The menu's frame, as the viewport menu draws it.
+/// The menu's frame: a ribbon popup, with the viewport menu's metrics.
 fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, Message> {
     container(column(items).width(Fill))
-        .style(container::bordered_box)
+        .style(popup_panel_style)
         .padding([MENU_PAD_TOP as u16, 0])
         .width(Length::Fixed(width))
         .into()
@@ -370,7 +371,7 @@ fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, M
 fn separator<'a>() -> Element<'a, Message> {
     let line =
         container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
+            background: Some(Background::Color(chrome::border(theme))),
             ..Default::default()
         });
     container(line)
@@ -451,14 +452,13 @@ fn submenu_row<'a>(label: String, open: bool, list: Submenu) -> Element<'a, Mess
 /// Row colours of the viewport menu: hover tints the background, disabled
 /// rows fade their text.
 fn row_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
     let (background, text_color) = match status {
         button::Status::Hovered | button::Status::Pressed => (
-            Some(Background::Color(palette.background.weak.color)),
-            palette.background.weak.text,
+            Some(Background::Color(chrome::hover(theme))),
+            chrome::strong(theme),
         ),
-        button::Status::Disabled => (None, palette.background.base.text.scale_alpha(0.42)),
-        button::Status::Active => (None, palette.background.base.text),
+        button::Status::Disabled => (None, chrome::muted(theme)),
+        button::Status::Active => (None, chrome::text(theme)),
     };
     button::Style {
         background,

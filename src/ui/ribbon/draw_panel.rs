@@ -11,8 +11,8 @@ use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 
 use super::extras::{self, Layout, MoreGroup, MoreTool, PanelExtras};
 use super::widgets::{
-    make_icon, make_tip, muted_text_style, popup_panel_style, popup_row_style, tip_style,
-    tool_btn_style, LARGE_DROPDOWN_ARROW_SIZE, PANEL_TITLE_H, PANEL_TITLE_PAD,
+    make_icon, make_tip, popup_panel_style, popup_row_style, tip_style, tool_btn_style,
+    PANEL_TITLE_H, PANEL_TITLE_SIZE,
 };
 use super::{dropdown_backdrop, keytips, position_ribbon_dropdown, Ribbon, RibbonMinimize};
 use crate::app::Message;
@@ -22,9 +22,12 @@ use crate::ui::icons;
 use crate::ui::style::chrome;
 use crate::ui::wrap_bar::{dropdown_bounds, recent_bounds, PosReport};
 
-const GROUP_TITLE_ARROW_SIZE: f32 = LARGE_DROPDOWN_ARROW_SIZE * 1.5;
+const GROUP_TITLE_ARROW_SIZE: f32 = 8.0;
 /// The title strip at the bottom of a panel, which an open slide-out covers.
-const TITLE_STRIP: f32 = PANEL_TITLE_H + PANEL_TITLE_PAD;
+const TITLE_STRIP: f32 = PANEL_TITLE_H;
+/// A panel's dialog launcher, at the right end of its title strip.
+const LAUNCHER_W: f32 = 16.0;
+const LAUNCHER_H: f32 = 15.0;
 /// Height of a slide-out's footer.
 const FOOTER_H: f32 = 19.0;
 /// A slide-out tool button, and the arrow of one with a submenu.
@@ -295,18 +298,38 @@ impl Ribbon {
     }
 }
 
+/// The title row of the panel `key`: its title, or for a panel with a
+/// slide-out a button that opens it; and the panel's dialog launcher, which
+/// the panel frame puts at the right end of the strip.
 pub(super) fn group_title<'a>(
     title: &'static str,
     key: &str,
     look: SlideLook,
     active_tool: Option<&str>,
-) -> Element<'a, Message> {
-    let Some(panel) = panel_for_group(key) else {
-        let label = keytips::label_anchor(
-            || format!("title:{title}"),
-            text(t!(title)).size(9).style(muted_text_style),
-        );
-        return container(label).padding([1, 4]).into();
+) -> (Element<'a, Message>, Option<Element<'a, Message>>) {
+    let panel = panel_for_group(key);
+    let launcher = panel.and_then(launcher);
+    // Room for the launcher on both sides keeps the title centred.
+    let side = if launcher.is_some() {
+        LAUNCHER_W + 2.0
+    } else {
+        4.0
+    };
+    let title_text = |title: &'static str| {
+        text(t!(title))
+            .size(PANEL_TITLE_SIZE)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .style(|theme: &Theme| text::Style {
+                color: Some(chrome::title_text(theme)),
+            })
+    };
+    let Some(panel) = panel else {
+        let label = keytips::label_anchor(|| format!("title:{title}"), title_text(title));
+        let row = container(label)
+            .height(PANEL_TITLE_H)
+            .center_y(PANEL_TITLE_H)
+            .padding([0.0, side]);
+        return (row.into(), launcher);
     };
     let expanded = look != SlideLook::Closed;
     // A command running from the closed slide-out lights its title, the way a
@@ -321,7 +344,7 @@ pub(super) fn group_title<'a>(
         panel.id,
         button(
             row![
-                keytips::label_anchor(|| keytips::label_id(panel.id), text(t!(title)).size(9)),
+                keytips::label_anchor(|| keytips::label_id(panel.id), title_text(title)),
                 arrow
             ]
             .spacing(4)
@@ -333,16 +356,15 @@ pub(super) fn group_title<'a>(
             _ => Message::ToggleRibbonDropdown(panel.id.to_string()),
         })
         .style(move |theme: &Theme, status| tool_btn_style(theme, lit, status))
-        .padding([1, 4]),
+        .height(PANEL_TITLE_H - 3.0)
+        .padding([0, 4]),
     )
     .into();
-    let Some(launcher) = launcher(panel) else {
-        return title_button;
-    };
-    row![title_button, launcher]
-        .spacing(6)
-        .align_y(iced::Center)
-        .into()
+    let row = container(title_button)
+        .height(PANEL_TITLE_H)
+        .center_y(PANEL_TITLE_H)
+        .padding([0.0, side]);
+    (row.into(), launcher)
 }
 
 /// The corner arrow that runs the dialog command of `panel`, if it has one.
@@ -352,17 +374,23 @@ pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> 
     let launcher = tooltip(
         // A right arrow turned to point into the corner.
         button(
-            iced::widget::svg(icons::themed_handle(icons::ARROW_LONG_RIGHT))
-                .width(10)
-                .height(10)
-                .rotation(iced::Radians(std::f32::consts::FRAC_PI_4))
-                .style(|theme: &Theme, _| iced::widget::svg::Style {
-                    color: Some(theme.palette().background.base.text),
-                }),
+            container(
+                iced::widget::svg(icons::themed_handle(icons::ARROW_LONG_RIGHT))
+                    .width(9)
+                    .height(9)
+                    .rotation(iced::Radians(std::f32::consts::FRAC_PI_4))
+                    .style(|theme: &Theme, _| iced::widget::svg::Style {
+                        color: Some(chrome::title_text(theme)),
+                    }),
+            )
+            .center_x(Fill)
+            .center_y(Fill),
         )
         .on_press(launcher_message(dialog))
         .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
-        .padding([0, 3]),
+        .width(LAUNCHER_W)
+        .height(LAUNCHER_H)
+        .padding(0),
         make_tip(format!(
             "{}\n{} {dialog}",
             t!(panel.dialog_label),
@@ -372,7 +400,6 @@ pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> 
     )
     .delay(Duration::from_millis(400))
     .style(tip_style);
-    // Shrink-sized: a Fill here would make the panel claim the whole row.
     Some(keytips::anchor(keytips::XREF_LAUNCHER, launcher))
 }
 

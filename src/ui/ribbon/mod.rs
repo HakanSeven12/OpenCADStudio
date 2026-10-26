@@ -9,7 +9,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use rustc_hash::FxHashMap as HashMap;
 
@@ -293,7 +293,7 @@ pub struct Ribbon {
     /// panel is collapsed). Written by `CollapsePanels`, read when anchoring
     /// dropdowns below the ribbon.
     tool_bar_h: Arc<AtomicU32>,
-    /// User-chosen panel density (persisted). `Auto` sizes by window width.
+    /// Panel density: `Auto` sizes the panels to the window; tests pin one.
     collapse_mode: CollapseMode,
     /// Hidden tabs and panels, panel order and the like (persisted).
     layout: RibbonLayout,
@@ -308,9 +308,6 @@ pub struct Ribbon {
     /// The window size, for the search box and its results.
     win_w: f32,
     win_h: f32,
-    /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
-    /// selector hides itself then to give the cramped tab row its space back.
-    collapse_tight: Arc<AtomicBool>,
     /// The selected PDF underlay's switches while only underlays are selected.
     underlay_ctx: Option<UnderlayContext>,
     /// Only xrefs are selected.
@@ -452,7 +449,6 @@ impl Ribbon {
             search: search::SearchState::default(),
             win_w: f32::INFINITY,
             win_h: f32::INFINITY,
-            collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
             point_cloud_ctx: None,
@@ -469,15 +465,10 @@ impl Ribbon {
         self.win_h = h;
     }
 
-    /// Change the tool-panel density. Persistence is handled by the caller via
-    /// the consolidated app config (`save_config`).
+    /// Pin the tool panels to one density, so a test sees a known layout.
+    #[cfg(test)]
     pub fn set_collapse_mode(&mut self, mode: CollapseMode) {
         self.collapse_mode = mode;
-    }
-
-    /// The current tool-panel density (for saving into the app config).
-    pub fn collapse_mode(&self) -> CollapseMode {
-        self.collapse_mode
     }
 
     /// Apply a saved layout. Persistence is handled by the caller via the
@@ -1110,19 +1101,6 @@ impl Ribbon {
             .min_spacing_x(-12.0)
             .row_h(28.0);
 
-        // Panel-density selector, pinned to the right edge of the tab row: a bare
-        // ▾ button that opens a list of modes (see `dropdown_overlay`). `Auto`
-        // sizes panels to the window; the others force one density. The choice is
-        // persisted (see `Ribbon::set_collapse_mode`). It hides itself once the
-        // tool row is tight, giving the cramped tab row its space back.
-        let dd_open = self.open_dropdown.as_deref() == Some(COLLAPSE_MODE_ID);
-        let mode_btn = button(crate::ui::icons::themed_arrow_down(10.0))
-            .on_press(Message::ToggleRibbonDropdown(COLLAPSE_MODE_ID.to_string()))
-            .style(move |theme: &Theme, status| top_hist_btn_style(theme, true, dd_open, status))
-            .height(24)
-            .padding([2, 8]);
-        let mode_dd = PosReport::new(COLLAPSE_MODE_ID, mode_btn);
-
         let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
         if menu_row.is_none() {
             tab_row = tab_row.push(self.logo_button(false));
@@ -1138,9 +1116,6 @@ impl Ribbon {
         // Without the menu row the search box ends the tab row.
         if menu_row.is_none() {
             tab_row = tab_row.push(self.search_box());
-        }
-        if !self.collapse_tight.load(Ordering::Relaxed) {
-            tab_row = tab_row.push(mode_dd);
         }
 
         let tab_bar = container(tab_row)
@@ -1289,7 +1264,6 @@ impl Ribbon {
                 })
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
-                .report_tight(self.collapse_tight.clone())
                 .mode(mode)
                 .into()
         } else {
@@ -1434,37 +1408,6 @@ impl Ribbon {
             let (align_right, h_pad, top) = self.dd_anchor(open_id, 170.0, win.0);
             let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
 
-            return Some(dropdown_backdrop(positioned));
-        }
-
-        if open_id == COLLAPSE_MODE_ID {
-            const W: f32 = 150.0;
-            let current = self.collapse_mode;
-            let rows: Vec<Element<Message>> = CollapseMode::ALL
-                .iter()
-                .map(|&m| {
-                    button(
-                        row![
-                            crate::ui::icons::themed_check_cell(m == current),
-                            text(t!(m.label())).size(11),
-                        ]
-                        .spacing(4)
-                        .align_y(iced::Center),
-                    )
-                    .on_press(Message::SetRibbonCollapseMode(m))
-                    .style(popup_row_style)
-                    .width(Fill)
-                    .padding([5, 10])
-                    .into()
-                })
-                .collect();
-
-            let panel = container(column(rows))
-                .style(popup_panel_style)
-                .width(Length::Fixed(W));
-
-            let (align_right, h_pad, top) = self.dd_anchor(open_id, W, win.0);
-            let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
             return Some(dropdown_backdrop(positioned));
         }
 

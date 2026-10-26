@@ -3057,8 +3057,6 @@ pub enum Message {
     },
     /// Ribbon key tips: Alt, typed codes and Esc.
     KeyTip(crate::ui::ribbon::KeyTipInput),
-    /// Change the ribbon tool-panel density (persisted).
-    SetRibbonCollapseMode(crate::ui::ribbon::CollapseMode),
     /// A ribbon tool button was clicked — highlights the tool and dispatches its event.
     RibbonToolClick {
         tool_id: String,

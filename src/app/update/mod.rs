@@ -2707,13 +2707,6 @@ impl OpenCADStudio {
                 follow.map_or_else(Task::none, Task::done)
             }
 
-            Message::SetRibbonCollapseMode(mode) => {
-                self.ribbon.set_collapse_mode(mode);
-                self.ribbon.close_dropdown();
-                self.save_config();
-                Task::none()
-            }
-
             Message::RibbonToolClick { tool_id, event } => {
                 // A tool clicked in a minimized ribbon's popup closes it.
                 self.ribbon.close_popup();

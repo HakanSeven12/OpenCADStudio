@@ -9,7 +9,7 @@
 
 use std::cell::RefCell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
@@ -78,9 +78,9 @@ fn slot(i: usize, level: Level) -> usize {
 const MAX_PANEL_SQUEEZE: f32 = 8.0;
 
 /// How the ribbon tool panels are sized. `Auto` adapts to the window width (the
-/// step-by-step degradation); the others pin every panel to one density so the
-/// user can override the automatic choice. The selection is persisted.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+/// step-by-step degradation); the others pin every panel to one density, as the
+/// minimized ribbon's popup and the tests do.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum CollapseMode {
     /// Size panels to the window: degrade from the right as space runs out.
     #[default]
@@ -94,24 +94,6 @@ pub enum CollapseMode {
 }
 
 impl CollapseMode {
-    /// Every mode, in dropdown order.
-    pub const ALL: &'static [CollapseMode] = &[
-        CollapseMode::Auto,
-        CollapseMode::Full,
-        CollapseMode::Compact,
-        CollapseMode::Collapsed,
-    ];
-
-    /// Label shown in the dropdown.
-    pub fn label(self) -> &'static str {
-        match self {
-            CollapseMode::Auto => "Auto",
-            CollapseMode::Full => "Full",
-            CollapseMode::Compact => "Compact",
-            CollapseMode::Collapsed => "Collapsed",
-        }
-    }
-
     /// The degradation level every panel is pinned to, or `None` for `Auto`.
     fn forced_level(self) -> Option<Level> {
         match self {
@@ -120,12 +102,6 @@ impl CollapseMode {
             CollapseMode::Compact => Some(Level::Compact),
             CollapseMode::Collapsed => Some(Level::Collapsed),
         }
-    }
-}
-
-impl std::fmt::Display for CollapseMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
     }
 }
 
@@ -188,11 +164,8 @@ pub(crate) struct CollapsePanels<'a> {
     /// If set, the measured row height is written here each layout (read when
     /// anchoring dropdowns below the ribbon).
     height_out: Option<Arc<AtomicU32>>,
-    /// If set, `true` is written here whenever the row is in the tight state
-    /// (some panel dropped to its small icon), so the tab bar can react.
-    tight_out: Option<Arc<AtomicBool>>,
-    /// User-chosen density. `Auto` runs the width-based degradation; the others
-    /// pin every panel to one level regardless of the window width.
+    /// `Auto` runs the width-based degradation; the others pin every panel
+    /// to one level regardless of the window width.
     mode: CollapseMode,
     /// Fingerprint of content that can affect natural panel dimensions.
     measure_key: u64,
@@ -327,7 +300,6 @@ impl<'a> CollapsePanels<'a> {
             row_h,
             levels: RefCell::new(vec![Level::Full; n]),
             height_out: None,
-            tight_out: None,
             mode: CollapseMode::Auto,
             measure_key: 0,
             drag_strip: 0.0,
@@ -359,12 +331,6 @@ impl<'a> CollapsePanels<'a> {
     /// Report the measured row height into `out` on every layout.
     pub fn report_height(mut self, out: Arc<AtomicU32>) -> Self {
         self.height_out = Some(out);
-        self
-    }
-
-    /// Report whether the row is in the tight state into `out` on every layout.
-    pub fn report_tight(mut self, out: Arc<AtomicBool>) -> Self {
-        self.tight_out = Some(out);
         self
     }
 
@@ -525,11 +491,6 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             }
         }
 
-        // The row is "tight" once any panel has dropped to its small icon — the
-        // last, most cramped state. The tab bar hides its mode selector then.
-        if let Some(out) = &self.tight_out {
-            out.store(levels.iter().any(|&l| l == Level::Tight), Ordering::Relaxed);
-        }
         *self.levels.borrow_mut() = levels.clone();
 
         // Same idea as the tab bar squeezing its gaps before wrapping: once every

@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::settings::UserSettings;
-use crate::ui::ribbon::{CollapseMode, RibbonLayout};
+use crate::ui::ribbon::RibbonLayout;
 use crate::ui::statusbar::statusbar_config::StatusBarConfig;
 use crate::ui::window::plot::PlotDialogState;
 
@@ -37,7 +37,7 @@ pub struct AppConfig {
     pub graphic_fills_on_current_layer: bool,
     /// Add a newly selected annotation scale to existing annotative objects.
     pub annotation_auto_scale: i8,
-    /// Ribbon collapse density.
+    /// Ribbon layout.
     pub ribbon: RibbonConfig,
     /// Print dialog preferences (only the persisted fields; runtime state is
     /// skipped by `PlotDialogState`'s serde attributes).
@@ -549,7 +549,6 @@ pub struct StartConfig {
 #[derive(Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct RibbonConfig {
-    pub collapse: CollapseMode,
     /// Hidden tabs and panels, panel order, panel titles, minimize state and
     /// pinned slide-outs, stored as fields of this section.
     #[serde(flatten)]
@@ -735,10 +734,9 @@ mod tests {
         use crate::ui::ribbon::{MinimizePref, RibbonMinimize};
 
         // A config from before the layout settings keeps loading, with the
-        // collapse mode it had and the default layout.
+        // default layout; the panel density it may still hold is ignored.
         let old: AppConfig =
             serde_json::from_str(r#"{"ribbon":{"collapse":"Compact"}}"#).expect("old config");
-        assert_eq!(old.ribbon.collapse, CollapseMode::Compact);
         assert!(old.ribbon.layout == RibbonLayout::default());
         assert!(old.ribbon.layout.show_panel_titles);
         assert!(!old.ribbon.layout.search_collapsed);

@@ -49,7 +49,7 @@ fn main() {
 
     let frame = |cache, renderer: &mut iced::Renderer| {
         let ui = UserInterface::build(
-            ribbon.view(false, false, 0, 0, false, None),
+            ribbon.view(None, false, false, false, 0, 0, false, None),
             bounds,
             cache,
             renderer,

@@ -2675,11 +2675,21 @@ bg={bg_ms:.1}ms n={view_count}"
             // menu bar and status bar stay so commands remain reachable and
             // the mode can be toggled back off.
             let mut col = column![];
-            if self.show_menu_bar {
-                col = col.push(crate::ui::menu_bar::view());
-            }
-            if !self.clean_screen && !self.ribbon_closed {
+            if self.clean_screen {
+                // Clean screen keeps the menu row, led by the compact logo.
+                if self.show_menu_bar {
+                    col = col.push(
+                        row![
+                            container(self.ribbon.logo_button(false)).padding([0, 6]),
+                            crate::ui::menu_bar::view(),
+                        ]
+                        .align_y(iced::Center),
+                    );
+                }
+            } else {
                 col = col.push(self.ribbon.view(
+                    self.show_menu_bar.then(crate::ui::menu_bar::view),
+                    self.ribbon_closed,
                     is_paper,
                     self.tabs[self.active_tab].is_start,
                     self.tabs[self.active_tab].history.undo_stack.len(),
@@ -2877,6 +2887,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.win_size,
                     self.tabs[self.active_tab].is_start,
                     &self.tabs[self.active_tab].recent_colors,
+                    &self.recent_files,
                 )
                 .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
         };

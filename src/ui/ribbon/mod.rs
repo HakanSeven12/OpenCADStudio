@@ -32,6 +32,7 @@ mod visibility_panel;
 pub use context_tools::{UnderlayContext, pdf_underlay_tools, point_cloud_tools, xref_tools};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 use widgets::{StyleContext, *};
+mod app_menu;
 mod collapse;
 mod keytips;
 mod layout;
@@ -40,6 +41,7 @@ mod minimize;
 mod ribbon_menu;
 use crate::t;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
+pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
 use collapse::{CollapsePanels, Panel};
 pub use draw_panel::SlideOutMsg;
@@ -48,7 +50,7 @@ pub use keytips::{
     key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed,
 };
 pub use layout::{MinimizePref, RibbonLayout, RibbonMinimize};
-pub use minimize::{MinimizeMsg, Opener, MINIMIZE_MENU_ID};
+pub use minimize::{MinimizeMsg, Opener};
 pub use ribbon_menu::{RibbonMenuMsg, Submenu};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
@@ -908,15 +910,21 @@ impl Ribbon {
 
     // ── View ──────────────────────────────────────────────────────────────
 
-    pub fn view(
-        &self,
+    /// The ribbon. With `menu_row` (MENUBAR 1) the large logo spans the
+    /// menu row and the tab row; without it a compact logo starts the tab
+    /// row. A `closed` ribbon (RIBBONCLOSE) keeps the tab row.
+    #[allow(clippy::too_many_arguments)]
+    pub fn view<'a>(
+        &'a self,
+        menu_row: Option<Element<'a, Message>>,
+        closed: bool,
         is_paper: bool,
         is_start: bool,
         undo_count: usize,
         redo_count: usize,
         show_block_palette: bool,
         visibility: Option<crate::ui::window::block_visibility::RibbonContext>,
-    ) -> Element<'_, Message> {
+    ) -> Element<'a, Message> {
         // ── Quick-access file commands + undo/redo, one merged flow ────────
         let lead = iced::widget::Row::with_children(vec![
             quick_access_btn(crate::ui::icons::DOC_NEW, "New", "QNEW").into(),
@@ -1071,16 +1079,18 @@ impl Ribbon {
             .padding([2, 8]);
         let mode_dd = PosReport::new(COLLAPSE_MODE_ID, mode_btn);
 
-        let mut tab_row = row![
+        let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
+        if menu_row.is_none() {
+            tab_row = tab_row.push(self.logo_button(false));
+        }
+        tab_row = tab_row.push(
             container(
                 WrapBar::new(lead.into(), tabs.into())
                     .spacing(6.0)
                     .report_height(self.tab_bar_h.clone()),
             )
-            .width(Length::Fill)
-        ]
-        .spacing(6.0)
-        .align_y(iced::Center);
+            .width(Length::Fill),
+        );
         if !self.collapse_tight.load(Ordering::Relaxed) {
             tab_row = tab_row.push(mode_dd);
         }
@@ -1097,8 +1107,20 @@ impl Ribbon {
             .width(Length::Fill);
 
         let tab_bar = PosReport::new(minimize::TAB_BAR_ID, tab_bar);
-        let mut ribbon = column![tab_bar];
+        let top: Element<'a, Message> = match menu_row {
+            Some(menu_row) => row![
+                container(self.logo_button(true)).style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(crate::ui::style::chrome::bar(theme))),
+                    ..Default::default()
+                }),
+                column![menu_row, tab_bar].width(Fill),
+            ]
+            .into(),
+            None => tab_bar.into(),
+        };
+        let mut ribbon = column![top];
         match self.layout.minimize {
+            _ if closed => {}
             RibbonMinimize::Off => {
                 ribbon = ribbon.push(self.tool_area(
                     is_paper,
@@ -1277,8 +1299,12 @@ impl Ribbon {
         win: (f32, f32),
         is_start: bool,
         recent_colors: &[AcadColor],
+        recent_files: &[std::path::PathBuf],
     ) -> Option<Element<'_, Message>> {
         let open_id = self.open_dropdown.as_deref()?;
+        if open_id == APP_MENU_ID {
+            return Some(self.app_menu(recent_files, win));
+        }
         // The minimize button belongs to the tab row, which the Start tab
         // keeps; the tools' dropdowns need a drawing.
         if open_id == minimize::MINIMIZE_MENU_ID {
@@ -2233,7 +2259,7 @@ mod tests {
             ribbon.set_collapse_mode(mode);
             ribbon.collapsed_open =
                 (mode == CollapseMode::Collapsed).then(|| first_panel.to_string());
-            let view = ribbon.view(false, false, 0, 0, false, None);
+            let view = ribbon.view(None, false, false, false, 0, 0, false, None);
             std::hint::black_box(view);
         }
     }

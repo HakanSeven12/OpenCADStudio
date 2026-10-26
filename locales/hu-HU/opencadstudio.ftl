@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Kicsinyítés panelgombokra
     .cycle-through-all = Mindegyik körbe
     .more-tools = További eszközök
+    .plot = Nyomtatás...
+    .recent-drawings = Legutóbbi rajzok
 
 options =
     .language-section = Nyelv

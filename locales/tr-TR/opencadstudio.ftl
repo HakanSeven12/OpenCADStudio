@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Panel düğmelerine küçült
     .cycle-through-all = Tümünde dolaş
     .more-tools = Diğer araçlar
+    .plot = Çizdir...
+    .recent-drawings = Son çizimler
 
 options =
     .language-section = Dil

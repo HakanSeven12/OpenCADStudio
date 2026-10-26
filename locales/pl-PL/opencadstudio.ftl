@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Minimalizuj do przycisków paneli
     .cycle-through-all = Przełączaj cyklicznie
     .more-tools = Więcej narzędzi
+    .plot = Drukuj...
+    .recent-drawings = Ostatnie rysunki
 
 options =
     .language-section = Język

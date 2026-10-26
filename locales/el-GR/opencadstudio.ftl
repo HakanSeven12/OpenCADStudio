@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Ελαχιστοποίηση σε κουμπιά πλαισίων
     .cycle-through-all = Κυκλική εναλλαγή όλων
     .more-tools = Περισσότερα εργαλεία
+    .plot = Σχεδίαση...
+    .recent-drawings = Πρόσφατα σχέδια
 
 options =
     .language-section = Γλώσσα

@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = 最小化為面板按鈕
     .cycle-through-all = 循環切換全部
     .more-tools = 更多工具
+    .plot = 出圖...
+    .recent-drawings = 最近的圖面
 
 options =
     .language-section = 語言

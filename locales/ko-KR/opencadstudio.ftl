@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = 패널 버튼으로 최소화
     .cycle-through-all = 모두 순환
     .more-tools = 추가 도구
+    .plot = 플롯...
+    .recent-drawings = 최근 도면
 
 options =
     .language-section = 언어

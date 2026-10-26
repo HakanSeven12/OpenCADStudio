@@ -3,9 +3,20 @@
 //! implementation of it.
 
 use crate::app::Message;
+use crate::ui::style::chrome;
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::widget::{self, Widget};
+use iced::advanced::{mouse, overlay, renderer, Shell};
 use iced::widget::{button, container, text};
-use iced::{Background, Border, Element, Fill, Theme};
+use iced::{
+    Background, Border, Element, Event, Fill, Length, Rectangle, Renderer, Shadow, Size, Theme,
+    Vector,
+};
 use iced_aw::menu::{Item, Menu, MenuBar};
+
+/// Height of the menu row, and of a menu title in it.
+const ROW_H: f32 = 25.0;
+const TITLE_H: f32 = 20.0;
 
 type Entries = &'static [(&'static str, &'static str)];
 
@@ -227,17 +238,21 @@ pub fn view<'a>() -> Element<'a, Message> {
                 })
                 .collect();
             Item::with_menu(
-                container(text(crate::t!(title).into_owned()).size(12)).padding([3, 8]),
+                Title::new(
+                    container(text(crate::t!(title).into_owned()).size(12))
+                        .center_y(TITLE_H)
+                        .padding([0, 9]),
+                ),
                 Menu::new(items).width(240.0).offset(2.0),
             )
         })
         .collect();
-    MenuBar::new(roots)
+    let bar = MenuBar::new(roots)
         .close_on_item_click_global(true)
         .style(|theme: &Theme, _| {
             let palette = theme.palette();
             iced_aw::style::menu_bar::Style {
-                bar_background: Background::Color(palette.background.weakest.color),
+                bar_background: Background::Color(chrome::bar(theme)),
                 bar_border: Border::default(),
                 bar_shadow: Default::default(),
                 menu_background: Background::Color(palette.background.base.color),
@@ -247,12 +262,178 @@ pub fn view<'a>() -> Element<'a, Message> {
                     radius: 3.0.into(),
                 },
                 menu_shadow: Default::default(),
-                path: Background::Color(palette.primary.weak.color),
+                path: Background::Color(chrome::hover(theme)),
                 path_border: Border::default(),
             }
         })
+        .width(Fill);
+    container(bar)
+        .padding(iced::Padding {
+            top: 1.0,
+            ..iced::Padding::ZERO
+        })
+        .height(ROW_H)
         .width(Fill)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::bar(theme))),
+            ..Default::default()
+        })
         .into()
+}
+
+/// A menu title on the bar: `tab_text`, and `strong` on a `hover` fill
+/// under the pointer.
+struct Title<'a> {
+    content: Element<'a, Message>,
+}
+
+impl<'a> Title<'a> {
+    fn new(content: impl Into<Element<'a, Message>>) -> Self {
+        Self {
+            content: content.into(),
+        }
+    }
+}
+
+impl<'a> Widget<Message, Theme, Renderer> for Title<'a> {
+    /// Whether the pointer is on the title.
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::of::<bool>()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        widget::tree::State::new(false)
+    }
+
+    fn diff(&mut self, tree: &mut widget::Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        if let Event::Mouse(mouse::Event::CursorMoved { .. }) = event {
+            // The fill follows the pointer onto and off the title.
+            let hovered = cursor.is_over(layout.bounds());
+            let state = tree.state.downcast_mut::<bool>();
+            if *state != hovered {
+                *state = hovered;
+                shell.request_redraw();
+            }
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &widget::Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let hovered = cursor.is_over(layout.bounds());
+        if hovered {
+            renderer::Renderer::fill_quad(
+                renderer,
+                renderer::Quad {
+                    bounds: layout.bounds(),
+                    border: Border::default(),
+                    shadow: Shadow::default(),
+                    snap: true,
+                },
+                Background::Color(chrome::hover(theme)),
+            );
+        }
+        let style = renderer::Style {
+            text_color: if hovered {
+                chrome::strong(theme)
+            } else {
+                chrome::tab_text(theme)
+            },
+        };
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            &style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut widget::Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+impl<'a> From<Title<'a>> for Element<'a, Message> {
+    fn from(title: Title<'a>) -> Self {
+        Element::new(title)
+    }
 }
 
 #[cfg(test)]

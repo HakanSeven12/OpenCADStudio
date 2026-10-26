@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Minimaliseren tot paneelknoppen
     .cycle-through-all = Alles rouleren
     .more-tools = Meer gereedschappen
+    .plot = Plotten...
+    .recent-drawings = Recente tekeningen
 
 options =
     .language-section = Taal

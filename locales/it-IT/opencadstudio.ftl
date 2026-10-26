@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Riduci a pulsanti dei gruppi
     .cycle-through-all = Scorri tutti
     .more-tools = Altri strumenti
+    .plot = Stampa...
+    .recent-drawings = Disegni recenti
 
 options =
     .language-section = Lingua

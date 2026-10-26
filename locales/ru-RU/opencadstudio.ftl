@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Свернуть до кнопок панелей
     .cycle-through-all = Перебирать все
     .more-tools = Другие инструменты
+    .plot = Печать...
+    .recent-drawings = Недавние чертежи
 
 options =
     .language-section = Язык

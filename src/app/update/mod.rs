@@ -1195,6 +1195,8 @@ impl OpenCADStudio {
             ),
 
             Message::OpenRecent(path) => {
+                // Opened from the application menu, which closes.
+                self.ribbon.close_app_menu();
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     // Recents are read from disk every save → the path may be
@@ -3462,6 +3464,8 @@ impl OpenCADStudio {
             }
 
             Message::Command(cmd) => {
+                // A command picked from the application menu closes it.
+                self.ribbon.close_app_menu();
                 // Close viewport context menu if open.
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
@@ -6929,7 +6933,8 @@ impl OpenCADStudio {
             // ── Ribbon dropdowns ──────────────────────────────────────────
             Message::ToggleRibbonDropdown(id) => {
                 // The minimize button's menu works without a drawing.
-                if self.tabs[self.active_tab].is_start && id != crate::ui::ribbon::MINIMIZE_MENU_ID
+                if self.tabs[self.active_tab].is_start
+                    && !crate::ui::ribbon::works_without_drawing(&id)
                 {
                     self.ribbon.close_dropdown();
                 } else {

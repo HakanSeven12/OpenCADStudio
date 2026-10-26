@@ -90,7 +90,6 @@ pub static SAVE: &[u8] = include_bytes!("../../assets/icons/ui/save.svg");
 pub static FILE_EXPORT: &[u8] = include_bytes!("../../assets/icons/ui/file_export.svg");
 pub static PRINT: &[u8] = include_bytes!("../../assets/icons/ui/print.svg");
 pub static HEART: &[u8] = include_bytes!("../../assets/icons/ui/heart.svg");
-#[cfg(target_arch = "wasm32")]
 pub static GEAR: &[u8] = include_bytes!("../../assets/icons/ui/gear.svg");
 pub static DOT: &[u8] = include_bytes!("../../assets/icons/ui/dot.svg");
 pub static DIRTY_DOT: &[u8] = include_bytes!("../../assets/icons/ui/dirty_dot.svg");
@@ -326,6 +325,156 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
             bounds,
         );
     }
+}
+
+// ── Application logo ──────────────────────────────────────────────────────
+
+/// The application logo, as the window icon and the About dialog show it.
+const LOGO: &[u8] = include_bytes!("../../assets/logo.svg");
+
+/// The logo's letters alone: its four letter shapes, without the
+/// background, the crosshair and the corner stripes.
+fn logo_letters() -> &'static [u8] {
+    static LETTERS: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    LETTERS.get_or_init(|| {
+        let source = std::str::from_utf8(LOGO).expect("logo.svg is UTF-8");
+        let paths: String = source
+            .split("<path")
+            .skip(1)
+            .map(|rest| format!("<path{}/>", &rest[..rest.find("/>").unwrap_or(rest.len())]))
+            .collect();
+        format!(
+            r#"<svg width="724" height="292" viewBox="110 192 724 292" fill="none" xmlns="http://www.w3.org/2000/svg">{paths}</svg>"#
+        )
+        .into_bytes()
+    })
+}
+
+/// The logo in the theme's colours: blue to the accent, white to the text
+/// colour, the background to the chrome's `page` tone and its shadow
+/// stripe to a deeper one.
+fn recolor_logo(source: &[u8], theme: &Theme) -> Vec<u8> {
+    let hex = |color: Color| {
+        let [r, g, b, _] = color.into_rgba8();
+        format!("#{r:02x}{g:02x}{b:02x}")
+    };
+    let background = theme.palette().background.base;
+    let accent = hex(theme.palette().primary.base.color);
+    let text = hex(background.text);
+    let page = hex(crate::ui::style::chrome::page(theme));
+    let shadow = hex(crate::ui::style::chrome::mix(
+        background.color,
+        background.text,
+        -0.2,
+    ));
+    let map: [(&str, &str); 6] = [
+        ("#327DE8", &accent),
+        ("#337CE5", &accent),
+        ("#F7F7F8", &text),
+        ("\"white\"", &format!("\"{text}\"")),
+        ("#1C2430", &page),
+        ("#141D26", &shadow),
+    ];
+    let mut svg = String::from_utf8_lossy(source).into_owned();
+    for (from, to) in map {
+        svg = svg.replace(from, to);
+    }
+    svg.into_bytes()
+}
+
+/// The recoloured logo per (letters only, theme colours).
+type LogoCache = FxHashMap<(bool, [[u8; 4]; 6]), svg::Handle>;
+
+thread_local! {
+    static LOGO_CACHE: RefCell<LogoCache> = RefCell::new(FxHashMap::default());
+}
+
+fn logo_handle(letters: bool, theme: &Theme) -> svg::Handle {
+    let key = (letters, palette_key(theme));
+    LOGO_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(handle) = cache.get(&key) {
+            return handle.clone();
+        }
+        let source = if letters { logo_letters() } else { LOGO };
+        let handle = svg::Handle::from_memory(recolor_logo(source, theme));
+        if cache.len() >= 8 {
+            cache.clear();
+        }
+        cache.insert(key, handle.clone());
+        handle
+    })
+}
+
+struct Logo {
+    letters: bool,
+    width: f32,
+    height: f32,
+}
+
+impl<M> Widget<M, Theme, Renderer> for Logo {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fixed(self.width), Length::Fixed(self.height))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::atomic(
+            limits,
+            Length::Fixed(self.width),
+            Length::Fixed(self.height),
+        )
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: iced::advanced::mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let handle = logo_handle(self.letters, theme);
+        let measured = renderer.measure_svg(&handle);
+        if measured.width == 0 || measured.height == 0 {
+            return;
+        }
+        let bounds = layout.bounds();
+        let fitted = ContentFit::Contain.fit(
+            Size::new(measured.width as f32, measured.height as f32),
+            bounds.size(),
+        );
+        let position = Point::new(
+            bounds.center_x() - fitted.width / 2.0,
+            bounds.center_y() - fitted.height / 2.0,
+        );
+        renderer.draw_svg(
+            core_svg::Svg {
+                handle,
+                color: None,
+                rotation: Radians(0.0),
+                opacity: 1.0,
+            },
+            Rectangle::new(position, fitted),
+            bounds,
+        );
+    }
+}
+
+/// The application logo in the theme's colours, `width` × `height`; with
+/// `letters` only its letters.
+pub fn logo<'a, M: 'a>(letters: bool, width: f32, height: f32) -> Element<'a, M> {
+    Element::new(Logo {
+        letters,
+        width,
+        height,
+    })
 }
 
 /// Render a multi-colour tool icon using semantic colours from the active theme.
@@ -819,6 +968,25 @@ mod tests {
         assert!(contains(&themed, &colors.danger));
         assert!(contains(&themed, &colors.success));
         assert!(contains(&themed, b"#123456"));
+    }
+
+    #[test]
+    fn the_logo_follows_the_theme() {
+        let theme = Theme::Dark;
+        let svg = String::from_utf8(super::recolor_logo(super::LOGO, &theme)).unwrap();
+        for original in [
+            "#327DE8",
+            "#337CE5",
+            "#F7F7F8",
+            "#1C2430",
+            "#141D26",
+            "\"white\"",
+        ] {
+            assert!(!svg.contains(original), "{original} is left");
+        }
+        let letters = std::str::from_utf8(super::logo_letters()).unwrap();
+        assert_eq!(letters.matches("<path").count(), 4);
+        assert!(!letters.contains("<rect"));
     }
 
     #[test]

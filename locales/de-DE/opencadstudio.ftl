@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Auf Gruppenschaltflächen minimieren
     .cycle-through-all = Alle durchlaufen
     .more-tools = Weitere Werkzeuge
+    .plot = Plotten...
+    .recent-drawings = Zuletzt verwendete Zeichnungen
 
 options =
     .language-section = Sprache

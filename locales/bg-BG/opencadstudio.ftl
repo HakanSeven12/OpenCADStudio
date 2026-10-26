@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Минимизиране до бутоните на панелите
     .cycle-through-all = Циклично през всички
     .more-tools = Още инструменти
+    .plot = Печат...
+    .recent-drawings = Последни чертежи
 
 options =
     .language-section = Език

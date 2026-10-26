@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = Thu nhỏ thành nút bảng
     .cycle-through-all = Luân phiên tất cả
     .more-tools = Thêm công cụ
+    .plot = In...
+    .recent-drawings = Bản vẽ gần đây
 
 options =
     .language-section = Ngôn ngữ

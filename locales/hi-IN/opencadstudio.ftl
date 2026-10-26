@@ -57,6 +57,8 @@ ribbon-menu =
     .minimize-to-panel-buttons = पैनल बटनों तक छोटा करें
     .cycle-through-all = सभी में चक्र करें
     .more-tools = और टूल
+    .plot = प्लॉट...
+    .recent-drawings = हाल के ड्रॉइंग
 
 options =
     .language-section = भाषा

@@ -32,9 +32,9 @@ const LAUNCHER_H: f32 = metrics::LAUNCHER_H;
 /// Height of a slide-out's footer.
 const FOOTER_H: f32 = 19.0;
 /// A slide-out tool button, and the arrow of one with a submenu.
-const CELL: f32 = 26.0;
+const CELL: f32 = metrics::SMALL_W;
 const CELL_ICON: f32 = metrics::SMALL_ICON;
-const SPLIT_W: f32 = 11.0;
+const SPLIT_W: f32 = metrics::SPLIT_ARROW_W;
 const GAP: f32 = 2.0;
 const PAD: f32 = 4.0;
 const OPTION_HEIGHT: f32 = 22.0;

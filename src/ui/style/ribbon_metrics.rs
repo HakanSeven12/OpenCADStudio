@@ -40,6 +40,23 @@ pub const COMBO_H: f32 = 22.0;
 pub const GAP: f32 = 2.0;
 /// Height of a large button: exactly three small rows.
 pub const LARGE_H: f32 = 3.0 * ROW_H + 2.0 * GAP;
+/// Width of an icon-only small button, and of the face of a small split
+/// button; the icon sits `SMALL_PAD` from every side.
+pub const SMALL_W: f32 = SMALL_ICON + 2.0 * SMALL_PAD;
+pub const SMALL_PAD: f32 = 3.0;
+/// A small button with a label: the icon `SMALL_PAD` from its left edge,
+/// then this gap, the label and this right padding.
+pub const LABEL_GAP: f32 = 6.0;
+pub const LABEL_PAD_RIGHT: f32 = 7.0;
+/// Width of the arrow part of a small split button.
+pub const SPLIT_ARROW_W: f32 = 12.0;
+/// Top padding of a large button, above its icon.
+pub const LARGE_PAD_TOP: f32 = 3.0;
+/// Where a large split button's arrow part starts; its face lights from
+/// the top to a pixel above.
+pub const LARGE_FACE_H: f32 = 36.0;
+/// Distance from the bottom of a large split button to its arrow.
+pub const LARGE_ARROW_BOTTOM: f32 = 10.0;
 /// Height of a collapsed panel's button, with and without panel titles.
 pub const COLLAPSED_H: f32 = 93.0;
 pub const COLLAPSED_UNTITLED_H: f32 = 84.0;

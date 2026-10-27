@@ -71,14 +71,12 @@ const LARGE_LABEL_LINES: f32 = 2.0;
 const LARGE_LABEL_SIZE: f32 = 12.0;
 /// Line height of a large button's label, relative to its size.
 const LARGE_LABEL_LINE: f32 = 1.15;
-/// Horizontal padding of a small button.
-const SMALL_PAD: f32 = 7.0;
+/// Padding around a small button's icon.
+const SMALL_PAD: f32 = metrics::SMALL_PAD;
 /// Width of an icon-only small button.
-pub(super) const SMALL_W: f32 = SMALL_ICON + 2.0 * SMALL_PAD;
+pub(super) const SMALL_W: f32 = metrics::SMALL_W;
 /// Width of the arrow part of a split button.
-pub(super) const ARROW_W: f32 = 12.0;
-/// Height of the arrow under a one-line label of a large split button.
-pub(super) const LARGE_ARR: f32 = 12.0;
+pub(super) const ARROW_W: f32 = metrics::SPLIT_ARROW_W;
 /// Arrow size used under large dropdown tools such as Circle.
 pub(super) const LARGE_DROPDOWN_ARROW_SIZE: f32 = 8.0;
 /// Size of button labels.
@@ -436,7 +434,8 @@ pub(super) fn flush_small_col<'a>(
     if buf.is_empty() {
         return;
     }
-    let col = column(std::mem::take(buf)).spacing(ROW_GAP);
+    // The buttons of a column take its width, so their outlines line up.
+    let col = super::stretch_column::StretchColumn::new(std::mem::take(buf), ROW_GAP);
     out.push(col.into());
 }
 
@@ -668,9 +667,9 @@ pub(super) fn render_small<'a>(
             let btn = button(make_icon(t.icon, SMALL_ICON))
                 .on_press(Message::RibbonToolClick { tool_id, event })
                 .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-                .width(Length::Fixed(SMALL_W))
+                .width(Fill)
                 .height(ROW_H)
-                .padding([2.0, SMALL_PAD]);
+                .padding(SMALL_PAD);
             super::keytips::anchor(
                 t.id,
                 tooltip(btn, make_tip(tip_text), TipPos::Right)
@@ -697,14 +696,19 @@ pub(super) fn render_small<'a>(
                         .wrapping(advanced_text::Wrapping::None),
                 ),
             ]
-            .spacing(5)
+            .spacing(metrics::LABEL_GAP)
             .align_y(iced::Center);
             let btn = button(content)
                 .on_press(Message::RibbonToolClick { tool_id, event })
                 .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-                .width(Length::Shrink)
+                .width(Fill)
                 .height(ROW_H)
-                .padding([0.0, SMALL_PAD]);
+                .padding(Padding {
+                    top: 0.0,
+                    right: metrics::LABEL_PAD_RIGHT,
+                    bottom: 0.0,
+                    left: SMALL_PAD,
+                });
             super::keytips::anchor(
                 t.id,
                 tooltip(btn, make_tip(tip_text), TipPos::Right)
@@ -765,9 +769,9 @@ pub(super) fn render_small<'a>(
                     event: ModuleEvent::Command(last.to_string()),
                 })
                 .style(move |theme: &Theme, status| split_part_style(theme, active, status))
-                .width(Length::Fixed(SMALL_W))
+                .width(Fill)
                 .height(ROW_H)
-                .padding([2.0, SMALL_PAD]);
+                .padding(SMALL_PAD);
 
             let arr_tip = format!("{} {}", t!(cur_label), t!("options"));
             let arr_btn = button(
@@ -797,6 +801,7 @@ pub(super) fn render_small<'a>(
                 split_outline(
                     row![icon_with_tip, arr_with_tip]
                         .spacing(0)
+                        .width(Fill)
                         .height(ROW_H)
                         .into(),
                 ),
@@ -846,7 +851,7 @@ pub(super) fn render_small<'a>(
                         .wrapping(advanced_text::Wrapping::None),
                 ),
             ]
-            .spacing(5)
+            .spacing(metrics::LABEL_GAP)
             .align_y(iced::Center);
             // A state that is only shown (not chosen) opens the list instead.
             let face_btn = button(face)
@@ -859,11 +864,11 @@ pub(super) fn render_small<'a>(
                     }
                 })
                 .style(move |theme: &Theme, status| split_part_style(theme, active, status))
-                .width(Length::Shrink)
+                .width(Fill)
                 .height(ROW_H)
                 .padding(Padding {
                     top: 0.0,
-                    right: 3.0,
+                    right: 0.0,
                     bottom: 0.0,
                     left: SMALL_PAD,
                 });
@@ -892,6 +897,7 @@ pub(super) fn render_small<'a>(
                     .style(tip_style),
             ]
             .spacing(0)
+            .width(Fill)
             .height(ROW_H);
             PosReport::new(*id, split_outline(parts.into())).into()
         }
@@ -988,11 +994,12 @@ pub(super) fn render_large_dropdown<'a>(
     })
     .style(move |theme: &Theme, status| split_part_style(theme, active, status))
     .width(Fill)
-    .height(Length::Fixed(LARGE_ICON + 5.0))
+    // The face lights to a pixel above the arrow part.
+    .height(Length::Fixed(metrics::LARGE_FACE_H - 1.0))
     .padding(Padding {
-        top: 3.0,
+        top: metrics::LARGE_PAD_TOP,
         right: 4.0,
-        bottom: 2.0,
+        bottom: 0.0,
         left: 4.0,
     });
 
@@ -1013,12 +1020,17 @@ pub(super) fn render_large_dropdown<'a>(
         .align_x(iced::Center)
         .width(Fill)
         .into(),
+        // The arrow sits a fixed distance above the bottom, just under the
+        // label.
         None => column![
             large_label(first.to_string()).wrapping(advanced_text::Wrapping::None),
-            container(arrow).height(LARGE_ARR).center_y(LARGE_ARR),
+            iced::widget::Space::new().height(Fill),
+            arrow,
+            iced::widget::Space::new().height(metrics::LARGE_ARROW_BOTTOM),
         ]
         .align_x(iced::Center)
         .width(Fill)
+        .height(Fill)
         .into(),
     };
     let arr_btn = button(super::keytips::label_anchor(
@@ -1040,8 +1052,9 @@ pub(super) fn render_large_dropdown<'a>(
         .delay(Duration::from_millis(400))
         .style(tip_style);
 
+    // The arrow part starts at `LARGE_FACE_H` and runs to the bottom.
     let content = column![top_with_tip, arr_with_tip]
-        .spacing(0)
+        .spacing(1)
         .width(Fill)
         .height(Length::Fixed(LARGE_H));
 
@@ -1068,8 +1081,9 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
                 button(icon_el)
                     .on_press(msg)
                     .style(move |theme: &Theme, status| tool_btn_style(theme, is_active, status))
+                    .width(SMALL_W)
                     .height(ROW_H)
-                    .padding([2, 5]),
+                    .padding(SMALL_PAD),
                 make_tip(tip.to_string()),
                 TipPos::Right,
             )
@@ -1136,7 +1150,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
             .width(Fill)
             .height(Length::Fixed(LARGE_H))
             .padding(Padding {
-                top: 3.0,
+                top: metrics::LARGE_PAD_TOP,
                 right: 4.0,
                 bottom: 0.0,
                 left: 4.0,

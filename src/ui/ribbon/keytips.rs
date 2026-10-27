@@ -1364,10 +1364,10 @@ fn pill_candidates(
         let icon = Point::new(b.center_x(), (b.y + label.y) / 2.0);
         let mut spots = Vec::new();
         if dropdown {
-            // The arrow strip lies under the label.
+            // The arrow lies under the label.
             spots.push(Point::new(
                 b.center_x(),
-                b.y + b.height - super::widgets::LARGE_ARR / 2.0,
+                b.y + b.height - crate::ui::style::ribbon_metrics::LARGE_ARROW_BOTTOM,
             ));
         }
         spots.extend([

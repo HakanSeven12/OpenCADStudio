@@ -41,6 +41,7 @@ mod minimize;
 mod panel_frame;
 mod ribbon_menu;
 mod search;
+mod stretch_column;
 use crate::t;
 use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};

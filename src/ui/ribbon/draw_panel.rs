@@ -22,7 +22,6 @@ use crate::ui::icons;
 use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{dropdown_bounds, recent_bounds, PosReport};
 
-const GROUP_TITLE_ARROW_SIZE: f32 = 8.0;
 /// The title strip at the bottom of a panel and the line over it, which an
 /// open slide-out covers.
 const TITLE_STRIP: f32 = metrics::SLIDE_OUT_TOP;
@@ -337,9 +336,9 @@ pub(super) fn group_title<'a>(
     // dropdown lights while one of its items runs.
     let lit = expanded || panel.tools().any(|tool| tool.is_active(active_tool));
     let arrow = if expanded {
-        icons::themed_arrow_up(GROUP_TITLE_ARROW_SIZE)
+        icons::dropup_arrow()
     } else {
-        icons::themed_arrow_down(GROUP_TITLE_ARROW_SIZE)
+        icons::dropdown_arrow()
     };
     let title_button: Element<'a, Message> = PosReport::new(
         panel.id,
@@ -560,7 +559,7 @@ fn tool_button(tool: &MoreTool, active: bool, panel_id: &'static str) -> Element
         return face;
     }
     // The arrow opens the tool's submenu under itself.
-    let arrow = button(icons::themed_arrow_down(6.0))
+    let arrow = button(container(icons::dropdown_arrow()).center(Fill))
         .on_press(Message::ToggleRibbonDropdown(command.to_string()))
         .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
         .width(SPLIT_W)
@@ -646,7 +645,7 @@ fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Eleme
                         chrome::strong(theme)
                     }),
                 }),
-            icons::themed_arrow_up(7.0),
+            icons::dropup_arrow(),
         ]
         .spacing(4)
         .align_y(iced::Center),

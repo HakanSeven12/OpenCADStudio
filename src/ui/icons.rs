@@ -1078,6 +1078,77 @@ pub fn themed_arrow_toggle<'a, M: 'a>(open: bool, size: f32) -> Element<'a, M> {
     }
 }
 
+/// The dropdown arrow of split buttons, combos and menus: a solid triangle
+/// `DROPDOWN_ARROW_W` x `DROPDOWN_ARROW_H` drawn on whole pixels, in the
+/// text colour of the button it is in.
+pub fn dropdown_arrow<'a, M: 'a>() -> Element<'a, M> {
+    Element::new(PixelArrow { up: false })
+}
+
+/// [`dropdown_arrow`] pointing up, for a list or slide-out that is open.
+pub fn dropup_arrow<'a, M: 'a>() -> Element<'a, M> {
+    Element::new(PixelArrow { up: true })
+}
+
+struct PixelArrow {
+    up: bool,
+}
+
+impl<M> Widget<M, Theme, Renderer> for PixelArrow {
+    fn size(&self) -> Size<Length> {
+        Size::new(
+            Length::Fixed(metrics::DROPDOWN_ARROW_W),
+            Length::Fixed(metrics::DROPDOWN_ARROW_H),
+        )
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::atomic(
+            limits,
+            Length::Fixed(metrics::DROPDOWN_ARROW_W),
+            Length::Fixed(metrics::DROPDOWN_ARROW_H),
+        )
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: iced::advanced::mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        use iced::advanced::Renderer as _;
+        // Whole pixels, so the edges stay sharp.
+        let origin = Point::new(layout.bounds().x.round(), layout.bounds().y.round());
+        let rows = metrics::DROPDOWN_ARROW_H as usize;
+        for row in 0..rows {
+            let inset = row as f32;
+            let y = if self.up { rows - 1 - row } else { row } as f32;
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle {
+                        x: origin.x + inset,
+                        y: origin.y + y,
+                        width: metrics::DROPDOWN_ARROW_W - 2.0 * inset,
+                        height: 1.0,
+                    },
+                    snap: true,
+                    ..renderer::Quad::default()
+                },
+                style.text_color,
+            );
+        }
+    }
+}
+
 /// The undo arrow drawn like [`chrome`].
 pub fn chrome_undo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
     if enabled {

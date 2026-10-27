@@ -327,7 +327,7 @@ impl Ribbon {
         )
         .delay(Duration::from_millis(400))
         .style(tip_style);
-        let arrow = button(icons::themed_arrow_down(7.0))
+        let arrow = button(container(icons::dropdown_arrow()).center_y(Fill))
             .on_press(Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string()))
             .style(move |theme: &Theme, status| top_hist_btn_style(theme, true, menu_open, status))
             .height(22)
@@ -529,9 +529,9 @@ impl Ribbon {
                 row![
                     text(crate::tr!("ribbon-menu", "more-tools")).size(11),
                     if open {
-                        icons::themed_arrow_up(8.0)
+                        icons::dropup_arrow()
                     } else {
-                        icons::themed_arrow_down(8.0)
+                        icons::dropdown_arrow()
                     },
                 ]
                 .spacing(4)

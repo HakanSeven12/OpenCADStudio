@@ -2137,7 +2137,7 @@ fn collapse_button<'a>(
                             .wrapping(iced::advanced::text::Wrapping::Word)
                             .style(title_text_style),
                     ),
-                    crate::ui::icons::themed_secondary_arrow_down(8.0),
+                    crate::ui::icons::dropdown_arrow(),
                 ]
                 .spacing(3)
                 .width(Fill)
@@ -2213,7 +2213,7 @@ fn collapse_button<'a>(
                     .wrapping(iced::advanced::text::Wrapping::None)
                     .style(title_text_style),
             ),
-            crate::ui::icons::themed_secondary_arrow_down(8.0),
+            crate::ui::icons::dropdown_arrow(),
         ]
         .spacing(3)
         .width(Fill)

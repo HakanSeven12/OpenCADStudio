@@ -81,6 +81,10 @@ pub const ICON_ART_SPAN: f32 = 19.0;
 pub const ICON_OVERFLOW: f32 = 1.0;
 /// Width of an icon's outline strokes on screen, at every size.
 pub const ICON_LINE: f32 = 1.0;
+/// The dropdown arrow: a solid triangle this wide and high, one pixel row
+/// narrower by a pixel on each side per row.
+pub const DROPDOWN_ARROW_W: f32 = 5.0;
+pub const DROPDOWN_ARROW_H: f32 = 3.0;
 
 // The tools fit the content area with its padding, and a collapsed panel the
 // tool area.

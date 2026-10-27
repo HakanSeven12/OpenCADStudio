@@ -77,8 +77,6 @@ const SMALL_PAD: f32 = metrics::SMALL_PAD;
 pub(super) const SMALL_W: f32 = metrics::SMALL_W;
 /// Width of the arrow part of a split button.
 pub(super) const ARROW_W: f32 = metrics::SPLIT_ARROW_W;
-/// Arrow size used under large dropdown tools such as Circle.
-pub(super) const LARGE_DROPDOWN_ARROW_SIZE: f32 = 8.0;
 /// Size of button labels.
 pub(super) const LABEL_SIZE: f32 = 12.0;
 /// Ribbon tool-area height with panel titles.
@@ -194,7 +192,7 @@ fn measure_split_width(renderer: &iced::Renderer, label: &str) -> f32 {
         ribbon_label_bounds(renderer, line, f32::INFINITY, advanced_text::Wrapping::None).width
     };
     let widest = match second {
-        Some(second) => natural(first).max(natural(second) + 2.0 + LARGE_DROPDOWN_ARROW_SIZE),
+        Some(second) => natural(first).max(natural(second) + 2.0 + metrics::DROPDOWN_ARROW_W),
         None => natural(first),
     };
     (widest + LARGE_LABEL_HPAD).ceil().max(LARGE_W)
@@ -775,7 +773,7 @@ pub(super) fn render_small<'a>(
 
             let arr_tip = format!("{} {}", t!(cur_label), t!("options"));
             let arr_btn = button(
-                container(icons::themed_arrow_down(8.0))
+                container(icons::dropdown_arrow())
                     .width(Fill)
                     .height(Fill)
                     .align_x(iced::Center)
@@ -873,7 +871,7 @@ pub(super) fn render_small<'a>(
                     left: SMALL_PAD,
                 });
             let arrow = button(
-                container(icons::themed_arrow_down(8.0))
+                container(icons::dropdown_arrow())
                     .width(Fill)
                     .height(Fill)
                     .align_x(iced::Center)
@@ -1003,7 +1001,7 @@ pub(super) fn render_large_dropdown<'a>(
         left: 4.0,
     });
 
-    let arrow = icons::themed_arrow_down(LARGE_DROPDOWN_ARROW_SIZE);
+    let arrow = icons::dropdown_arrow();
     let (first, second) = split_label(&label);
     let lines: Element<'_, Message> = match second {
         Some(second) => column![
@@ -1041,7 +1039,13 @@ pub(super) fn render_large_dropdown<'a>(
     .style(move |theme: &Theme, status| split_part_style(theme, dd_open, status))
     .width(Fill)
     .height(Fill)
-    .padding([0, 2]);
+    // The label lines up with a large button's: 2 px under the icon.
+    .padding(Padding {
+        top: 1.0,
+        right: 2.0,
+        bottom: 0.0,
+        left: 2.0,
+    });
 
     let top_with_tip = tooltip(top_btn, make_tip(tip_text), TipPos::Right)
         .gap(6.0)
@@ -1270,7 +1274,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                     ))
                     .width(name_w)
                     .clip(true),
-                    icons::themed_arrow_down(9.0),
+                    icons::dropdown_arrow(),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -1344,11 +1348,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                         ))
                         .width(Fill)
                         .clip(true),
-                        if is_open {
-                            icons::themed_arrow_up(8.0)
-                        } else {
-                            icons::themed_arrow_down(8.0)
-                        },
+                        icons::dropdown_arrow(),
                     ]
                     .spacing(4)
                     .align_y(iced::Center),
@@ -1422,11 +1422,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                     ))
                     .width(Fill)
                     .clip(true),
-                    if is_open {
-                        icons::themed_arrow_up(9.0)
-                    } else {
-                        icons::themed_arrow_down(9.0)
-                    },
+                    icons::dropdown_arrow(),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -1568,15 +1564,12 @@ pub(super) fn render_history_control<'a>(
 
     let arrow_btn = {
         let btn = button(
-            container(if active {
-                icons::themed_arrow_down(8.0)
-            } else {
-                icons::themed_disabled_arrow_down(8.0)
-            })
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::Center)
-            .align_y(iced::Center),
+            // An inactive button's muted text colour fades the arrow.
+            container(icons::dropdown_arrow())
+                .width(Fill)
+                .height(Fill)
+                .align_x(iced::Center)
+                .align_y(iced::Center),
         )
         .style(move |theme: &Theme, status| top_hist_btn_style(theme, active, dd_open, status))
         .width(Length::Fixed(TOP_ARR_W))

@@ -51,6 +51,19 @@ pub const COLLAPSED_UNTITLED_H: f32 = 84.0;
 pub const SMALL_ICON: f32 = 16.0;
 /// Size large icons are drawn at.
 pub const LARGE_ICON: f32 = 32.0;
+/// Size of the icons of tiny strip buttons: the slide-out pin, the search
+/// box's collapse button.
+pub const STRIP_ICON: f32 = 14.0;
+/// The icon files are drawn on a 24-unit grid; their artwork spans units
+/// `ICON_ART_START` to `ICON_ART_START + ICON_ART_SPAN`, and that span fills
+/// an icon's box.
+pub const ICON_GRID: f32 = 24.0;
+pub const ICON_ART_START: f32 = 2.5;
+pub const ICON_ART_SPAN: f32 = 19.0;
+/// How far artwork may reach past its box before it is cut off.
+pub const ICON_OVERFLOW: f32 = 1.0;
+/// Width of an icon's outline strokes on screen, at every size.
+pub const ICON_LINE: f32 = 1.0;
 
 // The tools fit the content area with its padding, and a collapsed panel the
 // tool area.

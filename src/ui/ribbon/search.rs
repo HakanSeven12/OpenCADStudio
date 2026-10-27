@@ -22,7 +22,7 @@ use super::{app_menu, draw_panel, extras, Ribbon, QUICK_ACCESS};
 use crate::app::Message;
 use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
 use crate::ui::icons;
-use crate::ui::style::chrome;
+use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{recent_bounds, PosReport};
 
 /// The search field, in the box or in the narrow window's overlay.
@@ -572,7 +572,7 @@ impl Ribbon {
         if self.narrow() {
             let open = self.search.field_open;
             let magnifier = button(
-                container(icons::themed(icons::SEARCH, 13.0))
+                container(icons::chrome(icons::SEARCH, metrics::SMALL_ICON))
                     .center_x(Fill)
                     .center_y(Fill),
             )
@@ -673,7 +673,7 @@ impl Ribbon {
             container(input).center_y(Fill),
         ]
         .into();
-        let mut content = row![icons::themed(icons::SEARCH, 12.0), input]
+        let mut content = row![icons::chrome(icons::SEARCH, metrics::SMALL_ICON), input]
             .spacing(4)
             .align_y(iced::Center);
         if !query.is_empty() {
@@ -683,12 +683,12 @@ impl Ribbon {
             ));
         }
         if !overlay {
-            // » : two arrows overlapping.
+            // » : two arrows filling a strip icon's box.
+            let half = metrics::STRIP_ICON / 2.0;
             let chevrons = row![
-                icons::themed_arrow_right(7.0),
-                icons::themed_arrow_right(7.0)
-            ]
-            .spacing(-3.0);
+                icons::themed_arrow_right(half),
+                icons::themed_arrow_right(half)
+            ];
             content = content.push(
                 tooltip(
                     small_button(chevrons.into(), SearchMsg::Collapse(true)),
@@ -849,8 +849,11 @@ impl Ribbon {
     fn result_row(&self, index: usize, selected: bool) -> Element<'_, Message> {
         let hit = &self.search.hits[index];
         let icon: Element<'_, Message> = match &hit.icon {
-            Some(icon) => make_icon(icon.clone(), 16.0),
-            None => Space::new().width(16).height(16).into(),
+            Some(icon) => make_icon(icon.clone(), metrics::SMALL_ICON),
+            None => Space::new()
+                .width(metrics::SMALL_ICON)
+                .height(metrics::SMALL_ICON)
+                .into(),
         };
         button(
             row![
@@ -928,12 +931,12 @@ pub fn results_scroll_id() -> iced::widget::Id {
     iced::widget::Id::new(RESULTS_SCROLL_ID)
 }
 
-/// A 14 × 14 button in the field.
+/// A strip button in the field, as big as a strip icon.
 fn small_button<'a>(content: Element<'a, Message>, msg: SearchMsg) -> Element<'a, Message> {
     button(container(content).center_x(Fill).center_y(Fill))
         .on_press(Message::RibbonSearch(msg))
-        .width(14)
-        .height(14)
+        .width(metrics::STRIP_ICON)
+        .height(metrics::STRIP_ICON)
         .padding(0)
         .style(|theme: &Theme, status| button::Style {
             background: matches!(status, button::Status::Hovered | button::Status::Pressed)

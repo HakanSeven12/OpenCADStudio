@@ -18,7 +18,7 @@ use super::{
 };
 use crate::app::Message;
 use crate::ui::icons;
-use crate::ui::style::chrome;
+use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{dropdown_bounds, PosReport};
 
 /// The dropdown that picks what the minimize button does.
@@ -37,7 +37,7 @@ const CLOSE_DELAY: Duration = Duration::from_millis(1000);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const TITLE_ROW_H: f32 = 19.0;
 const BUTTON_ROW_H: f32 = 36.0;
-const BUTTON_ICON: f32 = 22.0;
+const BUTTON_ICON: f32 = metrics::SMALL_ICON;
 const MENU_W: f32 = 210.0;
 
 /// What a popup opens from.

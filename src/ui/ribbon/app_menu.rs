@@ -23,7 +23,7 @@ const COMPACT_W: f32 = 38.0;
 const COMPACT_H: f32 = 18.0;
 const MENU_W: f32 = 300.0;
 const ROW_H: f32 = 28.0;
-const ICON: f32 = 16.0;
+const ICON: f32 = crate::ui::style::ribbon_metrics::SMALL_ICON;
 /// How many recent drawings the menu lists.
 const RECENT_LIMIT: usize = 9;
 
@@ -195,7 +195,7 @@ fn menu_row<'a>(
 ) -> Element<'a, Message> {
     button(
         row![
-            icons::themed(icon, ICON),
+            icons::chrome(icon, ICON),
             text(label).size(12),
             Space::new().width(Fill),
             text(shortcut)

@@ -1493,8 +1493,8 @@ impl Ribbon {
                 let disabled = widgets::is_disabled_item(cmd);
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_current);
-                let icon_el: Element<Message> = container(make_icon(*item_icon, 20.0))
-                    .width(Length::Fixed(20.0))
+                let icon_el: Element<Message> = container(make_icon(*item_icon, SMALL_ICON))
+                    .width(Length::Fixed(SMALL_ICON))
                     .into();
                 let label_el = text(t!(*label))
                     .size(11)
@@ -1563,7 +1563,7 @@ impl Ribbon {
         // on it flips that state instead of bubbling up to the row's
         // make-active handler (#133).
         let icon_btn = |bytes: &'static [u8], msg: Message| -> Element<'_, Message> {
-            button(crate::ui::icons::semantic(bytes, 14.0))
+            button(crate::ui::icons::tool(bytes, SMALL_ICON))
                 .on_press(msg)
                 .style(popup_row_style)
                 .padding([2, 4])

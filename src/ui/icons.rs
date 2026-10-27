@@ -17,6 +17,7 @@ use iced::{Color, ContentFit, Element, Length, Point, Radians, Rectangle, Render
 use rustc_hash::FxHashMap;
 
 use crate::ui::style::common::{accessible_accent, wcag_contrast};
+use crate::ui::style::ribbon_metrics as metrics;
 
 static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_down.svg");
 static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
@@ -130,6 +131,9 @@ struct SemanticCacheKey {
     address: usize,
     length: usize,
     palette: [[u8; 4]; 6],
+    /// The box size, in tenths of a pixel, the strokes were made 1 px for;
+    /// 0 for the artwork's own strokes.
+    lines_for: u16,
 }
 
 thread_local! {
@@ -274,6 +278,10 @@ struct SemanticIcon {
     bytes: &'static [u8],
     size: f32,
     opacity: f32,
+    /// Draw a grid icon's artwork filling its box, with 1 px lines.
+    fill_box: bool,
+    /// One colour for the whole icon instead of its semantic colours.
+    tint: Option<fn(&Theme) -> Color>,
 }
 
 impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
@@ -300,7 +308,11 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
         _cursor: iced::advanced::mouse::Cursor,
         _viewport: &Rectangle,
     ) {
-        let handle = semantic_handle(self.bytes, theme);
+        let lines_for = self.fill_box.then_some(self.size);
+        let handle = match self.tint {
+            Some(_) => tinted_handle(self.bytes, lines_for),
+            None => semantic_handle(self.bytes, theme, lines_for),
+        };
         let measured = renderer.measure_svg(&handle);
         if measured.width == 0 || measured.height == 0 {
             return;
@@ -308,22 +320,31 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
 
         let image_size = Size::new(measured.width as f32, measured.height as f32);
         let bounds = layout.bounds();
+        let svg = core_svg::Svg {
+            handle,
+            color: self.tint.map(|tint| tint(theme)),
+            rotation: Radians(0.0),
+            opacity: self.opacity,
+        };
+        if self.fill_box && image_size == Size::new(metrics::ICON_GRID, metrics::ICON_GRID) {
+            // The artwork's span fills the box; what reaches past it may
+            // overflow a little rather than be cut off.
+            let scale = bounds.width / metrics::ICON_ART_SPAN;
+            let offset = metrics::ICON_ART_START * scale;
+            let drawn = Rectangle::new(
+                Point::new(bounds.x - offset, bounds.y - offset),
+                Size::new(metrics::ICON_GRID * scale, metrics::ICON_GRID * scale),
+            );
+            renderer.draw_svg(svg, drawn, bounds.expand(metrics::ICON_OVERFLOW));
+            return;
+        }
         let fitted = ContentFit::Contain.fit(image_size, bounds.size());
         let position = Point::new(
             bounds.center_x() - fitted.width / 2.0,
             bounds.center_y() - fitted.height / 2.0,
         );
 
-        renderer.draw_svg(
-            core_svg::Svg {
-                handle,
-                color: None,
-                rotation: Radians(0.0),
-                opacity: self.opacity,
-            },
-            Rectangle::new(position, fitted),
-            bounds,
-        );
+        renderer.draw_svg(svg, Rectangle::new(position, fitted), bounds);
     }
 }
 
@@ -483,6 +504,8 @@ pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
         bytes,
         size,
         opacity: 1.0,
+        fill_box: false,
+        tint: None,
     })
 }
 
@@ -492,14 +515,136 @@ pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<
         bytes,
         size,
         opacity: 0.42,
+        fill_box: false,
+        tint: None,
     })
 }
 
-fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
+/// A tool icon in its semantic colours, `size` × `size` the way AutoCAD
+/// draws icons: the artwork fills the box and its lines are 1 px.
+pub fn tool<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 1.0,
+        fill_box: true,
+        tint: None,
+    })
+}
+
+/// [`tool`] faded like disabled menu text.
+pub fn tool_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 0.42,
+        fill_box: true,
+        tint: None,
+    })
+}
+
+/// A chrome icon in the theme's text colour, drawn like [`tool`].
+pub fn chrome<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 1.0,
+        fill_box: true,
+        tint: Some(|theme| theme.palette().background.base.text),
+    })
+}
+
+/// [`chrome`] faded like disabled menu text.
+pub fn chrome_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 0.42,
+        fill_box: true,
+        tint: Some(|theme| theme.palette().background.base.text),
+    })
+}
+
+/// Tenths of a pixel, as the icon caches key a box size.
+fn size_key(size: Option<f32>) -> u16 {
+    size.map_or(0, |size| (size * 10.0).round() as u16)
+}
+
+thread_local! {
+    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize, u16), svg::Handle>> =
+        RefCell::new(FxHashMap::default());
+}
+
+/// The handle of a one-colour icon, its lines made 1 px for a box of
+/// `lines_for`.
+fn tinted_handle(bytes: &'static [u8], lines_for: Option<f32>) -> svg::Handle {
+    let key = (bytes.as_ptr() as usize, bytes.len(), size_key(lines_for));
+    if let Some(handle) = TINTED_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return handle;
+    }
+    let source = match lines_for {
+        Some(size) => one_pixel_lines(bytes, size),
+        None => bytes.to_vec(),
+    };
+    let handle = svg::Handle::from_memory(source);
+    TINTED_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
+    handle
+}
+
+/// A grid icon with every outline stroke as wide as `metrics::ICON_LINE` is
+/// on screen once its artwork fills a `size` box. Other icons are returned
+/// as they are.
+fn one_pixel_lines(source: &[u8], size: f32) -> Vec<u8> {
+    const WIDTH: &str = "stroke-width";
+    let Ok(text) = std::str::from_utf8(source) else {
+        return source.to_vec();
+    };
+    if !text.contains(r#"viewBox="0 0 24 24""#) {
+        return source.to_vec();
+    }
+    let width = format!("{:.4}", metrics::ICON_ART_SPAN * metrics::ICON_LINE / size);
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut rest = text;
+    while let Some(at) = rest.find(WIDTH) {
+        let (head, tail) = rest.split_at(at + WIDTH.len());
+        out.push_str(head);
+        // `="1.5"` in an attribute, `:1.5` in a style.
+        let value = tail.trim_start_matches(['=', '"', '\'', ':', ' ']);
+        out.push_str(&tail[..tail.len() - value.len()]);
+        let digits = value.len()
+            - value
+                .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')
+                .len();
+        let (number, after) = value.split_at(digits);
+        // A zero width stays: it hides the stroke.
+        if number.parse::<f32>().is_ok_and(|n| n > 0.0) {
+            out.push_str(&width);
+        } else {
+            out.push_str(number);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    // Strokes without a width of their own take the root's.
+    if let Some(start) = out.find("<svg") {
+        if let Some(end) = out[start..].find('>').map(|end| start + end) {
+            if !out[start..end].contains(WIDTH) {
+                let at = start + "<svg".len();
+                out.insert_str(at, &format!(r#" {WIDTH}="{width}""#));
+            }
+        }
+    }
+    out.into_bytes()
+}
+
+/// The handle of a semantic icon, its lines made 1 px for a box of
+/// `lines_for`.
+fn semantic_handle(bytes: &'static [u8], theme: &Theme, lines_for: Option<f32>) -> svg::Handle {
     let key = SemanticCacheKey {
         address: bytes.as_ptr() as usize,
         length: bytes.len(),
         palette: palette_key(theme),
+        lines_for: size_key(lines_for),
     };
 
     SEMANTIC_CACHE.with(|cache| {
@@ -508,7 +653,12 @@ fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
             return handle.clone();
         }
 
-        let handle = svg::Handle::from_memory(recolor_semantic_svg(bytes, theme));
+        let recolored = recolor_semantic_svg(bytes, theme);
+        let source = match lines_for {
+            Some(size) => one_pixel_lines(&recolored, size),
+            None => recolored,
+        };
+        let handle = svg::Handle::from_memory(source);
         if cache.len() >= SEMANTIC_CACHE_LIMIT {
             cache.clear();
         }
@@ -928,6 +1078,24 @@ pub fn themed_arrow_toggle<'a, M: 'a>(open: bool, size: f32) -> Element<'a, M> {
     }
 }
 
+/// The undo arrow drawn like [`chrome`].
+pub fn chrome_undo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
+    if enabled {
+        chrome(UNDO, size)
+    } else {
+        chrome_disabled(UNDO, size)
+    }
+}
+
+/// The redo arrow drawn like [`chrome`].
+pub fn chrome_redo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
+    if enabled {
+        chrome(REDO, size)
+    } else {
+        chrome_disabled(REDO, size)
+    }
+}
+
 pub fn themed_undo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
     if enabled {
         themed(UNDO, size)
@@ -941,6 +1109,35 @@ pub fn themed_redo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
         themed(REDO, size)
     } else {
         themed_disabled(REDO, size)
+    }
+}
+
+#[cfg(test)]
+mod line_tests {
+    use super::one_pixel_lines;
+
+    #[test]
+    fn a_grid_icon_gets_one_pixel_lines_for_its_box() {
+        let source = br#"<svg viewBox="0 0 24 24"><path stroke-width="1.625"/><g style="stroke-width:2"/><path stroke-width="0"/></svg>"#;
+        let out = String::from_utf8(one_pixel_lines(source, 16.0)).unwrap();
+        // 19 grid units fill 16 px: a 1 px line is 19 / 16 units wide.
+        assert!(out.contains(r#"<path stroke-width="1.1875"/>"#), "{out}");
+        assert!(out.contains("stroke-width:1.1875"), "{out}");
+        // A hidden stroke stays hidden; the root gives the rest a width.
+        assert!(out.contains(r#"stroke-width="0""#), "{out}");
+        assert!(
+            out.starts_with(r#"<svg stroke-width="1.1875" viewBox"#),
+            "{out}"
+        );
+        // At 32 px the lines are thinner in grid units.
+        let large = String::from_utf8(one_pixel_lines(source, 32.0)).unwrap();
+        assert!(large.contains(r#"stroke-width="0.5938""#), "{large}");
+    }
+
+    #[test]
+    fn other_icons_keep_their_lines() {
+        let source = br#"<svg viewBox="0 0 12 12"><path stroke-width="1.5"/></svg>"#;
+        assert_eq!(one_pixel_lines(source, 16.0), source.to_vec());
     }
 }
 

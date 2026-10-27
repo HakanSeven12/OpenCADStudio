@@ -24,9 +24,9 @@ fn tool(
     let enabled = message.is_some();
     let size = if large { LARGE_ICON } else { SMALL_ICON };
     let image = if enabled {
-        crate::ui::icons::semantic(icon, size)
+        crate::ui::icons::tool(icon, size)
     } else {
-        crate::ui::icons::semantic_disabled(icon, size)
+        crate::ui::icons::tool_disabled(icon, size)
     };
     let face: Element<'static, Message> = if large {
         column![

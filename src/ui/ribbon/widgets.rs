@@ -443,7 +443,7 @@ pub(super) fn flush_small_col<'a>(
 pub(super) fn make_icon(icon: IconKind, size: f32) -> Element<'static, Message> {
     match icon {
         IconKind::Glyph(s) => text(s).size(size * 0.7).into(),
-        IconKind::Svg(bytes) => icons::semantic(bytes, size),
+        IconKind::Svg(bytes) => icons::tool(bytes, size),
     }
 }
 
@@ -1062,7 +1062,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
             let is_active = active_tool.as_deref() == Some(t.id);
             let tip = t!(t.label);
             let event = t.event.clone();
-            let icon_el: Element<Message> = make_icon(t.icon, 16.0);
+            let icon_el: Element<Message> = make_icon(t.icon, SMALL_ICON);
             let msg = module_event_to_message(event);
             let btn = tooltip(
                 button(icon_el)
@@ -1220,9 +1220,9 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
             let ll = info.map(|l| l.locked).unwrap_or(false);
             let is_open = open_dd.as_deref() == Some(LAYER_COMBO_ID);
 
-            let vis_icon = icons::semantic(icons::layer_visible(lv), 14.0);
-            let freeze_icon = icons::semantic(icons::layer_freeze(lf), 14.0);
-            let lock_icon = icons::semantic(icons::layer_lock(ll), 14.0);
+            let vis_icon = icons::tool(icons::layer_visible(lv), SMALL_ICON);
+            let freeze_icon = icons::tool(icons::layer_freeze(lf), SMALL_ICON);
+            let lock_icon = icons::tool(icons::layer_lock(ll), SMALL_ICON);
             let swatch = container(text(""))
                 .style(move |theme: &Theme| container::Style {
                     background: Some(Background::Color(lc)),
@@ -1481,7 +1481,7 @@ pub(super) fn quick_access_btn<'a>(
 ) -> Element<'a, Message> {
     // The bundled UI SVGs are black-stroked; tint them to a light chrome grey so
     // they read on the dark top strip (raw black is invisible there).
-    let icon = icons::themed(icon_bytes, 16.0);
+    let icon = icons::chrome(icon_bytes, SMALL_ICON);
     let btn = button(
         container(icon)
             .width(Fill)
@@ -1514,9 +1514,9 @@ pub(super) fn render_history_control<'a>(
 
     let main_btn = {
         let glyph = if dropdown_id == UNDO_HISTORY_ID {
-            icons::themed_undo(15.0, active)
+            icons::chrome_undo(SMALL_ICON, active)
         } else {
-            icons::themed_redo(15.0, active)
+            icons::chrome_redo(SMALL_ICON, active)
         };
         let btn = button(
             container(glyph)

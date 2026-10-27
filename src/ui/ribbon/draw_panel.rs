@@ -33,7 +33,7 @@ const LAUNCHER_H: f32 = metrics::LAUNCHER_H;
 const FOOTER_H: f32 = 19.0;
 /// A slide-out tool button, and the arrow of one with a submenu.
 const CELL: f32 = 26.0;
-const CELL_ICON: f32 = 16.0;
+const CELL_ICON: f32 = metrics::SMALL_ICON;
 const SPLIT_W: f32 = 11.0;
 const GAP: f32 = 2.0;
 const PAD: f32 = 4.0;
@@ -619,13 +619,13 @@ fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Eleme
     const SIDE: f32 = 20.0;
     let key = panel.key;
     let pin: Element<'a, Message> = if hovered {
-        button(icons::themed(
+        button(icons::chrome(
             if pinned {
                 icons::PIN
             } else {
                 icons::PIN_ACTIVE
             },
-            12.0,
+            metrics::STRIP_ICON,
         ))
         .on_press(Message::RibbonSlideOut(SlideOutMsg::TogglePin(key)))
         .style(|theme: &Theme, status| tool_btn_style(theme, false, status))

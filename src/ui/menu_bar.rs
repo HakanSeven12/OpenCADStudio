@@ -663,7 +663,7 @@ const MENUS: &[(&str, &[Entry])] = &[
 /// Width of a pull-down menu.
 const MENU_W: f32 = 290.0;
 const ENTRY_H: f32 = 22.0;
-const ICON: f32 = 16.0;
+const ICON: f32 = crate::ui::style::ribbon_metrics::SMALL_ICON;
 
 /// The menu bar, one pull-down per menu. `drawings` are the open drawings
 /// the Window menu lists: tab index and name.
@@ -797,7 +797,7 @@ fn entry<'a>(
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     let icon: Element<'a, Message> = match icon {
-        Some(bytes) => crate::ui::icons::semantic(bytes, ICON),
+        Some(bytes) => crate::ui::icons::tool(bytes, ICON),
         None => Space::new().width(ICON).height(ICON).into(),
     };
     let tail: Element<'a, Message> = if on_press.is_some() {

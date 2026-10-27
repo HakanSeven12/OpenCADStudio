@@ -1599,7 +1599,7 @@ pub(super) fn render_history_control<'a>(
 
 /// A part of a Quick Access split button: filled on hover, without the
 /// outline, which is the split button's.
-fn qat_split_part_style(
+pub(super) fn qat_split_part_style(
     theme: &Theme,
     active: bool,
     open: bool,

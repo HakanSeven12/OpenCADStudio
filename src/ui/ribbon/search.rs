@@ -33,7 +33,7 @@ const RESULTS_ID: &str = "ribbon_search_results";
 const RESULTS_SCROLL_ID: &str = "ribbon_search_scroll";
 const BOX_W: f32 = 190.0;
 const BOX_H: f32 = 20.0;
-const BUTTON_W: f32 = 24.0;
+const BUTTON_W: f32 = metrics::SEARCH_BUTTON;
 const FIELD_W: f32 = 300.0;
 const FIELD_H: f32 = 24.0;
 const RESULTS_W: f32 = 440.0;
@@ -578,7 +578,7 @@ impl Ribbon {
             )
             .on_press(Message::RibbonSearch(SearchMsg::OpenField))
             .width(BUTTON_W)
-            .height(BOX_H)
+            .height(BUTTON_W)
             .padding(0)
             .style(move |theme: &Theme, status| {
                 let lit =

@@ -9,8 +9,8 @@ use iced::widget::{button, column, container, mouse_area, opaque, row, text, too
 use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 
 use super::widgets::{
-    make_icon, make_tip, popup_panel_style, tip_style, tool_btn_style, top_hist_btn_style,
-    TOOL_BAR_H,
+    make_icon, make_tip, popup_panel_style, qat_split_part_style, split_outline, tip_style,
+    tool_btn_style, TOOL_BAR_H,
 };
 use super::{
     draw_panel, extras, first_tool_icon, keytips, render_group, ribbon_menu, visibility_panel,
@@ -310,29 +310,38 @@ impl Ribbon {
         } else {
             crate::tr!("ribbon-menu", "minimize")
         };
-        let chevron = if minimized {
-            icons::themed_arrow_down(10.0)
+        // The chevron in a small icon's box, so the face is the size of an
+        // icon button.
+        let chevron = container(if minimized {
+            icons::themed_arrow_down(metrics::CHEVRON)
         } else {
-            icons::themed_arrow_up(10.0)
-        };
+            icons::themed_arrow_up(metrics::CHEVRON)
+        })
+        .center(metrics::SMALL_ICON);
         let menu_open = self.open_dropdown.as_deref() == Some(MINIMIZE_MENU_ID);
         let face = tooltip(
-            button(chevron)
+            button(container(chevron).center(Fill))
                 .on_press(Message::RibbonMinimize(MinimizeMsg::Toggle))
-                .style(|theme: &Theme, status| top_hist_btn_style(theme, false, false, status))
-                .height(22)
-                .padding([2, 5]),
+                .style(|theme: &Theme, status| qat_split_part_style(theme, true, false, status))
+                .width(metrics::SMALL_W)
+                .height(metrics::SMALL_W)
+                .padding(0),
             make_tip(tip),
             tooltip::Position::Bottom,
         )
         .delay(Duration::from_millis(400))
         .style(tip_style);
-        let arrow = button(container(icons::dropdown_arrow()).center_y(Fill))
+        let arrow = button(container(icons::dropdown_arrow()).center(Fill))
             .on_press(Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string()))
-            .style(move |theme: &Theme, status| top_hist_btn_style(theme, true, menu_open, status))
-            .height(22)
-            .padding([2, 3]);
-        PosReport::new(MINIMIZE_MENU_ID, row![face, arrow].align_y(iced::Center)).into()
+            .style(move |theme: &Theme, status| {
+                qat_split_part_style(theme, true, menu_open, status)
+            })
+            .width(metrics::QAT_SPLIT_ARROW_W)
+            .height(metrics::SMALL_W)
+            .padding(0);
+        // A split button like Undo's: one hover outline round both parts.
+        let parts = split_outline(row![face, arrow].into());
+        PosReport::new(MINIMIZE_MENU_ID, parts).into()
     }
 
     /// The list of what the minimize button does, under its arrow.

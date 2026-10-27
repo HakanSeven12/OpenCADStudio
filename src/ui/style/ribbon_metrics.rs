@@ -12,8 +12,16 @@ pub const TAB_H: f32 = 25.0;
 /// A Quick Access button, square, and the gap between buttons.
 pub const QAT_BUTTON: f32 = 22.0;
 pub const QAT_GAP: f32 = 2.0;
-/// Width of the arrow part of a Quick Access split button.
+/// Width of the arrow part of a Quick Access split button, and of the
+/// minimize split button after the tabs.
 pub const QAT_SPLIT_ARROW_W: f32 = 11.0;
+/// The search box shrunk to its magnifier: a square button with the icon
+/// `SEARCH_BUTTON_PAD` from each side.
+pub const SEARCH_BUTTON: f32 = SMALL_ICON + 2.0 * SEARCH_BUTTON_PAD;
+pub const SEARCH_BUTTON_PAD: f32 = 2.0;
+/// Size of the chevrons drawn inside an icon's box, such as the minimize
+/// button's.
+pub const CHEVRON: f32 = 9.0;
 
 // ── Tool area ──────────────────────────────────────────────────────────────
 

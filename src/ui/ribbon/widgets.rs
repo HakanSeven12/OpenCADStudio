@@ -374,11 +374,11 @@ fn large_label<'a>(label: String) -> iced::widget::Text<'a, Theme, iced::Rendere
 
 // ── Tab-bar constants ──────────────────────────────────────────────────────
 
-pub(super) const TOP_ARR_W: f32 = 12.0;
-pub(super) const TOP_HIST_W: f32 = 28.0;
-pub(super) const TOP_HIST_GAP: f32 = 4.0;
-/// Height of the quick-access buttons, the tabs' height.
-pub(super) const TOP_BUTTON_H: f32 = 22.0;
+pub(super) const TOP_ARR_W: f32 = metrics::QAT_SPLIT_ARROW_W;
+pub(super) const TOP_HIST_W: f32 = metrics::QAT_BUTTON;
+pub(super) const TOP_HIST_GAP: f32 = metrics::QAT_GAP;
+/// Height of the quick-access buttons.
+pub(super) const TOP_BUTTON_H: f32 = metrics::QAT_BUTTON;
 
 // ── Dropdown / combo ID constants ─────────────────────────────────────────
 
@@ -1535,10 +1535,10 @@ pub(super) fn render_history_control<'a>(
                 .align_x(iced::Center)
                 .align_y(iced::Center),
         )
-        .style(move |theme: &Theme, status| top_hist_btn_style(theme, active, dd_open, status))
+        .style(move |theme: &Theme, status| qat_split_part_style(theme, active, dd_open, status))
         .width(Length::Fixed(TOP_HIST_W))
         .height(TOP_BUTTON_H)
-        .padding([2, 0]);
+        .padding(0);
         let btn = if active {
             if dropdown_id == UNDO_HISTORY_ID {
                 btn.on_press(Message::Undo)
@@ -1571,7 +1571,7 @@ pub(super) fn render_history_control<'a>(
                 .align_x(iced::Center)
                 .align_y(iced::Center),
         )
-        .style(move |theme: &Theme, status| top_hist_btn_style(theme, active, dd_open, status))
+        .style(move |theme: &Theme, status| qat_split_part_style(theme, active, dd_open, status))
         .width(Length::Fixed(TOP_ARR_W))
         .height(TOP_BUTTON_H)
         .padding(0);
@@ -1590,7 +1590,24 @@ pub(super) fn render_history_control<'a>(
         .style(tip_style)
     };
 
-    PosReport::new(dropdown_id, row![main_btn, arrow_btn].spacing(0)).into()
+    // A split button: its hover outline goes round both parts, inside them,
+    // so it takes no room.
+    let parts: Element<'a, Message> = row![main_btn, arrow_btn].spacing(0).into();
+    let parts = if active { split_outline(parts) } else { parts };
+    PosReport::new(dropdown_id, parts).into()
+}
+
+/// A part of a Quick Access split button: filled on hover, without the
+/// outline, which is the split button's.
+fn qat_split_part_style(
+    theme: &Theme,
+    active: bool,
+    open: bool,
+    status: button::Status,
+) -> button::Style {
+    let mut style = top_hist_btn_style(theme, active, open, status);
+    style.border.width = 0.0;
+    style
 }
 
 /// A quick-access button on the tab row; `active` is false while it has

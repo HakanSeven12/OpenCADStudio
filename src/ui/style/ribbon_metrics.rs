@@ -9,6 +9,12 @@ pub const TAB_ROW_H: f32 = 27.0;
 /// Height of a tab.
 pub const TAB_H: f32 = 25.0;
 
+/// A Quick Access button, square, and the gap between buttons.
+pub const QAT_BUTTON: f32 = 22.0;
+pub const QAT_GAP: f32 = 2.0;
+/// Width of the arrow part of a Quick Access split button.
+pub const QAT_SPLIT_ARROW_W: f32 = 11.0;
+
 // ── Tool area ──────────────────────────────────────────────────────────────
 
 /// Height of the tool area with panel titles.

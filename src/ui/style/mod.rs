@@ -9,6 +9,7 @@ pub mod mleaderstyle;
 pub mod mlstyle;
 pub mod plotstyle;
 pub mod point_style;
+pub mod ribbon_metrics;
 pub mod row_button;
 pub mod scale_manager;
 pub mod style_list;

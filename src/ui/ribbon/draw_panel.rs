@@ -19,15 +19,16 @@ use crate::app::Message;
 use crate::modules::IconKind;
 use crate::t;
 use crate::ui::icons;
-use crate::ui::style::chrome;
+use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{dropdown_bounds, recent_bounds, PosReport};
 
 const GROUP_TITLE_ARROW_SIZE: f32 = 8.0;
-/// The title strip at the bottom of a panel, which an open slide-out covers.
-const TITLE_STRIP: f32 = PANEL_TITLE_H;
+/// The title strip at the bottom of a panel and the line over it, which an
+/// open slide-out covers.
+const TITLE_STRIP: f32 = metrics::SLIDE_OUT_TOP;
 /// A panel's dialog launcher, at the right end of its title strip.
-const LAUNCHER_W: f32 = 16.0;
-const LAUNCHER_H: f32 = 15.0;
+const LAUNCHER_W: f32 = metrics::LAUNCHER_W;
+const LAUNCHER_H: f32 = metrics::LAUNCHER_H;
 /// Height of a slide-out's footer.
 const FOOTER_H: f32 = 19.0;
 /// A slide-out tool button, and the arrow of one with a submenu.

@@ -10,7 +10,7 @@ use super::widgets::{
 };
 use crate::app::Message;
 use crate::modules::IconKind;
-use crate::ui::style::chrome;
+use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::window::block_visibility::{Action, RibbonContext};
 
 fn tool(
@@ -142,7 +142,9 @@ fn view(context: Option<RibbonContext>, compact: bool) -> Element<'static, Messa
     )
     .center_y(PANEL_TITLE_H);
     let panel = column![
-        container(controls).padding([3, 4]).height(LARGE_H + 6.0),
+        container(controls)
+            .padding([metrics::CONTENT_PAD_TOP, metrics::CONTENT_PAD_SIDE])
+            .height(metrics::CONTENT_H),
         title
     ]
     .align_x(iced::Center)

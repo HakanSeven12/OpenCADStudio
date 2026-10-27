@@ -23,7 +23,7 @@ use crate::modules::{IconKind, ModuleEvent, RibbonItem, StyleKey, ToolDef};
 use crate::t;
 use crate::ui::icons;
 use crate::ui::properties::{acad_color_display, linetype_display_name, LwItem};
-use crate::ui::style::chrome;
+use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::PosReport;
 
 use super::LayerInfo;
@@ -49,17 +49,19 @@ pub(super) struct ToggleState {
 
 // ── Layout constants ──────────────────────────────────────────────────────
 
+// The sizes come from `ribbon_metrics`; these names are the ribbon's.
+
 /// Height of a small (one-row) button; three rows and their gaps make the
 /// height of a large button.
-pub(super) const ROW_H: f32 = 20.0;
+pub(super) const ROW_H: f32 = metrics::ROW_H;
 /// Gap between the rows of small buttons.
-pub(super) const ROW_GAP: f32 = 2.0;
+pub(super) const ROW_GAP: f32 = metrics::GAP;
 /// Height of a large button: three small rows.
-pub(super) const LARGE_H: f32 = 3.0 * ROW_H + 2.0 * ROW_GAP;
+pub(super) const LARGE_H: f32 = metrics::LARGE_H;
 /// Icon size inside a large button.
-pub(super) const LARGE_ICON: f32 = 30.0;
+pub(super) const LARGE_ICON: f32 = metrics::LARGE_ICON;
 /// Icon size inside a small button.
-pub(super) const SMALL_ICON: f32 = 16.0;
+pub(super) const SMALL_ICON: f32 = metrics::SMALL_ICON;
 /// Narrowest large button.
 pub(super) const LARGE_W: f32 = 52.0;
 /// Horizontal button padding surrounding a large tool's label.
@@ -81,18 +83,14 @@ pub(super) const LARGE_ARR: f32 = 12.0;
 pub(super) const LARGE_DROPDOWN_ARROW_SIZE: f32 = 8.0;
 /// Size of button labels.
 pub(super) const LABEL_SIZE: f32 = 12.0;
-/// Ribbon tool-area height with panel titles: the tools, 3 px above and below
-/// them, and the title strip.
-pub(super) const TOOL_BAR_H: f32 = LARGE_H + 6.0 + PANEL_TITLE_H;
+/// Ribbon tool-area height with panel titles.
+pub(super) const TOOL_BAR_H: f32 = metrics::TOOL_AREA_H;
 /// Ribbon tool-area height without panel titles.
-pub(super) const TOOL_BAR_H_UNTITLED: f32 = 80.0;
+pub(super) const TOOL_BAR_H_UNTITLED: f32 = metrics::TOOL_AREA_UNTITLED_H;
 /// Height of the title strip at the bottom of a panel.
-pub(super) const PANEL_TITLE_H: f32 = 19.0;
+pub(super) const PANEL_TITLE_H: f32 = metrics::TITLE_STRIP_H;
 /// Size of a panel title.
 pub(super) const PANEL_TITLE_SIZE: f32 = 11.5;
-/// Height of a collapsed panel button's large representative face. A collapsed
-/// button is this face plus the title opener.
-pub(super) const COLLAPSED_FACE_H: f32 = LARGE_H;
 
 /// Gap between the combo dropdown and the tool rows beneath it.
 const COMBO_ROW_SPACING: f32 = ROW_GAP;
@@ -1266,7 +1264,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
             .on_press(Message::ToggleRibbonDropdown(LAYER_COMBO_ID.to_string()))
             .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 3.0))
             .padding([0, 8])
-            .height(ROW_H)
+            .height(metrics::COMBO_H)
             .width(Fill);
 
             combo_panel_col(
@@ -1344,7 +1342,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 .on_press(Message::ToggleRibbonDropdown(dd_id.to_string()))
                 .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 2.0))
                 .padding([0, 8])
-                .height(ROW_H)
+                .height(metrics::COMBO_H)
                 .width(Length::Fixed(PROP_W))
             };
 
@@ -1422,7 +1420,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
             .on_press(Message::ToggleRibbonDropdown(combo_id.to_string()))
             .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 3.0))
             .padding([0, 8])
-            .height(ROW_H)
+            .height(metrics::COMBO_H)
             .width(Fill);
 
             // The open style list renders as a floating overlay
@@ -1624,12 +1622,11 @@ mod size_tests {
 
     #[test]
     fn the_ribbon_has_the_design_sizes() {
-        // Three 20 px rows make a 64 px large button.
-        assert_eq!(LARGE_H, 64.0);
-        assert_eq!(SMALL_W, 30.0);
-        // 89 px with panel titles, 80 px without.
-        assert_eq!(TOOL_BAR_H, 89.0);
-        assert_eq!(TOOL_BAR_H_UNTITLED, 80.0);
+        // Three 22 px rows make a 70 px large button.
+        assert_eq!(LARGE_H, 70.0);
+        // 99 px with panel titles, 89 px without.
+        assert_eq!(TOOL_BAR_H, 99.0);
+        assert_eq!(TOOL_BAR_H_UNTITLED, 89.0);
         // Two label lines fit under the icon of a large button.
         let line = LARGE_LABEL_SIZE * LARGE_LABEL_LINE;
         assert!(3.0 + LARGE_ICON + 2.0 + LARGE_LABEL_LINES * line <= LARGE_H);

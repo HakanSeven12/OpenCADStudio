@@ -42,7 +42,7 @@ mod panel_frame;
 mod ribbon_menu;
 mod search;
 use crate::t;
-use crate::ui::style::chrome;
+use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
@@ -215,8 +215,8 @@ fn title_text_style(theme: &Theme) -> iced::widget::text::Style {
 }
 
 /// Height of a tab, and of the tab row it stands at the bottom of.
-const TAB_H: f32 = 22.0;
-const TAB_ROW_H: f32 = 28.0;
+const TAB_H: f32 = metrics::TAB_H;
+const TAB_ROW_H: f32 = metrics::TAB_ROW_H;
 const TAB_TEXT_SIZE: f32 = 12.5;
 /// Width of the accent outline of a contextual tab.
 const TAB_OUTLINE: f32 = 1.5;
@@ -491,7 +491,7 @@ impl Ribbon {
             active_mleader_style: String::new(),
             table_style_names: vec![],
             active_table_style: String::new(),
-            tab_bar_h: Arc::new(AtomicU32::new(28.0f32.to_bits())),
+            tab_bar_h: Arc::new(AtomicU32::new(TAB_ROW_H.to_bits())),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             layout: RibbonLayout::default(),
@@ -862,6 +862,7 @@ impl Ribbon {
             collapse_button(
                 g,
                 &button_key,
+                titles,
                 self.last_panel_tool.get(g.title).copied(),
                 self.lit_tool(),
                 &self.open_dropdown,
@@ -1129,6 +1130,7 @@ impl Ribbon {
             container(
                 WrapBar::new(lead.into(), tabs.into())
                     .spacing(6.0)
+                    .min_row_h(TAB_ROW_H)
                     .report_height(self.tab_bar_h.clone()),
             )
             .width(Length::Fill),
@@ -1985,12 +1987,18 @@ fn render_group<'a>(
 
     // The tools sit 3 px from the title strip's top line and the tool area's
     // top edge; without titles they are centred in the shorter area.
-    let body_pad = if titles {
-        3.0
+    let body = container(tools_el).padding(Padding {
+        top: metrics::CONTENT_PAD_TOP,
+        right: metrics::CONTENT_PAD_SIDE,
+        bottom: metrics::CONTENT_PAD_BOTTOM,
+        left: metrics::CONTENT_PAD_SIDE,
+    });
+    let body = if titles {
+        body.height(metrics::CONTENT_H)
     } else {
-        (TOOL_BAR_H_UNTITLED - LARGE_H) / 2.0
+        body.height(TOOL_BAR_H_UNTITLED).align_y(iced::Center)
     };
-    let mut panel = column![container(tools_el).padding([body_pad, 4.0])];
+    let mut panel = column![body];
     let mut launcher = None;
     if titles {
         let (title, corner) =
@@ -2081,6 +2089,7 @@ fn first_tool_icon(group: &RibbonGroup) -> Option<IconKind> {
 fn collapse_button<'a>(
     group: &RibbonGroup,
     key: &str,
+    titles: bool,
     last_used: Option<&str>,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
@@ -2197,36 +2206,44 @@ fn collapse_button<'a>(
                 || keytips::label_id(&keytips::collapsed_anchor(title)),
                 text(localized_title.clone())
                     .size(PANEL_TITLE_SIZE)
+                    .line_height(1.0)
                     .width(Fill)
                     .align_x(iced::Center)
-                    .wrapping(iced::advanced::text::Wrapping::Word)
+                    .wrapping(iced::advanced::text::Wrapping::None)
                     .style(title_text_style),
             ),
             crate::ui::icons::themed_secondary_arrow_down(8.0),
         ]
         .spacing(3)
         .width(Fill)
+        .height(Fill)
         .align_y(iced::Center),
     )
     .on_press(Message::ToggleRibbonPanel(title.to_string()))
     .style(opener_style(holds && !face_lit))
     .width(Fill)
-    .padding([1, 4]);
+    .height(Fill)
+    .padding([0, 4]);
     let opener = keytips::anchor_with(
         || keytips::collapsed_anchor(title),
         automatic_large_button(localized_title, opener.into()),
     );
 
-    // The large face fills a fixed slot so a collapsed panel is shorter than a full
-    // 3-row panel, letting `CollapsePanels` shrink the ribbon row.
+    // The large face, and under it the opener in the rest of the button's
+    // height.
     let face_box = container(face)
-        .height(Length::Fixed(COLLAPSED_FACE_H))
+        .height(Length::Fixed(LARGE_H))
         .align_y(iced::Center);
 
     column![face_box, opener]
         .align_x(iced::Center)
-        .spacing(2)
-        .padding([3u16, 4])
+        .spacing(0)
+        .padding([1u16, 4])
+        .height(Length::Fixed(if titles {
+            metrics::COLLAPSED_H
+        } else {
+            metrics::COLLAPSED_UNTITLED_H
+        }))
         .into()
 }
 

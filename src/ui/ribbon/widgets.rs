@@ -569,15 +569,12 @@ pub(super) fn combo_btn_style(
     }
 }
 
-/// A row of a ribbon popup or dropdown.
+/// A row of a ribbon popup or dropdown. An idle row is clear, so it does
+/// not paint over the popup's border.
 pub(crate) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
     let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: Some(Background::Color(if hovered {
-            chrome::hover(theme)
-        } else {
-            chrome::panel(theme)
-        })),
+        background: hovered.then(|| Background::Color(chrome::hover(theme))),
         text_color: if hovered {
             chrome::strong(theme)
         } else {

@@ -9,12 +9,12 @@ use iced::widget::{button, column, container, mouse_area, opaque, row, text, too
 use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 
 use super::widgets::{
-    make_icon, make_tip, popup_panel_style, popup_row_style, tip_style, tool_btn_style,
-    top_hist_btn_style, TOOL_BAR_H,
+    make_icon, make_tip, popup_panel_style, tip_style, tool_btn_style, top_hist_btn_style,
+    TOOL_BAR_H,
 };
 use super::{
-    draw_panel, extras, first_tool_icon, keytips, render_group, visibility_panel, CollapseMode,
-    MinimizePref, Ribbon, RibbonMinimize,
+    draw_panel, extras, first_tool_icon, keytips, render_group, ribbon_menu, visibility_panel,
+    CollapseMode, MinimizePref, Ribbon, RibbonMinimize,
 };
 use crate::app::Message;
 use crate::ui::icons;
@@ -51,11 +51,12 @@ pub enum Opener {
 pub enum MinimizeMsg {
     /// The minimize button's face: the next minimize state.
     Toggle,
-    /// What the face does.
+    /// What the face does; choosing one minimize state also switches to it.
     SetPref(MinimizePref),
     /// The pointer rests on a tab or panel title.
     EnterOpener(Opener),
-    LeaveOpener,
+    /// The pointer left that tab or panel title.
+    LeaveOpener(Opener),
     EnterPopup,
     LeavePopup,
     /// A panel title or button was clicked.
@@ -67,7 +68,8 @@ pub enum MinimizeMsg {
 pub(super) struct MinState {
     /// Minimized to tabs: the tool area of the tab on show is open.
     tool_area: bool,
-    over_opener: bool,
+    /// The tab or panel title the pointer is on.
+    over_opener: Option<Opener>,
     over_popup: bool,
     /// The popup the pointer rests on, and when it opens.
     opening: Option<(Opener, Instant)>,
@@ -169,7 +171,7 @@ impl Ribbon {
 
     /// Start the close delay once the pointer is off the popup and its opener.
     fn arm_close(&mut self, now: Instant) {
-        if self.popup_open() && !self.min.over_opener && !self.min.over_popup {
+        if self.popup_open() && self.min.over_opener.is_none() && !self.min.over_popup {
             self.min.closing = Some(now + CLOSE_DELAY);
         }
     }
@@ -185,10 +187,19 @@ impl Ribbon {
             MinimizeMsg::SetPref(pref) => {
                 self.layout.minimize_pref = pref;
                 self.close_dropdown();
+                let mode = match pref {
+                    MinimizePref::Cycle => None,
+                    MinimizePref::Tabs => Some(RibbonMinimize::Tabs),
+                    MinimizePref::PanelTitles => Some(RibbonMinimize::PanelTitles),
+                    MinimizePref::PanelButtons => Some(RibbonMinimize::PanelButtons),
+                };
+                if let Some(mode) = mode {
+                    self.set_minimize(mode);
+                }
                 return true;
             }
             MinimizeMsg::EnterOpener(opener) => {
-                self.min.over_opener = true;
+                self.min.over_opener = Some(opener);
                 self.min.closing = None;
                 let showing = match opener {
                     Opener::Tab(index) => self.min.tool_area && index == self.active,
@@ -196,9 +207,19 @@ impl Ribbon {
                 };
                 self.min.opening = (!showing).then_some((opener, now + OPEN_DELAY));
             }
-            MinimizeMsg::LeaveOpener => {
-                self.min.over_opener = false;
-                self.min.opening = None;
+            // Moving onto a neighbour can report entering it before leaving
+            // this one: only what this opener started is undone.
+            MinimizeMsg::LeaveOpener(opener) => {
+                if self.min.over_opener == Some(opener) {
+                    self.min.over_opener = None;
+                }
+                if self
+                    .min
+                    .opening
+                    .is_some_and(|(pending, _)| pending == opener)
+                {
+                    self.min.opening = None;
+                }
                 self.arm_close(now);
             }
             MinimizeMsg::EnterPopup => {
@@ -338,25 +359,13 @@ impl Ribbon {
         let rows: Vec<Element<'_, Message>> = choices
             .into_iter()
             .map(|(pref, label)| {
-                button(
-                    row![
-                        icons::themed_check_cell(pref == current),
-                        text(label).size(11),
-                    ]
-                    .spacing(4)
-                    .align_y(iced::Center),
-                )
-                .on_press(Message::RibbonMinimize(MinimizeMsg::SetPref(pref)))
-                .style(popup_row_style)
-                .width(Fill)
-                .padding([5, 10])
-                .into()
+                let choose = Message::RibbonMinimize(MinimizeMsg::SetPref(pref));
+                ribbon_menu::check_row(label, pref == current, Some(choose)).into()
             })
             .collect();
-        let panel = container(column(rows))
-            .style(popup_panel_style)
-            .width(Length::Fixed(MENU_W));
-        self.place_dropdown(MINIMIZE_MENU_ID, panel.into(), MENU_W, win.0)
+        // The same menu as the ribbon's right-click menu.
+        let panel = ribbon_menu::panel_of_width(rows, MENU_W);
+        self.place_dropdown(MINIMIZE_MENU_ID, panel, MENU_W, win.0)
     }
 
     /// The row that stands for the tool area when the ribbon is minimized
@@ -392,7 +401,9 @@ impl Ribbon {
                     .on_enter(Message::RibbonMinimize(MinimizeMsg::EnterOpener(
                         Opener::Panel(title),
                     )))
-                    .on_exit(Message::RibbonMinimize(MinimizeMsg::LeaveOpener))
+                    .on_exit(Message::RibbonMinimize(MinimizeMsg::LeaveOpener(
+                        Opener::Panel(title),
+                    )))
                     .into()
             };
             keytips::anchor_with(
@@ -585,7 +596,7 @@ mod tests {
 
         // Leaving the tab for the popup keeps it.
         let t1 = t0 + Duration::from_millis(200);
-        ribbon.on_minimize(MinimizeMsg::LeaveOpener, t1);
+        ribbon.on_minimize(MinimizeMsg::LeaveOpener(Opener::Tab(insert)), t1);
         ribbon.on_minimize(MinimizeMsg::EnterPopup, t1);
         ribbon.tick(t1 + Duration::from_secs(2));
         assert!(ribbon.popup_open());
@@ -600,6 +611,44 @@ mod tests {
         ribbon.tick(t2 + Duration::from_millis(2200));
         assert!(!ribbon.popup_open());
         assert!(!ribbon.wants_tick());
+    }
+
+    #[test]
+    fn moving_left_onto_a_neighbour_opens_it() {
+        let mut ribbon = Ribbon::default();
+        ribbon.on_minimize(MinimizeMsg::Toggle, Instant::now());
+        let draw = tab(&ribbon, "draw");
+        let insert = tab(&ribbon, "insert");
+        let t0 = Instant::now();
+        ribbon.on_minimize(MinimizeMsg::EnterOpener(Opener::Tab(insert)), t0);
+        ribbon.tick(t0 + Duration::from_millis(200));
+        assert_eq!(ribbon.active, insert);
+        // The tab on the left reports the pointer before the right one lets
+        // go of it.
+        let t1 = t0 + Duration::from_millis(300);
+        ribbon.on_minimize(MinimizeMsg::EnterOpener(Opener::Tab(draw)), t1);
+        ribbon.on_minimize(MinimizeMsg::LeaveOpener(Opener::Tab(insert)), t1);
+        ribbon.tick(t1 + Duration::from_millis(200));
+        assert!(ribbon.popup_open());
+        assert_eq!(ribbon.active, draw);
+    }
+
+    #[test]
+    fn choosing_a_minimize_state_switches_to_it() {
+        let mut ribbon = Ribbon::default();
+        let now = Instant::now();
+        for (pref, mode) in [
+            (MinimizePref::PanelButtons, RibbonMinimize::PanelButtons),
+            (MinimizePref::Tabs, RibbonMinimize::Tabs),
+            (MinimizePref::PanelTitles, RibbonMinimize::PanelTitles),
+        ] {
+            assert!(ribbon.on_minimize(MinimizeMsg::SetPref(pref), now));
+            assert_eq!(ribbon.minimize(), mode);
+            assert_eq!(ribbon.layout.minimize_pref, pref);
+        }
+        // Cycling only changes what the button does next.
+        ribbon.on_minimize(MinimizeMsg::SetPref(MinimizePref::Cycle), now);
+        assert_eq!(ribbon.minimize(), RibbonMinimize::PanelTitles);
     }
 
     #[test]

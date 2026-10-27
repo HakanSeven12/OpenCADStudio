@@ -359,7 +359,7 @@ fn panel(items: Vec<Element<'_, Message>>) -> Element<'_, Message> {
 }
 
 /// The menu's frame: a ribbon popup, with the viewport menu's metrics.
-fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, Message> {
+pub(super) fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, Message> {
     container(column(items).width(Fill))
         .style(popup_panel_style)
         .padding([MENU_PAD_TOP as u16, 0])
@@ -394,23 +394,11 @@ const ROW_PADDING: Padding = Padding {
 };
 
 fn item_row<'a>(row: Row) -> Element<'a, Message> {
-    let enabled = row.enabled;
-    let mut content = row![text(row.label).size(12)].align_y(iced::Center);
-    if row.checked {
-        content = content.push(Space::new().width(Fill)).push(if enabled {
-            icons::themed(icons::CHECK, CHECK_SIZE)
-        } else {
-            icons::themed_disabled(icons::CHECK, CHECK_SIZE)
-        });
-    }
-    let mut item = button(content)
-        .padding(ROW_PADDING)
-        .width(Fill)
-        .height(Length::Fixed(MENU_ROW_H))
-        .style(row_style);
-    if enabled {
-        item = item.on_press(Message::RibbonMenu(row.action));
-    }
+    let item = check_row(
+        row.label,
+        row.checked,
+        row.enabled.then_some(Message::RibbonMenu(row.action)),
+    );
     match row.reason {
         Some(reason) => tooltip(item, make_tip(reason), tooltip::Position::Right)
             .delay(Duration::from_millis(400))
@@ -418,6 +406,30 @@ fn item_row<'a>(row: Row) -> Element<'a, Message> {
             .into(),
         None => item.into(),
     }
+}
+
+/// A menu row: its label, and a check at the right when `checked`. Without
+/// `on_press` it is disabled.
+pub(super) fn check_row<'a>(
+    label: String,
+    checked: bool,
+    on_press: Option<Message>,
+) -> button::Button<'a, Message> {
+    let enabled = on_press.is_some();
+    let mut content = row![text(label).size(12)].align_y(iced::Center);
+    if checked {
+        content = content.push(Space::new().width(Fill)).push(if enabled {
+            icons::themed(icons::CHECK, CHECK_SIZE)
+        } else {
+            icons::themed_disabled(icons::CHECK, CHECK_SIZE)
+        });
+    }
+    button(content)
+        .padding(ROW_PADDING)
+        .width(Fill)
+        .height(Length::Fixed(MENU_ROW_H))
+        .style(row_style)
+        .on_press_maybe(on_press)
 }
 
 /// A row that opens `list` beside the menu when hovered or clicked.

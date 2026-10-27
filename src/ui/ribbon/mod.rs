@@ -218,7 +218,7 @@ fn title_text_style(theme: &Theme) -> iced::widget::text::Style {
 const TAB_H: f32 = 22.0;
 const TAB_ROW_H: f32 = 28.0;
 const TAB_TEXT_SIZE: f32 = 12.5;
-/// Width of the accent outline of the active tab.
+/// Width of the accent outline of a contextual tab.
 const TAB_OUTLINE: f32 = 1.5;
 
 /// `tab` with an accent line along its top and sides.
@@ -1082,10 +1082,10 @@ impl Ribbon {
                 })
                 .height(TAB_H)
                 .padding([0, 9]);
-                // The active tab is outlined on three sides and open below,
-                // into the tool area; a contextual tab keeps its outline while
+                // The active tab shares the tool area's colour and opens into
+                // it. A contextual tab is outlined on three sides, also while
                 // another tab is on show, so it is easy to find again.
-                let tab: Element<'_, Message> = if is_active || is_contextual {
+                let tab: Element<'_, Message> = if is_contextual {
                     tab_outline(tab.into())
                 } else {
                     tab.into()
@@ -1098,7 +1098,9 @@ impl Ribbon {
                         .on_enter(Message::RibbonMinimize(MinimizeMsg::EnterOpener(
                             Opener::Tab(i),
                         )))
-                        .on_exit(Message::RibbonMinimize(MinimizeMsg::LeaveOpener))
+                        .on_exit(Message::RibbonMinimize(MinimizeMsg::LeaveOpener(
+                            Opener::Tab(i),
+                        )))
                         .into()
                 } else {
                     btn.into()

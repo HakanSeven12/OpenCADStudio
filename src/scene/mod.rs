@@ -16276,12 +16276,17 @@ mod delta_undo_tests {
             rec.into_recorded_images();
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].0, handle);
-        assert_eq!(objects.len(), 1);
-        assert!(objects[0].1.is_none());
-        assert!(matches!(
-            scene.document.objects.get(&objects[0].0),
+        // The image's own graph: ACAD_IMAGE_DICT, the definition and the image's
+        // reactor are new; the named object dictionary gains the entry.
+        assert_eq!(objects.len(), 4);
+        let root = scene.document.header.named_objects_dict_handle;
+        for (h, before) in &objects {
+            assert_eq!(before.is_some(), *h == root, "{h:?}");
+        }
+        assert!(objects.iter().any(|(h, _)| matches!(
+            scene.document.objects.get(h),
             Some(ObjectType::ImageDefinition(_))
-        ));
+        )));
     }
 
     #[test]

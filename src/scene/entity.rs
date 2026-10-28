@@ -1088,6 +1088,7 @@ impl Scene {
             entity = crate::modules::draw::modify::explode::normalize_entity_for_block(entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
+            self.ensure_image_definition(&mut entity);
             let handle = self
                 .document
                 .add_entity(entity)
@@ -1269,30 +1270,138 @@ impl Scene {
     /// caller starts an interactive insert so paste-as-block can prompt for the
     /// drop point. The geometry comes from the clipboard rather than live
     /// entities, so there is nothing to stage or erase. (#129)
-    /// Give a new RasterImage the ImageDefinition object it must reference,
-    /// unless it already names one.
-    fn ensure_image_definition(&mut self, entity: &mut EntityType) {
+    /// Register a new image's shared definition and exclusively owned reactor.
+    pub(super) fn ensure_image_definition(&mut self, entity: &mut EntityType) {
         let EntityType::RasterImage(img) = entity else {
             return;
         };
-        if img.definition_handle.is_some() {
+        use codec::objects::{Dictionary, ImageDefinition, ImageDefinitionReactor, ObjectType};
+        let existing = img
+            .definition_handle
+            .filter(|h| {
+                matches!(
+                    self.document.objects.get(h),
+                    Some(ObjectType::ImageDefinition(_))
+                )
+            })
+            .or_else(|| {
+                self.document
+                    .objects
+                    .iter()
+                    .find_map(|(h, object)| match object {
+                        ObjectType::ImageDefinition(def)
+                            if def.file_name.eq_ignore_ascii_case(&img.file_path) =>
+                        {
+                            Some(*h)
+                        }
+                        _ => None,
+                    })
+            });
+        let def_handle = existing.unwrap_or_else(|| self.document.allocate_handle());
+        let root = self.document.header.named_objects_dict_handle;
+        let dictionary = match self.document.objects.get(&root) {
+            Some(ObjectType::Dictionary(entries)) => entries.get("ACAD_IMAGE_DICT").filter(|h| {
+                matches!(
+                    self.document.objects.get(h),
+                    Some(ObjectType::Dictionary(_))
+                )
+            }),
+            _ => None,
+        };
+        // First-touch object images cover both new objects and shared mutations.
+        if self.is_recording_undo() {
+            for h in [Some(root), dictionary, Some(def_handle)]
+                .into_iter()
+                .flatten()
+            {
+                let before = self.document.objects.get(&h).cloned();
+                self.record_undo_object_before(h, before);
+            }
+        }
+        let owner = dictionary.unwrap_or_else(|| {
+            let h = self.document.allocate_handle();
+            self.record_undo_object_before(h, None);
+            let mut entries = Dictionary::new();
+            entries.handle = h;
+            entries.owner = root;
+            self.document
+                .objects
+                .insert(h, ObjectType::Dictionary(entries));
+            if let Some(ObjectType::Dictionary(entries)) = self.document.objects.get_mut(&root) {
+                entries.add_entry("ACAD_IMAGE_DICT", h);
+            }
+            h
+        });
+        if let Some(ObjectType::Dictionary(entries)) = self.document.objects.get_mut(&owner) {
+            if !entries.entries.iter().any(|(_, h)| *h == def_handle) {
+                let stem = std::path::Path::new(&img.file_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("IMAGE");
+                let mut key = stem.to_owned();
+                let mut suffix = 1;
+                while entries.get(&key).is_some() {
+                    suffix += 1;
+                    key = format!("{stem}_{suffix}");
+                }
+                entries.add_entry(key, def_handle);
+            }
+        }
+        if existing.is_none() {
+            let mut def = ImageDefinition::with_dimensions(
+                &img.file_path,
+                img.size.x as u32,
+                img.size.y as u32,
+            );
+            def.handle = def_handle;
+            def.is_loaded = true;
+            self.document
+                .objects
+                .insert(def_handle, ObjectType::ImageDefinition(def));
+        }
+        // An image that already owns a live reactor (re-added or moved into a
+        // block under its own handle) keeps it.
+        if let Some(own) = img.definition_reactor_handle.filter(|h| {
+            !img.common.handle.is_null()
+                && matches!(self.document.objects.get(h),
+                    Some(ObjectType::ImageDefinitionReactor(r)) if r.owner == img.common.handle)
+        }) {
+            if let Some(ObjectType::ImageDefinition(def)) =
+                self.document.objects.get_mut(&def_handle)
+            {
+                def.owner = owner;
+                for h in [owner, own] {
+                    if !def.reactors.contains(&h) {
+                        def.reactors.push(h);
+                    }
+                }
+            }
+            img.definition_handle = Some(def_handle);
             return;
         }
-        use codec::objects::{ImageDefinition, ObjectType};
-        // Allocate, not peek: a peeked handle is then handed to the image
-        // itself, and the DWG writer drops the definition that shares it. (#1421)
-        let def_handle = self.document.allocate_handle();
-        if self.is_recording_undo() {
-            self.record_undo_object_before(def_handle, None);
+        // Reserve the image's real handle before making its reactor. Copies
+        // arrive with a NULL handle and must never reuse the source's reactor.
+        if img.common.handle.is_null() {
+            img.common.handle = self.document.allocate_handle();
         }
-        let mut img_def =
-            ImageDefinition::with_dimensions(&img.file_path, img.size.x as u32, img.size.y as u32);
-        img_def.handle = def_handle;
-        img_def.is_loaded = true;
+        let reactor_handle = self.document.allocate_handle();
+        self.record_undo_object_before(reactor_handle, None);
+        let mut reactor = ImageDefinitionReactor::new(img.common.handle);
+        reactor.handle = reactor_handle;
+        reactor.owner = img.common.handle;
         self.document
             .objects
-            .insert(def_handle, ObjectType::ImageDefinition(img_def));
+            .insert(reactor_handle, ObjectType::ImageDefinitionReactor(reactor));
+        if let Some(ObjectType::ImageDefinition(def)) = self.document.objects.get_mut(&def_handle) {
+            def.owner = owner;
+            if !def.reactors.contains(&owner) {
+                def.reactors.push(owner);
+            }
+            def.reactors.push(reactor_handle);
+        }
         img.definition_handle = Some(def_handle);
+        img.definition_reactor_handle = Some(reactor_handle);
     }
 
     pub fn define_block_from_owned_entities(
@@ -1410,6 +1519,7 @@ impl Scene {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
+            self.ensure_image_definition(&mut entity);
             added.extend(self.document.add_entity(entity).ok());
         }
         self.refresh_meshes_for_handles(&added);
@@ -1474,6 +1584,7 @@ impl Scene {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
+            self.ensure_image_definition(&mut entity);
             changed.extend(self.document.add_entity(entity).ok());
         }
         self.refresh_meshes_for_handles(&changed);
@@ -3432,5 +3543,127 @@ impl Scene {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod image_definition_graph_tests {
+    use super::*;
+    use codec::entities::RasterImage;
+    use codec::objects::ObjectType;
+
+    fn image(path: &str) -> EntityType {
+        EntityType::RasterImage(RasterImage::with_size(
+            path,
+            codec::types::Vector3::ZERO,
+            4.0,
+            4.0,
+            40.0,
+            40.0,
+        ))
+    }
+
+    fn raster(scene: &Scene, handle: Handle) -> &RasterImage {
+        let Some(EntityType::RasterImage(image)) = scene.document.get_entity(handle) else {
+            panic!("expected image {handle:?}");
+        };
+        image
+    }
+
+    fn assert_reactor(scene: &Scene, handle: Handle, definition: Handle) -> Handle {
+        let image = raster(scene, handle);
+        assert_eq!(image.definition_handle, Some(definition));
+        let reactor_handle = image.definition_reactor_handle.expect("image reactor link");
+        let Some(ObjectType::ImageDefinitionReactor(reactor)) =
+            scene.document.objects.get(&reactor_handle)
+        else {
+            panic!("missing image reactor");
+        };
+        assert_eq!(reactor.handle, reactor_handle);
+        assert_eq!(reactor.owner, handle);
+        assert_eq!(reactor.image_handle, handle);
+        let Some(ObjectType::ImageDefinition(def)) = scene.document.objects.get(&definition) else {
+            panic!("missing image definition");
+        };
+        assert!(def.reactors.contains(&reactor_handle));
+        reactor_handle
+    }
+
+    #[test]
+    fn attach_same_file_shares_registered_definition_and_owns_reactors() {
+        let mut scene = Scene::new();
+        let first = scene.add_entity(image("shared.png"));
+        let second = scene.add_entity(image("shared.png"));
+        let definitions: Vec<_> = scene
+            .document
+            .objects
+            .iter()
+            .filter_map(|(h, o)| {
+                if let ObjectType::ImageDefinition(def) = o {
+                    Some((*h, def))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(definitions.len(), 1, "one definition per file");
+        let (definition, def) = definitions[0];
+        let root = scene.document.header.named_objects_dict_handle;
+        let Some(ObjectType::Dictionary(root)) = scene.document.objects.get(&root) else {
+            panic!("missing named object dictionary");
+        };
+        let dictionary = root.get("ACAD_IMAGE_DICT").expect("image dictionary entry");
+        let Some(ObjectType::Dictionary(entries)) = scene.document.objects.get(&dictionary) else {
+            panic!("missing image dictionary");
+        };
+        assert_eq!(
+            entries.owner,
+            scene.document.header.named_objects_dict_handle
+        );
+        assert_eq!(entries.get("shared"), Some(definition));
+        assert_eq!(def.owner, dictionary);
+        assert!(def.reactors.contains(&dictionary));
+        assert_ne!(
+            assert_reactor(&scene, first, definition),
+            assert_reactor(&scene, second, definition)
+        );
+        assert_eq!(def.reactors.len(), 3);
+    }
+
+    #[test]
+    fn copy_shares_definition_with_fresh_owned_reactor() {
+        let mut scene = Scene::new();
+        let source = scene.add_entity(image("shared.png"));
+        scene.begin_undo_recording();
+        let copies = scene.copy_entities(
+            &[source],
+            &crate::command::EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+        );
+        assert_eq!(copies.len(), 1);
+        let copy = copies[0];
+        assert_ne!(
+            raster(&scene, copy).definition_reactor_handle,
+            raster(&scene, source).definition_reactor_handle
+        );
+        let definition = raster(&scene, source)
+            .definition_handle
+            .expect("source definition");
+        let source_reactor = assert_reactor(&scene, source, definition);
+        let copy_reactor = assert_reactor(&scene, copy, definition);
+        let recording = scene.take_undo_recording().expect("undo recording");
+        assert!(!recording.is_poisoned());
+        let (_, objects, _, _, _) = recording.into_recorded_images();
+        assert!(objects
+            .iter()
+            .any(|(h, before)| *h == copy_reactor && before.is_none()));
+        let before = objects
+            .iter()
+            .find(|(h, _)| *h == definition)
+            .expect("shared definition before-image");
+        let Some(ObjectType::ImageDefinition(def)) = &before.1 else {
+            panic!("missing definition before-image");
+        };
+        assert!(def.reactors.contains(&source_reactor));
+        assert!(!def.reactors.contains(&copy_reactor));
     }
 }

@@ -950,6 +950,7 @@ impl Scene {
             // not claim the source's, or file validation reports
             // "Extension dictionary <H> Cannot access".
             sub.common_mut().xdictionary_handle = None;
+            self.ensure_image_definition(&mut sub);
             let _ = self.document.add_entity(sub);
         }
         Some(new_name)
@@ -1111,6 +1112,7 @@ impl Scene {
             entity.common_mut().xdictionary_handle = None;
 
             entity.common_mut().handle = Handle::NULL;
+            self.ensure_image_definition(&mut entity);
             let h = self.document.add_entity(entity).unwrap_or(Handle::NULL);
             if !h.is_null() {
                 // Deep-clone the extension-dictionary tree so edits on the

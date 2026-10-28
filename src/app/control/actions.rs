@@ -324,17 +324,6 @@ impl OpenCADStudio {
             self.push_undo_snapshot(i, "IMAGEATTACH");
             let handle = {
                 let document = &mut self.tabs[i].scene.document;
-                let definition_handle = document.allocate_handle();
-                let mut definition = codec::objects::ImageDefinition::with_dimensions(
-                    path,
-                    image.pixel_width,
-                    image.pixel_height,
-                );
-                definition.handle = definition_handle;
-                document.objects.insert(
-                    definition_handle,
-                    codec::objects::ObjectType::ImageDefinition(definition),
-                );
                 let mut entity = codec::entities::RasterImage::with_size(
                     path,
                     final_at,
@@ -343,7 +332,6 @@ impl OpenCADStudio {
                     final_width,
                     height,
                 );
-                entity.definition_handle = Some(definition_handle);
                 if let Some(l_name) = layer_name {
                     entity.common.layer = l_name.to_string();
                     if !document.layers.contains(l_name) {
@@ -359,9 +347,13 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                document
-                    .add_entity(codec::EntityType::RasterImage(entity))
-                    .map_err(|e| failure("embed_failed", e))?
+                let handle = self.tabs[i]
+                    .scene
+                    .add_entity(codec::EntityType::RasterImage(entity));
+                if handle.is_null() {
+                    return Err(failure("embed_failed", "Could not add image"));
+                }
+                handle
             };
             self.tabs[i].scene.populate_images_from_document();
             if layer_name.is_some() {

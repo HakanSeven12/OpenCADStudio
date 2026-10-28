@@ -123,6 +123,55 @@ fn transform_dimension_part(entity: &mut EntityType, t: &EntityTransform) {
 }
 
 impl Scene {
+    /// Link a leader and its annotation, including the annotation's persistent reactor.
+    pub fn link_leader_annotation(&mut self, leader: Handle, annotation: Handle) -> bool {
+        let old_annotation = match self.document.get_entity(leader) {
+            Some(EntityType::Leader(value)) => value.annotation_handle,
+            _ => return false,
+        };
+        if annotation == leader || self.document.get_entity(annotation).is_none() {
+            return false;
+        }
+        let mut touched = vec![leader, annotation];
+        if old_annotation != annotation && self.document.get_entity(old_annotation).is_some() {
+            touched.push(old_annotation);
+        }
+        if self.is_recording_undo() {
+            for &handle in &touched {
+                let before = self.document.get_entity_arc(handle);
+                self.record_undo_before(handle, before);
+            }
+        }
+        if old_annotation != annotation {
+            if let Some(entity) = self.document.get_entity_mut(old_annotation) {
+                entity
+                    .common_mut()
+                    .reactors
+                    .retain(|&handle| handle != leader);
+            }
+        }
+        if let Some(EntityType::Leader(value)) = self.document.get_entity_mut(leader) {
+            value.annotation_handle = annotation;
+        }
+        let reactors = &mut self
+            .document
+            .get_entity_mut(annotation)
+            .unwrap()
+            .common_mut()
+            .reactors;
+        if !reactors.contains(&leader) {
+            reactors.push(leader);
+        }
+        // The context may have been created before the annotation handle was known.
+        self.sync_displayed_annotation_context(leader);
+        let changes: Vec<_> = touched
+            .into_iter()
+            .map(|h| (h, ChangeKind::Modified))
+            .collect();
+        self.bump_entities(&changes);
+        true
+    }
+
     pub(crate) fn sync_displayed_annotation_context(&mut self, handle: Handle) -> bool {
         let scale = self.displayed_annotation_scale_handle();
         crate::scene::annotative::sync_annotation_context_from_entity(
@@ -2754,6 +2803,90 @@ impl Scene {
         if !hatch_changes.is_empty() {
             self.bump_entities(&hatch_changes);
         }
+    }
+}
+
+#[cfg(test)]
+mod leader_annotation_reactor_tests {
+    use super::*;
+
+    fn add_pair(scene: &mut Scene) -> (Handle, Handle) {
+        let leader = scene.add_entity(EntityType::Leader(codec::entities::Leader::default()));
+        let annotation = scene.add_entity(EntityType::MText(Box::new(
+            codec::entities::MText::with_value("note", codec::types::Vector3::new(10.0, 5.0, 0.0)),
+        )));
+        (leader, annotation)
+    }
+
+    #[test]
+    fn linking_adds_annotation_reactor_exactly_once() {
+        let mut scene = Scene::new();
+        let (leader, annotation) = add_pair(&mut scene);
+        assert!(scene.link_leader_annotation(leader, annotation));
+        assert!(scene.link_leader_annotation(leader, annotation));
+
+        let Some(EntityType::Leader(value)) = scene.document.get_entity(leader) else {
+            panic!("leader missing");
+        };
+        assert_eq!(value.annotation_handle, annotation);
+        let reactors = &scene
+            .document
+            .get_entity(annotation)
+            .unwrap()
+            .common()
+            .reactors;
+        assert_eq!(reactors.iter().filter(|&&h| h == leader).count(), 1);
+    }
+
+    #[test]
+    fn copy_pair_remaps_annotation_reactor() {
+        let mut scene = Scene::new();
+        let (leader, annotation) = add_pair(&mut scene);
+        assert!(scene.link_leader_annotation(leader, annotation));
+        let copies = scene.copy_entities(
+            &[leader, annotation],
+            &EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+        );
+        assert_eq!(copies.len(), 2);
+        assert_ne!(copies[0], leader);
+        assert_ne!(copies[1], annotation);
+        let Some(EntityType::Leader(value)) = scene.document.get_entity(copies[0]) else {
+            panic!("copied leader missing");
+        };
+        assert_eq!(value.annotation_handle, copies[1]);
+        let reactors = &scene
+            .document
+            .get_entity(copies[1])
+            .unwrap()
+            .common()
+            .reactors;
+        assert_eq!(reactors.iter().filter(|&&h| h == copies[0]).count(), 1);
+        assert!(!reactors.contains(&leader));
+        assert!(scene
+            .document
+            .get_entity(annotation)
+            .unwrap()
+            .common()
+            .reactors
+            .contains(&leader));
+    }
+
+    #[test]
+    fn linking_new_pair_preserves_absent_undo_before_images() {
+        let mut scene = Scene::new();
+        scene.begin_undo_recording();
+        let (leader, annotation) = add_pair(&mut scene);
+        assert!(scene.link_leader_annotation(leader, annotation));
+        let recording = scene.take_undo_recording().unwrap();
+        assert!(matches!(recording.before.get(&leader), Some(None)));
+        assert!(matches!(recording.before.get(&annotation), Some(None)));
+        assert!(scene
+            .document
+            .get_entity(annotation)
+            .unwrap()
+            .common()
+            .reactors
+            .contains(&leader));
     }
 }
 

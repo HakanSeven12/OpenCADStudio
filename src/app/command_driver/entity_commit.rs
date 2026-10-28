@@ -719,25 +719,7 @@ impl OpenCADStudio {
         // Link the leader to its annotation so the pair edits as a unit
         // (double-click on the leader resolves to the text entity).
         if let (Some(lh), Some(ah)) = (leader_handle, edit_handle) {
-            let linked = if let Some(codec::EntityType::Leader(l)) =
-                self.tabs[i].scene.document.get_entity_mut(lh)
-            {
-                l.annotation_handle = ah;
-                true
-            } else {
-                false
-            };
-
-            if linked {
-                // The LEADER may already have received its annotation context while
-                // annotation_handle was still NULL. Refresh it now that the MTEXT link
-                // is known so the context represents the finished leader.
-                self.tabs[i].scene.sync_displayed_annotation_context(lh);
-
-                self.tabs[i]
-                    .scene
-                    .bump_entities(&[(lh, crate::scene::ChangeKind::Modified)]);
-            }
+            self.tabs[i].scene.link_leader_annotation(lh, ah);
         }
         self.tabs[i].dirty = true;
         self.tabs[i].scene.clear_preview_wire();

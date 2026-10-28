@@ -27,6 +27,12 @@ impl Scene {
         group.owner = group_dict_handle;
         group.add_entities(handles);
         let gh = group.handle;
+        if self.is_recording_undo() {
+            let before = self.document.objects.get(&group_dict_handle).cloned();
+            self.record_undo_object_before(group_dict_handle, before);
+            self.record_undo_object_before(gh, None);
+        }
+        self.set_group_member_reactors(gh, &group.entities, true);
         self.document.objects.insert(gh, ObjectType::Group(group));
         if let Some(ObjectType::Dictionary(dict)) =
             self.document.objects.get_mut(&group_dict_handle)
@@ -34,6 +40,30 @@ impl Scene {
             dict.add_entry(&name, gh);
         }
         gh
+    }
+
+    /// Keep member back-links and their first-touch undo images together.
+    fn set_group_member_reactors(&mut self, group: Handle, members: &[Handle], add: bool) {
+        for &member in members {
+            let Some(entity) = self.document.get_entity(member) else {
+                continue;
+            };
+            if entity.common().reactors.contains(&group) == add {
+                continue;
+            }
+            if self.is_recording_undo() {
+                let before = self.document.get_entity_arc(member);
+                self.record_undo_before(member, before);
+            }
+            if let Some(entity) = self.document.get_entity_mut(member) {
+                let reactors = &mut entity.common_mut().reactors;
+                if add {
+                    reactors.push(group);
+                } else {
+                    reactors.retain(|reactor| *reactor != group);
+                }
+            }
+        }
     }
 
     /// Recreate every *live* group whose full membership was copied.
@@ -114,13 +144,7 @@ impl Scene {
                 }
                 self.record_undo_object_before(gh, None);
             }
-            for member in group.entities.clone() {
-                if let Some(entity) = self.document.get_entity_mut(member) {
-                    if !entity.common().reactors.contains(&gh) {
-                        entity.common_mut().reactors.push(gh);
-                    }
-                }
-            }
+            self.set_group_member_reactors(gh, &group.entities, true);
             self.document.objects.insert(gh, ObjectType::Group(group));
             if let Some(ObjectType::Dictionary(dict)) =
                 self.document.objects.get_mut(&group_dict_handle)
@@ -171,7 +195,19 @@ impl Scene {
             })
             .collect();
         let count = to_delete.len();
+        if count > 0 && self.is_recording_undo() {
+            let before = self.document.objects.get(&group_dict_handle).cloned();
+            self.record_undo_object_before(group_dict_handle, before);
+        }
         for gh in &to_delete {
+            if let Some(ObjectType::Group(group)) = self.document.objects.get(gh) {
+                let members = group.entities.clone();
+                if self.is_recording_undo() {
+                    let before = self.document.objects.get(gh).cloned();
+                    self.record_undo_object_before(*gh, before);
+                }
+                self.set_group_member_reactors(*gh, &members, false);
+            }
             if let Some(ObjectType::Dictionary(dict)) =
                 self.document.objects.get_mut(&group_dict_handle)
             {
@@ -242,6 +278,139 @@ impl Scene {
                 .map(|handle| vec![handle]),
         );
         units
+    }
+}
+
+#[cfg(test)]
+mod group_reactor_tests {
+    use super::*;
+    use codec::entities::{EntityType, Line};
+    use codec::types::Vector3;
+
+    fn two_lines() -> (Scene, [Handle; 2]) {
+        let mut scene = Scene::new();
+        let members = [0.0, 5.0].map(|y| {
+            scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(0.0, y, 0.0),
+                Vector3::new(10.0, y, 0.0),
+            )))
+        });
+        (scene, members)
+    }
+
+    #[test]
+    fn create_group_links_members_back() {
+        let (mut scene, members) = two_lines();
+        let group = scene.create_group("G1".into(), vec![members[0], members[1], members[0]]);
+        for member in members {
+            let reactors = &scene.document.get_entity(member).unwrap().common().reactors;
+            assert_eq!(reactors.iter().filter(|&&h| h == group).count(), 1);
+        }
+    }
+
+    #[test]
+    fn deleting_group_clears_member_reactors() {
+        let (mut scene, members) = two_lines();
+        let unrelated = scene.document.allocate_handle();
+        scene
+            .document
+            .get_entity_mut(members[0])
+            .unwrap()
+            .common_mut()
+            .reactors
+            .push(unrelated);
+        let group = scene.create_group("G1".into(), members.to_vec());
+        // Seed the back-links independently of create, as in an imported drawing.
+        // Duplicates must also be removed without touching other reactors.
+        for member in members {
+            scene
+                .document
+                .get_entity_mut(member)
+                .unwrap()
+                .common_mut()
+                .reactors
+                .extend([group, group]);
+        }
+        let before: Vec<_> = members
+            .iter()
+            .map(|&h| {
+                scene
+                    .document
+                    .get_entity(h)
+                    .unwrap()
+                    .common()
+                    .reactors
+                    .clone()
+            })
+            .collect();
+        scene.begin_undo_recording();
+        assert_eq!(scene.delete_groups_containing(&[members[1]]), 1);
+        assert!(!scene.document.objects.contains_key(&group));
+        for member in members {
+            assert!(!scene
+                .document
+                .get_entity(member)
+                .unwrap()
+                .common()
+                .reactors
+                .contains(&group));
+        }
+        assert_eq!(
+            scene
+                .document
+                .get_entity(members[0])
+                .unwrap()
+                .common()
+                .reactors,
+            vec![unrelated]
+        );
+        let recorded = scene.take_undo_recording().unwrap().into_before_images();
+        assert_eq!(recorded.len(), 2);
+        let delta: Vec<_> = recorded
+            .into_iter()
+            .map(|(h, before)| (h, before, scene.document.get_entity_arc(h)))
+            .collect();
+        scene.apply_entity_delta(&delta, true);
+        for (member, expected) in members.into_iter().zip(before) {
+            assert_eq!(
+                scene.document.get_entity(member).unwrap().common().reactors,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn undo_create_restores_member_reactors() {
+        let (mut scene, members) = two_lines();
+        scene.begin_undo_recording();
+        let group = scene.create_group("G1".into(), members.to_vec());
+        let recorded = scene.take_undo_recording().unwrap().into_before_images();
+        assert_eq!(
+            recorded.len(),
+            2,
+            "both member before-images must be recorded"
+        );
+        let delta: Vec<_> = recorded
+            .into_iter()
+            .map(|(h, before)| (h, before, scene.document.get_entity_arc(h)))
+            .collect();
+        scene.apply_entity_delta(&delta, true);
+        for member in members {
+            assert!(scene
+                .document
+                .get_entity(member)
+                .unwrap()
+                .common()
+                .reactors
+                .is_empty());
+        }
+        scene.apply_entity_delta(&delta, false);
+        for member in members {
+            assert_eq!(
+                scene.document.get_entity(member).unwrap().common().reactors,
+                vec![group]
+            );
+        }
     }
 }
 

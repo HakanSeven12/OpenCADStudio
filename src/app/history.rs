@@ -747,6 +747,7 @@ impl OpenCADStudio {
         label: impl Into<String>,
     ) -> PendingObjectDelta {
         self.finish_pending_history(i);
+        self.tabs[i].scene.begin_undo_recording();
         PendingObjectDelta {
             label: label.into(),
             current_layout: self.tabs[i].scene.current_layout.clone(),
@@ -757,6 +758,17 @@ impl OpenCADStudio {
     }
 
     pub(super) fn commit_group_undo(&mut self, i: usize, pending: PendingObjectDelta) {
+        let entities: Vec<_> = self.tabs[i]
+            .scene
+            .take_undo_recording()
+            .map(|rec| rec.into_recorded_images().0)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(handle, before)| {
+                let after = self.tabs[i].scene.document.get_entity_arc(handle);
+                (handle, before, after)
+            })
+            .collect();
         let after = self.group_object_state(i);
         let mut handles: HashSet<Handle> = pending.before.keys().copied().collect();
         handles.extend(after.keys().copied());
@@ -772,12 +784,12 @@ impl OpenCADStudio {
                 })
             })
             .collect();
-        if entries.is_empty() {
+        if entries.is_empty() && entities.is_empty() {
             return;
         }
         let delta = DeltaSnapshot {
             visibility_states: None,
-            entities: Vec::new(),
+            entities,
             current_layout_before: pending.current_layout,
             current_layout_after: self.tabs[i].scene.current_layout.clone(),
             selected_before: pending.selected_before,

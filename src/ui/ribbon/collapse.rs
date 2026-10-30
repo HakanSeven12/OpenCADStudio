@@ -9,7 +9,7 @@
 
 use std::cell::RefCell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
@@ -161,6 +161,9 @@ pub(crate) struct CollapsePanels<'a> {
     /// If set, the measured row height is written here each layout (read when
     /// anchoring dropdowns below the ribbon).
     height_out: Option<Arc<AtomicU32>>,
+    /// If set, `true` is written here whenever the row is in the tight state
+    /// (some panel at its narrowest button), so the tab row can react.
+    tight_out: Option<Arc<AtomicBool>>,
     /// `Auto` runs the width-based degradation; the others pin every panel
     /// to one level regardless of the window width.
     mode: CollapseMode,
@@ -296,6 +299,7 @@ impl<'a> CollapsePanels<'a> {
             row_h,
             levels: RefCell::new(vec![Level::Full; n]),
             height_out: None,
+            tight_out: None,
             mode: CollapseMode::Auto,
             measure_key: 0,
             drag_strip: 0.0,
@@ -327,6 +331,12 @@ impl<'a> CollapsePanels<'a> {
     /// Report the measured row height into `out` on every layout.
     pub fn report_height(mut self, out: Arc<AtomicU32>) -> Self {
         self.height_out = Some(out);
+        self
+    }
+
+    /// Report whether the row is in the tight state into `out` on every layout.
+    pub fn report_tight(mut self, out: Arc<AtomicBool>) -> Self {
+        self.tight_out = Some(out);
         self
     }
 
@@ -481,6 +491,11 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             self.ensure_element(tree, i, level);
         }
 
+        // The row is tight once any panel is at its narrowest button, the
+        // most cramped state; the tab row hides the minimize button then.
+        if let Some(out) = &self.tight_out {
+            out.store(levels.contains(&Level::Tight), Ordering::Relaxed);
+        }
         *self.levels.borrow_mut() = levels.clone();
 
         // Same idea as the tab bar squeezing its gaps before wrapping: once every

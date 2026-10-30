@@ -9,7 +9,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use rustc_hash::FxHashMap as HashMap;
 
@@ -345,6 +345,9 @@ pub struct Ribbon {
     /// The window size, for the search box and its results.
     win_w: f32,
     win_h: f32,
+    /// Set by `CollapsePanels` when the tool row is tight; the minimize
+    /// button hides then to give the cramped tab row its space back.
+    collapse_tight: Arc<AtomicBool>,
     /// The selected PDF underlay's switches while only underlays are selected.
     underlay_ctx: Option<UnderlayContext>,
     /// Only xrefs are selected.
@@ -485,6 +488,7 @@ impl Ribbon {
             search: search::SearchState::default(),
             win_w: f32::INFINITY,
             win_h: f32::INFINITY,
+            collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
             point_cloud_ctx: None,
@@ -1089,14 +1093,19 @@ impl Ribbon {
             },
         );
         let mut tab_items = tab_items;
-        tab_items.push(self.minimize_button());
+        // A minimized ribbon has no tool row to be tight.
+        if self.layout.minimize != RibbonMinimize::Off
+            || !self.collapse_tight.load(Ordering::Relaxed)
+        {
+            tab_items.push(self.minimize_button());
+        }
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
         // down to -12px on a narrow (e.g. phone) tab row, tucking neighbours into
         // each other's 14px side padding without overlapping the labels. When the
         // row has room the gap stays 6px, so wide/desktop layouts are unchanged.
         let tabs = WrapFlow::new(tab_items)
-            .spacing_x(2.0)
+            .spacing_x(metrics::TAB_GAP)
             .min_spacing_x(-6.0)
             .row_h(TAB_ROW_H);
 
@@ -1262,6 +1271,7 @@ impl Ribbon {
                 })
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
+                .report_tight(self.collapse_tight.clone())
                 .mode(mode)
                 .into()
         } else {

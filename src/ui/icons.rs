@@ -1101,7 +1101,39 @@ pub fn chevron_up<'a, M: 'a>() -> Element<'a, M> {
 }
 
 fn arrow<'a, M: 'a>(width: f32, height: f32, up: bool) -> Element<'a, M> {
-    Element::new(VectorArrow { width, height, up })
+    Element::new(VectorShape {
+        width,
+        height,
+        handle: arrow_handle(width, height, up),
+    })
+}
+
+/// The minimize button's icon on a 16 px grid: the ribbon as a 15 x 10
+/// outline with a solid triangle in it, pointing up to minimize the ribbon
+/// and down, once `minimized`, to show it in full. Drawn like the arrows, in
+/// the text colour.
+pub fn ribbon_toggle<'a, M: 'a>(minimized: bool) -> Element<'a, M> {
+    thread_local! {
+        static HANDLES: [svg::Handle; 2] = [false, true].map(|minimized| {
+            // The triangle is 6 wide and 3 high between x 5 and 11; its flat
+            // edge is at y 10 pointing up, at y 7 pointing down.
+            let triangle = if minimized {
+                "M5 7 H11 L8 10 Z"
+            } else {
+                "M5 10 H11 L8 7 Z"
+            };
+            let source = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect x="0.5" y="3.5" width="15" height="10" fill="none" stroke="black" stroke-width="1"/><path d="{triangle}" fill="black"/></svg>"#
+            );
+            svg::Handle::from_memory(source.into_bytes())
+        });
+    }
+    let size = metrics::SMALL_ICON;
+    Element::new(VectorShape {
+        width: size,
+        height: size,
+        handle: HANDLES.with(|handles| handles[usize::from(minimized)].clone()),
+    })
 }
 
 /// The window's scale factor, in thousandths: where a whole physical pixel
@@ -1153,13 +1185,14 @@ fn arrow_handle(width: f32, height: f32, up: bool) -> svg::Handle {
     handle
 }
 
-struct VectorArrow {
+/// A vector shape `width` x `height` drawn in the text colour.
+struct VectorShape {
     width: f32,
     height: f32,
-    up: bool,
+    handle: svg::Handle,
 }
 
-impl<M> Widget<M, Theme, Renderer> for VectorArrow {
+impl<M> Widget<M, Theme, Renderer> for VectorShape {
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fixed(self.width), Length::Fixed(self.height))
     }
@@ -1194,7 +1227,7 @@ impl<M> Widget<M, Theme, Renderer> for VectorArrow {
         let drawn = Rectangle::new(at, Size::new(self.width, self.height));
         renderer.draw_svg(
             core_svg::Svg {
-                handle: arrow_handle(self.width, self.height, self.up),
+                handle: self.handle.clone(),
                 color: Some(style.text_color),
                 rotation: Radians(0.0),
                 opacity: 1.0,

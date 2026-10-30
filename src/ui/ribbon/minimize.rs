@@ -324,7 +324,11 @@ impl Ribbon {
         }
     }
 
-    /// The minimize split button after the last tab.
+    /// The minimize split button after the last tab: a face with the ribbon
+    /// icon, whose triangle points up to minimize and down to show the full
+    /// ribbon, and an arrow part that opens the list of minimize states. Its
+    /// icons are in the title colour, strong while hovered or while the list
+    /// is open; one outline goes round both parts on hover.
     pub(super) fn minimize_button(&self) -> Element<'_, Message> {
         let minimized = self.layout.minimize != RibbonMinimize::Off;
         let to_full = next(self.layout.minimize, self.layout.minimize_pref) == RibbonMinimize::Off;
@@ -335,21 +339,24 @@ impl Ribbon {
         } else {
             crate::tr!("ribbon-menu", "minimize")
         };
-        // The chevron in a small icon's box, so the face is the size of an
-        // icon button.
-        let chevron = container(if minimized {
-            icons::themed_arrow_down(metrics::CHEVRON)
-        } else {
-            icons::themed_arrow_up(metrics::CHEVRON)
-        })
-        .center(metrics::SMALL_ICON);
         let menu_open = self.open_dropdown.as_deref() == Some(MINIMIZE_MENU_ID);
+        let part_style = move |theme: &Theme, status: button::Status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                text_color: if hovered || menu_open {
+                    chrome::strong(theme)
+                } else {
+                    chrome::title_text(theme)
+                },
+                ..qat_split_part_style(theme, true, false, status)
+            }
+        };
         let face = tooltip(
-            button(container(chevron).center(Fill))
+            button(container(icons::ribbon_toggle(minimized)).center(Fill))
                 .on_press(Message::RibbonMinimize(MinimizeMsg::Toggle))
-                .style(|theme: &Theme, status| qat_split_part_style(theme, true, false, status))
-                .width(metrics::SMALL_W)
-                .height(metrics::SMALL_W)
+                .style(part_style)
+                .width(metrics::MINIMIZE_FACE_W)
+                .height(metrics::QAT_BUTTON)
                 .padding(0),
             make_tip(tip),
             tooltip::Position::Bottom,
@@ -358,15 +365,22 @@ impl Ribbon {
         .style(tip_style);
         let arrow = button(container(icons::dropdown_arrow()).center(Fill))
             .on_press(Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string()))
-            .style(move |theme: &Theme, status| {
-                qat_split_part_style(theme, true, menu_open, status)
-            })
-            .width(metrics::QAT_SPLIT_ARROW_W)
-            .height(metrics::SMALL_W)
+            .style(part_style)
+            .width(metrics::SPLIT_ARROW_W)
+            .height(metrics::QAT_BUTTON)
             .padding(0);
         // A split button like Undo's: one hover outline round both parts.
         let parts = split_outline(row![face, arrow].into());
-        PosReport::new(MINIMIZE_MENU_ID, parts).into()
+        // At the bottom of the tab row, beside the last tab.
+        container(PosReport::new(MINIMIZE_MENU_ID, parts))
+            .padding(Padding {
+                left: metrics::MINIMIZE_MARGIN - metrics::TAB_GAP,
+                bottom: metrics::MINIMIZE_BOTTOM,
+                ..Padding::ZERO
+            })
+            .height(metrics::TAB_ROW_H)
+            .align_bottom(metrics::TAB_ROW_H)
+            .into()
     }
 
     /// The list of what the minimize button does, under its arrow.

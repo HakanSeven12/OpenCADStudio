@@ -250,15 +250,7 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
 
     // 3. Match common prefixes / variations
     let family_lower = family.to_lowercase();
-    let alias = match family_lower.as_str() {
-        "arialn" => Some("Arial Narrow"),
-        "gothic" => Some("Century Gothic"),
-        "times" => Some("Times New Roman"),
-        "cour" => Some("Courier New"),
-        _ => None,
-    };
-
-    if let Some(alias_name) = alias {
+    for alias_name in substitute_families(&family_lower) {
         if let Some(matched) = families
             .iter()
             .find(|&f| f.eq_ignore_ascii_case(alias_name))
@@ -297,6 +289,34 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Installed families that stand in for a font file stem or family name
+/// (lowercase), in order of preference. Bitstream's Swiss 721, which AutoCAD
+/// installs and drawings name by family (`Swis721 Cn BT`) or file
+/// (`swissc`), is Helvetica: TeX Gyre Heros and Nimbus Sans are free
+/// Helvetica clones, and their Cn / Narrow cuts keep condensed lines inside
+/// their MTEXT width instead of wrapping.
+fn substitute_families(family_lower: &str) -> &'static [&'static str] {
+    match family_lower {
+        "arialn" => &["Arial Narrow"],
+        "gothic" => &["Century Gothic"],
+        "times" => &["Times New Roman"],
+        "cour" => &["Courier New"],
+        "swis721 bt" | "swiss" => &[
+            "TeX Gyre Heros",
+            "Nimbus Sans",
+            "Arial",
+            "Liberation Sans",
+        ],
+        "swis721 cn bt" | "swissc" => &[
+            "TeX Gyre Heros Cn",
+            "Nimbus Sans Narrow",
+            "Arial Narrow",
+            "Liberation Sans Narrow",
+        ],
+        _ => &[],
+    }
 }
 
 /// Separator between a family and the face of it a [`styled_family`] name
@@ -600,6 +620,26 @@ mod tests {
                 "{name} must alias to Noto Serif first, Noto Sans second"
             );
         }
+    }
+
+    /// Swiss 721, by family or file, stands in through free Helvetica
+    /// clones; the condensed cut only through narrow faces, so its MTEXT
+    /// lines keep their width.
+    #[test]
+    fn swiss_721_substitutes_keep_the_width() {
+        for name in ["swis721 cn bt", "swissc"] {
+            let faces = substitute_families(name);
+            assert_eq!(faces.first(), Some(&"TeX Gyre Heros Cn"), "{name}");
+            assert!(
+                faces.iter().all(|f| f.ends_with(" Cn") || f.ends_with(" Narrow")),
+                "{name}: {faces:?}"
+            );
+        }
+        for name in ["swis721 bt", "swiss"] {
+            assert_eq!(substitute_families(name).first(), Some(&"TeX Gyre Heros"));
+        }
+        assert_eq!(substitute_families("arialn"), &["Arial Narrow"]);
+        assert!(substitute_families("swis721 blkcn bt").is_empty());
     }
 
     #[test]

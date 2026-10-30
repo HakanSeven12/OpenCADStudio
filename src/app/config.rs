@@ -743,7 +743,7 @@ mod tests {
             serde_json::from_str(r#"{"ribbon":{"collapse":"Compact"}}"#).expect("old config");
         assert!(old.ribbon.layout == RibbonLayout::default());
         assert!(old.ribbon.layout.show_panel_titles);
-        assert!(!old.ribbon.layout.search_collapsed);
+        assert!(old.ribbon.layout.search_expanded);
 
         let mut original = AppConfig::default();
         let layout = &mut original.ribbon.layout;
@@ -757,14 +757,14 @@ mod tests {
         layout.minimize = RibbonMinimize::PanelTitles;
         layout.minimize_pref = MinimizePref::Tabs;
         layout.pinned_slideouts.insert("draw/Draw".into());
-        layout.search_collapsed = true;
+        layout.search_expanded = false;
 
         let serialized = serde_json::to_string(&original).expect("serialize config");
         // The fields sit directly in the ribbon section.
         let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
         assert_eq!(value["ribbon"]["hidden_tabs"][0], "manage");
         assert_eq!(value["ribbon"]["minimize"], "PanelTitles");
-        assert_eq!(value["ribbon"]["search_collapsed"], true);
+        assert_eq!(value["ribbon"]["search_expanded"], false);
         let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
         assert!(restored.ribbon == original.ribbon);
     }

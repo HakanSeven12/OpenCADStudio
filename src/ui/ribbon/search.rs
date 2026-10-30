@@ -31,16 +31,38 @@ pub const SEARCH_INPUT_ID: &str = "ribbon_search_input";
 const BOX_ID: &str = "ribbon_search_box";
 const RESULTS_ID: &str = "ribbon_search_results";
 const RESULTS_SCROLL_ID: &str = "ribbon_search_scroll";
+/// The full box, its padding and the gap between its parts.
 const BOX_W: f32 = 190.0;
 const BOX_H: f32 = 20.0;
-const BUTTON_W: f32 = metrics::SEARCH_BUTTON;
+const BOX_PAD_LEFT: f32 = 6.0;
+const BOX_PAD_RIGHT: f32 = 5.0;
+const BOX_GAP: f32 = 5.0;
+/// The clear, collapse and keep-expanded buttons in the box.
+const BOX_BUTTON: f32 = 18.0;
+/// The magnifier button that stands for the box.
+const MAGNIFIER_W: f32 = 24.0;
+const MAGNIFIER_H: f32 = 20.0;
+/// Size of the typed text and the placeholder.
+const INPUT_SIZE: f32 = 11.5;
+/// The field over the magnifier button on a narrow window, and how far above
+/// the button it stands.
 const FIELD_W: f32 = 300.0;
 const FIELD_H: f32 = 24.0;
+const FIELD_ABOVE: f32 = 2.0;
+/// How long a temporary box stays after a press elsewhere, so a press on its
+/// own buttons or results still lands.
+const BLUR_DELAY: Duration = Duration::from_millis(200);
+
+// The search box's icons on the 24-unit grid.
+const MAGNIFIER: &str = "M4 11a7 7 0 1 0 14 0a7 7 0 1 0-14 0 M20 20l-4-4";
+const COLLAPSE: &str = "M7 6l6 6-6 6 M13 6l6 6-6 6";
+const KEEP: &str = "M17 6l-6 6 6 6 M11 6l-6 6 6 6";
+const CLEAR: &str = "M5.5 5.5l13 13 M18.5 5.5l-13 13";
 const RESULTS_W: f32 = 440.0;
 const ROW_H: f32 = 26.0;
 const HEADER_H: f32 = 20.0;
 /// Below this window width the box shrinks to its magnifier button.
-const NARROW: f32 = 1080.0;
+pub(super) const NARROW: f32 = 1080.0;
 const BEST: usize = 5;
 const PER_GROUP: usize = 8;
 /// A picked ribbon button blinks: on and off `FLASHES` times this long.
@@ -116,9 +138,9 @@ pub enum SearchMsg {
     Move(bool),
     Submit,
     Pick(usize),
-    /// Shrink the box to its magnifier button (`true`), or keep it.
+    /// Shrink the box to its magnifier button (`true`), or keep it expanded.
     Collapse(bool),
-    /// Open the field over the magnifier button.
+    /// Open the box for now, from the magnifier button.
     OpenField,
     /// A press inside the box (`true`) or anywhere else.
     Press(bool),
@@ -135,8 +157,11 @@ pub(super) struct SearchState {
     selected: usize,
     /// The results were put away by a press elsewhere; typing brings them back.
     hidden: bool,
-    /// The field over the magnifier button is open.
-    field_open: bool,
+    /// The box is open for now: from the magnifier button while collapsed,
+    /// or as the field over it on a narrow window.
+    temp_open: bool,
+    /// When a temporary box closes after a press elsewhere.
+    closing: Option<Instant>,
     scroll: f32,
     /// The ribbon button blinking after a pick, and when it started.
     flash: Option<(&'static str, Instant)>,
@@ -408,20 +433,41 @@ impl Ribbon {
         !self.search.query.trim().is_empty() && !self.search.hidden
     }
 
-    /// Empty the box and close its results and field.
-    fn clear_search(&mut self) {
+    /// Empty the box and close its results.
+    fn clear_query(&mut self) {
         self.search.query.clear();
         self.search.hits.clear();
         self.search.shown.clear();
         self.search.hidden = false;
-        self.search.field_open = false;
     }
 
-    /// Escape: clear the search; whether there was one to clear.
+    /// Empty the box and close its results and a temporary box.
+    fn clear_search(&mut self) {
+        self.clear_query();
+        self.search.temp_open = false;
+        self.search.closing = None;
+    }
+
+    /// Escape: clear the text, or with none close a temporary box; whether
+    /// there was something to do.
     pub fn escape_search(&mut self) -> bool {
-        let active = !self.search.query.is_empty() || self.search.field_open;
-        self.clear_search();
-        active
+        if !self.search.query.is_empty() {
+            self.clear_query();
+            true
+        } else if self.search.temp_open {
+            self.clear_search();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The window changed width: a temporary box closes when it turns
+    /// narrow or wide; the kept-open preference stays as it is.
+    pub(super) fn search_resized(&mut self, was_narrow: bool) {
+        if self.narrow() != was_narrow && self.search.temp_open {
+            self.clear_search();
+        }
     }
 
     /// Apply a search message.
@@ -435,9 +481,7 @@ impl Ribbon {
                 out.scroll_to = Some(0.0);
             }
             SearchMsg::Clear => {
-                let field_open = self.search.field_open;
-                self.clear_search();
-                self.search.field_open = field_open;
+                self.clear_query();
                 out.focus = true;
             }
             SearchMsg::Move(down) => {
@@ -471,21 +515,33 @@ impl Ribbon {
                 out.run = Some(hit.run);
             }
             SearchMsg::Collapse(collapsed) => {
-                out.save = self.layout.search_collapsed != collapsed;
-                self.layout.search_collapsed = collapsed;
-                self.clear_search();
+                out.save = self.layout.search_expanded == collapsed;
+                self.layout.search_expanded = !collapsed;
+                if collapsed {
+                    self.clear_search();
+                } else {
+                    // Kept open: the text stays and the field keeps focus.
+                    self.search.temp_open = false;
+                    self.search.closing = None;
+                    out.focus = true;
+                }
             }
             SearchMsg::OpenField => {
-                self.search.field_open = true;
+                self.search.temp_open = true;
+                self.search.closing = None;
                 self.search.hidden = false;
                 out.focus = true;
             }
             SearchMsg::Press(inside) => {
                 if inside {
                     self.search.hidden = false;
+                    self.search.closing = None;
                 } else {
                     self.search.hidden = true;
-                    self.search.field_open = false;
+                    // A temporary box closes once the press is done with.
+                    if self.search.temp_open {
+                        self.search.closing = Some(now + BLUR_DELAY);
+                    }
                 }
             }
             SearchMsg::Scrolled(offset) => self.search.scroll = offset,
@@ -536,6 +592,9 @@ impl Ribbon {
 
     /// The ribbon button blinking after a pick: blink on, then off, until done.
     pub(super) fn search_tick(&mut self, now: Instant) {
+        if self.search.closing.is_some_and(|at| now >= at) {
+            self.clear_search();
+        }
         let Some((id, at)) = self.search.flash else {
             return;
         };
@@ -548,8 +607,9 @@ impl Ribbon {
         }
     }
 
+    /// Whether a button blinks or a temporary box is due to close.
     pub(super) fn search_flashing(&self) -> bool {
-        self.search.flash.is_some()
+        self.search.flash.is_some() || self.search.closing.is_some()
     }
 
     /// The button the ribbon lights: the running command's, or the picked
@@ -562,29 +622,37 @@ impl Ribbon {
         }
     }
 
+    /// A window too narrow for the box: only its magnifier button shows.
     fn narrow(&self) -> bool {
-        self.layout.search_collapsed || self.win_w < NARROW
+        self.win_w < NARROW
     }
 
-    /// The search box, or on a narrow window (or when collapsed) its
-    /// magnifier button.
+    /// Whether the full box shows in the tab row: kept open, or open for now.
+    fn shows_box(&self) -> bool {
+        !self.narrow() && (self.layout.search_expanded || self.search.temp_open)
+    }
+
+    /// The search box, or its magnifier button while it is collapsed or the
+    /// window is narrow.
     pub fn search_box(&self) -> Element<'_, Message> {
-        if self.narrow() {
-            let open = self.search.field_open;
+        if !self.shows_box() {
+            let narrow = self.narrow();
+            let open = self.search.temp_open;
             let magnifier = button(
-                container(icons::chrome(icons::SEARCH, metrics::SMALL_ICON))
+                container(icons::line_icon(MAGNIFIER, metrics::SMALL_ICON))
                     .center_x(Fill)
                     .center_y(Fill),
             )
             .on_press(Message::RibbonSearch(SearchMsg::OpenField))
-            .width(BUTTON_W)
-            .height(BUTTON_W)
+            .width(MAGNIFIER_W)
+            .height(MAGNIFIER_H)
             .padding(0)
             .style(move |theme: &Theme, status| {
                 let lit =
                     open || matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
                     background: lit.then(|| Background::Color(chrome::hover(theme))),
+                    text_color: chrome::title_text(theme),
                     border: Border {
                         color: if lit {
                             chrome::hover_border(theme)
@@ -598,26 +666,38 @@ impl Ribbon {
                 }
             });
             // A right-click keeps the box expanded on a wide window.
-            let magnifier = mouse_area(magnifier)
-                .on_right_press(Message::RibbonSearch(SearchMsg::Collapse(false)));
-            let magnifier = tooltip(
-                magnifier,
-                make_tip(crate::tr!("ribbon-menu", "search-commands")),
-                tooltip::Position::Bottom,
-            )
-            .gap(6.0)
-            .delay(Duration::from_millis(400))
-            .style(tip_style);
+            let (magnifier, tip): (Element<'_, Message>, _) = if narrow {
+                (
+                    magnifier.into(),
+                    crate::tr!("ribbon-menu", "search-commands"),
+                )
+            } else {
+                (
+                    mouse_area(magnifier)
+                        .on_right_press(Message::RibbonSearch(SearchMsg::Collapse(false)))
+                        .into(),
+                    crate::tr!("ribbon-menu", "search-commands-keep"),
+                )
+            };
+            let magnifier = tooltip(magnifier, make_tip(tip), tooltip::Position::Bottom)
+                .gap(6.0)
+                .delay(Duration::from_millis(400))
+                .style(tip_style);
             return PosReport::new(BOX_ID, magnifier).into();
         }
-        let field = self.search_field(BOX_W, BOX_H, false);
+        let end = if self.layout.search_expanded {
+            End::Collapse
+        } else {
+            End::Keep
+        };
+        let field = self.search_field(BOX_W, BOX_H, end);
         PosReport::new(BOX_ID, self.watch_presses(field)).into()
     }
 
     /// Put the results away on a press elsewhere, and bring them back on a
     /// press in the field.
     fn watch_presses<'a>(&self, field: Element<'a, Message>) -> Element<'a, Message> {
-        let active = !self.search.query.is_empty() || self.search.field_open;
+        let active = !self.search.query.is_empty() || self.search.temp_open;
         PressWatch {
             child: field,
             on_inside: (active && self.search.hidden)
@@ -629,23 +709,23 @@ impl Ribbon {
     }
 
     /// The search field: magnifier, input with its placeholder, clear button
-    /// and, in the box, the collapse button. The overlay's has an accent
-    /// border.
-    fn search_field(&self, width: f32, height: f32, overlay: bool) -> Element<'_, Message> {
+    /// while there is text, and at the end the button `end` names. The field
+    /// over the magnifier button on a narrow window has an accent border.
+    fn search_field(&self, width: f32, height: f32, end: End) -> Element<'_, Message> {
         let query = &self.search.query;
         let input = text_input("", query)
             .id(SEARCH_INPUT_ID)
             .on_input(|query| Message::RibbonSearch(SearchMsg::Input(query)))
             .on_submit(Message::RibbonSearch(SearchMsg::Submit))
-            .size(12)
-            .padding([0, 2])
+            .size(INPUT_SIZE)
+            .padding(0)
             .width(Fill)
             .style(|theme: &Theme, _| text_input::Style {
                 background: Background::Color(Color::TRANSPARENT),
                 border: Border::default(),
                 icon: chrome::muted(theme),
                 placeholder: chrome::muted(theme),
-                value: chrome::text(theme),
+                value: chrome::strong(theme),
                 selection: chrome::accent(theme).scale_alpha(0.4),
             });
         // The placeholder is italic, which the input's own is not. The stack
@@ -658,7 +738,7 @@ impl Ribbon {
         let input: Element<'_, Message> = stack![
             container(
                 text(placeholder)
-                    .size(12)
+                    .size(INPUT_SIZE)
                     .font(Font {
                         style: iced::font::Style::Italic,
                         ..Font::DEFAULT
@@ -667,32 +747,44 @@ impl Ribbon {
                         color: Some(chrome::muted(theme)),
                     }),
             )
-            .padding([0, 2])
             .width(Fill)
             .center_y(Fill),
             container(input).center_y(Fill),
         ]
         .into();
-        let mut content = row![icons::chrome(icons::SEARCH, metrics::SMALL_ICON), input]
-            .spacing(4)
+        let magnifier =
+            container(icons::line_icon(MAGNIFIER, metrics::STRIP_ICON)).style(|theme: &Theme| {
+                container::Style {
+                    text_color: Some(chrome::title_text(theme)),
+                    ..Default::default()
+                }
+            });
+        let mut content = row![magnifier, input]
+            .spacing(BOX_GAP)
             .align_y(iced::Center);
         if !query.is_empty() {
-            content = content.push(small_button(
-                icons::themed(icons::CLOSE, 10.0),
+            content = content.push(box_button(
+                icons::line_icon(CLEAR, metrics::SMALL_ICON),
                 SearchMsg::Clear,
+                chrome::danger,
+                chrome::danger,
             ));
         }
-        if !overlay {
-            // » : two arrows filling a strip icon's box.
-            let half = metrics::STRIP_ICON / 2.0;
-            let chevrons = row![
-                icons::themed_arrow_right(half),
-                icons::themed_arrow_right(half)
-            ];
+        let end_button = match end {
+            End::Collapse => Some((COLLAPSE, true, crate::tr!("ribbon-menu", "collapse-search"))),
+            End::Keep => Some((KEEP, false, crate::tr!("ribbon-menu", "keep-search"))),
+            End::None => None,
+        };
+        if let Some((path, collapse, tip)) = end_button {
             content = content.push(
                 tooltip(
-                    small_button(chevrons.into(), SearchMsg::Collapse(true)),
-                    make_tip(crate::tr!("ribbon-menu", "collapse-search")),
+                    box_button(
+                        icons::line_icon(path, metrics::STRIP_ICON),
+                        SearchMsg::Collapse(collapse),
+                        chrome::muted,
+                        chrome::strong,
+                    ),
+                    make_tip(tip),
                     tooltip::Position::Bottom,
                 )
                 .gap(6.0)
@@ -700,14 +792,15 @@ impl Ribbon {
                 .style(tip_style),
             );
         }
+        let overlay = end == End::None;
         container(content)
             .width(width)
             .height(height)
             .padding(Padding {
                 top: 0.0,
-                right: 2.0,
+                right: BOX_PAD_RIGHT,
                 bottom: 0.0,
-                left: 5.0,
+                left: BOX_PAD_LEFT,
             })
             .style(move |theme: &Theme| container::Style {
                 background: Some(Background::Color(chrome::page(theme))),
@@ -715,7 +808,7 @@ impl Ribbon {
                     color: if overlay {
                         chrome::accent(theme)
                     } else {
-                        chrome::hover_border(theme)
+                        chrome::border(theme)
                     },
                     width: 1.0,
                     radius: 2.0.into(),
@@ -732,7 +825,7 @@ impl Ribbon {
         Some(if self.narrow() {
             Rectangle {
                 x: b.x + b.width - FIELD_W,
-                y: b.center_y() - FIELD_H / 2.0,
+                y: b.y - FIELD_ABOVE,
                 width: FIELD_W,
                 height: FIELD_H,
             }
@@ -744,7 +837,7 @@ impl Ribbon {
     /// The search layer over the window: the field over the magnifier button
     /// when it is open, and the results under the box or field.
     pub fn search_layer(&self) -> Option<Element<'_, Message>> {
-        let field = self.narrow() && self.search.field_open;
+        let field = self.narrow() && self.search.temp_open;
         if !field && !self.search_results_open() {
             return None;
         }
@@ -758,7 +851,7 @@ impl Ribbon {
         };
         let mut layer = column![];
         if field {
-            let field = self.watch_presses(self.search_field(FIELD_W, FIELD_H, true));
+            let field = self.watch_presses(self.search_field(FIELD_W, FIELD_H, End::None));
             layer = layer.push(container(field).padding(Padding {
                 left: anchor.x - x,
                 ..Padding::ZERO
@@ -931,21 +1024,42 @@ pub fn results_scroll_id() -> iced::widget::Id {
     iced::widget::Id::new(RESULTS_SCROLL_ID)
 }
 
-/// A strip button in the field, as big as a strip icon.
-fn small_button<'a>(content: Element<'a, Message>, msg: SearchMsg) -> Element<'a, Message> {
-    button(container(content).center_x(Fill).center_y(Fill))
+/// The button at the end of the search field.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum End {
+    /// » : collapse the kept-open box to its magnifier button.
+    Collapse,
+    /// « : keep the temporarily open box expanded.
+    Keep,
+    /// None: the field over the magnifier button on a narrow window.
+    None,
+}
+
+/// A button in the search field, with its icon in `colour`, or `hover`
+/// under the pointer, on a `panel` background. It sends `msg`; the app then
+/// gives the field its focus back.
+fn box_button<'a>(
+    icon: Element<'a, Message>,
+    msg: SearchMsg,
+    colour: fn(&Theme) -> Color,
+    hover: fn(&Theme) -> Color,
+) -> Element<'a, Message> {
+    button(container(icon).center_x(Fill).center_y(Fill))
         .on_press(Message::RibbonSearch(msg))
-        .width(metrics::STRIP_ICON)
-        .height(metrics::STRIP_ICON)
+        .width(BOX_BUTTON)
+        .height(BOX_BUTTON)
         .padding(0)
-        .style(|theme: &Theme, status| button::Style {
-            background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-                .then(|| Background::Color(chrome::hover(theme))),
-            border: Border {
-                radius: 2.0.into(),
-                ..Border::default()
-            },
-            ..Default::default()
+        .style(move |theme: &Theme, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: hovered.then(|| Background::Color(chrome::panel(theme))),
+                text_color: if hovered { hover(theme) } else { colour(theme) },
+                border: Border {
+                    radius: 2.0.into(),
+                    ..Border::default()
+                },
+                ..Default::default()
+            }
         })
         .into()
 }
@@ -1180,5 +1294,65 @@ mod tests {
         assert!(ribbon.escape_search());
         assert!(!ribbon.search_results_open());
         assert!(!ribbon.escape_search());
+    }
+
+    #[test]
+    fn the_box_collapses_opens_for_now_and_can_be_kept_expanded() {
+        let mut ribbon = Ribbon::new();
+        ribbon.set_window_size((1600.0, 900.0));
+        let now = Instant::now();
+        // Kept open by default; » collapses it and asks to save.
+        assert!(ribbon.shows_box());
+        assert!(ribbon.on_search(SearchMsg::Collapse(true), now).save);
+        assert!(!ribbon.shows_box());
+
+        // The magnifier opens it for now; a press elsewhere closes it a
+        // moment later, a press inside in the meantime keeps it.
+        let out = ribbon.on_search(SearchMsg::OpenField, now);
+        assert!(out.focus && ribbon.shows_box());
+        let _ = ribbon.on_search(SearchMsg::Press(false), now);
+        let _ = ribbon.on_search(SearchMsg::Press(true), now);
+        ribbon.search_tick(now + BLUR_DELAY);
+        assert!(ribbon.shows_box());
+        let _ = ribbon.on_search(SearchMsg::Press(false), now);
+        assert!(ribbon.wants_tick());
+        ribbon.search_tick(now + BLUR_DELAY);
+        assert!(!ribbon.shows_box());
+
+        // Escape clears the text first, then closes the temporary box.
+        let _ = ribbon.on_search(SearchMsg::OpenField, now);
+        let _ = ribbon.on_search(SearchMsg::Input("line".into()), now);
+        assert!(ribbon.escape_search());
+        assert!(ribbon.shows_box());
+        assert!(ribbon.escape_search());
+        assert!(!ribbon.shows_box());
+
+        // « keeps it open, with its text.
+        let _ = ribbon.on_search(SearchMsg::OpenField, now);
+        let _ = ribbon.on_search(SearchMsg::Input("line".into()), now);
+        let out = ribbon.on_search(SearchMsg::Collapse(false), now);
+        assert!(out.save && out.focus);
+        assert!(ribbon.layout.search_expanded);
+        assert_eq!(ribbon.search.query, "line");
+        let _ = ribbon.on_search(SearchMsg::Press(false), now);
+        ribbon.search_tick(now + BLUR_DELAY);
+        assert!(ribbon.shows_box());
+    }
+
+    #[test]
+    fn a_narrow_window_shows_the_magnifier_whatever_the_preference() {
+        let mut ribbon = Ribbon::new();
+        ribbon.set_window_size((1600.0, 900.0));
+        let now = Instant::now();
+        let _ = ribbon.on_search(SearchMsg::Collapse(true), now);
+        let _ = ribbon.on_search(SearchMsg::OpenField, now);
+        // Turning narrow closes the temporary box; the preference stays.
+        ribbon.set_window_size((900.0, 900.0));
+        assert!(!ribbon.search.temp_open);
+        let _ = ribbon.on_search(SearchMsg::Collapse(false), now);
+        ribbon.set_window_size((900.0, 900.0));
+        assert!(!ribbon.shows_box());
+        ribbon.set_window_size((1600.0, 900.0));
+        assert!(ribbon.shows_box());
     }
 }

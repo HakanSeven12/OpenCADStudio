@@ -560,8 +560,10 @@ impl Ribbon {
         if w > self.win_w && self.layout.minimize == RibbonMinimize::Off {
             self.close_popup();
         }
+        let was_narrow = self.win_w < search::NARROW;
         self.win_w = w;
         self.win_h = h;
+        self.search_resized(was_narrow);
     }
 
     /// Pin the tool panels to one density, so a test sees a known layout.

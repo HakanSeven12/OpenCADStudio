@@ -1023,6 +1023,36 @@ pub fn dropup_arrow<'a, M: 'a>() -> Element<'a, M> {
     arrow(metrics::DROPDOWN_ARROW_W, metrics::DROPDOWN_ARROW_H, true)
 }
 
+/// A stroked line icon from `path` on a 24-unit grid, cropped to units 2.5
+/// to 21.5 and drawn `size` px square with 1 px round-capped lines, in the
+/// text colour of the widget it is in.
+pub fn line_icon<'a, M: 'a>(path: &'static str, size: f32) -> Element<'a, M> {
+    thread_local! {
+        static LINE_CACHE: RefCell<FxHashMap<(usize, u16), svg::Handle>> =
+            RefCell::new(FxHashMap::default());
+    }
+    let key = (path.as_ptr() as usize, size_key(size));
+    let handle = LINE_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry(key)
+            .or_insert_with(|| {
+                // 19 grid units fill the box: a 1 px line is 19 / size units.
+                let width = 19.0 / size;
+                let source = format!(
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="2.5 2.5 19 19"><path d="{path}" fill="none" stroke="black" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+                );
+                svg::Handle::from_memory(source.into_bytes())
+            })
+            .clone()
+    });
+    Element::new(VectorShape {
+        width: size,
+        height: size,
+        handle,
+    })
+}
+
 fn arrow<'a, M: 'a>(width: f32, height: f32, up: bool) -> Element<'a, M> {
     Element::new(VectorShape {
         width,

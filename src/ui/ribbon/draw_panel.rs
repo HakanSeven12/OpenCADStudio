@@ -29,7 +29,7 @@ const TITLE_STRIP: f32 = metrics::SLIDE_OUT_TOP;
 const LAUNCHER_W: f32 = metrics::LAUNCHER_W;
 const LAUNCHER_H: f32 = metrics::LAUNCHER_H;
 /// Height of a slide-out's footer.
-const FOOTER_H: f32 = 19.0;
+pub(super) const FOOTER_H: f32 = 19.0;
 /// A slide-out tool button, and the arrow of one with a submenu.
 const CELL: f32 = metrics::SMALL_W;
 const CELL_ICON: f32 = metrics::SMALL_ICON;
@@ -298,15 +298,21 @@ impl Ribbon {
     }
 }
 
-/// The title row of the panel `key`: its title, or for a panel with a
-/// slide-out a button that opens it; and the panel's dialog launcher, which
-/// the panel frame puts at the right end of the strip.
-pub(super) fn group_title<'a>(
-    title: &'static str,
-    key: &str,
-    look: SlideLook,
-    active_tool: Option<&str>,
-) -> (Element<'a, Message>, Option<Element<'a, Message>>) {
+/// The title row of panel `key`, laid out in its title strip.
+pub(super) struct TitleRow<'a> {
+    /// The title, with a chevron for a panel with extra tools.
+    pub row: Element<'a, Message>,
+    /// The dialog launcher, at the right end of the strip.
+    pub launcher: Option<Element<'a, Message>>,
+    /// What a click on the strip sends: opens or closes the extra tools.
+    pub press: Option<Message>,
+}
+
+/// The title row of the panel `key`: its title, and for a panel with extra
+/// tools a chevron, ▾ while they are closed and ▴ while open; the title is
+/// strong while they are open and not pinned. A click anywhere on the strip
+/// opens them; a pinned panel closes from its footer only.
+pub(super) fn group_title<'a>(title: &'static str, key: &str, look: SlideLook) -> TitleRow<'a> {
     let panel = panel_for_group(key);
     let launcher = panel.and_then(launcher);
     // Room for the launcher on both sides keeps the title centred.
@@ -315,56 +321,59 @@ pub(super) fn group_title<'a>(
     } else {
         4.0
     };
-    let title_text = |title: &'static str| {
-        text(t!(title))
-            .size(PANEL_TITLE_SIZE)
-            .wrapping(iced::widget::text::Wrapping::None)
-            .style(|theme: &Theme| text::Style {
-                color: Some(chrome::title_text(theme)),
-            })
-    };
+    let label = text(t!(title))
+        .size(PANEL_TITLE_SIZE)
+        .wrapping(iced::widget::text::Wrapping::None);
     let Some(panel) = panel else {
-        let label = keytips::label_anchor(|| format!("title:{title}"), title_text(title));
-        let row = container(label)
-            .height(PANEL_TITLE_H)
-            .center_y(PANEL_TITLE_H)
-            .padding([0.0, side]);
-        return (row.into(), launcher);
+        let label = keytips::label_anchor(|| format!("title:{title}"), label);
+        return TitleRow {
+            row: strip_row(label, SlideLook::Closed, side),
+            launcher,
+            press: None,
+        };
     };
-    let expanded = look != SlideLook::Closed;
-    // A command running from the closed slide-out lights its title, the way a
-    // dropdown lights while one of its items runs.
-    let lit = expanded || panel.tools().any(|tool| tool.is_active(active_tool));
-    let arrow = if expanded {
-        icons::dropup_arrow()
+    let chevron = if look == SlideLook::Closed {
+        icons::chevron_down()
     } else {
-        icons::dropdown_arrow()
+        icons::chevron_up()
     };
-    let title_button: Element<'a, Message> = PosReport::new(
-        panel.id,
-        button(
-            row![
-                keytips::label_anchor(|| keytips::label_id(panel.id), title_text(title)),
-                arrow
-            ]
-            .spacing(4)
-            .align_y(iced::Center),
-        )
-        .on_press(match look {
-            // A pinned slide-out folds away and unpins.
-            SlideLook::Pinned => Message::RibbonSlideOut(SlideOutMsg::Collapse(panel.key)),
-            _ => Message::ToggleRibbonDropdown(panel.id.to_string()),
-        })
-        .style(move |theme: &Theme, status| tool_btn_style(theme, lit, status))
-        .height(PANEL_TITLE_H - 3.0)
-        .padding([0, 4]),
-    )
-    .into();
-    let row = container(title_button)
+    let content = row![
+        keytips::label_anchor(|| keytips::label_id(panel.id), label),
+        chevron
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+    TitleRow {
+        // The key tips and the minimized ribbon find the opener here.
+        row: strip_row(PosReport::new(panel.id, content), look, side),
+        launcher,
+        press: match look {
+            SlideLook::Pinned => None,
+            _ => Some(Message::ToggleRibbonDropdown(panel.id.to_string())),
+        },
+    }
+}
+
+/// `content` centred in a title strip, in the strip's text colour: strong
+/// while the extra tools are open and not pinned.
+fn strip_row<'a>(
+    content: impl Into<Element<'a, Message>>,
+    look: SlideLook,
+    side: f32,
+) -> Element<'a, Message> {
+    container(content)
         .height(PANEL_TITLE_H)
         .center_y(PANEL_TITLE_H)
-        .padding([0.0, side]);
-    (row.into(), launcher)
+        .padding([0.0, side])
+        .style(move |theme: &Theme| container::Style {
+            text_color: Some(if look == SlideLook::Open {
+                chrome::strong(theme)
+            } else {
+                chrome::title_text(theme)
+            }),
+            ..Default::default()
+        })
+        .into()
 }
 
 /// The corner arrow that runs the dialog command of `panel`, if it has one.
@@ -444,21 +453,8 @@ fn slide_out<'a>(
     width: f32,
     pinned: bool,
 ) -> Element<'a, Message> {
-    let active = ribbon.lit_tool().as_deref();
-    let inner = (width - 2.0 * PAD).max(CELL + SPLIT_W);
-    let labelled = panel.more.len() > 1;
-    let mut groups = column![].spacing(4);
-    for group in &panel.more {
-        if labelled {
-            groups = groups.push(group_label(group));
-        }
-        groups = groups.push(tool_rows(&group.tools, panel.id, active, inner));
-    }
-    if panel.layout == Layout::Reference {
-        groups = groups.push(fade_row(ribbon.xref_fade, panel.id));
-    }
     let body = column![
-        container(groups).padding(PAD).width(Fill),
+        extra_tools(ribbon, panel, width),
         footer(ribbon.slide.footer == Some(panel.key), panel, pinned),
     ];
     let body = container(body)
@@ -482,6 +478,29 @@ fn slide_out<'a>(
             .on_enter(Message::RibbonSlideOut(SlideOutMsg::OverSlideOut(true)))
             .on_exit(Message::RibbonSlideOut(SlideOutMsg::OverSlideOut(false))),
     )
+}
+
+/// The extra tools of `panel` in a box `width` wide: its tool groups, and
+/// the xref fading row on Reference.
+pub(super) fn extra_tools<'a>(
+    ribbon: &Ribbon,
+    panel: &'static PanelExtras,
+    width: f32,
+) -> Element<'a, Message> {
+    let active = ribbon.lit_tool().as_deref();
+    let inner = (width - 2.0 * PAD).max(CELL + SPLIT_W);
+    let labelled = panel.more.len() > 1;
+    let mut groups = column![].spacing(4);
+    for group in &panel.more {
+        if labelled {
+            groups = groups.push(group_label(group));
+        }
+        groups = groups.push(tool_rows(&group.tools, panel.id, active, inner));
+    }
+    if panel.layout == Layout::Reference {
+        groups = groups.push(fade_row(ribbon.xref_fade, panel.id));
+    }
+    container(groups).padding(PAD).width(Fill).into()
 }
 
 /// The name of a tool group, upper case, with a hairline after it.
@@ -634,24 +653,21 @@ fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Eleme
     } else {
         Space::new().width(SIDE).into()
     };
+    // The title and its chevron in the footer's text colour.
     let title = button(
-        row![
-            text(t!(panel.title()))
-                .size(11.5)
-                .style(move |theme: &Theme| text::Style {
-                    color: Some(if pinned {
-                        chrome::title_text(theme)
-                    } else {
-                        chrome::strong(theme)
-                    }),
-                }),
-            icons::dropup_arrow(),
-        ]
-        .spacing(4)
-        .align_y(iced::Center),
+        row![text(t!(panel.title())).size(11.5), icons::chevron_up()]
+            .spacing(4)
+            .align_y(iced::Center),
     )
     .on_press(Message::RibbonSlideOut(SlideOutMsg::Collapse(key)))
-    .style(|theme: &Theme, status| tool_btn_style(theme, false, status))
+    .style(move |theme: &Theme, status| button::Style {
+        text_color: if pinned {
+            chrome::title_text(theme)
+        } else {
+            chrome::strong(theme)
+        },
+        ..tool_btn_style(theme, false, status)
+    })
     .padding([0, 4]);
     let launcher = launcher(panel).unwrap_or_else(|| Space::new().width(SIDE).into());
     let bar = container(
@@ -721,8 +737,9 @@ fn options_list<'a>(
 pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
     let panel = panel_for_dropdown(id).expect("registered ribbon extension");
     let mut layers: Vec<Element<'a, Message>> = Vec::new();
-    // A pinned slide-out shows on its own layer.
-    if !ribbon.layout.pinned_slideouts.contains(panel.key) {
+    // A pinned slide-out shows on its own layer, and a peek shows the
+    // extra tools inside itself.
+    if !ribbon.layout.pinned_slideouts.contains(panel.key) && ribbon.collapsed_open.is_none() {
         if let Some((left, top, width)) = slide_out_place(ribbon, panel) {
             layers.push(placed(
                 slide_out(ribbon, panel, width, false),

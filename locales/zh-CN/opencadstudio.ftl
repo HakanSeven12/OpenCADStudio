@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = 最小化为面板按钮
     .cycle-through-all = 循环浏览所有项
     .more-tools = 更多工具
+    .fewer-tools = 更少工具
     .plot = 打印...
     .recent-drawings = 最近的图形
     .search-placeholder = 输入命令

@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Thu nhỏ thành nút bảng
     .cycle-through-all = Luân phiên tất cả
     .more-tools = Thêm công cụ
+    .fewer-tools = Ít công cụ hơn
     .plot = In...
     .recent-drawings = Bản vẽ gần đây
     .search-placeholder = Nhập lệnh

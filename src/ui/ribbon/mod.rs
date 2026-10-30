@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use rustc_hash::FxHashMap as HashMap;
 
 use codec::types::{Color as AcadColor, LineWeight};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
@@ -167,7 +167,6 @@ fn hash_item_layout(item: &RibbonItem, hasher: &mut impl Hasher) {
 fn panel_measure_key(
     groups: &[&RibbonGroup],
     last_cmd: &HashMap<&'static str, &'static str>,
-    last_panel_tool: &HashMap<&'static str, &'static str>,
     style_ctx: &StyleContext<'_>,
     visibility: Option<&crate::ui::window::block_visibility::RibbonContext>,
 ) -> u64 {
@@ -187,12 +186,6 @@ fn panel_measure_key(
         id.hash(&mut hasher);
         command.hash(&mut hasher);
     }
-    let mut representatives: Vec<_> = last_panel_tool.iter().collect();
-    representatives.sort_unstable_by_key(|(title, _)| **title);
-    for (title, tool) in representatives {
-        title.hash(&mut hasher);
-        tool.hash(&mut hasher);
-    }
     for (names, active) in [
         (style_ctx.text_style_names, style_ctx.active_text_style),
         (style_ctx.dim_style_names, style_ctx.active_dim_style),
@@ -207,12 +200,6 @@ fn panel_measure_key(
     }
     format!("{visibility:?}").hash(&mut hasher);
     hasher.finish()
-}
-
-fn title_text_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(chrome::title_text(theme)),
-    }
 }
 
 /// Height of a tab, and of the tab row it stands at the bottom of.
@@ -306,11 +293,8 @@ pub struct Ribbon {
     /// Layout tabs (LAYOUTTAB) visibility — drives the Layout Tabs button highlight.
     pub show_layout_tabs: bool,
     pub open_dropdown: Option<String>,
-    /// Title of the collapsed panel whose flyout is currently open, if any.
+    /// Title of the collapsed or minimized panel whose peek is open, if any.
     pub collapsed_open: Option<String>,
-    /// Last tool used from each panel (panel title → tool id). A collapsed panel
-    /// shows this tool on its button, defaulting to the panel's first tool.
-    last_panel_tool: HashMap<&'static str, &'static str>,
     last_cmd: HashMap<&'static str, &'static str>,
     pub active_layer: String,
     pub layer_infos: Vec<LayerInfo>,
@@ -467,7 +451,6 @@ impl Ribbon {
             show_layout_tabs: true,
             open_dropdown: None,
             collapsed_open: None,
-            last_panel_tool: HashMap::default(),
             last_cmd: HashMap::default(),
             // Empty until a document is open — populated by sync_ribbon_layers.
             active_layer: String::new(),
@@ -514,6 +497,10 @@ impl Ribbon {
 
     /// The window size changed.
     pub fn set_window_size(&mut self, (w, h): (f32, f32)) {
+        // A wider window may show the peeked panel in full again.
+        if w > self.win_w && self.layout.minimize == RibbonMinimize::Off {
+            self.close_popup();
+        }
         self.win_w = w;
         self.win_h = h;
     }
@@ -837,14 +824,18 @@ impl Ribbon {
     ) -> Panel<'a> {
         let key = extras::panel_key(module_id, g.title);
         let button_key = key.clone();
-        let titles = self.layout.show_panel_titles;
+        let strip = if self.layout.show_panel_titles {
+            Strip::Titled
+        } else {
+            Strip::Untitled
+        };
         let look = self.slide_look(&key);
         let group = move |compact: bool| {
             render_group(
                 compact,
                 g,
                 &key,
-                titles,
+                strip,
                 look,
                 Vec::new(),
                 self.lit_tool(),
@@ -860,22 +851,18 @@ impl Ribbon {
             )
         };
         let button = move |tight: bool| {
-            collapse_button(
-                g,
-                &button_key,
-                titles,
-                self.last_panel_tool.get(g.title).copied(),
-                self.lit_tool(),
-                &self.open_dropdown,
-                &self.last_cmd,
-                ts,
-                &self.layer_infos,
-                &self.active_layer,
-                self.active_color,
-                &self.active_linetype,
-                self.active_lineweight,
-                &style_ctx,
+            // The button lights while one of the panel's tools runs.
+            let holds = self
+                .lit_tool()
+                .as_deref()
+                .is_some_and(|id| locate::group_holds(&button_key, g, id));
+            collapsed_button(
+                g.title,
+                first_tool_icon(g),
+                self.layout.show_panel_titles,
                 tight,
+                self.collapsed_open.as_deref() == Some(g.title),
+                holds,
             )
         };
         Panel::deferred(g.title, move |level| match level {
@@ -889,14 +876,18 @@ impl Ribbon {
     pub fn toggle_dropdown(&mut self, id: &str) {
         // A slide-out tool's submenu that was open goes.
         self.slide.closed(false);
+        // The extra tools of a peek's panel open inside the peek.
+        if self.peek_extras().is_some_and(|panel| panel.id == id) {
+            self.toggle_peek_extras();
+            return;
+        }
         if self.open_dropdown.as_deref() == Some(id) {
             self.open_dropdown = None;
         } else {
             self.open_dropdown = Some(id.to_string());
-            // A slide-out closes a collapsed panel's flyout, but opens from a
-            // minimized ribbon's panel popup, which stays.
-            if draw_panel::owns_dropdown(id) && self.layout.minimize == RibbonMinimize::Off {
-                self.collapsed_open = None;
+            // Another panel's slide-out closes the peek.
+            if draw_panel::panel_for_dropdown(id).is_some_and(|panel| panel.id == id) {
+                self.close_popup();
             }
         }
     }
@@ -919,7 +910,10 @@ impl Ribbon {
         let pinned = draw_panel::panel_for_dropdown(parent)
             .is_some_and(|panel| self.layout.pinned_slideouts.contains(panel.key));
         self.slide.closed(false);
-        if id == parent || pinned {
+        // In a peek, from a submenu back to the peek.
+        if self.collapsed_open.is_some() {
+            self.open_dropdown = None;
+        } else if id == parent || pinned {
             self.close_dropdown();
         } else {
             self.open_dropdown = Some(parent.to_string());
@@ -927,30 +921,13 @@ impl Ribbon {
         true
     }
 
-    /// Toggle the flyout of a collapsed ribbon panel (identified by its title).
+    /// Toggle the peek of a collapsed ribbon panel (identified by its title).
     pub fn toggle_collapsed_panel(&mut self, id: &str) {
         if self.collapsed_open.as_deref() == Some(id) {
-            self.collapsed_open = None;
+            self.close_popup();
         } else {
+            self.close_popup();
             self.collapsed_open = Some(id.to_string());
-        }
-    }
-
-    /// Record `tool_id` as the last-used tool of whichever active-module panel
-    /// contains it, so a collapsed panel shows that tool on its button.
-    pub fn note_panel_tool(&mut self, tool_id: &str) {
-        if let Some(module) = self.modules.get(self.active) {
-            for group in module.ribbon_groups() {
-                if let Some(id) = group
-                    .tools
-                    .iter()
-                    .filter_map(item_id)
-                    .find(|id| *id == tool_id)
-                {
-                    self.last_panel_tool.insert(group.title, id);
-                    return;
-                }
-            }
         }
     }
 
@@ -1248,14 +1225,8 @@ impl Ribbon {
             let measure_key = if mode == CollapseMode::Auto {
                 // Panels without titles are shorter: measure them afresh.
                 let mut hasher = DefaultHasher::new();
-                panel_measure_key(
-                    &groups,
-                    &self.last_cmd,
-                    &self.last_panel_tool,
-                    &style_ctx,
-                    visibility.as_ref(),
-                )
-                .hash(&mut hasher);
+                panel_measure_key(&groups, &self.last_cmd, &style_ctx, visibility.as_ref())
+                    .hash(&mut hasher);
                 self.layout.show_panel_titles.hash(&mut hasher);
                 hasher.finish()
             } else {
@@ -1267,7 +1238,11 @@ impl Ribbon {
                     if self.modules[effective_active].id() == "block_editor"
                         && g.title == "Visibility"
                     {
-                        visibility_panel::panel(visibility.clone())
+                        visibility_panel::panel(
+                            visibility.clone(),
+                            self.layout.show_panel_titles,
+                            self.collapsed_open.as_deref() == Some(g.title),
+                        )
                     } else {
                         self.panel(self.modules[effective_active].id(), g, ts, style_ctx)
                     }
@@ -1280,7 +1255,7 @@ impl Ribbon {
             } else {
                 0.0
             };
-            CollapsePanels::new(panels, self.collapsed_open.clone(), self.panel_h())
+            CollapsePanels::new(panels, self.panel_h())
                 .draggable(strip, move |titles| Message::RibbonReorderPanels {
                     module,
                     titles,
@@ -1918,6 +1893,18 @@ impl Ribbon {
     }
 }
 
+/// How a panel shows its title strip.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Strip {
+    /// The title strip, with the title.
+    Titled,
+    /// Panel titles are off.
+    Untitled,
+    /// No strip: the body of a collapsed or minimized panel's peek, whose
+    /// footer stands for the strip.
+    Peek,
+}
+
 /// Render a single ribbon panel (tools + group label), fixed `TOOL_BAR_H` tall.
 /// When `compact`, large tools/dropdowns are drawn as small icon columns.
 #[allow(clippy::too_many_arguments)]
@@ -1925,7 +1912,7 @@ fn render_group<'a>(
     compact: bool,
     group: &RibbonGroup,
     key: &str,
-    titles: bool,
+    strip: Strip,
     look: draw_panel::SlideLook,
     lead: Vec<Element<'a, Message>>,
     active_tool: &Option<String>,
@@ -1994,24 +1981,40 @@ fn render_group<'a>(
         bottom: metrics::CONTENT_PAD_BOTTOM,
         left: metrics::CONTENT_PAD_SIDE,
     });
-    let body = if titles {
-        body.height(metrics::CONTENT_H)
-    } else {
-        body.height(TOOL_BAR_H_UNTITLED).align_y(iced::Center)
+    let body = match strip {
+        Strip::Titled | Strip::Peek => body.height(metrics::CONTENT_H),
+        Strip::Untitled => body.height(TOOL_BAR_H_UNTITLED).align_y(iced::Center),
     };
     let mut panel = column![body];
     let mut launcher = None;
-    if titles {
-        let (title, corner) =
-            draw_panel::group_title(group.title, key, look, active_tool.as_deref());
-        panel = panel.push(title);
-        launcher = corner;
+    let mut press = None;
+    if strip == Strip::Titled {
+        let title = draw_panel::group_title(group.title, key, look);
+        panel = panel.push(title.row);
+        launcher = title.launcher;
+        press = title.press;
     }
+    let height = match strip {
+        Strip::Titled => TOOL_BAR_H,
+        Strip::Untitled => TOOL_BAR_H_UNTITLED,
+        Strip::Peek => metrics::CONTENT_H,
+    };
     let panel = panel
         .align_x(iced::Center)
         .spacing(0)
-        .height(Length::Fixed(panel_height(titles)));
-    let panel = panel_frame::PanelFrame::new(panel.into(), titles, launcher);
+        .height(Length::Fixed(height));
+    let strip_h = if strip == Strip::Titled {
+        PANEL_TITLE_H
+    } else {
+        0.0
+    };
+    let panel = panel_frame::PanelFrame::new(panel.into(), strip_h, launcher)
+        .lit(look == draw_panel::SlideLook::Open)
+        .on_press(press);
+    // A peek shows the extra tools inside itself.
+    if strip == Strip::Peek {
+        return panel.into();
+    }
     let Some(extras) = draw_panel::panel_for_group(key) else {
         return panel.into();
     };
@@ -2033,36 +2036,9 @@ fn render_group<'a>(
     PosReport::owned(draw_panel::panel_box_id(key), panel).into()
 }
 
-/// The top-level command id of a ribbon item, if it has one.
-fn item_id(it: &RibbonItem) -> Option<&'static str> {
-    match it {
-        RibbonItem::Tool(t) | RibbonItem::LabeledTool(t) | RibbonItem::LargeTool(t) => Some(t.id),
-        RibbonItem::Dropdown { id, .. }
-        | RibbonItem::LabeledDropdown { id, .. }
-        | RibbonItem::LargeDropdown { id, .. } => Some(*id),
-        RibbonItem::PropertiesGroup { match_prop } => Some(match_prop.id),
-        _ => None,
-    }
-}
-
-/// The tool a collapsed panel shows on its button: the last-used one, else the
-/// panel's first tool-like item.
-fn representative<'g>(group: &'g RibbonGroup, last_used: Option<&str>) -> Option<&'g RibbonItem> {
-    if let Some(want) = last_used {
-        if let Some(found) = group
-            .tools
-            .iter()
-            .find(|&it| item_id(it).map_or(false, |id| id == want))
-        {
-            return Some(found);
-        }
-    }
-    group.tools.iter().find(|&it| item_id(it).is_some())
-}
-
-/// The icon of a panel's first tool-like item. Shown on the tightest collapse
-/// button; digs into the composite groups so Layers/Properties/Styles panels
-/// still get a representative icon.
+/// The icon of a panel's first tool-like item, which its collapsed button and
+/// minimized panel button show; digs into the composite groups so
+/// Layers/Properties/Styles panels still get an icon.
 fn first_tool_icon(group: &RibbonGroup) -> Option<IconKind> {
     group.tools.iter().find_map(|it| match it {
         RibbonItem::Tool(t) | RibbonItem::LabeledTool(t) | RibbonItem::LargeTool(t) => Some(t.icon),
@@ -2081,171 +2057,79 @@ fn first_tool_icon(group: &RibbonGroup) -> Option<IconKind> {
     })
 }
 
-/// A collapsed panel. In the COLLAPSED step: a live representative-tool button
-/// (updates to the last-used tool) plus a title + ▾ opener for the full flyout.
-/// In the tighter `compact` (TIGHT) step: just the first tool's icon + ▾, a pure
-/// flyout opener with no direct tool run. Height is natural content height
-/// (shorter than a full 3-row panel), so `CollapsePanels` can shrink the ribbon.
-#[allow(clippy::too_many_arguments)]
-fn collapse_button<'a>(
-    group: &RibbonGroup,
-    key: &str,
+/// An auto-collapsed panel: one large button with the icon of the panel's
+/// first tool, its title and a ▾, as high as the tool area. A click, or the
+/// pointer resting on it, opens the panel's peek under it (`minimized_popup`).
+/// In the `tight` step the title wraps onto two lines, so the button is
+/// narrower. It lights while one of the panel's tools runs (`holds`) and
+/// shows hovered while its peek is `open`.
+pub(super) fn collapsed_button<'a>(
+    title: &'static str,
+    icon: Option<IconKind>,
     titles: bool,
-    last_used: Option<&str>,
-    active_tool: &Option<String>,
-    open_dd: &Option<String>,
-    last_cmd: &HashMap<&'static str, &'static str>,
-    state: widgets::ToggleState,
-    layer_infos: &'a [LayerInfo],
-    active_layer: &'a str,
-    active_color: AcadColor,
-    active_linetype: &'a str,
-    active_lineweight: LineWeight,
-    style_ctx: &StyleContext<'_>,
-    // When set, this is the TIGHT step (reached once even the all-collapsed row
-    // overflows): the whole panel becomes a single non-running button — the first
-    // tool's icon + a ▾ that opens the tools flyout. Nothing runs directly here.
-    compact: bool,
+    tight: bool,
+    open: bool,
+    holds: bool,
 ) -> Element<'a, Message> {
-    let title = group.title;
     let localized_title = t!(title).into_owned();
-    // A collapsed panel lights its opener while one of its hidden tools runs,
-    // the way a dropdown lights while one of its items does.
-    let active = active_tool.as_deref();
-    let holds = active.is_some_and(|id| locate::group_holds(key, group, id));
-    let opener_style =
-        move |lit: bool| move |theme: &Theme, status| tool_btn_style(theme, lit, status);
-
-    // Tightest form: one button = the panel's FIRST tool icon + its title + ▾.
-    // Clicking opens the flyout listing every tool; no tool runs directly at this
-    // density (you pick one from the dropdown), so the tightest row is pure openers.
-    if compact {
-        let icon: Element<'_, Message> = match first_tool_icon(group) {
-            Some(ik) => make_icon(ik, SMALL_ICON),
-            None => text("").into(),
-        };
-        let content = button(
-            column![
-                icon,
-                row![
-                    keytips::label_anchor(
-                        || keytips::label_id(&keytips::collapsed_anchor(title)),
-                        text(localized_title.clone())
-                            .size(PANEL_TITLE_SIZE)
-                            .width(Fill)
-                            .align_x(iced::Center)
-                            .wrapping(iced::advanced::text::Wrapping::Word)
-                            .style(title_text_style),
-                    ),
-                    crate::ui::icons::dropdown_arrow(),
-                ]
-                .spacing(3)
-                .width(Fill)
-                .align_y(iced::Center),
-            ]
-            .align_x(iced::Center)
-            .spacing(2)
-            .width(Fill),
-        )
-        .on_press(Message::ToggleRibbonPanel(title.to_string()))
-        .style(opener_style(holds))
-        .width(Fill)
-        .padding([3, 5]);
-        return keytips::anchor_with(
-            || keytips::collapsed_anchor(title),
-            automatic_large_button(localized_title, content.into()),
-        );
-    }
-
-    // Collapsed (not yet tight): a large representative-tool face — a live button
-    // that runs the last-used tool — above a title + ▾ opener for the full flyout.
-    // For a Properties panel the representative is its Match button.
-    let rep = representative(group, last_used);
-    // The face lights itself when it is the running tool.
-    let face_lit = rep
-        .zip(active)
-        .is_some_and(|(item, id)| locate::item_holds(item, id));
-    let face: Element<'_, Message> = match rep {
-        Some(RibbonItem::PropertiesGroup { match_prop }) => render_large(
-            &RibbonItem::LargeTool(match_prop.clone()),
-            &widgets::RenderCtx {
-                active_tool,
-                open_dd,
-                last_cmd,
-                state,
-                layer_infos,
-                active_layer,
-                active_color,
-                active_linetype,
-                active_lineweight,
-                style_ctx,
-                compact: false,
-            },
-        ),
-        Some(item) => render_large(
-            item,
-            &widgets::RenderCtx {
-                active_tool,
-                open_dd,
-                last_cmd,
-                state,
-                layer_infos,
-                active_layer,
-                active_color,
-                active_linetype,
-                active_lineweight,
-                style_ctx,
-                compact: false,
-            },
-        ),
-        None => text("").into(),
+    let icon: Element<'_, Message> = match icon {
+        Some(icon) => make_icon(icon, LARGE_ICON),
+        None => Space::new().width(LARGE_ICON).height(LARGE_ICON).into(),
     };
-
-    let opener = button(
-        row![
-            keytips::label_anchor(
-                || keytips::label_id(&keytips::collapsed_anchor(title)),
-                text(localized_title.clone())
-                    .size(PANEL_TITLE_SIZE)
-                    .line_height(1.0)
-                    .width(Fill)
-                    .align_x(iced::Center)
-                    .wrapping(iced::advanced::text::Wrapping::None)
-                    .style(title_text_style),
-            ),
-            crate::ui::icons::dropdown_arrow(),
-        ]
-        .spacing(3)
-        .width(Fill)
-        .height(Fill)
-        .align_y(iced::Center),
-    )
-    .on_press(Message::ToggleRibbonPanel(title.to_string()))
-    .style(opener_style(holds && !face_lit))
-    .width(Fill)
-    .height(Fill)
-    .padding([0, 4]);
-    let opener = keytips::anchor_with(
-        || keytips::collapsed_anchor(title),
-        automatic_large_button(localized_title, opener.into()),
+    let label = keytips::label_anchor(
+        || keytips::label_id(&keytips::collapsed_anchor(title)),
+        text(localized_title.clone())
+            .size(PANEL_TITLE_SIZE)
+            .align_x(iced::Center)
+            .wrapping(if tight {
+                iced::advanced::text::Wrapping::Word
+            } else {
+                iced::advanced::text::Wrapping::None
+            }),
     );
-
-    // The large face, and under it the opener in the rest of the button's
-    // height.
-    let face_box = container(face)
-        .height(Length::Fixed(LARGE_H))
-        .align_y(iced::Center);
-
-    column![face_box, opener]
+    let content = column![icon, label, crate::ui::icons::dropdown_arrow()]
         .align_x(iced::Center)
-        .spacing(0)
-        .padding([1u16, 4])
-        .height(Length::Fixed(if titles {
-            metrics::COLLAPSED_H
-        } else {
-            metrics::COLLAPSED_UNTITLED_H
-        }))
-        .into()
+        .spacing(metrics::GAP);
+    let height = if titles {
+        metrics::COLLAPSED_H
+    } else {
+        metrics::COLLAPSED_UNTITLED_H
+    };
+    let opener = minimize::Opener::Panel(title);
+    let face = button(content)
+        .on_press(Message::RibbonMinimize(minimize::MinimizeMsg::Click(
+            opener,
+        )))
+        .style(move |theme: &Theme, status| {
+            let status = if open && !holds {
+                button::Status::Hovered
+            } else {
+                status
+            };
+            tool_btn_style(theme, holds, status)
+        })
+        .height(height)
+        .padding(Padding {
+            top: metrics::LARGE_PAD_TOP,
+            ..Padding::from([0.0, metrics::CONTENT_PAD_SIDE])
+        });
+    let face = if tight {
+        // Narrow: as wide as the title's longest word.
+        face.into()
+    } else {
+        automatic_large_button(localized_title, face.into())
+    };
+    let face = mouse_area(face)
+        .on_enter(Message::RibbonMinimize(minimize::MinimizeMsg::EnterOpener(
+            opener,
+        )))
+        .on_exit(Message::RibbonMinimize(minimize::MinimizeMsg::LeaveOpener(
+            opener,
+        )));
+    keytips::anchor_with(
+        || keytips::collapsed_anchor(title),
+        PosReport::owned(minimize::opener_id(title), face),
+    )
 }
 
 impl Default for Ribbon {
@@ -2284,7 +2168,7 @@ mod tests {
         let groups: Vec<_> = groups.iter().collect();
         let mut last_cmd = FxHashMap::default();
         last_cmd.insert("TEST_DROPDOWN", selected_command);
-        panel_measure_key(&groups, &last_cmd, &FxHashMap::default(), &style_ctx, None)
+        panel_measure_key(&groups, &last_cmd, &style_ctx, None)
     }
 
     #[test]

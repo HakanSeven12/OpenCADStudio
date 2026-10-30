@@ -6,7 +6,7 @@ use super::collapse::{Level, Panel};
 use super::panel_frame::PanelFrame;
 use super::widgets::{
     LARGE_H, LARGE_ICON, LARGE_W, PANEL_TITLE_H, PANEL_TITLE_SIZE, ROW_H, SMALL_ICON, SMALL_W,
-    TOOL_BAR_H, make_icon, tool_btn_style,
+    TOOL_BAR_H, tool_btn_style,
 };
 use crate::app::Message;
 use crate::modules::IconKind;
@@ -149,26 +149,24 @@ fn view(context: Option<RibbonContext>, compact: bool) -> Element<'static, Messa
     ]
     .align_x(iced::Center)
     .height(TOOL_BAR_H);
-    PanelFrame::new(panel.into(), true, None).into()
+    PanelFrame::new(panel.into(), PANEL_TITLE_H, None).into()
 }
 
-fn collapsed(tight: bool) -> Element<'static, Message> {
-    let icon = make_icon(
-        IconKind::Svg(include_bytes!("../../../assets/icons/ui/list.svg")),
-        if tight { SMALL_ICON } else { LARGE_ICON },
-    );
-    button(
-        column![icon, text(crate::t!("Visibility ▾").into_owned()).size(10)]
-            .align_x(iced::Center)
-            .spacing(4),
-    )
-    .on_press(Message::ToggleRibbonPanel("Visibility".into()))
-    .style(|theme, status| tool_btn_style(theme, false, status))
-    .padding([4, 6])
-    .into()
-}
-
-pub(super) fn panel<'a>(context: Option<RibbonContext>) -> Panel<'a> {
+/// The panel; collapsed, its button shows panel titles or not (`titles`) and
+/// whether its peek is `open`.
+pub(super) fn panel<'a>(context: Option<RibbonContext>, titles: bool, open: bool) -> Panel<'a> {
+    let collapsed = move |tight: bool| {
+        super::collapsed_button(
+            "Visibility",
+            Some(IconKind::Svg(include_bytes!(
+                "../../../assets/icons/ui/list.svg"
+            ))),
+            titles,
+            tight,
+            open,
+            false,
+        )
+    };
     Panel::deferred("Visibility", move |level| match level {
         Level::Full => view(context.clone(), false),
         Level::Compact => view(context.clone(), true),

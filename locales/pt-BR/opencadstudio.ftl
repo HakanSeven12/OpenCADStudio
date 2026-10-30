@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Minimizar para botões dos painéis
     .cycle-through-all = Percorrer todos
     .more-tools = Mais ferramentas
+    .fewer-tools = Menos ferramentas
     .plot = Plotar...
     .recent-drawings = Desenhos recentes
     .search-placeholder = Digite um comando

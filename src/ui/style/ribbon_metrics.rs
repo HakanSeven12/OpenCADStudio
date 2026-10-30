@@ -75,6 +75,14 @@ pub const LARGE_ARROW_BOTTOM: f32 = 10.0;
 pub const COLLAPSED_H: f32 = 93.0;
 pub const COLLAPSED_UNTITLED_H: f32 = 84.0;
 
+// ── Minimized ribbon ───────────────────────────────────────────────────────
+
+/// Height of the row of panel titles that stands for the tool area.
+pub const MINIMIZED_TITLES_H: f32 = 20.0;
+/// Height of the row of panel buttons, and the size of their icons.
+pub const MINIMIZED_BUTTONS_H: f32 = 32.0;
+pub const MINIMIZED_BUTTON_ICON: f32 = 22.0;
+
 // ── Icons ──────────────────────────────────────────────────────────────────
 
 /// Size small icons are drawn at: ribbon, menu, slide-out, search-result

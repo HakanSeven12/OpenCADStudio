@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Minimalizovat na tlačítka panelů
     .cycle-through-all = Cyklovat všemi
     .more-tools = Další nástroje
+    .fewer-tools = Méně nástrojů
     .plot = Vykreslit...
     .recent-drawings = Poslední výkresy
     .search-placeholder = Zadejte příkaz

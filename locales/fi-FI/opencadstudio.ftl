@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Pienennä paneelien painikkeiksi
     .cycle-through-all = Kierrä kaikki
     .more-tools = Lisää työkaluja
+    .fewer-tools = Vähemmän työkaluja
     .plot = Tulosta...
     .recent-drawings = Viimeisimmät piirustukset
     .search-placeholder = Kirjoita komento

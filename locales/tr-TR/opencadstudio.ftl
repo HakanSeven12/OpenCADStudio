@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Panel düğmelerine küçült
     .cycle-through-all = Tümünde dolaş
     .more-tools = Diğer araçlar
+    .fewer-tools = Daha az araç
     .plot = Çizdir...
     .recent-drawings = Son çizimler
     .search-placeholder = Bir komut yazın

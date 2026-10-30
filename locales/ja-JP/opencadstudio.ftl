@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = パネル ボタンに最小化
     .cycle-through-all = すべてを循環
     .more-tools = その他のツール
+    .fewer-tools = ツールを減らす
     .plot = 印刷...
     .recent-drawings = 最近使用した図面
     .search-placeholder = コマンドを入力

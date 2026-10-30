@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Ελαχιστοποίηση σε κουμπιά πλαισίων
     .cycle-through-all = Κυκλική εναλλαγή όλων
     .more-tools = Περισσότερα εργαλεία
+    .fewer-tools = Λιγότερα εργαλεία
     .plot = Σχεδίαση...
     .recent-drawings = Πρόσφατα σχέδια
     .search-placeholder = Πληκτρολογήστε εντολή

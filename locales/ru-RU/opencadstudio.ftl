@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Свернуть до кнопок панелей
     .cycle-through-all = Перебирать все
     .more-tools = Другие инструменты
+    .fewer-tools = Меньше инструментов
     .plot = Печать...
     .recent-drawings = Недавние чертежи
     .search-placeholder = Введите команду

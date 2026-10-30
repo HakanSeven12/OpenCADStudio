@@ -50,12 +50,6 @@ pub(super) fn group_entries<'g>(key: &str, group: &'g RibbonGroup) -> Vec<Entry<
     out
 }
 
-/// Whether `item` shows the button keyed `id`, lit or as the item a lit
-/// dropdown holds.
-pub(super) fn item_holds(item: &RibbonItem, id: &str) -> bool {
-    item_entries(item).iter().any(|(entry, _)| *entry == id)
-}
-
 /// Whether `group`, the panel `key`, holds the button keyed `id`.
 pub(super) fn group_holds(key: &str, group: &RibbonGroup, id: &str) -> bool {
     group_entries(key, group)

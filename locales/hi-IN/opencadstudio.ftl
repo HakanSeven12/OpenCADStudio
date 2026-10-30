@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = पैनल बटनों तक छोटा करें
     .cycle-through-all = सभी में चक्र करें
     .more-tools = और टूल
+    .fewer-tools = कम टूल
     .plot = प्लॉट...
     .recent-drawings = हाल के ड्रॉइंग
     .search-placeholder = कमांड टाइप करें

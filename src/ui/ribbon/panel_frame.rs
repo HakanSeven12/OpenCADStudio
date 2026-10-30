@@ -1,7 +1,9 @@
 //! The frame of a ribbon panel: its title strip drawn across the panel's
 //! width, and the dialog launcher in the strip's right corner. A panel is as
 //! wide as its tools or its title; the strip and launcher follow that width
-//! instead of filling, so measuring a panel stays a plain layout.
+//! instead of filling, so measuring a panel stays a plain layout. A press
+//! anywhere on the strip but the launcher works like a button: it fires when
+//! released over the strip, so a drag that starts there moves the panel.
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
@@ -11,29 +13,61 @@ use iced::{
     Vector,
 };
 
-use super::widgets::PANEL_TITLE_H;
 use crate::app::Message;
 use crate::ui::style::chrome;
 
 pub(super) struct PanelFrame<'a> {
     content: Element<'a, Message>,
     corner: Option<Element<'a, Message>>,
-    strip: bool,
+    /// Height of the title strip at the bottom; 0 for none.
+    strip: f32,
+    /// The strip shows its panel's extra tools are open.
+    lit: bool,
+    on_press: Option<Message>,
 }
 
 impl<'a> PanelFrame<'a> {
-    /// `content` ends with its title row when `strip` is set; `corner` sits at
-    /// the right end of that row.
+    /// `content` ends with its title row, `strip` px high (0 for none);
+    /// `corner` sits at the right end of that row.
     pub fn new(
         content: Element<'a, Message>,
-        strip: bool,
+        strip: f32,
         corner: Option<Element<'a, Message>>,
     ) -> Self {
         Self {
             content,
-            corner: corner.filter(|_| strip),
+            corner: corner.filter(|_| strip > 0.0),
             strip,
+            lit: false,
+            on_press: None,
         }
+    }
+
+    /// Light the strip: its panel's extra tools are open.
+    pub fn lit(mut self, lit: bool) -> Self {
+        self.lit = lit;
+        self
+    }
+
+    /// What a click on the strip sends.
+    pub fn on_press(mut self, message: Option<Message>) -> Self {
+        self.on_press = message;
+        self
+    }
+
+    /// Whether `at` is on the strip and off the launcher.
+    fn on_strip(&self, layout: Layout<'_>, at: Point) -> bool {
+        let bounds = layout.bounds();
+        let strip = Rectangle {
+            y: bounds.y + bounds.height - self.strip,
+            height: self.strip,
+            ..bounds
+        };
+        strip.contains(at)
+            && !layout
+                .children()
+                .nth(1)
+                .is_some_and(|corner| corner.bounds().contains(at))
     }
 
     fn parts_mut(&mut self) -> Vec<&mut Element<'a, Message>> {
@@ -44,6 +78,15 @@ impl<'a> PanelFrame<'a> {
 }
 
 impl<'a> Widget<Message, Theme, Renderer> for PanelFrame<'a> {
+    // Whether a press on the strip waits for its release.
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::of::<bool>()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        widget::tree::State::new(false)
+    }
+
     fn diff(&mut self, tree: &mut widget::Tree) {
         let mut parts = self.parts_mut();
         tree.diff_children_custom(
@@ -73,12 +116,12 @@ impl<'a> Widget<Message, Theme, Renderer> for PanelFrame<'a> {
             let node = corner.as_widget_mut().layout(
                 &mut tree.children[1],
                 renderer,
-                &layout::Limits::new(Size::ZERO, Size::new(size.width, PANEL_TITLE_H)),
+                &layout::Limits::new(Size::ZERO, Size::new(size.width, self.strip)),
             );
             let corner_size = node.size();
             nodes.push(node.move_to(Point::new(
                 (size.width - corner_size.width).max(0.0),
-                size.height - (PANEL_TITLE_H + corner_size.height) / 2.0,
+                size.height - (self.strip + corner_size.height) / 2.0,
             )));
         }
         layout::Node::with_children(size, nodes)
@@ -108,6 +151,29 @@ impl<'a> Widget<Message, Theme, Renderer> for PanelFrame<'a> {
                 return;
             }
         }
+        let Some(message) = self.on_press.clone() else {
+            return;
+        };
+        let over = cursor
+            .position_over(layout.bounds())
+            .is_some_and(|at| self.on_strip(layout, at));
+        let pressed = tree.state.downcast_mut::<bool>();
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                *pressed = over;
+                if over {
+                    shell.capture_event();
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if *pressed => {
+                *pressed = false;
+                if over {
+                    shell.publish(message);
+                    shell.capture_event();
+                }
+            }
+            _ => {}
+        }
     }
 
     fn mouse_interaction(
@@ -118,6 +184,13 @@ impl<'a> Widget<Message, Theme, Renderer> for PanelFrame<'a> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
+        if self.on_press.is_some()
+            && cursor
+                .position_over(layout.bounds())
+                .is_some_and(|at| self.on_strip(layout, at))
+        {
+            return mouse::Interaction::Pointer;
+        }
         std::iter::once(&self.content)
             .chain(self.corner.as_ref())
             .zip(&tree.children)
@@ -142,8 +215,8 @@ impl<'a> Widget<Message, Theme, Renderer> for PanelFrame<'a> {
         viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
-        if self.strip {
-            let top = bounds.y + bounds.height - PANEL_TITLE_H;
+        if self.strip > 0.0 {
+            let top = bounds.y + bounds.height - self.strip;
             let quad = |y: f32, height: f32| renderer::Quad {
                 bounds: Rectangle {
                     x: bounds.x,
@@ -156,8 +229,12 @@ impl<'a> Widget<Message, Theme, Renderer> for PanelFrame<'a> {
                 snap: true,
             };
             renderer.fill_quad(
-                quad(top, PANEL_TITLE_H),
-                Background::Color(chrome::title_bar(theme)),
+                quad(top, self.strip),
+                Background::Color(if self.lit {
+                    chrome::hover(theme)
+                } else {
+                    chrome::title_bar(theme)
+                }),
             );
             // A 1 px line over the strip.
             renderer.fill_quad(quad(top, 1.0), Background::Color(chrome::page(theme)));

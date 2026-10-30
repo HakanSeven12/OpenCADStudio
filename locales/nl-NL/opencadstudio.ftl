@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = Minimaliseren tot paneelknoppen
     .cycle-through-all = Alles rouleren
     .more-tools = Meer gereedschappen
+    .fewer-tools = Minder gereedschappen
     .plot = Plotten...
     .recent-drawings = Recente tekeningen
     .search-placeholder = Typ een opdracht

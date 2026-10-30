@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = ຫຍໍ້ເປັນປຸ່ມແຜງ
     .cycle-through-all = ໝູນວຽນທັງໝົດ
     .more-tools = ເຄື່ອງມືເພີ່ມເຕີມ
+    .fewer-tools = ເຄື່ອງມືໜ້ອຍລົງ
     .plot = ພິມ...
     .recent-drawings = ແບບແຕ້ມຫຼ້າສຸດ
     .search-placeholder = ພິມຄຳສັ່ງ

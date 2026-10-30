@@ -125,10 +125,8 @@ impl OpenCADStudio {
                 .push_info(crate::t!("No drawing open — use New or Open first.").as_ref());
             return Task::none();
         }
-        // Dismiss any open dropdown / collapsed-panel flyout on tool use,
-        // and remember this tool as its panel's last-used one.
+        // Dismiss any open dropdown / collapsed-panel flyout on tool use.
         self.ribbon.close_dropdown();
-        self.ribbon.note_panel_tool(&tool_id);
         self.ribbon.activate_tool(&tool_id);
         match event {
             // `dispatch_command` turns a one-shot tool's highlight off

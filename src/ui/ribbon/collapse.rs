@@ -23,10 +23,9 @@ use crate::app::Message;
 use crate::ui::style::chrome;
 
 /// One panel in its four density renderings. `tight` is the collapsed button
-/// with a small representative icon instead of the large one — the last step
-/// before the buttons are squeezed together. An open flyout draws the panel's
-/// own `full` rendering; see `FlyoutOverlay`. Elements are built lazily and
-/// indexed by `Level`.
+/// at its narrowest — the last step before the buttons are squeezed
+/// together. A collapsed panel's peek is drawn by the ribbon, not here.
+/// Elements are built lazily and indexed by `Level`.
 pub(crate) struct Panel<'a> {
     pub(crate) id: String,
     elements: [Option<Element<'a, Message>>; SLOTS],
@@ -155,8 +154,6 @@ pub(crate) fn decide_levels(mode: CollapseMode, widths: &[Widths], max_w: f32) -
 
 pub(crate) struct CollapsePanels<'a> {
     panels: Vec<Panel<'a>>,
-    /// Title of the panel whose flyout is open (if any).
-    open: Option<String>,
     /// Fallback row height, used only when there are no panels to measure.
     row_h: f32,
     /// Chosen degradation level per panel; set during layout.
@@ -292,11 +289,10 @@ impl MeasureCache {
 }
 
 impl<'a> CollapsePanels<'a> {
-    pub fn new(panels: Vec<Panel<'a>>, open: Option<String>, row_h: f32) -> Self {
+    pub fn new(panels: Vec<Panel<'a>>, row_h: f32) -> Self {
         let n = panels.len();
         Self {
             panels,
-            open,
             row_h,
             levels: RefCell::new(vec![Level::Full; n]),
             height_out: None,
@@ -480,15 +476,9 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         };
 
         // Measurements let Auto choose a density without building all variants
-        // again. On a cache hit only the selected element is built. If a
-        // collapsed panel is open, its Full element is also needed by the flyout.
+        // again. On a cache hit only the selected element is built.
         for (i, &level) in levels.iter().enumerate() {
             self.ensure_element(tree, i, level);
-            if matches!(level, Level::Collapsed | Level::Tight)
-                && self.open.as_deref() == Some(self.panels[i].id.as_str())
-            {
-                self.ensure_element(tree, i, Level::Full);
-            }
         }
 
         *self.levels.borrow_mut() = levels.clone();
@@ -856,32 +846,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             })));
         }
 
-        // An open flyout owns the overlay slot.
-        if let Some(open_id) = self.open.clone() {
-            if let Some(p) = self.panels.iter().position(|pan| pan.id == open_id) {
-                // Only a button-form panel (collapsed or tight) shows a flyout.
-                let lvl = levels.get(p).copied().unwrap_or(Level::Full);
-                if (lvl == Level::Collapsed || lvl == Level::Tight)
-                    && layout.children().nth(p).is_some()
-                {
-                    let child_layout = layout.children().nth(p).unwrap();
-                    let b = child_layout.bounds();
-                    let anchor = Point::new(b.x + translation.x, b.y + b.height + translation.y);
-                    // The flyout is the panel's own `full` rendering (the row
-                    // never shows slot 0 while the panel is button-form, so it
-                    // is free to double as the overlay content).
-                    return Some(overlay::Element::new(Box::new(FlyoutOverlay {
-                        content: self.panels[p].elements[Level::Full as usize]
-                            .as_mut()
-                            .expect("open collapsed flyout has full panel content"),
-                        tree: &mut tree.children[slot(p, Level::Full)],
-                        anchor,
-                    })));
-                }
-            }
-        }
-
-        // No flyout: forward the SHOWN children's overlays. Every ribbon
+        // Forward the SHOWN children's overlays. Every ribbon
         // tooltip is an iced overlay produced inside these children, so
         // returning None here left all of them permanently dead (#411 — a
         // regression from the day this widget replaced the plain row).
@@ -987,122 +952,6 @@ impl overlay::Overlay<Message, Theme, Renderer> for GhostOverlay<'_, '_> {
     }
 }
 
-/// Overlay that renders an open panel's flyout anchored below its button and
-/// closes it when the user presses outside. Draws the panel's `full` rendering
-/// (`content`) inside a thin styled box.
-struct FlyoutOverlay<'a, 'b> {
-    content: &'b mut Element<'a, Message>,
-    tree: &'b mut widget::Tree,
-    anchor: Point,
-}
-
-impl overlay::Overlay<Message, Theme, Renderer> for FlyoutOverlay<'_, '_> {
-    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let viewport = Rectangle::with_size(bounds);
-        let limits = layout::Limits::new(Size::ZERO, viewport.size());
-        let node = self
-            .content
-            .as_widget_mut()
-            .layout(self.tree, renderer, &limits);
-        let size = node.size();
-        let mut x = self.anchor.x;
-        let mut y = self.anchor.y;
-        if x + size.width > viewport.width {
-            x = (viewport.width - size.width).max(0.0);
-        }
-        if y + size.height > viewport.height {
-            y = (self.anchor.y - size.height).max(0.0);
-        }
-        layout::Node::with_children(size, vec![node]).translate(Vector::new(x, y))
-    }
-
-    fn draw(
-        &self,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-    ) {
-        let b = layout.bounds();
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: b,
-                border: Border {
-                    color: chrome::border(theme),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                shadow: Shadow::default(),
-                snap: true,
-            },
-            Background::Color(chrome::panel(theme)),
-        );
-        let child = layout.children().next().unwrap();
-        self.content.as_widget().draw(
-            self.tree,
-            renderer,
-            theme,
-            style,
-            child,
-            cursor,
-            &child.bounds(),
-        );
-    }
-
-    fn update(
-        &mut self,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-        shell: &mut Shell<'_, Message>,
-    ) {
-        let child = layout.children().next().unwrap();
-        let vp = child.bounds();
-
-        if let Event::Mouse(mouse::Event::ButtonPressed(_)) = event {
-            if !cursor.is_over(vp) {
-                shell.publish(Message::CloseRibbonDropdown);
-                shell.capture_event();
-                return;
-            }
-        }
-
-        self.content
-            .as_widget_mut()
-            .update(self.tree, event, child, cursor, renderer, shell, &vp);
-    }
-
-    fn operate(
-        &mut self,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
-        let child = layout.children().next().unwrap();
-        self.content
-            .as_widget_mut()
-            .operate(self.tree, child, renderer, operation);
-    }
-
-    fn mouse_interaction(
-        &self,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-    ) -> mouse::Interaction {
-        let child = layout.children().next().unwrap();
-        self.content.as_widget().mouse_interaction(
-            self.tree,
-            child,
-            cursor,
-            &child.bounds(),
-            renderer,
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1176,7 +1025,7 @@ mod tests {
         use iced_test::runtime::user_interface::{Cache, UserInterface};
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        fn view(counter: Arc<AtomicUsize>, open: Option<String>) -> Element<'static, Message> {
+        fn view(counter: Arc<AtomicUsize>) -> Element<'static, Message> {
             let panel = Panel::deferred("test", move |level| {
                 counter.fetch_add(1, Ordering::Relaxed);
                 let (width, height) = match level {
@@ -1190,7 +1039,7 @@ mod tests {
                     .height(Length::Fixed(height))
                     .into()
             });
-            CollapsePanels::new(vec![panel], open, 80.0)
+            CollapsePanels::new(vec![panel], 80.0)
                 .measure_key(17)
                 .into()
         }
@@ -1206,7 +1055,7 @@ mod tests {
         .expect("headless renderer");
 
         let ui = UserInterface::build(
-            view(count.clone(), None),
+            view(count.clone()),
             Size::new(1000.0, 100.0),
             Cache::default(),
             &mut renderer,
@@ -1214,7 +1063,7 @@ mod tests {
         assert_eq!(count.load(Ordering::Relaxed), 4);
 
         let ui = UserInterface::build(
-            view(count.clone(), None),
+            view(count.clone()),
             Size::new(1000.0, 100.0),
             ui.into_cache(),
             &mut renderer,
@@ -1222,7 +1071,7 @@ mod tests {
         assert_eq!(count.load(Ordering::Relaxed), 5, "only Full is rebuilt");
 
         let ui = UserInterface::build(
-            view(count.clone(), None),
+            view(count.clone()),
             Size::new(170.0, 100.0),
             ui.into_cache(),
             &mut renderer,
@@ -1230,15 +1079,15 @@ mod tests {
         assert_eq!(count.load(Ordering::Relaxed), 6, "resize builds Compact");
 
         let _ui = UserInterface::build(
-            view(count.clone(), Some("test".to_string())),
+            view(count.clone()),
             Size::new(20.0, 100.0),
             ui.into_cache(),
             &mut renderer,
         );
         assert_eq!(
             count.load(Ordering::Relaxed),
-            8,
-            "tight selection builds Tight and Full for the open flyout"
+            7,
+            "tight selection builds only Tight"
         );
     }
 

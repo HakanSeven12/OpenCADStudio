@@ -10,16 +10,16 @@ use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 
 use super::widgets::{
     make_icon, make_tip, popup_panel_style, qat_split_part_style, split_outline, tip_style,
-    tool_btn_style, TOOL_BAR_H,
+    tool_btn_style, PANEL_TITLE_SIZE,
 };
 use super::{
-    draw_panel, extras, first_tool_icon, keytips, render_group, ribbon_menu, visibility_panel,
-    CollapseMode, MinimizePref, Ribbon, RibbonMinimize,
+    draw_panel, extras, first_tool_icon, keytips, position_ribbon_dropdown, render_group,
+    ribbon_menu, visibility_panel, CollapseMode, MinimizePref, Ribbon, RibbonMinimize, Strip,
 };
 use crate::app::Message;
 use crate::ui::icons;
 use crate::ui::style::{chrome, ribbon_metrics as metrics};
-use crate::ui::wrap_bar::{dropdown_bounds, PosReport};
+use crate::ui::wrap_bar::{dropdown_bounds, recent_bounds, PosReport};
 
 /// The dropdown that picks what the minimize button does.
 pub const MINIMIZE_MENU_ID: &str = "RIBBON_MINIMIZE";
@@ -35,10 +35,15 @@ const OPEN_DELAY: Duration = Duration::from_millis(150);
 const CLOSE_DELAY: Duration = Duration::from_millis(1000);
 /// Two clicks on a tab within this time are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
-const TITLE_ROW_H: f32 = 19.0;
-const BUTTON_ROW_H: f32 = 36.0;
-const BUTTON_ICON: f32 = metrics::SMALL_ICON;
 const MENU_W: f32 = 210.0;
+/// The body of the open peek, whose width the extra tools in it take.
+const PEEK_BODY_ID: &str = "ribbon_peek_body";
+
+/// The anchor of the opener of panel `title`'s peek: an auto-collapsed
+/// panel's button, or a minimized ribbon's panel title or button.
+pub(super) fn opener_id(title: &str) -> String {
+    format!("{OPENER_PREFIX}{title}")
+}
 
 /// What a popup opens from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +66,8 @@ pub enum MinimizeMsg {
     LeavePopup,
     /// A panel title or button was clicked.
     Click(Opener),
+    /// A click off the open peek.
+    Dismiss,
 }
 
 /// Popup state of the minimized ribbon.
@@ -77,6 +84,8 @@ pub(super) struct MinState {
     closing: Option<Instant>,
     /// The last tab clicked, for double clicks.
     last_tab_click: Option<(usize, Instant)>,
+    /// The peek shows its panel's extra tools.
+    more: bool,
 }
 
 /// The minimize state the button's face moves to from `current`.
@@ -116,9 +125,8 @@ impl Ribbon {
     /// Whether a popup of the minimized ribbon shows.
     fn popup_open(&self) -> bool {
         match self.layout.minimize {
-            RibbonMinimize::Off => false,
             RibbonMinimize::Tabs => self.min.tool_area,
-            RibbonMinimize::PanelTitles | RibbonMinimize::PanelButtons => {
+            RibbonMinimize::Off | RibbonMinimize::PanelTitles | RibbonMinimize::PanelButtons => {
                 self.collapsed_open.is_some()
             }
         }
@@ -131,10 +139,22 @@ impl Ribbon {
         self.min.opening = None;
         self.min.closing = None;
         self.min.over_popup = false;
-        if self.layout.minimize != RibbonMinimize::Off {
-            self.collapsed_open = None;
-        }
+        self.min.more = false;
+        self.collapsed_open = None;
         open
+    }
+
+    /// The extra tools of the panel whose peek is open.
+    pub(super) fn peek_extras(&self) -> Option<&'static extras::PanelExtras> {
+        let title = self.collapsed_open.as_deref()?;
+        let module = self.modules.get(self.active)?;
+        draw_panel::panel_for_group(&extras::panel_key(module.id(), title))
+    }
+
+    /// Show or hide the extra tools in the open peek.
+    pub(super) fn toggle_peek_extras(&mut self) {
+        self.open_dropdown = None;
+        self.min.more = !self.min.more;
     }
 
     /// Whether a popup or slide-out is due to open or close, so the app
@@ -163,6 +183,7 @@ impl Ribbon {
             Opener::Panel(title) => {
                 if self.collapsed_open.as_deref() != Some(title) {
                     self.close_dropdown();
+                    self.min.more = false;
                     self.collapsed_open = Some(title.to_string());
                 }
             }
@@ -237,6 +258,10 @@ impl Ribbon {
                 } else {
                     self.open_popup(opener);
                 }
+            }
+            MinimizeMsg::Dismiss => {
+                self.close_popup();
+                self.close_dropdown();
             }
         }
         false
@@ -381,22 +406,42 @@ impl Ribbon {
     /// to panel titles or panel buttons: one opener per panel.
     pub(super) fn minimized_row(&self, is_start: bool) -> Element<'_, Message> {
         let buttons = self.layout.minimize == RibbonMinimize::PanelButtons;
-        let height = if buttons { BUTTON_ROW_H } else { TITLE_ROW_H };
+        let height = if buttons {
+            metrics::MINIMIZED_BUTTONS_H
+        } else {
+            metrics::MINIMIZED_TITLES_H
+        };
         let openers = self.groups_for(self.active).map(|group| {
             let title = group.title;
             let open = self.collapsed_open.as_deref() == Some(title);
-            let label = text(crate::t!(title)).size(if buttons { 12.0 } else { 11.5 });
+            let label = text(crate::t!(title)).size(PANEL_TITLE_SIZE);
             let content: Element<'_, Message> = match first_tool_icon(group).filter(|_| buttons) {
-                Some(icon) => row![make_icon(icon, BUTTON_ICON), label]
-                    .spacing(6)
+                Some(icon) => row![make_icon(icon, metrics::MINIMIZED_BUTTON_ICON), label]
+                    .spacing(metrics::LABEL_GAP)
                     .align_y(iced::Center)
                     .into(),
                 None => label.into(),
             };
+            // Hovered or open: the hover background and strong text.
             let mut opener = button(container(content).center_y(Fill))
-                .style(move |theme: &Theme, status| tool_btn_style(theme, open, status))
+                .style(move |theme: &Theme, status| {
+                    let hot =
+                        open || matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        text_color: if hot {
+                            chrome::strong(theme)
+                        } else {
+                            chrome::title_text(theme)
+                        },
+                        ..tool_btn_style(
+                            theme,
+                            false,
+                            if hot { button::Status::Hovered } else { status },
+                        )
+                    }
+                })
                 .height(height)
-                .padding([0, 9]);
+                .padding([0.0, metrics::LABEL_PAD_RIGHT]);
             // The Start tab has no drawing for the tools to work on.
             if !is_start {
                 opener = opener.on_press(Message::RibbonMinimize(MinimizeMsg::Click(
@@ -417,7 +462,7 @@ impl Ribbon {
             };
             keytips::anchor_with(
                 || keytips::collapsed_anchor(title),
-                PosReport::owned(format!("{OPENER_PREFIX}{title}"), opener),
+                PosReport::owned(opener_id(title), opener),
             )
         });
         container(row(openers).spacing(1).align_y(iced::Center))
@@ -436,20 +481,33 @@ impl Ribbon {
             .into()
     }
 
-    /// The open popup of the minimized ribbon, over the drawing: the tool
-    /// area of the tab on show, or one panel under its title.
-    pub fn minimized_popup(
-        &self,
+    /// The open popup over the drawing: with the ribbon minimized to tabs,
+    /// the tool area of the tab on show; otherwise the peek of one panel
+    /// under its opener (an auto-collapsed panel's button, or a minimized
+    /// panel title or button), which a click elsewhere closes.
+    pub fn minimized_popup<'a>(
+        &'a self,
         is_paper: bool,
         is_start: bool,
         show_block_palette: bool,
         visibility: Option<crate::ui::window::block_visibility::RibbonContext>,
         win: (f32, f32),
-    ) -> Option<Element<'_, Message>> {
+    ) -> Option<Element<'a, Message>> {
         if !self.popup_open() {
             return None;
         }
-        let (content, left, top) = if self.layout.minimize == RibbonMinimize::Tabs {
+        let watched = |content: Element<'a, Message>| -> Element<'a, Message> {
+            PosReport::new(
+                POPUP_ID,
+                opaque(
+                    mouse_area(content)
+                        .on_enter(Message::RibbonMinimize(MinimizeMsg::EnterPopup))
+                        .on_exit(Message::RibbonMinimize(MinimizeMsg::LeavePopup)),
+                ),
+            )
+            .into()
+        };
+        if self.layout.minimize == RibbonMinimize::Tabs {
             let top = dropdown_bounds(TAB_BAR_ID).map_or(self.tab_bar_height(), |b| b.y + b.height);
             // A popup is never squeezed: its panels show at full size.
             let area = self.tool_area(
@@ -459,39 +517,53 @@ impl Ribbon {
                 visibility,
                 CollapseMode::Full,
             );
-            (area, 0.0, top)
+            let placed = container(container(watched(area)).width(Fill))
+                .padding(Padding {
+                    top,
+                    ..Padding::ZERO
+                })
+                .width(Fill)
+                .height(Fill);
+            return Some(placed.into());
+        }
+        let title = self.collapsed_open.as_deref()?;
+        let panel = self.panel_popup(title, show_block_palette, visibility)?;
+        // Under its opener, left-aligned; the last two panels of the row
+        // align right, so the peek stays on screen. Before the opener is
+        // drawn (the first frame) it opens at the left under the tool area.
+        let anchor = recent_bounds(&opener_id(title));
+        let titles: Vec<&str> = self
+            .groups_for(self.active)
+            .map(|group| group.title)
+            .collect();
+        let right = anchor.is_some()
+            && titles
+                .iter()
+                .position(|shown| *shown == title)
+                .is_some_and(|index| index + 2 >= titles.len());
+        let anchor = anchor.unwrap_or(iced::Rectangle {
+            x: 0.0,
+            y: self.tab_bar_height(),
+            width: 0.0,
+            height: self.tool_bar_height(),
+        });
+        let h_pad = if right {
+            (win.0 - anchor.x - anchor.width).max(0.0)
         } else {
-            let title = self.collapsed_open.as_deref()?;
-            let anchor = dropdown_bounds(&format!("{OPENER_PREFIX}{title}"))?;
-            let panel = self.panel_popup(title, show_block_palette, visibility)?;
-            (panel, anchor.x, anchor.y + anchor.height)
+            anchor.x.max(0.0)
         };
-        let content = PosReport::new(
-            POPUP_ID,
-            opaque(
-                mouse_area(content)
-                    .on_enter(Message::RibbonMinimize(MinimizeMsg::EnterPopup))
-                    .on_exit(Message::RibbonMinimize(MinimizeMsg::LeavePopup)),
-            ),
-        );
-        let width = if self.layout.minimize == RibbonMinimize::Tabs {
-            Length::Fill
-        } else {
-            Length::Shrink
-        };
-        let placed = container(container(content).width(width))
-            .padding(Padding {
-                top,
-                left: left.clamp(0.0, (win.0 - 40.0).max(0.0)),
-                ..Padding::ZERO
-            })
-            .width(Fill)
-            .height(Fill);
-        Some(placed.into())
+        let placed =
+            position_ribbon_dropdown(watched(panel), right, h_pad, anchor.y + anchor.height);
+        Some(
+            mouse_area(placed)
+                .on_press(Message::RibbonMinimize(MinimizeMsg::Dismiss))
+                .into(),
+        )
     }
 
-    /// Panel `title` of the tab on show, with a footer holding its slide-out
-    /// opener and its dialog launcher.
+    /// The peek of panel `title` of the tab on show: the panel without its
+    /// title strip, the extra tools while they are open, and a footer with
+    /// "More tools" and the dialog launcher.
     fn panel_popup(
         &self,
         title: &str,
@@ -504,15 +576,15 @@ impl Ribbon {
             .find(|group| group.title == title)?;
         let key = extras::panel_key(module.id(), group.title);
         let body = if module.id() == "block_editor" && group.title == "Visibility" {
-            visibility_panel::panel(visibility).full()
+            visibility_panel::panel(visibility, false, true).full()
         } else {
             let style_ctx = self.style_context();
             render_group(
                 false,
                 group,
                 &key,
-                false,
-                self.slide_look(&key),
+                Strip::Peek,
+                draw_panel::SlideLook::Closed,
                 Vec::new(),
                 self.lit_tool(),
                 &self.open_dropdown,
@@ -526,40 +598,70 @@ impl Ribbon {
                 &style_ctx,
             )
         };
-        let mut footer = row![].spacing(6).align_y(iced::Center);
+        let mut popup = column![PosReport::new(PEEK_BODY_ID, body)];
         let extras = draw_panel::panel_for_group(&key);
+        let mut footer = row![].align_y(iced::Center);
         if let Some(extras) = extras {
-            let open = self
-                .open_dropdown
-                .as_deref()
-                .and_then(draw_panel::parent_panel)
-                == Some(extras.id);
-            let more = button(
+            if self.min.more {
+                let width = recent_bounds(PEEK_BODY_ID).map_or(0.0, |body| body.width);
+                popup = popup.push(draw_panel::extra_tools(self, extras, width));
+            }
+            let more = self.min.more;
+            let label = if more {
+                crate::tr!("ribbon-menu", "fewer-tools")
+            } else {
+                crate::tr!("ribbon-menu", "more-tools")
+            };
+            let toggle = button(
                 row![
-                    text(crate::tr!("ribbon-menu", "more-tools")).size(11),
-                    if open {
-                        icons::dropup_arrow()
+                    text(label).size(PANEL_TITLE_SIZE),
+                    if more {
+                        icons::chevron_up()
                     } else {
-                        icons::dropdown_arrow()
+                        icons::chevron_down()
                     },
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
             )
             .on_press(Message::ToggleRibbonDropdown(extras.id.to_string()))
-            .style(move |theme: &Theme, status| tool_btn_style(theme, open, status))
-            .padding([1, 6]);
-            footer = footer.push(keytips::anchor(extras.id, PosReport::new(extras.id, more)));
+            .style(|theme: &Theme, status| button::Style {
+                text_color: chrome::title_text(theme),
+                ..tool_btn_style(theme, false, status)
+            })
+            .padding([0, 4]);
+            footer = footer.push(keytips::anchor(
+                extras.id,
+                PosReport::new(extras.id, toggle),
+            ));
         }
         footer = footer.push(Space::new().width(Fill));
         if let Some(launcher) = extras.and_then(draw_panel::launcher) {
             footer = footer.push(launcher);
         }
-        let popup = column![
-            container(body).height(TOOL_BAR_H),
-            container(footer).padding([2, 4]).width(Fill),
-        ];
-        Some(container(popup).style(popup_panel_style).into())
+        // The footer stands for the title strip: its colour and the line
+        // over it.
+        let line =
+            container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(chrome::page(theme))),
+                ..Default::default()
+            });
+        let bar = container(footer.padding([0, 2]))
+            .center_y(draw_panel::FOOTER_H - 1.0)
+            .width(Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(chrome::title_bar(theme))),
+                ..Default::default()
+            });
+        popup = popup.push(column![line, bar].width(Fill));
+        // As wide as the panel: the footer and extra tools fill that width,
+        // not the window's.
+        Some(
+            container(popup.width(Length::Shrink))
+                .width(Length::Shrink)
+                .style(popup_panel_style)
+                .into(),
+        )
     }
 }
 

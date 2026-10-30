@@ -57,6 +57,7 @@ ribbon-menu =
     .minimize-to-panel-buttons = تصغير إلى أزرار اللوحات
     .cycle-through-all = التدوير عبر الكل
     .more-tools = مزيد من الأدوات
+    .fewer-tools = أدوات أقل
     .plot = طباعة...
     .recent-drawings = الرسومات الأخيرة
     .search-placeholder = اكتب أمرًا

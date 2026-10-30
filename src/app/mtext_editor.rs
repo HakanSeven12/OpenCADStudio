@@ -15,10 +15,15 @@ use codec::{EntityType, Handle, MText};
 use glam::DVec3;
 use iced::widget::text_editor;
 
-// Lossless index of the raw MTEXT source the editor will edit through; it is
-// wired into the editor by the following changes and only tested until then.
+// Lossless index of the raw MTEXT source and the source patches the editor
+// will edit through; wired into the editor by the following changes and only
+// tested until then.
 #[allow(dead_code)]
 mod raw_adapter;
+#[allow(dead_code)]
+mod raw_edit;
+#[allow(dead_code)]
+mod raw_operations;
 
 /// Character-level format toggles applied to the current selection by the
 /// toolbar. Each maps to a DXF MTEXT inline code understood by the renderer

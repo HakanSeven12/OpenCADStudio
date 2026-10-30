@@ -57,6 +57,17 @@ fn format_editing_time(days: f64) -> String {
     }
 }
 
+/// The summary as the dialog shows it. The hyperlink base is one drawing
+/// value kept in the summary and in the header (HYPERLINKBASE sets both); the
+/// DXF writer prefers the summary and falls back to the header, so do the same.
+fn summary_as_shown(doc: &codec::Document) -> SummaryInfo {
+    let mut info = doc.summary_info.clone();
+    if info.hyperlink_base.is_empty() {
+        info.hyperlink_base = doc.header.hyperlink_base.clone();
+    }
+    info
+}
+
 impl OpenCADStudio {
     fn general_rows(&self) -> Vec<(String, String)> {
         let tab = &self.tabs[self.active_tab];
@@ -115,11 +126,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn open_drawing_properties(&mut self) {
         self.drawing_properties = Some(State {
             tab: Tab::General,
-            summary: self.tabs[self.active_tab]
-                .scene
-                .document
-                .summary_info
-                .clone(),
+            summary: summary_as_shown(&self.tabs[self.active_tab].scene.document),
             general: self.general_rows(),
             error: None,
         });
@@ -181,11 +188,13 @@ impl OpenCADStudio {
         self.drawing_properties = None;
         self.active_modal = None;
         let i = self.active_tab;
-        if self.tabs[i].scene.document.summary_info == edited {
+        if summary_as_shown(&self.tabs[i].scene.document) == edited {
             return Task::none();
         }
         self.push_undo_snapshot(i, "DWGPROPS");
-        self.tabs[i].scene.document.summary_info = edited;
+        let document = &mut self.tabs[i].scene.document;
+        document.header.hyperlink_base = edited.hyperlink_base.clone();
+        document.summary_info = edited;
         self.tabs[i].dirty = true;
         // Fields showing Title, Author or a custom property read it again.
         let hosts = crate::entities::field::acvar_hosts(&self.tabs[i].scene.document);
@@ -326,6 +335,84 @@ mod tests {
             panic!("the text stays");
         };
         assert_eq!(shown.value, "99");
+    }
+
+    /// S2: undo puts back the summary and the text showing a field of it.
+    #[test]
+    fn undo_restores_summary_and_field_text() {
+        use codec::entities::{EntityType, MText};
+        let mut app = app_with_summary();
+        let i = app.active_tab;
+        app.tabs[i].scene.document.summary_info.custom_properties[0].1 = "A".into();
+        let doc = &mut app.tabs[i].scene.document;
+        let t = doc.add_entity(EntityType::MText(Box::new(MText::new()))).unwrap();
+        crate::entities::field::set_text_field(
+            doc,
+            t,
+            Some((r"\AcVar CustomDP.cost".into(), vec![])),
+            "A",
+        );
+        let shown = |app: &OpenCADStudio| match app.tabs[i].scene.document.get_entity(t) {
+            Some(EntityType::MText(m)) => m.value.clone(),
+            o => panic!("{o:?}"),
+        };
+        let before = app.tabs[i].scene.document.summary_info.clone();
+        app.tabs[i].dirty = false;
+        let _ = app.dispatch_command("DWGPROPS");
+        let _ = app.update(Message::DwgProps(DwgPropsMsg::CustomValue(0, "B".into())));
+        let _ = app.update(Message::DwgProps(DwgPropsMsg::Ok));
+        assert_eq!(shown(&app), "B");
+        let _ = app.automation_op(r#"{"op":"undo"}"#);
+        assert_eq!(app.tabs[i].scene.document.summary_info, before);
+        assert_eq!(shown(&app), "A");
+        assert!(!app.tabs[i].dirty);
+        let _ = app.automation_op(r#"{"op":"redo"}"#);
+        assert_eq!(shown(&app), "B");
+    }
+
+    /// S3: the hyperlink base is the one value HYPERLINKBASE also sets, so an
+    /// edit reaches the header copy the DWG writer stores, and undo puts both back.
+    #[test]
+    fn hyperlink_base_edit_reaches_summary_and_header_and_undoes_together() {
+        let mut app = app_with_summary();
+        let i = app.active_tab;
+        let _ = app.dispatch_command("DWGPROPS");
+        let _ = app.update(Message::DwgProps(DwgPropsMsg::Summary(
+            SummaryField::HyperlinkBase,
+            "C:/docs".into(),
+        )));
+        let _ = app.update(Message::DwgProps(DwgPropsMsg::Ok));
+        let doc = &app.tabs[i].scene.document;
+        assert_eq!(doc.summary_info.hyperlink_base, "C:/docs");
+        assert_eq!(doc.header.hyperlink_base, "C:/docs");
+        let _ = app.automation_op(r#"{"op":"undo"}"#);
+        let doc = &app.tabs[i].scene.document;
+        assert_eq!(doc.summary_info.hyperlink_base, "");
+        assert_eq!(doc.header.hyperlink_base, "");
+        let _ = app.automation_op(r#"{"op":"redo"}"#);
+        let doc = &app.tabs[i].scene.document;
+        assert_eq!(doc.summary_info.hyperlink_base, "C:/docs");
+        assert_eq!(doc.header.hyperlink_base, "C:/docs");
+    }
+
+    /// S3/S2: a base held only by the header is shown, and OK without edits
+    /// changes nothing (no undo step, no dirty flag, header untouched).
+    #[test]
+    fn header_only_hyperlink_base_is_shown_and_unchanged_ok_is_a_no_op() {
+        let mut app = app_with_summary();
+        let i = app.active_tab;
+        app.tabs[i].scene.document.header.hyperlink_base = "D:/base".into();
+        app.tabs[i].dirty = false;
+        let before = app.tabs[i].scene.document.summary_info.clone();
+        let undo = undo_len(&mut app);
+        let _ = app.dispatch_command("DWGPROPS");
+        assert_eq!(state(&app).summary.hyperlink_base, "D:/base");
+        let _ = app.update(Message::DwgProps(DwgPropsMsg::Ok));
+        let doc = &app.tabs[i].scene.document;
+        assert_eq!(doc.summary_info, before);
+        assert_eq!(doc.header.hyperlink_base, "D:/base");
+        assert!(!app.tabs[i].dirty);
+        assert_eq!(undo_len(&mut app), undo);
     }
 
     #[test]

@@ -4534,6 +4534,7 @@ impl OpenCADStudio {
         };
         let lost = crate::io::drawing_properties_lost_on_save(
             &self.tabs[i].scene.document.summary_info,
+            &self.tabs[i].scene.document.header.hyperlink_base,
             version,
             is_dxf,
         );

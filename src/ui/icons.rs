@@ -1079,27 +1079,89 @@ pub fn themed_arrow_toggle<'a, M: 'a>(open: bool, size: f32) -> Element<'a, M> {
 }
 
 /// The dropdown arrow of split buttons, combos and menus: a solid triangle
-/// `DROPDOWN_ARROW_W` x `DROPDOWN_ARROW_H` drawn on whole pixels, in the
-/// text colour of the button it is in.
+/// `DROPDOWN_ARROW_W` x `DROPDOWN_ARROW_H`, in the text colour of the button
+/// it is in.
 pub fn dropdown_arrow<'a, M: 'a>() -> Element<'a, M> {
-    Element::new(PixelArrow { up: false })
+    arrow(metrics::DROPDOWN_ARROW_W, metrics::DROPDOWN_ARROW_H, false)
 }
 
 /// [`dropdown_arrow`] pointing up, for a list or slide-out that is open.
 pub fn dropup_arrow<'a, M: 'a>() -> Element<'a, M> {
-    Element::new(PixelArrow { up: true })
+    arrow(metrics::DROPDOWN_ARROW_W, metrics::DROPDOWN_ARROW_H, true)
 }
 
-struct PixelArrow {
+/// The chevron of a panel title strip that opens the panel's extra tools.
+pub fn chevron_down<'a, M: 'a>() -> Element<'a, M> {
+    arrow(metrics::CHEVRON_W, metrics::CHEVRON_H, false)
+}
+
+/// [`chevron_down`] pointing up, while the extra tools are open.
+pub fn chevron_up<'a, M: 'a>() -> Element<'a, M> {
+    arrow(metrics::CHEVRON_W, metrics::CHEVRON_H, true)
+}
+
+fn arrow<'a, M: 'a>(width: f32, height: f32, up: bool) -> Element<'a, M> {
+    Element::new(VectorArrow { width, height, up })
+}
+
+/// The window's scale factor, in thousandths: where a whole physical pixel
+/// lies, so an arrow's flat edge can sit on one.
+static SCALE_FACTOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1000);
+
+/// Note the window's scale factor (when it opens and whenever it changes).
+pub fn set_scale_factor(scale: f32) {
+    SCALE_FACTOR.store(
+        (scale * 1000.0).round() as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+fn scale_factor() -> f32 {
+    SCALE_FACTOR.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
+}
+
+/// `value` moved onto the nearest whole physical pixel.
+fn on_physical_pixel(value: f32) -> f32 {
+    let scale = scale_factor();
+    (value * scale).round() / scale
+}
+
+thread_local! {
+    static ARROW_CACHE: RefCell<FxHashMap<(u16, u16, bool), svg::Handle>> =
+        RefCell::new(FxHashMap::default());
+}
+
+/// A solid triangle `width` x `height` as a vector, flat edge on top
+/// (pointing down) or at the bottom (pointing up). The renderer draws it at
+/// the window's scale with smooth sides.
+fn arrow_handle(width: f32, height: f32, up: bool) -> svg::Handle {
+    let key = (size_key(Some(width)), size_key(Some(height)), up);
+    if let Some(handle) = ARROW_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return handle;
+    }
+    let tip = width / 2.0;
+    let path = if up {
+        format!("M0 {height} H{width} L{tip} 0 Z")
+    } else {
+        format!("M0 0 H{width} L{tip} {height} Z")
+    };
+    let source = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><path d="{path}" fill="black"/></svg>"#
+    );
+    let handle = svg::Handle::from_memory(source.into_bytes());
+    ARROW_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
+    handle
+}
+
+struct VectorArrow {
+    width: f32,
+    height: f32,
     up: bool,
 }
 
-impl<M> Widget<M, Theme, Renderer> for PixelArrow {
+impl<M> Widget<M, Theme, Renderer> for VectorArrow {
     fn size(&self) -> Size<Length> {
-        Size::new(
-            Length::Fixed(metrics::DROPDOWN_ARROW_W),
-            Length::Fixed(metrics::DROPDOWN_ARROW_H),
-        )
+        Size::new(Length::Fixed(self.width), Length::Fixed(self.height))
     }
 
     fn layout(
@@ -1110,8 +1172,8 @@ impl<M> Widget<M, Theme, Renderer> for PixelArrow {
     ) -> layout::Node {
         layout::atomic(
             limits,
-            Length::Fixed(metrics::DROPDOWN_ARROW_W),
-            Length::Fixed(metrics::DROPDOWN_ARROW_H),
+            Length::Fixed(self.width),
+            Length::Fixed(self.height),
         )
     }
 
@@ -1123,29 +1185,26 @@ impl<M> Widget<M, Theme, Renderer> for PixelArrow {
         style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: iced::advanced::mouse::Cursor,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
-        use iced::advanced::Renderer as _;
-        // Whole pixels, so the edges stay sharp.
-        let origin = Point::new(layout.bounds().x.round(), layout.bounds().y.round());
-        let rows = metrics::DROPDOWN_ARROW_H as usize;
-        for row in 0..rows {
-            let inset = row as f32;
-            let y = if self.up { rows - 1 - row } else { row } as f32;
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: origin.x + inset,
-                        y: origin.y + y,
-                        width: metrics::DROPDOWN_ARROW_W - 2.0 * inset,
-                        height: 1.0,
-                    },
-                    snap: true,
-                    ..renderer::Quad::default()
-                },
-                style.text_color,
-            );
-        }
+        // The shape is drawn as it is; only its corner sits on a whole
+        // physical pixel, which keeps the flat edge sharp at every scale.
+        let bounds = layout.bounds();
+        let at = Point::new(on_physical_pixel(bounds.x), on_physical_pixel(bounds.y));
+        let drawn = Rectangle::new(at, Size::new(self.width, self.height));
+        renderer.draw_svg(
+            core_svg::Svg {
+                handle: arrow_handle(self.width, self.height, self.up),
+                color: Some(style.text_color),
+                rotation: Radians(0.0),
+                opacity: 1.0,
+            },
+            drawn,
+            drawn
+                .expand(1.0)
+                .intersection(&viewport.expand(1.0))
+                .unwrap_or(drawn),
+        );
     }
 }
 

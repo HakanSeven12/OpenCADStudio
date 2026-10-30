@@ -2491,7 +2491,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             v_col += 1;
                             cursor_x = 0.0;
                         }
-                        for ch in text.chars() {
+                        for (index, ch) in text.chars().enumerate() {
                             let col_dx = (v_col - v_col_start) as f32 * entity_h * 1.2;
                             let s = ch.to_string();
                             let (strokes, fill_tris) = lff::tessellate_text_run(
@@ -2535,6 +2535,21 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             local_bounds[1] = local_bounds[1].min(gy0);
                             local_bounds[2] = local_bounds[2].max(gx + run_h);
                             local_bounds[3] = local_bounds[3].max(gy1);
+                            // Editor hit-testing: one box per character cell.
+                            if opts.want_glyph_boxes {
+                                let (ax, ay) = to_world(line_base_x, line_base_y, col_dx, ly);
+                                let (bx, by) =
+                                    to_world(line_base_x, line_base_y, col_dx + run_h, ly + cell);
+                                glyph_boxes.push(GlyphBox {
+                                    vis: atom.char_offset + index,
+                                    xmin: ax.min(bx),
+                                    xmax: ax.max(bx),
+                                    ymin: ay.min(by),
+                                    ymax: ay.max(by),
+                                    is_rtl: false,
+                                    local: [gx, line_ly + ly, gx + run_h, line_ly + ly + cell],
+                                });
+                            }
                             vis += 1;
                             cursor_x += cell;
                         }
@@ -2904,6 +2919,31 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         // on a column break is consumed by it (no leading
                         // blank cell at the top of a column).
                         let cell = atom.state.height_mul * entity_h * 1.4;
+                        // Editor hit-testing: the space's own cell (empty at
+                        // the top of a column, where it is consumed).
+                        if opts.want_glyph_boxes {
+                            let col_dx = (v_col - v_col_start) as f32 * entity_h * 1.2;
+                            let run_h = atom.state.height_mul * entity_h;
+                            let ly = -(cursor_x + cell);
+                            let h = if cursor_x <= 1e-6 { 0.0 } else { cell };
+                            let (ax, ay) = to_world(line_base_x, line_base_y, col_dx, ly);
+                            let (bx, by) =
+                                to_world(line_base_x, line_base_y, col_dx + run_h, ly + h);
+                            glyph_boxes.push(GlyphBox {
+                                vis: atom.char_offset,
+                                xmin: ax.min(bx),
+                                xmax: ax.max(bx),
+                                ymin: ay.min(by),
+                                ymax: ay.max(by),
+                                is_rtl: false,
+                                local: [
+                                    line_lx + col_dx,
+                                    line_ly + ly,
+                                    line_lx + col_dx + run_h,
+                                    line_ly + ly + h,
+                                ],
+                            });
+                        }
                         if cursor_x <= 1e-6 {
                             continue;
                         }
@@ -2996,6 +3036,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     // indent, or a second column's tabs miss every stop and
                     // shoot off right.
                     let tab_base = box_left;
+                    let tab_x0 = cursor_x;
                     let local = cursor_x - tab_base;
                     let stop = sub
                         .tab_stops
@@ -3062,6 +3103,23 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     entity_h,
                                 );
                         }
+                    }
+                    // Editor hit-testing only: the tab is one caret slot,
+                    // spanning the gap it opens (nothing is drawn for it).
+                    if opts.want_glyph_boxes {
+                        let run_h = atom.state.height_mul * entity_h;
+                        let x1 = cursor_x.max(tab_x0);
+                        let (ax, ay) = to_world(line_base_x, line_base_y, tab_x0, 0.0);
+                        let (bx, by) = to_world(line_base_x, line_base_y, x1, run_h);
+                        glyph_boxes.push(GlyphBox {
+                            vis: atom.char_offset,
+                            xmin: ax.min(bx),
+                            xmax: ax.max(bx),
+                            ymin: ay.min(by),
+                            ymax: ay.max(by),
+                            is_rtl: false,
+                            local: [line_lx + tab_x0, line_ly, line_lx + x1, line_ly + run_h],
+                        });
                     }
                 }
             }
@@ -3410,6 +3468,49 @@ mod v_anchor_tests {
             vertical_text: false,
             want_glyph_boxes: true,
         })
+    }
+
+    #[test]
+    fn tabs_and_vertical_text_get_one_caret_box_per_character() {
+        // A tab is one caret slot spanning the gap up to its stop.
+        let layout = layout_at_top("a\tb", 2.5);
+        let mut boxes: Vec<_> = layout.glyph_boxes.iter().collect();
+        boxes.sort_by_key(|b| b.vis);
+        assert_eq!(boxes.iter().map(|b| b.vis).collect::<Vec<_>>(), [0, 1, 2]);
+        let (a, tab, b) = (boxes[0], boxes[1], boxes[2]);
+        assert!((tab.xmin - a.xmax).abs() < 1e-3 && (tab.xmax - b.xmin).abs() < 1e-3);
+        // Vertical text: every character and space has its cell, going down.
+        let style = ResolvedTextStyle {
+            font_name: "txt".to_string(),
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            is_backward: false,
+            is_upside_down: false,
+            is_vertical: true,
+        };
+        let layout = layout_mtext(&MTextRenderOpts {
+            columns: Default::default(),
+            value: "ab c",
+            insertion: [0.0, 0.0, 0.0],
+            height: 2.5,
+            rect_w: 0.0,
+            rotation: 0.0,
+            style: &style,
+            attach_h_anchor: 0.0,
+            v_anchor: MTextVAnchor::Top,
+            line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
+            vertical_text: true,
+            want_glyph_boxes: true,
+        });
+        let mut boxes: Vec<_> = layout.glyph_boxes.iter().collect();
+        boxes.sort_by_key(|b| b.vis);
+        assert_eq!(
+            boxes.iter().map(|b| b.vis).collect::<Vec<_>>(),
+            [0, 1, 2, 3]
+        );
+        assert!(boxes.windows(2).all(|w| w[1].ymax <= w[0].ymin + 1e-3));
     }
 
     /// The top of what a line draws sits at the insertion point.

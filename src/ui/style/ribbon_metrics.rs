@@ -106,16 +106,6 @@ pub const LARGE_ICON: f32 = 32.0;
 pub const STRIP_ICON: f32 = 14.0;
 /// Size of the pin in the footer of a panel's extra tools.
 pub const PIN_ICON: f32 = 11.0;
-/// The icon files are drawn on a 24-unit grid; their artwork spans units
-/// `ICON_ART_START` to `ICON_ART_START + ICON_ART_SPAN`, and that span fills
-/// an icon's box.
-pub const ICON_GRID: f32 = 24.0;
-pub const ICON_ART_START: f32 = 2.5;
-pub const ICON_ART_SPAN: f32 = 19.0;
-/// How far artwork may reach past its box before it is cut off.
-pub const ICON_OVERFLOW: f32 = 1.0;
-/// Width of an icon's outline strokes on screen, at every size.
-pub const ICON_LINE: f32 = 1.0;
 /// The dropdown arrow: a solid triangle this wide and high.
 pub const DROPDOWN_ARROW_W: f32 = 5.0;
 pub const DROPDOWN_ARROW_H: f32 = 3.0;

@@ -75,11 +75,12 @@ pub fn apply_along(
     color: [f32; 4],
     selected: bool,
     line_weight_px: f32,
-    // Shared "A"-type reference length (the MLINE centre-line). `Some` end-aligns
-    // the pattern: a solid begin/end dash whose length is derived from `ref_total`
-    // (so every parallel element shares one interior phase and its dashes line up)
-    // while this element still ends on a dash at its own endpoint. `None` tiles
-    // the pattern from the start vertex (legacy phase, unchanged).
+    // "A"-type reference length: the path's own for a single entity, the shared
+    // centre-line for an MLINE element. `Some` end-aligns the pattern: a solid
+    // begin/end dash whose length is derived from `ref_total` (so every parallel
+    // element shares one interior phase and its dashes line up) while this
+    // element still ends on a dash at its own endpoint. `None` tiles the pattern
+    // from the start vertex.
     ref_total: Option<f32>,
 ) -> Vec<WireModel> {
     if path_pts.len() < 2 || lt.segments.is_empty() {
@@ -122,17 +123,22 @@ pub fn apply_along(
         return vec![];
     }
 
-    // "A"-type end alignment (MLINE): with a shared reference length, replace the
-    // from-start tiling with a solid begin/end dash and a phased interior so this
-    // element lines up with its siblings and ends on a dash. Dash-first patterns
-    // only; align_end is derived from `ref_total` (shared) but the trailing dash
-    // lands at this element's own end (`path_len`).
+    // "A"-type end alignment: with a reference length, replace the from-start
+    // tiling with a solid begin/end dash and a phased interior so the path
+    // begins and ends on a dash (an MLINE element also lines up with its
+    // siblings). Dash-first patterns only; align_end is derived from `ref_total`
+    // but the trailing dash lands at this path's own end (`path_len`).
     let atype_segs: Option<Vec<LtSeg>> = ref_total.and_then(|rt| {
         let a = match scaled.first() {
             Some(LtSeg::Dash(a)) if *a > 0.0 => *a,
             _ => return None,
         };
-        if rt <= pattern_len || path_len <= pattern_len {
+        // Too short for one whole pattern: one solid dash end to end, as the
+        // GPU dash shader draws a short aligned wire.
+        if path_len <= pattern_len {
+            return Some(vec![LtSeg::Dash(path_len)]);
+        }
+        if rt <= pattern_len {
             return None;
         }
         let k = ((rt - a) / pattern_len).round().max(1.0);

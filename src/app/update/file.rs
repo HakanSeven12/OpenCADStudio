@@ -4509,12 +4509,42 @@ impl OpenCADStudio {
         ext: &str,
         version: codec::DxfVersion,
     ) -> Option<Vec<String>> {
-        let format = ocs_save::external_format(ext)?;
+        let Some(format) = ocs_save::external_format(ext) else {
+            return self.drawing_properties_loss(i, ext, version);
+        };
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         // A write that fails outright is reported by the save itself.
         let losses = ocs_save::external_losses(&prepared, format).ok()?;
         (!losses.is_empty()).then_some(losses)
+    }
+
+    /// The drawing-properties warning when a DWG/DXF `version` cannot store the
+    /// properties tab `i` has filled in; `None` when there is nothing to lose.
+    fn drawing_properties_loss(
+        &self,
+        i: usize,
+        ext: &str,
+        version: codec::DxfVersion,
+    ) -> Option<Vec<String>> {
+        let (format, is_dxf) = match ext {
+            "dxf" => ("DXF", true),
+            "dwg" | "dwt" => ("DWG", false),
+            _ => return None,
+        };
+        let lost = crate::io::drawing_properties_lost_on_save(
+            &self.tabs[i].scene.document.summary_info,
+            version,
+            is_dxf,
+        );
+        (lost > 0).then(|| {
+            vec![crate::tr!(
+                "dwgprops-dialog",
+                "save-loss",
+                format = format,
+                count = lost.to_string()
+            )]
+        })
     }
 
     /// Hold `pending` back and ask whether to save despite `losses`.

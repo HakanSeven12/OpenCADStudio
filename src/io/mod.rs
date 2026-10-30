@@ -1756,6 +1756,35 @@ pub fn format_for_version(version: codec::DxfVersion, is_dxf: bool) -> String {
     format!("{} {}", if is_dxf { "DXF" } else { "DWG" }, year)
 }
 
+/// Drawing properties (`SummaryInfo`, the DWGPROPS dialog) that saving to
+/// `version` would silently drop. DWG R2000 and older write no SummaryInfo
+/// section at all; DXF R2000 and older write no `$TITLE`…`$CUSTOMPROPERTY`
+/// header variables, but still keep the hyperlink base (`$HYPERLINKBASE`).
+/// Counts the filled-in fields plus every custom property; `0` means the save
+/// loses nothing. "Last saved by" is not counted: it is stamped, not authored,
+/// and would otherwise ask on every save of a drawing nobody filled in.
+pub fn drawing_properties_lost_on_save(
+    info: &codec::document::SummaryInfo,
+    version: codec::DxfVersion,
+    is_dxf: bool,
+) -> usize {
+    if version >= codec::DxfVersion::AC1018 {
+        return 0;
+    }
+    let mut fields = vec![
+        &info.title,
+        &info.subject,
+        &info.author,
+        &info.keywords,
+        &info.comments,
+        &info.revision_number,
+    ];
+    if !is_dxf {
+        fields.push(&info.hyperlink_base);
+    }
+    fields.iter().filter(|value| !value.is_empty()).count() + info.custom_properties.len()
+}
+
 /// Count of unsupported "raw passthrough" objects/entities — AEC / application
 /// objects with no native representation, kept only as verbatim source-version
 /// bytes — that would be DROPPED when saving `doc` to `target_version` (or to

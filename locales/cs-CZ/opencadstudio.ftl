@@ -6778,6 +6778,7 @@ dwgprops-dialog =
     .cancel = Cancel
     .error-empty-name = Custom property { $row } has no name.
     .error-duplicate-name = Custom property name "{ $name }" is used more than once (names are case-insensitive).
+    .save-loss = { $format } files older than 2004 do not store the drawing properties; { $count } filled-in properties will be lost.
 purge-dialog =
     .title = Purge
     .blocks = Blocks

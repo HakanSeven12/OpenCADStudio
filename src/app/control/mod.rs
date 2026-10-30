@@ -1321,6 +1321,9 @@ impl OpenCADStudio {
                     Task::none()
                 } else {
                     self.prepare_native_save(i);
+                    // allow_lossy already acknowledged what the save drops; a
+                    // script must not be stopped by the confirmation dialog.
+                    self.conversion_loss_allowed = req["allow_lossy"].as_bool() == Some(true);
                     self.queue_native_save(
                         i,
                         path,
@@ -2105,6 +2108,36 @@ mod tests {
             "{qsave}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn windowed_save_with_allow_lossy_does_not_wait_for_the_loss_dialog() {
+        // DWG R2000 cannot store drawing properties; a script that acknowledged
+        // losses with allow_lossy must not be parked behind the confirmation.
+        for allow_lossy in [false, true] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.main_window = Some(iced::window::Id::unique());
+            assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+            let i = app.active_tab;
+            app.tabs[i].scene.document.summary_info.custom_properties =
+                vec![("Client".into(), "ACME".into())];
+            let path = std::env::temp_dir().join(format!(
+                "ocs_allow_lossy_{}_{allow_lossy}.dwg",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let _ = request(
+                &mut app,
+                json!({"op":"save","path":path,"overwrite":true,
+                       "target_version":"2000","allow_lossy":allow_lossy}),
+            );
+            assert_eq!(
+                app.active_modal == Some(crate::app::ModalKind::ConversionLoss),
+                !allow_lossy,
+                "allow_lossy={allow_lossy}"
+            );
+            let _ = std::fs::remove_file(&path);
+        }
     }
 
     #[test]

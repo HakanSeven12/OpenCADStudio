@@ -964,6 +964,15 @@ impl OpenCADStudio {
             // PLOT / PRINT open the full plot dialog (printer, paper, scale,
             // options); EXPORT / EXPORTPDF stay a direct PDF export.
             "PLOT" | "PRINT" => {
+                // DXEVAL: the plot command compares extraction tables
+                // before its dialog opens; -PLOT does not.
+                if let Some(task) = self.evaluate_extraction_tables(
+                    i,
+                    super::extraction_eval::EVENT_PLOT,
+                    Some(Message::Command(cmd.to_string())),
+                ) {
+                    return Some(task);
+                }
                 return Some(Task::done(Message::PlotDialogOpen));
             }
             // PUBLISH: the layouts of the drawing, each with its own page
@@ -1852,158 +1861,157 @@ impl OpenCADStudio {
                 }
             }
 
-            cmd if cmd == "DATALINKUPDATE" || cmd.starts_with("DATALINKUPDATE ") => {
-                let write_back = cmd
-                    .trim_start_matches("DATALINKUPDATE")
-                    .trim()
-                    .eq_ignore_ascii_case("WRITE");
-                let selected: Vec<codec::Handle> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .filter_map(|(handle, entity)| {
-                        matches!(entity, codec::EntityType::Table(_)).then_some(handle)
-                    })
-                    .collect();
-                let table_handles = if selected.is_empty() {
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .entities()
-                        .filter_map(|entity| {
-                            matches!(entity, codec::EntityType::Table(_))
-                                .then_some(entity.common().handle)
-                        })
-                        .collect::<Vec<_>>()
-                } else {
-                    selected
-                };
-                let mut jobs = Vec::new();
-                for handle in &table_handles {
-                    let Some(codec::EntityType::Table(table)) =
-                        self.tabs[i].scene.document.get_entity(*handle)
-                    else {
-                        continue;
-                    };
-                    let link_handle = table
+            "DATALINKUPDATE" => {
+                let names = crate::app::annotation_data::data_link_entries(
+                    &self.tabs[i].scene.document,
+                )
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+                let command =
+                    crate::modules::annotate::data_link::DataLinkUpdateCommand::new(names);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            // DATALINKUPDATE _RUN <U|W> <ALL|SEL|NAME name> — the end of the
+            // interactive command: update the chosen linked tables from their
+            // sources, or write them back.
+            cmd if cmd.starts_with("DATALINKUPDATE _RUN") => {
+                let args = cmd.trim_start_matches("DATALINKUPDATE _RUN").trim();
+                if args == "NONE" {
+                    self.command_line.push_output(
+                        crate::t!("No data links exist in the current drawing.").as_ref(),
+                    );
+                    self.command_line.push_output(
+                        crate::t!("To create a data link, use the DATALINK command.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let write = args.starts_with('W');
+                let scope = args.get(2..).unwrap_or("").trim();
+                let document = &self.tabs[i].scene.document;
+                let link_of = |table: &codec::entities::Table| {
+                    table
                         .rows
                         .iter()
                         .flat_map(|row| row.cells.iter())
-                        .find_map(|cell| cell.data_link_handle);
-                    let Some(link_handle) = link_handle else {
-                        continue;
-                    };
-                    jobs.push((*handle, link_handle));
-                }
-                if jobs.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("DATALINKUPDATE: no linked tables found.").as_ref());
-                    return Some(Task::none());
-                }
-                if write_back {
+                        .find_map(|cell| cell.data_link_handle)
+                };
+                let wanted_link = scope.strip_prefix("NAME ").and_then(|name| {
+                    crate::app::annotation_data::data_link_entries(document)
+                        .into_iter()
+                        .find(|(known, _)| known.eq_ignore_ascii_case(name.trim()))
+                        .map(|(_, handle)| handle)
+                });
+                let selected: Vec<codec::Handle> = if scope == "SEL" {
+                    self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(handle, _)| handle)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let jobs: Vec<(codec::Handle, codec::Handle)> = document
+                    .entities()
+                    .filter_map(|entity| match entity {
+                        codec::EntityType::Table(table) => {
+                            link_of(table).map(|link| (entity.common().handle, link))
+                        }
+                        _ => None,
+                    })
+                    .filter(|(table, link)| match scope {
+                        "SEL" => selected.contains(table),
+                        "ALL" => true,
+                        _ => Some(*link) == wanted_link,
+                    })
+                    .collect();
+                self.command_line.push_output(
+                    crate::tf!("{} object(s) found.", jobs.len()).as_ref(),
+                );
+                if write {
+                    let mut refused = 0usize;
                     let mut written = 0usize;
-                    let mut errors = Vec::new();
                     for (table_handle, link_handle) in &jobs {
+                        let document = &self.tabs[i].scene.document;
+                        if !crate::app::annotation_data::data_link_allows_write(
+                            document,
+                            *link_handle,
+                        ) {
+                            refused += 1;
+                            continue;
+                        }
                         let Some(codec::EntityType::Table(table)) =
-                            self.tabs[i].scene.document.get_entity(*table_handle)
+                            document.get_entity(*table_handle)
                         else {
                             continue;
                         };
                         let csv = table_to_csv(table);
                         match crate::app::annotation_data::data_link_write_path(
-                            &self.tabs[i].scene.document,
+                            document,
                             *link_handle,
                         )
                         .and_then(|path| {
                             std::fs::write(path, csv).map_err(|error| error.to_string())
                         }) {
                             Ok(()) => written += 1,
-                            Err(error) => errors.push(error),
+                            Err(error) => self.command_line.push_error(&error),
                         }
                     }
-                    if written > 0 {
+                    if refused > 0 {
                         self.command_line.push_output(
-                            crate::tf!("DATALINKUPDATE: wrote {} linked source(s).", written)
-                                .as_ref(),
+                            crate::tf!(
+                                "{} data link(s) do not allow their data to be written out.",
+                                refused
+                            )
+                            .as_ref(),
                         );
                     }
-                    for error in errors {
-                        self.command_line.push_error(&error);
-                    }
-                    return Some(Task::none());
-                }
-                let updates: Vec<_> = jobs
-                    .into_iter()
-                    .filter_map(|(table_handle, link_handle)| {
-                        crate::app::annotation_data::read_data_link(
-                            &self.tabs[i].scene.document,
-                            link_handle,
-                        )
-                        .ok()
-                        .map(|rows| (table_handle, link_handle, rows))
-                    })
-                    .filter(|(_, _, rows)| !rows.is_empty())
-                    .collect();
-                if updates.is_empty() {
-                    self.command_line.push_error(
-                        crate::t!("DATALINKUPDATE: linked sources could not be read.").as_ref(),
+                    self.command_line.push_output(
+                        crate::tf!("{} data link(s) written out successfully.", written).as_ref(),
                     );
                     return Some(Task::none());
                 }
-                self.push_undo_snapshot(i, "DATALINKUPDATE");
-                use codec::entities::table::CellStateFlags;
-                let mut changed_handles = Vec::new();
-                for (table_handle, link_handle, rows) in updates {
-                    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-                    let Some(codec::EntityType::Table(table)) =
-                        self.tabs[i].scene.document.get_entity_mut(table_handle)
-                    else {
-                        continue;
-                    };
-                    while table.row_count() < rows.len() {
-                        table.add_row();
-                    }
-                    while table.row_count() > rows.len() {
-                        table.remove_row(table.row_count() - 1);
-                    }
-                    while table.column_count() < columns {
-                        let width = table
-                            .columns
-                            .last()
-                            .map(|column| column.width)
-                            .unwrap_or(2.0);
-                        table.add_column(width);
-                    }
-                    while table.column_count() > columns {
-                        table.remove_column(table.column_count() - 1);
-                    }
-                    for row in 0..rows.len() {
-                        for column in 0..columns {
-                            if let Some(cell) = table.cell_mut(row, column) {
-                                cell.set_text(
-                                    rows[row].get(column).map(String::as_str).unwrap_or(""),
-                                );
-                                cell.has_linked_data = true;
-                                cell.data_link_handle = Some(link_handle);
-                                cell.data_link_rows = rows.len() as i32;
-                                cell.data_link_columns = columns as i32;
-                                cell.state.insert(
-                                    CellStateFlags::LINKED
-                                        | CellStateFlags::CONTENT_LOCKED
-                                        | CellStateFlags::FORMAT_LOCKED,
-                                );
-                            }
+                let mut updates = Vec::new();
+                let mut failed = 0usize;
+                for (table_handle, link_handle) in &jobs {
+                    let document = &self.tabs[i].scene.document;
+                    // An extraction table is refreshed by running its saved
+                    // extraction again, under its title row.
+                    let (read, first_linked_row) =
+                        match crate::app::annotation_data::extraction_table_rows(
+                            document,
+                            self.tabs[i].current_path.as_deref(),
+                            *table_handle,
+                            *link_handle,
+                        ) {
+                            Some(rows) => (rows, 1),
+                            None => (
+                                crate::app::annotation_data::read_data_link(
+                                    document,
+                                    *link_handle,
+                                ),
+                                0,
+                            ),
+                        };
+                    match read {
+                        Ok(rows) if !rows.is_empty() => {
+                            updates.push((*table_handle, *link_handle, rows, first_linked_row))
                         }
+                        _ => failed += 1,
                     }
-                    changed_handles.push(table_handle);
                 }
-                self.invalidate_property_targets(i, &changed_handles);
-                self.tabs[i].dirty = true;
-                self.refresh_properties();
+                let updated = self.apply_link_updates(i, updates);
+                if failed > 0 {
+                    self.command_line.push_output(
+                        crate::tf!("{} object(s) could not be updated.", failed).as_ref(),
+                    );
+                }
                 self.command_line.push_output(
                     crate::tf!(
-                        "DATALINKUPDATE: updated {} linked table(s).",
-                        changed_handles.len()
+                        "{} object(s) updated successfully.",
+                        updated
                     )
                     .as_ref(),
                 );
@@ -2197,6 +2205,49 @@ pub(crate) fn parse_csv_table(text: &str) -> Vec<Vec<String>> {
         }
     }
     rows
+}
+
+/// Replaces a linked table's cells with the rows read from its link, growing
+/// or shrinking the grid to fit, and locks every cell to the link.
+pub(crate) fn apply_link_rows(
+    table: &mut codec::entities::Table,
+    link_handle: codec::Handle,
+    rows: &[Vec<String>],
+    first_linked_row: usize,
+) {
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    while table.row_count() < rows.len() {
+        // A new row repeats the row above it (height, cell formats); its
+        // texts are written below.
+        match table.rows.last().cloned() {
+            Some(row) => table.rows.push(row),
+            None => {
+                table.add_row();
+            }
+        }
+    }
+    while table.row_count() > rows.len() {
+        table.remove_row(table.row_count() - 1);
+    }
+    while table.column_count() < columns {
+        let width = table
+            .columns
+            .last()
+            .map(|column| column.width)
+            .unwrap_or(2.0);
+        table.add_column(width);
+    }
+    while table.column_count() > columns {
+        table.remove_column(table.column_count() - 1);
+    }
+    for (row, values) in rows.iter().enumerate() {
+        for column in 0..columns {
+            if let Some(cell) = table.cell_mut(row, column) {
+                cell.set_text(values.get(column).map(String::as_str).unwrap_or(""));
+            }
+        }
+    }
+    crate::modules::annotate::data_link::link_cells(table, link_handle, first_linked_row);
 }
 
 pub(crate) fn table_to_csv(table: &codec::entities::Table) -> String {

@@ -3,8 +3,8 @@ use super::*;
 use crate::scene::parametric_constraints::{ParametricConstraintSet, ParametricScope};
 use codec::entities::{Arc, Circle, Ellipse, Line};
 
-fn fixture() -> (codec::CadDocument, Vec<Handle>, ParametricConstraintSet) {
-    let mut doc = codec::CadDocument::new();
+fn fixture() -> (codec::Document, Vec<Handle>, ParametricConstraintSet) {
+    let mut doc = codec::Document::new();
     let mut handles = vec![];
     for entity in [
         EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_X)),

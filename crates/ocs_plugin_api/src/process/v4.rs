@@ -130,7 +130,7 @@ impl V4Connection {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let kind = request_kind(&req);
         let timeout = request_timeout(kind);
-        let deadline = Instant::now() + timeout;
+        let mut deadline = Instant::now() + timeout;
 
         // A coalesced grip move (API v11) may have been answered between
         // polls; its response waits in `deferred_responses`. Consume ours
@@ -191,7 +191,13 @@ impl V4Connection {
                     tab_id,
                     payload,
                 }) => {
-                    if tab_id.is_none_or(|request_tab| request_tab == host.tab_id()) {
+                    // Refresh the call deadline whenever the plugin actively
+                    // communicates (including periodic keep-alive heartbeats
+                    // while paused in an interactive debugger).
+                    deadline = Instant::now() + timeout;
+                    if matches!(*payload, PluginRequest::GetTabId)
+                        || tab_id.is_none_or(|request_tab| request_tab == host.tab_id() || host.tab_id() == 0)
+                    {
                         self.respond_to_plugin_request(host, rid, payload, on_start_interactive)?;
                     } else {
                         self.deferred
@@ -576,7 +582,7 @@ mod tests {
     use crate::ipc::protocol::{HostResponse, PluginRequest, PluginResponse};
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
-    use codec::{CadDocument, Handle};
+    use codec::{Document, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, ToNsName,
@@ -644,10 +650,10 @@ mod tests {
         fn tab_index(&self) -> usize {
             0
         }
-        fn document(&self) -> &CadDocument {
+        fn document(&self) -> &Document {
             panic!("not used")
         }
-        fn document_mut(&mut self) -> &mut CadDocument {
+        fn document_mut(&mut self) -> &mut Document {
             panic!("not used")
         }
         fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
@@ -1164,10 +1170,10 @@ mod tests {
         fn tab_index(&self) -> usize {
             0
         }
-        fn document(&self) -> &CadDocument {
+        fn document(&self) -> &Document {
             panic!("not used")
         }
-        fn document_mut(&mut self) -> &mut CadDocument {
+        fn document_mut(&mut self) -> &mut Document {
             panic!("not used")
         }
         fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
@@ -1276,7 +1282,7 @@ mod tests {
                 &PluginToHostV4::Request {
                     id: 6000 + id,
                     tab_id: Some(0),
-                    payload: PluginRequest::ExecuteCommand("CVI_REPLAY".to_string()),
+                    payload: PluginRequest::ExecuteCommand("PLUGIN_REPLAY".to_string()),
                 },
             )
             .expect("nested command send");
@@ -1299,6 +1305,8 @@ mod tests {
                     payload: HostResponse::CustomGrip(crate::host::CustomGripResponse {
                         preview: Vec::new(),
                         live_entities: Vec::new(),
+                        descriptor: None,
+                        descriptor_tolerance: None,
                     }),
                 },
             )
@@ -1410,5 +1418,73 @@ mod tests {
             "the whole exchange stays cheap — the wall-clock timeout never runs"
         );
         runner.join().expect("runner thread finished");
+    }
+
+    #[test]
+    fn plugin_requests_refresh_call_deadline_during_debug_pause() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_test_env();
+        std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", "1");
+
+        let (runner_end, host_end) = connect_pair();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let runner = thread::spawn(move || {
+            let mut stream = runner_end;
+            let frame = recv::<HostToPluginV4>(&mut stream).expect("dispatch frame");
+            let HostToPluginV4::Request { id, .. } = frame else {
+                panic!("unexpected frame: {frame:?}")
+            };
+            // Simulate a plugin paused in a debugger for longer than the 1s
+            // call timeout window by sending periodic keep-alive GetTabId
+            // requests every 350ms (total ~1.75s > 1s).
+            for req_idx in 0..5u64 {
+                thread::sleep(Duration::from_millis(350));
+                send(
+                    &mut stream,
+                    &PluginToHostV4::Request {
+                        id: 9000 + req_idx,
+                        tab_id: Some(0),
+                        payload: PluginRequest::GetTabId,
+                    },
+                )
+                .expect("keepalive send");
+                match recv::<HostToPluginV4>(&mut stream).expect("keepalive reply") {
+                    HostToPluginV4::Response {
+                        payload: PluginResponse::TabId(_),
+                        ..
+                    } => {}
+                    other => panic!("unexpected keepalive reply: {other:?}"),
+                }
+            }
+            send(
+                &mut stream,
+                &PluginToHostV4::Response {
+                    id,
+                    payload: HostResponse::Bool(true),
+                },
+            )
+            .expect("dispatch response");
+            // Hold the stream open until the host thread has verified the
+            // connection survived the debug pause.
+            let _ = done_rx.recv_timeout(Duration::from_secs(10));
+        });
+
+        let conn = V4Connection::new(host_end, Arc::new(|_, _| {})).expect("connection");
+        let mut host = RecordingHost::default();
+        let resp = conn
+            .call(
+                &mut host,
+                HostRequest::Dispatch {
+                    cmd: "DEBUG_CMD".to_string(),
+                },
+                &mut |_| {},
+            )
+            .expect("periodic plugin requests should refresh deadline and prevent timeout");
+        assert!(matches!(resp, HostResponse::Bool(true)));
+        assert!(conn.is_alive());
+        let _ = done_tx.send(());
+        runner.join().expect("runner thread finished");
+        std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS");
+        restore_test_env();
     }
 }

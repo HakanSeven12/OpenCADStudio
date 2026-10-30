@@ -372,6 +372,129 @@ fn block_test_unsaved_visibility_states_work_without_changing_the_editor() {
     assert_eq!(app.tabs[source].scene.document, original);
 }
 
+/// A door, a window frame and a cat in `SAMPLE`, edited in a block test, with
+/// a `WindowHidden` state controlling only the frame. Returns the test tab,
+/// its model-space reference and the hidden state's index.
+fn visibility_reference() -> (OpenCADStudio, usize, Handle, usize) {
+    let (mut app, source, _) = fixture();
+    let doc = &mut app.tabs[source].scene.document;
+    let owner = doc.block_records.get("SAMPLE").unwrap().handle;
+    let mut frame = Line::from_points(
+        Vector3::new(10.0, 21.0, 0.0),
+        Vector3::new(15.0, 21.0, 0.0),
+    );
+    frame.common.owner_handle = owner;
+    let frame = doc.add_entity(EntityType::Line(frame)).unwrap();
+    let mut cat = Line::from_points(
+        Vector3::new(10.0, 22.0, 0.0),
+        Vector3::new(15.0, 22.0, 0.0),
+    );
+    cat.common.owner_handle = owner;
+    doc.add_entity(EntityType::Line(cat)).unwrap();
+    let parameter = crate::scene::block_visibility::create(doc, owner, Vector3::ZERO).unwrap();
+    let hidden =
+        crate::scene::block_visibility::add_state(doc, parameter, "WindowHidden", 0).unwrap();
+    crate::scene::block_visibility::set_visible(doc, parameter, hidden, &[frame], false);
+
+    let _ = app.open_block_test(source);
+    let test = app.active_tab;
+    let model = app.tabs[test].scene.document.header.model_space_block_handle;
+    let reference = app.tabs[test]
+        .scene
+        .document
+        .entities()
+        .find(|e| e.common().owner_handle == model && matches!(e, EntityType::Insert(_)))
+        .unwrap()
+        .common()
+        .handle;
+    (app, test, reference, hidden)
+}
+
+/// A state hides only the objects its parameter controls. A reference to the
+/// definition keeps drawing the members the state never mentions.
+#[test]
+fn block_test_visibility_state_hides_only_the_controlled_member() {
+    let (mut app, test, reference, hidden) = visibility_reference();
+    app.apply_visibility_state(reference, hidden);
+    app.finish_pending_history(test);
+
+    let doc = &app.tabs[test].scene.document;
+    let EntityType::Insert(insert) = doc.get_entity(reference).unwrap() else {
+        unreachable!()
+    };
+    let mut visible: Vec<f64> = doc
+        .entities_in_block(&insert.block_name)
+        .filter(|entity| !entity.common().invisible)
+        .filter_map(|entity| match entity {
+            EntityType::Line(line) => Some(line.start.y),
+            _ => None,
+        })
+        .collect();
+    visible.sort_by(f64::total_cmp);
+    assert_eq!(
+        visible,
+        vec![20.0, 22.0],
+        "the door and the cat stay visible; only the window frame is hidden"
+    );
+
+    let Some(crate::scene::model::object::Property {
+        value:
+            crate::scene::model::object::PropValue::ChoiceWithTooltip {
+                selected, options, ..
+            },
+        ..
+    }) = OpenCADStudio::visibility_property(doc, reference)
+    else {
+        panic!("a visibility row for the reference")
+    };
+    assert_eq!(options, ["VisibilityState0", "WindowHidden"]);
+    assert_eq!(selected, "WindowHidden");
+
+    app.tabs[test].scene.select_entity(reference, true);
+    app.tabs[test].selected_handle = Some(reference);
+    app.refresh_visibility_grip([0.0, 0.0, 0.0]);
+    assert_eq!(
+        app.tabs[test]
+            .visibility_grip
+            .as_ref()
+            .and_then(|grip| grip.current),
+        Some(hidden),
+        "the popup ticks the state the reference shows"
+    );
+}
+
+/// The palette names the state once, on the editable `Visibility1` row; it
+/// neither lists every state nor repeats the parameter name as a value.
+#[test]
+fn block_visibility_state_is_shown_once_as_the_editable_row() {
+    let (mut app, test, reference, hidden) = visibility_reference();
+    app.apply_visibility_state(reference, hidden);
+    app.finish_pending_history(test);
+    app.tabs[test].scene.select_entity(reference, true);
+    app.tabs[test].selected_handle = Some(reference);
+    app.refresh_properties();
+
+    let rows: Vec<&crate::scene::model::object::Property> =
+        app.tabs[test].properties.sections.iter().flat_map(|s| &s.props).collect();
+    let visibility: Vec<&&crate::scene::model::object::Property> = rows
+        .iter()
+        .filter(|row| row.field == "dyn_visibility")
+        .collect();
+    assert_eq!(visibility.len(), 1, "one row carries the state");
+    assert!(
+        matches!(&visibility[0].value, crate::scene::model::object::PropValue::ChoiceWithTooltip { selected, .. } if selected == "WindowHidden"),
+        "the row shows the current state: {:?}",
+        visibility[0].value
+    );
+    assert!(app.tabs[test].properties.choice_combos.contains_key("dyn_visibility"));
+    for label in ["Visibility", "Visibility states"] {
+        assert!(
+            !rows.iter().any(|row| row.label == label),
+            "the palette repeats the state as '{label}'"
+        );
+    }
+}
+
 #[test]
 fn block_test_lookup_choice_evaluates_temporary_reference_only() {
     use crate::scene::model::object::PropValue;

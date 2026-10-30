@@ -516,10 +516,10 @@ mod tests {
             fn tab_index(&self) -> usize {
                 0
             }
-            fn document(&self) -> &codec::CadDocument {
+            fn document(&self) -> &codec::Document {
                 panic!("not used")
             }
-            fn document_mut(&mut self) -> &mut codec::CadDocument {
+            fn document_mut(&mut self) -> &mut codec::Document {
                 panic!("not used")
             }
             fn document_reader(&self) -> Box<dyn crate::host::DocumentReader + '_> {

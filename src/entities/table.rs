@@ -142,7 +142,7 @@ fn cell_text_height(
 /// A cell's text style: the content's own, else the cell, row, column or
 /// table style that sets it (by handle, or by name for a cell override).
 fn cell_text_style(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     table: &Table,
     row: &codec::entities::table::TableRow,
     column: usize,
@@ -161,6 +161,21 @@ fn cell_text_style(
                 .map(|s| s.handle)
         })
     })
+}
+
+/// The face each text style draws with, resolved the way text of that style
+/// resolves anywhere else (a .shx file on disk before the built-in stroke
+/// font of its name), so a table's cells match the text of its picture.
+fn table_style_fonts(document: &codec::Document) -> rustc_hash::FxHashMap<codec::Handle, String> {
+    document
+        .text_styles
+        .iter()
+        .map(|style| {
+            let font = crate::entities::text_support::resolve_text_style(&style.name, document)
+                .font_name;
+            (style.handle, font)
+        })
+        .collect()
 }
 
 fn style_for_border<'a>(
@@ -676,7 +691,7 @@ fn fallback_content_centers(
 }
 
 fn content_display_value(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     table: &Table,
     content: &codec::entities::table::CellContent,
 ) -> String {
@@ -701,7 +716,7 @@ fn content_display_value(
 }
 
 fn resolved_content_geometry(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     table: &Table,
     row: usize,
     column: usize,
@@ -753,7 +768,7 @@ fn resolved_content_geometry(
 
 pub(crate) fn block_cell_inserts(
     table: &Table,
-    document: &codec::CadDocument,
+    document: &codec::Document,
     anno_scale: f32,
 ) -> Vec<codec::entities::Insert> {
     use codec::entities::table::ContentLayoutFlags;
@@ -1054,7 +1069,7 @@ pub(crate) fn block_cell_inserts(
 }
 
 impl RenderConvertible for Table {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         if self.rows.is_empty() || self.columns.is_empty() {
             return None;
         }
@@ -1190,33 +1205,9 @@ impl RenderConvertible for Table {
         let title_suppressed = resolved_title_suppressed(self, table_style);
         let header_suppressed = resolved_header_suppressed(self, table_style);
 
+        let style_fonts = table_style_fonts(document);
         let font_for_handle = |handle: Option<codec::Handle>| -> Option<String> {
-            handle.and_then(|h| lookup_style(h)).and_then(|s| {
-                let mut font_name = if !s.true_type_font.trim().is_empty() {
-                    s.true_type_font.trim().to_string()
-                } else {
-                    let file = s.font_file.trim();
-                    if !file.is_empty() {
-                        let basename = file.rsplit(['/', '\\']).next().unwrap_or(file);
-                        let stem = basename.split('.').next().unwrap_or(basename).trim();
-                        if !stem.is_empty() {
-                            stem.to_string()
-                        } else {
-                            return None;
-                        }
-                    } else {
-                        return None;
-                    }
-                };
-                if !crate::scene::text::lff::is_builtin(&font_name) {
-                    if let Some(canonical) =
-                        crate::scene::text::sysfont::canonical_family_name(&font_name)
-                    {
-                        font_name = canonical;
-                    }
-                }
-                Some(font_name)
-            })
+            handle.and_then(|h| style_fonts.get(&h).cloned())
         };
         // Build a ResolvedTextStyle for the cell — needed by the shared MText
         // pipeline so inline `\W`, `\Q`, etc. compose with the style baseline.
@@ -1398,7 +1389,7 @@ impl RenderConvertible for Table {
 /// Builds colored geometry for tables without a stored display block.
 pub fn tessellate_table(
     tab: &Table,
-    document: &codec::CadDocument,
+    document: &codec::Document,
     selected: bool,
     entity_color: [f32; 4],
     line_weight_px: f32,
@@ -1469,29 +1460,9 @@ pub fn tessellate_table(
     let lookup_style = |hh: codec::Handle| -> Option<&codec::tables::TextStyle> {
         document.text_styles.iter().find(|s| s.handle == hh)
     };
+    let style_fonts = table_style_fonts(document);
     let font_for_handle = |handle: Option<codec::Handle>| -> Option<String> {
-        handle.and_then(lookup_style).and_then(|s| {
-            let mut font_name = if !s.true_type_font.trim().is_empty() {
-                s.true_type_font.trim().to_string()
-            } else {
-                let file = s.font_file.trim();
-                let basename = file.rsplit(['/', '\\']).next().unwrap_or(file);
-                let stem = basename.split('.').next().unwrap_or(basename).trim();
-                if !stem.is_empty() {
-                    stem.to_string()
-                } else {
-                    return None;
-                }
-            };
-            if !crate::scene::text::lff::is_builtin(&font_name) {
-                if let Some(canonical) =
-                    crate::scene::text::sysfont::canonical_family_name(&font_name)
-                {
-                    font_name = canonical;
-                }
-            }
-            Some(font_name)
-        })
+        handle.and_then(|h| style_fonts.get(&h).cloned())
     };
     let resolved_style_for_handle =
         |handle: Option<codec::Handle>, font_name: String| -> ResolvedTextStyle {
@@ -2167,50 +2138,35 @@ pub fn tessellate_table(
 }
 
 impl Grippable for Table {
+    /// The reference's table grips: the insertion point; arrows that
+    /// stretch the width (top right), the height (bottom left) or both
+    /// (bottom right); a square on every column line; and the arrow at the
+    /// bottom middle that breaks the table.
     fn grips(&self) -> Vec<GripDef> {
-        let origin = glam::DVec3::new(
-            self.insertion_point.x,
-            self.insertion_point.y,
-            self.insertion_point.z,
-        );
-        let horizontal = glam::DVec3::new(
-            self.horizontal_direction.x,
-            self.horizontal_direction.y,
-            self.horizontal_direction.z,
-        )
-        .normalize_or(glam::DVec3::X);
-        let normal = glam::DVec3::new(self.normal.x, self.normal.y, self.normal.z)
-            .normalize_or(glam::DVec3::Z);
-        let down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
+        use crate::entities::common::oriented_triangle_grip;
+        let (origin, horizontal, down) = grip_frame(self);
         let width = self.total_width();
         let height = self.total_height();
-        let mut grips = vec![square_grip(0, origin)];
-        grips.push(square_grip(1, origin + horizontal * width));
-        grips.push(square_grip(2, origin + down * height));
+        let mut grips = vec![
+            square_grip(0, origin),
+            oriented_triangle_grip(1, origin + horizontal * width, horizontal),
+            oriented_triangle_grip(2, origin + down * height, down),
+            oriented_triangle_grip(
+                3,
+                origin + horizontal * width + down * height,
+                (horizontal + down).normalize_or(down),
+            ),
+            oriented_triangle_grip(4, origin + horizontal * (width * 0.5) + down * height, down),
+        ];
+        let line_y = column_grip_offset(self);
         let mut offset = 0.0;
-        for (column, definition) in self.columns.iter().enumerate() {
-            offset += definition.width;
-            if column + 1 < self.columns.len() {
-                grips.push(square_grip(
-                    100 + column,
-                    origin + horizontal * offset + down * (height * 0.5),
-                ));
+        for line in 0..=self.columns.len() {
+            if line > 0 {
+                offset += self.columns[line - 1].width;
             }
-        }
-        offset = 0.0;
-        for (row, definition) in self.rows.iter().enumerate() {
-            offset += definition.height;
-            if row + 1 < self.rows.len() {
-                grips.push(square_grip(
-                    1000 + row,
-                    origin + horizontal * (width * 0.5) + down * offset,
-                ));
-            }
-        }
-        for (index, data) in self.break_data.iter().enumerate() {
             grips.push(square_grip(
-                2000 + index,
-                origin + glam::DVec3::new(data.position.x, data.position.y, data.position.z),
+                100 + line,
+                origin + horizontal * offset + down * line_y,
             ));
         }
         grips
@@ -2232,60 +2188,97 @@ impl Grippable for Table {
             self.insertion_point.z = point.z;
             return;
         }
-        let origin = glam::DVec3::new(
-            self.insertion_point.x,
-            self.insertion_point.y,
-            self.insertion_point.z,
-        );
-        let horizontal = glam::DVec3::new(
-            self.horizontal_direction.x,
-            self.horizontal_direction.y,
-            self.horizontal_direction.z,
-        )
-        .normalize_or(glam::DVec3::X);
-        let normal = glam::DVec3::new(self.normal.x, self.normal.y, self.normal.z)
-            .normalize_or(glam::DVec3::Z);
-        let down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
-        if grip_id == 1 {
-            let width = (point - origin).dot(horizontal).max(1.0e-6);
-            let current = self.total_width();
+        let (origin, horizontal, down) = grip_frame(self);
+        let along = (point - origin).dot(horizontal);
+        let below = (point - origin).dot(down);
+        let scale_columns = |table: &mut Self, width: f64| {
+            let current = table.total_width();
             if current > 1.0e-12 {
-                for column in &mut self.columns {
-                    column.width *= width / current;
+                for column in &mut table.columns {
+                    column.width *= width.max(1.0e-6) / current;
                 }
             }
-        } else if grip_id == 2 {
-            let height = (point - origin).dot(down).max(1.0e-6);
-            let current = self.total_height();
+        };
+        let scale_rows = |table: &mut Self, height: f64| {
+            let current = table.total_height();
             if current > 1.0e-12 {
-                for row in &mut self.rows {
-                    row.height *= height / current;
+                for row in &mut table.rows {
+                    row.height *= height.max(1.0e-6) / current;
                 }
             }
-        } else if (100..1000).contains(&grip_id) {
-            let column = grip_id - 100;
-            let before: f64 = self
-                .columns
-                .iter()
-                .take(column)
-                .map(|item| item.width)
-                .sum();
-            if let Some(definition) = self.columns.get_mut(column) {
-                definition.width = ((point - origin).dot(horizontal) - before).max(1.0e-6);
+        };
+        match grip_id {
+            1 => scale_columns(self, along),
+            2 => scale_rows(self, below),
+            3 => {
+                scale_columns(self, along);
+                scale_rows(self, below);
             }
-        } else if (1000..2000).contains(&grip_id) {
-            let row = grip_id - 1000;
-            let before: f64 = self.rows.iter().take(row).map(|item| item.height).sum();
-            if let Some(definition) = self.rows.get_mut(row) {
-                definition.height = ((point - origin).dot(down) - before).max(1.0e-6);
+            // Breaking: the table splits where the arrow is left.
+            4 => {
+                use codec::entities::table::BreakOptionFlags;
+                if below > 1.0e-6 && below < self.total_height() {
+                    self.break_options.insert(BreakOptionFlags::ENABLE_BREAKS);
+                    self.apply_geom_prop("tbl_break_height", &below.to_string());
+                }
             }
-        } else if grip_id >= 2000 {
-            if let Some(data) = self.break_data.get_mut(grip_id - 2000) {
-                let offset = point - origin;
-                data.position = codec::types::Vector3::new(offset.x, offset.y, offset.z);
+            // The left line moves the table's left edge, the others the
+            // right edge of the column before them.
+            100 => {
+                if let Some(first) = self.columns.first_mut() {
+                    let width = (first.width - along).max(1.0e-6);
+                    let shift = horizontal * (first.width - width);
+                    first.width = width;
+                    self.insertion_point.x += shift.x;
+                    self.insertion_point.y += shift.y;
+                    self.insertion_point.z += shift.z;
+                }
             }
+            id if id > 100 => {
+                let column = id - 101;
+                let before: f64 = self.columns.iter().take(column).map(|c| c.width).sum();
+                if let Some(definition) = self.columns.get_mut(column) {
+                    definition.width = (along - before).max(1.0e-6);
+                }
+            }
+            _ => {}
         }
     }
+}
+
+/// Insertion point and the table's across and downward directions.
+fn grip_frame(table: &Table) -> (glam::DVec3, glam::DVec3, glam::DVec3) {
+    let origin = glam::DVec3::new(
+        table.insertion_point.x,
+        table.insertion_point.y,
+        table.insertion_point.z,
+    );
+    let horizontal = glam::DVec3::new(
+        table.horizontal_direction.x,
+        table.horizontal_direction.y,
+        table.horizontal_direction.z,
+    )
+    .normalize_or(glam::DVec3::X);
+    let normal =
+        glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z).normalize_or(glam::DVec3::Z);
+    let down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
+    (origin, horizontal, down)
+}
+
+/// The column grips sit on the top edge of the first row whose cells do
+/// not span columns (below a merged title).
+fn column_grip_offset(table: &Table) -> f64 {
+    let mut offset = 0.0;
+    for (index, row) in table.rows.iter().enumerate() {
+        let spans = table.merged_ranges.iter().any(|range| {
+            range.top_row <= index && index <= range.bottom_row && range.right_col > range.left_col
+        });
+        if !spans {
+            return offset;
+        }
+        offset += row.height;
+    }
+    0.0
 }
 
 impl PropertyEditable for Table {
@@ -2360,12 +2353,6 @@ impl PropertyEditable for Table {
                 },
             }
         };
-        // Direction = angle of the horizontal direction vector in the XY plane.
-        let direction_deg = (self
-            .horizontal_direction
-            .y
-            .atan2(self.horizontal_direction.x))
-        .to_degrees();
         let break_height = self
             .break_data
             .first()
@@ -2440,12 +2427,6 @@ impl PropertyEditable for Table {
                 })
             });
         let legacy = self.legacy_style_override.as_ref();
-        let title_suppressed = legacy
-            .and_then(|style| style.title_suppressed)
-            .unwrap_or(false);
-        let header_suppressed = legacy
-            .and_then(|style| style.header_suppressed)
-            .unwrap_or(false);
         let horizontal_margin = legacy
             .and_then(|style| style.horizontal_cell_margin)
             .or_else(|| self.base_style.as_ref().map(|style| style.margin_left))
@@ -2454,88 +2435,25 @@ impl PropertyEditable for Table {
             .and_then(|style| style.vertical_cell_margin)
             .or_else(|| self.base_style.as_ref().map(|style| style.margin_top))
             .unwrap_or(0.06);
-        let uniform_column_width = self
-            .columns
-            .first()
-            .map(|column| column.width)
-            .unwrap_or(0.0);
-        let columns_uniform = self
-            .columns
-            .iter()
-            .all(|column| (column.width - uniform_column_width).abs() <= 1.0e-9);
-        let uniform_row_height = self.rows.first().map(|row| row.height).unwrap_or(0.0);
-        let rows_uniform = self
-            .rows
-            .iter()
-            .all(|row| (row.height - uniform_row_height).abs() <= 1.0e-9);
-        let uniform_number =
-            |label: &str, field: &'static str, value: f64, uniform: bool| -> Property {
-                if uniform {
-                    edit(label, field, value)
-                } else {
-                    Property {
-                        label: label.into(),
-                        field,
-                        value: PropValue::PlainText(t!("Varies").into_owned()),
-                    }
-                }
-            };
-        let override_count = self.rows.iter().filter(|row| row.style.is_some()).count()
-            + self
-                .columns
-                .iter()
-                .filter(|column| column.style.is_some())
-                .count()
-            + self
-                .rows
-                .iter()
-                .flat_map(|row| row.cells.iter())
-                .filter(|cell| cell.style.is_some())
-                .count()
-            + usize::from(self.base_style.is_some() || self.legacy_style_override.is_some());
-
+        // The table and its place, as the reference palette lists them: the
+        // row and column counts are read-only, the size and flow editable.
         let mut sections = vec![
             PropSection {
                 title: t!("Table").into_owned(),
                 props: vec![
                     ro(t!("Table style").as_ref(), "tbl_style_handle", "Standard"),
-                    toggle(
-                        t!("Title suppressed").as_ref(),
-                        "tbl_title_suppressed",
-                        title_suppressed,
-                        true,
-                    ),
-                    toggle(
-                        t!("Header suppressed").as_ref(),
-                        "tbl_header_suppressed",
-                        header_suppressed,
-                        true,
+                    ro(t!("Rows").as_ref(), "tbl_rows", self.rows.len().to_string()),
+                    ro(
+                        t!("Columns").as_ref(),
+                        "tbl_cols",
+                        self.columns.len().to_string(),
                     ),
                     choice(
-                        t!("Flow direction").as_ref(),
+                        t!("Direction").as_ref(),
                         "tbl_flow_direction",
                         if table_flow_up { "Up" } else { "Down" }.to_string(),
                         vec!["Down".into(), "Up".into()],
                         true,
-                    ),
-                    edit(t!("Direction").as_ref(), "tbl_direction", direction_deg),
-                    edit(t!("Rows").as_ref(), "tbl_rows", self.rows.len() as f64),
-                    edit(
-                        t!("Columns").as_ref(),
-                        "tbl_cols",
-                        self.columns.len() as f64,
-                    ),
-                    uniform_number(
-                        t!("Column width").as_ref(),
-                        "tbl_column_width",
-                        uniform_column_width,
-                        columns_uniform,
-                    ),
-                    uniform_number(
-                        t!("Row height").as_ref(),
-                        "tbl_row_height",
-                        uniform_row_height,
-                        rows_uniform,
                     ),
                     edit(t!("Table width").as_ref(), "tbl_width", self.total_width()),
                     edit(
@@ -2543,59 +2461,25 @@ impl PropertyEditable for Table {
                         "tbl_height",
                         self.total_height(),
                     ),
-                    edit(
-                        t!("Horizontal cell margin").as_ref(),
-                        "tbl_horizontal_margin",
-                        horizontal_margin,
-                    ),
-                    edit(
-                        t!("Vertical cell margin").as_ref(),
-                        "tbl_vertical_margin",
-                        vertical_margin,
-                    ),
-                    ro(
-                        t!("Table overrides").as_ref(),
-                        "tbl_overrides",
-                        if override_count == 0 {
-                            t!("None").into_owned()
-                        } else {
-                            override_count.to_string()
-                        },
-                    ),
                 ],
             },
             PropSection {
                 title: t!("Geometry").into_owned(),
                 props: vec![
                     edit(
-                        t!("Insertion X").as_ref(),
+                        t!("Position X").as_ref(),
                         "tbl_insert_x",
                         self.insertion_point.x,
                     ),
                     edit(
-                        t!("Insertion Y").as_ref(),
+                        t!("Position Y").as_ref(),
                         "tbl_insert_y",
                         self.insertion_point.y,
                     ),
                     edit(
-                        t!("Insertion Z").as_ref(),
+                        t!("Position Z").as_ref(),
                         "tbl_insert_z",
                         self.insertion_point.z,
-                    ),
-                    ro(
-                        t!("Normal X").as_ref(),
-                        "tbl_normal_x",
-                        format!("{:.4}", self.normal.x),
-                    ),
-                    ro(
-                        t!("Normal Y").as_ref(),
-                        "tbl_normal_y",
-                        format!("{:.4}", self.normal.y),
-                    ),
-                    ro(
-                        t!("Normal Z").as_ref(),
-                        "tbl_normal_z",
-                        format!("{:.4}", self.normal.z),
                     ),
                 ],
             },
@@ -2928,7 +2812,7 @@ impl PropertyEditable for Table {
                     breaks_enabled,
                 ),
                 number(
-                    t!("Maximum height").as_ref(),
+                    t!("Break height").as_ref(),
                     "tbl_break_height",
                     break_height,
                     breaks_enabled && !manual_heights,

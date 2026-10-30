@@ -5,7 +5,7 @@
 //   *           → copies currently selected model-space entities
 
 use crate::t;
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
@@ -19,12 +19,12 @@ pub fn tool() -> ToolDef {
     }
 }
 
-/// Build a standalone `CadDocument` containing the named block's entities
+/// Build a standalone `Document` containing the named block's entities
 /// extracted into model space.
 ///
 /// Returns `Err` if the block is not found or has no entities.
-pub fn extract_block_to_doc(src: &CadDocument, block_name: &str) -> Result<CadDocument, String> {
-    let mut out = CadDocument::new();
+pub fn extract_block_to_doc(src: &Document, block_name: &str) -> Result<Document, String> {
+    let mut out = Document::new();
     extract_block_into(src, block_name, &mut out)?;
     Ok(out)
 }
@@ -32,9 +32,9 @@ pub fn extract_block_to_doc(src: &CadDocument, block_name: &str) -> Result<CadDo
 /// Extract the block's entities into `out` (a fresh document or a loaded
 /// template whose tables/styles should survive — Catalog §2.1).
 pub fn extract_block_into(
-    src: &CadDocument,
+    src: &Document,
     block_name: &str,
-    out: &mut CadDocument,
+    out: &mut Document,
 ) -> Result<(), String> {
     let br = src
         .block_records
@@ -59,22 +59,22 @@ pub fn extract_block_into(
     Ok(())
 }
 
-/// Build a standalone `CadDocument` from an explicit list of entity handles
+/// Build a standalone `Document` from an explicit list of entity handles
 /// (the "selected entities" mode, `*`).
 pub fn extract_entities_to_doc(
-    src: &CadDocument,
+    src: &Document,
     handles: &[codec::Handle],
-) -> Result<CadDocument, String> {
-    let mut out = CadDocument::new();
+) -> Result<Document, String> {
+    let mut out = Document::new();
     extract_entities_into(src, handles, &mut out)?;
     Ok(out)
 }
 
 /// Extract the listed entities into `out` (fresh document or template base).
 pub fn extract_entities_into(
-    src: &CadDocument,
+    src: &Document,
     handles: &[codec::Handle],
-    out: &mut CadDocument,
+    out: &mut Document,
 ) -> Result<(), String> {
     if handles.is_empty() {
         return Err(t!("No entities selected for WBLOCK.").into_owned());
@@ -94,9 +94,9 @@ pub fn extract_entities_into(
 /// blocks they use — without those an exported INSERT points at nothing and
 /// the file opens empty or needs recovery. (#1111)
 fn copy_with_dependencies(
-    src: &CadDocument,
+    src: &Document,
     handles: &[codec::Handle],
-    out: &mut CadDocument,
+    out: &mut Document,
     translate: Option<&crate::command::EntityTransform>,
 ) {
     let handles: Vec<codec::Handle> = handles
@@ -124,7 +124,7 @@ fn copy_with_dependencies(
 /// after the copy (Catalog §2.1/CF-01.2). Opt-in per request; the
 /// interactive WBLOCK export keeps the source coordinates.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub fn normalize_to_origin(out: &mut CadDocument) {
+pub fn normalize_to_origin(out: &mut Document) {
     let mut min = [f64::INFINITY; 3];
     for entity in out.entities() {
         let (lo, _) = crate::scene::convert::tess::entity_bounds(entity);
@@ -173,15 +173,15 @@ impl crate::command::CadCommand for WblockPickBasePointCommand {
     }
 }
 
-/// Build a standalone `CadDocument` from an explicit list of entity handles,
+/// Build a standalone `Document` from an explicit list of entity handles,
 /// applying `base_point` translation and `unit` insertion units.
 pub fn extract_entities_to_doc_with_base(
-    src: &CadDocument,
+    src: &Document,
     handles: &[codec::Handle],
     base_point: glam::DVec3,
     unit: i16,
-) -> Result<CadDocument, String> {
-    let mut out = CadDocument::new();
+) -> Result<Document, String> {
+    let mut out = Document::new();
     out.header.insertion_units = unit;
     if handles.is_empty() {
         return Err(t!("No entities selected for WBLOCK.").into_owned());
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_extract_entities_with_base_point_and_units() {
-        let mut doc = CadDocument::new();
+        let mut doc = Document::new();
         let mut line = Line::new();
         line.start = Vector3::new(10.0, 20.0, 0.0);
         line.end = Vector3::new(30.0, 40.0, 0.0);
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_extract_block_to_doc() {
-        let mut doc = CadDocument::new();
+        let mut doc = Document::new();
         let mut line = Line::new();
         line.start = Vector3::new(1.0, 2.0, 0.0);
         line.end = Vector3::new(3.0, 4.0, 0.0);

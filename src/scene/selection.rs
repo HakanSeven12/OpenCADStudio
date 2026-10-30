@@ -342,36 +342,49 @@ impl Scene {
     /// layout that matches one of the selected entities by `(variant,
     /// layer)`. The seed selection stays selected. No-op when nothing is
     /// selected. Returns the number of newly-added entities.
-    pub fn select_similar(&mut self) -> usize {
+    /// Add every object of the active layout that has the type of a
+    /// selected object and the same properties `mode` names (the
+    /// SELECTSIMILARMODE bits, see [`SIMILAR_FIELDS`]).
+    pub fn select_similar(&mut self, mode: u16) -> usize {
         use crate::entities::traits::entity_type_name;
         if self.selected.is_empty() {
             return 0;
         }
-        let pairs: rustc_hash::FxHashSet<(&str, String)> = self
-            .selected
-            .iter()
-            .filter_map(|h| self.document.get_entity(*h))
-            .map(|e| (entity_type_name(e), e.as_entity().layer().to_string()))
-            .collect();
-        let handles = self.current_layout_entity_handles();
-        let mut added = 0;
-        for h in handles {
-            if self.selected.contains(&h) {
-                continue;
-            }
-            if let Some(e) = self.document.get_entity(h) {
-                let key = (entity_type_name(e), e.as_entity().layer().to_string());
-                if pairs.contains(&key) {
-                    self.selected.insert(h);
-                    self.selected_order.push(h);
-                    added += 1;
-                }
-            }
+        let key = |e: &codec::EntityType| -> Vec<Option<String>> {
+            SIMILAR_FIELDS
+                .iter()
+                .filter(|(bit, _)| mode & bit != 0)
+                .map(|(_, fields)| {
+                    fields
+                        .iter()
+                        .find_map(|field| self.entity_property_value(e, field))
+                })
+                .collect()
+        };
+        let mut keys: rustc_hash::FxHashMap<&str, rustc_hash::FxHashSet<Vec<Option<String>>>> =
+            Default::default();
+        for e in self.selected.iter().filter_map(|h| self.document.get_entity(*h)) {
+            keys.entry(entity_type_name(e)).or_default().insert(key(e));
         }
-        if added > 0 {
+        let matches: Vec<Handle> = self
+            .current_layout_entity_handles()
+            .into_iter()
+            .filter(|h| !self.selected.contains(h))
+            .filter(|h| {
+                self.document.get_entity(*h).is_some_and(|e| {
+                    keys.get(entity_type_name(e))
+                        .is_some_and(|wanted| wanted.contains(&key(e)))
+                })
+            })
+            .collect();
+        for &h in &matches {
+            self.selected.insert(h);
+            self.selected_order.push(h);
+        }
+        if !matches.is_empty() {
             self.bump_selection_set();
         }
-        added
+        matches.len()
     }
 
     /// Replace the selection with its complement: every selectable object
@@ -824,6 +837,12 @@ impl Scene {
                                     QSelectValueEditor::Choice(vec!["false".into(), "true".into()])
                                 }
                                 PropValue::AttrText { .. } => QSelectValueEditor::Text,
+                                PropValue::PluginParam { .. } => {
+                                    // A class parameter's record value is text to the
+                                    // quick-select reader; the committed edit stays on
+                                    // the class's own record path (API v14).
+                                    QSelectValueEditor::Text
+                                }
                                 PropValue::BlockNumber { .. }
                                 | PropValue::BlockChoice { .. }
                                 | PropValue::Stepper { .. }
@@ -953,7 +972,9 @@ impl Scene {
             } else {
                 entity.common().linetype.clone()
             }),
-            "linetype_scale" => Some(format!("{:.4}", entity.common().linetype_scale)),
+            "linetype_scale" => Some(crate::entities::common::format_decimal(
+                entity.common().linetype_scale,
+            )),
             "plot_style" => Some(
                 match entity.common().plotstyle_flags {
                     0 => "ByLayer",
@@ -1015,6 +1036,7 @@ impl Scene {
                     PropValue::HatchPatternChoice(s) => s,
                     PropValue::BoolToggle { value, .. } => value.to_string(),
                     PropValue::AttrText { value, .. } => value,
+                    PropValue::PluginParam { value, .. } => value,
                     PropValue::Stepper { display, .. } => display,
                     PropValue::BlockNumber { .. }
                     | PropValue::BlockChoice { .. }
@@ -1054,7 +1076,12 @@ impl Scene {
     // ── Erase ─────────────────────────────────────────────────────────────
 
     pub fn erase_entities(&mut self, handles: &[Handle]) {
-        self.remove_entities(handles, true, true);
+        self.remove_entities(handles, true, true, true);
+    }
+
+    /// Replace only planned sources, preserving annotations or leaders not exploded.
+    pub fn erase_entities_exact(&mut self, handles: &[Handle]) {
+        self.remove_entities(handles, true, true, false);
     }
 
     /// Like [`erase_entities`](Self::erase_entities) but without the
@@ -1062,7 +1089,7 @@ impl Scene {
     /// removes them through the plugin host API; locked-layer policy stays
     /// enforced either way.
     pub fn erase_entities_plugin(&mut self, handles: &[Handle]) {
-        self.remove_entities(handles, true, false);
+        self.remove_entities(handles, true, false, true);
     }
 
     /// Roll back entities created by the current command after a downstream
@@ -1071,7 +1098,7 @@ impl Scene {
     /// The shared removal path keeps first-touch undo state, history objects,
     /// groups, selection, and derived caches coherent.
     pub(crate) fn rollback_new_entities(&mut self, handles: &[Handle]) {
-        self.remove_entities(handles, false, false);
+        self.remove_entities(handles, false, false, true);
     }
 
     fn remove_entities(
@@ -1079,8 +1106,13 @@ impl Scene {
         handles: &[Handle],
         respect_layer_locks: bool,
         respect_reference_only: bool,
+        expand_linked: bool,
     ) {
-        let erase_handles = self.handles_expanded_for_leader_annotations(handles);
+        let erase_handles = if expand_linked {
+            self.handles_expanded_for_leader_annotations(handles)
+        } else {
+            handles.to_vec()
+        };
 
         // One pass over document.objects instead of a scan per erased handle.
         let mut managers_by_section: HashMap<Handle, Vec<Handle>> = HashMap::default();
@@ -1144,6 +1176,7 @@ impl Scene {
                     self.record_undo_reference_designation_before(h);
                 }
             }
+            self.remove_image_definition_reactor(h);
             self.delete_solid_history(h);
             if let Some(settings_handle) = settings_handle {
                 self.document.objects.remove(&settings_handle);
@@ -1171,6 +1204,7 @@ impl Scene {
                 hover_changed = true;
             }
             hover_changed |= self.constraint_hover_highlights.remove(&h);
+            hover_changed |= self.box_hover_highlights.remove(&h);
             if self
                 .constraint_hover_refs
                 .iter()
@@ -1278,6 +1312,14 @@ impl Scene {
             if self.is_recording_undo() {
                 self.record_undo_before(handle, None);
             }
+            // OOPS restores entities without replaying the erased object images.
+            let entity = if matches!(entity.as_ref(), EntityType::RasterImage(_)) {
+                let mut image = (*entity).clone();
+                self.ensure_image_definition(&mut image);
+                Arc::new(image)
+            } else {
+                entity
+            };
             if self.document.restore_entity_arc(entity).is_some() {
                 self.reseed_derived_caches(handle);
                 restored.push(handle);
@@ -1291,6 +1333,22 @@ impl Scene {
         restored
     }
 }
+
+/// SELECTSIMILARMODE's default: layer and name.
+pub const SELECT_SIMILAR_DEFAULT: u16 = 130;
+
+/// The SELECTSIMILARMODE bits and the property each compares; the first
+/// field an object has is its value.
+const SIMILAR_FIELDS: &[(u16, &[&str])] = &[
+    (1, &["color"]),
+    (2, &["layer"]),
+    (4, &["linetype"]),
+    (8, &["linetype_scale"]),
+    (16, &["lineweight"]),
+    (32, &["plot_style"]),
+    (64, &["style", "style_name", "dimension_style"]),
+    (128, &["block"]),
+];
 
 #[cfg(test)]
 mod tests {
@@ -1343,7 +1401,7 @@ mod tests {
         use codec::entities::Point;
         use codec::xdata::{ExtendedDataRecord, XDataValue};
 
-        let mut doc = CadDocument::new();
+        let mut doc = Document::new();
 
         // An entity carrying a PE_URL hyperlink resolves to that link.
         let mut linked = Point::new();
@@ -1621,3 +1679,5 @@ mod tests {
         assert_eq!(scene.selection_fingerprint(), fingerprint);
     }
 }
+
+

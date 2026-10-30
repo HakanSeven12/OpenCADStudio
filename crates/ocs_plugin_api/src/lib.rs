@@ -32,6 +32,7 @@
 //! - `runner` — child-process runner entry point.
 //! - `shm` — shared-memory document views.
 
+pub mod dialog;
 pub mod entity_coverage;
 pub mod entity_coverage_types;
 pub mod manifest;
@@ -66,6 +67,7 @@ pub mod shm;
 #[cfg(feature = "host")]
 pub mod runner;
 
+pub use dialog::*;
 pub use entity_coverage::{
     get_embedded_entity_coverage_json, EntityCoverageCatalog, EntityKindCoverage, EntityScope,
     ModelAccess, PropertyCoverage,

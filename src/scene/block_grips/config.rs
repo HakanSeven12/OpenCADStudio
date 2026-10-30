@@ -57,7 +57,7 @@ fn one_mut(data: &mut DynamicBlockData) -> Option<&mut BlockOnePointParameter> {
 }
 
 impl Config {
-    fn read(doc: &CadDocument, definition: Handle, handle: Handle) -> Result<Self, &'static str> {
+    fn read(doc: &Document, definition: Handle, handle: Handle) -> Result<Self, &'static str> {
         let graph =
             authoring::graph(doc, definition)?.ok_or("The authoring graph is unavailable.")?;
         if let Some(ObjectType::BlockVisibilityParameter(p)) = doc.objects.get(&handle) {
@@ -166,7 +166,7 @@ impl Config {
     }
 }
 
-pub(crate) fn choices(doc: &CadDocument, definition: Handle, parameter: Handle) -> Vec<usize> {
+pub(crate) fn choices(doc: &Document, definition: Handle, parameter: Handle) -> Vec<usize> {
     let Ok(config) = Config::read(doc, definition, parameter) else {
         return vec![];
     };
@@ -176,7 +176,7 @@ pub(crate) fn choices(doc: &CadDocument, definition: Handle, parameter: Handle) 
         .collect()
 }
 
-fn graph_mut(doc: &mut CadDocument, graph: Handle) -> &mut BlockEvaluationGraph {
+fn graph_mut(doc: &mut Document, graph: Handle) -> &mut BlockEvaluationGraph {
     let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&graph).unwrap() else {
         unreachable!()
     };
@@ -186,7 +186,7 @@ fn graph_mut(doc: &mut CadDocument, graph: Handle) -> &mut BlockEvaluationGraph 
     graph
 }
 fn link(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     graph: Handle,
     source: i32,
     destination: i32,
@@ -207,7 +207,7 @@ fn link(
     authoring::graph::link(graph, source, destination)
 }
 fn component(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     graph: Handle,
     id: i32,
@@ -262,7 +262,7 @@ fn component(
 
 /// None restores positions; Some changes the grip count. Commit only complete graphs.
 pub(crate) fn set(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     parameter: Handle,
     count: Option<usize>,
@@ -588,7 +588,7 @@ pub(crate) fn set(
 }
 
 pub(crate) fn snapshot(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
 ) -> Result<Vec<(Handle, ObjectType)>, &'static str> {
     let graph = authoring::graph(doc, definition)?.ok_or("The authoring graph is unavailable.")?;
@@ -606,7 +606,7 @@ pub(crate) fn snapshot(
         .map(|(handle, object)| (*handle, object.clone()))
         .collect())
 }
-pub(crate) fn count(doc: &CadDocument, definition: Handle, parameter: Handle) -> Option<usize> {
+pub(crate) fn count(doc: &Document, definition: Handle, parameter: Handle) -> Option<usize> {
     let config = Config::read(doc, definition, parameter).ok()?;
     Some(config.ids.iter().filter(|id| **id > 0).count())
 }
@@ -620,7 +620,7 @@ pub(crate) struct NativeGrip {
 }
 
 pub(crate) fn locations(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     parameter: Handle,
 ) -> Result<Vec<NativeGrip>, &'static str> {
@@ -678,7 +678,7 @@ pub(crate) fn locations(
 }
 
 pub(crate) fn set_location(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     parameter: Handle,
     role: usize,
@@ -708,7 +708,7 @@ pub(crate) fn set_location(
 
 /// Keep native display glyphs separate from definition geometry and labels.
 pub(crate) fn apply_graphic(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     parameter: Handle,
     graphic: &mut crate::scene::block_distance_parameter::Graphic,
@@ -738,7 +738,7 @@ mod tests {
     use codec::{DwgReader, DwgWriter, DxfReader, DxfWriter, EntityType};
     use std::io::Cursor;
 
-    fn fixture(family: usize) -> (CadDocument, Handle, Handle) {
+    fn fixture(family: usize) -> (Document, Handle, Handle) {
         let mut scene = Scene::new();
         scene.define_block_raw(
             "GRIPS",
@@ -817,7 +817,7 @@ mod tests {
         }
         (scene.document, definition, parameter)
     }
-    fn check_graph(doc: &CadDocument, definition: Handle) {
+    fn check_graph(doc: &Document, definition: Handle) {
         let handle = authoring::graph(doc, definition).unwrap().unwrap();
         let ObjectType::DynamicBlock(object) = &doc.objects[&handle] else {
             panic!()
@@ -830,7 +830,7 @@ mod tests {
             .iter()
             .all(|node| authoring::graph::valid_lists(graph, node.id)));
     }
-    fn native_grips(doc: &CadDocument, definition: Handle, parameter: Handle) -> Vec<Handle> {
+    fn native_grips(doc: &Document, definition: Handle, parameter: Handle) -> Vec<Handle> {
         let config = Config::read(doc, definition, parameter).unwrap();
         let mut handles = doc
             .objects

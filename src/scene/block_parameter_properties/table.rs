@@ -30,8 +30,8 @@ fn revision(view: &TableView) -> u64 {
 }
 
 pub(super) fn current_row(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
     definition: Handle,
     view: &TableView,
@@ -83,8 +83,8 @@ pub(super) fn current_row(
 }
 
 pub(super) fn property(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     document: u64,
     insert: Handle,
     definition: Handle,
@@ -156,12 +156,12 @@ pub(super) fn property(
 }
 
 pub(super) fn evaluate(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     key: Key,
     expected: u64,
     input: Input,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let view = tables::table(baseline.unwrap_or(doc), key.definition)?
         .ok_or("The Block Properties Table is unavailable.")?;
     let current =

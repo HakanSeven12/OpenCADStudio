@@ -105,7 +105,7 @@ thread_local! {
 /// The solids a composite's booleans joined, as (node id, palette label) in
 /// operand order. Empty for a solid with no boolean step.
 pub fn composite_operands(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Vec<(i32, String)> {
     let Some(tree) = document
@@ -128,7 +128,7 @@ pub fn composite_operands(
 }
 
 /// Edit the operand the palette lists as `label` from now on.
-pub fn select_operand(document: &codec::CadDocument, handle: codec::Handle, label: &str) {
+pub fn select_operand(document: &codec::Document, handle: codec::Handle, label: &str) {
     if let Some((id, _)) = composite_operands(document, handle)
         .into_iter()
         .find(|(_, candidate)| candidate == label)
@@ -145,7 +145,7 @@ pub fn select_operand(document: &codec::CadDocument, handle: codec::Handle, labe
 /// by the tessellation's chord; the search widens until some operand's
 /// surface is in reach, and the first in reach wins.
 pub fn select_operand_at(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     point: glam::DVec3,
 ) -> bool {
@@ -175,7 +175,7 @@ pub fn select_operand_at(
 /// The solids a composite's booleans joined, each rebuilt where it sits in
 /// the composite, with its node id. Empty for a solid with no boolean step.
 fn placed_operands(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Vec<(i32, kernel::brep::Body)> {
     let Some(tree) = document
@@ -200,7 +200,7 @@ fn placed_operands(
 /// With its history shown, a composite draws the solids its booleans joined,
 /// each where it sits: their edges, as world polylines.
 pub fn composite_history_edges(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Vec<Vec<[f64; 3]>> {
     let Some((_, object_show_history, show_history_mode)) = history_flags(document, handle) else {
@@ -229,7 +229,7 @@ pub fn composite_history_edges(
 /// The composite's history and the node id of the operand being edited: the
 /// one last chosen, or the first.
 fn selected_operand(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Option<(codec::objects::SolidHistoryTree, i32)> {
     let tree = document
@@ -267,7 +267,7 @@ fn ancestors_frame(tree: &codec::objects::SolidHistoryTree, id: i32) -> Option<g
 /// The operand of a composite solid that the palette and grips edit, placed
 /// where it sits in the composite. None for a solid with no boolean step.
 pub fn edit_operand(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Option<SolidHistoryOperation> {
     let (tree, id) = selected_operand(document, handle)?;
@@ -282,7 +282,7 @@ pub fn edit_operand(
 /// its composite stores it in. `operation` itself when the solid has no
 /// boolean step.
 pub fn operand_to_history(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     mut operation: SolidHistoryOperation,
 ) -> Option<SolidHistoryOperation> {
@@ -335,7 +335,7 @@ fn compact_surface_number(mut value: String) -> String {
 }
 
 fn history_flags(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Option<(bool, bool, i16)> {
     let graph = document.solid_history_graph(handle)?;
@@ -429,7 +429,7 @@ fn revolve_direction_property(
 }
 
 pub fn has_specialized_primitive_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> bool {
     matches!(
@@ -454,7 +454,7 @@ pub fn has_specialized_primitive_properties(
 /// operations refine that primitive without replacing its editable type,
 /// position, or dimensions.
 pub fn primitive_property_operation(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Option<SolidHistoryOperation> {
     if let Some(operand) = edit_operand(document, handle) {
@@ -470,7 +470,7 @@ pub fn primitive_property_operation(
 /// the common entity rows plus [`primitive_properties`].  A generic B-rep has
 /// no stable primitive dimensions to expose, but it still uses the compact
 /// Solid History palette rather than the internal ACIS/cache diagnostics.
-pub fn has_compact_solid_properties(document: &codec::CadDocument, handle: codec::Handle) -> bool {
+pub fn has_compact_solid_properties(document: &codec::Document, handle: codec::Handle) -> bool {
     match document.get_entity(handle) {
         Some(codec::EntityType::Solid3D(_)) => true,
         Some(codec::EntityType::Surface(_)) => matches!(
@@ -511,7 +511,7 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
 }
 
 fn revolve_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryRevolve,
 ) -> Vec<PropSection> {
@@ -621,7 +621,7 @@ fn revolve_properties(
 }
 
 fn extrusion_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistorySweep,
 ) -> Vec<PropSection> {
@@ -874,7 +874,7 @@ pub fn extrusion_surface_data(value: &SolidHistorySweep) -> Option<codec::entiti
 }
 
 fn sweep_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistorySweep,
 ) -> Vec<PropSection> {
@@ -996,7 +996,7 @@ pub fn loft_closed_editable(value: &SolidHistoryLoft) -> bool {
 }
 
 fn loft_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryLoft,
 ) -> Vec<PropSection> {
@@ -1184,7 +1184,7 @@ fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
 }
 
 fn torus_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryTorus,
 ) -> Vec<PropSection> {
@@ -1251,7 +1251,7 @@ fn torus_properties(
 }
 
 fn cone_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryCone,
 ) -> Vec<PropSection> {
@@ -1368,7 +1368,7 @@ fn cone_properties(
     ]
 }
 
-fn brep_properties(document: &codec::CadDocument, handle: codec::Handle) -> Vec<PropSection> {
+fn brep_properties(document: &codec::Document, handle: codec::Handle) -> Vec<PropSection> {
     let (record_history, object_show_history, show_history_mode) =
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
@@ -1401,7 +1401,7 @@ fn brep_properties(document: &codec::CadDocument, handle: codec::Handle) -> Vec<
 }
 
 fn cylinder_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryCylinder,
 ) -> Vec<PropSection> {
@@ -1527,7 +1527,7 @@ fn pyramid_display_rotation(value: &SolidHistoryPyramid) -> Option<f64> {
 }
 
 fn pyramid_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryPyramid,
 ) -> Vec<PropSection> {
@@ -1625,7 +1625,7 @@ fn pyramid_properties(
 }
 
 fn sphere_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistorySphere,
 ) -> Vec<PropSection> {
@@ -1702,7 +1702,7 @@ fn sphere_properties(
 }
 
 fn rectangular_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryBox,
     solid_type: &str,
@@ -1792,7 +1792,7 @@ fn rectangular_properties(
 }
 
 pub fn primitive_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Vec<PropSection> {
     if !matches!(
@@ -1827,7 +1827,7 @@ pub fn primitive_properties(
 }
 
 fn operation_properties(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     operation: &SolidHistoryOperation,
 ) -> Vec<PropSection> {
@@ -2121,7 +2121,7 @@ fn apply_revolve_geometry_property(
 }
 
 pub fn apply_history_choice(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     handle: codec::Handle,
     field: &str,
     value: &str,
@@ -3012,7 +3012,7 @@ fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
 /// Visible LOFT construction curves, owned by the parent display entity.
 /// Copies are transformed to WCS and never inserted into the document.
 pub fn loft_visible_history_entities(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
 ) -> Vec<EntityType> {
     let Some((_, object_show_history, show_history_mode)) = history_flags(document, handle) else {
@@ -3599,7 +3599,7 @@ pub fn fillet_radius_grip(body: &Body, radius: f64) -> Option<GripDef> {
 }
 
 pub fn chamfer_distance_grips(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: codec::Handle,
     value: &SolidHistoryChamfer,
 ) -> Vec<GripDef> {
@@ -3684,7 +3684,7 @@ pub fn chamfer_distance_grips(
     .collect()
 }
 
-pub fn primitive_grips(document: &codec::CadDocument, handle: codec::Handle) -> Vec<GripDef> {
+pub fn primitive_grips(document: &codec::Document, handle: codec::Handle) -> Vec<GripDef> {
     let Some(mut operation) = edit_operand(document, handle)
         .or_else(|| document.solid_history_operation(handle).cloned())
     else {

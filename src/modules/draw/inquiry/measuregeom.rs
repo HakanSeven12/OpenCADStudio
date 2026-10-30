@@ -154,44 +154,17 @@ impl MeasureGeomCommand {
     }
 
     /// Build a cyan preview wire connecting the picked points and the cursor.
-    fn preview_wire(name: &str, pts: Vec<[f32; 3]>) -> WireModel {
-        WireModel {
-            bg_adapt: None,
-            point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
-            world_width: 0.0,
-            depth_override: None,
-            display_visible: true,
-            snap_only: false,
-            plot_visible: true,
-            fill_is_3d: false,
-            fill_is_2d_solid: false,
-            render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
-            name: name.to_string(),
-            points: pts,
-            points_low: Vec::new(),
-            color: WireModel::CYAN,
-            selected: false,
-            pattern_length: 0.0,
-            pattern: [0.0; 8],
-            line_weight_px: 1.0,
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
-
-            ..Default::default()
-        }
+    ///
+    /// Keeps full f64 coordinates through [`WireModel::solid_f64`]: previews
+    /// cast straight to f32 drift about half a metre away from their snapped
+    /// points on UTM-scale drawings.
+    fn preview_wire(name: &str, pts: Vec<DVec3>) -> WireModel {
+        WireModel::solid_f64(
+            name.to_string(),
+            pts.into_iter().map(|point| point.to_array()).collect(),
+            WireModel::CYAN,
+            false,
+        )
     }
 
     fn radius_at(entity: &EntityType, point: DVec3) -> Option<f64> {
@@ -366,13 +339,9 @@ impl MeasureGeomCommand {
             let mut end = c;
             start[axis] += from;
             end[axis] += to;
-            let f = |p: DVec3| {
-                let p = plane.to_world(p);
-                [p.x as f32, p.y as f32, p.z as f32]
-            };
             wires.push(Self::preview_wire(
                 "measuregeom_quick",
-                vec![f(start), f(end)],
+                vec![plane.to_world(start), plane.to_world(end)],
             ));
             let value = crate::entities::common::format_length(to - from);
             lines.push(if axis == 0 {
@@ -699,26 +668,25 @@ impl CadCommand for MeasureGeomCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        let f = |p: DVec3| [p.x as f32, p.y as f32, p.z as f32];
         match self.mode {
             Mode::Distance | Mode::Angle => {
                 if self.points.is_empty() {
                     return None;
                 }
-                let mut pts: Vec<[f32; 3]> = self.points.iter().map(|p| f(*p)).collect();
+                let mut pts = self.points.clone();
                 if self.mode == Mode::Angle && self.points.len() >= 2 {
-                    pts = vec![f(self.points[1]), f(self.points[0])];
+                    pts = vec![self.points[1], self.points[0]];
                 }
-                pts.push(f(pt));
+                pts.push(pt);
                 Some(Self::preview_wire("measuregeom_preview", pts))
             }
             Mode::Area => {
                 if self.points.is_empty() {
                     return None;
                 }
-                let mut pts: Vec<[f32; 3]> = self.points.iter().map(|p| f(*p)).collect();
-                pts.push(f(pt));
-                pts.push(f(self.points[0]));
+                let mut pts = self.points.clone();
+                pts.push(pt);
+                pts.push(self.points[0]);
                 Some(Self::preview_wire("measuregeom_preview", pts))
             }
             _ => None,

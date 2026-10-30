@@ -494,6 +494,164 @@ mod tests {
     }
 
     #[test]
+    fn plugin_class_requests_roundtrip() {
+        // API v14: the class frames keep the same wire discipline — serialize
+        // then deserialize byte-clean, in declared order.
+        let class = crate::host::PluginClassDeclaration {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            grip_schema: vec![crate::host::PluginGripSchemaEntry {
+                grip_id: 1,
+                param_name: "peak_gradient".to_string(),
+                drives: None,
+            }],
+            // API v14: the parameter schema rides the same frame byte-clean.
+            parameters: vec![crate::host::PluginClassParameter {
+                name: "peak_gradient".to_string(),
+                value_kind: crate::host::PluginClassParameterKind::Real,
+                editable: true,
+            }],
+        };
+        let bytes = bincode::serialize(&PluginRequest::RegisterPluginClass {
+            class: class.clone(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::RegisterPluginClass { class: got } if got == class)
+        );
+        let instance = crate::host::PluginClassInstance {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            design: crate::host::PluginDisplayDescriptor::ParametricChain(
+                crate::host::ParametricChain {
+                    plane: crate::host::ParametricPlane::Profile,
+                    segments: vec![crate::host::ParametricSegment {
+                        def: crate::host::CurveSegmentDef {
+                            // slope ramp 0 -> 0.1 over the run (the record's
+                            // parabola restated as data).
+                            length: 80.0,
+                            ramp: crate::host::Ramp::Polynomial {
+                                degree: 1,
+                                coeffs: [0.0, 0.1, 0.0, 0.0],
+                            },
+                            cross_slope: None,
+                        },
+                        start_point: [0.0, 100.0],
+                        start_direction: 0.0f64.atan(),
+                    }],
+                    layer: "PLUGIN_PROFILE".to_string(),
+                },
+            ),
+            tolerance: 1e-3,
+            layer: "PLUGIN_PROFILE".to_string(),
+            design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+        };
+        let bytes = bincode::serialize(&PluginRequest::StagePluginClassInstance {
+            instance: instance.clone(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::StagePluginClassInstance { instance: got } if got == instance)
+        );
+        let bytes = bincode::serialize(&PluginResponse::RegisterPluginClassResult(Ok(())))
+            .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::RegisterPluginClassResult(Ok(())))
+        );
+        let bytes = bincode::serialize(&PluginResponse::StagePluginClassInstanceResult(Ok(
+            vec![codec::Handle::new(0x51)],
+        )))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::StagePluginClassInstanceResult(Ok(handles)) if handles.len() == 1)
+        );
+        let bytes = bincode::serialize(&PluginResponse::StagePluginClassInstanceResult(
+            Err("class not registered in this session".to_owned()),
+        ))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::StagePluginClassInstanceResult(Err(_)))
+        );
+        // The descriptor hook rides the v11 response additively: the
+        // default round-trips as None, and a set descriptor survives.
+        let bytes = bincode::serialize(&crate::host::CustomGripResponse::default()).unwrap();
+        assert!(
+            matches!(
+                bincode::deserialize::<crate::host::CustomGripResponse>(&bytes).unwrap().descriptor,
+                None
+            ),
+            "a default response stays descriptor-free"
+        );
+        let bytes = bincode::serialize(&crate::host::CustomGripResponse {
+            preview: Vec::new(),
+            live_entities: Vec::new(),
+            descriptor: Some(crate::host::PluginDisplayDescriptor::ParametricChain(
+                crate::host::ParametricChain {
+                    plane: crate::host::ParametricPlane::Plan,
+                    segments: Vec::new(),
+                    layer: String::new(),
+                },
+            )),
+            descriptor_tolerance: None,
+        })
+        .unwrap();
+        assert!(
+            matches!(
+                bincode::deserialize::<crate::host::CustomGripResponse>(&bytes).unwrap().descriptor,
+                Some(crate::host::PluginDisplayDescriptor::ParametricChain(_))
+            ),
+            "the descriptor hook survives the wire"
+        );
+    }
+
+    #[test]
+    fn class_instance_properties_request_and_response_roundtrip() {
+        // The read half of the session's properties pair rides the wire
+        // additively: a stamped handle in, the declared rows (or the strict
+        // refusal) out.
+        let bytes = bincode::serialize(&PluginRequest::PluginClassInstanceProperties {
+            handle: codec::Handle::new(11),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::PluginClassInstanceProperties { handle } if handle == codec::Handle::new(11))
+        );
+        let bytes = bincode::serialize(&PluginResponse::PluginClassInstancePropertiesResult(Ok(
+            vec![crate::host::PluginClassParameterRow {
+                name: "peak_gradient".to_string(),
+                value_kind: crate::host::PluginClassParameterKind::Real,
+                editable: true,
+                value: Some("0.09".to_string()),
+            }],
+        )))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::PluginClassInstancePropertiesResult(Ok(rows))
+                if rows.len() == 1
+                    && rows[0].name == "peak_gradient"
+                    && rows[0].value_kind == crate::host::PluginClassParameterKind::Real
+                    && rows[0].editable
+                    && rows[0].value.as_deref() == Some("0.09"))
+        );
+        let bytes = bincode::serialize(&PluginResponse::PluginClassInstancePropertiesResult(
+            Err("entity carries the class stamp without its schema version".to_owned()),
+        ))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::PluginClassInstancePropertiesResult(Err(msg))
+                if msg == "entity carries the class stamp without its schema version")
+        );
+    }
+
+    #[test]
     fn plugin_notification_roundtrip() {
         let frame = PluginToHostV4::Notification(NotificationEnvelope {
             command_id: None,
@@ -557,6 +715,81 @@ mod tests {
         assert!(
             matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
             PluginResponse::SetReferenceOnlyResult(Err(error)) if error == "entity is on a locked layer")
+        );
+    }
+
+    #[test]
+    fn parametric_chain_requests_roundtrip() {
+        // The V14 declared-chain payload survives one bincode hop intact:
+        // the ramp data, the continuity fields, and the sampled answer's
+        // shape.
+        let chain = crate::host::ParametricChain {
+            plane: crate::host::ParametricPlane::Plan,
+            segments: vec![crate::host::ParametricSegment {
+                def: crate::host::CurveSegmentDef {
+                    // curvature ramp 0 -> -1/300 over the arc (the record's
+                    // straight-to-circle spiral restated as data).
+                    length: 60.0,
+                    ramp: crate::host::Ramp::Polynomial {
+                        degree: 1,
+                        coeffs: [0.0, -1.0 / 300.0, 0.0, 0.0],
+                    },
+                    cross_slope: None,
+                },
+                start_point: [40.0, 0.0],
+                start_direction: 0.0,
+            }],
+            layer: "PLUGIN_DISPLAY".to_string(),
+        };
+        let bytes = bincode::serialize(&PluginRequest::StageParametricChain {
+            reference_name: "align-1".to_string(),
+            chain: chain.clone(),
+            tolerance: 1e-3,
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::StageParametricChain { reference_name, chain: got, tolerance }
+                if reference_name == "align-1" && got == chain && tolerance == 1e-3)
+        );
+        let bytes = bincode::serialize(&PluginRequest::SampleParametric { chain: chain.clone(), s: 30.0 })
+            .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::SampleParametric { chain: got, s } if got == chain && s == 30.0)
+        );
+        let bytes = bincode::serialize(&PluginResponse::StageParametricChainResult(Ok(vec![
+            codec::Handle::new(0x2A),
+        ])))
+        .unwrap();
+        assert!(matches!(
+            bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::StageParametricChainResult(Ok(handles)) if handles.len() == 1
+        ));
+        let bytes = bincode::serialize(&PluginResponse::StageParametricChainResult(Err(
+            "seam segment 1 to 2: not continuous".to_owned(),
+        )))
+        .unwrap();
+        assert!(matches!(
+            bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::StageParametricChainResult(Err(_))
+        ));
+        let bytes = bincode::serialize(&PluginResponse::SampleParametricResult(Ok(Some(
+            crate::host::ParametricSample {
+                point: [100.0, -0.2],
+                direction: [0.995, -0.0998],
+            },
+        ))))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::SampleParametricResult(Ok(Some(sample))) if sample.point == [100.0, -0.2])
+        );
+        let bytes =
+            bincode::serialize(&PluginResponse::SampleParametricResult(Ok(None))).unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::SampleParametricResult(Ok(None)))
         );
     }
 

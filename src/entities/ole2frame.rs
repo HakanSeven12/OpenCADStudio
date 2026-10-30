@@ -122,7 +122,7 @@ pub(crate) fn hidden(ole: &Ole2Frame) -> bool {
 
 /// OLEFRAME of the drawing: 0 no frame, 1 frame shown and plotted, 2 frame
 /// shown but not plotted (the default).
-pub(crate) fn frame_mode(document: &codec::CadDocument) -> i16 {
+pub(crate) fn frame_mode(document: &codec::Document) -> i16 {
     crate::io::drawing_variable(document, "OLEFRAME")
         .and_then(|value| value.trim().parse::<i16>().ok())
         .filter(|value| (0..=2).contains(value))
@@ -306,7 +306,7 @@ fn apply_transform(ole: &mut Ole2Frame, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Ole2Frame {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         if hidden(self) {
             return None;
         }

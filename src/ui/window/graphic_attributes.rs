@@ -8,7 +8,7 @@ use crate::ui::dock::PanelId;
 use crate::ui::window::gradient_editor::{GradientEditorState, GradientMsg};
 use codec::entities::{EntityCommon, Hatch, HatchGradientPattern};
 use codec::types::{Color as AcadColor, LineWeight, Transparency};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use iced::widget::{
     button, column, combo_box, container, image, row, slider, text, text_input, tooltip, Space,
 };
@@ -262,7 +262,7 @@ pub(crate) struct FillIndex {
 }
 
 impl FillIndex {
-    pub(crate) fn build(document: &CadDocument) -> Self {
+    pub(crate) fn build(document: &Document) -> Self {
         let mut by_boundary: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
         for entity in document.entities() {
             let EntityType::Hatch(hatch) = entity else {
@@ -283,7 +283,7 @@ impl FillIndex {
 
     /// The fill kind of each selected object: its own kind for a selected
     /// HATCH, otherwise the kind of the first associative HATCH it bounds.
-    pub(crate) fn current(&self, document: &CadDocument, selected: &[Handle]) -> GraphicAttribute {
+    pub(crate) fn current(&self, document: &Document, selected: &[Handle]) -> GraphicAttribute {
         let fill_of = |handle: &Handle| {
             let own = match document.get_entity(*handle) {
                 Some(EntityType::Hatch(hatch)) => return GraphicAttribute::of(hatch),
@@ -311,7 +311,7 @@ impl FillIndex {
     }
 
     /// HATCH entities that are selected or associated with a selected boundary.
-    pub(crate) fn fill_handles(&self, document: &CadDocument, selected: &[Handle]) -> Vec<Handle> {
+    pub(crate) fn fill_handles(&self, document: &Document, selected: &[Handle]) -> Vec<Handle> {
         let mut seen = FxHashSet::default();
         let mut fills = Vec::new();
         for handle in selected {
@@ -332,19 +332,19 @@ impl FillIndex {
 
 /// The fill kind of the selection; see [`FillIndex::current`].
 #[cfg(test)]
-pub(crate) fn current(document: &CadDocument, selected: &[Handle]) -> GraphicAttribute {
+pub(crate) fn current(document: &Document, selected: &[Handle]) -> GraphicAttribute {
     FillIndex::build(document).current(document, selected)
 }
 
 /// HATCH entities that are selected or associated with a selected boundary.
 /// Scans the whole drawing; the palette view uses its cached [`FillIndex`].
-pub(crate) fn fill_handles(document: &CadDocument, selected: &[Handle]) -> Vec<Handle> {
+pub(crate) fn fill_handles(document: &Document, selected: &[Handle]) -> Vec<Handle> {
     FillIndex::build(document).fill_handles(document, selected)
 }
 
 /// Selected non-HATCH objects plus the boundaries of selected associative
 /// HATCH entities.
-pub(crate) fn line_handles(document: &CadDocument, selected: &[Handle]) -> Vec<Handle> {
+pub(crate) fn line_handles(document: &Document, selected: &[Handle]) -> Vec<Handle> {
     let mut handles = Vec::new();
     let mut seen = FxHashSet::default();
     for handle in selected {
@@ -379,7 +379,7 @@ pub(crate) fn top_handle(handles: &[Handle], draw_depth: &DrawDepth) -> Option<H
 
 /// The value of the topmost object and whether any of `handles` differs.
 fn shared_value<'a, T: PartialEq>(
-    document: &'a CadDocument,
+    document: &'a Document,
     handles: &[Handle],
     draw_depth: &DrawDepth,
     value: impl Fn(&EntityCommon) -> T,
@@ -396,7 +396,7 @@ fn shared_value<'a, T: PartialEq>(
     Some((top, shared, varies))
 }
 
-fn current_layer_name(document: &CadDocument) -> &str {
+fn current_layer_name(document: &Document) -> &str {
     if document.header.current_layer_name.is_empty() {
         "0"
     } else {
@@ -405,7 +405,7 @@ fn current_layer_name(document: &CadDocument) -> &str {
 }
 
 /// Layer of the topmost object, or the current layer without a selection.
-fn top_layer<'a>(document: &'a CadDocument, handles: &[Handle], draw_depth: &DrawDepth) -> &'a str {
+fn top_layer<'a>(document: &'a Document, handles: &[Handle], draw_depth: &DrawDepth) -> &'a str {
     top_handle(handles, draw_depth)
         .and_then(|handle| document.get_entity(handle))
         .map_or_else(
@@ -457,7 +457,7 @@ struct TransparencyInfo {
 }
 
 impl TransparencyInfo {
-    fn new(document: &CadDocument, layer: &str, stored: Transparency, varies: bool) -> Self {
+    fn new(document: &Document, layer: &str, stored: Transparency, varies: bool) -> Self {
         let effective = if stored.is_by_layer() {
             document
                 .layers
@@ -489,7 +489,7 @@ impl TransparencyInfo {
 }
 
 fn color_info(
-    document: &CadDocument,
+    document: &Document,
     handles: &[Handle],
     draw_depth: &DrawDepth,
 ) -> Option<ColorInfo> {
@@ -503,7 +503,7 @@ fn color_info(
 }
 
 /// Line colour for new objects (CECOLOR) when nothing is selected.
-fn current_color_info(document: &CadDocument) -> ColorInfo {
+fn current_color_info(document: &Document) -> ColorInfo {
     let color = document.header.current_entity_color;
     let shown = match color {
         AcadColor::ByLayer => document
@@ -520,7 +520,7 @@ fn current_color_info(document: &CadDocument) -> ColorInfo {
 }
 
 fn transparency_info(
-    document: &CadDocument,
+    document: &Document,
     handles: &[Handle],
     draw_depth: &DrawDepth,
 ) -> Option<TransparencyInfo> {
@@ -529,7 +529,7 @@ fn transparency_info(
 }
 
 fn effective_lineweight(
-    document: &CadDocument,
+    document: &Document,
     handles: &[Handle],
     draw_depth: &DrawDepth,
     stored: LineWeight,
@@ -543,7 +543,7 @@ fn effective_lineweight(
         .map_or(LineWeight::Default, |layer| layer.line_weight)
 }
 
-fn current_linetype_name(document: &CadDocument) -> &str {
+fn current_linetype_name(document: &Document) -> &str {
     if !document.header.current_linetype_name.is_empty() {
         document.header.current_linetype_name.as_str()
     } else if !document.header.current_linetype_handle.is_null() {
@@ -559,7 +559,7 @@ fn current_linetype_name(document: &CadDocument) -> &str {
 
 /// The linetype actually drawn: ByLayer resolves to the layer's linetype,
 /// ByBlock to Continuous.
-fn effective_linetype<'a>(document: &'a CadDocument, layer: &str, logical: &'a str) -> &'a str {
+fn effective_linetype<'a>(document: &'a Document, layer: &str, logical: &'a str) -> &'a str {
     if logical.is_empty() || logical.eq_ignore_ascii_case("ByLayer") {
         document
             .layers
@@ -576,7 +576,7 @@ fn is_continuous(name: &str) -> bool {
     name.eq_ignore_ascii_case("Continuous") || name.eq_ignore_ascii_case("Solid")
 }
 
-fn linetype_preview_art(document: &CadDocument, linetype: &str) -> String {
+fn linetype_preview_art(document: &Document, linetype: &str) -> String {
     if is_continuous(linetype) {
         return "_".repeat(80);
     }
@@ -615,7 +615,7 @@ fn linetype_preview_art(document: &CadDocument, linetype: &str) -> String {
 
 /// The topmost selected fill of the given kind.
 fn top_fill_hatch<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     fills: &[Handle],
     draw_depth: &DrawDepth,
     kind: GraphicAttribute,
@@ -634,7 +634,7 @@ fn top_fill_hatch<'a>(
     }
 }
 
-fn gradients_vary(document: &CadDocument, fills: &[Handle]) -> bool {
+fn gradients_vary(document: &Document, fills: &[Handle]) -> bool {
     let mut gradients = fills
         .iter()
         .filter_map(|handle| match document.get_entity(*handle) {
@@ -1009,7 +1009,7 @@ fn preview_row<'a>(
 }
 
 fn linetype_row<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     properties: &'a crate::ui::properties::PropertiesPanel,
     linetype: &str,
     varies: bool,
@@ -1183,7 +1183,7 @@ fn lineweight_field<'a>(
 /// The Line section: values of the selection's line objects, or the
 /// creation defaults when nothing is selected.
 fn line_section<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     properties: &'a crate::ui::properties::PropertiesPanel,
     handles: &[Handle],
     no_selection: bool,

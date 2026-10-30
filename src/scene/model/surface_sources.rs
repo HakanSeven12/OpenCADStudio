@@ -50,7 +50,7 @@ impl SurfaceSources {
 
 /// Keep the sources with the surface.
 pub fn link_surface_sources(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     surface: Handle,
     sources: &SurfaceSources,
 ) {

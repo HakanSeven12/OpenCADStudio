@@ -35,6 +35,8 @@ enum Step {
 pub struct DimTeditCommand {
     step: Step,
     picked_entity: Option<EntityType>,
+    /// The option a ribbon button chose before the pick (L, R, C or A).
+    preset: Option<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -50,6 +52,16 @@ impl DimTeditCommand {
         Self {
             step: Step::PickDim,
             picked_entity: None,
+            preset: None,
+        }
+    }
+
+    /// DIMTEDIT that takes `option` (L, R, C or A) once the dimension is
+    /// picked, as the Dimensions panel's text buttons run it.
+    pub fn with_option(option: &'static str) -> Self {
+        Self {
+            preset: Some(option),
+            ..Self::new()
         }
     }
 
@@ -131,6 +143,9 @@ impl CadCommand for DimTeditCommand {
             handle,
             entity: self.picked_entity.take(),
         };
+        if let Some(option) = self.preset.take() {
+            return self.on_text_input(option).unwrap_or(CmdResult::NeedPoint);
+        }
         CmdResult::NeedPoint
     }
 
@@ -197,20 +212,19 @@ impl CadCommand for DimTeditCommand {
         if !matches!(self.step, Step::PickTextPos { .. }) {
             return None;
         }
-        let point = point.as_vec3();
-        let d = 0.2_f32;
-        Some(WireModel {
-            name: "dimtedit_preview".into(),
-            points: vec![
+        let d = 0.2_f64;
+        Some(WireModel::solid_f64(
+            "dimtedit_preview".into(),
+            vec![
                 [point.x - d, point.y - d, point.z],
                 [point.x + d, point.y - d, point.z],
                 [point.x + d, point.y + d, point.z],
                 [point.x - d, point.y + d, point.z],
                 [point.x - d, point.y - d, point.z],
             ],
-            color: WireModel::CYAN,
-            ..WireModel::default()
-        })
+            WireModel::CYAN,
+            false,
+        ))
     }
 
     fn inject_picked_entity(&mut self, entity: EntityType) {

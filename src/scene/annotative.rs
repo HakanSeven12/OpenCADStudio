@@ -15,11 +15,11 @@ use codec::objects::{
     MTextAttributeContext, MTextContext, ObjectContextData, ObjectContextKind, ObjectType,
 };
 use codec::types::{Vector2, Vector3};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use std::borrow::Cow;
 
 /// Resolve a handle to a `Dictionary` object, if it is one.
-pub fn as_dict(doc: &CadDocument, handle: Handle) -> Option<&Dictionary> {
+pub fn as_dict(doc: &Document, handle: Handle) -> Option<&Dictionary> {
     match doc.objects.get(&handle) {
         Some(ObjectType::Dictionary(d)) => Some(d),
         _ => None,
@@ -42,7 +42,7 @@ pub fn as_dict(doc: &CadDocument, handle: Handle) -> Option<&Dictionary> {
 /// Idempotent: the resolved or created handle is written back to the header, so
 /// later calls return the same dictionary rather than minting another root. On a
 /// well-formed drawing this returns the existing root untouched.
-pub fn root_named_dict_handle(doc: &mut CadDocument) -> Handle {
+pub fn root_named_dict_handle(doc: &mut Document) -> Handle {
     let h = doc.header.named_objects_dict_handle;
     if matches!(doc.objects.get(&h), Some(ObjectType::Dictionary(_))) {
         return h;
@@ -79,7 +79,8 @@ pub fn root_named_dict_handle(doc: &mut CadDocument) -> Handle {
 /// stops resolving annotative; turning it on leaves the base geometry as the
 /// single (implicit, current-scale) representation. TEXT uses a context rather
 /// than a native flag; other entity types are not toggled here.
-pub fn set_entity_annotative(doc: &mut CadDocument, handle: Handle, want: bool) {
+pub fn set_entity_annotative(doc: &mut Document, handle: Handle, want: bool) {
+    set_annotative_marker(doc, handle, want);
     if let Some(e) = doc.get_entity_mut(handle) {
         match e {
             EntityType::MText(t) => t.is_annotative = want,
@@ -94,11 +95,27 @@ pub fn set_entity_annotative(doc: &mut CadDocument, handle: Handle, want: bool) 
     }
 }
 
+/// The object's own annotative flag, which other programs read before its
+/// annotation contexts: `AnnotativeData { 1, on }`.
+fn set_annotative_marker(doc: &mut Document, handle: Handle, on: bool) {
+    use codec::xdata::XDataValue;
+    let values = on.then(|| {
+        vec![
+            XDataValue::String("AnnotativeData".into()),
+            XDataValue::ControlString("{".into()),
+            XDataValue::Integer16(1),
+            XDataValue::Integer16(1),
+            XDataValue::ControlString("}".into()),
+        ]
+    });
+    crate::scene::view::dispatch::set_entity_xdata(doc, handle, "AcadAnnotative", values);
+}
+
 /// Derive the per-scale context payload for an entity from its current
 /// placement. Returns the concrete class name and the context kind, or `None`
 /// for entity types that do not carry a per-object annotation context.
 fn dimension_context_for(
-    doc: &CadDocument,
+    doc: &Document,
     dimension: &codec::entities::Dimension,
 ) -> Option<DimContext> {
     use codec::entities::Dimension;
@@ -202,6 +219,7 @@ fn attribute_context_for(
             xdictionary_handle: None,
             has_binary_data: false,
             class_version: 3,
+            has_file_to_extension_dictionary: true,
             is_default: false,
             scale,
             mtext: mtext_context_for(mtext),
@@ -210,7 +228,7 @@ fn attribute_context_for(
 }
 
 fn context_kind_for(
-    doc: &CadDocument,
+    doc: &Document,
     entity: &EntityType,
     scale: Handle,
 ) -> Option<(&'static str, ObjectContextKind)> {
@@ -328,7 +346,7 @@ pub fn supports_annotation_context(entity: &EntityType) -> bool {
     }
 }
 
-fn register_context_class(doc: &mut CadDocument, dxf_name: &str) {
+fn register_context_class(doc: &mut Document, dxf_name: &str) {
     doc.register_object_context_class(dxf_name);
     if doc.classes.get_by_name(dxf_name).is_some() {
         return;
@@ -377,7 +395,7 @@ fn register_context_class(doc: &mut CadDocument, dxf_name: &str) {
 /// first one created — the native representation). Returns `false` for entity
 /// kinds that carry no per-object context (their annotative-ness is style-driven).
 pub fn create_annotation_context(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     entity_handle: Handle,
     scale_handle: Handle,
 ) -> bool {
@@ -413,6 +431,7 @@ pub fn create_annotation_context(
 
     let mgr_h = get_or_create_child_dict(doc, xdict_h, "AcDbContextDataManager");
     let coll_h = get_or_create_child_dict(doc, mgr_h, "ACDB_ANNOTATIONSCALES");
+    set_annotative_marker(doc, entity_handle, true);
 
     // Idempotent: if a leaf already applies to this scale, keep it.
     let existing = as_dict(doc, coll_h)
@@ -443,6 +462,8 @@ pub fn create_annotation_context(
         reactors: vec![coll_h],
         xdictionary_handle: None,
         class_version: 3,
+        has_file_to_extension_dictionary: true,
+        uses_legacy_mleader_context_base: false,
         is_default,
         scale: scale_handle,
         kind,
@@ -465,7 +486,7 @@ pub fn create_annotation_context(
 /// majority) and for objects whose contexts include the current scale. Gated
 /// on an extension dictionary so non-annotative entities skip the lookup.
 pub fn annotative_offscale_for(
-    doc: &CadDocument,
+    doc: &Document,
     common: &EntityCommon,
     scale_handle: Option<Handle>,
     all_visible: bool,
@@ -492,7 +513,7 @@ pub fn annotative_offscale_for(
     }
 }
 pub(crate) fn annotation_scale_handles_for_entity(
-    doc: &CadDocument,
+    doc: &Document,
     entity_handle: Handle,
 ) -> Vec<Handle> {
     object_scale_memberships(doc, entity_handle)
@@ -500,7 +521,7 @@ pub(crate) fn annotation_scale_handles_for_entity(
         .map(|(_, scale_handle)| scale_handle)
         .collect()
 }
-pub fn scale_handle_by_name(doc: &CadDocument, name: &str) -> Option<Handle> {
+pub fn scale_handle_by_name(doc: &Document, name: &str) -> Option<Handle> {
     doc.objects
         .iter()
         .find_map(|(handle, object)| match object {
@@ -513,7 +534,7 @@ pub fn scale_handle_by_name(doc: &CadDocument, name: &str) -> Option<Handle> {
         })
 }
 
-pub fn ensure_scale_object(doc: &mut CadDocument, source: &codec::objects::Scale) -> Handle {
+pub fn ensure_scale_object(doc: &mut Document, source: &codec::objects::Scale) -> Handle {
     if let Some(handle) = scale_handle_by_name(doc, &source.name) {
         return handle;
     }
@@ -548,7 +569,7 @@ pub fn ensure_scale_object(doc: &mut CadDocument, source: &codec::objects::Scale
 /// The annotation scales an object currently carries a per-object context for,
 /// as `(scale name, scale handle)` pairs (one per representation). Empty when
 /// the object has no per-object context chain.
-pub fn object_scale_memberships(doc: &CadDocument, entity: Handle) -> Vec<(String, Handle)> {
+pub fn object_scale_memberships(doc: &Document, entity: Handle) -> Vec<(String, Handle)> {
     let mut out = Vec::new();
     let Some(coll_h) = annotation_scales_dict(doc, entity) else {
         return out;
@@ -571,7 +592,7 @@ pub fn object_scale_memberships(doc: &CadDocument, entity: Handle) -> Vec<(Strin
 /// down via [`clear_annotation_context`] so the object becomes non-annotative.
 /// Returns `true` if a representation was removed.
 pub fn remove_annotation_context_for_scale(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     entity: Handle,
     scale_handle: Handle,
 ) -> bool {
@@ -610,7 +631,7 @@ pub fn remove_annotation_context_for_scale(
 
 /// Resolve an entity's `ACDB_ANNOTATIONSCALES` collection dictionary handle, if
 /// its context chain exists.
-fn annotation_scales_dict(doc: &CadDocument, entity: Handle) -> Option<Handle> {
+fn annotation_scales_dict(doc: &Document, entity: Handle) -> Option<Handle> {
     let xd = doc
         .get_entity(entity)
         .and_then(|e| e.common().xdictionary_handle)?;
@@ -623,7 +644,7 @@ fn annotation_scales_dict(doc: &CadDocument, entity: Handle) -> Option<Handle> {
 /// absent, the leaf explicitly marked as the native/default representation is
 /// preferred, followed by the first valid leaf.
 pub fn active_object_context_for_scale(
-    doc: &CadDocument,
+    doc: &Document,
     entity: Handle,
     scale_handle: Option<Handle>,
 ) -> Option<&ObjectContextData> {
@@ -659,7 +680,7 @@ pub fn active_object_context_for_scale(
 /// the representation displayed at `scale_handle`. The leaf identity, scale
 /// handle and default marker stay intact; only the context payload is copied.
 pub fn reset_annotation_context_positions(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     entity: Handle,
     scale_handle: Option<Handle>,
 ) -> bool {
@@ -694,7 +715,7 @@ pub fn reset_annotation_context_positions(
 }
 
 pub fn effective_annotation_scale_for(
-    doc: &CadDocument,
+    doc: &Document,
     entity: &EntityType,
     fallback: f32,
     scale_handle: Option<Handle>,
@@ -752,7 +773,7 @@ pub fn effective_annotation_scale_for(
 /// when `None`) draws than the object's default representation: the ratio of
 /// their model-per-paper factors. `None` when either is missing.
 pub fn text_context_ratio(
-    doc: &CadDocument,
+    doc: &Document,
     handle: Handle,
     scale_handle: Option<Handle>,
 ) -> Option<f64> {
@@ -833,7 +854,7 @@ fn apply_mtext_context(entity: &mut codec::entities::MText, context: &MTextConte
 fn apply_dimension_context(
     dimension: &mut codec::entities::Dimension,
     context: &codec::objects::DimContext,
-    doc: &CadDocument,
+    doc: &Document,
 ) {
     use codec::entities::Dimension;
     use codec::objects::DimSubtype;
@@ -848,6 +869,32 @@ fn apply_dimension_context(
         base.flip_arrow2 = context.flip_arrow2;
         if let Some(record) = doc.block_records.iter().find(|r| r.handle == context.block) {
             base.block_name.clone_from(&record.name);
+        }
+    }
+
+    // A context also keeps the fit settings its scale was drawn with, and
+    // `override_code` flags which of them it overrides, one bit each in the
+    // order stored: DIMTOFL, DIMSOXD, DIMATFIT, DIMTIX, DIMTMOVE. Without them
+    // a 1:50 context drawn with a leader (DIMTMOVE 1) under a style without
+    // one lost its leader. An override on the dimension itself still wins.
+    // DIMATFIT stays with the style: its field is one bit, the variable has
+    // four values.
+    {
+        use crate::entities::dim_override as ov;
+        let common = &mut dimension.base_mut().common;
+        for (bit, code, value) in [
+            (1, ov::DIMTOFL, context.dimtofl),
+            (2, ov::DIMSOXD, context.dimosxd),
+            (8, ov::DIMTIX, context.dimtix),
+            (16, ov::DIMTMOVE, context.dimtmove),
+        ] {
+            if context.override_code & bit != 0 && ov::int(&common.extended_data, code).is_none() {
+                ov::set_on_common(
+                    common,
+                    code,
+                    Some(codec::xdata::XDataValue::Integer16(value as i16)),
+                );
+            }
         }
     }
 
@@ -975,7 +1022,7 @@ fn sync_hatch_loops(loops: &mut Vec<HatchLoopContext>, paths: &[codec::entities:
 }
 
 pub fn entity_for_annotation_context<'a>(
-    doc: &'a CadDocument,
+    doc: &'a Document,
     entity: &'a EntityType,
     scale_handle: Option<Handle>,
 ) -> Cow<'a, EntityType> {
@@ -1180,7 +1227,7 @@ fn sync_dimension_context(
 /// Copy an edited entity's placement back into one per-scale leaf so geometry
 /// edits remain attached to the representation displayed by the caller.
 pub fn sync_annotation_context_from_entity(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     entity_handle: Handle,
     scale_handle: Option<Handle>,
 ) -> bool {
@@ -1326,7 +1373,7 @@ pub fn sync_annotation_context_from_entity(
 /// its source placement, so it is materialized, translated, and written back
 /// without disturbing the transformed base representation.
 pub fn translate_annotation_contexts(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     entity_handle: Handle,
     delta: glam::DVec3,
 ) -> bool {
@@ -1341,7 +1388,7 @@ pub fn translate_annotation_contexts(
 /// only the displayed one — otherwise MOVE/ROTATE/SCALE leave the other scales
 /// where they were and they reappear there on a scale switch. (#700)
 pub fn transform_annotation_contexts(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     entity_handle: Handle,
     t: &crate::command::EntityTransform,
 ) -> bool {
@@ -1415,7 +1462,7 @@ pub fn transform_annotation_contexts(
 
 /// Get the child dictionary stored under `key` in `parent_h`, creating an empty
 /// one (owned by `parent_h`) and registering the entry when absent.
-fn get_or_create_child_dict(doc: &mut CadDocument, parent_h: Handle, key: &str) -> Handle {
+fn get_or_create_child_dict(doc: &mut Document, parent_h: Handle, key: &str) -> Handle {
     if let Some(h) = as_dict(doc, parent_h).and_then(|d| d.get(key)) {
         return h;
     }
@@ -1435,7 +1482,7 @@ fn get_or_create_child_dict(doc: &mut CadDocument, parent_h: Handle, key: &str) 
 /// and the legacy annotative XDATA markers, so [`is_annotative`] no longer fires
 /// on it. The shared `SCALE` objects in `ACAD_SCALELIST` are document-level and
 /// left intact.
-pub fn clear_annotation_context(doc: &mut CadDocument, handle: Handle) {
+pub fn clear_annotation_context(doc: &mut Document, handle: Handle) {
     if let Some(xdict_h) = doc
         .get_entity(handle)
         .and_then(|e| e.common().xdictionary_handle)
@@ -1479,21 +1526,21 @@ fn name_matches(style_name: &str, name: &str) -> bool {
 /// Creation paths use this to stamp a new TEXT/MTEXT with its own annotation
 /// context. Render-time detection deliberately does not use it: an existing
 /// non-annotative object may still reference a style later made annotative.
-pub fn text_style_is_annotative(doc: &CadDocument, name: &str) -> bool {
+pub fn text_style_is_annotative(doc: &Document, name: &str) -> bool {
     doc.text_styles
         .iter()
         .find(|s| name_matches(&s.name, name))
         .is_some_and(|s| s.annotative)
 }
 
-pub fn dim_style_is_annotative(doc: &CadDocument, name: &str) -> bool {
+pub fn dim_style_is_annotative(doc: &Document, name: &str) -> bool {
     doc.dim_styles
         .iter()
         .find(|s| name_matches(&s.name, name))
         .is_some_and(|s| s.annotative)
 }
 
-fn mleader_style_annotative(doc: &CadDocument, handle: Option<Handle>) -> bool {
+fn mleader_style_annotative(doc: &Document, handle: Option<Handle>) -> bool {
     let Some(h) = handle else {
         return false;
     };
@@ -1502,7 +1549,7 @@ fn mleader_style_annotative(doc: &CadDocument, handle: Option<Handle>) -> bool {
         .any(|(oh, o)| matches!(o, ObjectType::MultiLeaderStyle(s) if *oh == h && s.is_annotative))
 }
 
-fn table_style_annotative(doc: &CadDocument, handle: Option<Handle>) -> bool {
+fn table_style_annotative(doc: &Document, handle: Option<Handle>) -> bool {
     let Some(handle) = handle else {
         return false;
     };
@@ -1523,7 +1570,7 @@ fn table_style_annotative(doc: &CadDocument, handle: Option<Handle>) -> bool {
 /// a scale). Such an object has nothing to scale *to*, so it must render at its
 /// base geometry — treating it as annotative would (mis)scale it by the
 /// annotation factor in annotation-scaled viewports, ballooning the text.
-fn has_context_manager(doc: &CadDocument, common: &EntityCommon) -> bool {
+fn has_context_manager(doc: &Document, common: &EntityCommon) -> bool {
     let key = |d: &Dictionary, name: &str| {
         d.entries
             .iter()
@@ -1545,11 +1592,11 @@ fn has_context_manager(doc: &CadDocument, common: &EntityCommon) -> bool {
 /// Whether a MULTILEADER participates in annotation scaling through its
 /// per-object context or entity flag. A later style edit is applied only by an
 /// explicit style update, so it cannot retroactively change existing objects.
-pub fn mleader_is_annotative(doc: &CadDocument, mleader: &codec::entities::MultiLeader) -> bool {
+pub fn mleader_is_annotative(doc: &Document, mleader: &codec::entities::MultiLeader) -> bool {
     has_context_manager(doc, &mleader.common) || mleader.enable_annotation_scale
 }
 
-pub fn annotation_style_is_annotative(doc: &CadDocument, entity: &EntityType) -> bool {
+pub fn annotation_style_is_annotative(doc: &Document, entity: &EntityType) -> bool {
     match entity {
         EntityType::Text(text) => text_style_is_annotative(doc, &text.style),
         EntityType::MText(text) => text_style_is_annotative(doc, &text.style),
@@ -1777,7 +1824,7 @@ fn apply_mleader_style_at_display_scale(
 }
 
 pub fn apply_mleader_style_to_object(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     handle: Handle,
     style: &codec::objects::MultiLeaderStyle,
 ) -> bool {
@@ -1853,7 +1900,7 @@ pub fn apply_mleader_style_to_object(
 }
 
 pub fn update_entity_from_annotation_style(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     handle: Handle,
     current_scale: Option<Handle>,
     paper_to_model: f64,
@@ -1983,7 +2030,7 @@ pub fn update_entity_from_annotation_style(
 /// Whether the block definition `name` is annotative: its block record
 /// carries `AcadAnnotative` (`AnnotativeData { 1 1 }`), or, in drawings an
 /// earlier build wrote, its BLOCK entity does.
-pub fn block_is_annotative(doc: &CadDocument, name: &str) -> bool {
+pub fn block_is_annotative(doc: &Document, name: &str) -> bool {
     let Some(br) = doc.block_records.get(name) else {
         return false;
     };
@@ -2014,7 +2061,7 @@ pub fn block_is_annotative(doc: &CadDocument, name: &str) -> bool {
 }
 
 /// Whether an entity participates in annotation scaling.
-pub fn is_annotative(doc: &CadDocument, entity: &EntityType) -> bool {
+pub fn is_annotative(doc: &Document, entity: &EntityType) -> bool {
     if object_is_annotative(doc, entity.common()) {
         return true;
     }
@@ -2033,27 +2080,25 @@ pub fn is_annotative(doc: &CadDocument, entity: &EntityType) -> bool {
 
 /// Whether an object carries its own annotative state: a per-object
 /// annotation context or an annotative XDATA marker. Its style does not count.
-pub fn object_is_annotative(doc: &CadDocument, common: &EntityCommon) -> bool {
-    // Per-object annotation context (works regardless of style).
-    if has_context_manager(doc, common) {
-        return true;
-    }
-    // Legacy annotative XDATA markers.
+pub fn object_is_annotative(doc: &Document, common: &EntityCommon) -> bool {
     let xd = &common.extended_data;
-    let standard_marker = xd
-        .get_record("AcadAnnotative")
-        .and_then(|record| {
-            record
-                .values
-                .iter()
-                .filter_map(|value| match value {
-                    codec::xdata::XDataValue::Integer16(value) => Some(*value),
-                    _ => None,
-                })
-                .last()
-        })
-        .is_some_and(|value| value != 0);
-    standard_marker
+    // The object's own flag wins: a context left behind after annotative was
+    // switched off is stored with the flag at 0.
+    let standard_marker = xd.get_record("AcadAnnotative").and_then(|record| {
+        record
+            .values
+            .iter()
+            .filter_map(|value| match value {
+                codec::xdata::XDataValue::Integer16(value) => Some(*value),
+                _ => None,
+            })
+            .last()
+    });
+    if let Some(flag) = standard_marker {
+        return flag != 0;
+    }
+    // Per-object annotation context (works regardless of style).
+    has_context_manager(doc, common)
         || xd.get_record("AcAnnoPO").is_some()
         || xd.get_record("AcAnnotativeData").is_some()
 }

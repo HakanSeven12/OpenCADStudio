@@ -54,6 +54,8 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         (format!("{ACCEL}+N"), "QNEW"),
         (format!("{ACCEL}+O"), "OPEN"),
         (format!("{ACCEL}+P"), "PLOT"),
+        (format!("{ACCEL}+W"), "TOGGLESELECTIONCYCLING"),
+        (format!("{ACCEL}+R"), "NEXTVIEWPORT"),
         (format!("{ACCEL}+Q"), "QUIT"),
         (format!("{ACCEL}+S"), "SAVE"),
         (format!("{ACCEL}+SHIFT+S"), "SAVEAS"),
@@ -81,9 +83,16 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         ("RIGHT".to_string(), "CARETRIGHT"),
     ]
     .into_iter()
+    .chain(PLATFORM_BINDINGS.iter().map(|(key, action)| (key.to_string(), *action)))
     .map(|(key, action)| (key, action.to_string()))
     .collect()
 }
+
+/// Bindings a platform expects of every application.
+#[cfg(target_os = "macos")]
+pub(super) const PLATFORM_BINDINGS: &[(&str, &str)] = &[("CMD+,", "OPTIONS")];
+#[cfg(not(target_os = "macos"))]
+pub(super) const PLATFORM_BINDINGS: &[(&str, &str)] = &[];
 
 /// Canonical form used by the editor, command interface, config and key event
 /// resolver. Modifier order is stable so equivalent user input shares one row.
@@ -190,6 +199,8 @@ pub(super) const INPUT_ACTIONS: &[&str] = &[
     "TOGGLEDUCS",
     "OTRACK",
     "DYNINPUT",
+    "TOGGLESELECTIONCYCLING",
+    "NEXTVIEWPORT",
     "SELECTALL",
     "PASTECLIP",
 ];
@@ -292,6 +303,26 @@ impl OpenCADStudio {
         self.persist_settings_if_changed();
     }
 
+    /// Ctrl+R: make the next viewport of the layout current, from paper
+    /// space the first one, keeping a running command going.
+    fn next_viewport(&mut self) -> Task<Message> {
+        let scene = &self.tabs[self.active_tab].scene;
+        if scene.current_layout == "Model" {
+            return Task::none();
+        }
+        let viewports: Vec<codec::Handle> =
+            scene.viewport_list().into_iter().map(|vp| vp.handle).collect();
+        let next = match scene.active_viewport.and_then(|h| viewports.iter().position(|v| *v == h)) {
+            Some(index) => viewports.get((index + 1) % viewports.len()),
+            None => viewports.first(),
+        };
+        let Some(&next) = next else {
+            return Task::none();
+        };
+        self.viewport_switch_keeps_command = true;
+        Task::done(Message::EnterViewport(next))
+    }
+
     pub(super) fn run_shortcut(&mut self, key: &str) -> Task<Message> {
         let action = self.shortcut_bindings.get(key).or_else(|| {
             let base = key.rsplit('+').next()?;
@@ -349,8 +380,14 @@ impl OpenCADStudio {
             "TOGGLEDUCS" => Message::ToggleDynamicUcs,
             "OTRACK" => Message::ToggleOTrack,
             "DYNINPUT" => Message::ToggleDynInput,
+            "TOGGLESELECTIONCYCLING" => Message::ToggleSelectionCycling,
+            "NEXTVIEWPORT" => return self.next_viewport(),
             "SELECTALL" => Message::SelectAllShortcut,
             "PASTECLIP" => Message::PasteShortcut,
+
+            // The multiline text editor keeps its own history.
+            "UNDO" if self.mtext_editor.is_some() => Message::MTextUndo,
+            "REDO" if self.mtext_editor.is_some() => Message::MTextRedo,
 
             "UNDO" => {
                 let i = self.active_tab;

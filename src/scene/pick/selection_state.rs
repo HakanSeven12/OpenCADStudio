@@ -88,6 +88,9 @@ pub struct SelectionInput {
     pub middle_down: bool,
     pub middle_last_pos: Option<Point>,
     pub middle_last_press_time: Option<Instant>,
+    /// Where a middle drag that is panning started; Shift pressed during
+    /// that pan locks it to one axis instead of orbiting (#2155).
+    pub middle_pan_from: Option<Point>,
     /// Which way a ZOOM Dynamic drag is currently zooming: `true` while it is
     /// zooming out. Only the magnifier cursor reads it. The sign is latched
     /// rather than taken from the live `dy` so that the sub-pixel jitter of a

@@ -39,7 +39,10 @@ fn fonts() -> &'static SysFonts {
             db.load_system_fonts();
             // TrueType files dropped into the Fonts folder resolve like
             // installed ones, as the folder's SHX fonts already do (#925).
-            if let Some(dir) = crate::io::font_repo::fonts_dir() {
+            for dir in crate::io::font_repo::fonts_dir()
+                .into_iter()
+                .chain(crate::io::font_repo::support_folder())
+            {
                 db.load_fonts_dir(dir);
             }
             db
@@ -261,6 +264,29 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
             .find(|&f| f.eq_ignore_ascii_case(alias_name))
         {
             return Some(matched.clone());
+        }
+    }
+
+    // 3b. Swiss 721 is Bitstream's Helvetica: without it, a free Helvetica
+    //     clone keeps the text's widths. The condensed cut (`Swis721 Cn BT`,
+    //     `swissc*.ttf`) only takes a narrow face, so lines still fit.
+    if family_lower.starts_with("swis721") || family_lower.starts_with("swiss") {
+        let condensed = family_lower.starts_with("swissc")
+            || family_lower.split_whitespace().any(|word| word == "cn");
+        let twins: &[&str] = if condensed {
+            &[
+                "TeX Gyre Heros Cn",
+                "Nimbus Sans Narrow",
+                "Arial Narrow",
+                "Liberation Sans Narrow",
+            ]
+        } else {
+            &["TeX Gyre Heros", "Nimbus Sans", "Helvetica", "Arial", "Liberation Sans"]
+        };
+        for twin in twins {
+            if let Some(matched) = families.iter().find(|&f| f.eq_ignore_ascii_case(twin)) {
+                return Some(matched.clone());
+            }
         }
     }
 
@@ -674,3 +700,4 @@ mod tests {
         );
     }
 }
+

@@ -10,11 +10,7 @@ repository = "your-account/your-plugin-repo"
 [opencad]
 # Keep in sync with the Rust manifest's `ApiVersion::CURRENT` — this is the
 # pre-load gate; the runner also checks the compiled-in symbol.
-api_version = 13
-# Replace both placeholders in the packaging step. The v1 template's
-# release workflow contains a working example.
-rustc_version = "__RUSTC_VERSION__"
-acadrust_source = "__ACADRUST_SOURCE__"
+api_version = 14
 ribbon_order = 100
 command_prefixes = [
     "COUNT_SURVEY_POINTS",

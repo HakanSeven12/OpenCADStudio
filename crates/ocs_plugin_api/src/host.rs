@@ -23,12 +23,13 @@ use crate::ribbon::CadModule;
 // so out-of-tree plugins can use them without adding their own opencadcodec
 // dependency (which would risk an ABI-mismatching version).
 pub use codec;
+pub use codec as acadrust;
 pub use codec::objects::{
     DictionaryCloningFlags, KnownXRecordKind, ProxyObjectReference, ProxyReferenceKind, XRecord,
     XRecordEntry, XRecordSection, XRecordValue, XRecordValueType,
 };
 pub use codec::xdata::{ExtendedDataRecord, XDataValue};
-pub use codec::{CadDocument, EntityType, Handle};
+pub use codec::{Document, EntityType, Handle};
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
@@ -36,6 +37,16 @@ use crate::ipc::protocol::{PluginRequest, PluginResponse};
 /// Out-of-process V4 plugins implement this; in-process hosts may return `None`.
 pub trait PluginRequestSender: Send + Sync {
     fn request(&self, req: PluginRequest) -> Result<PluginResponse, PluginRequestError>;
+}
+
+/// One page of [`HostApi::query_entities`] (API v14).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntityPage {
+    pub entities: Vec<EntityType>,
+    /// Matches in the whole drawing, across all pages.
+    pub count: u64,
+    /// The `offset` of the next page; `None` on the last one.
+    pub next_offset: Option<u64>,
 }
 
 /// Error returned when a plugin worker thread cannot issue a host request.
@@ -457,6 +468,13 @@ pub enum HostNotification {
         entities: Vec<Handle>,
         records: Vec<(Handle, String)>,
     },
+    /// V7 panel control event (button click, value change). Discriminant 12.
+    PanelAction {
+        panel_id: String,
+        control_id: String,
+        action: String,
+        value: Option<crate::dialog::DialogValue>,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -524,6 +542,22 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, entities).map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, records).map_err(serde::ser::Error::custom)?;
             }
+            HostNotification::PanelAction {
+                panel_id,
+                control_id,
+                action,
+                value,
+            } => {
+                bytes.push(12);
+                bincode::serialize_into(&mut bytes, panel_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, control_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, action)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, value)
+                    .map_err(serde::ser::Error::custom)?;
+            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -582,6 +616,23 @@ impl<'de> Deserialize<'de> for HostNotification {
                     version,
                     entities,
                     records,
+                })
+            }
+            12 => {
+                let mut cursor = std::io::Cursor::new(rest);
+                let panel_id: String = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                let control_id: String = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                let action: String = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                let value: Option<crate::dialog::DialogValue> = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                Ok(HostNotification::PanelAction {
+                    panel_id,
+                    control_id,
+                    action,
+                    value,
                 })
             }
             _ => Ok(HostNotification::Unknown(bytes)),
@@ -850,6 +901,21 @@ pub trait InteractiveCommand: Send {
     fn selection_rejects_locked_layers(&self) -> bool {
         false
     }
+
+    /// An optional declarative modal dialog to display while this interactive command is active.
+    fn modal_dialog(&self) -> Option<crate::dialog::DialogDef> {
+        None
+    }
+
+    /// User submitted or cancelled the modal dialog.
+    fn on_dialog_response(&mut self, _response: crate::dialog::DialogResponse) -> CommandStep {
+        CommandStep::Done
+    }
+
+    /// Pending panel updates buffered during interactive command execution (API v7, additive).
+    fn take_pending_panel_updates(&mut self) -> Vec<(String, std::collections::HashMap<String, crate::dialog::DialogValue>)> {
+        Vec::new()
+    }
 }
 
 /// A preview wire rendered in real-time during interactive commands.
@@ -1067,6 +1133,27 @@ pub struct CustomGripResponse {
     pub preview: Vec<PreviewWire>,
     #[serde(default)]
     pub live_entities: Vec<(Handle, EntityType)>,
+    /// A descriptor-backed live design for the dragged instance (API v14,
+    /// additive). Some on the Begin answer tells the host to derive the live
+    /// preview ITSELF from this design for the rest of the drag â€” re-evaluated
+    /// locally per coalesced cursor move, no further Move frames crossing the
+    /// IPC â€” instead of the plugin streaming preview/live-entity geometry per
+    /// move. The plugin's settle callback stays the only write window (its
+    /// own labeled undo step; records first, then the re-stage). Older hosts
+    /// deserialize the field to None and keep the v12 semantics untouched;
+    /// None keeps every current response behaving exactly as before.
+    #[serde(default)]
+    pub descriptor: Option<PluginDisplayDescriptor>,
+    /// (API v14, additive) THE per-move re-derivation tolerance of a
+    /// descriptor-backed drag — the same tolerance the plugin staged its
+    /// instance with: it bounds the drag's chord fits AND the per-move
+    /// seam continuity reads (one declared accuracy). `Some` must accompany the Begin answer's `descriptor`
+    /// (the host never invents a frame budget: a descriptor without a finite
+    /// positive tolerance leaves the v12 streaming semantics untouched, with
+    /// one headline in the error queue). Older hosts deserialize the field
+    /// to None.
+    #[serde(default)]
+    pub descriptor_tolerance: Option<f64>,
 }
 
 /// Per-response cap on live-geometry entities (API v12): the drag stays
@@ -1118,6 +1205,32 @@ macro_rules! export_plugin {
             $crate::API_VERSION
         }
 
+        /// The whole runner, run by this plugin's own build so no Rust type
+        /// crosses the library boundary (API v14 and later). `socket` is the
+        /// host's socket name; returns the process exit code.
+        #[no_mangle]
+        pub extern "C" fn ocs_plugin_run(socket: *const ::std::os::raw::c_char) -> i32 {
+            if socket.is_null() {
+                return 2;
+            }
+            let socket = unsafe { ::std::ffi::CStr::from_ptr(socket) }
+                .to_string_lossy()
+                .into_owned();
+            match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                let plugin: ::std::boxed::Box<dyn $crate::host::BuiltinPlugin> =
+                    ::std::boxed::Box::new($ctor);
+                $crate::runner::run_with_plugin(&socket, $crate::API_VERSION, plugin)
+                    .map_err(|e| e.to_string())
+            })) {
+                ::std::result::Result::Ok(::std::result::Result::Ok(())) => 0,
+                ::std::result::Result::Ok(::std::result::Result::Err(e)) => {
+                    eprintln!("[plugin] {e}");
+                    1
+                }
+                ::std::result::Result::Err(_) => 2,
+            }
+        }
+
         #[no_mangle]
         pub extern "C" fn ocs_plugin_register(
         ) -> *mut ::std::boxed::Box<dyn $crate::host::BuiltinPlugin> {
@@ -1143,7 +1256,7 @@ pub trait HostApi {
     fn tab_index(&self) -> usize;
 
     // ── Document ────────────────────────────────────────────────────────────
-    fn document(&self) -> &CadDocument;
+    fn document(&self) -> &Document;
     /// Mutable access to the active document.
     ///
     /// For an **out-of-process** plugin this borrows a *local snapshot*: edits
@@ -1152,7 +1265,7 @@ pub trait HostApi {
     /// use [`add_entity`](Self::add_entity), [`update_entity`](Self::update_entity)
     /// and [`remove_entity`](Self::remove_entity), which are committed to the
     /// host document over IPC.
-    fn document_mut(&mut self) -> &mut CadDocument;
+    fn document_mut(&mut self) -> &mut Document;
 
     /// Add an entity to the active document, returning its handle.
     fn add_entity(&mut self, entity: EntityType) -> Handle;
@@ -1192,6 +1305,28 @@ pub trait HostApi {
 
     // ── Undo / dirty ────────────────────────────────────────────────────────
     fn push_undo(&mut self, label: &str);
+    /// Open one undo step that spans several messages (API v14): every edit
+    /// until [`HostApi::end_undo_group`] joins it, including writes a worker
+    /// thread sends through [`HostApi::plugin_request_sender`], and
+    /// `push_undo` inside it opens nothing new. The step also closes when the
+    /// user runs a command of their own. The default is [`HostApi::push_undo`].
+    fn begin_undo_group(&mut self, label: &str) {
+        self.push_undo(label);
+    }
+    /// Close the step [`HostApi::begin_undo_group`] opened.
+    fn end_undo_group(&mut self) {}
+
+    /// The entities matching `query`, one page at a time (API v14). `query`
+    /// is the JSON of the control API's `query` operation, e.g.
+    /// `{"layer":"*-OPENBARE_RUIMTE_*","type":"Mesh","xdata_app":"OPENINFRA",
+    /// "bounds":[x0,y0,x1,y1],"offset":0,"limit":500}`: `layer` takes `*` and
+    /// `?`, `where` filters properties by JSON Pointer, and `limit` is at
+    /// most 10000. One message carries at most 64 MiB either way, so batch
+    /// writes and size pages to stay under it.
+    fn query_entities(&mut self, query: &str) -> Result<EntityPage, String> {
+        let _ = query;
+        Err("query_entities is not supported by this host".to_owned())
+    }
     fn set_dirty(&mut self);
 
     // ── Command line ────────────────────────────────────────────────────────
@@ -1294,6 +1429,12 @@ pub trait HostApi {
 
     /// Read a named host setting without invoking the command dispatcher.
     /// Names are case-insensitive. Hosts may support only a subset.
+    ///
+    /// The desktop host reads `CLAYER`, `CTAB`, `CTEXTSTYLE`, `CELTYPE` and
+    /// `SNAPANG`, and the drawing's numeric and point variables (`INSUNITS`,
+    /// `MEASUREMENT`, `LUNITS`, `LUPREC`, `LTSCALE`, `PDMODE`, `PDSIZE`,
+    /// `EXTMIN`, `EXTMAX`, `LIMMIN`, `LIMMAX`, `INSBASE`, ...). A point comes
+    /// back as text, `"x,y,z"`.
     fn system_variable(&self, _name: &str) -> Option<HostSettingValue> {
         None
     }
@@ -1626,7 +1767,522 @@ pub trait HostApi {
     ) -> Result<Vec<(String, Vec<XRecordEntry>)>, String> {
         Err("XRecord listing with entries is not supported by this host".to_owned())
     }
+
+    /// Turn a declared parametric alignment chain into reference-only display
+    /// geometry (API v14, additive).
+    ///
+    /// The chain carries the record layer's truth — curve definitions
+    /// (length, driving-quantity ramp, cross-slope data) plus the continuity
+    /// fields (start point/direction) — and the host owns the evaluation: a
+    /// generic Gaussian-Q kernel plus the closed forms a ramp class admits.
+    /// Staged carriers: an exact standard entity where one exists GENERICALLY
+    /// (a constant-zero plan ramp stages a line, any other constant plan
+    /// ramp an arc; a profile ramp that is an at-most-quadratic polynomial
+    /// in the run stages an exact clamped Hermite spline of degree up to 3,
+    /// a constant profile slope a line) and bounded LwPolyline chords within
+    /// `tolerance` otherwise — the same `tolerance` bounds the seam
+    /// audit's continuity reads (one declared accuracy per chain) —
+    /// (table ramps and every other law — measured,
+    /// refined chords, never a guessed shape). Chains are audited
+    /// seam-to-seam BEFORE anything is staged
+    /// (refused with the audited pair named on mismatch), and a chain that
+    /// would need more display entities than
+    /// [`MAX_PLUGIN_LIVE_ENTITIES`](self::MAX_PLUGIN_LIVE_ENTITIES) publishes
+    /// nothing.
+    ///
+    /// Undo composition follows the entity-write contract: inside a
+    /// plugin-opened `push_undo` scope the staged set joins that scope; with
+    /// no scope open it is one step of its own; a refusal records no step.
+    /// Staged entities are marked reference-only (plugin-owned display
+    /// data). The designation is scene state: like every designation it is
+    /// not persisted in the file, so the marking plugin re-applies it on
+    /// reopen.
+    fn stage_parametric_chain(
+        &mut self,
+        _reference_name: &str,
+        _chain: &ParametricChain,
+        _tolerance: f64,
+    ) -> Result<Vec<Handle>, String> {
+        Err("Parametric chain staging is not supported by this host".to_owned())
+    }
+
+    /// Evaluate a declared parametric chain at chain position `s` (API v14,
+    /// additive): the same engine the staging builds from, exposed for
+    /// placement and basis-curve reads. Pure evaluation — no document state,
+    /// no undo, no publish. `s` is measured along the chain's declared
+    /// segment lengths from the chain start; outside the chain it answers
+    /// `None`.
+    fn sample_parametric(
+        &self,
+        _chain: &ParametricChain,
+        _s: f64,
+    ) -> Result<Option<ParametricSample>, String> {
+        Err("Parametric chain sampling is not supported by this host".to_owned())
+    }
+
+    /// Register a plugin-scoped entity class (API v14, additive).
+    ///
+    /// The declaration is session state, exactly like the grip sets: the
+    /// drawing file keeps only what the instances stamp (XDATA identity keys,
+    /// entity-bound records) plus the plugin's own record-layer XRecords —
+    /// never the class registry itself; the plugin re-declares on load and
+    /// after its own notification boundaries. Re-registering `class_id` with
+    /// an EQUAL schema (same `schema_version` and grip ids/parameter names)
+    /// is idempotent; any mismatch refuses without touching the live class —
+    /// a parameter-set change is a RE-STAGE of the instances, not a hot
+    /// schema swap.
+    ///
+    /// The grip schema is the class-scoped surface of the v11 grip rule: it
+    /// names the parameters the class's grips drive (ids must match the
+    /// plugin's later [`HostApi::set_plugin_grips`] declarations for these
+    /// instances). The host stores it for instance validation; grip
+    /// interpretation stays the plugin's per the v11 law.
+    fn register_plugin_class(
+        &mut self,
+        _plugin_id: &str,
+        _class: &PluginClassDeclaration,
+    ) -> Result<(), String> {
+        Err("Plugin class registration is not supported by this host".to_owned())
+    }
+
+    /// Stage one instance of a session-registered plugin class (API v14,
+    /// additive).
+    ///
+    /// The generalized form of [`HostApi::stage_parametric_chain`]: the
+    /// instance carries only identity — class id, schema version, layer,
+    /// record linkage — and a HOST-EVALUATED display descriptor
+    /// ([`PluginDisplayDescriptor`]; the v14 parametric engine is the first
+    /// host-known kind, so a `ParametricChain` design stages through exactly
+    /// the audited-seam/cap/refusal/undo contract of chain staging). The
+    /// staged set is reference-only (the designation machinery transfers
+    /// verbatim), stamped with the class identity key, and the instance's
+    /// record linkage (`design_record`) rides the record layer as usual: the
+    /// definition lives in records, host and file never grow a new runtime.
+    /// Refusals precede any change and record no undo step; otherwise one
+    /// batched add, one geometry bump, one publish — one step of its own
+    /// unless a plugin `push_undo` scope is open, which it joins.
+    fn stage_plugin_class_instance(
+        &mut self,
+        _plugin_id: &str,
+        _instance: &PluginClassInstance,
+    ) -> Result<Vec<Handle>, String> {
+        Err("Plugin class instance staging is not supported by this host".to_owned())
+    }
+
+    /// Read a class instance's declared parameter rows (API v14, additive —
+    /// the read half of the session's properties pair, carried by
+    /// `PluginRequest::PluginClassInstanceProperties` /
+    /// `PluginResponse::PluginClassInstancePropertiesResult`). The identity
+    /// stamp (the entity's XDATA class key) resolves the session-registered
+    /// class, the design-record linkage resolves under the named-object
+    /// dictionary, and every declared parameter reads its (name, value)
+    /// entry pair. Values print exactly what the record row carries — the
+    /// host never invents units or semantics for a name or kind it does not
+    /// declare. Strict on purpose: a missing entity, a broken linkage or a
+    /// stale schema refuses — the caller re-stages.
+    fn plugin_class_instance_properties(
+        &self,
+        _handle: Handle,
+    ) -> Result<Vec<PluginClassParameterRow>, String> {
+        Err("Plugin class instance properties are not supported by this host".to_owned())
+    }
+
+    /// Display a declarative modal form dialog and wait for user submission
+    /// or cancellation (API v7, additive).
+    fn show_dialog(&mut self, _dialog: crate::dialog::DialogDef) -> crate::dialog::DialogResponse {
+        crate::dialog::DialogResponse::Cancelled
+    }
+
+    /// Register a persistent dockable side panel / palette (API v7, additive).
+    fn register_panel(&mut self, _panel: crate::dialog::PanelDef) -> bool {
+        false
+    }
+
+    /// Update control values in a persistent dockable side panel (API v7, additive).
+    fn update_panel(
+        &mut self,
+        _panel_id: &str,
+        _values: std::collections::HashMap<String, crate::dialog::DialogValue>,
+    ) -> bool {
+        false
+    }
+
+    /// Toggle visibility or show/hide a persistent dockable side panel (API v7, additive).
+    fn toggle_panel(&mut self, _panel_id: &str, _show: Option<bool>) -> bool {
+        false
+    }
 }
+
+/// **Parametric-chain staging types (api 14, the v2 generic shapes).**
+///
+/// The declared-data contract for alignment chains the host stages from
+/// ramps declared as DATA. The wire carries the record layer's declared
+/// truth only — curve definitions and continuity — and the host owns the
+/// evaluation (curve integrals), the seam audit and the reference-only
+/// display staging. There is NO host-side species vocabulary: which
+/// quantity a ramp drives per plane, which laws the record model restates
+/// with which ramp payloads, and what a segment's ends must be are the
+/// declaring plugin's own semantics; the host refuses only what it can
+/// state generically (see [`CurveSegmentDef`]). The IFC 4.3 alignment
+/// libraries that reuse this contract live in plugins (e.g. the civil-ifc
+/// crate), not in this host.
+///
+/// Staged carriers: constant plan ramps as `Line`/`Arc` (exact), profile
+/// slope ramps that are at-most-quadratic polynomials in the run as exact
+/// clamped Hermite splines of degree up to 3 (const slopes as lines), and
+/// everything else as measured-deviation LwPolyline chords within the
+/// declared tolerance. A HELIX entity is never produced: the codec's
+/// Helix is a 3D constant-pitch space spiral, and a plan ramp curve is a
+/// 2D law — staging one for the other would be mathematically wrong.
+///
+/// The plane a parametric chain lives in. A chain is single-plane: the
+/// driving quantity reads as the plan curvature in the plan plane and as
+/// the profile slope in the profile plane (the record model's two sheets).
+///
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ParametricPlane {
+    /// Plan view: world (x, y) coordinates in the drawing's model plane,
+    /// bearings in radians CCW from +x (±2π-legal, normalized by the host).
+    Plan,
+    /// Profile sheet: (station, elevation) coordinates — x = the distance
+    /// along the horizontal alignment, y = height, exactly the
+    /// IfcAlignmentVerticalSegment frame. No rotation applies.
+    Profile,
+}
+
+/// One declared segment of a parametric chain (api 14, the v2 shape).
+///
+/// Only continuity and the law ride the wire: the curve definition plus the
+/// start point and direction. There is no species enum and no per-species
+/// quantity vocabulary (gradients, radii, curvature-end fields, bank/cant
+/// fields): the driving ramp IS the law, declared as data, and every
+/// record-model reading of those names stays in the declaring plugin. The
+/// host evaluates the generic contract only (see [`CurveSegmentDef`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParametricSegment {
+    /// The curve definition: length, the driving ramp, the cross-slope data.
+    pub def: CurveSegmentDef,
+    /// Start point: plan = world (x, y); profile = (station, elevation).
+    pub start_point: [f64; 2],
+    /// Declared start direction, radians, ±2π-legal. Plan: bearing. Profile:
+    /// the slope angle as the record declares it (the slope itself is the
+    /// driving ramp's own data; this field is the continuity read the seam
+    /// audit and joins consult).
+    pub start_direction: f64,
+}
+
+/// The declared chain (API v14, additive): the record layer's truth, turned
+/// into display geometry by the host.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParametricChain {
+    /// The plane the chain lives in.
+    pub plane: ParametricPlane,
+    /// The declared segments, start to end (at least one; each length must
+    /// be greater than zero — a zero-length terminator is a plugin's
+    /// staging detail, not a host contract, and refuses).
+    pub segments: Vec<ParametricSegment>,
+    /// Layer name for the staged display entities (the consumer's own
+    /// display convention). Empty = the host's default layer.
+    pub layer: String,
+}
+
+/// One evaluated point of a parametric chain (API v14, additive).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ParametricSample {
+    /// Plane coordinates of the point (plan = world (x, y); profile =
+    /// (station, elevation)).
+    pub point: [f64; 2],
+    /// Unit tangent in plane coordinates (plan = (cos θ, sin θ); profile =
+    /// (1, gradient) / |(1, gradient)|).
+    pub direction: [f64; 2],
+}
+
+/// **Generic curve-definition types (api 14; the v2 in-place reshaping).**
+///
+/// The host knows NO species: a curve is a driving-quantity ramp declared as
+/// DATA over the unit station parameter, evaluated by the host's generic
+/// integrator, audited at the declaring instance's own tolerance (the
+/// seams' continuity bound — one declared accuracy for welds and chords),
+/// and staged with
+/// generic carriers (exact Hermite for the polynomial class, measured-
+/// deviation chords otherwise). Species semantics (which quantity drives,
+/// which ramps restate which law, what a segment's ends must be) are the
+/// declaring plugin's own checks — the host refuses only what it can state
+/// generically. These ARE the v14 envelope's shapes: the envelope was
+/// reshaped IN PLACE before release (api_version stays 14) because no
+/// deployed plugins pre-date the reshaping.
+///
+/// A curve ramp: the driving quantity's values over one unit parameter
+/// (not `Copy`: the sampled arm carries a table; clone freely — staging
+/// copies payloads once, the per-move tier borrows).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Ramp {
+    /// An at-most-cubic polynomial ramp, coefficients ascending
+    /// (`value(xi) = Σ coeffs[i]·xi^i`); the exact class: the ramp AND its
+    /// integral are closed forms, and exact carriers derive generically.
+    Polynomial {
+        /// Coefficients in use (0..=3; higher entries ignored).
+        degree: u8,
+        /// Ascending coefficients, `coeffs[i]·xi^i`.
+        coeffs: [f64; 4],
+    },
+    /// A piecewise-linear ramp: `count` active knots ascending in xi over
+    /// [0, 1]; the integral accumulates per-interval quadratics. The same
+    /// 6-slot layout the declared vocabulary shipped.
+    Piecewise {
+        /// Active knots (0 < count <= 6; the rest are padding).
+        count: u32,
+        /// The (xi, value) knots, ascending in xi.
+        knots: [(f64, f64); 6],
+    },
+    /// A uniformly sampled table: `n` values at xi = i/(n-1); looked up
+    /// O(log n) with a linear tail; the host precomputes the stage-time
+    /// cumulative integrals so drag-time re-integration is O(log n) +
+    /// a small exacting tail (the performance-critical drag tier).
+    Sampled {
+        /// Table length (1..=4096).
+        n: u32,
+        /// The values, uniform in xi.
+        values: Vec<f64>,
+    },
+}
+
+/// One generically-defined segment: continuity state exactly as the
+/// segment struct carries it, plus the ramp payload in place of the
+/// species vocabulary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CurveSegmentDef {
+    /// The record-model length (plan = arc length; profile = horizontal run).
+    pub length: f64,
+    /// The driving-quantity ramp over the unit parameter.
+    pub ramp: Ramp,
+    /// The secondary-quantity ramp as unnamed data (the cross-slope term a
+    /// plugin's cant layout carries; the host integrates it for the
+    /// record's secondary rows but slides NOTHING about the plane curve).
+    pub cross_slope: Option<Ramp>,
+}
+
+/// What a plugin grip re-anchors, in record-model terms only (the generic
+/// replacement for per-species drive semantics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnchorLaw {
+    /// Drag the end point in the sheet (the plan piers).
+    EndStationToXY,
+    /// Re-anchor the end elevation.
+    EndElevation,
+    /// Re-anchor the end slope (grade).
+    EndGrade,
+    /// Scale the ramp's end value of the driving quantity.
+    EndCurvatureScale,
+    /// Re-run the segment's length.
+    Length,
+}
+
+/// **Plugin class-object staging types (API v14, additive).**
+///
+/// The generalization of the parametric staging contract: a plugin-declared
+/// entity CLASS whose instances carry only identity (class id, schema
+/// version, layer, record linkage) while the DEFINITION stays in the record
+/// layer (XRecords — the file's only source of truth) and the display is
+/// HOST-EVALUATED from a design descriptor. Alignment chains are exactly the
+/// `ParametricChain` descriptor kind: a class instance whose design is a
+/// chain stages through [`HostApi::stage_parametric_chain`]'s audited-seam,
+/// cap, refusal, undo and reference-only discipline verbatim. Older hosts
+/// simply answer the class methods with the standard degradation error.
+///
+/// The class declaration itself is session state like the v11 grip sets —
+/// never written to the drawing file; instances stamp only XDATA identity
+/// keys and record linkages, so a file without the plugin still renders its
+/// staged (standard-entity) display and reads its records, it just has no
+/// re-marking, re-staging or grip semantics until the plugin loads again.
+///
+/// A plugin-declared entity class (API v14).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginClassDeclaration {
+    /// Stable identity key the host stamps on instances (XDATA class key —
+    /// same key the plugin declares as its v10 `entity_classes` identity for
+    /// presentation purposes; the host stamps it on HOST-staged instances so
+    /// instance sets survive and re-associate across sessions).
+    pub class_id: String,
+    /// Monotone schema version of the class's parameter set (the record
+    /// layer's truth). An instance refuses to stage against a live class
+    /// whose version differs — the consumer re-declares and re-stages
+    /// instead, keeping the records authoritative.
+    pub schema_version: u32,
+    /// The class's grip schema (ids and the parameter names they drive,
+    /// matching the plugin's later `set_plugin_grips` declarations for its
+    /// instances). The host uses it for instance validation; grip
+    /// interpretation stays the declaring plugin's per the v11 law.
+    pub grip_schema: Vec<PluginGripSchemaEntry>,
+    /// The class's parameter schema (API v14, additive; serde default keeps
+    /// earlier declarations readable): WHAT the parameters are — names, value
+    /// kinds, and which rows host surfaces (the properties panel) may write.
+    /// Declaring parameters turns the record layer's truth into named
+    /// properties; the values themselves stay on the instance's design
+    /// record row. Names must be unique and non-empty (registering refuses
+    /// otherwise).
+    #[serde(default)]
+    pub parameters: Vec<PluginClassParameter>,
+}
+
+/// One grip in a class's schema (API v14): which parameter of the class
+/// schema this grip drives. Drag semantics remain the declaring plugin's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginGripSchemaEntry {
+    /// Grip id â€” links a schema row to the plugin's `set_plugin_grips`
+    /// declaration (the drag's `CustomGripEvent::grip_id`).
+    pub grip_id: u64,
+    /// Parameter name in the class's record layer this grip drives
+    /// (e.g. `"peak_gradient"`).
+    pub param_name: String,
+    /// (API v14, additive) The design point this grip re-anchors in a
+    /// descriptor-backed drag: when the drag's Begin answer hands the host
+    /// a live descriptor design, the host re-derives that design per
+    /// coalesced cursor move through THIS declared rule instead of
+    /// streaming Move frames. `None` (the serde default: earlier
+    /// declarations and streaming-only grips) keeps the v11/v12 semantics
+    /// untouched.
+    #[serde(default)]
+    pub drives: Option<PluginGripAnchor>,
+}
+
+/// The design point a descriptor-backed grip re-anchors (api 14; the v2
+/// anchor-law shape — the v14 envelope was reshaped in place before
+/// release, so the earlier empty drive struct never shipped). The cursor's
+/// move REPLACES that point of the declared design: the segment's named
+/// end follows the cursor per the declared anchor law, the driving ramp
+/// re-derives per its own integral law (one generic arm-consistent
+/// re-anchor — no per-species host code), the joints re-declare downstream
+/// from the engine's own sampling, and the chain's own audit gates every
+/// move's design. The host serves only what it can state generically: the
+/// profile plane's end-side anchor laws. A drive outside that set (the
+/// plan plane, the START side, a segment index out of the descriptor's
+/// range) keeps the v12 streaming path, with one headline in the error
+/// queue naming the constraint. Future drives append as NEW serde-default
+/// fields on this struct (never new positions inside it) so older hosts
+/// deserialize them harmlessly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginGripAnchor {
+    /// Zero-based index into the descriptor chain's segments.
+    pub segment: u32,
+    /// Whether the grip re-anchors that segment's START point; `false`
+    /// names the segment's end. The host serves the END side only (an
+    /// END-point drag fully re-derives the section through its own ramp
+    /// law); a declared START side keeps the streaming path until a host
+    /// release serves it.
+    pub at_start: bool,
+    /// The record-model quantity this grip re-anchors.
+    pub anchor: AnchorLaw,
+}
+
+/// One declared class parameter (API v14, additive): a name, a value kind,
+/// and an editability. The schema lets host surfaces render a class
+/// instance's parameters without the plugin's source: the value lives on
+/// the instance's design record row (the record layer stays the only
+/// truth); the declaration only says what kinds exist and which rows the
+/// host's property surfaces may write. The host never invents parameter
+/// semantics for a name or kind it does not know.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginClassParameter {
+    /// The parameter's name as the record row and host surfaces address it.
+    pub name: String,
+    /// The value kind the record row carries.
+    pub value_kind: PluginClassParameterKind,
+    /// Whether host property surfaces may write this row. A write composes
+    /// as one undo step through the session's XRecord update path, and the
+    /// declaring plugin re-stages from the record's dirty notification.
+    /// Read-only rows render but never write.
+    pub editable: bool,
+}
+
+/// The value kind of one declared class parameter (API v14, additive).
+/// Kinds append at the END only (the wire encodes a variant by its
+/// position).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PluginClassParameterKind {
+    /// A floating-point quantity; the record row carries an XRecord double
+    /// (an integral reading casts to one).
+    Real,
+    /// A count; the record row carries an XRecord integer.
+    Integer,
+    /// Free text; the record row carries an XRecord string.
+    Text,
+}
+
+/// One read row of a class instance's declared parameters (API v14,
+/// additive; the wire carrier of
+/// [`HostApi::plugin_class_instance_properties`]). The value is exactly
+/// what the record row carries — only the declared kind's own reading,
+/// never a unit or semantic conversion; `None` = the record does not
+/// carry this parameter's pair yet (the row renders the declaration).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginClassParameterRow {
+    /// The parameter's declared name.
+    pub name: String,
+    /// The declared kind the row prints under.
+    pub value_kind: PluginClassParameterKind,
+    /// Whether host property surfaces may write this row.
+    pub editable: bool,
+    /// The record row's own printed value; `None` when absent.
+    pub value: Option<String>,
+}
+
+/// One staged instance of a registered plugin class (API v14): identity plus
+/// a host-evaluated design descriptor. Records carry the truth; the host
+/// never re-interprets anything the plugin does not declare here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginClassInstance {
+    /// Must equal a class registered in this session (else the staging
+    /// refuses before any change).
+    pub class_id: String,
+    /// The schema version the instance was authored against (refuses on
+    /// mismatch with the live declaration).
+    pub schema_version: u32,
+    /// The host-evaluated display design.
+    pub design: PluginDisplayDescriptor,
+    /// The instance's own tolerance (chain designs: BOTH readings — the
+    /// carrier tolerance of the table-law ramps' chords AND the seam
+    /// continuity bound of the chain's audited welds: the point seam
+    /// reads it as meters, the plan's bearing seam as radians, the
+    /// profile's slope seam as the gradient family). The declared
+    /// accuracy is the record model's own declaration, one number.
+    #[serde(default)]
+    pub tolerance: f64,
+    /// Layer for the staged display set; empty = the host's default layer.
+    pub layer: String,
+    /// NOD-side record name holding this instance's parameter truth (the
+    /// handles-to-records linkage the plugin maintains).
+    #[serde(default)]
+    pub design_record: String,
+}
+
+/// Host-evaluated display descriptor kinds (API v14, additive).
+///
+/// Kinds append at the END only (the wire encodes a variant by its
+/// position); the first host-known kind is the v14 parametric engine for
+/// alignment chains. A kind the host does not know refuses the staging at
+/// the contract — never approximated, never silently dropped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PluginDisplayDescriptor {
+    /// The v14 parametric engine is the host-known evaluator (the same wire
+    /// grammar [`HostApi::stage_parametric_chain`] takes).
+    ParametricChain(ParametricChain),
+    // New descriptor kinds go after the existing ones: inserting one earlier
+    // would make a plugin built against the previous API send its kind and
+    // have the host read it as something else.
+}
+
+impl PluginDisplayDescriptor {
+    /// (API v14, additive) A stable diagnostic label for the error queue and
+    /// the logs. Later kinds append their arm here (the law: kinds append at
+    /// the END only).
+    pub fn kind_label(&self) -> &'static str {
+        match self {
+            Self::ParametricChain(_) => "ParametricChain",
+        }
+    }
+}
+
 
 /// One XRecord addressed by dictionary path + name (API v13, additive).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1699,7 +2355,7 @@ pub trait DocumentReader {
     /// Total number of entities in the document.
     fn entity_count(&self) -> usize;
 
-    /// Iterate over all entities without allocating a full `CadDocument`.
+    /// Iterate over all entities without allocating a full `Document`.
     fn for_each_entity(&self, f: &mut dyn FnMut(ReaderEntity<'_>));
 
     /// Look up a layer name by handle.
@@ -1727,8 +2383,8 @@ impl ReaderEntityKind {
     }
 }
 
-/// In-process `DocumentReader` implementation that wraps a borrowed `CadDocument`.
-pub struct CadDocumentReader<'a>(pub &'a CadDocument);
+/// In-process `DocumentReader` implementation that wraps a borrowed `Document`.
+pub struct CadDocumentReader<'a>(pub &'a Document);
 
 impl<'a> DocumentReader for CadDocumentReader<'a> {
     fn entity_count(&self) -> usize {

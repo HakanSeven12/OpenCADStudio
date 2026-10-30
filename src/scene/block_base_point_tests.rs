@@ -36,7 +36,7 @@ use crate::scene::{CreateBlockOptions, Scene};
 use crate::ui::window::block_definition::{BlockDefinitionState, BlockObjectMode};
 use codec::entities::{AttributeDefinition, AttributeEntity, Circle, Insert, Line};
 use codec::types::{Handle, Matrix4, Transform, Vector3};
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 use glam::DVec3;
 
 const BP_TEST: &str = "BP_TEST";
@@ -113,7 +113,7 @@ fn scene_with_bp_test() -> Scene {
 }
 
 /// The LINE stored in `block`, in block-local coordinates.
-fn block_line(document: &CadDocument, block: &str) -> Line {
+fn block_line(document: &Document, block: &str) -> Line {
     document
         .block_records
         .get(block)
@@ -127,7 +127,7 @@ fn block_line(document: &CadDocument, block: &str) -> Line {
         .expect("the block's LINE")
 }
 
-fn block_attdefs(document: &CadDocument, block: &str) -> Vec<AttributeDefinition> {
+fn block_attdefs(document: &Document, block: &str) -> Vec<AttributeDefinition> {
     let Some(br) = document.block_records.get(block) else {
         return Vec::new();
     };

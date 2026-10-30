@@ -35,7 +35,7 @@ impl CadModule for DrawModule {
         use groups::{group, ungroup};
         use inquiry::{area, dist, measuregeom};
         use layers::{
-            layfrz, layiso, laylck, layoff, layon, laythw, layulk, layuniso, make_current,
+            layfrz, layiso, laylck, layoff, layon, laythw, layulk, layuniso, laywalk, make_current,
             match_layer, panel,
         };
         use modify::{
@@ -169,6 +169,7 @@ impl CadModule for DrawModule {
                                 laylck::tool(),
                                 make_current::tool(),
                                 layiso::tool(),
+                                laywalk::tool(),
                             ],
                             row3: vec![
                                 layon::tool(),

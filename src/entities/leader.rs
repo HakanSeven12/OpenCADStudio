@@ -516,7 +516,7 @@ fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
 // ── Trait impls ────────────────────────────────────────────────────────────
 
 impl RenderConvertible for Leader {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
@@ -616,7 +616,7 @@ impl crate::entities::traits::Transformable for Leader {
 pub trait LeaderTess {
     fn tessellate(
         &self,
-        document: &codec::CadDocument,
+        document: &codec::Document,
         handle: codec::Handle,
         selected: bool,
         entity_color: [f32; 4],
@@ -628,7 +628,7 @@ pub trait LeaderTess {
 impl LeaderTess for Leader {
     fn tessellate(
         &self,
-        document: &codec::CadDocument,
+        document: &codec::Document,
         handle: codec::Handle,
         selected: bool,
         entity_color: [f32; 4],

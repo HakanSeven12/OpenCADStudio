@@ -113,7 +113,7 @@ pub struct TextInlineState {
     /// Canvas-space anchor where the field is drawn (the insertion-point click).
     pub screen_anchor: iced::Point,
 }
-pub(super) fn can_edit_text(mut handle: Handle, document: &codec::CadDocument) -> bool {
+pub(super) fn can_edit_text(mut handle: Handle, document: &codec::Document) -> bool {
     for _ in 0..8 {
         match document.get_entity(handle) {
             Some(codec::EntityType::Leader(l)) => {
@@ -167,11 +167,29 @@ impl super::OpenCADStudio {
             self.open_tolerance_dialog(Some(target));
             return iced::Task::none();
         }
+        // A table edits its first cell on the command line.
+        if let Some(EntityType::Table(table)) = self.tabs[i].scene.document.get_entity(target) {
+            let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+                target, table, 0, 0,
+            );
+            self.command_line
+                .push_info(&crate::command::CadCommand::prompt(&command));
+            self.tabs[i].active_cmd = Some(Box::new(command));
+            return iced::Task::none();
+        }
         if matches!(
             self.tabs[i].scene.document.get_entity(target),
             Some(EntityType::AttributeDefinition(_))
         ) {
             self.open_attdef_edit(target);
+            return iced::Task::none();
+        }
+        // A text that is one field, as FIELD makes it, edits that field.
+        if matches!(
+            self.tabs[i].scene.document.get_entity(target),
+            Some(EntityType::MText(_) | EntityType::Text(_))
+        ) && self.open_field_edit(target)
+        {
             return iced::Task::none();
         }
         // Snapshot what we need before borrowing `self` mutably to open.
@@ -332,7 +350,7 @@ impl super::OpenCADStudio {
             {
                 self.tabs[i].scene.document.header.text_height = paper_height;
             }
-            let handle = self.commit_entity_handle(plane.place_entity(EntityType::Text(t)));
+            let handle = self.commit_new_text(plane.place_entity(EntityType::Text(t)));
             if annotative {
                 let scale = self.tabs[i].scene.creation_annotation_scale_handle();
                 if let (Some(handle), Some(scale)) = (handle, scale) {

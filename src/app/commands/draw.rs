@@ -473,63 +473,85 @@ impl OpenCADStudio {
             "CENTERLINE" => {
                 use crate::modules::draw::draw::centerline::CenterLineCommand;
                 let settings = self.tabs[i].scene.centerline_settings();
-                let new_cmd = CenterLineCommand::new(settings);
+                let names = self.tabs[i].scene.layer_names_for_center();
+                let new_cmd = CenterLineCommand::new(settings, names);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "CENTERRESET" => {
-                let handles = self.tabs[i].scene.selected_handles_in_order();
+            // CENTERRESET / CENTERDISASSOCIATE work on the preselected centre
+            // objects, or ask for them.
+            "CENTERRESET" | "CENTERDISASSOCIATE"
+                if !self.tabs[i]
+                    .scene
+                    .selected_handles_in_order()
+                    .iter()
+                    .any(|handle| self.tabs[i].scene.is_center_object(*handle)) =>
+            {
+                use crate::modules::draw::select::SelectObjectsCommand;
+                let (prompt, apply) = if cmd == "CENTERRESET" {
+                    (crate::tr!("center-cmd", "reset-select"), "_CENTERRESET_APPLY")
+                } else {
+                    (
+                        crate::tr!("center-cmd", "disassociate-select"),
+                        "_CENTERDISASSOCIATE_APPLY",
+                    )
+                };
+                let prompt: &'static str = Box::leak(prompt.into_boxed_str());
+                let select = SelectObjectsCommand::filtered(
+                    cmd,
+                    apply,
+                    prompt,
+                    crate::scene::centerline::is_center_carrier,
+                );
+                self.command_line.push_info(&select.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(select));
+            }
+
+            "CENTERRESET" | "_CENTERRESET_APPLY" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_handles_in_order()
+                    .into_iter()
+                    .filter(|handle| self.tabs[i].scene.is_center_object(*handle))
+                    .collect();
+                self.tabs[i].scene.deselect_all();
+                // An empty selection ends the command without a report.
+                if handles.is_empty() {
+                    return Some(self.finish_dispatch(cmd));
+                }
                 self.push_undo_snapshot(i, "CENTERRESET");
                 let count = self.tabs[i].scene.reset_centerlines(&handles)
                     + self.tabs[i].scene.reset_center_marks(&handles);
                 if count > 0 {
                     self.tabs[i].dirty = true;
                 }
-                self.command_line.push_output(&crate::tf!(
-                    "CENTERRESET: {count} center object(s) updated."
-                ));
+                self.command_line
+                    .push_output(&crate::tr!("center-cmd", "reset-done", count = count));
             }
 
             "CENTERREASSOCIATE" => {
-                let handles = self.tabs[i].scene.selected_handles_in_order();
-                let mark_targets: Vec<_> = handles
-                    .iter()
-                    .copied()
-                    .filter(|handle| {
-                        let Some(codec::EntityType::Line(line)) =
-                            self.tabs[i].scene.document.get_entity(*handle)
-                        else {
-                            return false;
-                        };
-                        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
-                            .is_some()
-                    })
-                    .collect();
-                if mark_targets.len() == 1 && handles.len() == 1 {
-                    use crate::modules::draw::draw::dimcenter::CenterMarkReassociateCommand;
-                    let new_cmd = CenterMarkReassociateCommand::new(mark_targets[0]);
-                    self.command_line.push_info(&new_cmd.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
-                    return Some(self.finish_dispatch(cmd));
-                }
-                self.push_undo_snapshot(i, "CENTERREASSOCIATE");
-                let count = self.tabs[i]
-                    .scene
-                    .set_centerline_association(&handles, true)
-                    + self.tabs[i]
-                        .scene
-                        .set_center_mark_association(&handles, true);
-                if count > 0 {
-                    self.tabs[i].dirty = true;
-                }
-                self.command_line.push_output(&crate::tf!(
-                    "CENTERREASSOCIATE: {count} center object(s) associated."
-                ));
+                use crate::modules::draw::draw::dimcenter::CenterReassociateCommand;
+                let new_cmd = CenterReassociateCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "CENTERDISASSOCIATE" => {
-                let handles = self.tabs[i].scene.selected_handles_in_order();
+            "CENTERDISASSOCIATE" | "_CENTERDISASSOCIATE_APPLY" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_handles_in_order()
+                    .into_iter()
+                    .filter(|handle| self.tabs[i].scene.is_center_object(*handle))
+                    .collect();
+                self.tabs[i].scene.deselect_all();
+                if handles.is_empty() {
+                    return Some(self.finish_dispatch(cmd));
+                }
+                let was_associated: Vec<(bool, bool)> = handles
+                    .iter()
+                    .filter_map(|handle| self.tabs[i].scene.center_object_state(*handle))
+                    .collect();
                 self.push_undo_snapshot(i, "CENTERDISASSOCIATE");
                 let count = self.tabs[i]
                     .scene
@@ -540,9 +562,17 @@ impl OpenCADStudio {
                 if count > 0 {
                     self.tabs[i].dirty = true;
                 }
-                self.command_line.push_output(&crate::tf!(
-                    "CENTERDISASSOCIATE: {count} center object(s) detached."
-                ));
+                self.command_line
+                    .push_output(&crate::tr!("center-cmd", "disassociate-done", count = count));
+                for (mark, associated) in was_associated {
+                    if associated {
+                        self.command_line.push_output(&if mark {
+                            crate::tr!("center-cmd", "mark-disassociated")
+                        } else {
+                            crate::tr!("center-cmd", "line-disassociated")
+                        });
+                    }
+                }
             }
 
             "DIMCENTER" => {
@@ -555,7 +585,8 @@ impl OpenCADStudio {
             "CENTERMARK" => {
                 use crate::modules::draw::draw::dimcenter::CenterMarkCommand;
                 let settings = self.tabs[i].scene.centerline_settings();
-                let new_cmd = CenterMarkCommand::new(settings);
+                let names = self.tabs[i].scene.layer_names_for_center();
+                let new_cmd = CenterMarkCommand::new(settings, names);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -756,7 +787,11 @@ impl OpenCADStudio {
                     glam::DVec3::from_array(storage.y_axis),
                 );
                 let sources_started = crate::perf::enabled().then(iced::time::Instant::now);
-                let boundary_sources = self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
+                let mut boundary_sources =
+                    self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
+                self.tabs[i]
+                    .scene
+                    .retain_sources_on_screen(&mut boundary_sources, plane);
                 let sources_ms = crate::perf::elapsed_ms(sources_started);
                 let (source_count, segment_count, curve_count) = if perf_hatch {
                     (
@@ -855,9 +890,12 @@ impl OpenCADStudio {
 
             "GRADIENT" => {
                 use crate::modules::draw::draw::hatch::GradientCommand;
-                let boundary_sources = self.tabs[i]
+                let plane = crate::command::WorkingPlane::default();
+                let mut boundary_sources =
+                    self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
+                self.tabs[i]
                     .scene
-                    .boundary_sources_on_plane(crate::command::WorkingPlane::default(), 1.0e-6);
+                    .retain_sources_on_screen(&mut boundary_sources, plane);
                 let new_cmd = GradientCommand::new(boundary_sources)
                     .with_gap_tolerance(self.hatch_gap_tolerance);
                 self.command_line.push_info(&new_cmd.prompt());
@@ -871,7 +909,8 @@ impl OpenCADStudio {
                 } else {
                     crate::command::WorkingPlane::default()
                 };
-                let sources = self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
+                let mut sources = self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
+                self.tabs[i].scene.retain_sources_on_screen(&mut sources, plane);
                 let selected = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -1049,6 +1088,45 @@ impl OpenCADStudio {
                 }
             }
 
+            "DCDISPLAY" => {
+                use crate::command::ValuePromptCommand;
+                use crate::modules::draw::select::SelectObjectsCommand;
+                if self.tabs[i].scene.selected_handles_in_order().is_empty() {
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else {
+                    let c = ValuePromptCommand::new(
+                        "DCDISPLAY",
+                        "DCDISPLAY  Enter an option [Show/Hide] <Show>:",
+                    );
+                    self.command_line.push_info(&c.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                }
+            }
+
+            cmd if cmd.starts_with("DCDISPLAY ") => {
+                let visible = match cmd["DCDISPLAY ".len()..].trim().to_ascii_uppercase().as_str() {
+                    "" | "S" | "SHOW" => true,
+                    "H" | "HIDE" => false,
+                    _ => {
+                        self.command_line
+                            .push_error(crate::t!("Usage: DCDISPLAY [Show|Hide]").as_ref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                };
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                let scope = self.tabs[i].current_parametric_scope();
+                let count = self.tabs[i].scene.set_parametric_constraint_visibility(
+                    scope,
+                    Some(&handles),
+                    true,
+                    visible,
+                );
+                self.command_line
+                    .push_output(crate::tf!("{} constraint indicator(s) updated.", count).as_ref());
+            }
+
             "GCRESET" => {
                 let scope = self.tabs[i].current_parametric_scope();
                 let count = self.tabs[i]
@@ -1086,7 +1164,7 @@ impl OpenCADStudio {
                     visible,
                 );
                 self.command_line
-                    .push_output(format!("{} constraint indicator(s) updated.", count).as_str());
+                    .push_output(crate::tf!("{} constraint indicator(s) updated.", count).as_ref());
             }
 
             "DELCONSTRAINT" => {
@@ -1821,9 +1899,35 @@ impl OpenCADStudio {
             }
 
             "ECONSTRAINT" | "GCEQUAL" => {
+                use crate::command::CmdResult;
                 use crate::modules::parametric::EqualConstraintCommand;
-                // Both objects are picked inside the command, as in the
-                // reference; a selection made beforehand is not used.
+                // A live selection is the set the constraint is about: the
+                // umbrella dispatches the type while the picks are still in
+                // place, and the reference consumes a pickfirst selection
+                // there too. The first object is the datum, as it is for a
+                // first-then-second pick; with nothing selected the command
+                // picks its own two objects.
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.len() >= 2 {
+                    let refs = handles
+                        .iter()
+                        .filter_map(|handle| {
+                            let entity = self.tabs[i].scene.document.get_entity(*handle)?;
+                            EqualConstraintCommand::preselected_reference(entity, *handle)
+                        })
+                        .collect::<Vec<_>>();
+                    if refs.len() == handles.len() {
+                        let (first, others) = refs.split_first().expect("checked len >= 2");
+                        return Some(self.apply_cmd_result(CmdResult::AddEqualConstraint {
+                            first: *first,
+                            others: others.to_vec(),
+                            multiple: false,
+                            label: "Equal constraint",
+                        }));
+                    }
+                    self.command_line
+                        .push_error(EqualConstraintCommand::INVALID_OBJECT);
+                }
                 self.tabs[i].scene.deselect_all();
                 let command = EqualConstraintCommand::new();
                 self.command_line.push_info(&command.prompt());
@@ -2744,7 +2848,11 @@ impl OpenCADStudio {
                 } else {
                     height
                 };
-                let new_cmd = MTextCommand::with_defaults(height, style);
+                let annotative = crate::scene::annotative::text_style_is_annotative(
+                    &self.tabs[i].scene.document,
+                    &style,
+                );
+                let new_cmd = MTextCommand::with_defaults(height, style).with_annotative(annotative);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

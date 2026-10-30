@@ -655,7 +655,8 @@ impl Ribbon {
             ));
         }
         footer = footer.push(Space::new().width(Fill));
-        if let Some(launcher) = extras.and_then(draw_panel::launcher) {
+        // A panel may have a launcher without extra tools.
+        if let Some(launcher) = extras::for_panel(&key).and_then(draw_panel::launcher) {
             footer = footer.push(launcher);
         }
         // The footer stands for the title strip: its colour and the line

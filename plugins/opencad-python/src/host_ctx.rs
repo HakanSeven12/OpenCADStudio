@@ -62,6 +62,18 @@ pub(crate) fn ensure_undo_started(host: &mut dyn HostApi) {
     });
 }
 
+/// Call before a script starts driving a command. While a plugin request
+/// runs, a command joins the plugin's open undo scope, so without this the
+/// script's earlier writes and the command would undo as one step. A fresh
+/// scope takes the command instead, and the next write opens a new group.
+pub(crate) fn split_undo_group(host: &mut dyn HostApi) {
+    UNDO_STARTED.with(|started| {
+        if started.replace(false) {
+            host.push_undo(UNDO_LABEL.with(|label| label.get()));
+        }
+    });
+}
+
 /// Run `f` with the `HostApi` active for the current `PY_EVAL` call, if any.
 /// Returns `None` outside of a `HostGuard`-covered call (a script should never
 /// observe this in practice, since the guard spans the whole interpreter run).

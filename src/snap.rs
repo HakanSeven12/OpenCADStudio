@@ -380,6 +380,10 @@ pub struct Snapper {
     /// the override mode and `snap_enabled` is forced on — the override works
     /// even with running osnap off (#337).
     override_saved: Option<(HashSet<SnapType>, bool)>,
+    /// OSNAPZ: object snaps land on this plane (a point on it and its
+    /// normal: the current UCS at the current elevation) instead of keeping
+    /// the snapped object's height. `None` keeps the object's point.
+    pub osnap_z_plane: Option<(DVec3, DVec3)>,
 }
 
 impl Default for Snapper {
@@ -391,7 +395,6 @@ impl Default for Snapper {
         enabled.insert(SnapType::Node);
         enabled.insert(SnapType::Quadrant);
         enabled.insert(SnapType::Intersection);
-        enabled.insert(SnapType::Nearest);
         let mut enabled3d = HashSet::default();
         enabled3d.insert(SnapType::Vertex);
         enabled3d.insert(SnapType::EdgeMidpoint);
@@ -424,6 +427,7 @@ impl Default for Snapper {
             parallel_ref: None,
             parallel_dwell: None,
             override_saved: None,
+            osnap_z_plane: None,
         }
     }
 }
@@ -1307,6 +1311,7 @@ impl Snapper {
             parallel_ref: None,
             parallel_dwell: None,
             override_saved: None,
+            osnap_z_plane: None,
         };
         // Tangent-only: Grid is disabled here, so the grid basis is irrelevant.
         tmp.snap(
@@ -1561,6 +1566,18 @@ impl Snapper {
             construction_ray,
             &[],
         )
+        .map(|hit| self.on_osnap_z_plane(hit))
+    }
+
+    /// The snapped point moved onto the OSNAPZ plane along its normal; a grid
+    /// point already lies on the drafting plane.
+    pub fn on_osnap_z_plane(&self, mut hit: SnapResult) -> SnapResult {
+        if let Some((origin, normal)) = self.osnap_z_plane {
+            if hit.snap_type != SnapType::Grid {
+                hit.world -= normal * (hit.world - origin).dot(normal);
+            }
+        }
+        hit
     }
 
     /// Find the best snap candidate while also testing extra construction rays
@@ -2931,6 +2948,73 @@ impl Snapper {
                     }
                     offer(wire, curve_d2, piece);
                 }
+            }
+        }
+
+        // Nothing caught in the aperture: the object under the cursor offers
+        // its nearest enabled discrete point, so an endpoint or a midpoint
+        // need not be hunted for (#1914). With Nearest on, the point on the
+        // curve is always nearer and stands.
+        if self.snap_enabled
+            && matches!(
+                best.as_ref().map(|b| b.snap_type),
+                None | Some(SnapType::Grid)
+            )
+        {
+            let near_cursor = |a: DVec3, b: DVec3| {
+                let foot = nearest_on_segment(cursor_world, a, b);
+                dist2(world_to_screen(foot, view_rot, eye, bounds), cursor_screen) < radius2
+            };
+            let mut hovered: Vec<&WireModel> = Vec::new();
+            if let Some(segments) = &local_segments {
+                for segment in segments {
+                    let Some(wire) = wires.source_wire(segment.wire) else {
+                        continue;
+                    };
+                    if !hovered.iter().any(|known| std::ptr::eq(*known, wire))
+                        && near_cursor(segment.a, segment.b)
+                    {
+                        hovered.push(wire);
+                    }
+                }
+            } else {
+                hovered.extend(in_range_wires.iter().filter(|wire| {
+                    (0..wire.points.len().saturating_sub(1))
+                        .any(|i| near_cursor(wp_f64(wire, i), wp_f64(wire, i + 1)))
+                }));
+            }
+            let mut nearest: Option<(f32, SnapResult)> = None;
+            for wire in hovered {
+                self.for_each_discrete_feature(
+                    std::slice::from_ref(wire),
+                    || std::iter::once(wire),
+                    |world, snap_type, source| {
+                        let screen = world_to_screen(world, view_rot, eye, bounds);
+                        let d2 = dist2(screen, cursor_screen);
+                        if in_bounds(screen) && nearest.as_ref().map_or(true, |(n, _)| d2 < *n) {
+                            nearest = Some((
+                                d2,
+                                SnapResult {
+                                    world,
+                                    screen,
+                                    snap_type,
+                                    tangent_obj: None,
+                                    extension_base: None,
+                                    extension_base2: None,
+                                    extension_origin: None,
+                                    extension_dir: None,
+                                    viewport: None,
+                                    source,
+                                    secondary_source: None,
+                                    model_point: None,
+                                },
+                            ));
+                        }
+                    },
+                );
+            }
+            if let Some((_, found)) = nearest {
+                best = Some(found);
             }
         }
 

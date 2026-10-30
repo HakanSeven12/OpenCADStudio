@@ -2,7 +2,7 @@ use super::*;
 use crate::scene::block_parameter_properties::{self as native, Input};
 use crate::scene::model::object::{BlockParameterKey, PropValue};
 
-fn setup() -> (CadDocument, Handle, Handle, Handle, Handle) {
+fn setup() -> (Document, Handle, Handle, Handle, Handle) {
     let (mut doc, def) = fixture();
     add_distance(&mut doc, def);
     let p = crate::scene::block_actions::all_parameters(&doc, def).remove(0);
@@ -42,8 +42,8 @@ fn setup() -> (CadDocument, Handle, Handle, Handle, Handle) {
 }
 
 fn choices(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
 ) -> Vec<(BlockParameterKey, usize, Vec<String>)> {
     native::properties(doc, baseline, 17, insert)

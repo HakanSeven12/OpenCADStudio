@@ -3,15 +3,15 @@ use super::document::{
     StructureSnapshot,
 };
 use super::{Message, ModalKind, OpenCADStudio};
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 use iced::Task;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// A single save checkpoint. Entity payloads remain shared through the
 /// document's Arc storage; only modified entities detach during editing.
 pub(super) struct BlockEditCheckpoint {
-    document: CadDocument,
-    structure: CadDocument,
+    document: Document,
+    structure: Document,
     constraints: Vec<crate::scene::parametric_constraints::ParametricConstraintSet>,
     parameters: crate::scene::named_parameters::ParameterTable,
     dirty: bool,
@@ -49,7 +49,7 @@ fn same_constraints(
         && before.dimensions == after.dimensions
 }
 
-fn normalize_allocation(document: &mut CadDocument, next: u64) {
+fn normalize_allocation(document: &mut Document, next: u64) {
     if document.next_handle() < next {
         document.header.handle_seed = next - 1;
         document.allocate_handle();
@@ -272,6 +272,7 @@ impl OpenCADStudio {
             dirty_before: checkpoint.dirty,
             dirty_after: true,
             active_layer,
+            layiso_state: None,
             structure,
             parametric_constraints,
             reference_designations: Vec::new(),
@@ -587,6 +588,7 @@ impl OpenCADStudio {
         self.grip_popup = None;
         self.visibility_popup = None;
         self.table_popup = None;
+        self.flip_popup = None;
         history.checkpoint = self.block_edit_checkpoint(i);
         self.tabs[i].block_edit_history = Some(history);
         self.tabs[i].scene.bump_geometry();
@@ -602,7 +604,7 @@ impl OpenCADStudio {
 
     /// Save-time representation edits belong to the preceding editor command,
     /// so local Undo cannot leave untracked members or reuse their handles.
-    fn coalesce_saved_representations(&mut self, i: usize, before: &CadDocument) {
+    fn coalesce_saved_representations(&mut self, i: usize, before: &Document) {
         let tab = &mut self.tabs[i];
         let doc = &tab.scene.document;
         if before == doc {

@@ -32,7 +32,7 @@ use crate::host::{
     CommandSource, CommandStep, ExecutionResult, HostApi, HostNotification, PluginNotification,
 };
 use crate::ipc::protocol::{
-    CadDocument, EntityType, Handle, HostRequest, HostResponse, HostToPlugin, InteractiveEvent,
+    Document, EntityType, Handle, HostRequest, HostResponse, HostToPlugin, InteractiveEvent,
     PluginToHost, RunnerHandshake, PLUGIN_TOKEN_ENV,
 };
 use crate::ipc::server::handle_plugin_request;
@@ -82,10 +82,10 @@ impl HostApi for NullHost {
     fn tab_index(&self) -> usize {
         0
     }
-    fn document(&self) -> &CadDocument {
+    fn document(&self) -> &Document {
         panic!("NullHost: document not available")
     }
-    fn document_mut(&mut self) -> &mut CadDocument {
+    fn document_mut(&mut self) -> &mut Document {
         panic!("NullHost: document_mut not available")
     }
     fn document_reader(&self) -> Box<dyn crate::host::DocumentReader + '_> {
@@ -253,6 +253,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
             crate::host::CustomGripPhase::Settle => "CustomGripSettle",
             crate::host::CustomGripPhase::Cancel => "CustomGripCancel",
         },
+        HostRequest::GetModalDialog { .. } => "GetModalDialog",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -319,6 +320,10 @@ impl PluginProcess {
             .arg(&socket_name)
             .arg(cdylib_path)
             .env(PLUGIN_TOKEN_ENV, &token)
+            .env(
+                crate::version_info::WIRE_SCHEMA_ENV,
+                crate::version_info::wire_schema(),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -882,6 +887,34 @@ impl PluginProcess {
         }
     }
 
+    /// Ask the plugin process whether an interactive command has an active modal dialog.
+    pub fn get_modal_dialog(
+        &self,
+        command_id: u64,
+    ) -> Result<Option<crate::dialog::DialogDef>, PluginError> {
+        if let Some(v4) = &self.v4 {
+            let resp = v4.call(
+                &mut NullHost,
+                HostRequest::GetModalDialog { command_id },
+                &mut |_| {},
+            )?;
+            match resp {
+                HostResponse::ModalDialog(d) => Ok(d),
+                other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+            }
+        } else {
+            self.call_simple(
+                HostRequest::GetModalDialog { command_id },
+                "GetModalDialog",
+                "get_modal_dialog",
+                |resp| match resp {
+                    HostResponse::ModalDialog(d) => Ok(d),
+                    other => Err(Box::new(other)),
+                },
+            )
+        }
+    }
+
     pub fn is_alive(&self) -> bool {
         if let Some(v4) = &self.v4 {
             return v4.is_alive();
@@ -1427,7 +1460,7 @@ mod timeout_tests {
     use crate::ribbon::owned::OwnedPluginManifest;
     use crate::test_lock::ENV_LOCK;
     use codec::xdata::ExtendedDataRecord;
-    use codec::{CadDocument, EntityType, Handle};
+    use codec::{Document, EntityType, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,
@@ -1453,12 +1486,12 @@ mod timeout_tests {
     }
 
     struct DummyHost {
-        doc: CadDocument,
+        doc: Document,
         push_info_messages: StdMutex<Vec<String>>,
     }
 
     impl DummyHost {
-        fn new(doc: CadDocument) -> Self {
+        fn new(doc: Document) -> Self {
             Self {
                 doc,
                 push_info_messages: StdMutex::new(Vec::new()),
@@ -1473,10 +1506,10 @@ mod timeout_tests {
         fn tab_index(&self) -> usize {
             0
         }
-        fn document(&self) -> &CadDocument {
+        fn document(&self) -> &Document {
             &self.doc
         }
-        fn document_mut(&mut self) -> &mut CadDocument {
+        fn document_mut(&mut self) -> &mut Document {
             &mut self.doc
         }
         fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
@@ -1618,7 +1651,7 @@ mod timeout_tests {
             let _ = recv::<HostToPlugin>(&mut peer);
         });
 
-        let mut host = DummyHost::new(CadDocument::default());
+        let mut host = DummyHost::new(Document::default());
         let start = Instant::now();
         let result = process.dispatch(&mut host, "HANG", &mut |_| {});
         let elapsed = start.elapsed();
@@ -1683,7 +1716,7 @@ mod timeout_tests {
                 .expect("send final response");
         });
 
-        let mut host = DummyHost::new(CadDocument::default());
+        let mut host = DummyHost::new(Document::default());
         let result = process.dispatch(&mut host, "NESTED", &mut |_| {});
         assert!(result.expect("dispatch succeeds"));
         assert!(process.is_alive(), "process should still be alive");

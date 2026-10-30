@@ -1,12 +1,14 @@
 use super::*;
 mod multiple_outputs;
+mod expressions;
+mod rename;
 use crate::scene::{block_basepoint, block_distance_parameter as distance, render_graph, Scene};
 use codec::{
     entities::{Insert, Line},
     EntityType,
 };
 
-fn fixture() -> (CadDocument, Handle) {
+fn fixture() -> (Document, Handle) {
     let mut scene = Scene::new();
     scene.define_block_raw(
         "LOOKUP",
@@ -19,7 +21,7 @@ fn fixture() -> (CadDocument, Handle) {
     let definition = scene.document.block_records.get("LOOKUP").unwrap().handle;
     (scene.document, definition)
 }
-fn add_distance(document: &mut CadDocument, definition: Handle) {
+fn add_distance(document: &mut Document, definition: Handle) {
     distance::create(
         document,
         definition,
@@ -30,7 +32,7 @@ fn add_distance(document: &mut CadDocument, definition: Handle) {
     )
     .unwrap();
 }
-fn draft(document: &CadDocument, definition: Handle, parameter: Handle) -> BlockLookupAction {
+fn draft(document: &Document, definition: Handle, parameter: Handle) -> BlockLookupAction {
     let p = parameters(document, definition)
         .into_iter()
         .find(|(h, _)| *h == parameter)
@@ -45,7 +47,7 @@ fn draft(document: &CadDocument, definition: Handle, parameter: Handle) -> Block
     table.expressions = vec!["2".into(), "Small".into(), "4".into(), "Large".into()];
     table
 }
-fn graph_data(document: &CadDocument, definition: Handle) -> codec::objects::BlockEvaluationGraph {
+fn graph_data(document: &Document, definition: Handle) -> codec::objects::BlockEvaluationGraph {
     let ObjectType::DynamicBlock(o) =
         &document.objects[&graph_handle(document, definition).unwrap()]
     else {
@@ -56,7 +58,7 @@ fn graph_data(document: &CadDocument, definition: Handle) -> codec::objects::Blo
     };
     g.clone()
 }
-fn assert_links(document: &CadDocument, definition: Handle) {
+fn assert_links(document: &Document, definition: Handle) {
     let g = graph_data(document, definition);
     for n in &g.nodes {
         assert!(graph::valid_lists(&g, n.id), "invalid node {}", n.id);
@@ -77,7 +79,7 @@ fn assert_links(document: &CadDocument, definition: Handle) {
         );
     }
 }
-fn roundtrip(document: &CadDocument, definition: Handle) {
+fn roundtrip(document: &Document, definition: Handle) {
     let graph = graph_handle(document, definition).unwrap();
     for extension in ["dwg", "dxf"] {
         let bytes = crate::io::save_to_bytes(document, extension, document.version).unwrap();
@@ -304,7 +306,13 @@ fn lookup_reverse_selection_evaluates_saved_reference_geometry() {
     let mut unsupported = document.clone();
     let (_, mut malformed) = table(&unsupported, definition, lookup).unwrap().unwrap();
     malformed.columns[0].connection_name = "UpdatedAngle".into();
-    apply_table(&mut unsupported, definition, lookup, malformed).unwrap();
+    let before = unsupported.clone();
+    assert!(apply_table(&mut unsupported, definition, lookup, malformed.clone()).is_err());
+    assert_eq!(unsupported, before);
+    // Simulate a retained imported binding without authoring it through Apply.
+    let (handle, _) = table(&unsupported, definition, lookup).unwrap().unwrap();
+    let ObjectType::DynamicBlock(object) = unsupported.objects.get_mut(&handle).unwrap() else { panic!() };
+    object.data = DynamicBlockData::LookupAction(malformed);
     let before = unsupported.clone();
     assert!(evaluate_reference_choice(&unsupported, insert, "Large").is_err());
     assert_eq!(unsupported, before);
@@ -440,6 +448,8 @@ fn lookup_existing_expressions_survive_row_reordering_and_output_edits() {
     edited.expressions[1] = "Renamed".into();
     assert!(validate(&edited, Some(&original)).is_ok());
     edited.expressions[0] = "[7,9]".into();
+    assert!(validate(&edited, Some(&original)).is_ok());
+    edited.expressions[0] = "{opaque}".into();
     assert!(validate(&edited, Some(&original)).is_err());
 }
 #[test]

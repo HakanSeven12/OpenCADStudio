@@ -28,6 +28,7 @@ pub(super) fn sysvars(tab: &DocumentTab) -> SysVars {
         ("angbase", n(h.angle_base)),
         ("angdir", i(h.angle_direction)),
         ("insunits", i(h.insertion_units)),
+        ("measurement", i(h.measurement)),
         ("ltscale", n(h.linetype_scale)),
         ("celtscale", n(h.current_entity_linetype_scale)),
         ("textsize", n(h.text_height)),

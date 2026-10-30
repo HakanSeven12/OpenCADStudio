@@ -221,20 +221,24 @@ impl MeasurementScale {
             Some(XDataValue::Real(-self.paper_factor())),
         );
         let common = entity.common_mut();
-        let mut data = ExtendedData::new();
-        for record in common
-            .extended_data
-            .records()
-            .iter()
-            .filter(|r| r.application_name != Self::APP_ID)
-        {
-            data.add_record(record.clone());
-        }
         let mut record = ExtendedDataRecord::new(Self::APP_ID);
         record.add_value(XDataValue::Integer16(1));
         record.add_value(XDataValue::Real(self.user_lfac));
         record.add_value(XDataValue::Real(self.viewport_compensation));
-        data.add_record(record);
+        // In the old record's place, so an unchanged scale leaves the
+        // entity equal to what it was.
+        let mut record = Some(record);
+        let mut data = ExtendedData::new();
+        for existing in common.extended_data.records() {
+            if existing.application_name != Self::APP_ID {
+                data.add_record(existing.clone());
+            } else if let Some(record) = record.take() {
+                data.add_record(record);
+            }
+        }
+        if let Some(record) = record {
+            data.add_record(record);
+        }
         // Parsed records are authoritative after changing measurement data.
         common.extended_data = data;
     }

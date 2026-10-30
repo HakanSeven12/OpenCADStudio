@@ -4,7 +4,7 @@ use codec::{DwgReader, DwgWriter, DxfReader, DxfWriter};
 use instance::ParameterFrame;
 use std::io::Cursor;
 
-fn insert(doc: &mut CadDocument) -> Handle {
+fn insert(doc: &mut Document) -> Handle {
     doc.add_entity(EntityType::Insert(codec::entities::Insert::new(
         "ACTIONS",
         Vector3::ZERO,
@@ -12,7 +12,7 @@ fn insert(doc: &mut CadDocument) -> Handle {
     .unwrap()
 }
 
-fn line(doc: &CadDocument, insert: Handle) -> &codec::entities::Line {
+fn line(doc: &Document, insert: Handle) -> &codec::entities::Line {
     let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
         panic!()
     };
@@ -28,14 +28,14 @@ fn line(doc: &CadDocument, insert: Handle) -> &codec::entities::Line {
         .unwrap()
 }
 
-fn parameter(doc: &CadDocument, definition: Handle, handle: Handle) -> Parameter {
+fn parameter(doc: &Document, definition: Handle, handle: Handle) -> Parameter {
     all_parameters(doc, definition)
         .into_iter()
         .find(|p| p.handle == handle)
         .unwrap()
 }
 
-fn distance(doc: &mut CadDocument, definition: Handle, kind: distance::Kind) -> Handle {
+fn distance(doc: &mut Document, definition: Handle, kind: distance::Kind) -> Handle {
     distance::create(
         doc,
         definition,
@@ -47,7 +47,7 @@ fn distance(doc: &mut CadDocument, definition: Handle, kind: distance::Kind) -> 
     .unwrap()
 }
 
-fn roundtrips(doc: &CadDocument) -> Vec<CadDocument> {
+fn roundtrips(doc: &Document) -> Vec<Document> {
     vec![
         doc.clone(),
         DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(doc).unwrap()))

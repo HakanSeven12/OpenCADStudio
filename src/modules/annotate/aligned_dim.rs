@@ -303,68 +303,20 @@ impl CadCommand for AlignedDimensionCommand {
                 let p1 = self.plane.to_local(p1);
                 let p2 = self.plane.to_local(p2);
                 let pt = self.plane.to_local(pt);
-                let mut preview = preview_aligned(p1, p2, pt);
-                preview.points = preview
-                    .points
-                    .iter()
+                let points = preview_aligned(p1, p2, pt)
+                    .into_iter()
                     .map(|point| {
-                        if point[0].is_nan() {
-                            *point
+                        if point.x.is_nan() {
+                            point
                         } else {
-                            self.plane
-                                .to_world(DVec3::new(
-                                    point[0] as f64,
-                                    point[1] as f64,
-                                    point[2] as f64,
-                                ))
-                                .as_vec3()
-                                .to_array()
+                            self.plane.to_world(point)
                         }
                     })
                     .collect();
-                return Some(preview);
+                return Some(preview_wire(points));
             }
         };
-        // Preview WireModel points are screen/GPU-side: downcast to f32.
-        let p1 = p1.as_vec3();
-        let p2 = p2.as_vec3();
-        Some(WireModel {
-            bg_adapt: None,
-            point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
-            world_width: 0.0,
-            depth_override: None,
-            display_visible: true,
-            snap_only: false,
-            plot_visible: true,
-            fill_is_3d: false,
-            fill_is_2d_solid: false,
-            render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
-            name: "dimaligned_preview".into(),
-            points: vec![[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]],
-            points_low: Vec::new(),
-            color: WireModel::CYAN,
-            selected: false,
-            pattern_length: 0.0,
-            pattern: [0.0; 8],
-            line_weight_px: 1.0,
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
-
-            ..Default::default()
-        })
+        Some(preview_wire(vec![p1, p2]))
     }
 
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
@@ -413,76 +365,48 @@ fn dim_line_endpoints(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> (DVec3, DVec3) {
     (p1 + perp * offset, p2 + perp * offset)
 }
 
-fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
+fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> Vec<DVec3> {
     let (d1, d2) = dim_line_endpoints(p1, p2, dim_pt);
     let axis = (d2 - d1).normalize_or_zero();
     let perp = DVec3::new(-axis.y, axis.x, 0.0);
-    let nan = [f32::NAN, 0.0, 0.0];
+    let nan = DVec3::splat(f64::NAN);
     let arrow = 0.22;
     let text = (d1 + d2) * 0.5 + perp * 0.15;
     let half_width = ((p2 - p1).length().log10().max(0.0) + 1.0) * 0.18;
     let half_height = 0.16;
-    let to_point = |point: DVec3| point.as_vec3().to_array();
-    WireModel {
-        bg_adapt: None,
-        point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
-        world_width: 0.0,
-        depth_override: None,
-        display_visible: true,
-        snap_only: false,
-        plot_visible: true,
-        fill_is_3d: false,
-        fill_is_2d_solid: false,
-        render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
-        dash_from_start: false,
-        dash_align_end: None,
-        text_verts: Vec::new(),
-        name: "dimaligned_preview".into(),
-        points: vec![
-            to_point(p1),
-            to_point(d1),
-            nan,
-            to_point(p2),
-            to_point(d2),
-            nan,
-            to_point(d1),
-            to_point(d2),
-            nan,
-            to_point(d1 + axis * arrow + perp * arrow * 0.45),
-            to_point(d1),
-            to_point(d1 + axis * arrow - perp * arrow * 0.45),
-            nan,
-            to_point(d2 - axis * arrow + perp * arrow * 0.45),
-            to_point(d2),
-            to_point(d2 - axis * arrow - perp * arrow * 0.45),
-            nan,
-            to_point(text - axis * half_width - perp * half_height),
-            to_point(text + axis * half_width - perp * half_height),
-            to_point(text + axis * half_width + perp * half_height),
-            to_point(text - axis * half_width + perp * half_height),
-            to_point(text - axis * half_width - perp * half_height),
-        ],
-        points_low: Vec::new(),
-        color: WireModel::CYAN,
-        selected: false,
-        pattern_length: 0.0,
-        pattern: [0.0; 8],
-        line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        aci: 0,
-        key_vertices: vec![],
-        aabb: WireModel::UNBOUNDED_AABB,
-        plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
+    vec![
+        p1,
+        d1,
+        nan,
+        p2,
+        d2,
+        nan,
+        d1,
+        d2,
+        nan,
+        d1 + axis * arrow + perp * arrow * 0.45,
+        d1,
+        d1 + axis * arrow - perp * arrow * 0.45,
+        nan,
+        d2 - axis * arrow + perp * arrow * 0.45,
+        d2,
+        d2 - axis * arrow - perp * arrow * 0.45,
+        nan,
+        text - axis * half_width - perp * half_height,
+        text + axis * half_width - perp * half_height,
+        text + axis * half_width + perp * half_height,
+        text - axis * half_width + perp * half_height,
+        text - axis * half_width - perp * half_height,
+    ]
+}
 
-        ..Default::default()
-    }
+fn preview_wire(points: Vec<DVec3>) -> WireModel {
+    WireModel::solid_f64(
+        "dimaligned_preview".into(),
+        points.into_iter().map(|point| point.to_array()).collect(),
+        WireModel::CYAN,
+        false,
+    )
 }
 
 // ── Autocomplete registry ─────────────────────────────────

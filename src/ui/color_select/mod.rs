@@ -32,6 +32,21 @@ pub struct ColorExtras {
     pub background: bool,
 }
 
+thread_local! {
+    static RECENT: std::cell::RefCell<Vec<AcadColor>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The active drawing's recently picked colours, newest first. The view
+/// seeds it so every colour list offers them.
+pub fn set_recent_colors(colors: &[AcadColor]) {
+    RECENT.with(|recent| {
+        let mut recent = recent.borrow_mut();
+        if recent.as_slice() != colors {
+            *recent = colors.to_vec();
+        }
+    });
+}
+
 /// Encode a colour as the ACI integer string the style editors store
 /// (ByBlock=0, ByLayer=256, indexed 1-255). True colours are mapped to the
 /// closest ACI entry because these fields cannot store RGB values.
@@ -209,11 +224,14 @@ fn color_selector_with_indicator<'a>(
     // handles viewport placement, Escape, and outside-click dismissal.
     // By omitting `.width(...)`, DropDown defaults to the exact pixel width
     // of the underlay (`head`), matching the value column width and aligning flush.
-    iced_aw::DropDown::new(head, popup, true)
-        .alignment(iced_aw::drop_down::Alignment::Bottom)
-        .offset(2.0)
-        .on_dismiss(on_dismiss)
-        .into()
+    // Inside a scrollable (Layer Manager rows) the list needs the real
+    // visible area to flip above a field near the bottom edge.
+    crate::ui::drop_down_fit::drop_down_fit(
+        iced_aw::DropDown::new(head, popup, true)
+            .alignment(iced_aw::drop_down::Alignment::Bottom)
+            .offset(2.0)
+            .on_dismiss(on_dismiss),
+    )
 }
 
 pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
@@ -296,6 +314,25 @@ pub fn color_list<'a>(
     for i in 1u8..=9 {
         list = list.push(named_row(AcadColor::Index(i)));
     }
+    // Colours picked recently beyond the nine standard ones.
+    let recent = RECENT.with(|recent| recent.borrow().clone());
+    for color in recent
+        .into_iter()
+        .filter(|color| !matches!(color, AcadColor::Index(1..=9)))
+    {
+        let (bg, _) = acad_color_display(color);
+        list = list.push(
+            button(
+                row![swatch(bg), text(color_display_name(color)).size(11)]
+                    .spacing(5)
+                    .align_y(iced::Center),
+            )
+            .on_press(on_select(color))
+            .style(list_row_style)
+            .padding([2, 4])
+            .width(Length::Fill),
+        );
+    }
     list = list.push(
         button(text(t!("Select Color...")).size(11))
             .on_press(on_more)
@@ -314,7 +351,20 @@ pub fn drop_down_below<'a>(
     popup_height: Length,
     on_dismiss: Message,
 ) -> Element<'a, Message> {
-    let mut dd = iced_aw::DropDown::new(base, popup, true)
+    editable_drop_down_below(base, popup, popup_width, popup_height, on_dismiss, true)
+}
+
+/// Keep the same widget tree while toggling an editable dropdown, preserving
+/// its text input's focus, cursor and selection.
+pub fn editable_drop_down_below<'a>(
+    base: Element<'a, Message>,
+    popup: Element<'a, Message>,
+    popup_width: Option<Length>,
+    popup_height: Length,
+    on_dismiss: Message,
+    expanded: bool,
+) -> Element<'a, Message> {
+    let mut dd = iced_aw::DropDown::new(base, popup, expanded)
         .height(popup_height)
         .alignment(iced_aw::drop_down::Alignment::Bottom)
         .offset(2.0)

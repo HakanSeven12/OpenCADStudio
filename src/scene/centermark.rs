@@ -170,7 +170,7 @@ pub(crate) fn picked_mark_source(
 }
 
 fn resolve_source(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     source: &CenterMarkSource,
 ) -> Option<(DVec3, f64, DVec3, DVec3)> {
     let entity = document.get_entity(source.handle)?;
@@ -319,8 +319,15 @@ fn apply_source_geometry(
     association.center = vector(center);
     association.radius = radius;
     association.plane_origin = vector(center);
-    association.plane_x = vector(x);
-    association.plane_y = vector(y);
+    // The mark keeps its own rotation while its source stays in the same
+    // plane; only a source turned out of that plane re-aligns it.
+    let old_normal = dvec(association.plane_x)
+        .cross(dvec(association.plane_y))
+        .normalize_or_zero();
+    if old_normal.dot(x.cross(y).normalize_or_zero()) < 1.0 - 1.0e-9 {
+        association.plane_x = vector(x);
+        association.plane_y = vector(y);
+    }
     if association.cross_size_relative {
         association.cross_size = radius * 2.0 * size_factor;
     }
@@ -373,8 +380,55 @@ impl Scene {
             return false;
         };
         update_carrier(line, &association);
+        // The mark now points at `source_handle`; drop the indexed edge.
+        self.associative_centermark_source_cache
+            .borrow_mut()
+            .take();
         self.bump_entities(&[(target, ChangeKind::Modified)]);
         true
+    }
+
+    /// Centre-mark carriers attached to the changed source handle, read from
+    /// the reverse index (built on first use, dropped whenever an entity or an
+    /// association may have changed). Candidates are re-validated against
+    /// their current xdata, so a stale entry can only cost a lookup.
+    fn associative_centermark_dependents(
+        &self,
+        changed: &rustc_hash::FxHashSet<Handle>,
+    ) -> Vec<Handle> {
+        if self
+            .associative_centermark_source_cache
+            .borrow()
+            .is_none()
+        {
+            let mut index: HashMap<Handle, Vec<Handle>> = HashMap::default();
+            for entity in self.document.entities() {
+                let EntityType::Line(line) = entity else {
+                    continue;
+                };
+                let Some(association) = CenterMarkAssociation::read(&line.common.extended_data)
+                else {
+                    continue;
+                };
+                if !association.associated {
+                    continue;
+                }
+                let carriers = index.entry(association.source.handle).or_default();
+                if !carriers.contains(&line.common.handle) {
+                    carriers.push(line.common.handle);
+                }
+            }
+            *self.associative_centermark_source_cache.borrow_mut() = Some(index);
+        }
+        let cache = self.associative_centermark_source_cache.borrow();
+        let index = cache.as_ref().expect("associative centre mark index");
+        let mut handles = rustc_hash::FxHashSet::default();
+        for source in changed {
+            if let Some(carriers) = index.get(source) {
+                handles.extend(carriers.iter().copied());
+            }
+        }
+        handles.into_iter().collect()
     }
 
     pub(crate) fn refresh_associative_center_marks(
@@ -386,15 +440,15 @@ impl Scene {
             return Vec::new();
         }
         let candidates: Vec<_> = self
-            .document
-            .entities()
-            .filter_map(|entity| {
-                let EntityType::Line(line) = entity else {
+            .associative_centermark_dependents(&changed)
+            .into_iter()
+            .filter_map(|handle| {
+                let EntityType::Line(line) = self.document.get_entity(handle)? else {
                     return None;
                 };
                 let association = CenterMarkAssociation::read(&line.common.extended_data)?;
                 (association.associated && changed.contains(&association.source.handle))
-                    .then_some((line.common.handle, association))
+                    .then_some((handle, association))
             })
             .collect();
         let mut result = Vec::new();
@@ -493,6 +547,12 @@ impl Scene {
             }
         }
         if !candidates.is_empty() {
+            // The association flags just changed. Drop the index; the bump
+            // below re-indexes from the new xdata (an all-disassociated bump
+            // rebuilds an empty index and refreshes nothing).
+            self.associative_centermark_source_cache
+                .borrow_mut()
+                .take();
             let changes: Vec<_> = candidates
                 .iter()
                 .map(|(handle, _)| (*handle, ChangeKind::Modified))
@@ -513,4 +573,105 @@ pub(crate) fn entity_has_center_association(entity: &EntityType) -> bool {
     };
     CenterMarkAssociation::read(&line.common.extended_data)
         .is_some_and(|association| association.associated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codec::entities::{Circle, Line};
+
+    fn source_circle() -> EntityType {
+        EntityType::Circle(Circle::from_center_radius(
+            Vector3::new(10.0, 10.0, 0.0),
+            5.0,
+        ))
+    }
+
+    fn carrier(source: Handle) -> EntityType {
+        let association = CenterMarkAssociation {
+            source: CenterMarkSource {
+                handle: source,
+                kind: CenterMarkSourceKind::Circle,
+                segment_index: -1,
+                pick_point: Vector3::new(10.0, 10.0, 0.0),
+            },
+            plane_origin: Vector3::new(10.0, 10.0, 0.0),
+            plane_x: Vector3::new(1.0, 0.0, 0.0),
+            plane_y: Vector3::new(0.0, 1.0, 0.0),
+            center: Vector3::new(10.0, 10.0, 0.0),
+            radius: 5.0,
+            cross_size: 1.0,
+            cross_gap: 0.5,
+            cross_size_relative: false,
+            cross_gap_relative: false,
+            extension_length: 0.0,
+            length_adjustments: [0.0; 4],
+            overshoots: [0.0; 4],
+            show_extensions: false,
+            associated: true,
+        };
+        let mut line = Line::from_points(
+            Vector3::new(9.5, 10.0, 0.0),
+            Vector3::new(10.5, 10.0, 0.0),
+        );
+        association.write(&mut line.common.extended_data);
+        EntityType::Line(line)
+    }
+
+    fn carrier_y(scene: &Scene, handle: Handle) -> f64 {
+        let Some(EntityType::Line(line)) = scene.document.get_entity(handle) else {
+            panic!("carrier is not a line");
+        };
+        assert!((line.start.y - line.end.y).abs() < 1e-9, "carrier not horizontal");
+        line.start.y
+    }
+
+    #[test]
+    fn index_finds_marks_when_their_circle_moves() {
+        let mut scene = Scene::new();
+        let source = scene.add_entity(source_circle());
+        let mark = scene.add_entity(carrier(source));
+        assert!((carrier_y(&scene, mark) - 10.0).abs() < 1e-9);
+
+        let Some(EntityType::Circle(circle)) = scene.document.get_entity_mut(source) else {
+            panic!("source is not a circle");
+        };
+        circle.center.y = 20.0;
+        scene.bump_entities(&[(source, ChangeKind::Modified)]);
+        assert!((carrier_y(&scene, mark) - 20.0).abs() < 1e-9);
+    }
+
+    /// Paste inserts straight into the document and bumps `Added`; a mark
+    /// arriving that way must reach a warm index too.
+    #[test]
+    fn index_picks_up_a_mark_added_after_it_was_built() {
+        let mut scene = Scene::new();
+        let source = scene.add_entity(source_circle());
+        let early = scene.add_entity(carrier(source));
+
+        let Some(EntityType::Circle(circle)) = scene.document.get_entity_mut(source) else {
+            panic!("source is not a circle");
+        };
+        circle.center.y = 12.0;
+        scene.bump_entities(&[(source, ChangeKind::Modified)]);
+        assert!(
+            (carrier_y(&scene, early) - 12.0).abs() < 1e-9,
+            "index is warm"
+        );
+
+        let pasted = scene
+            .document
+            .add_entity(carrier(source))
+            .unwrap_or(Handle::NULL);
+        assert!(!pasted.is_null());
+        scene.bump_entities(&[(pasted, ChangeKind::Added)]);
+
+        let Some(EntityType::Circle(circle)) = scene.document.get_entity_mut(source) else {
+            panic!("source is not a circle");
+        };
+        circle.center.y = 20.0;
+        scene.bump_entities(&[(source, ChangeKind::Modified)]);
+        assert!((carrier_y(&scene, pasted) - 20.0).abs() < 1e-9);
+        assert!((carrier_y(&scene, early) - 20.0).abs() < 1e-9);
+    }
 }

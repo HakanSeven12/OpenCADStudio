@@ -21,7 +21,7 @@ without it keeps working, and the default `HostApi` methods refuse.
 
 | Area | `HostApi` entry | What it does |
 |---|---|---|
-| Read | `document()`, `entity_snapshot` | The full `CadDocument` snapshot; a detached JSON view of any typed entity. |
+| Read | `document()`, `entity_snapshot` | The full `Document` snapshot; a detached JSON view of any typed entity. |
 | Entities | `add_entity`, `remove_entity`, `update_entities_transaction`, `set_reference_only` | Create, delete and replace entities. A transaction validates every replacement first and either commits all of them as one undo step or none. `set_reference_only` designates plugin-owned display geometry (API v9, see below). |
 | Selection | `selection`, `set_selection` | Ordered, tab-scoped, exact (missing or duplicate handles reject the request). |
 | Solids | `solid_operation` | Kernel-backed create, transform, booleans, extrude, region and surface from a profile, picture embedding. Every result is verified to lift back from its ACIS payload without loss; a refusal leaves the operands untouched. |

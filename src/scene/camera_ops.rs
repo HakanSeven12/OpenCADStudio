@@ -114,7 +114,7 @@ fn fold_sane_bounds(
 }
 
 fn block_entity_transform(
-    document: &CadDocument,
+    document: &Document,
     block_name: &str,
     target: Handle,
     visited: &mut Vec<String>,
@@ -460,9 +460,14 @@ impl Scene {
         view
     }
 
-    /// Zoom the model-space camera in/out by a percentage.
+    /// Zoom the active view in/out by a percentage.
     /// factor > 1 = zoom out, factor < 1 = zoom in.
     pub fn zoom_camera(&mut self, factor: f32) {
+        if self.active_viewport.is_some() && self.current_layout != "Model" {
+            self.scale_active_viewport(factor as f64, None);
+            self.camera_generation += 1;
+            return;
+        }
         let mut cam = self.camera.borrow_mut();
         cam.distance = (cam.distance * factor).max(0.001);
         drop(cam);
@@ -674,6 +679,10 @@ impl Scene {
         let min = p1.min(p2);
         let max = p1.max(p2);
         if min == max {
+            return;
+        }
+        if self.active_viewport.is_some() && self.current_layout != "Model" {
+            self.fit_active_viewport_to_window(min, max);
             return;
         }
         let aspect = self.active_camera_aspect();
@@ -1654,6 +1663,7 @@ impl Scene {
                 scale,
                 self.annotation_all_visible(),
                 None,
+                None,
             ) {
                 let is_infinite = Self::handle_from_wire_name(&wire.name)
                     .and_then(|handle| self.document.get_entity(handle))
@@ -2089,7 +2099,7 @@ impl Scene {
 }
 
 /// The drawing's ACAD_BACKGROUND dictionary, made when it has none.
-fn background_dictionary(document: &mut codec::CadDocument) -> Option<Handle> {
+fn background_dictionary(document: &mut codec::Document) -> Option<Handle> {
     use codec::objects::{Dictionary, ObjectType};
     let root = document.header.named_objects_dict_handle;
     let Some(ObjectType::Dictionary(root_dictionary)) = document.objects.get(&root) else {
@@ -2120,7 +2130,7 @@ fn background_dictionary(document: &mut codec::CadDocument) -> Option<Handle> {
 /// A new background object in ACAD_BACKGROUND, keyed by its own handle as
 /// the reference keys it. Null when the drawing has no named-objects root.
 pub fn add_background(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     data: codec::objects::ClassObjectData,
 ) -> Handle {
     use codec::objects::{ClassObject, ObjectType};
@@ -2144,7 +2154,7 @@ pub fn add_background(
 /// Erases a background object once no view or viewport refers to it (the
 /// reference erases a view's background when it is replaced, cleared or the
 /// view deleted, and a viewport's when the viewport takes another).
-pub fn erase_background(document: &mut codec::CadDocument, handle: Handle) {
+pub fn erase_background(document: &mut codec::Document, handle: Handle) {
     use codec::objects::{ClassObjectData as D, ObjectType};
     if !handle.is_valid()
         || document.views.iter().any(|view| view.background_handle == handle)
@@ -2179,7 +2189,7 @@ pub fn erase_background(document: &mut codec::CadDocument, handle: Handle) {
 
 /// A copy of a background object (the reference gives each view and
 /// viewport its own); null for none.
-pub fn copy_background(document: &mut codec::CadDocument, handle: Handle) -> Handle {
+pub fn copy_background(document: &mut codec::Document, handle: Handle) -> Handle {
     use codec::objects::{ClassObjectData as D, ObjectType};
     match document.objects.get(&handle) {
         Some(ObjectType::ClassObject(object))

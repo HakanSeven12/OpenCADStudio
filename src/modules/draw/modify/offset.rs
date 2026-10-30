@@ -285,7 +285,7 @@ fn offset_curved(
 
 // ── Dispatch ───────────────────────────────────────────────────────────────
 
-fn compute_offsets(entity: &EntityType, dist: f64, side_pt: Vec3) -> Vec<EntityType> {
+pub(crate) fn compute_offsets(entity: &EntityType, dist: f64, side_pt: Vec3) -> Vec<EntityType> {
     match entity {
         EntityType::Line(l) => offset_line(l, dist, side_pt).into_iter().collect(),
         EntityType::Circle(c) => offset_circle(c, dist, side_pt).into_iter().collect(),

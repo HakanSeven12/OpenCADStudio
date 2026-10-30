@@ -114,7 +114,7 @@ impl Scene {
         // its shaded mesh.
         let block = self.current_layout_block_handle();
         let mut points: FxHashMap<Handle, Vec<[f64; 3]>> = FxHashMap::default();
-        let wires = self.wires_for_block_culled(block, None, None, None, None, None, true, None);
+        let wires = self.wires_for_block_culled(block, None, None, None, None, None, true, None, None);
         for wire in &wires {
             let Some(handle) = Self::handle_from_wire_name(&wire.name) else {
                 continue;

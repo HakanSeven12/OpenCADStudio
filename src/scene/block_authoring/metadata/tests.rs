@@ -6,7 +6,7 @@ use crate::scene::{
 };
 use codec::types::Vector3;
 
-fn fixture() -> (CadDocument, Handle, Vec<Handle>) {
+fn fixture() -> (Document, Handle, Vec<Handle>) {
     let mut scene = Scene::new();
     scene.define_block_raw("METADATA", Vector3::ZERO, vec![]);
     let definition = scene.document.block_records.get("METADATA").unwrap().handle;
@@ -51,7 +51,7 @@ fn fixture() -> (CadDocument, Handle, Vec<Handle>) {
     handles.push(block_visibility::create(doc, definition, Vector3::ZERO).unwrap());
     (scene.document, definition, handles)
 }
-fn values(doc: &CadDocument, def: Handle, handle: Handle) -> Vec<(Field, String)> {
+fn values(doc: &Document, def: Handle, handle: Handle) -> Vec<(Field, String)> {
     read(doc, def, handle)
         .unwrap()
         .text

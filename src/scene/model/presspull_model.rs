@@ -330,6 +330,67 @@ fn profile_owner(scene: &Scene, plane: WorkingPlane, anchor: DVec3) -> Option<(H
     None
 }
 
+/// A point inside a planar face of `handle` seen edge-on along `view`, when
+/// the cursor line through `point` runs within `reach` of that face. Such a
+/// face draws as a line, so a ray never lands on it.
+pub fn edge_on_face_point(
+    scene: &Scene,
+    handle: Handle,
+    point: DVec3,
+    view: DVec3,
+    reach: f64,
+) -> Option<DVec3> {
+    let body = scene.solid_models.get(&handle)?;
+    let view = view.try_normalize()?;
+    let mut best: Option<(f64, DVec3)> = None;
+    for face in body.face_keys() {
+        let Some(profile) = brep::planar_face_profile(body, face) else {
+            continue;
+        };
+        let Some(normal) = profile.plane.normal().map(DVec3::from_array) else {
+            continue;
+        };
+        if normal.dot(view).abs() > 1e-6 {
+            continue;
+        }
+        let Some(gap) = profile.plane.distance_to(point.to_array()) else {
+            continue;
+        };
+        if gap.abs() > reach || best.is_some_and(|(nearest, _)| nearest <= gap.abs()) {
+            continue;
+        }
+        // The cursor line, dropped into the face plane, crosses the face
+        // along `view`; take the middle of the stretch inside it.
+        let base = point - normal * gap;
+        let boundary = profile.loops.into_iter().flatten().collect::<Vec<_>>();
+        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+        for curve in &boundary {
+            for local in curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE) {
+                let t = (DVec3::from_array(profile.plane.point_at(local)) - base).dot(view);
+                low = low.min(t);
+                high = high.max(t);
+            }
+        }
+        if low >= high {
+            continue;
+        }
+        // ponytail: sampled, a face whose inside along the line is thinner
+        // than 1/64 of its depth is missed.
+        let inside = (0..=64)
+            .map(|k| base + view * (low + (high - low) * k as f64 / 64.0))
+            .filter(|candidate| {
+                profile.plane.project(candidate.to_array()).is_some_and(|local| {
+                    contains(&boundary, local, Tolerance::new(BOUNDARY_TOLERANCE))
+                })
+            })
+            .collect::<Vec<_>>();
+        if let Some(middle) = inside.get(inside.len() / 2) {
+            best = Some((gap.abs(), *middle));
+        }
+    }
+    best.map(|(_, point)| point)
+}
+
 /// A supplied curve handle means explicit edge/preselection. An absent handle
 /// means a bounded-area pick; closed profiles therefore retain their distinct
 /// edge and interior behaviors. A solid handle prefers its exact trimmed face.

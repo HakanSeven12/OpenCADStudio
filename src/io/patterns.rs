@@ -51,31 +51,32 @@ pub fn catalog() -> &'static [PatternDef] {
 }
 
 /// The text of every `*.<ext>` file in `<config>/<folder>`, where users drop
-/// their own hatch patterns and linetypes. Bundled names come first, so a
+/// their own hatch patterns and linetypes, and in the support folder. Bundled names come first, so a
 /// user file adds definitions rather than replacing the built-in ones.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn user_definitions(folder: &str, ext: &str) -> String {
-    let Some(dir) = crate::config::config_dir().map(|dir| dir.join(folder)) else {
-        return String::new();
-    };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return String::new();
-    };
-    let mut paths: Vec<_> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case(ext))
-        })
-        .collect();
-    paths.sort();
-    paths
-        .iter()
-        .filter_map(|path| std::fs::read(path).ok())
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .collect::<Vec<_>>()
-        .join("\n")
+    let dirs = crate::config::config_dir()
+        .map(|dir| dir.join(folder))
+        .into_iter()
+        .chain(crate::io::font_repo::support_folder());
+    dirs.flat_map(|dir| {
+        let mut paths: Vec<_> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+            })
+            .collect();
+        paths.sort();
+        paths
+    })
+    .filter_map(|path| std::fs::read(path).ok())
+    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 /// The web build has no user folder.

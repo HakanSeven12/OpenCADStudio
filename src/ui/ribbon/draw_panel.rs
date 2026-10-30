@@ -38,6 +38,8 @@ const GAP: f32 = 2.0;
 const PAD: f32 = 4.0;
 const OPTION_HEIGHT: f32 = 22.0;
 const OPTIONS_W: f32 = 190.0;
+/// The least width of a slide-out with a layer list.
+const LIST_MIN_W: f32 = 180.0;
 /// How long an unpinned slide-out stays after the pointer leaves it and its
 /// panel, so the pointer can cross the gap between them.
 const CLOSE_DELAY: Duration = Duration::from_millis(300);
@@ -71,7 +73,7 @@ pub(super) fn parent_panel(id: &str) -> Option<&'static str> {
 
 /// The slide-out under the title of the panel `key`.
 pub(super) fn panel_for_group(key: &str) -> Option<&'static PanelExtras> {
-    extras::for_panel(key).filter(|panel| panel.tools().next().is_some())
+    extras::for_panel(key).filter(|panel| panel.has_slide_out())
 }
 
 /// The slide-out under the panel `key`, if it has one.
@@ -325,7 +327,8 @@ pub(super) fn group_title<'a>(
         PANEL_TITLE_H
     };
     let panel = panel_for_group(key);
-    let launcher = panel.and_then(|panel| {
+    // A panel may have a launcher without a slide-out.
+    let launcher = extras::for_panel(key).and_then(|panel| {
         launcher_of_height(
             panel,
             if thin {
@@ -435,12 +438,12 @@ fn launcher_of_height<'a>(panel: &PanelExtras, height: f32) -> Option<Element<'a
     )
     .delay(Duration::from_millis(400))
     .style(tip_style);
-    Some(keytips::anchor(keytips::XREF_LAUNCHER, launcher))
+    Some(keytips::anchor(panel.launcher, launcher))
 }
 
 /// Where the slide-out of `panel` shows, as (left, top, width): under the
 /// panel's body, over its title strip (or the thin strip without panel
-/// titles), as wide as the panel.
+/// titles), as wide as the panel, and wide enough for a layer list.
 fn slide_out_place(ribbon: &Ribbon, panel: &PanelExtras) -> Option<(f32, f32, f32)> {
     let id = panel_box_id(panel.key);
     let body = recent_bounds(&id).or_else(|| dropdown_bounds(&id))?;
@@ -450,7 +453,11 @@ fn slide_out_place(ribbon: &Ribbon, panel: &PanelExtras) -> Option<(f32, f32, f3
         metrics::SLIDE_OUT_TOP_THIN
     };
     let top = body.y + body.height - strip;
-    Some((body.x, top, body.width))
+    let width = match panel.layout {
+        Layout::TextLayer | Layout::CenterLayer => body.width.max(LIST_MIN_W),
+        Layout::Grid | Layout::Reference => body.width,
+    };
+    Some((body.x, top, width))
 }
 
 /// `content` (`width` wide) at (`left`, `top`), kept inside the window.
@@ -519,7 +526,8 @@ fn slide_out<'a>(
 }
 
 /// The extra tools of `panel` in a box `width` wide: its tool groups, and
-/// the xref fading row on Reference.
+/// the xref fading row on Reference, the text layer list on Text or the
+/// center layer list on Centerlines.
 pub(super) fn extra_tools<'a>(
     ribbon: &Ribbon,
     panel: &'static PanelExtras,
@@ -535,10 +543,94 @@ pub(super) fn extra_tools<'a>(
         }
         groups = groups.push(tool_rows(&group.tools, panel.id, active, inner));
     }
-    if panel.layout == Layout::Reference {
-        groups = groups.push(fade_row(ribbon.xref_fade, panel.id));
+    match panel.layout {
+        Layout::Grid => {}
+        Layout::Reference => groups = groups.push(fade_row(ribbon.xref_fade, panel.id)),
+        Layout::TextLayer => groups = groups.push(text_layers(ribbon)),
+        Layout::CenterLayer => {
+            groups = groups.push(super::widgets::layer_combo(
+                super::widgets::CENTER_LAYER_COMBO,
+                &ribbon.center_layer,
+                ribbon.center_layer_color(),
+                false,
+                format!("{}\n{} CENTERLAYER", t!("Center Layer"), t!("Command:")),
+            ))
+        }
     }
     container(groups).padding(PAD).width(Fill).into()
+}
+
+/// The layer new text goes on (TEXTLAYER): Use Current, or a layer of the
+/// drawing, each with its colour.
+fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
+    const SWATCH: f32 = 10.0;
+    const ROW: f32 = 24.0;
+    const MAX_H: f32 = 220.0;
+    let current = ribbon.text_layer.clone();
+    let entry = |value: String, label: String, color: Option<iced::Color>| {
+        let on = value.eq_ignore_ascii_case(&current);
+        let swatch: Element<'a, Message> = match color {
+            Some(color) => container(Space::new())
+                .width(SWATCH)
+                .height(SWATCH)
+                .style(move |theme: &Theme| container::Style {
+                    background: Some(color.into()),
+                    border: iced::Border {
+                        color: chrome::border(theme),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into(),
+            None => Space::new().width(SWATCH).height(SWATCH).into(),
+        };
+        let item: Element<'a, Message> = button(
+            row![swatch, text(label).size(11)]
+                .spacing(6)
+                .align_y(iced::Center),
+        )
+        .on_press(Message::RibbonTextLayer(value))
+        .style(move |theme: &Theme, status| {
+            if on {
+                tool_btn_style(theme, true, status)
+            } else {
+                popup_row_style(theme, status)
+            }
+        })
+        .width(Fill)
+        .padding([3, 6])
+        .into();
+        item
+    };
+    let mut layers: Vec<Element<'a, Message>> =
+        vec![entry(String::new(), t!("Use Current").into_owned(), None)];
+    layers.extend(
+        ribbon
+            .layer_infos
+            .iter()
+            .map(|info| entry(info.name.clone(), info.name.clone(), Some(info.color))),
+    );
+    let list_height = ((ribbon.layer_infos.len() + 1) as f32 * ROW).min(MAX_H);
+    let title = row![
+        make_icon(
+            IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg")),
+            metrics::SMALL_ICON
+        ),
+        text(t!("Text Layer"))
+            .size(11)
+            .style(|theme: &Theme| text::Style {
+                color: Some(chrome::muted(theme)),
+            }),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    column![
+        title,
+        iced::widget::scrollable(column(layers).spacing(1)).height(Length::Fixed(list_height)),
+    ]
+    .spacing(4)
+    .into()
 }
 
 /// The name of a tool group, upper case, with a hairline after it.

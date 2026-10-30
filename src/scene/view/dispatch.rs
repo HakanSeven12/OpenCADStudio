@@ -238,7 +238,7 @@ pub fn apply_common_prop(entity: &mut EntityType, field: &str, value: &str) {
 ///     stale verbatim block (matched by APPID handle) so the new value wins.
 /// Other applications' verbatim blocks are preserved for round-trip fidelity.
 pub fn set_entity_xdata(
-    doc: &mut codec::CadDocument,
+    doc: &mut codec::Document,
     handle: codec::Handle,
     app: &str,
     values: Option<Vec<codec::xdata::XDataValue>>,

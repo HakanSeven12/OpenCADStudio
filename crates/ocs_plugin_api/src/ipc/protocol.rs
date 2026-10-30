@@ -26,7 +26,7 @@ use crate::ribbon::owned::{OwnedEntityClasses, OwnedPluginManifest, OwnedRibbonG
 
 pub use crate::host::PreviewWire;
 pub use codec::xdata::{ExtendedDataRecord, XDataValue};
-pub use codec::{CadDocument, EntityType, Handle};
+pub use codec::{Document, EntityType, Handle};
 
 /// Events the host forwards to an active plugin `InteractiveCommand`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +41,8 @@ pub enum InteractiveEvent {
     Cancel,
     /// A set of entities selected during selection gathering mode.
     SelectionComplete(Vec<Handle>),
+    /// V7 (additive): modal dialog submitted or cancelled.
+    DialogResponse(crate::dialog::DialogResponse),
 }
 
 /// Initial handshake sent by the plugin runner immediately after connecting.
@@ -119,6 +121,10 @@ pub enum HostRequest {
     SelectionRejectsLockedLayers {
         command_id: u64,
     },
+    /// V7: query optional modal dialog for an interactive command.
+    GetModalDialog {
+        command_id: u64,
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -135,6 +141,7 @@ pub enum HostResponse {
     /// V11: the owning plugin's answer to a custom-grip drag event: the
     /// preview wire set that replaces its previous live preview.
     CustomGrip(CustomGripResponse),
+    ModalDialog(Option<crate::dialog::DialogDef>),
 }
 
 /// Requests the plugin runner sends to the host.
@@ -304,6 +311,61 @@ pub enum PluginRequest {
     ListXRecordsWithEntries {
         dictionary_path: Vec<String>,
     },
+    /// V14 (additive): turn a declared parametric chain into reference-only
+    /// display geometry (one publish, the entity-write undo contract).
+    StageParametricChain {
+        reference_name: String,
+        chain: crate::host::ParametricChain,
+        tolerance: f64,
+    },
+    /// V14 (additive): evaluate a declared chain at `s` — a pure read.
+    SampleParametric {
+        chain: crate::host::ParametricChain,
+        s: f64,
+    },
+    /// V14 (additive): register a plugin-scoped entity class — session
+    /// state; idempotent for an equal schema, refusing a mismatch.
+    RegisterPluginClass {
+        class: crate::host::PluginClassDeclaration,
+    },
+    /// V14 (additive): stage one instance of a registered plugin class —
+    /// identity plus a host-evaluated design descriptor (the entity-write
+    /// undo contract; reference-only; capped).
+    StagePluginClassInstance {
+        instance: crate::host::PluginClassInstance,
+    },
+    /// V14 (additive): read a registered class instance's declared
+    /// parameter rows — the read half of the session's properties pair
+    /// across the wire (the identity stamp resolves; the record row stays
+    /// the values' truth).
+    PluginClassInstanceProperties {
+        handle: Handle,
+    },
+    /// V7 (additive): modal form dialog request.
+    ShowDialog(crate::dialog::DialogDef),
+    /// V7 (additive): register a persistent dockable side panel.
+    RegisterPanel(crate::dialog::PanelDef),
+    /// V7 (additive): update control values in a persistent dockable side panel.
+    UpdatePanel {
+        panel_id: String,
+        values: std::collections::HashMap<String, crate::dialog::DialogValue>,
+    },
+    /// V7 (additive): toggle visibility or show/hide a persistent dockable side panel.
+    TogglePanel {
+        panel_id: String,
+        show: Option<bool>,
+    },
+    /// V14: open one undo step that later messages join until
+    /// [`PluginRequest::EndUndoGroup`].
+    BeginUndoGroup {
+        label: String,
+    },
+    /// V14: close the step [`PluginRequest::BeginUndoGroup`] opened.
+    EndUndoGroup,
+    /// V14: a page of the entities matching a control-API `query` JSON.
+    QueryEntities {
+        query: String,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -313,7 +375,7 @@ pub enum PluginResponse {
     Bool(bool),
     Handle(Handle),
     Record(Option<ExtendedDataRecord>),
-    Document(Box<CadDocument>),
+    Document(Box<Document>),
     Error(String),
     /// Path to the memory-mapped file and the current snapshot version.
     DocumentView {
@@ -368,6 +430,25 @@ pub enum PluginResponse {
     UpdateXRecordsResult(Result<Vec<Result<Handle, String>>, String>),
     /// V13 (additive): dictionary XRecords with their entries.
     ListXRecordsWithEntriesResult(Result<Vec<(String, Vec<XRecordEntry>)>, String>),
+    /// V14 (additive): handles of the staged display entities.
+    StageParametricChainResult(Result<Vec<Handle>, String>),
+    /// V14 (additive): the evaluated chain point, `None` outside the chain.
+    SampleParametricResult(Result<Option<crate::host::ParametricSample>, String>),
+    /// V14 (additive): outcome of a plugin class registration.
+    RegisterPluginClassResult(Result<(), String>),
+    /// V14 (additive): handles of the staged instance display set.
+    StagePluginClassInstanceResult(Result<Vec<Handle>, String>),
+    /// V14 (additive): a class instance's declared parameter rows (the
+    /// read half of the session's properties pair).
+    PluginClassInstancePropertiesResult(
+        Result<Vec<crate::host::PluginClassParameterRow>, String>,
+    ),
+    DialogResult(crate::dialog::DialogResponse),
+    PanelRegistered(bool),
+    PanelUpdated(bool),
+    PanelToggled(bool),
+    /// V14: answer to [`PluginRequest::QueryEntities`].
+    EntityPage(Result<crate::host::EntityPage, String>),
 }
 
 /// Messages sent from the host to the plugin runner.

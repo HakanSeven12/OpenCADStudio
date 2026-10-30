@@ -1,6 +1,6 @@
 use crate::command::{CadCommand, CmdOption, CmdResult, PointPickContext};
 use crate::scene::block_alignment::{Alignment, Targets};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use glam::DVec3;
 
 pub struct AlignmentCommand {
@@ -71,7 +71,7 @@ impl CadCommand for AlignmentCommand {
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
-    fn preview_entities(&mut self, _doc: &CadDocument, cursor: DVec3) -> Vec<EntityType> {
+    fn preview_entities(&mut self, _doc: &Document, cursor: DVec3) -> Vec<EntityType> {
         self.targets
             .pose(&self.alignment, cursor, self.context, self.flipped)
             .ok()

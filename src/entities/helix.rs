@@ -522,7 +522,7 @@ fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {
 }
 
 impl RenderConvertible for Helix {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         self.spline.to_render(document)
     }
 }

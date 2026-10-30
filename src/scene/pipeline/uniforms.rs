@@ -43,7 +43,9 @@ pub struct Uniforms {
     /// overlay pass sees a non-zero value (`Pipeline::upload_uniforms`).
     pub highlight_widen: f32,
     pub eye_low: [f32; 3],
-    pub _pad_el: f32,
+    /// Edge colour of the filled-with-edges modes, `0x01RRGGBB` in the
+    /// bits (see [`edge_rgb_bits`]); any other value draws them black.
+    pub edge_rgb: f32,
 
     // Up to four native AcDbLight/Sun sources. Positions are uploaded relative
     // to the current eye, preserving large-coordinate precision without
@@ -125,7 +127,7 @@ impl Uniforms {
             eye_high,
             highlight_widen: 0.0,
             eye_low,
-            _pad_el: 0.0,
+            edge_rgb: 0.0,
             light_position_type: [[0.0; 4]; 4],
             light_direction_intensity: [[0.0; 4]; 4],
             light_color_hotspot: [[0.0; 4]; 4],
@@ -155,4 +157,11 @@ impl Uniforms {
             light_web_rotation: [[0.0; 4]; 4],
         }
     }
+}
+
+/// The `edge_rgb` uniform for an edge colour (`None`: black).
+pub fn edge_rgb_bits(rgb: Option<[u8; 3]>) -> f32 {
+    f32::from_bits(rgb.map_or(0, |[r, g, b]| {
+        0x0100_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
+    }))
 }

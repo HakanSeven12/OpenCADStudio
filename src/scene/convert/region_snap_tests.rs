@@ -14,7 +14,7 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
             radius: 10.0,
         })],
     ] {
-        let mut document = CadDocument::new();
+        let mut document = Document::new();
         let mut block = BlockRecord::new("REGION_SNAPS");
         block.handle = document.allocate_handle();
         let owner = block.handle;
@@ -125,7 +125,7 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
         }
     }
 }
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Point, Rectangle};
 use kernel::geom2d::{Circle, Curve, Line};
@@ -148,7 +148,7 @@ fn ring(points: &[[f64; 2]]) -> Vec<Curve> {
 
 fn wires(entity: &EntityType) -> Vec<WireModel> {
     super::tessellate::tessellate(
-        &CadDocument::new(),
+        &Document::new(),
         Handle::new(123),
         entity,
         false,

@@ -252,20 +252,12 @@ impl CadModule for InsertModule {
                             label: "Data\nLink",
                             ..crate::modules::annotate::data_link::tool()
                         }),
-                        RibbonItem::LabeledTool(ToolDef {
-                            id: "DATALINKUPDATE",
-                            label: "Download from Source",
-                            icon: IconKind::Svg(include_bytes!("../../../assets/icons/sync.svg")),
-                            event: ModuleEvent::Command("DATALINKUPDATE;_U".to_string()),
-                        }),
-                        RibbonItem::LabeledTool(ToolDef {
-                            id: "DATALINKUPDATE_WRITE",
-                            label: "Upload to Source",
-                            icon: IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/ui/file_export.svg"
-                            )),
-                            event: ModuleEvent::Command("DATALINKUPDATE;_W".to_string()),
-                        }),
+                        RibbonItem::LabeledTool(
+                            crate::modules::annotate::data_link::download_tool(),
+                        ),
+                        RibbonItem::LabeledTool(
+                            crate::modules::annotate::data_link::upload_tool(),
+                        ),
                         RibbonItem::LabeledTool(ToolDef {
                             label: "Extract Data",
                             ..crate::modules::annotate::data_extract::tool()

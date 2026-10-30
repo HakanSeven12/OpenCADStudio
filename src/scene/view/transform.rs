@@ -61,6 +61,34 @@ where
     }
 }
 
+/// `t` as one opencadcodec `Transform`, for data that has no entity-specific
+/// rules (XDATA world points, distances and scale factors).
+pub fn codec_transform(t: &EntityTransform) -> Transform {
+    match t {
+        EntityTransform::Translate(d) => Transform::from_translation(to_v3(*d)),
+        EntityTransform::Rotate {
+            center,
+            axis,
+            angle_rad,
+        } => Transform::from_translation(to_v3(-*center))
+            .then(&Transform::from_rotation(
+                to_v3(axis.normalize_or(DVec3::Z)),
+                *angle_rad,
+            ))
+            .then(&Transform::from_translation(to_v3(*center))),
+        EntityTransform::Scale { center, factor } => Transform::from_scaling_with_origin(
+            Vector3::new(*factor, *factor, *factor),
+            to_v3(*center),
+        ),
+        EntityTransform::Mirror {
+            p1,
+            p2,
+            working_normal,
+        } => reflection_about_working_line(*p1, *p2, *working_normal),
+        EntityTransform::Affine(transform) => transform.clone(),
+    }
+}
+
 /// Reflection across the world-XY line through `p1`→`p2` as an opencadcodec
 /// `Transform`, for delegating MIRROR to opencadcodec's entity-aware
 /// `apply_transform` paths (which handle direction flags, stored-angle

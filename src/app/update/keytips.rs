@@ -11,7 +11,15 @@ impl OpenCADStudio {
         match input {
             KeyTipInput::AltTap if self.ribbon.keytips_active() => self.hide_keytips(),
             KeyTipInput::AltTap => {
-                if self.active_modal.is_some() || self.clean_screen || self.ribbon_closed {
+                let i = self.active_tab;
+                if self.active_modal.is_some()
+                    || self.clean_screen
+                    || self.ribbon_closed
+                    || self.tabs[i].active_cmd.is_some()
+                    || self.tabs[i].suspended_cmd.is_some()
+                    || self.control.get_point.is_some()
+                    || self.control.user_select.is_some()
+                {
                     return Task::none();
                 }
                 // A focused field other than the command line keeps Alt.

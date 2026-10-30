@@ -3,7 +3,7 @@
 use super::*;
 use codec::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
 
-fn entry(doc: &CadDocument, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
+fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
     let Some(ObjectType::Dictionary(d)) = doc.objects.get(&owner) else {
         return Err("The reference contains an invalid parameter dictionary.");
     };
@@ -13,7 +13,7 @@ fn entry(doc: &CadDocument, owner: Handle, key: &str) -> Result<Option<Handle>, 
         .map(|(_, h)| *h))
 }
 
-fn cache(doc: &CadDocument, insert: Handle, id: i32) -> Result<Option<Handle>, &'static str> {
+fn cache(doc: &Document, insert: Handle, id: i32) -> Result<Option<Handle>, &'static str> {
     let Some(mut owner) = doc.extension_dictionary_handle(insert) else {
         return Ok(None);
     };
@@ -64,7 +64,7 @@ impl ParameterFrame {
 }
 
 pub(crate) fn frame(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     p: &Parameter,
 ) -> Result<ParameterFrame, &'static str> {
@@ -119,7 +119,7 @@ pub(crate) fn frame(
 
 #[cfg(test)]
 pub(crate) fn current(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     p: &Parameter,
 ) -> Result<DVec3, &'static str> {
@@ -139,7 +139,7 @@ fn frame_value(p: &Parameter, frame: ParameterFrame) -> Value {
 }
 
 pub(crate) fn test_frame(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     p: &Parameter,
 ) -> Result<ParameterFrame, &'static str> {
@@ -155,7 +155,7 @@ pub(crate) fn test_frame(
 }
 
 pub(crate) fn test_value(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     p: &Parameter,
 ) -> Result<Value, &'static str> {
@@ -167,7 +167,7 @@ pub(crate) fn test_value(
 }
 
 pub(crate) fn value(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     p: &Parameter,
 ) -> Result<Value, &'static str> {
@@ -210,7 +210,7 @@ pub(crate) fn value(
 }
 
 fn ensure_dictionary(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     owner: Handle,
     key: &str,
 ) -> Result<Handle, &'static str> {
@@ -235,7 +235,7 @@ fn ensure_dictionary(
 }
 
 pub(crate) fn save(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     insert: Handle,
     p: &Parameter,
     value: Value,
@@ -281,7 +281,7 @@ pub(crate) fn save(
 
 /// Persist both endpoints without changing the parameter or any display grip.
 pub(crate) fn save_frame(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     insert: Handle,
     p: &Parameter,
     frame: ParameterFrame,
@@ -334,7 +334,7 @@ pub(crate) fn save_frame(
 }
 
 fn ensure_cache(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     insert: Handle,
     p: &Parameter,
 ) -> Result<Handle, &'static str> {
@@ -402,7 +402,7 @@ fn ensure_cache(
     Ok(h)
 }
 
-pub(crate) fn definition(doc: &CadDocument, insert: Handle) -> Option<Handle> {
+pub(crate) fn definition(doc: &Document, insert: Handle) -> Option<Handle> {
     let EntityType::Insert(i) = doc.get_entity(insert)? else {
         return None;
     };
@@ -419,20 +419,20 @@ pub(crate) fn definition(doc: &CadDocument, insert: Handle) -> Option<Handle> {
 /// Stage and validate completely before exposing any changes to the drawing.
 #[cfg(test)]
 pub(crate) fn evaluate(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     parameter: Handle,
     local: DVec3,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     evaluate_value(doc, insert, parameter, Value::Point(local))
 }
 
 pub(crate) fn evaluate_value(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     parameter: Handle,
     input: Value,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     if let Value::Frame { base, end } = input {
         return evaluate_frame(doc, insert, parameter, ParameterFrame { base, end });
     }
@@ -454,11 +454,11 @@ pub(crate) fn evaluate_value(
 }
 
 pub(crate) fn evaluate_frame(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     parameter: Handle,
     requested: ParameterFrame,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     evaluate_input(
         doc,
         insert,
@@ -469,8 +469,8 @@ pub(crate) fn evaluate_frame(
 }
 
 pub(crate) fn load_frames(
-    doc: &CadDocument,
-    evaluated: &mut CadDocument,
+    doc: &Document,
+    evaluated: &mut Document,
     insert: Handle,
     parameters: &[Parameter],
 ) -> Result<std::collections::BTreeMap<Handle, ParameterFrame>, &'static str> {
@@ -489,12 +489,12 @@ pub(crate) fn load_frames(
 }
 
 fn evaluate_input(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     parameter: Handle,
     input: Value,
     requested: Option<ParameterFrame>,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let def =
         definition(doc, insert).ok_or("Select a uniformly scaled dynamic block reference.")?;
     let parameters = all_parameters(doc, def);
@@ -539,8 +539,8 @@ fn evaluate_input(
 }
 
 pub(crate) fn load_test_frames(
-    doc: &CadDocument,
-    evaluated: &mut CadDocument,
+    doc: &Document,
+    evaluated: &mut Document,
     insert: Handle,
     parameters: &[Parameter],
 ) -> Result<std::collections::BTreeMap<Handle, ParameterFrame>, &'static str> {
@@ -560,13 +560,13 @@ pub(crate) fn load_test_frames(
 
 /// Evaluate a scratch reference while retaining its immutable definition baseline.
 pub(crate) fn evaluate_test_value(
-    doc: &CadDocument,
-    baseline: &CadDocument,
+    doc: &Document,
+    baseline: &Document,
     definition: Handle,
     insert: Handle,
     parameter: Handle,
     input: Value,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let parameters = all_parameters(baseline, definition);
     let selected = parameters
         .iter()
@@ -628,9 +628,9 @@ pub(crate) fn evaluate_test_value(
 
 /// Restore one reference without changing the definition or another reference.
 pub(crate) fn reset(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let def = doc
         .dynamic_definition_for_insert(insert)
         .ok_or("Select a dynamic block reference.")?;
@@ -684,11 +684,11 @@ pub(crate) fn reset(
 }
 
 pub(crate) fn reset_test(
-    doc: &CadDocument,
-    baseline: &CadDocument,
+    doc: &Document,
+    baseline: &Document,
     def: Handle,
     insert: Handle,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let EntityType::Insert(reference) = doc.get_entity(insert).ok_or("Missing block reference.")?
     else {
         return Err("Select a block reference.");
@@ -736,7 +736,7 @@ pub(crate) fn reset_test(
 }
 
 fn clear_table_history(
-    result: &mut CadDocument,
+    result: &mut Document,
     insert: Handle,
     history: Option<Handle>,
 ) -> Result<(), &'static str> {
@@ -788,7 +788,7 @@ fn clear_table_history(
     Ok(())
 }
 
-fn table_history_owner(doc: &CadDocument, insert: Handle) -> Result<Option<Handle>, &'static str> {
+fn table_history_owner(doc: &Document, insert: Handle) -> Result<Option<Handle>, &'static str> {
     let Some(mut owner) = doc.extension_dictionary_handle(insert) else {
         return Ok(None);
     };
@@ -802,7 +802,7 @@ fn table_history_owner(doc: &CadDocument, insert: Handle) -> Result<Option<Handl
 }
 
 pub(crate) fn table_history_row(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     view: &crate::scene::block_properties_table::TableView,
 ) -> Option<usize> {
@@ -821,31 +821,31 @@ pub(crate) fn table_history_row(
 }
 
 pub(crate) fn evaluate_table_row(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     columns: &[crate::scene::block_properties_table::Column],
     row: usize,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     evaluate_table_row_context(doc, None, insert, columns, row)
 }
 
 pub(crate) fn evaluate_test_table_row(
-    doc: &CadDocument,
-    baseline: &CadDocument,
+    doc: &Document,
+    baseline: &Document,
     insert: Handle,
     columns: &[crate::scene::block_properties_table::Column],
     row: usize,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     evaluate_table_row_context(doc, Some(baseline), insert, columns, row)
 }
 
 fn evaluate_table_row_context(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
     columns: &[crate::scene::block_properties_table::Column],
     row: usize,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let def =
         definition(doc, insert).ok_or("Select a uniformly scaled dynamic block reference.")?;
     let view = crate::scene::block_properties_table::table(doc, def)?
@@ -887,7 +887,7 @@ fn evaluate_table_row_context(
 }
 
 fn write_table_history(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     insert: Handle,
     view: &crate::scene::block_properties_table::TableView,
     row: usize,
@@ -947,15 +947,15 @@ fn write_table_history(
 }
 
 /// Refresh existing evaluated references after an authoring change.
-pub(crate) fn refresh(doc: &CadDocument, def: Handle) -> Result<CadDocument, &'static str> {
+pub(crate) fn refresh(doc: &Document, def: Handle) -> Result<Document, &'static str> {
     refresh_after_edit(doc, doc, def)
 }
 
 pub(crate) fn refresh_after_edit(
-    doc: &CadDocument,
-    before: &CadDocument,
+    doc: &Document,
+    before: &Document,
     def: Handle,
-) -> Result<CadDocument, &'static str> {
+) -> Result<Document, &'static str> {
     if authoring::graph(doc, def)?.is_none() {
         return Ok(doc.clone());
     }
@@ -991,11 +991,11 @@ pub(crate) fn refresh_after_edit(
 }
 
 pub(crate) fn materialize(
-    doc: &CadDocument,
+    doc: &Document,
     insert: Handle,
     def: Handle,
-    evaluated: &CadDocument,
-) -> Result<CadDocument, &'static str> {
+    evaluated: &Document,
+) -> Result<Document, &'static str> {
     let mut scene = crate::scene::Scene::new();
     scene.document = doc.clone();
     authoring::tag_members(&mut scene.document, def);

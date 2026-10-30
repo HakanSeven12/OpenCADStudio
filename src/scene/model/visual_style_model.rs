@@ -1,5 +1,5 @@
 use codec::objects::{ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 
 #[derive(Clone, Debug)]
 pub struct MeshVisualStyle {
@@ -231,14 +231,14 @@ impl MeshVisualStyle {
 }
 
 pub(crate) fn resolve_visual_style_handle(
-    document: &CadDocument,
+    document: &Document,
     handle: Handle,
 ) -> Option<MeshVisualStyle> {
     visual_style(document, Some(handle))
         .map(|(handle, style)| MeshVisualStyle::from_dwg(handle, style))
 }
 
-fn visual_style(document: &CadDocument, handle: Option<Handle>) -> Option<(Handle, &VisualStyle)> {
+fn visual_style(document: &Document, handle: Option<Handle>) -> Option<(Handle, &VisualStyle)> {
     let handle = handle.filter(|handle| handle.is_valid())?;
     match document.objects.get(&handle) {
         Some(ObjectType::VisualStyle(style)) => Some((handle, style)),
@@ -247,7 +247,7 @@ fn visual_style(document: &CadDocument, handle: Option<Handle>) -> Option<(Handl
 }
 
 pub fn resolve_mesh_visual_style(
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
 ) -> Option<MeshVisualStyle> {
     let common = entity.common();
@@ -274,7 +274,7 @@ pub fn resolve_mesh_visual_style(
 
 pub fn apply_mesh_visual_style(
     set: &mut super::mesh_model::MeshLodSet,
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
 ) {
     set.visual_style = resolve_mesh_visual_style(document, entity);

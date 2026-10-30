@@ -3,15 +3,15 @@
 //! Full deep clone vs `Arc` sharing.
 //!
 //! `collect_entries_with_prev` (`src/io/xref.rs`) walks the nested-xref work
-//! queue with a `HashMap<String, CadDocument>`: on a cache miss it stored a
+//! queue with a `HashMap<String, Document>`: on a cache miss it stored a
 //! FULL deep clone of the freshly parsed document while keeping the original,
 //! and on every cache hit it deep-cloned the document again — O(document
 //! size) memory plus an O(document size) copy per access. The fix stores
-//! `Arc<CadDocument>` and clones only the `Arc`.
+//! `Arc<Document>` and clones only the `Arc`.
 //!
 //! End-to-end DWG nested-xref loading is hard to synthesize faithfully, so
 //! this bench isolates the cache operations themselves at the function
-//! level: a representative `CadDocument` (mixed lines/circles/polylines plus
+//! level: a representative `Document` (mixed lines/circles/polylines plus
 //! block records) is built once, and each timed cycle models one cache miss
 //! (insert) followed by K hits, then drops the cache — the exact access
 //! pattern of the nested enumeration loop, minus file I/O. The simulated
@@ -33,7 +33,7 @@ use std::time::Instant;
 use codec::entities::{Circle, Line, LwPolyline, LwVertex};
 use codec::tables::BlockRecord;
 use codec::types::{Vector2, Vector3};
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 
 const DOC_ENTITIES: usize = 4_000;
 const BLOCK_RECORDS: usize = 24;
@@ -50,8 +50,8 @@ const WARMUP_B: usize = 2_000;
 
 /// Representative nested-xref drawing: mostly 2D geometry plus a handful of
 /// block records — the two regions the nested enumeration loop reads.
-fn synthetic_document() -> CadDocument {
-    let mut doc = CadDocument::new();
+fn synthetic_document() -> Document {
+    let mut doc = Document::new();
     for i in 0..DOC_ENTITIES {
         let x = (i % 200) as f64 * 10.0;
         let y = (i / 200) as f64 * 10.0;
@@ -91,15 +91,15 @@ fn synthetic_document() -> CadDocument {
 
 /// The read the nested enumeration loop performs on each cached document,
 /// used as the document-identity sink so no access can be elided.
-fn entity_count(doc: &CadDocument) -> usize {
+fn entity_count(doc: &Document) -> usize {
     black_box(doc.entities().count())
 }
 
 /// The removed production pattern (xref.rs nested work queue): store a full
 /// deep clone of the freshly loaded document on miss, deep-clone it again on
 /// every hit, drop everything at cycle end.
-fn old_ops(loaded: CadDocument, hits: usize) -> usize {
-    let mut cache: HashMap<String, CadDocument> = HashMap::default();
+fn old_ops(loaded: Document, hits: usize) -> usize {
+    let mut cache: HashMap<String, Document> = HashMap::default();
     cache.insert(CACHE_KEY.to_owned(), loaded.clone());
     let mut sum = entity_count(&loaded);
     for _ in 0..hits {
@@ -111,8 +111,8 @@ fn old_ops(loaded: CadDocument, hits: usize) -> usize {
 
 /// The fixed pattern: move the freshly loaded document into an `Arc`, store
 /// an `Arc` clone on miss, `Arc`-clone on every hit — no deep copy anywhere.
-fn new_ops(loaded: CadDocument, hits: usize) -> usize {
-    let mut cache: HashMap<String, Arc<CadDocument>> = HashMap::default();
+fn new_ops(loaded: Document, hits: usize) -> usize {
+    let mut cache: HashMap<String, Arc<Document>> = HashMap::default();
     let doc = Arc::new(loaded);
     cache.insert(CACHE_KEY.to_owned(), Arc::clone(&doc));
     let mut sum = entity_count(&doc);
@@ -129,10 +129,10 @@ fn new_ops(loaded: CadDocument, hits: usize) -> usize {
 /// `sink`, so neither path can be optimized away.
 fn measure(
     label: &str,
-    source: &CadDocument,
+    source: &Document,
     iterations: usize,
     warmup: usize,
-    mut op: impl Fn(CadDocument) -> usize,
+    mut op: impl Fn(Document) -> usize,
 ) -> f64 {
     let mut sink = 0usize;
     for _ in 0..warmup {
@@ -157,18 +157,18 @@ fn measure(
 fn main() {
     let source = synthetic_document();
     println!(
-        "nested-xref document cache: {DOC_ENTITIES} entities + {BLOCK_RECORDS} block records per CadDocument, {HITS} cache hits per miss"
+        "nested-xref document cache: {DOC_ENTITIES} entities + {BLOCK_RECORDS} block records per Document, {HITS} cache hits per miss"
     );
 
     let a_median = measure(
-        "OLD (HashMap<String, CadDocument> deep clone):",
+        "OLD (HashMap<String, Document> deep clone):",
         &source,
         ITERATIONS_A,
         WARMUP_A,
         |loaded| old_ops(loaded, HITS),
     );
     let b_median = measure(
-        "NEW (HashMap<String, Arc<CadDocument>>):      ",
+        "NEW (HashMap<String, Arc<Document>>):      ",
         &source,
         ITERATIONS_B,
         WARMUP_B,

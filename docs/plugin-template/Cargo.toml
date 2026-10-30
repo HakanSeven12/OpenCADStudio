@@ -16,4 +16,4 @@ crate-type = ["cdylib"]
 ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", features = ["host"] }
 # Entity types for writes. MUST match the host's codec pin exactly
 # (the host's `codec` dependency in its Cargo.toml) or the host refuses.
-acadrust = { package = "acadrust", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "e80d1a9" }
+acadrust = { package = "acadrust", git = "https://github.com/HakanSeven12/acadrust.git", rev = "24b037a" }

@@ -360,7 +360,7 @@ fn replace_entity_text(
 }
 
 fn replace_match_text(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     target: FindMatchKey,
     search: &str,
     replacement: &str,
@@ -391,7 +391,7 @@ fn replace_match_text(
 
 /// Row context for a match: its (single-line, shortened) text, object type
 /// and layer.
-fn describe_match(document: &codec::CadDocument, key: FindMatchKey) -> FindResult {
+fn describe_match(document: &codec::Document, key: FindMatchKey) -> FindResult {
     let (text, kind, layer) = match key {
         FindMatchKey::Entity(handle) | FindMatchKey::BlockEntityInInsert { entity: handle, .. } => {
             document.get_entity(handle).map_or_else(Default::default, |entity| {
@@ -463,7 +463,7 @@ fn match_label(target: FindMatchKey) -> String {
 }
 
 fn block_contains_entity(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     block_name: &str,
     target: codec::Handle,
     visited: &mut Vec<String>,

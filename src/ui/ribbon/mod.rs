@@ -50,8 +50,10 @@ pub use collapse::CollapseMode;
 use collapse::{CollapsePanels, Panel};
 pub use draw_panel::SlideOutMsg;
 pub use keytips::{
-    KeyTipInput, KeyTipStep, active as keytips_active, key_pressed as keytip_key_pressed,
-    key_released as keytip_key_released, pointer_pressed as keytip_pointer_pressed,
+    KeyTipInput, KeyTipStep, active as keytips_active, clear_alt_alone as keytip_clear_alt_alone,
+    key_pressed as keytip_key_pressed, key_released as keytip_key_released,
+    note_command_finished as keytip_note_command_finished,
+    note_focus_changed as keytip_note_focus_changed, pointer_pressed as keytip_pointer_pressed,
 };
 pub use layout::{MinimizePref, RibbonLayout, RibbonMinimize};
 pub use minimize::{MinimizeMsg, Opener};
@@ -332,6 +334,8 @@ pub struct Ribbon {
     /// Live filter for the layer dropdown's search box (#343). Cleared on
     /// close so the next open starts unfiltered.
     pub layer_filter: String,
+    /// The drawing's saved layer states, restored from the layer dropdown.
+    pub layer_states: Vec<String>,
     /// Active object color — ACI / ByLayer / ByBlock.
     pub active_color: AcadColor,
     /// Colour-book identity (`BOOK$NAME`) of a colour picked from a colour
@@ -391,6 +395,18 @@ pub struct Ribbon {
     block_testing: Option<usize>,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
+    /// Annotate > Text: the find box, the text height box (TEXTSIZE while it
+    /// is not being typed in) and TEXTLAYER (empty: the current layer).
+    pub text_find: String,
+    pub text_height: String,
+    pub text_height_editing: bool,
+    pub text_layer: String,
+    /// Annotate > Dimensions: DIMLAYER (empty: the current layer).
+    pub dim_layer: String,
+    /// Annotate > Leaders: MLEADERLAYER (empty: the current layer).
+    pub mleader_layer: String,
+    /// Annotate > Centerlines: CENTERLAYER (empty: the current layer).
+    pub center_layer: String,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
 }
@@ -490,6 +506,7 @@ impl Ribbon {
             active_layer: String::new(),
             layer_infos: vec![],
             layer_filter: String::new(),
+            layer_states: Vec::new(),
             active_color: AcadColor::ByLayer,
             active_color_book: None,
             active_linetype: "ByLayer".to_string(),
@@ -526,6 +543,13 @@ impl Ribbon {
             block_editing: None,
             block_testing: None,
             xref_fade: 50,
+            text_find: String::new(),
+            text_height: String::new(),
+            text_height_editing: false,
+            text_layer: String::new(),
+            dim_layer: String::new(),
+            center_layer: String::new(),
+            mleader_layer: String::new(),
             keytips: None,
         }
     }
@@ -1246,6 +1270,12 @@ impl Ribbon {
             active_mleader_style: &self.active_mleader_style,
             table_style_names: &self.table_style_names,
             active_table_style: &self.active_table_style,
+            text_find: &self.text_find,
+            text_height: &self.text_height,
+            dim_layer: &self.dim_layer,
+            dim_layer_color: self.dim_layer_color(),
+            mleader_layer: &self.mleader_layer,
+            mleader_layer_color: self.layer_color(&self.mleader_layer),
         }
     }
 
@@ -1465,6 +1495,31 @@ impl Ribbon {
             return self.layer_combo_overlay(win);
         }
 
+        if open_id == widgets::DIM_LAYER_COMBO {
+            return Some(self.annotation_layer_overlay(
+                widgets::DIM_LAYER_COMBO,
+                &self.dim_layer,
+                Message::RibbonDimLayer,
+                win,
+            ));
+        }
+        if open_id == widgets::CENTER_LAYER_COMBO {
+            return Some(self.annotation_layer_overlay(
+                widgets::CENTER_LAYER_COMBO,
+                &self.center_layer,
+                Message::RibbonCenterLayer,
+                win,
+            ));
+        }
+        if open_id == widgets::MLEADER_LAYER_COMBO {
+            return Some(self.annotation_layer_overlay(
+                widgets::MLEADER_LAYER_COMBO,
+                &self.mleader_layer,
+                Message::RibbonMLeaderLayer,
+                win,
+            ));
+        }
+
         if open_id == PROP_COLOR_ID {
             return self.prop_color_overlay(win, recent_colors);
         }
@@ -1584,6 +1639,90 @@ impl Ribbon {
         )))
     }
 
+    /// The colour of the DIMLAYER layer, `None` for Use Current.
+    fn dim_layer_color(&self) -> Option<iced::Color> {
+        self.layer_color(&self.dim_layer)
+    }
+
+    /// The colour of the CENTERLAYER layer, `None` for Use Current.
+    pub(super) fn center_layer_color(&self) -> Option<iced::Color> {
+        self.layer_color(&self.center_layer)
+    }
+
+    /// The colour of layer `name`, `None` for Use Current (empty).
+    fn layer_color(&self, name: &str) -> Option<iced::Color> {
+        if name.is_empty() {
+            return None;
+        }
+        self.layer_infos
+            .iter()
+            .find(|info| info.name.eq_ignore_ascii_case(name))
+            .map(|info| info.color)
+    }
+
+    /// An Annotate layer list (`id`, Dimensions or Leaders): Use Current,
+    /// then the drawing's layers; a pick sends `pick`.
+    fn annotation_layer_overlay(
+        &self,
+        id: &'static str,
+        current: &str,
+        pick: fn(String) -> Message,
+        win: (f32, f32),
+    ) -> Element<'_, Message> {
+        const W: f32 = 220.0;
+        let current = current.to_string();
+        let entry = |value: String, label: String, color: Option<iced::Color>| {
+            let on = value.eq_ignore_ascii_case(&current);
+            let swatch: Element<'_, Message> = match color {
+                Some(color) => container(text(""))
+                    .width(10)
+                    .height(10)
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(color.into()),
+                        border: Border {
+                            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                            width: 1.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into(),
+                None => iced::widget::Space::new().width(10).height(10).into(),
+            };
+            let item: Element<'_, Message> = button(
+                row![
+                    crate::ui::icons::themed_check_cell(on),
+                    swatch,
+                    text(label).size(11)
+                ]
+                .spacing(6)
+                .align_y(iced::Center),
+            )
+            .on_press(pick(value))
+            .style(popup_row_style)
+            .width(Fill)
+            .padding([3, 8])
+            .into();
+            item
+        };
+        let mut rows: Vec<Element<'_, Message>> =
+            vec![entry(String::new(), t!("Use Current").into_owned(), None)];
+        rows.extend(
+            self.layer_infos
+                .iter()
+                .map(|info| entry(info.name.clone(), info.name.clone(), Some(info.color))),
+        );
+        let list_height = ((self.layer_infos.len() + 1) as f32 * 24.0).min(260.0);
+        let panel = container(
+            scrollable(column(rows).spacing(1)).height(Length::Fixed(list_height)),
+        )
+        .style(popup_panel_style)
+        .padding(2)
+        .width(Length::Fixed(W));
+        let (align_right, h_pad, top) = self.dd_anchor(id, W, win.0);
+        dropdown_backdrop(position_ribbon_dropdown(panel.into(), align_right, h_pad, top))
+    }
+
     fn layer_combo_overlay(&self, win: (f32, f32)) -> Option<Element<'_, Message>> {
         // A toggle icon (visible / freeze / lock) is its own button so a click
         // on it flips that state instead of bubbling up to the row's
@@ -1687,10 +1826,21 @@ impl Ribbon {
         .style(popup_row_style)
         .width(Fill)
         .padding([6, 10]);
+        // Saved layer states restore with one click, as the manager's
+        // Restore does.
+        let states = column(self.layer_states.iter().map(|name| {
+            button(text(name).size(11))
+                .on_press(Message::RibbonLayerStateRestore(name.clone()))
+                .style(popup_row_style)
+                .width(Fill)
+                .padding([4, 26])
+                .into()
+        }));
         let panel = container(
             column![
                 container(search).padding([4, 4]),
                 scrollable(column(rows)).height(Length::Fixed(list_h)),
+                states,
                 container(state_manager)
                     .width(Fill)
                     .padding([3, 4])
@@ -1751,6 +1901,12 @@ impl Ribbon {
             active_mleader_style: &self.active_mleader_style,
             table_style_names: &self.table_style_names,
             active_table_style: &self.active_table_style,
+            text_find: &self.text_find,
+            text_height: &self.text_height,
+            dim_layer: &self.dim_layer,
+            dim_layer_color: self.dim_layer_color(),
+            mleader_layer: &self.mleader_layer,
+            mleader_layer_color: self.layer_color(&self.mleader_layer),
         };
         let active = ctx.active_for(style_key).to_string();
 
@@ -1972,7 +2128,32 @@ fn render_group<'a>(
         compact,
     };
 
-    for item in &group.tools {
+    let mut tools = group.tools.iter().peekable();
+    while let Some(item) = tools.next() {
+        // Dimensions: the small tools after the style / layer lists are their
+        // bottom row (Linear, Quick, Continue), not a column of their own.
+        if !compact
+            && matches!(
+                item,
+                RibbonItem::StyleComboGroup {
+                    style_key: crate::modules::StyleKey::DimStyle,
+                    ..
+                }
+            )
+        {
+            flush_small_col(&mut small_buf, &mut items_row);
+            let mut below = Vec::new();
+            while let Some(next) = tools.next_if(|next| {
+                matches!(
+                    next,
+                    RibbonItem::LabeledTool(_) | RibbonItem::LabeledDropdown { .. }
+                )
+            }) {
+                below.push(widgets::render_row_item(next, active_tool, open_dd, last_cmd, state));
+            }
+            items_row.push(widgets::render_large_with(item, &ctx, below));
+            continue;
+        }
         let is_large = match item {
             RibbonItem::LargeTool(_) | RibbonItem::LargeDropdown { .. } => !compact,
             RibbonItem::ToolGrid { .. }
@@ -2179,6 +2360,12 @@ mod tests {
             active_mleader_style: "",
             table_style_names: &[],
             active_table_style: "",
+            text_find: "",
+            text_height: "",
+            dim_layer: "",
+            dim_layer_color: None,
+            mleader_layer: "",
+            mleader_layer_color: None,
         };
         let groups: Vec<_> = groups.iter().collect();
         let mut last_cmd = FxHashMap::default();

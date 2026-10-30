@@ -45,9 +45,13 @@ use crate::modules::draw::modify::spline_ops::{
 };
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
+use crate::scene::convert::tess::entity_world_aabb_f64;
 use crate::t;
 
 use super::entity_index::ModifyEntityIndex;
+
+#[path = "trim_hatch_region.rs"]
+mod hatch_region;
 
 // ── Dropdown constants ─────────────────────────────────────────────────────
 
@@ -191,6 +195,47 @@ impl Geo {
         }
     }
 }
+
+fn geo_overlaps_aabb(geo: &Geo, target: [f64; 4]) -> bool {
+    let bounds = match geo {
+        Geo::Line { p1, p2, .. } => [
+            p1[0].min(p2[0]),
+            p1[1].min(p2[1]),
+            p1[0].max(p2[0]),
+            p1[1].max(p2[1]),
+        ],
+        Geo::Arc { cx, cy, r, .. } | Geo::Circle { cx, cy, r, .. } => {
+            [cx - r, cy - r, cx + r, cy + r]
+        }
+        Geo::Ellipse { cx, cy, a, b, .. } => {
+            let radius = a.abs() + b.abs();
+            [cx - radius, cy - radius, cx + radius, cy + radius]
+        }
+        Geo::Spline { curve, .. } => {
+            let samples = (0..=32).map(|i| curve.point_at(i as f64 / 32.0));
+            let mut bounds = [
+                f64::INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+            ];
+            for point in samples {
+                bounds[0] = bounds[0].min(point[0]);
+                bounds[1] = bounds[1].min(point[1]);
+                bounds[2] = bounds[2].max(point[0]);
+                bounds[3] = bounds[3].max(point[1]);
+            }
+            bounds
+        }
+        // Unbounded boundaries are always retained in the nearby set.
+        Geo::Ray { .. } | Geo::InfLine { .. } => return true,
+    };
+    bounds[0] <= target[2]
+        && bounds[2] >= target[0]
+        && bounds[1] <= target[3]
+        && bounds[3] >= target[1]
+}
+
 pub fn is_trim_boundary_entity(entity: &EntityType) -> bool {
     matches!(
         entity,
@@ -208,9 +253,16 @@ pub fn is_trim_boundary_entity(entity: &EntityType) -> bool {
     )
 }
 fn build_geos(entities: &[EntityType]) -> Vec<Geo> {
+    build_geos_with_handle(entities, None)
+}
+
+/// Build boundary geometry while optionally attributing every segment to the
+/// owning INSERT. Block contents are virtual TRIM boundaries; the INSERT stays
+/// the real drawing entity and therefore remains untouched by the command.
+fn build_geos_with_handle(entities: &[EntityType], owner: Option<Handle>) -> Vec<Geo> {
     let mut out = Vec::new();
     for e in entities {
-        let h = e.common().handle;
+        let h = owner.unwrap_or_else(|| e.common().handle);
         match e {
             // A polyline acts as a boundary through its constituent edges, so
             // a Line/Arc/… can be trimmed against it. Explode into Line + Arc
@@ -3753,6 +3805,8 @@ fn apply_pending_replacement(
 
 pub struct TrimCommand {
     all_entities: Vec<EntityType>,
+    /// Exploded block contents used only as virtual cutting geometry.
+    block_boundaries: Vec<(Handle, Vec<EntityType>)>,
     entity_index: ModifyEntityIndex,
     geos: Vec<Geo>,
     /// Replacements sent to the host, applied once their handles are known.
@@ -3793,13 +3847,34 @@ impl TrimCommand {
     }
 
     pub fn with_cutting_edges(all_entities: Vec<EntityType>, initial_edges: Vec<Handle>) -> Self {
+        Self::with_block_boundaries(all_entities, Vec::new(), initial_edges)
+    }
+
+    pub fn with_block_boundaries(
+        all_entities: Vec<EntityType>,
+        block_boundaries: Vec<(Handle, Vec<EntityType>)>,
+        initial_edges: Vec<Handle>,
+    ) -> Self {
         let all_entities: Vec<EntityType> = all_entities
             .into_iter()
             .map(entity_with_lwpolyline_world_xy_owned)
             .collect();
+        let block_boundaries = block_boundaries
+            .into_iter()
+            .map(|(handle, entities)| {
+                (
+                    handle,
+                    entities
+                        .into_iter()
+                        .map(entity_with_lwpolyline_world_xy_owned)
+                        .collect(),
+                )
+            })
+            .collect();
 
         let mut cmd = Self {
             all_entities,
+            block_boundaries,
             entity_index: ModifyEntityIndex::empty(),
             geos: Vec::new(),
             pending: Vec::new(),
@@ -3820,7 +3895,7 @@ impl TrimCommand {
     /// with the Edge option's implied extrapolation applied on top.
     fn rebuild_geos(&mut self) {
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
-        self.geos = if self.edge_set.is_empty() {
+        let mut geos = if self.edge_set.is_empty() {
             build_geos(&self.all_entities)
         } else {
             // A set, not the Vec: every trim rebuilds this, and a selection
@@ -3834,6 +3909,17 @@ impl TrimCommand {
                 .collect();
             build_geos(&picked)
         };
+        let selected_edges: Option<std::collections::HashSet<Handle>> = (!self.edge_set.is_empty())
+            .then(|| self.edge_set.iter().copied().collect());
+        for (insert_handle, entities) in &self.block_boundaries {
+            if selected_edges
+                .as_ref()
+                .is_none_or(|handles| handles.contains(insert_handle))
+            {
+                geos.extend(build_geos_with_handle(entities, Some(*insert_handle)));
+            }
+        }
+        self.geos = geos;
         if self.implied_edges {
             imply_edge_geos(&mut self.geos);
         }
@@ -3849,11 +3935,43 @@ impl TrimCommand {
         let Some(handles) = self.entity_index.nearby_handles(&self.all_entities, handle) else {
             return self.geos.clone();
         };
+        let Some(target_entity) = self.entity_index.get(&self.all_entities, handle) else {
+            return self.geos.clone();
+        };
+        let Some(target_bounds) = entity_world_aabb_f64(target_entity) else {
+            return self.geos.clone();
+        };
         self.geos
             .iter()
-            .filter(|geo| handles.contains(&geo.handle()))
+            .filter(|geo| {
+                handles.contains(&geo.handle())
+                    || self
+                        .block_boundaries
+                        .iter()
+                        .any(|(owner, _)| *owner == geo.handle()
+                            && geo_overlaps_aabb(geo, target_bounds))
+            })
             .cloned()
             .collect()
+    }
+
+    fn hatch_trim_at(&self, handle: Handle, point: DVec3) -> Option<hatch_region::HatchTrim> {
+        let EntityType::Hatch(hatch) = self.entity_index.get(&self.all_entities, handle)? else {
+            return None;
+        };
+        let nearby = (!self.implied_edges)
+            .then(|| self.entity_index.nearby_handles(&self.all_entities, handle))
+            .flatten();
+        let edges: std::collections::HashSet<_> = self.edge_set.iter().copied().collect();
+        let cutters = self.all_entities.iter().filter(|entity| {
+            let handle = entity.common().handle;
+            is_trim_boundary_entity(entity)
+                && (edges.is_empty() || edges.contains(&handle))
+                && nearby
+                    .as_ref()
+                    .is_none_or(|handles| handles.contains(&handle))
+        });
+        hatch_region::trim(hatch, cutters, point, self.implied_edges)
     }
 
     fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
@@ -4035,9 +4153,16 @@ impl CadCommand for TrimCommand {
                     return CmdResult::ReplaceEntity(handle, Vec::new());
                 }
                 let (px, py) = (pt.x, pt.y);
+                let entity = self.entity_index.get(&self.all_entities, handle);
                 let new_entities = if self.shift {
                     // Shift+click swaps to Extend for this pick (#336).
                     pick_extend_at(&self.all_entities, &self.geos, handle, px, py).map(|e| vec![e])
+                } else if matches!(entity, Some(EntityType::Hatch(_))) {
+                    // Treat a HATCH as a filled arrangement of cells. This extends
+                    // the legacy half-plane solver to multi-edge partitions and
+                    // curved / tilted boundaries while retaining exact paths.
+                    self.hatch_trim_at(handle, pt)
+                        .map(|trim| vec![EntityType::Hatch(Box::new(trim.kept))])
                 } else {
                     let geos = self.nearby_geos(handle);
                     if self.quick {
@@ -4432,33 +4557,9 @@ impl CadCommand for TrimCommand {
                         ))
                     }).collect();
                 }
-                let Some(trimmed) = trim_hatch_at(hatch, geos, pt.x, pt.y) else {
-                    return vec![];
-                };
-                let mut out = Vec::new();
-                for (index, path) in hatch.paths.iter().enumerate() {
-                    if let Some(mut points) = crate::scene::hatch_path_ring(path) {
-                        points.push(points[0]);
-                        out.push(WireModel::solid_f64(
-                            format!("trim_hatch_original_{index}"),
-                            points.into_iter().map(|p| [p[0], p[1], hatch.elevation]).collect(),
-                            TRIM_REMOVE_GRAY,
-                            false,
-                        ));
-                    }
-                }
-                for (index, path) in trimmed.paths.iter().enumerate() {
-                    if let Some(mut points) = crate::scene::hatch_path_ring(path) {
-                        points.push(points[0]);
-                        out.push(WireModel::solid_f64(
-                            format!("trim_hatch_keep_{index}"),
-                            points.into_iter().map(|p| [p[0], p[1], hatch.elevation]).collect(),
-                            WireModel::CYAN,
-                            false,
-                        ));
-                    }
-                }
-                out
+                self.hatch_trim_at(handle, pt)
+                    .map(|trim| trim.preview_wires())
+                    .unwrap_or_default()
             }
             Some(EntityType::LwPolyline(p)) => {
                 let Some(survivors) = trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos) else {
@@ -4623,7 +4724,7 @@ pub struct ExtendCommand {
     /// Cached live box preview; rebuilding extensions on every raw pointer
     /// event can stall large drawings. Final commit always recalculates.
     box_preview_wires: Vec<WireModel>,
-    box_preview_at: Option<std::time::Instant>,
+    box_preview_at: Option<iced::time::Instant>,
 }
 
 impl ExtendCommand {
@@ -4923,7 +5024,7 @@ impl CadCommand for ExtendCommand {
             }
         }
         self.box_preview_wires = preview;
-        self.box_preview_at = Some(std::time::Instant::now());
+        self.box_preview_at = Some(iced::time::Instant::now());
         Some(self.box_preview_wires.clone())
     }
 
@@ -5310,7 +5411,7 @@ mod tests {
         let EntityType::Hatch(trimmed) = &edited[0] else { panic!("HATCH expected"); };
         assert!(!trimmed.is_associative);
         assert!(trimmed.paths.iter().all(|p| p.boundary_handles.is_empty()));
-        assert_eq!(trimmed.common.handle, Handle::NULL);
+        assert_eq!(trimmed.common.handle, Handle::new(1));
         assert_eq!(trimmed.paths.len(), 1);
         let ring = crate::scene::hatch_path_ring(&trimmed.paths[0]).unwrap();
         assert!(ring.iter().all(|p| p[0] >= 5.0 - 1e-8));
@@ -5806,6 +5907,47 @@ mod tests {
         }
         command.on_entity_replaced(Handle::new(1), &[]);
         assert!(command.all_entities.is_empty());
+    }
+
+    #[test]
+    fn trim_against_block_contents_keeps_only_the_clicked_block_interval() {
+        let target = xline_at(0.0, 5.0, 10.0, 5.0, 1);
+        let block_handle = Handle::new(90);
+        let triangle = vec![
+            xline_at(3.0, 3.0, 7.0, 5.0, 101),
+            xline_at(7.0, 5.0, 3.0, 7.0, 102),
+            xline_at(3.0, 7.0, 3.0, 3.0, 103),
+        ];
+
+        for (quick, initial_edges) in [(true, Vec::new()), (false, vec![block_handle])] {
+            let mut command = TrimCommand::with_block_boundaries(
+                vec![target.clone()],
+                vec![(block_handle, triangle.clone())],
+                initial_edges,
+            );
+            command.quick = quick;
+            command.mode = TrimMode::Pick;
+
+            let CmdResult::ReplaceEntity(handle, survivors) = command.on_entity_pick(
+                Handle::new(1),
+                DVec3::new(5.0, 5.0, 0.0),
+            ) else {
+                panic!("TRIM should cut against the block contents");
+            };
+            assert_eq!(handle, Handle::new(1));
+            assert_eq!(survivors.len(), 2);
+            let spans: Vec<_> = survivors
+                .iter()
+                .map(|entity| match entity {
+                    EntityType::Line(line) => (line.start.x, line.end.x),
+                    _ => panic!("expected line survivors"),
+                })
+                .collect();
+            assert!((spans[0].0 - 0.0).abs() < 1e-6);
+            assert!((spans[0].1 - 3.0).abs() < 1e-6);
+            assert!((spans[1].0 - 7.0).abs() < 1e-6);
+            assert!((spans[1].1 - 10.0).abs() < 1e-6);
+        }
     }
 
     #[test]

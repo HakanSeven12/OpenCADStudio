@@ -476,6 +476,10 @@ impl OpenCADStudio {
         }
         crate::app::style_ops::ensure_standard_styles(&mut self.tabs[i].scene.document);
         self.tabs[i].adopt_active_ucs_from_header();
+        // The template's saved view and its grid/snap state, as an opened
+        // drawing gets them (#2198).
+        self.tabs[i].scene.restore_saved_camera();
+        self.adopt_view_display(i);
         self.tabs[i].current_path = None;
         self.tabs[i].is_start = false;
         self.tabs[i].dirty = true;
@@ -541,7 +545,7 @@ impl OpenCADStudio {
 const FILE_IDENTITY_APP: &str = "SPMDOCUNIQUE";
 
 /// The handle of the entity carrying the file identity, if present.
-fn find_file_identity_marker(document: &codec::CadDocument) -> Option<codec::Handle> {
+fn find_file_identity_marker(document: &codec::Document) -> Option<codec::Handle> {
     document
         .entities()
         .find(|entity| {
@@ -555,7 +559,7 @@ fn find_file_identity_marker(document: &codec::CadDocument) -> Option<codec::Han
 }
 
 /// The identity GUID from the marker entity's XData.
-fn marker_identity(document: &codec::CadDocument, handle: codec::Handle) -> Option<String> {
+fn marker_identity(document: &codec::Document, handle: codec::Handle) -> Option<String> {
     let record = document
         .get_entity(handle)?
         .common()
@@ -628,7 +632,7 @@ fn read_sysvar(scene: &crate::scene::Scene, name: &str) -> Option<Value> {
     Some(value)
 }
 
-fn validate_sysvar(document: &codec::CadDocument, name: &str, value: &Value) -> Result<(), Value> {
+fn validate_sysvar(document: &codec::Document, name: &str, value: &Value) -> Result<(), Value> {
     let failure = |message: &str| crate::app::control::failure("invalid_sysvar_value", message);
     match name.to_ascii_lowercase().as_str() {
         "ltscale" => {
@@ -699,9 +703,12 @@ fn validate_sysvar(document: &codec::CadDocument, name: &str, value: &Value) -> 
     Ok(())
 }
 
-fn set_sysvar(document: &mut codec::CadDocument, name: &str, value: &Value) -> Result<(), Value> {
+fn set_sysvar(document: &mut codec::Document, name: &str, value: &Value) -> Result<(), Value> {
     validate_sysvar(document, name, value)?;
     let failure = |message: &str| crate::app::control::failure("invalid_sysvar_value", message);
+    // The header and the tables are separate fields of the acadrust document;
+    // borrow them through it, not through the whole Document.
+    let document: &mut codec::CadDocument = document;
     let header = &mut document.header;
     match name.to_ascii_lowercase().as_str() {
         "ltscale" => {

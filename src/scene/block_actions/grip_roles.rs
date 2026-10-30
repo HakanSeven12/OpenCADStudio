@@ -1,5 +1,50 @@
-//! Runtime grip eligibility for native key-point displacement bindings.
+//! Runtime grip eligibility for supported native action bindings.
 use super::*;
+
+fn connections_match(connections: &[BlockConnection], id: i32, names: &[&str]) -> bool {
+    connections.len() == names.len()
+        && connections
+            .iter()
+            .zip(names)
+            .all(|(connection, name)| connection.code == id && connection.name == *name)
+}
+
+/// The same binding contract is used by grip activation and action evaluation.
+/// None denotes a displacement family, whose key-point rules are separate.
+pub(super) fn scalar_mask(parameter: &Parameter, data: &DynamicBlockData) -> Option<u8> {
+    let id = parameter.id;
+    let base_names = &["UpdatedBaseX", "UpdatedBaseY"];
+    let (valid, roles) = match data {
+        DynamicBlockData::ScaleAction(action) => (
+            connections_match(&action.connections, id, &["Scale", "XScale", "YScale"])
+                && connections_match(&action.action.connections, id, base_names),
+            0b0011,
+        ),
+        DynamicBlockData::ArrayAction(action) => (
+            connections_match(
+                &action.connections,
+                id,
+                &["Base", "End", "UpdatedBase", "UpdatedEnd"],
+            ),
+            if parameter.xy { 0b1111 } else { 0b0011 },
+        ),
+        DynamicBlockData::RotateAction(action) => (
+            connections_match(&action.connections, id, &["AngleDelta"])
+                && connections_match(&action.action.connections, id, base_names),
+            0b0010,
+        ),
+        DynamicBlockData::FlipAction(action) => (
+            connections_match(
+                &action.connections,
+                id,
+                &["Flip", "UpdatedFlip", "UpdatedBase", "UpdatedEnd"],
+            ),
+            0b0001,
+        ),
+        _ => return None,
+    };
+    Some(if valid { roles } else { 0 })
+}
 
 fn displacement(p: &Parameter, connections: &[BlockConnection]) -> u8 {
     if connections.len() != 2 || connections.iter().any(|connection| connection.code != p.id) {
@@ -24,7 +69,7 @@ fn displacement(p: &Parameter, connections: &[BlockConnection]) -> u8 {
     }
 }
 
-pub(crate) fn mask(doc: &CadDocument, definition: Handle, parameter: &Parameter) -> u8 {
+pub(crate) fn mask(doc: &Document, definition: Handle, parameter: &Parameter) -> u8 {
     actions(doc, definition)
         .into_iter()
         .filter(|(_, _, kind, node)| *node == parameter.id && compatible(parameter, *kind))
@@ -46,11 +91,13 @@ pub(crate) fn mask(doc: &CadDocument, definition: Handle, parameter: &Parameter)
                         _ => 0,
                     }
                 }
-                // Non-displacement action families retain their existing role behavior.
-                _ => 15,
+                _ => scalar_mask(parameter, &object.data).unwrap_or(0),
             }
         })
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod scalar_tests;

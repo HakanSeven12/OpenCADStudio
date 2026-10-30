@@ -2,6 +2,8 @@
 // from the application bundle or user plugins folder (see `external`).
 // See `docs/plugin-architecture.md`.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod plugin_classes;
 pub mod entity_labels;
 pub mod external;
 #[cfg(not(target_arch = "wasm32"))]
@@ -11,6 +13,15 @@ pub mod marketplace;
 pub mod registry;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod v4_support;
+#[cfg(target_arch = "wasm32")]
+pub mod v4_support {
+    pub fn publish_panel_action(
+        _panel_id: String,
+        _control_id: String,
+        _action: String,
+        _value: Option<ocs_plugin_api::dialog::DialogValue>,
+    ) {}
+}
 
 pub(crate) use registry::try_dispatch;
 pub use registry::{all_ribbon_modules, plugin_command_names, ribbon_modules_enabled};

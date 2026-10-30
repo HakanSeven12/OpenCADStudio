@@ -15,7 +15,9 @@ pub struct TextVertex {
     pub uv: [f32; 2],
     pub color: [f32; 4],
     pub draw_depth: f32,
-} // 52 bytes, no padding holes (all f32)
+    /// Pen half-width of a stroke glyph in atlas glyph units (0 = filled).
+    pub pen: f32,
+} // 56 bytes, no padding holes (all f32)
 
 impl TextVertex {
     pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -43,6 +45,11 @@ impl TextVertex {
             wgpu::VertexAttribute {
                 offset: std::mem::offset_of!(TextVertex, draw_depth) as u64,
                 shader_location: 4,
+                format: wgpu::VertexFormat::Float32,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(TextVertex, pen) as u64,
+                shader_location: 8,
                 format: wgpu::VertexFormat::Float32,
             },
         ];
@@ -139,6 +146,7 @@ pub fn push_glyph_vertices(
                 uv,
                 color,
                 draw_depth,
+                pen: q.pen,
             }
         };
         let bl = [q.uv_min[0], q.uv_max[1]];
@@ -184,6 +192,7 @@ pub fn push_glyph_vertices_on_plane(
                 uv,
                 color,
                 draw_depth,
+                pen: q.pen,
             }
         };
         let bl = [q.uv_min[0], q.uv_max[1]];
@@ -614,6 +623,7 @@ mod tests {
             corners: [[0.0, 0.0], [8.0, 0.0], [8.0, 9.0], [0.0, 9.0]],
             uv_min: [0.10, 0.20],
             uv_max: [0.30, 0.40],
+            pen: 0.0,
         };
         let mut out = Vec::new();
         // Large origin exercises the double-single precision path.
@@ -644,6 +654,7 @@ mod tests {
             corners: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uv_min: [0.0, 0.0],
             uv_max: [1.0, 1.0],
+            pen: 0.0,
         };
         let mut out = Vec::new();
         push_glyph_vertices(&mut out, &[q], [0.0, 0.0, 0.0], 2.0, [1.0; 4], 0.0);

@@ -18,7 +18,7 @@ pub struct Item {
     pub graphic: Graphic,
     pub grips: Vec<(Part, Vector3)>,
 }
-pub fn items(doc: &CadDocument, definition: Handle) -> Vec<Item> {
+pub fn items(doc: &Document, definition: Handle) -> Vec<Item> {
     let mut result = vec![];
     for (handle, p) in crate::scene::block_point_parameter::parameters(doc, definition) {
         let mut graphic = Graphic::default();
@@ -197,7 +197,7 @@ fn grip(data: &mut DynamicBlockData) -> Option<&mut BlockGrip> {
     })
 }
 pub fn move_part(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     handle: Handle,
     part: Part,
@@ -449,8 +449,8 @@ pub fn move_part(
             }
         }
     }
-    if let Some(ObjectType::BlockVisibilityParameter(p)) = staged.objects.get(&handle) {
-        staged.block_visibility_params.insert(handle, p.clone());
+    if let Some(ObjectType::BlockVisibilityParameter(p)) = staged.objects.get(&handle).cloned() {
+        staged.block_visibility_params.insert(handle, p);
     }
     if !native_grips.is_empty() {
         let updated = crate::scene::block_grips::config::locations(&staged, definition, handle)?;
@@ -480,7 +480,7 @@ pub fn move_part(
 /// they are detached from both ends; actions left without any parameter can no
 /// longer drive anything and are removed with it.
 pub fn remove_parameter(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     handle: Handle,
 ) -> Result<(), &'static str> {

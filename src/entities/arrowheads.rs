@@ -8,7 +8,7 @@
 
 use codec::entities::{Circle, Line, LwPolyline, LwVertex, Solid};
 use codec::types::{Color, LineWeight, Vector3};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 
 /// Name shown, block name (empty: closed filled, the null handle).
 pub(crate) const STANDARD: &[(&str, &str)] = &[
@@ -47,6 +47,21 @@ fn standard_by_label(label: &str) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
+/// A standard arrowhead's block typed by name, in any case and with or
+/// without its leading underscore (`_DOT`, `dot`); `.` and `ClosedFilled`
+/// are the closed filled default (an empty name).
+pub(crate) fn typed_standard_block(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    if value.is_empty() || value == "." || value.eq_ignore_ascii_case("ClosedFilled") {
+        return Some("");
+    }
+    let bare = value.trim_start_matches('_');
+    STANDARD
+        .iter()
+        .map(|(_, name)| *name)
+        .find(|name| !name.is_empty() && name.trim_start_matches('_').eq_ignore_ascii_case(bare))
+}
+
 /// The block name a picker value stands for: a standard name's block, or
 /// the value itself (a user arrow block).
 pub(crate) fn block_name(value: &str) -> &str {
@@ -62,7 +77,7 @@ pub(crate) fn label_for_block(name: &str) -> String {
 }
 
 /// What a picker shows for the arrowhead `handle`.
-pub(crate) fn label(doc: &CadDocument, handle: Handle) -> String {
+pub(crate) fn label(doc: &Document, handle: Handle) -> String {
     if handle.is_null() {
         return STANDARD[0].0.to_string();
     }
@@ -89,7 +104,7 @@ pub(crate) fn options<'a>(current: impl IntoIterator<Item = &'a str>) -> Vec<Str
 
 /// The handle a picker value selects, creating a standard arrowhead's block
 /// when the drawing does not have it yet. `None` for an unknown name.
-pub(crate) fn resolve(doc: &mut CadDocument, value: &str) -> Option<Handle> {
+pub(crate) fn resolve(doc: &mut Document, value: &str) -> Option<Handle> {
     let value = value.trim();
     if value.is_empty() || value == "Default" {
         return Some(Handle::NULL);

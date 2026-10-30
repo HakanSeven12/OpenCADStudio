@@ -8,7 +8,7 @@
 
 use codec::entities::Insert;
 use codec::types::{Color, Matrix3, Matrix4, Transform, Vector3};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::scene::view::render::{
@@ -80,7 +80,7 @@ pub struct InsertStyleSpec {
 }
 
 impl InsertStyleSpec {
-    pub fn new(document: &CadDocument, insert: &Insert, viewport: Option<Handle>) -> Self {
+    pub fn new(document: &Document, insert: &Insert, viewport: Option<Handle>) -> Self {
         let common = &insert.common;
         let has_book_color = has_resolved_book_color_common(document, common);
         let linetype = &common.linetype;
@@ -155,7 +155,7 @@ impl InsertStyleSpec {
 
 impl BlockStyle {
     pub fn for_entity(
-        document: &CadDocument,
+        document: &Document,
         entity: &EntityType,
         viewport: Option<Handle>,
     ) -> Self {
@@ -167,7 +167,7 @@ impl BlockStyle {
     }
 
     pub fn for_nested(
-        document: &CadDocument,
+        document: &Document,
         insert: &Insert,
         parent: Self,
         viewport: Option<Handle>,
@@ -177,7 +177,7 @@ impl BlockStyle {
 
     pub fn resolve(
         self,
-        document: &CadDocument,
+        document: &Document,
         entity: &EntityType,
         viewport: Option<Handle>,
     ) -> ResolvedStyle {
@@ -207,7 +207,7 @@ impl BlockStyle {
     }
 }
 
-fn layer_aci(document: &CadDocument, layer: &str) -> u8 {
+fn layer_aci(document: &Document, layer: &str) -> u8 {
     document
         .layers
         .get(layer)
@@ -254,7 +254,7 @@ impl InstanceContext {
         !self.root_handle.is_null()
     }
 
-    pub fn style_for(&self, document: &CadDocument, entity: &EntityType) -> ResolvedStyle {
+    pub fn style_for(&self, document: &Document, entity: &EntityType) -> ResolvedStyle {
         if self.insert_path.iter().any(|insert| crate::scene::block_construction::is_construction(&insert.common)) {
             return crate::scene::block_construction::display_style();
         }
@@ -276,8 +276,12 @@ impl InstanceContext {
 }
 
 pub struct RenderSceneGraph<'a> {
-    document: &'a CadDocument,
+    document: &'a Document,
     frozen_layers: Option<&'a FxHashSet<Handle>>,
+    /// Session LAYWALK visible-layer set of the space this graph renders,
+    /// carried like `frozen_layers`. `None` = the space is not walked (or
+    /// the graph serves a foreign space / an export pass).
+    layer_walk: Option<&'a FxHashSet<Handle>>,
     annotation_scale_handle: Option<Handle>,
     annotation_scale: f32,
     all_visible: bool,
@@ -291,7 +295,7 @@ pub struct RenderSceneGraph<'a> {
 
 impl<'a> RenderSceneGraph<'a> {
     pub fn new(
-        document: &'a CadDocument,
+        document: &'a Document,
         frozen_layers: Option<&'a FxHashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
@@ -300,6 +304,7 @@ impl<'a> RenderSceneGraph<'a> {
         Self {
             document,
             frozen_layers,
+            layer_walk: None,
             annotation_scale_handle,
             annotation_scale: 1.0,
             all_visible,
@@ -312,6 +317,11 @@ impl<'a> RenderSceneGraph<'a> {
 
     pub fn with_visibility_reveal(mut self, handles: &'a FxHashSet<Handle>) -> Self {
         self.visibility_reveal = Some(handles);
+        self
+    }
+
+    pub fn with_layer_walk(mut self, visible: Option<&'a FxHashSet<Handle>>) -> Self {
+        self.layer_walk = visible;
         self
     }
 
@@ -610,8 +620,15 @@ impl<'a> RenderSceneGraph<'a> {
             return false;
         }
         let layer = self.document.layers.get(&common.layer);
-        if (member && block_member_layer_hidden(self.document, &common.layer))
-            || (!member && layer.is_some_and(|layer| layer.flags.off || layer.flags.frozen))
+        if (member && block_member_layer_hidden(self.document, &common.layer, self.layer_walk))
+            || (!member
+                && layer.is_some_and(|layer| {
+                    layer.flags.off
+                        || layer.flags.frozen
+                        || self
+                            .layer_walk
+                            .is_some_and(|walk| !walk.contains(&layer.handle))
+                }))
         {
             return false;
         }
@@ -633,15 +650,24 @@ impl<'a> RenderSceneGraph<'a> {
 /// Whether a block member on `layer` is hidden by its layer. Frozen layers
 /// hide it; layer 0 being off does not, since a member on layer 0 shows on the
 /// layer of the reference that places it, which the caller has checked.
-/// (#1916)
-pub(crate) fn block_member_layer_hidden(document: &CadDocument, layer: &str) -> bool {
+/// (#1916) `walk` is the session LAYWALK visible set of the space being
+/// rendered; outside layers hide like frozen ones, but layer 0 defers with the
+/// same exemption the off flag gets — the reference's layer was already
+/// checked against the walk by the caller.
+pub(crate) fn block_member_layer_hidden(
+    document: &Document,
+    layer: &str,
+    walk: Option<&FxHashSet<Handle>>,
+) -> bool {
     document.layers.get(layer).is_some_and(|record| {
+        let layer_zero = crate::scene::view::render::is_effective_layer_zero(layer);
         record.flags.frozen
-            || (record.flags.off && !crate::scene::view::render::is_effective_layer_zero(layer))
+            || (record.flags.off && !layer_zero)
+            || (walk.is_some_and(|walk| !walk.contains(&record.handle)) && !layer_zero)
     })
 }
 
-pub fn block_base_point(document: &CadDocument, block_name: &str) -> Vector3 {
+pub fn block_base_point(document: &Document, block_name: &str) -> Vector3 {
     block_record_by_name(document, block_name)
         .map(|record| {
             if let Some((_, parameter)) = super::block_basepoint::parameter(document, record.handle)
@@ -657,6 +683,19 @@ pub fn block_base_point(document: &CadDocument, block_name: &str) -> Vector3 {
                 .unwrap_or(record.base_point)
         })
         .unwrap_or(Vector3::ZERO)
+}
+
+/// An annotative dimension with a single scale representation has a single
+/// picture, its own block: edits drop it and moves carry it like any other
+/// dimension's. With several, each scale's block is a separate picture those
+/// edits leave behind, so it is drawn from its definition instead.
+fn single_scale_picture(document: &Document, handle: Handle, block: &str) -> bool {
+    crate::scene::annotative::object_scale_memberships(document, handle).len() == 1
+        && matches!(
+            document.get_entity(handle),
+            Some(EntityType::Dimension(stored))
+                if stored.base().block_name.trim().eq_ignore_ascii_case(block)
+        )
 }
 
 /// The block reference that places a dimension's picture block: at the
@@ -727,7 +766,7 @@ pub(crate) fn clear_dim_picture_placement(entity: &mut EntityType) {
     }
 }
 
-pub fn insert_transform(document: &CadDocument, insert: &Insert) -> Transform {
+pub fn insert_transform(document: &Document, insert: &Insert) -> Transform {
     insert_transform_with_base(insert, block_base_point(document, &insert.block_name))
 }
 
@@ -741,7 +780,7 @@ pub fn insert_transform_with_base(insert: &Insert, base: Vector3) -> Transform {
 }
 
 pub fn insert_transform_at_scale(
-    document: &CadDocument,
+    document: &Document,
     insert: &Insert,
     annotation_scale: f32,
 ) -> Transform {
@@ -754,7 +793,7 @@ pub fn insert_transform_at_scale(
 }
 
 pub fn insert_transform_with_policy(
-    document: &CadDocument,
+    document: &Document,
     insert: &Insert,
     annotation_scale: f32,
     scale_policy: BlockScalePolicy,
@@ -804,7 +843,7 @@ pub struct BlockUse {
 }
 
 pub(crate) fn block_record_by_name<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     name: &str,
 ) -> Option<&'a codec::tables::BlockRecord> {
     document.block_records.get(name).or_else(|| {
@@ -816,7 +855,7 @@ pub(crate) fn block_record_by_name<'a>(
 }
 
 fn block_use(
-    document: &CadDocument,
+    document: &Document,
     mut insert: Insert,
     role: BlockRole,
     scale_policy: BlockScalePolicy,
@@ -840,7 +879,7 @@ fn block_use(
 }
 
 pub fn block_use_from_handle(
-    document: &CadDocument,
+    document: &Document,
     block: Handle,
     role: BlockRole,
     insertion: Vector3,
@@ -862,7 +901,7 @@ pub fn block_use_from_handle(
 
 fn push_dependency_use(
     uses: &mut Vec<BlockUse>,
-    document: &CadDocument,
+    document: &Document,
     block: Handle,
     role: BlockRole,
 ) {
@@ -883,7 +922,7 @@ fn push_dependency_use(
 /// edges, such as block-valued table cells. Representation flags let renderers
 /// choose the active picture while dependency consumers keep the full graph.
 fn entity_owned_block_uses(
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
     annotation_scale: f32,
 ) -> Vec<BlockUse> {
@@ -905,7 +944,8 @@ fn entity_owned_block_uses(
                 let base = dimension.base();
                 let mut insert = dimension_picture_insert(base, record.name.clone());
                 insert.common = base.common.clone();
-                let picture = !crate::scene::annotative::is_annotative(document, entity);
+                let picture = !crate::scene::annotative::is_annotative(document, entity)
+                    || single_scale_picture(document, base.common.handle, &record.name);
                 vec![block_use(
                     document,
                     insert,
@@ -983,7 +1023,7 @@ fn entity_owned_block_uses(
 }
 
 pub fn entity_render_block_uses(
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
     annotation_scale: f32,
 ) -> Vec<BlockUse> {
@@ -991,7 +1031,7 @@ pub fn entity_render_block_uses(
 }
 
 pub fn entity_block_uses(
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
     annotation_scale: f32,
 ) -> Vec<BlockUse> {
@@ -1099,7 +1139,7 @@ pub fn array_offsets(insert: &Insert) -> Vec<[f64; 3]> {
 }
 
 pub fn insert_instance_transform(
-    document: &CadDocument,
+    document: &Document,
     insert: &Insert,
     offset: [f64; 3],
     annotation_scale: f32,
@@ -1121,7 +1161,7 @@ pub fn insert_instance_transform(
 }
 
 pub fn insert_instance_translation_delta(
-    document: &CadDocument,
+    document: &Document,
     insert: &Insert,
     offset: [f64; 3],
     annotation_scale: f32,
@@ -1137,7 +1177,7 @@ pub fn insert_instance_translation_delta(
 }
 
 pub fn block_contains_hatch(
-    document: &CadDocument,
+    document: &Document,
     block_name: &str,
     memo: &mut std::collections::HashMap<String, bool>,
 ) -> bool {
@@ -1172,7 +1212,7 @@ mod tests {
 
     #[test]
     fn applied_block_scale_skips_annotative_rescaling() {
-        let document = CadDocument::new();
+        let document = Document::new();
         let mut insert = Insert::new("BLOCK", Vector3::new(10.0, 20.0, 0.0));
         insert
             .common
@@ -1195,7 +1235,7 @@ mod tests {
     fn layer_zero_block_members_follow_the_reference_until_frozen() {
         use codec::entities::Line;
         use codec::tables::BlockRecord;
-        let mut document = CadDocument::new();
+        let mut document = Document::new();
         let mut record = BlockRecord::new("ARROW");
         record.handle = document.allocate_handle();
         let block = record.handle;
@@ -1203,7 +1243,7 @@ mod tests {
         let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
         line.common.owner_handle = block;
         document.add_entity(EntityType::Line(line)).unwrap();
-        let leaves = |document: &CadDocument| {
+        let leaves = |document: &Document| {
             let depths = rustc_hash::FxHashMap::default();
             let graph = RenderSceneGraph::new(document, None, None, true, &depths);
             let arrow =
@@ -1251,7 +1291,7 @@ mod tests {
 
     #[test]
     fn insert_instance_transform_does_not_scale_the_row_column_spacing() {
-        let document = CadDocument::new();
+        let document = Document::new();
         let mut insert = Insert::new("BLOCK", Vector3::new(100.0, 0.0, 0.0));
         insert.set_x_scale(2.0);
         insert.row_count = 1;
@@ -1286,7 +1326,7 @@ mod tests {
     fn insert_instance_transform_rotates_the_spacing_with_the_insert() {
         // Matches the pinned CAD model's own `Insert::array_points`: spacing
         // is rotated with the insert but never scaled.
-        let document = CadDocument::new();
+        let document = Document::new();
         let mut insert = Insert::new("BLOCK", Vector3::ZERO);
         insert.rotation = std::f64::consts::FRAC_PI_2;
         insert.row_count = 1;

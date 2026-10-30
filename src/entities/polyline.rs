@@ -38,7 +38,7 @@ fn tessellate_polyline(pl: &Polyline) -> RenderEntity {
 }
 
 impl RenderConvertible for Polyline {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         Some(tessellate_polyline(self))
     }
 }
@@ -265,6 +265,8 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
                     station_pieces: boundary.station_pieces,
                     source_length: boundary.source_length,
                     plinegen: continuous,
+                    separate_runs: false,
+                    solid: Vec::new(),
                 },
                 snap_pts: vec![],
                 tangent_geoms,
@@ -500,7 +502,7 @@ fn centerline_metadata_2d(
 }
 
 impl RenderConvertible for Polyline2D {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         let mut render = tessellate_polyline2d(self, document.header.fill_mode);
         // Arc segments offer their centres and quadrants.
         if self.vertices.iter().any(|v| v.bulge != 0.0) {
@@ -1098,7 +1100,7 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> RenderEntity {
 }
 
 impl RenderConvertible for Polyline3D {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         Some(tessellate_polyline3d(self))
     }
 }
@@ -1416,6 +1418,7 @@ pub(crate) fn wide_fills(pl: &codec::entities::Polyline2D) -> ([f64; 2], Vec<Vec
     let origin = [verts[0].location.x, verts[0].location.y];
     let seg_count = if pl.is_closed() { n } else { n - 1 };
     let mut out = Vec::new();
+    let mut segments = Vec::new();
     for i in 0..seg_count {
         let v0 = &verts[i];
         let v1 = &verts[(i + 1) % n];
@@ -1440,12 +1443,19 @@ pub(crate) fn wide_fills(pl: &codec::entities::Polyline2D) -> ([f64; 2], Vec<Vec
             (v1.location.x - origin[0]) as f32,
             (v1.location.y - origin[1]) as f32,
         ];
+        let segment = (p0, p1, hw0, hw1, v0.bulge as f32);
         if let Some(poly) =
             crate::entities::common::polyline_segment_fill(p0, p1, hw0, hw1, v0.bulge as f32)
         {
             out.push(poly);
+            segments.push(segment);
         }
     }
+    crate::entities::common::mitre_wide_joins(
+        &mut out,
+        &segments,
+        pl.is_closed() && segments.len() == seg_count,
+    );
     (origin, out)
 }
 

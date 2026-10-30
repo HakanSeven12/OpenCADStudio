@@ -1,6 +1,6 @@
 use codec::entities::Insert;
 use codec::types::{Matrix3, Transform, Vector3};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -62,7 +62,7 @@ pub(crate) fn unscale_attribute_grip(
 }
 
 fn attribute_is_render_visible(
-    document: &CadDocument,
+    document: &Document,
     visibility: i16,
     attribute: &codec::entities::AttributeEntity,
 ) -> bool {
@@ -140,7 +140,7 @@ fn grips(ins: &Insert) -> Vec<GripDef> {
 }
 
 pub(crate) fn visible_attribute_grips(
-    document: &CadDocument,
+    document: &Document,
     insert: &Insert,
     annotation_scale: f32,
 ) -> Vec<GripDef> {
@@ -349,7 +349,7 @@ impl crate::entities::traits::FallbackTess for Insert {
     }
 }
 pub(crate) fn insert_attribute_entities(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     insert: &codec::entities::Insert,
     annotation_scale: f32,
     scale_policy: crate::scene::BlockScalePolicy,
@@ -373,7 +373,7 @@ pub(crate) fn insert_attribute_entities(
 
 pub(crate) fn append_insert_attribute_wires(
     wires: &mut Vec<WireModel>,
-    document: &codec::CadDocument,
+    document: &codec::Document,
     ins: &codec::entities::Insert,
     insert_handle: Handle,
     sel: bool,
@@ -481,8 +481,8 @@ mod tests {
         ins
     }
 
-    fn document_with_layers(layers: Vec<Layer>) -> CadDocument {
-        let mut document = CadDocument::new();
+    fn document_with_layers(layers: Vec<Layer>) -> Document {
+        let mut document = Document::new();
         for layer in layers {
             document.layers.add_or_replace(layer);
         }
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn visible_attribute_grips_scale_annotative_attributes() {
-        let document = CadDocument::new();
+        let document = Document::new();
         let mut insert = block_with(vec![attribute("TAG", 11.0, 10.0)]);
         insert.insert_point = Vector3::new(10.0, 10.0, 0.0);
         insert

@@ -206,7 +206,13 @@ impl Scene {
             let frozen = viewport.and_then(|h| self.document.get_entity(h)).is_some_and(|entity| {
                 matches!(entity, EntityType::Viewport(vp) if layer.is_some_and(|l| vp.frozen_layers.contains(&l.handle)))
             });
-            if common.invisible || layer.is_some_and(|l| l.flags.off || l.flags.frozen) || frozen {
+            if common.invisible
+                || layer.is_some_and(|l| l.flags.off || l.flags.frozen)
+                || frozen
+                // LAYWALK: block-internal measurement targets obey the walk
+                // of the space being picked, exactly like the rendered wires.
+                || self.layer_walk_hidden(layer)
+            {
                 continue;
             }
             if let EntityType::Insert(child_insert) = child_entity {
@@ -332,6 +338,22 @@ fn wire_polyline_nearest(
 /// Distance from `point` to the planar geometry object-pick dimensioning
 /// supports. `None` for entity types that cannot be dimensioned by picking.
 pub fn planar_pick_distance(entity: &EntityType, point: DVec3) -> Option<f64> {
+    // A centre mark is picked by every line it draws, not only the stored
+    // carrier line (its horizontal cross arm).
+    if let EntityType::Line(line) = entity {
+        if let Some(mark) = codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        {
+            return crate::scene::centermark::render_segments(&mark)
+                .into_iter()
+                .map(|[a, b]| {
+                    let (a, b, p) = (a.truncate(), b.truncate(), point.truncate());
+                    let ab = b - a;
+                    let t = ((p - a).dot(ab) / ab.length_squared().max(1e-24)).clamp(0.0, 1.0);
+                    (a + ab * t - p).length()
+                })
+                .reduce(f64::min);
+        }
+    }
     let planar = crate::entities::curve::entity_curve(entity)?;
     let normal = DVec3::from_array(planar.plane.normal()?);
     if normal.cross(DVec3::Z).length_squared() > 1e-12 {

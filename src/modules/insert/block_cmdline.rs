@@ -2,7 +2,7 @@
 //! -BEDIT and ATTSYNC, with the reference's prompts and messages, and the
 //! choices the Block Definition / Write Block dialogs remember.
 
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
@@ -87,7 +87,7 @@ pub enum BlockKind {
 }
 
 impl BlockTable {
-    pub fn of(doc: &CadDocument) -> Self {
+    pub fn of(doc: &Document) -> Self {
         let mut entries = Vec::new();
         let mut attributed = Vec::new();
         for br in doc.block_records.iter() {

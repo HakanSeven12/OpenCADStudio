@@ -140,7 +140,9 @@ impl OpenCADStudio {
                 .interaction(match self.dock_drag {
                     Some(DockDrag::FloatSize { edge, .. }) => edge.interaction(),
                     Some(DockDrag::Split { .. }) => iced::mouse::Interaction::ResizingVertically,
-                    Some(DockDrag::Move { .. }) => iced::mouse::Interaction::Grabbing,
+                    Some(DockDrag::Move { .. } | DockDrag::QuickProperties) => {
+                        iced::mouse::Interaction::Grabbing
+                    }
                     // Widths, the Layer Manager column and the xref drags.
                     _ => iced::mouse::Interaction::ResizingHorizontally,
                 });
@@ -517,9 +519,25 @@ impl OpenCADStudio {
                 crate::ui::window::sheet_set::view(&self.sheet_set, width, chrome)
             }
             crate::ui::dock::PanelId::Layers => {
-                tab.layers.view_panel(self.layer_name_col_w, width, chrome)
+                let active_vp = tab
+                    .scene
+                    .active_viewport
+                    .filter(|_| tab.scene.current_layout != "Model");
+                tab.layers.view_panel(self.layer_name_col_w, width, chrome, active_vp)
             }
+            crate::ui::dock::PanelId::Laywalk => self.layer_walk_view(tab, width, chrome),
             crate::ui::dock::PanelId::QuickCalc => self.quick_calc_view(tab, width, chrome),
+            crate::ui::dock::PanelId::Plugin(num) => {
+                if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
+                    if let Some(state) = self.plugin_panels.get(panel_id) {
+                        state.view(num, width, chrome)
+                    } else {
+                        Space::new().into()
+                    }
+                } else {
+                    Space::new().into()
+                }
+            }
         }
     }
 

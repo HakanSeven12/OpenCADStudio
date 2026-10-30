@@ -401,6 +401,16 @@ pub(super) struct StyleContext<'a> {
     pub active_mleader_style: &'a str,
     pub table_style_names: &'a [String],
     pub active_table_style: &'a str,
+    /// Annotate > Text: what the find box holds and the text height shown.
+    pub text_find: &'a str,
+    pub text_height: &'a str,
+    /// Annotate > Dimensions: DIMLAYER (empty: the current layer) and the
+    /// colour of the layer it names.
+    pub dim_layer: &'a str,
+    pub dim_layer_color: Option<iced::Color>,
+    /// Annotate > Leaders: MLEADERLAYER, likewise.
+    pub mleader_layer: &'a str,
+    pub mleader_layer_color: Option<iced::Color>,
 }
 
 impl<'a> StyleContext<'a> {
@@ -646,6 +656,66 @@ pub(super) fn tip_style(theme: &Theme) -> container::Style {
 
 // ── Small item renderer ────────────────────────────────────────────────────
 
+/// A small tool with its name beside the icon, `width` wide.
+fn labeled_tool<'a>(
+    t: &ToolDef,
+    active_tool: &Option<String>,
+    state: ToggleState,
+    width: Length,
+) -> Element<'a, Message> {
+    let active = is_active_tool(t.id, active_tool, &state);
+    let event = t.event.clone();
+    let tool_id = t.id.to_string();
+    let label = t!(t.label).into_owned();
+    let tip_text = tool_tip_text(&label, t.id);
+    // One row: a label's line break becomes a space.
+    let label = label.replace('\n', " ");
+    let content = row![
+        make_icon(t.icon, SMALL_ICON),
+        super::keytips::label_anchor(
+            || super::keytips::label_id(t.id),
+            text(label)
+                .size(LABEL_SIZE)
+                .wrapping(advanced_text::Wrapping::None),
+        ),
+    ]
+    .spacing(metrics::LABEL_GAP)
+    .align_y(iced::Center);
+    let btn = button(content)
+        .on_press(Message::RibbonToolClick { tool_id, event })
+        .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
+        .width(width)
+        .height(ROW_H)
+        .padding(Padding {
+            top: 0.0,
+            right: metrics::LABEL_PAD_RIGHT,
+            bottom: 0.0,
+            left: SMALL_PAD,
+        });
+    super::keytips::anchor(
+        t.id,
+        tooltip(btn, make_tip(tip_text), TipPos::Right)
+            .gap(6.0)
+            .delay(Duration::from_millis(400))
+            .style(tip_style),
+    )
+}
+
+/// A small item of the Dimensions panel's bottom row: labeled tools take
+/// only the width of their name there.
+pub(super) fn render_row_item<'a>(
+    item: &RibbonItem,
+    active_tool: &Option<String>,
+    open_dd: &Option<String>,
+    last_cmd: &HashMap<&'static str, &'static str>,
+    state: ToggleState,
+) -> Element<'a, Message> {
+    match item {
+        RibbonItem::LabeledTool(t) => labeled_tool(t, active_tool, state, Length::Shrink),
+        _ => render_small(item, active_tool, open_dd, last_cmd, state),
+    }
+}
+
 /// Render a 1-row small button (Tool or Dropdown).
 pub(super) fn render_small<'a>(
     item: &RibbonItem,
@@ -677,44 +747,7 @@ pub(super) fn render_small<'a>(
             )
         }
 
-        RibbonItem::LabeledTool(t) => {
-            let active = is_active_tool(t.id, active_tool, &state);
-            let event = t.event.clone();
-            let tool_id = t.id.to_string();
-            let label = t!(t.label).into_owned();
-            let tip_text = tool_tip_text(&label, t.id);
-            // One row: a label's line break becomes a space.
-            let label = label.replace('\n', " ");
-            let content = row![
-                make_icon(t.icon, SMALL_ICON),
-                super::keytips::label_anchor(
-                    || super::keytips::label_id(t.id),
-                    text(label)
-                        .size(LABEL_SIZE)
-                        .wrapping(advanced_text::Wrapping::None),
-                ),
-            ]
-            .spacing(metrics::LABEL_GAP)
-            .align_y(iced::Center);
-            let btn = button(content)
-                .on_press(Message::RibbonToolClick { tool_id, event })
-                .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-                .width(Fill)
-                .height(ROW_H)
-                .padding(Padding {
-                    top: 0.0,
-                    right: metrics::LABEL_PAD_RIGHT,
-                    bottom: 0.0,
-                    left: SMALL_PAD,
-                });
-            super::keytips::anchor(
-                t.id,
-                tooltip(btn, make_tip(tip_text), TipPos::Right)
-                    .gap(6.0)
-                    .delay(Duration::from_millis(400))
-                    .style(tip_style),
-            )
-        }
+        RibbonItem::LabeledTool(t) => labeled_tool(t, active_tool, state, Fill),
 
         RibbonItem::Dropdown {
             id,
@@ -968,6 +1001,9 @@ pub(super) fn render_large_dropdown<'a>(
         })
         .or_else(|| items.first().map(|(_, lbl, _)| *lbl))
         .unwrap_or(id);
+    // FOLLOW_CHOSEN: the chosen item's icon and name.
+    let explicit_label =
+        explicit_label.filter(|label| *label != ocs_plugin_api::ribbon::FOLLOW_CHOSEN);
     // An empty label: the face keeps its own icon and names the chosen item.
     let names_item = explicit_label == Some("");
     let cur_icon = if names_item { icon } else { cur_icon };
@@ -1114,6 +1150,16 @@ fn combo_panel_col(width: f32, items: Vec<Element<'_, Message>>) -> Element<'_, 
 
 /// Render a full-height large button (LargeTool, LargeDropdown, LayerCombo, StyleCombo).
 pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Element<'a, Message> {
+    render_large_with(item, ctx, Vec::new())
+}
+
+/// [`render_large`], with `below` (small labeled tools) as the bottom row of
+/// the Dimensions style/layer lists.
+pub(super) fn render_large_with<'a>(
+    item: &RibbonItem,
+    ctx: &RenderCtx<'_>,
+    below: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
     let active_tool = ctx.active_tool;
     let open_dd = ctx.open_dd;
     let last_cmd = ctx.last_cmd;
@@ -1445,13 +1491,210 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                         .width(Fill)
                         .into(),
                 ];
+            // Dimensions: the style list and the dimension layer list each
+            // lead a row of small tools.
+            if *style_key == StyleKey::DimStyle && rows.len() == 2 {
+                let combo = col_items.pop().expect("the style combo");
+                let side = |tools: &[ToolDef]| {
+                    container(tool_row(tools, active_tool)).width(Length::Shrink)
+                };
+                col_items.push(
+                    row![container(combo).width(Fill), side(&rows[0])]
+                        .spacing(3)
+                        .align_y(iced::Center)
+                        .into(),
+                );
+                col_items.push(
+                    row![
+                        container(layer_combo(
+                            DIM_LAYER_COMBO,
+                            style_ctx.dim_layer,
+                            style_ctx.dim_layer_color,
+                            open_dd.as_deref() == Some(DIM_LAYER_COMBO),
+                            format!("{}\n{} DIMLAYER", t!("Dimension Layer"), t!("Command:")),
+                        ))
+                        .width(Fill),
+                        side(&rows[1])
+                    ]
+                    .spacing(3)
+                    .align_y(iced::Center)
+                    .into(),
+                );
+                // The bottom row is wider than the lists with their tools.
+                let width = if below.is_empty() { 1.7 } else { 2.0 };
+                if !below.is_empty() {
+                    col_items.push(row(below).spacing(2).align_y(iced::Center).into());
+                }
+                return combo_panel_col(STYLE_COMBO_W * width, col_items);
+            }
+            // Leaders: the style list, the multileader layer list, then the
+            // small tools.
+            if *style_key == StyleKey::MLeaderStyle {
+                col_items.push(
+                    container(layer_combo(
+                        MLEADER_LAYER_COMBO,
+                        style_ctx.mleader_layer,
+                        style_ctx.mleader_layer_color,
+                        open_dd.as_deref() == Some(MLEADER_LAYER_COMBO),
+                        format!("{}\n{} MLEADERLAYER", t!("Multileader Layer"), t!("Command:")),
+                    ))
+                    .width(Fill)
+                    .into(),
+                );
+            }
+            // Tables: each row leads with an icon-only update button, then
+            // the tool named beside its icon.
+            if *style_key == StyleKey::TableStyle {
+                for row_tools in rows {
+                    let items: Vec<Element<Message>> = row_tools
+                        .iter()
+                        .enumerate()
+                        .map(|(k, t)| {
+                            if k == 0 {
+                                tool_row(std::slice::from_ref(t), active_tool)
+                            } else {
+                                labeled_tool(t, active_tool, state, Length::Shrink)
+                            }
+                        })
+                        .collect();
+                    col_items.push(row(items).spacing(2).align_y(iced::Center).into());
+                }
+                return combo_panel_col(STYLE_COMBO_W, col_items);
+            }
             for row_tools in rows {
                 col_items.push(tool_row(row_tools, active_tool));
             }
+            if *style_key == StyleKey::TextStyle {
+                col_items.push(text_find_box(style_ctx.text_find));
+                col_items.push(text_height_box(style_ctx.text_height));
+            }
 
-            combo_panel_col(STYLE_COMBO_W, col_items)
+            // The Leaders lists are wider, so the layer list shows its name.
+            let width = if *style_key == StyleKey::MLeaderStyle {
+                STYLE_COMBO_W * 1.4
+            } else {
+                STYLE_COMBO_W
+            };
+            combo_panel_col(width, col_items)
         }
     }
+}
+
+/// Annotate > Dimensions: the dimension layer list's id.
+pub(crate) const DIM_LAYER_COMBO: &str = "DIM_LAYER_COMBO";
+/// Annotate > Leaders: the multileader layer list's id.
+pub(crate) const MLEADER_LAYER_COMBO: &str = "MLEADER_LAYER_COMBO";
+/// Annotate > Centerlines slide-out: the center layer list's id.
+pub(crate) const CENTER_LAYER_COMBO: &str = "CENTER_LAYER_COMBO";
+
+/// A layer list of the Annotate panels (`id`): the layer new annotations of
+/// its kind go on (DIMLAYER, MLEADERLAYER), with its colour; "Use Current"
+/// when it is the current layer.
+pub(super) fn layer_combo<'a>(
+    id: &'static str,
+    layer: &str,
+    color: Option<iced::Color>,
+    open: bool,
+    tip: String,
+) -> Element<'a, Message> {
+    let swatch: Element<'a, Message> = match color {
+        Some(color) => container(text(""))
+            .width(10)
+            .height(10)
+            .style(move |_: &Theme| container::Style {
+                background: Some(color.into()),
+                border: Border {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            })
+            .into(),
+        None => iced::widget::Space::new().width(10).height(10).into(),
+    };
+    let label = if layer.is_empty() {
+        t!("Use Current").into_owned()
+    } else {
+        layer.to_string()
+    };
+    let combo = button(
+        row![
+            make_icon(
+                IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg")),
+                12.0
+            ),
+            swatch,
+            container(text(label).size(11).wrapping(advanced_text::Wrapping::None))
+                .width(Fill)
+                .clip(true),
+            if open {
+                icons::themed_arrow_up(9.0)
+            } else {
+                icons::themed_arrow_down(9.0)
+            },
+        ]
+        .spacing(4)
+        .align_y(iced::Center),
+    )
+    .on_press(Message::ToggleRibbonDropdown(id.to_string()))
+    .style(move |theme: &Theme, status| combo_btn_style(theme, open, status, 3.0))
+    .padding([3, 8])
+    .width(Fill);
+    let combo = tooltip(PosReport::new(id, combo), make_tip(tip), TipPos::Bottom)
+        .delay(Duration::from_millis(400))
+        .style(tip_style);
+    super::keytips::anchor(id, combo)
+}
+
+/// Annotate > Text find box id, and its text height box.
+pub(crate) const TEXT_FIND_ID: &str = "ribbon_text_find";
+pub(crate) const TEXT_HEIGHT_ID: &str = "ribbon_text_height";
+
+/// Annotate > Text: text to find; Enter or the magnifier opens Find and
+/// Replace with it.
+fn text_find_box<'a>(value: &str) -> Element<'a, Message> {
+    let input = iced::widget::text_input(&t!("Find text"), value)
+        .id(iced::widget::Id::new(TEXT_FIND_ID))
+        .on_input(Message::RibbonTextFind)
+        .on_submit(Message::RibbonTextFindSubmit)
+        .size(11)
+        .padding([3, 6])
+        .width(Fill);
+    let search = button(make_icon(
+        IconKind::Svg(include_bytes!("../../../assets/icons/find.svg")),
+        14.0,
+    ))
+    .on_press(Message::RibbonTextFindSubmit)
+    .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
+    .padding(3);
+    let search = tooltip(search, make_tip(t!("Find text").into_owned()), TipPos::Bottom)
+        .delay(Duration::from_millis(400))
+        .style(tip_style);
+    row![input, search]
+        .spacing(2)
+        .align_y(iced::Center)
+        .width(Fill)
+        .into()
+}
+
+/// Annotate > Text: the text height new text takes (TEXTSIZE).
+fn text_height_box<'a>(value: &str) -> Element<'a, Message> {
+    let input = iced::widget::text_input("", value)
+        .id(iced::widget::Id::new(TEXT_HEIGHT_ID))
+        .on_input(Message::RibbonTextHeight)
+        .on_submit(Message::RibbonTextHeightSubmit)
+        .size(11)
+        .padding([3, 6])
+        .width(Fill);
+    let input = tooltip(
+        input,
+        make_tip(format!("{}\n{} TEXTSIZE", t!("Text Height"), t!("Command:"))),
+        TipPos::Bottom,
+    )
+    .delay(Duration::from_millis(400))
+    .style(tip_style);
+    super::keytips::anchor(super::keytips::TEXT_HEIGHT, input)
 }
 
 // ── Message helpers ────────────────────────────────────────────────────────
@@ -1690,6 +1933,12 @@ mod style_context_tests {
             active_mleader_style: &active_mleader,
             table_style_names: &table_names,
             active_table_style: &active_table,
+            text_find: "",
+            text_height: "",
+            dim_layer: "",
+            dim_layer_color: None,
+            mleader_layer: "",
+            mleader_layer_color: None,
         };
         assert_eq!(ctx.names_for(StyleKey::TextStyle), &text_names);
         assert_eq!(ctx.active_for(StyleKey::TextStyle), "Standard");
@@ -1711,6 +1960,12 @@ mod style_context_tests {
             active_mleader_style: &empty_s,
             table_style_names: &empty,
             active_table_style: &empty_s,
+            text_find: "",
+            text_height: "",
+            dim_layer: "",
+            dim_layer_color: None,
+            mleader_layer: "",
+            mleader_layer_color: None,
         };
         assert_eq!(ctx.active_for(StyleKey::TableStyle), "");
         assert!(ctx.names_for(StyleKey::MLeaderStyle).is_empty());

@@ -293,19 +293,42 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
     flow(move |q| {
         let option = q.keyword(
             crate::t!(
-                "-DIMSTYLE  Enter a dimension style option [Save/Restore/STatus/Variables/?] <Restore>:"
+                "-DIMSTYLE  Enter a dimension style option [ANnotative/Save/Restore/STatus/Variables/Apply/?] <Restore>:"
             )
             .into_owned(),
             Some("RESTORE"),
             &[
+                ("ANnotative", "ANNOTATIVE"),
                 ("Save", "SAVE"),
                 ("Restore", "RESTORE"),
                 ("STatus", "STATUS"),
                 ("Variables", "VARIABLES"),
+                ("Apply", "APPLY"),
                 ("?", "?"),
             ],
         )?;
         match option {
+            // A new style, annotative or not; -DIMSTYLE asks again after it.
+            "ANNOTATIVE" => {
+                let annotative = q.yes_no(
+                    crate::t!("-DIMSTYLE  Create annotative dimension style [Yes/No] <Yes>:")
+                        .into_owned(),
+                    true,
+                )?;
+                let name = q.text(
+                    crate::t!("-DIMSTYLE  Enter name for new dimension style or [?]:")
+                        .into_owned(),
+                    None,
+                )?;
+                if name == "?" {
+                    return run("-DIMSTYLE", &["?", "*"]);
+                }
+                run(
+                    "-DIMSTYLE",
+                    &["ANNOTATIVE", &name, if annotative { "1" } else { "0" }],
+                )
+            }
+            "APPLY" => run("-DIMSTYLE", &["APPLY"]),
             "SAVE" => {
                 let name = q.text(
                     crate::t!("-DIMSTYLE  Enter name for new dimension style or [?]:")
@@ -328,7 +351,21 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
                 }
                 run("-DIMSTYLE", &[option, &name])
             }
-            "RESTORE" | "VARIABLES" => {
+            "RESTORE" => {
+                let name = q.text(
+                    crate::t!("-DIMSTYLE  Enter a dimension style name, [?] or <select dimension>:")
+                        .into_owned(),
+                    Some(String::new()),
+                )?;
+                if name == "?" {
+                    return run("-DIMSTYLE", &["?", "*"]);
+                }
+                if name.is_empty() {
+                    return run("-DIMSTYLE", &["RESTORE_PICK"]);
+                }
+                run("-DIMSTYLE", &[option, &name])
+            }
+            "VARIABLES" => {
                 let name = q.text(
                     crate::t!(
                         "-DIMSTYLE  Enter a dimension style name or [?] <%{name}>:",
@@ -689,17 +726,25 @@ impl OpenCADStudio {
             }
             "-STYLE" => self.dash_style(i, &args),
             "-DIMSTYLE" if rest.is_empty() => {
+                self.push_current_dimstyle(i);
                 let doc = &self.tabs[i].scene.document;
                 let current = doc.header.current_dimstyle_name.clone();
                 let existing = doc.dim_styles.iter().map(|s| s.name.clone()).collect();
-                self.command_line.push_info(
-                    crate::t!("-DIMSTYLE  Current dimension style: %{name}", name = current)
-                        .as_ref(),
-                );
                 let flow = dimstyle_flow(current, existing);
                 start(self, ScriptPromptCommand::new("-DIMSTYLE", flow));
             }
-            "-DIMSTYLE" => self.dash_dimstyle(i, &args),
+            "-DIMSTYLE" => {
+                self.dash_dimstyle(i, &args);
+                // After a new style from ANnotative the options come again.
+                if arg(0) == "ANNOTATIVE" {
+                    self.push_current_dimstyle(i);
+                    let doc = &self.tabs[i].scene.document;
+                    let current = doc.header.current_dimstyle_name.clone();
+                    let existing = doc.dim_styles.iter().map(|s| s.name.clone()).collect();
+                    let flow = dimstyle_flow(current, existing);
+                    start(self, ScriptPromptCommand::new("-DIMSTYLE", flow));
+                }
+            }
             "-LAYOUT" if rest.is_empty() => {
                 let current = self.tabs[i].scene.current_layout.clone();
                 let next = Self::next_layout_name(&self.tabs[i].scene.layout_names());
@@ -952,10 +997,105 @@ impl OpenCADStudio {
             .push_output(crate::tf!("{} is now the current text style.", name).as_ref());
     }
 
+    /// "Current dimension style: X   Annotative: No".
+    fn push_current_dimstyle(&mut self, i: usize) {
+        let doc = &self.tabs[i].scene.document;
+        let current = doc.header.current_dimstyle_name.clone();
+        let annotative = crate::scene::annotative::dim_style_is_annotative(doc, &current);
+        let yes_no = if annotative { crate::t!("Yes") } else { crate::t!("No") };
+        self.command_line.push_info(
+            crate::t!(
+                "-DIMSTYLE  Current dimension style: %{name}   Annotative: %{annotative}",
+                name = current,
+                annotative = yes_no
+            )
+            .as_ref(),
+        );
+    }
+
     fn dash_dimstyle(&mut self, i: usize, args: &[String]) {
         let arg = |n: usize| args.get(n).cloned().unwrap_or_default();
         let name = arg(1);
         match arg(0).as_str() {
+            // ANnotative: the current style saved under a new name, with the
+            // annotative setting asked for, and made current.
+            "ANNOTATIVE" => {
+                self.dash_dimstyle(i, &["SAVE".to_string(), name.clone()]);
+                let doc = &mut self.tabs[i].scene.document;
+                if let Some(style) = doc.dim_styles.get_mut(&name) {
+                    style.annotative = arg(2) == "1";
+                    self.tabs[i].scene.invalidate_dim_style_dependencies(&name);
+                }
+            }
+            // Apply: the picked dimensions take the current style and lose
+            // their overrides.
+            "APPLY" => {
+                use crate::modules::draw::select::SelectObjectsCommand;
+                let select = SelectObjectsCommand::with_prompt(
+                    "-DIMSTYLE",
+                    r#"-DIMSTYLE ["APPLY_PICKED"]"#,
+                    "Select objects:",
+                );
+                self.command_line.push_info(&select.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(select));
+            }
+            "APPLY_PICKED" => {
+                let scene = &self.tabs[i].scene;
+                let handles: Vec<codec::Handle> = scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter(|(handle, entity)| {
+                        matches!(entity, codec::EntityType::Dimension(_))
+                            && !scene.is_layer_locked(*handle)
+                    })
+                    .map(|(handle, _)| handle)
+                    .collect();
+                if handles.is_empty() {
+                    return;
+                }
+                let current = scene.document.header.current_dimstyle_name.clone();
+                self.push_undo_snapshot(i, "DIMSTYLE APPLY");
+                for &handle in &handles {
+                    let doc = &mut self.tabs[i].scene.document;
+                    if let Some(codec::EntityType::Dimension(dimension)) =
+                        doc.get_entity_mut(handle)
+                    {
+                        dimension.base_mut().style_name = current.clone();
+                    }
+                    crate::entities::dim_override::replace(doc, handle, Vec::new());
+                }
+                self.invalidate_property_targets(i, &handles);
+                self.tabs[i].scene.deselect_all();
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+            }
+            // Restore from a picked dimension's style.
+            "RESTORE_PICK" => {
+                use crate::modules::draw::select::SelectObjectsCommand;
+                let select = SelectObjectsCommand::with_prompt(
+                    "-DIMSTYLE",
+                    r#"-DIMSTYLE ["RESTORE_PICKED"]"#,
+                    "Select dimension:",
+                );
+                self.command_line.push_info(&select.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(select));
+            }
+            "RESTORE_PICKED" => {
+                let scene = &self.tabs[i].scene;
+                let style = scene
+                    .selected_entities()
+                    .into_iter()
+                    .find_map(|(_, entity)| match entity {
+                        codec::EntityType::Dimension(dimension) => {
+                            Some(dimension.base().style_name.clone())
+                        }
+                        _ => None,
+                    });
+                self.tabs[i].scene.deselect_all();
+                if let Some(style) = style {
+                    self.dash_dimstyle(i, &["RESTORE".to_string(), style]);
+                }
+            }
             "SAVE" => {
                 let doc = &self.tabs[i].scene.document;
                 let current = doc.header.current_dimstyle_name.clone();
@@ -996,6 +1136,7 @@ impl OpenCADStudio {
                     Some(found) => {
                         let _ =
                             self.on_ribbon_style_changed(crate::modules::StyleKey::DimStyle, found);
+                        self.push_current_dimstyle(i);
                     }
                     None => self
                         .command_line

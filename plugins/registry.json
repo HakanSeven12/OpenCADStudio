@@ -5,6 +5,11 @@
     "description": "Reference dynamically-loaded add-on (ribbon tab + EX_HELLO command)."
   },
   {
+    "repo": "OpenAEC-Foundation/Open-Infra-Studio",
+    "name": "Open Infra Studio",
+    "description": "GIS and civil design for infrastructure: project location in any coordinate system, 600+ WMS/WFS/tile services worldwide, OpenStreetMap, CityGML/CityJSON, alignments, profiles and corridors, plus Dutch base data (BGT, BRK, KLIC, AHN) to NLCS."
+  },
+  {
     "repo": "mf4633/opencad-storm-sewer-plugin",
     "name": "Storm Sewer",
     "description": "Gravity storm-drain network design and analysis (Rational + Manning + HGL, LandXML import). Free to draw and analyze; Pro ($29/yr) adds HTML reports, pipe sizing, multi-RP."

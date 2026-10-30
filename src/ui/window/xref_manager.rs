@@ -13,7 +13,7 @@ use crate::io::xref_model::{
 use crate::ui::style::common::muted_style;
 use crate::ui::style::row_button::cell_button_style;
 use crate::ui::ROW_H;
-use codec::CadDocument;
+use codec::Document;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, tooltip};
 use iced::Padding;
 use iced::{Background, Border, Element, Fill, Length, Theme};
@@ -228,7 +228,7 @@ impl XrefManagerPanel {
     /// stat plus `load_file` for nested enumeration, both already wasm-safe.
     pub fn refresh(
         &mut self,
-        doc: &CadDocument,
+        doc: &Document,
         base_dir: &Path,
         unloaded: &HashSet<crate::io::xref_model::UnloadKey>,
         prev: &HashMap<u64, SystemTime>,
@@ -592,7 +592,7 @@ impl XrefManagerPanel {
         width: f32,
         chrome: crate::ui::dock::Chrome,
         missing: usize,
-        doc: &'a CadDocument,
+        doc: &'a Document,
     ) -> Element<'a, Message> {
         use crate::ui::dock::PanelId;
         let title_bar = crate::ui::dock::title_bar(
@@ -1128,7 +1128,7 @@ impl XrefManagerPanel {
 /// `(key, saved_path)` identities for every reference the host drawing holds
 /// directly — mirrors the three [`collect_entries`] scans so nested entries
 /// (foreign handles) classify correctly even on handle collisions.
-fn direct_identities(doc: &CadDocument) -> HashSet<(u64, String)> {
+fn direct_identities(doc: &Document) -> HashSet<(u64, String)> {
     use codec::objects::ObjectType;
 
     let mut ids: HashSet<(u64, String)> = HashSet::new();
@@ -1676,6 +1676,9 @@ fn menu_separator() -> Element<'static, Message> {
 /// path tools. No Bind, no Attach/Overlay — those are DWG-only and
 /// hidden entirely. Change Path Type shows a right triangle and a
 /// second list adjacent to "Change Path Type" on hover.
+/// Width of the Change Path Type flyout.
+const XREF_FLYOUT_W: f32 = 180.0;
+
 fn row_menu_for(id: XrefRowId, change_path_open: bool) -> Element<'static, Message> {
     let item = |label: &str, op: XrefPaletteOp| -> Element<'static, Message> {
         menu_row(label.to_string(), Message::XrefRowOp(id.clone(), op))
@@ -1754,8 +1757,16 @@ fn row_menu_for(id: XrefRowId, change_path_open: bool) -> Element<'static, Messa
     .width(Length::Fixed(220.0))
     .into();
 
+    // The menu keeps one width with the flyout open or closed: near the
+    // window edge the overlay is moved in to fit, and a width that changed
+    // with the flyout moved it out from under the pointer, which closed the
+    // flyout and moved it back (#2258).
     if !change_path_open {
-        return main;
+        return row![
+            main,
+            iced::widget::Space::new().width(Length::Fixed(XREF_FLYOUT_W))
+        ]
+        .into();
     }
 
     // Top offset so the flyout top border aligns directly with the "Change Path Type" row.
@@ -1785,7 +1796,7 @@ fn row_menu_for(id: XrefRowId, change_path_open: bool) -> Element<'static, Messa
         },
         ..Default::default()
     })
-    .width(Length::Fixed(180.0))
+    .width(Length::Fixed(XREF_FLYOUT_W))
     .into();
 
     let flyout_column = column![
@@ -2075,7 +2086,7 @@ fn host_row<'a>(
 
 fn details_pane<'a>(
     entry: Option<&'a ReferenceEntry>,
-    doc: &'a CadDocument,
+    doc: &'a Document,
 ) -> Element<'a, Message> {
     let inner: Element<'_, Message> = match entry {
         None => text(crate::t!("Select a reference to inspect its details"))
@@ -2189,7 +2200,7 @@ fn reference_preview(entry: &ReferenceEntry) -> Option<image::RgbaImage> {
 
 /// Image definition backing a [`RefKind::Image`] entry, looked up by the
 /// entry key (definition-object handle) for the Details pane extras.
-fn find_image_def(doc: &CadDocument, key: u64) -> Option<&codec::objects::ImageDefinition> {
+fn find_image_def(doc: &Document, key: u64) -> Option<&codec::objects::ImageDefinition> {
     doc.objects
         .get(&codec::types::Handle::from(key))
         .and_then(|o| match o {
@@ -2198,7 +2209,7 @@ fn find_image_def(doc: &CadDocument, key: u64) -> Option<&codec::objects::ImageD
         })
 }
 
-fn find_image_display_size(doc: &CadDocument, key: u64) -> Option<(f64, f64)> {
+fn find_image_display_size(doc: &Document, key: u64) -> Option<(f64, f64)> {
     let handle = codec::types::Handle::from(key);
     for entity in doc.entities() {
         if let codec::EntityType::RasterImage(img) = entity {
@@ -2466,10 +2477,10 @@ mod tests {
         assert!(!panel.display_rows().iter().any(|r| r.is_nested));
     }
 
-    fn preview_doc2(dir: &std::path::Path) -> codec::CadDocument {
+    fn preview_doc2(dir: &std::path::Path) -> codec::Document {
         // Two referenced images → genuine multi-select.
         use codec::objects::{ImageDefinition, ObjectType};
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         for (i, name) in ["a.png", "b.png"].iter().enumerate() {
             let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([9, 9, 9, 255]));
             img.save(dir.join(name)).unwrap();
@@ -2490,13 +2501,13 @@ mod tests {
         doc
     }
 
-    fn preview_doc(dir: &std::path::Path, name: &str) -> codec::CadDocument {
+    fn preview_doc(dir: &std::path::Path, name: &str) -> codec::Document {
         // Referenced 8x8 PNG under `dir`; the entry resolves Loaded.
         use codec::objects::{ImageDefinition, ObjectType};
         let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([9, 9, 9, 255]));
         img.save(dir.join(name)).unwrap();
         let img_path = dir.join(name).to_string_lossy().into_owned();
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let h = doc.allocate_handle();
         let mut def = ImageDefinition::with_dimensions(img_path.clone(), 8, 8);
         def.handle = h;
@@ -2578,7 +2589,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("plan.dwg"), b"not-a-real-dwg").unwrap();
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let mut br = codec::tables::BlockRecord::new("PLAN");
         br.flags.is_xref = true;
         br.xref_path = dir.join("plan.dwg").to_string_lossy().into_owned();

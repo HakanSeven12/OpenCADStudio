@@ -392,7 +392,7 @@ impl CadCommand for PointCloudCropCommand {
             Step::Radius => match crate::entities::common::parse_f64(text).filter(|r| *r > 0.0) {
                 Some(radius) => {
                     let center = self.points[0];
-                    self.points.push(center + DVec3::new(radius, 0.0, 0.0));
+                    self.points.push(center + self.view.0 * radius);
                     self.to_keep()
                 }
                 None => CmdResult::ReportError(REQUIRED.to_string()),
@@ -413,18 +413,17 @@ impl CadCommand for PointCloudCropCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        // Drawn on the view plane, as the crop is: in a side view a
+        // rectangle on the drawing's XY plane is seen edge-on.
+        let (right, up) = self.view;
         let outline: Vec<[f64; 3]> = match self.step {
             Step::RectSecond => {
                 let a = self.points[0];
-                [
-                    a,
-                    DVec3::new(pt.x, a.y, a.z),
-                    DVec3::new(pt.x, pt.y, a.z),
-                    DVec3::new(a.x, pt.y, a.z),
-                    a,
-                ]
-                .map(|p| p.to_array())
-                .to_vec()
+                let d = pt - a;
+                let (dx, dy) = (right * d.dot(right), up * d.dot(up));
+                [a, a + dx, a + dx + dy, a + dy, a]
+                    .map(|p| p.to_array())
+                    .to_vec()
             }
             Step::PolyNext => self
                 .points
@@ -435,11 +434,12 @@ impl CadCommand for PointCloudCropCommand {
                 .collect(),
             Step::Radius => {
                 let c = self.points[0];
-                let r = (pt - c).truncate().length();
+                let d = pt - c;
+                let r = d.dot(right).hypot(d.dot(up));
                 (0..=64)
                     .map(|k| {
                         let a = k as f64 / 64.0 * std::f64::consts::TAU;
-                        (c + DVec3::new(r * a.cos(), r * a.sin(), 0.0)).to_array()
+                        (c + right * (r * a.cos()) + up * (r * a.sin())).to_array()
                     })
                     .collect()
             }

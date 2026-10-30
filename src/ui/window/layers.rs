@@ -9,7 +9,6 @@ use crate::ui::style::row_button::{cell_button_style, header_button_style};
 use crate::ui::ROW_H;
 use codec::tables::layer::Layer as DocLayer;
 use codec::tables::Table;
-use codec::types::aci_table::aci_to_rgb;
 use codec::types::{Color as AcadColor, LineWeight};
 use codec::Handle;
 use iced::widget::{
@@ -25,6 +24,15 @@ use std::borrow::Cow;
 pub struct VpCol {
     pub handle: Handle,
     pub label: String,
+}
+
+/// A layout viewport as the Layer Manager shows it: its frozen layers and
+/// its layer colour overrides.
+pub struct ViewportLayers {
+    pub handle: Handle,
+    pub label: String,
+    pub frozen: Vec<Handle>,
+    pub colors: Vec<(Handle, AcadColor)>,
 }
 
 /// Sortable column in the Layer Manager table. Clicking a header sorts by
@@ -71,6 +79,8 @@ pub struct Layer {
     pub transparency: i32,
     /// Freeze state per-viewport, indexed parallel to LayerPanel::vp_cols.
     pub vp_frozen: Vec<bool>,
+    /// Colour override per-viewport, parallel to `vp_frozen`.
+    pub vp_colors: Vec<Option<AcadColor>>,
 }
 
 impl Layer {
@@ -88,6 +98,7 @@ impl Layer {
             lineweight: LineWeight::Default,
             transparency: 0,
             vp_frozen: vec![],
+            vp_colors: vec![],
         }
     }
 }
@@ -162,7 +173,7 @@ impl LayerPanel {
     pub fn sync_with_viewports(
         &mut self,
         doc_layers: &Table<DocLayer>,
-        vp_info: Vec<(Handle, String, Vec<Handle>)>,
+        vp_info: Vec<ViewportLayers>,
     ) {
         // The rebuild below re-indexes rows, so capture the selection by name
         // first and re-resolve it after (indices alone would go stale).
@@ -178,9 +189,9 @@ impl LayerPanel {
 
         self.vp_cols = vp_info
             .iter()
-            .map(|(h, label, _)| VpCol {
-                handle: *h,
-                label: label.clone(),
+            .map(|vp| VpCol {
+                handle: vp.handle,
+                label: vp.label.clone(),
             })
             .collect();
 
@@ -192,7 +203,16 @@ impl LayerPanel {
                 let layer_handle = l.handle;
                 let vp_frozen = vp_info
                     .iter()
-                    .map(|(_, _, frozen_handles)| frozen_handles.contains(&layer_handle))
+                    .map(|vp| vp.frozen.contains(&layer_handle))
+                    .collect();
+                let vp_colors = vp_info
+                    .iter()
+                    .map(|vp| {
+                        vp.colors
+                            .iter()
+                            .find(|(layer, _)| *layer == layer_handle)
+                            .map(|(_, color)| *color)
+                    })
                     .collect();
                 Layer {
                     name: l.name.clone(),
@@ -211,6 +231,7 @@ impl LayerPanel {
                     lineweight: l.line_weight,
                     transparency: (l.transparency.as_percent() * 100.0).round() as i32,
                     vp_frozen,
+                    vp_colors,
                 }
             })
             .collect();
@@ -315,11 +336,14 @@ impl LayerPanel {
     /// The Layer Manager as a dock pallet: its title bar, the toolbar across
     /// the pallet (search box on the right), then the table, at least as wide
     /// as the pallet and scrolling sideways when the pallet is narrower.
+    /// `active_vp`: the layout viewport being worked in, whose columns are
+    /// then the only ones shown.
     pub fn view_panel(
         &self,
         name_col_w: f32,
         width: f32,
         chrome: crate::ui::dock::Chrome,
+        active_vp: Option<Handle>,
     ) -> Element<'_, Message> {
         use crate::ui::dock::PanelId;
         let title_bar = crate::ui::dock::title_bar(
@@ -328,7 +352,7 @@ impl LayerPanel {
             chrome,
         );
         // Inside the pallet's 1 px border on either side.
-        let body = self.view_content(name_col_w, (width - 2.0).max(0.0));
+        let body = self.view_content(name_col_w, (width - 2.0).max(0.0), active_vp);
         container(column![title_bar, body])
             .width(Length::Fixed(width))
             .height(Length::Fill)
@@ -345,7 +369,14 @@ impl LayerPanel {
     }
 
     /// Toolbar and table for a pallet `inner_w` wide.
-    fn view_content(&self, name_col_w: f32, inner_w: f32) -> Element<'_, Message> {
+    fn view_content(
+        &self,
+        name_col_w: f32,
+        inner_w: f32,
+        active_vp: Option<Handle>,
+    ) -> Element<'_, Message> {
+        // A viewport the columns do not list yet shows them all.
+        let active_vp = active_vp.filter(|h| self.vp_cols.iter().any(|vp| vp.handle == *h));
         let has_sel = self.selected.is_some();
         let sel_is_zero = self
             .selected
@@ -470,12 +501,12 @@ impl LayerPanel {
         .spacing(4)
         .align_y(iced::Center);
 
-        for vp in &self.vp_cols {
+        for vp in self.vp_cols.iter().filter(|vp| active_vp.is_none_or(|h| h == vp.handle)) {
             header_row = header_row.push(
                 text(vp.label.as_str())
                     .size(10)
                     .style(muted_style)
-                    .width(Length::Fixed(COL_ICON)),
+                    .width(Length::Fixed(COL_ICON * 2.0 + 4.0)),
             );
         }
 
@@ -524,6 +555,7 @@ impl LayerPanel {
                 ltc,
                 lwc,
                 &self.vp_cols,
+                active_vp,
                 name_col_w,
             ));
         }
@@ -729,6 +761,7 @@ fn layer_row<'a>(
     lt_combo: Option<&'a combo_box::State<LinetypeItem>>,
     lw_combo_state: Option<&'a combo_box::State<LwItem>>,
     vp_cols: &'a [VpCol],
+    active_vp: Option<Handle>,
     name_col_w: f32,
 ) -> Element<'a, Message> {
     // #22: messages carry the layer name (resolved at dispatch time) so a
@@ -800,18 +833,24 @@ fn layer_row<'a>(
     } else {
         // ~6 px per glyph at the 10 px row font — track the column width.
         let name_budget = ((name_col_w / 6.0) as usize).max(8);
-        let name_btn =
-            button(text(crate::ui::text_util::elide(&layer.name, name_budget)).size(FONT_SZ))
-                .on_press(Message::LayerRenameStart(lname.clone()))
-                .style(cell_button_style(is_selected, index))
-                .padding(Padding {
-                    top: COMBO_PAD_V,
-                    bottom: COMBO_PAD_V,
-                    left: 4.0,
-                    right: 4.0,
-                })
-                .height(Length::Fixed(ROW_H))
-                .width(Length::Fixed(name_col_w));
+        // One line, cut at the cell: the glyph estimate can run over a narrow
+        // column, and a wrapped name spilled into the rows below (#2251).
+        let name_btn = button(
+            text(crate::ui::text_util::elide(&layer.name, name_budget))
+                .size(FONT_SZ)
+                .wrapping(iced::widget::text::Wrapping::None),
+        )
+        .clip(true)
+        .on_press(Message::LayerRenameStart(lname.clone()))
+        .style(cell_button_style(is_selected, index))
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 4.0,
+            right: 4.0,
+        })
+        .height(Length::Fixed(ROW_H))
+        .width(Length::Fixed(name_col_w));
         // When the name is truncated, reveal the full text on hover so the
         // user can still read it without widening the column.
         if layer.name.chars().count() > name_budget {
@@ -956,16 +995,35 @@ fn layer_row<'a>(
     .align_y(iced::Center);
 
     // Per-viewport freeze columns
-    for (vp_idx, _vp_col) in vp_cols.iter().enumerate() {
+    for (vp_idx, vp_col) in vp_cols.iter().enumerate() {
+        if active_vp.is_some_and(|h| h != vp_col.handle) {
+            continue;
+        }
         let is_vp_frozen = layer.vp_frozen.get(vp_idx).copied().unwrap_or(false);
         let vp_frz_svg = crate::ui::icons::layer_vp_freeze(is_vp_frozen);
-        row_content = row_content.push(
-            container(svg_btn(
-                vp_frz_svg,
-                Message::LayerToggleVpFreeze(lname.clone(), vp_idx),
+        // The viewport's colour for this layer: its override, else the layer's.
+        let vp_color = layer.vp_colors.get(vp_idx).copied().flatten();
+        let shown = vp_color.unwrap_or(layer.color);
+        let vp_color_btn = button(crate::ui::color_select::swatch(iced_color_from_acad(&shown)))
+            .on_press(Message::OpenColorWindow(
+                crate::app::ColorPickTarget::LayerViewport(lname.clone(), vp_col.handle),
+                shown,
             ))
-            .width(Length::Fixed(COL_ICON))
-            .align_x(iced::Center),
+            .padding(2)
+            .style(button::text);
+        row_content = row_content.push(
+            row![
+                container(svg_btn(
+                    vp_frz_svg,
+                    Message::LayerToggleVpFreeze(lname.clone(), vp_idx),
+                ))
+                .width(Length::Fixed(COL_ICON))
+                .align_x(iced::Center),
+                container(vp_color_btn)
+                    .width(Length::Fixed(COL_ICON))
+                    .align_x(iced::Center),
+            ]
+            .spacing(4),
         );
     }
 
@@ -1003,12 +1061,8 @@ fn layer_row<'a>(
 
 pub fn iced_color_from_acad(c: &AcadColor) -> Color {
     match c {
-        AcadColor::Index(i) => {
-            let (r, g, b) = aci_to_rgb(*i).unwrap_or((200, 200, 200));
-            Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
-        }
-        AcadColor::Rgb { r, g, b } => {
-            Color::from_rgb(*r as f32 / 255.0, *g as f32 / 255.0, *b as f32 / 255.0)
+        AcadColor::Index(_) | AcadColor::Rgb { .. } => {
+            crate::ui::properties::acad_color_display(*c).0
         }
         _ => Color::WHITE,
     }

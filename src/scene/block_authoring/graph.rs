@@ -1,6 +1,6 @@
 //! Maintain native adjacency lists while adding/replacing action dependencies.
 use codec::objects::{BlockEvaluationEdge, BlockEvaluationGraph, DynamicBlockData, ObjectType};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 
 pub(crate) fn valid_lists(g: &BlockEvaluationGraph, node: i32) -> bool {
     let Some(n) = g.nodes.iter().find(|n| n.id == node) else {
@@ -116,7 +116,7 @@ fn add(g: &mut BlockEvaluationGraph, id: i32, source: i32, destination: i32, inv
     });
 }
 pub(crate) fn bind_ids(
-    document: &mut CadDocument,
+    document: &mut Document,
     graph: Handle,
     action: i32,
     parameters: &[i32],

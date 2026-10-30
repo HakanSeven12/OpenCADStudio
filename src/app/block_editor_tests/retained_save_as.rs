@@ -163,7 +163,7 @@ fn retained_fixture() -> (OpenCADStudio, Handle, Handle, Handle) {
     (app, reference, owner, group_handle)
 }
 
-fn assert_scope_graph(document: &codec::CadDocument, owner: Handle, group: Handle) {
+fn assert_scope_graph(document: &codec::Document, owner: Handle, group: Handle) {
     let ObjectType::Associative(AssociativeObject {
         owner: scope,
         data: Data::ConstraintGroup(value),
@@ -440,7 +440,7 @@ fn save_as_retained_constraints_create_a_destination_root_network() {
     let source = &app.tabs[app.active_tab].scene.document;
     let copied = crate::app::block_save_as::copy_definition(
         source,
-        codec::CadDocument::new(),
+        codec::Document::new(),
         "EDIT_ME",
         "COPY",
     )

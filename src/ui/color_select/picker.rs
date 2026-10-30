@@ -1519,7 +1519,7 @@ mod tests {
     #[test]
     fn document_colours_pick_and_walk() {
         // A new drawing's layer 0 is white.
-        let doc = document::collect(&codec::CadDocument::new());
+        let doc = document::collect(&codec::Document::new());
         assert!(doc.iter().any(|c| c.color == AcadColor::Index(7)));
         let mut p = picker(AcadColor::Index(30)).with_drawing(doc, &[], Arc::default(), None, None);
         p.update(ColorPickerMsg::Tab(ColorPickerTab::Document));
@@ -1727,7 +1727,7 @@ mod tests {
                     ral()
                 };
                 let mut p = ColorPicker::new(target, color, varies).with_drawing(
-                    document::collect(&codec::CadDocument::new()),
+                    document::collect(&codec::Document::new()),
                     &[],
                     books,
                     None,

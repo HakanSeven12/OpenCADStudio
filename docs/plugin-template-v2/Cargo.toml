@@ -12,8 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ocs_plugin_api = { path = "../../crates/ocs_plugin_api", features = ["host"] }
-# Must match the host's opencadcodec pin exactly (its Cargo.toml's `codec`
-# entry): the plugin's entities and the host's re-exports are the same types
-# only when both resolve the same revision. The registration `rustc` /
-# `acadrust_source` gates enforce this at load time too.
-acadrust = { package = "acadrust", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "e80d1a9" }
+# The codec types travel to the host over IPC, so any revision whose types
+# have the host's wire shapes works (checked at connection, see
+# `version_info::wire_schema`); the host's own pin is the safe choice.
+acadrust = { package = "acadrust", git = "https://github.com/HakanSeven12/acadrust.git", rev = "24b037a" }

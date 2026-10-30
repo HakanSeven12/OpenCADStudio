@@ -284,7 +284,7 @@ impl CadCommand for ArcLengthDimensionCommand {
         }
         match self.step {
             Step::SelectObject => {
-                crate::t!("DIMARC  Select arc, polyline arc segment, or circular region arc edge:")
+                crate::t!("DIMARC  Select arc or polyline arc segment:")
                     .into_owned()
             }
             Step::DimLine(selection) => {

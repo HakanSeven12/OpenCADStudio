@@ -694,6 +694,7 @@ mod linux_impl {
         let mut changed = false;
         for (name, bytes) in [
             ("image-vnd.dwg.svg", DWG_ICON),
+            ("application-x-dwg.svg", DWG_ICON),
             ("image-vnd.dxf.svg", DXF_ICON),
         ] {
             let path = dir.join(name);
@@ -712,7 +713,38 @@ mod linux_impl {
                 .args(["--force", "--quiet", &hicolor.to_string_lossy()])
                 .status();
         }
+        install_mime_icon_names();
         Ok(())
+    }
+
+    fn install_mime_icon_names() {
+        let Ok(home) = data_home() else { return };
+        let pkgs = home.join("mime/packages");
+        let xml_path = pkgs.join(format!("{APP_ID}-icons.xml"));
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="image/vnd.dwg">
+    <icon name="image-vnd.dwg"/>
+    <generic-icon name="image-vnd.dwg"/>
+  </mime-type>
+  <mime-type type="application/x-dwg">
+    <icon name="application-x-dwg"/>
+    <generic-icon name="application-x-dwg"/>
+  </mime-type>
+  <mime-type type="image/vnd.dxf">
+    <icon name="image-vnd.dxf"/>
+    <generic-icon name="image-vnd.dxf"/>
+  </mime-type>
+</mime-info>
+"#;
+        if std::fs::read_to_string(&xml_path).ok().as_deref() == Some(xml) {
+            return;
+        }
+        if std::fs::create_dir_all(&pkgs).is_ok() && std::fs::write(&xml_path, xml).is_ok() {
+            let _ = std::process::Command::new("update-mime-database")
+                .arg(home.join("mime"))
+                .status();
+        }
     }
 
     fn data_home() -> Result<PathBuf, String> {

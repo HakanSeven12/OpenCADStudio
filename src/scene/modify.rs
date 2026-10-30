@@ -97,15 +97,16 @@ fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
 }
 
 /// MIRRTEXT on: a real MIRROR makes text a true glyph mirror. `apply_transform`
-/// already reflects the baseline rotation; toggling *both* group-71 bits
-/// (backward `0x2` + upside-down `0x4`) then renders the exact geometric
-/// reflection (the renderer XORs these flags into the effective width-factor
-/// sign / 180° flip). Toggling — not setting — keeps a double mirror an
-/// involution. Only single-line TEXT carries group 71; MTEXT / Shape keep the
-/// reflected rotation (readable-but-rotated), which is standard-conforming.
+/// already reflects the baseline rotation to `2·axis − rot`; the reflected glyph
+/// frame is that rotation plus 180° with the backward bit (`0x2`) toggled, which
+/// is what AutoCAD writes (upside-down `0x4` untouched). Toggling — not setting —
+/// keeps a double mirror an involution. Only single-line TEXT carries group 71;
+/// MTEXT / Shape keep the reflected rotation (readable-but-rotated), which is
+/// standard-conforming.
 fn mirror_true_text_flags(e: &mut EntityType) {
     if let EntityType::Text(t) = e {
-        t.generation_flags ^= 0x2 | 0x4;
+        t.generation_flags ^= 0x2;
+        t.rotation = (t.rotation + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
     }
 }
 
@@ -122,6 +123,55 @@ fn transform_dimension_part(entity: &mut EntityType, t: &EntityTransform) {
 }
 
 impl Scene {
+    /// Link a leader and its annotation, including the annotation's persistent reactor.
+    pub fn link_leader_annotation(&mut self, leader: Handle, annotation: Handle) -> bool {
+        let old_annotation = match self.document.get_entity(leader) {
+            Some(EntityType::Leader(value)) => value.annotation_handle,
+            _ => return false,
+        };
+        if annotation == leader || self.document.get_entity(annotation).is_none() {
+            return false;
+        }
+        let mut touched = vec![leader, annotation];
+        if old_annotation != annotation && self.document.get_entity(old_annotation).is_some() {
+            touched.push(old_annotation);
+        }
+        if self.is_recording_undo() {
+            for &handle in &touched {
+                let before = self.document.get_entity_arc(handle);
+                self.record_undo_before(handle, before);
+            }
+        }
+        if old_annotation != annotation {
+            if let Some(entity) = self.document.get_entity_mut(old_annotation) {
+                entity
+                    .common_mut()
+                    .reactors
+                    .retain(|&handle| handle != leader);
+            }
+        }
+        if let Some(EntityType::Leader(value)) = self.document.get_entity_mut(leader) {
+            value.annotation_handle = annotation;
+        }
+        let reactors = &mut self
+            .document
+            .get_entity_mut(annotation)
+            .unwrap()
+            .common_mut()
+            .reactors;
+        if !reactors.contains(&leader) {
+            reactors.push(leader);
+        }
+        // The context may have been created before the annotation handle was known.
+        self.sync_displayed_annotation_context(leader);
+        let changes: Vec<_> = touched
+            .into_iter()
+            .map(|h| (h, ChangeKind::Modified))
+            .collect();
+        self.bump_entities(&changes);
+        true
+    }
+
     pub(crate) fn sync_displayed_annotation_context(&mut self, handle: Handle) -> bool {
         let scale = self.displayed_annotation_scale_handle();
         crate::scene::annotative::sync_annotation_context_from_entity(
@@ -131,37 +181,24 @@ impl Scene {
         )
     }
 
-    /// Invalidate a dimension's baked block while capturing every removed
-    /// sub-entity for an active history transaction.
+    /// Invalidate a dimension's baked block inside an edit.
+    ///
+    /// Only the reference goes: the old picture stays a block of its own,
+    /// which an undo (recorded here, or a grip edit's own snapshot) points
+    /// back to, and the next save drops it once nothing names it.
     pub fn invalidate_dim_block_recorded(&mut self, handle: Handle) {
-        if self.is_recording_undo() {
-            let owned: Vec<Handle> = self
-                .document
-                .get_entity(handle)
-                .and_then(|entity| match entity {
-                    EntityType::Dimension(d) => {
-                        let name = d.base().block_name.clone();
-                        self.document.block_records.get(&name).map(|record| {
-                            let mut handles = record.entity_handles.clone();
-                            handles.push(record.block_entity_handle);
-                            handles.push(record.block_end_handle);
-                            handles
-                        })
-                    }
-                    _ => None,
-                })
-                .unwrap_or_default();
-            if let Some(before) = self.document.get_entity_arc(handle) {
-                self.record_undo_before(handle, Some(before));
-            }
-            for owned_handle in owned {
-                if let Some(before) = self.document.get_entity_arc(owned_handle) {
-                    self.record_undo_before(owned_handle, Some(before));
-                }
-            }
-            self.poison_undo_recording();
+        let Some(before) = self.document.get_entity_arc(handle) else {
+            return;
+        };
+        if !matches!(&*before, EntityType::Dimension(d) if !d.base().block_name.is_empty()) {
+            return;
         }
-        crate::modules::draw::modify::explode::invalidate_dim_block(&mut self.document, handle);
+        if self.is_recording_undo() {
+            self.record_undo_before(handle, Some(before));
+        }
+        if let Some(EntityType::Dimension(d)) = self.document.get_entity_mut(handle) {
+            d.base_mut().block_name.clear();
+        }
     }
 
     // ── Modify (transform / copy) ─────────────────────────────────────────
@@ -175,22 +212,40 @@ impl Scene {
             .filter(|&h| !self.is_layer_locked(h))
             .collect();
         let handles = &handles[..];
-        let retained_originals: Vec<(Handle, EntityType)> = handles
+        let selection: rustc_hash::FxHashSet<Handle> = handles.iter().copied().collect();
+        // The only consumer of these pre-edit images is the parametric solve:
+        // they feed its retained sizes and its collapse refusal, and the solve
+        // runs only when a constraint scope exists. Without one, skip the
+        // clones entirely.
+        let has_constraints = self
+            .parametric_constraints
             .iter()
-            .filter_map(|handle| {
-                self.document
-                    .get_entity(*handle)
-                    .cloned()
-                    .map(|entity| (*handle, entity))
-            })
-            .collect();
-        let transformed_refs: Vec<_> = handles
-            .iter()
-            .copied()
-            .map(parametric_constraints::ParametricRef::whole)
-            .collect();
+            .any(|set| !set.constraints.is_empty());
+        let retained_originals: Vec<(Handle, EntityType)> = if has_constraints {
+            handles
+                .iter()
+                .filter_map(|handle| {
+                    self.document
+                        .get_entity(*handle)
+                        .cloned()
+                        .map(|entity| (*handle, entity))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let transformed_refs: Vec<_> = if has_constraints {
+            handles
+                .iter()
+                .copied()
+                .map(parametric_constraints::ParametricRef::whole)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut driven_refs = Vec::new();
-        if !matches!(t, EntityTransform::Translate(_)) {
+        if has_constraints && !matches!(t, EntityTransform::Translate(_)) {
+            let mut seen_driven = rustc_hash::FxHashSet::default();
             for set in &self.parametric_constraints {
                 for constraint in &set.constraints {
                     if !constraint.enabled
@@ -206,7 +261,7 @@ impl Scene {
                     let selected_refs = constraint
                         .refs
                         .iter()
-                        .filter(|reference| handles.contains(&reference.entity))
+                        .filter(|reference| selection.contains(&reference.entity))
                         .count();
                     if selected_refs == 0 || selected_refs == constraint.refs.len() {
                         continue;
@@ -215,7 +270,7 @@ impl Scene {
                         .refs
                         .iter()
                         .copied()
-                        .filter(|reference| !handles.contains(&reference.entity))
+                        .filter(|reference| !selection.contains(&reference.entity))
                     {
                         let anchor = if let Some(index) = reference.segment_index() {
                             parametric_constraints::ParametricRef::point(
@@ -236,9 +291,12 @@ impl Scene {
                             link.enabled
                                 && link.kind == parametric_constraints::ConstraintKind::Coincident
                                 && link.refs.contains(&anchor)
-                                && link.refs.iter().any(|item| handles.contains(&item.entity))
+                                && link
+                                    .refs
+                                    .iter()
+                                    .any(|item| selection.contains(&item.entity))
                         });
-                        if !follows_selected_point && !driven_refs.contains(&anchor) {
+                        if !follows_selected_point && seen_driven.insert(anchor) {
                             driven_refs.push(anchor);
                         }
                     }
@@ -609,17 +667,29 @@ impl Scene {
     }
 
     /// Give a freshly-cloned entity brand-new handles for every *inline*
-    /// sub-entity that stores one (INSERT attributes, 3D-polyline vertices).
-    /// `document.add_entity` only assigns the top-level handle, so without this
-    /// a copy keeps its source's sub-handles — duplicate handles that corrupt
-    /// the saved DWG (file won't reopen in other CAD apps). Vertices that don't
-    /// store a handle (LwPolyline / heavy 2D polyline) get one from the writer,
-    /// so they need no fix-up here. (#129)
-    pub(super) fn reset_clone_subhandles(doc: &mut codec::CadDocument, entity: &mut EntityType) {
+    /// sub-entity that stores one (INSERT attributes and SEQEND, 3D-polyline
+    /// vertices, polyface vertices / faces / SEQEND, polygon-mesh vertices).
+    /// `document.add_entity` only assigns the top-level handle, and the DWG
+    /// writer reuses every non-null stored sub-handle, so without this a copy
+    /// writes its source's sub-handles again — duplicate handles that corrupt
+    /// the saved DWG (other CAD apps attach the copies to the source's
+    /// vertices, or drop them). Vertices that don't store a handle
+    /// (LwPolyline / heavy 2D polyline) get one from the writer, so they need
+    /// no fix-up here. Shared with the clipboard paste path. (#129)
+    pub(crate) fn reset_clone_subhandles(doc: &mut codec::Document, entity: &mut EntityType) {
         match entity {
+            EntityType::Table(table) => {
+                // A table exclusively owns its anonymous picture block. The
+                // codec also resolves by name, so detach both references.
+                table.block_record_handle = None;
+                table.block_name.clear();
+            }
             EntityType::Insert(ins) => {
                 for att in ins.attributes.iter_mut() {
                     att.common.handle = doc.allocate_handle();
+                }
+                if ins.seqend_handle.is_some() {
+                    ins.seqend_handle = Some(doc.allocate_handle());
                 }
             }
             EntityType::Polyline3D(p) => {
@@ -627,8 +697,182 @@ impl Scene {
                     v.handle = doc.allocate_handle();
                 }
             }
+            EntityType::PolyfaceMesh(m) => {
+                for v in m.vertices.iter_mut() {
+                    v.common.handle = doc.allocate_handle();
+                }
+                for f in m.faces.iter_mut() {
+                    f.common.handle = doc.allocate_handle();
+                }
+                if m.seqend_handle.is_some() {
+                    m.seqend_handle = Some(doc.allocate_handle());
+                }
+            }
+            EntityType::PolygonMesh(m) => {
+                for v in m.vertices.iter_mut() {
+                    v.common.handle = doc.allocate_handle();
+                }
+            }
             _ => {}
         }
+    }
+
+    /// Give each block-member copy (and each inline ATTRIB of a copied INSERT)
+    /// its own deep copy of the source's extension dictionary tree, owned by
+    /// the copy, with reactors and handles inside the tree remapped, as COPY
+    /// does. `originals` and `copies` are parallel lists.
+    pub(super) fn own_copied_xdicts(&mut self, originals: Vec<Handle>, copies: Vec<Handle>) {
+        // Include inline ATTRIBs: define_block_raw gives them new handles too.
+        let mut pairs = Vec::new();
+        for (from, to) in originals.into_iter().zip(copies) {
+            let (Some(source), Some(target)) =
+                (self.document.get_entity(from), self.document.get_entity(to))
+            else {
+                continue;
+            };
+            pairs.push((source.common().clone(), to, None));
+            if let (EntityType::Insert(source), EntityType::Insert(target)) = (source, target) {
+                pairs.extend(
+                    source
+                        .attributes
+                        .iter()
+                        .zip(&target.attributes)
+                        .enumerate()
+                        .map(|(k, (a, b))| (a.common.clone(), b.common.handle, Some((to, k)))),
+                );
+            }
+        }
+        let mapping: rustc_hash::FxHashMap<_, _> = pairs
+            .iter()
+            .map(|(common, to, _)| (common.handle, *to))
+            .collect();
+        let scales = pairs
+            .iter()
+            .map(|(common, _, attribute)| {
+                if attribute.is_some() {
+                    Vec::new()
+                } else {
+                    super::annotative::annotation_scale_handles_for_entity(
+                        &self.document,
+                        common.handle,
+                    )
+                }
+            })
+            .collect::<Vec<_>>();
+        let roots = pairs
+            .iter()
+            .zip(&scales)
+            .map(|((common, _, _), scales)| {
+                (
+                    common.handle,
+                    if scales.is_empty() {
+                        common.xdictionary_handle
+                    } else {
+                        None
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let (cross, owner_of) = self.prepare_xdict_copies(&roots);
+        let mut created = Vec::new();
+        // Block records and cloned objects require full-snapshot undo, like COPY.
+        self.poison_undo_recording();
+        for ((common, to, attribute), scales) in pairs.iter().zip(scales) {
+            let root = if scales.is_empty() {
+                common.xdictionary_handle.and_then(|root| {
+                    Self::clone_xdict_tree(
+                        &mut self.document,
+                        common.handle,
+                        root,
+                        *to,
+                        &cross,
+                        &owner_of,
+                        &mut created,
+                    )
+                })
+            } else {
+                None
+            };
+            if let Some((parent, k)) = attribute {
+                if let Some(EntityType::Insert(insert)) = self.document.get_entity_mut(*parent) {
+                    if let Some(attribute) = insert.attributes.get_mut(*k) {
+                        attribute.common.xdictionary_handle = root;
+                        attribute.common.owner_handle = *parent;
+                        attribute.common.reactors = common
+                            .reactors
+                            .iter()
+                            .filter_map(|h| mapping.get(h).copied())
+                            .collect();
+                    }
+                }
+            } else if let Some(entity) = self.document.get_entity_mut(*to) {
+                entity.common_mut().xdictionary_handle = root;
+            }
+            for scale in scales {
+                super::annotative::create_annotation_context(&mut self.document, *to, scale);
+            }
+        }
+        remap_copied_reactors(&mut self.document, &mapping);
+        remap_copied_xdict_cross_refs(&mut self.document, &mapping, &created);
+    }
+
+    /// Preallocate COPY's object-tree mapping before cloning any sibling tree.
+    pub(super) fn prepare_xdict_copies(
+        &mut self,
+        roots: &[(Handle, Option<Handle>)],
+    ) -> (
+        rustc_hash::FxHashMap<Handle, Handle>,
+        rustc_hash::FxHashMap<Handle, Handle>,
+    ) {
+        let mut owner_of = rustc_hash::FxHashMap::default();
+        let mut cross = rustc_hash::FxHashMap::default();
+        for (src_handle, src_xdict) in roots {
+            if let Some(root) = *src_xdict {
+                owner_of.insert(root, *src_handle);
+            }
+        }
+        let mut claimed = rustc_hash::FxHashSet::default();
+        for (src_handle, src_xdict) in roots {
+            let Some(root) = *src_xdict else {
+                continue;
+            };
+            let mut stack = vec![root];
+            while let Some(h) = stack.pop() {
+                if owner_of.get(&h).is_some_and(|&o| o != *src_handle) {
+                    continue;
+                }
+                if !claimed.insert(h) {
+                    continue;
+                }
+                owner_of.entry(h).or_insert(*src_handle);
+                let Some(obj) = self.document.objects.get(&h) else {
+                    continue;
+                };
+                match obj {
+                    codec::objects::ObjectType::Dictionary(d) => {
+                        for (_, child) in &d.entries {
+                            stack.push(*child);
+                        }
+                        if let Some(xd) = d.xdictionary_handle {
+                            stack.push(xd);
+                        }
+                    }
+                    codec::objects::ObjectType::XRecord(x) => {
+                        if let Some(xd) = x.xdictionary_handle {
+                            stack.push(xd);
+                        }
+                    }
+                    codec::objects::ObjectType::Field(f) => {
+                        stack.extend(f.child_fields.iter().copied());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for &h in owner_of.keys() {
+            cross.insert(h, self.document.allocate_handle());
+        }
+        (cross, owner_of)
     }
 
     /// Deep-clone the extension-dictionary tree rooted at `src_root` (owned by
@@ -643,7 +887,7 @@ impl Scene {
     /// root returns `None` so the caller leaves the copy without an extension
     /// dictionary — never shared.
     pub(super) fn clone_xdict_tree(
-        doc: &mut codec::CadDocument,
+        doc: &mut codec::Document,
         src_owner: Handle,
         src_root: Handle,
         new_owner: Handle,
@@ -692,6 +936,10 @@ impl Scene {
                     if let Some(xd) = x.xdictionary_handle {
                         stack.push(xd);
                     }
+                }
+                // A text field's nested fields belong to the same tree.
+                codec::objects::ObjectType::Field(f) => {
+                    stack.extend(f.child_fields.iter().copied());
                 }
                 _ => {}
             }
@@ -767,6 +1015,18 @@ impl Scene {
                     }
                     if let Some(&definition) = doc.block_representations.get(&h) {
                         representations.push((new_h, definition));
+                    }
+                }
+                // A FIELD under ACAD_FIELD: the copy evaluates its own field
+                // tree, so its handle, owner and nested fields are remapped.
+                codec::objects::ObjectType::Field(f) => {
+                    f.handle = new_h;
+                    f.owner = rewrite(f.owner);
+                    for child in &mut f.child_fields {
+                        *child = rewrite(*child);
+                    }
+                    for r in &mut f.referenced_objects {
+                        *r = rewrite(*r);
                     }
                 }
                 _ => {}
@@ -866,6 +1126,9 @@ impl Scene {
         br.handle = br_handle;
         br.block_entity_handle = block_handle;
         br.block_end_handle = end_handle;
+        // The DWG writer takes the anonymous bit from the flag alone; without
+        // it AutoCAD's audit reports `Invalid anonymous block "*D<n>"`.
+        br.flags.anonymous = true;
         self.document.block_records.add(br).ok()?;
         let mut block = Block::new(&new_name, codec::types::Vector3::ZERO);
         block.common.handle = block_handle;
@@ -887,6 +1150,7 @@ impl Scene {
             // not claim the source's, or file validation reports
             // "Extension dictionary <H> Cannot access".
             sub.common_mut().xdictionary_handle = None;
+            self.ensure_image_definition(&mut sub);
             let _ = self.document.add_entity(sub);
         }
         Some(new_name)
@@ -944,51 +1208,11 @@ impl Scene {
         // sibling's tree refs it, and every other object is claimed by the
         // first traversal that reaches it, so ownership stays consistent
         // with the walker below regardless of selection order.
-        let mut owner_of = rustc_hash::FxHashMap::default();
-        let mut cross = rustc_hash::FxHashMap::default();
-        for (src_handle, _, _, src_xdict) in &clones {
-            if let Some(root) = *src_xdict {
-                owner_of.insert(root, *src_handle);
-            }
-        }
-        let mut claimed = rustc_hash::FxHashSet::default();
-        for (src_handle, _, _, src_xdict) in &clones {
-            let Some(root) = *src_xdict else {
-                continue;
-            };
-            let mut stack = vec![root];
-            while let Some(h) = stack.pop() {
-                if owner_of.get(&h).is_some_and(|&o| o != *src_handle) {
-                    continue;
-                }
-                if !claimed.insert(h) {
-                    continue;
-                }
-                owner_of.entry(h).or_insert(*src_handle);
-                let Some(obj) = self.document.objects.get(&h) else {
-                    continue;
-                };
-                match obj {
-                    codec::objects::ObjectType::Dictionary(d) => {
-                        for (_, child) in &d.entries {
-                            stack.push(*child);
-                        }
-                        if let Some(xd) = d.xdictionary_handle {
-                            stack.push(xd);
-                        }
-                    }
-                    codec::objects::ObjectType::XRecord(x) => {
-                        if let Some(xd) = x.xdictionary_handle {
-                            stack.push(xd);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        for &h in owner_of.keys() {
-            cross.insert(h, self.document.allocate_handle());
-        }
+        let roots = clones
+            .iter()
+            .map(|(h, _, _, root)| (*h, *root))
+            .collect::<Vec<_>>();
+        let (cross, owner_of) = self.prepare_xdict_copies(&roots);
         let mut created_objects = Vec::new();
         for (src_handle, mut entity, annotation_scales, src_xdict) in clones {
             let text_orient = if preserve_text_orientation {
@@ -1023,6 +1247,21 @@ impl Scene {
                     }
                 }
             }
+            // An attribute's own extension dictionary (a field ATTRIB keeps
+            // its FIELD there) is cloned for the copy like the entity's; the
+            // source handles are read before the attributes get new ones.
+            let attribute_xdicts: Vec<(usize, Handle, Handle)> = match &mut entity {
+                EntityType::Insert(ins) => ins
+                    .attributes
+                    .iter_mut()
+                    .enumerate()
+                    .filter_map(|(k, att)| {
+                        let root = att.common.xdictionary_handle.take()?;
+                        Some((k, att.common.handle, root))
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
 
             // The source root was captured above; the clone must never carry
@@ -1030,6 +1269,7 @@ impl Scene {
             entity.common_mut().xdictionary_handle = None;
 
             entity.common_mut().handle = Handle::NULL;
+            self.ensure_image_definition(&mut entity);
             let h = self.document.add_entity(entity).unwrap_or(Handle::NULL);
             if !h.is_null() {
                 // Deep-clone the extension-dictionary tree so edits on the
@@ -1052,6 +1292,31 @@ impl Scene {
                         // a pure-entity delta; keep undo on the full snapshot.
                         self.poison_undo_recording();
                     }
+                }
+                for (k, src_attribute, src_root) in attribute_xdicts {
+                    let Some(new_attribute) = (match self.document.get_entity(h) {
+                        Some(EntityType::Insert(ins)) => {
+                            ins.attributes.get(k).map(|a| a.common.handle)
+                        }
+                        _ => None,
+                    }) else {
+                        continue;
+                    };
+                    let Some(new_root) = Self::clone_xdict_tree(
+                        &mut self.document,
+                        src_attribute,
+                        src_root,
+                        new_attribute,
+                        &cross,
+                        &owner_of,
+                        &mut created_objects,
+                    ) else {
+                        continue;
+                    };
+                    if let Some(EntityType::Insert(ins)) = self.document.get_entity_mut(h) {
+                        ins.attributes[k].common.xdictionary_handle = Some(new_root);
+                    }
+                    self.poison_undo_recording();
                 }
                 if !annotation_scales.is_empty() {
                     for scale_handle in annotation_scales {
@@ -1149,6 +1414,7 @@ impl Scene {
             let _ = self.sync_displayed_annotation_context(leader_handle);
         }
         remap_copied_reactors(&mut self.document, &handle_map);
+        remap_copied_viewport_clips(&mut self.document, &handle_map, false);
         // A tree cloned in one pass can hold refs to sibling copied entities;
         // only once every copy exists can those resolve.
         remap_copied_xdict_cross_refs(&mut self.document, &handle_map, &created_objects);
@@ -2650,12 +2916,96 @@ impl Scene {
     }
 }
 
+#[cfg(test)]
+mod leader_annotation_reactor_tests {
+    use super::*;
+
+    fn add_pair(scene: &mut Scene) -> (Handle, Handle) {
+        let leader = scene.add_entity(EntityType::Leader(codec::entities::Leader::default()));
+        let annotation = scene.add_entity(EntityType::MText(Box::new(
+            codec::entities::MText::with_value("note", codec::types::Vector3::new(10.0, 5.0, 0.0)),
+        )));
+        (leader, annotation)
+    }
+
+    #[test]
+    fn linking_adds_annotation_reactor_exactly_once() {
+        let mut scene = Scene::new();
+        let (leader, annotation) = add_pair(&mut scene);
+        assert!(scene.link_leader_annotation(leader, annotation));
+        assert!(scene.link_leader_annotation(leader, annotation));
+
+        let Some(EntityType::Leader(value)) = scene.document.get_entity(leader) else {
+            panic!("leader missing");
+        };
+        assert_eq!(value.annotation_handle, annotation);
+        let reactors = &scene
+            .document
+            .get_entity(annotation)
+            .unwrap()
+            .common()
+            .reactors;
+        assert_eq!(reactors.iter().filter(|&&h| h == leader).count(), 1);
+    }
+
+    #[test]
+    fn copy_pair_remaps_annotation_reactor() {
+        let mut scene = Scene::new();
+        let (leader, annotation) = add_pair(&mut scene);
+        assert!(scene.link_leader_annotation(leader, annotation));
+        let copies = scene.copy_entities(
+            &[leader, annotation],
+            &EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+        );
+        assert_eq!(copies.len(), 2);
+        assert_ne!(copies[0], leader);
+        assert_ne!(copies[1], annotation);
+        let Some(EntityType::Leader(value)) = scene.document.get_entity(copies[0]) else {
+            panic!("copied leader missing");
+        };
+        assert_eq!(value.annotation_handle, copies[1]);
+        let reactors = &scene
+            .document
+            .get_entity(copies[1])
+            .unwrap()
+            .common()
+            .reactors;
+        assert_eq!(reactors.iter().filter(|&&h| h == copies[0]).count(), 1);
+        assert!(!reactors.contains(&leader));
+        assert!(scene
+            .document
+            .get_entity(annotation)
+            .unwrap()
+            .common()
+            .reactors
+            .contains(&leader));
+    }
+
+    #[test]
+    fn linking_new_pair_preserves_absent_undo_before_images() {
+        let mut scene = Scene::new();
+        scene.begin_undo_recording();
+        let (leader, annotation) = add_pair(&mut scene);
+        assert!(scene.link_leader_annotation(leader, annotation));
+        let recording = scene.take_undo_recording().unwrap();
+        assert!(matches!(recording.before.get(&leader), Some(None)));
+        assert!(matches!(recording.before.get(&annotation), Some(None)));
+        assert!(scene
+            .document
+            .get_entity(annotation)
+            .unwrap()
+            .common()
+            .reactors
+            .contains(&leader));
+    }
+}
+
 /// A copy reacts only to what was copied with it: each reactor of the source
 /// that maps to a copy follows it there, and the rest (the source's dimension
 /// association, group, associative hatch) are dropped. The association and
 /// group copies add their own reactors afterwards.
 pub(crate) fn remap_copied_reactors(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
 ) {
     for &copy in handle_map.values() {
@@ -2670,13 +3020,39 @@ pub(crate) fn remap_copied_reactors(
     }
 }
 
+/// A copied clipped viewport is clipped by the copy of its boundary when that
+/// was copied with it, never by the source's boundary (which sits on the
+/// source viewport and would clip the copy somewhere else). With
+/// `drop_unmapped` (a paste, whose source handles may name anything in this
+/// drawing) a viewport whose boundary did not come along loses its clip.
+pub(crate) fn remap_copied_viewport_clips(
+    document: &mut codec::Document,
+    handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+    drop_unmapped: bool,
+) {
+    for &copy in handle_map.values() {
+        let Some(EntityType::Viewport(viewport)) = document.get_entity_mut(copy) else {
+            continue;
+        };
+        if viewport.clip_boundary_handle.is_null() {
+            continue;
+        }
+        if let Some(&boundary) = handle_map.get(&viewport.clip_boundary_handle) {
+            viewport.clip_boundary_handle = boundary;
+        } else if drop_unmapped {
+            viewport.clip_boundary_handle = Handle::NULL;
+            viewport.status.non_rectangular_clipping = false;
+        }
+    }
+}
+
 /// Resolve entity-valued refs inside freshly cloned object trees through the
 /// completed copy map. Object-to-object cross-refs are already resolved
 /// against the shared prealloc map inside `clone_xdict_tree`; this pass only
 /// rewrites refs to copied entities, which may not have existed yet when an
 /// earlier tree in the same call was cloned.
-fn remap_copied_xdict_cross_refs(
-    document: &mut codec::CadDocument,
+pub(super) fn remap_copied_xdict_cross_refs(
+    document: &mut codec::Document,
     handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
     created: &[Handle],
 ) {
@@ -2720,11 +3096,72 @@ fn remap_copied_xdict_cross_refs(
 }
 
 #[cfg(test)]
+mod mirror_text_tests {
+    use super::*;
+    use glam::DVec3;
+
+    fn mirror(p2: DVec3) -> EntityTransform {
+        EntityTransform::Mirror {
+            p1: DVec3::ZERO,
+            p2,
+            working_normal: DVec3::Z,
+        }
+    }
+
+    fn text(scene: &mut Scene, rotation_deg: f64) -> Handle {
+        let mut t = codec::entities::Text::new();
+        t.value = "ABC".to_string();
+        t.rotation = rotation_deg.to_radians();
+        scene.document.add_entity(EntityType::Text(t)).unwrap()
+    }
+
+    fn orient(scene: &Scene, handle: Handle) -> (f64, i16) {
+        match scene.document.get_entity(handle) {
+            Some(EntityType::Text(t)) => (t.rotation.to_degrees(), t.generation_flags),
+            other => panic!("expected a text, got {other:?}"),
+        }
+    }
+
+    /// MIRRTEXT on: rotation and group 71 as AutoCAD writes them, for a
+    /// vertical, horizontal and sloped axis through the origin.
+    #[test]
+    fn mirrtext_on_matches_autocad() {
+        let cases = [
+            (DVec3::Y, 0.0, 0.0),
+            (DVec3::Y, 30.0, 330.0),
+            (DVec3::X, 0.0, 180.0),
+            (DVec3::X, 30.0, 150.0),
+            (DVec3::new(1.0, 1.0, 0.0), 0.0, 270.0),
+            (DVec3::new(2.0, 1.0, 0.0), 90.0, 143.130),
+        ];
+        for (axis, rotation, expected) in cases {
+            let mut scene = Scene::new();
+            scene.document.header.mirror_text = true;
+            let moved = text(&mut scene, rotation);
+            scene.transform_entities(&[moved], &mirror(axis));
+            let source = text(&mut scene, rotation);
+            let copy = scene.copy_entities(&[source], &mirror(axis))[0];
+            for handle in [moved, copy] {
+                let (got, flags) = orient(&scene, handle);
+                assert!(
+                    (got - expected).abs() < 1e-3,
+                    "rot {rotation} about {axis:?}: got {got}, AutoCAD {expected}"
+                );
+                assert_eq!(
+                    flags, 2,
+                    "rot {rotation} about {axis:?}: only backward is set"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod define_transformed_block_xdict_tests {
     use super::*;
 
     /// No extension dictionary may be referenced by more than one entity.
-    fn assert_no_shared_xdicts(doc: &codec::CadDocument) {
+    fn assert_no_shared_xdicts(doc: &codec::Document) {
         use std::collections::HashMap;
         let mut owners: HashMap<codec::Handle, usize> = HashMap::new();
         for entity in doc.entities() {
@@ -2744,6 +3181,24 @@ mod define_transformed_block_xdict_tests {
             "shared extension dictionaries: {}",
             shared.join(", ")
         );
+    }
+
+    #[test]
+    fn clone_block_is_flagged_anonymous() {
+        let mut scene = Scene::new();
+        let line = scene
+            .document
+            .add_entity(codec::EntityType::Line(codec::entities::Line::new()))
+            .unwrap();
+        let subs = vec![scene.document.get_entity(line).unwrap().clone()];
+        let name = scene
+            .define_transformed_block(
+                &subs,
+                &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+            )
+            .expect("clone block must be created");
+        let record = scene.document.block_records.get(&name).unwrap();
+        assert!(record.flags.anonymous);
     }
 
     /// Cloned sub-entities must not share the source's extension dictionary.
@@ -2951,7 +3406,7 @@ mod copy_entities_xdict_tests {
 
     /// Every object reachable from `root` through dictionary entries and
     /// xdictionary links (cycle-safe).
-    fn tree_handles(doc: &codec::CadDocument, root: codec::Handle) -> Vec<codec::Handle> {
+    fn tree_handles(doc: &codec::Document, root: codec::Handle) -> Vec<codec::Handle> {
         let mut out = Vec::new();
         let mut stack = vec![root];
         let mut seen = std::collections::BTreeSet::new();
@@ -2983,7 +3438,7 @@ mod copy_entities_xdict_tests {
 
     /// Byte-for-byte image of a tree for source-unchanged assertions.
     fn tree_image(
-        doc: &codec::CadDocument,
+        doc: &codec::Document,
         root: codec::Handle,
     ) -> Vec<(codec::Handle, ObjectType)> {
         tree_handles(doc, root)
@@ -3612,5 +4067,469 @@ mod copy_entities_xdict_tests {
             panic!("source B root must still exist");
         };
         assert_eq!(b_d.get("SUB"), Some(b_sub));
+    }
+}
+
+#[cfg(test)]
+mod copy_entities_subhandle_tests {
+    use super::*;
+    use crate::command::EntityTransform;
+    use codec::entities::{
+        AttributeEntity, Insert, PolyfaceFace, PolyfaceMesh, PolyfaceVertex, PolygonMeshEntity,
+        PolygonMeshVertex,
+    };
+    use codec::types::Vector3;
+    use glam::DVec3;
+
+    /// A polyface mesh as the DWG reader returns it: every vertex, face and
+    /// the SEQEND carry their own handle.
+    fn loaded_polyface(doc: &mut codec::Document) -> PolyfaceMesh {
+        let mut mesh = PolyfaceMesh::new();
+        for (x, y) in [(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)] {
+            let mut v = PolyfaceVertex::new(Vector3::new(x, y, 0.0));
+            v.common.handle = doc.allocate_handle();
+            mesh.add_vertex(v);
+        }
+        let mut face = PolyfaceFace::quad(1, 2, 3, 4);
+        face.common.handle = doc.allocate_handle();
+        mesh.add_face(face);
+        mesh.seqend_handle = Some(doc.allocate_handle());
+        mesh
+    }
+
+    fn sub_handles(e: &EntityType) -> Vec<codec::Handle> {
+        match e {
+            EntityType::Insert(ins) => ins
+                .attributes
+                .iter()
+                .map(|a| a.common.handle)
+                .chain(ins.seqend_handle)
+                .collect(),
+            EntityType::PolyfaceMesh(m) => m
+                .vertices
+                .iter()
+                .map(|v| v.common.handle)
+                .chain(m.faces.iter().map(|f| f.common.handle))
+                .chain(m.seqend_handle)
+                .collect(),
+            EntityType::PolygonMesh(m) => m.vertices.iter().map(|v| v.common.handle).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// COPY must give every stored sub-entity handle of the copy a new value.
+    /// The DWG writer reuses non-null sub-handles, so a shared one makes the
+    /// copy point at the source's vertices / SEQEND in the saved file.
+    #[test]
+    fn copy_gives_complex_entities_fresh_sub_handles() {
+        let mut scene = Scene::new();
+        let doc = &mut scene.document;
+
+        let mesh = loaded_polyface(doc);
+        let mut grid = PolygonMeshEntity::new();
+        grid.m_vertex_count = 2;
+        grid.n_vertex_count = 2;
+        for (x, y) in [(40.0, 0.0), (40.0, 10.0), (50.0, 0.0), (50.0, 10.0)] {
+            let mut v = PolygonMeshVertex::at(Vector3::new(x, y, 0.0));
+            v.common.handle = doc.allocate_handle();
+            grid.vertices.push(v);
+        }
+        let mut ins = Insert::new("B", Vector3::new(0.0, 0.0, 0.0));
+        let mut att = AttributeEntity::new("TAG1".into(), "val".into());
+        att.common.handle = doc.allocate_handle();
+        ins.attributes.push(att);
+        ins.seqend_handle = Some(doc.allocate_handle());
+
+        let sources: Vec<codec::Handle> = [
+            EntityType::PolyfaceMesh(mesh),
+            EntityType::PolygonMesh(grid),
+            EntityType::Insert(ins),
+        ]
+        .into_iter()
+        .map(|e| doc.add_entity(e).unwrap())
+        .collect();
+
+        let copies =
+            scene.copy_entities(&sources, &EntityTransform::Translate(DVec3::new(100.0, 0.0, 0.0)));
+        assert_eq!(copies.len(), sources.len());
+
+        let mut seen = std::collections::HashSet::new();
+        for h in sources.iter().chain(copies.iter()) {
+            let subs = sub_handles(scene.document.get_entity(*h).unwrap());
+            assert!(!subs.is_empty());
+            for s in subs {
+                assert!(!s.is_null(), "sub-handle of {h:?} must be set");
+                assert!(seen.insert(s), "sub-handle {s:?} is shared between entities");
+            }
+        }
+    }
+
+    /// End to end through DWG: two copies of a polyface each read back with
+    /// their own four vertices and face, at their own position.
+    #[test]
+    fn copied_polyfaces_keep_their_vertices_through_a_dwg_roundtrip() {
+        let mut scene = Scene::new();
+        let mesh = loaded_polyface(&mut scene.document);
+        let src = scene.document.add_entity(EntityType::PolyfaceMesh(mesh)).unwrap();
+        for dx in [100.0, 200.0] {
+            scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::new(dx, 0.0, 0.0)));
+        }
+
+        let bytes = codec::DwgWriter::write_to_vec(&scene.document).unwrap();
+        let reopened = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+            .read()
+            .unwrap();
+        let mut first_x: Vec<f64> = reopened
+            .entities()
+            .filter_map(|e| match e {
+                EntityType::PolyfaceMesh(m) => {
+                    assert_eq!(m.vertices.len(), 4, "every polyface keeps its vertices");
+                    assert_eq!(m.faces.len(), 1, "every polyface keeps its face");
+                    Some(m.vertices[0].location.x)
+                }
+                _ => None,
+            })
+            .collect();
+        first_x.sort_by(f64::total_cmp);
+        assert_eq!(first_x, vec![20.0, 120.0, 220.0]);
+    }
+}
+
+#[cfg(test)]
+mod copy_viewport_clip_tests {
+    use super::*;
+    use crate::command::EntityTransform;
+    use codec::entities::{LwPolyline, Viewport};
+    use glam::DVec3;
+
+    fn clipped_viewport(scene: &mut Scene) -> (Handle, Handle) {
+        let mut boundary = LwPolyline::new();
+        boundary.add_point(codec::types::Vector2::new(0.0, 0.0));
+        boundary.add_point(codec::types::Vector2::new(10.0, 0.0));
+        boundary.add_point(codec::types::Vector2::new(5.0, 8.0));
+        boundary.is_closed = true;
+        let boundary = scene.add_entity(EntityType::LwPolyline(boundary));
+        let mut viewport = Viewport::new();
+        viewport.clip_boundary_handle = boundary;
+        viewport.status.non_rectangular_clipping = true;
+        let viewport = scene.add_entity(EntityType::Viewport(Box::new(viewport)));
+        (viewport, boundary)
+    }
+
+    fn clip_of(scene: &Scene, viewport: Handle) -> Handle {
+        match scene.document.get_entity(viewport) {
+            Some(EntityType::Viewport(v)) => v.clip_boundary_handle,
+            other => panic!("expected a viewport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn copied_viewport_is_clipped_by_the_copied_boundary() {
+        let mut scene = Scene::new();
+        let (viewport, boundary) = clipped_viewport(&mut scene);
+        let copies = scene.copy_entities(
+            &[viewport, boundary],
+            &EntityTransform::Translate(DVec3::new(100.0, 0.0, 0.0)),
+        );
+        let copied_viewport = copies
+            .iter()
+            .copied()
+            .find(|&h| matches!(scene.document.get_entity(h), Some(EntityType::Viewport(_))))
+            .expect("copied viewport");
+        let copied_boundary = copies
+            .iter()
+            .copied()
+            .find(|&h| {
+                matches!(
+                    scene.document.get_entity(h),
+                    Some(EntityType::LwPolyline(_))
+                )
+            })
+            .expect("copied boundary");
+        assert_eq!(clip_of(&scene, copied_viewport), copied_boundary);
+        assert_eq!(clip_of(&scene, viewport), boundary);
+    }
+}
+
+#[cfg(test)]
+mod copy_field_tests {
+    use super::*;
+    use crate::command::EntityTransform;
+    use codec::objects::{Dictionary, Field, ObjectType};
+    use glam::DVec3;
+
+    /// `owner`'s extension dictionary: ACAD_FIELD { TEXT -> field(child) }.
+    /// Returns (root, text field, child field).
+    fn add_field_tree(doc: &mut codec::Document, owner: Handle) -> (Handle, Handle, Handle) {
+        let root_h = doc.allocate_handle();
+        let fields_h = doc.allocate_handle();
+        let text_h = doc.allocate_handle();
+        let child_h = doc.allocate_handle();
+        let mut root = Dictionary::new();
+        root.handle = root_h;
+        root.owner = owner;
+        root.add_entry("ACAD_FIELD", fields_h);
+        let mut fields = Dictionary::new();
+        fields.handle = fields_h;
+        fields.owner = root_h;
+        fields.add_entry("TEXT", text_h);
+        let text = Field {
+            handle: text_h,
+            owner: fields_h,
+            evaluator_id: "_text".to_string(),
+            child_fields: vec![child_h],
+            ..Default::default()
+        };
+        let child = Field {
+            handle: child_h,
+            owner: text_h,
+            evaluator_id: "AcVar".to_string(),
+            code: r"\AcVar CustomDP.Client".to_string(),
+            ..Default::default()
+        };
+        doc.objects.insert(root_h, ObjectType::Dictionary(root));
+        doc.objects.insert(fields_h, ObjectType::Dictionary(fields));
+        doc.objects.insert(text_h, ObjectType::Field(text));
+        doc.objects.insert(child_h, ObjectType::Field(child));
+        (root_h, text_h, child_h)
+    }
+
+    fn entry(doc: &codec::Document, dict: Handle, key: &str) -> Handle {
+        match doc.objects.get(&dict) {
+            Some(ObjectType::Dictionary(d)) => d
+                .entries
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, h)| *h)
+                .expect("dictionary entry"),
+            other => panic!("expected a dictionary, got {other:?}"),
+        }
+    }
+
+    fn field(doc: &codec::Document, h: Handle) -> &Field {
+        match doc.objects.get(&h) {
+            Some(ObjectType::Field(f)) => f,
+            other => panic!("expected a field, got {other:?}"),
+        }
+    }
+
+    /// The copy's ACAD_FIELD tree is its own: fresh handles stored on the
+    /// objects themselves, owners and child links inside the new tree.
+    fn assert_own_field_tree(
+        doc: &codec::Document,
+        copy_root: Handle,
+        src_text: Handle,
+        src_child: Handle,
+    ) {
+        let fields = entry(doc, copy_root, "ACAD_FIELD");
+        let text_h = entry(doc, fields, "TEXT");
+        assert_ne!(text_h, src_text);
+        let text = field(doc, text_h);
+        assert_eq!(text.handle, text_h, "field object keeps its source handle");
+        assert_eq!(text.owner, fields);
+        assert_eq!(text.child_fields.len(), 1);
+        let child_h = text.child_fields[0];
+        assert_ne!(child_h, src_child, "copy shares the source's child field");
+        let child = field(doc, child_h);
+        assert_eq!(child.handle, child_h);
+        assert_eq!(child.owner, text_h);
+        assert_eq!(child.code, r"\AcVar CustomDP.Client");
+    }
+
+    #[test]
+    fn copied_text_gets_its_own_field_tree() {
+        let mut scene = Scene::new();
+        let src = scene
+            .document
+            .add_entity(EntityType::MText(Box::new(codec::entities::MText::new())))
+            .unwrap();
+        let (root, text, child) = add_field_tree(&mut scene.document, src);
+        scene
+            .document
+            .get_entity_mut(src)
+            .unwrap()
+            .common_mut()
+            .xdictionary_handle = Some(root);
+        let copies = scene.copy_entities(
+            &[src],
+            &EntityTransform::Translate(DVec3::new(100.0, 0.0, 0.0)),
+        );
+        let copy_root = scene
+            .document
+            .get_entity(copies[0])
+            .unwrap()
+            .common()
+            .xdictionary_handle
+            .expect("copy has an extension dictionary");
+        assert_ne!(copy_root, root);
+        assert_own_field_tree(&scene.document, copy_root, text, child);
+        assert_eq!(field(&scene.document, text).child_fields, vec![child]);
+    }
+
+    #[test]
+    fn copied_insert_attribute_gets_its_own_field_tree() {
+        let mut scene = Scene::new();
+        let mut insert = codec::entities::Insert::new(
+            "TITLE".to_string(),
+            codec::types::Vector3::ZERO,
+        );
+        insert.attributes.push(codec::entities::AttributeEntity::new(
+            "CLIENT".to_string(),
+            "ACME".to_string(),
+        ));
+        let src = scene.document.add_entity(EntityType::Insert(insert)).unwrap();
+        let src_attribute = match scene.document.get_entity(src) {
+            Some(EntityType::Insert(ins)) => ins.attributes[0].common.handle,
+            _ => unreachable!(),
+        };
+        let (root, text, child) = add_field_tree(&mut scene.document, src_attribute);
+        if let Some(EntityType::Insert(ins)) = scene.document.get_entity_mut(src) {
+            ins.attributes[0].common.xdictionary_handle = Some(root);
+        }
+        let copies = scene.copy_entities(
+            &[src],
+            &EntityTransform::Translate(DVec3::new(100.0, 0.0, 0.0)),
+        );
+        let (copy_attribute, copy_root) = match scene.document.get_entity(copies[0]) {
+            Some(EntityType::Insert(ins)) => (
+                ins.attributes[0].common.handle,
+                ins.attributes[0].common.xdictionary_handle,
+            ),
+            other => panic!("expected the copied insert, got {other:?}"),
+        };
+        let copy_root = copy_root.expect("copied attribute has an extension dictionary");
+        assert_ne!(copy_root, root, "copied attribute shares the source's dictionary");
+        match scene.document.objects.get(&copy_root) {
+            Some(ObjectType::Dictionary(d)) => assert_eq!(d.owner, copy_attribute),
+            other => panic!("expected a dictionary, got {other:?}"),
+        }
+        match scene.document.objects.get(&root) {
+            Some(ObjectType::Dictionary(d)) => assert_eq!(d.owner, src_attribute),
+            other => panic!("expected a dictionary, got {other:?}"),
+        }
+        assert_own_field_tree(&scene.document, copy_root, text, child);
+    }
+}
+
+#[cfg(test)]
+mod table_picture_ownership_tests {
+    use crate::command::{CadCommand, CmdResult, EntityTransform};
+    use crate::modules::annotate::table_cmd::TableCellEditCommand;
+    use crate::scene::Scene;
+    use codec::entities::Table;
+    use codec::types::Vector3;
+    use codec::{EntityType, Handle};
+    use glam::DVec3;
+
+    fn table(scene: &Scene, handle: Handle) -> &Table {
+        match scene.document.get_entity(handle) {
+            Some(EntityType::Table(table)) => table,
+            other => panic!("expected TABLE, got {other:?}"),
+        }
+    }
+
+    fn source_table(scene: &mut Scene) -> Handle {
+        let mut source = Table::new(Vector3::ZERO, 3, 2);
+        source.set_cell_text(0, 0, "Title");
+        source.set_cell_text(1, 0, "Header");
+        source.set_cell_text(2, 0, "A");
+        let handle = scene.add_entity(EntityType::Table(Box::new(source)));
+        assert!(table(scene, handle).block_record_handle.is_some());
+        assert!(table(scene, handle).block_name.starts_with("*T"));
+        handle
+    }
+
+    fn picture(scene: &Scene, handle: Handle) -> (Handle, String, Vec<String>) {
+        let table = table(scene, handle);
+        let record = table
+            .block_record_handle
+            .and_then(|h| scene.document.block_records.iter().find(|r| r.handle == h))
+            .or_else(|| scene.document.block_records.get(&table.block_name))
+            .expect("table resolves to a picture block");
+        let texts = record
+            .entity_handles
+            .iter()
+            .filter_map(|h| match scene.document.get_entity(*h) {
+                Some(EntityType::MText(text)) => Some(text.value.clone()),
+                _ => None,
+            })
+            .collect();
+        (record.handle, record.name.clone(), texts)
+    }
+
+    fn edit_copy(scene: &mut Scene, handle: Handle) {
+        let mut command = TableCellEditCommand::new(handle, table(scene, handle), 2, 0);
+        let result = command.on_text_input("B").expect("cell edit commits");
+        let CmdResult::ReplaceMany(mut replacements, _) = result else {
+            panic!("expected TABLEDIT replacement");
+        };
+        let (target, mut entities) = replacements.remove(0);
+        assert_eq!(target, handle);
+        // update_entity commits the replacement and runs bump_entities, the
+        // same refresh_table_block rebuild used by the cell-edit path.
+        assert!(scene.update_entity(entities.remove(0)));
+    }
+
+    #[test]
+    fn copied_table_edit_keeps_source_picture_text() {
+        let mut scene = Scene::new();
+        let source = source_table(&mut scene);
+        let before = picture(&scene, source);
+        scene.begin_undo_recording();
+        let copies = scene.copy_entities(
+            &[source],
+            &EntityTransform::Translate(DVec3::new(30.0, 0.0, 0.0)),
+        );
+        assert_eq!(copies.len(), 1);
+        let copy = copies[0];
+        edit_copy(&mut scene, copy);
+        let original_picture = picture(&scene, source);
+        let copied_picture = picture(&scene, copy);
+        assert_ne!(
+            original_picture.0, copied_picture.0,
+            "TABLE picture handles are shared"
+        );
+        assert_ne!(
+            original_picture.1, copied_picture.1,
+            "TABLE picture names are shared"
+        );
+        assert_eq!(
+            original_picture, before,
+            "source picture was modified by the copy's edit"
+        );
+        assert!(original_picture.2.iter().any(|text| text == "A"));
+        assert!(copied_picture.2.iter().any(|text| text == "B"));
+        assert_eq!(table(&scene, source).cell_text(2, 0), Some("A"));
+        assert_eq!(table(&scene, copy).cell_text(2, 0), Some("B"));
+        assert!(scene.take_undo_recording().unwrap().is_poisoned());
+    }
+
+    #[test]
+    fn editing_a_legacy_shared_picture_detaches_its_name() {
+        let mut scene = Scene::new();
+        let source = source_table(&mut scene);
+        let before = picture(&scene, source);
+        // Simulate a drawing already containing shared references, bypassing
+        // the clone helper to exercise the independent edit-time protection.
+        let mut copy = scene.document.get_entity(source).unwrap().clone();
+        copy.common_mut().handle = Handle::NULL;
+        let copy = scene.document.add_entity(copy).unwrap();
+        edit_copy(&mut scene, copy);
+        assert_ne!(picture(&scene, copy).0, before.0);
+        assert_eq!(picture(&scene, source), before);
+    }
+
+    #[test]
+    fn clone_helper_drops_both_table_picture_references() {
+        let mut scene = Scene::new();
+        let source = source_table(&mut scene);
+        let mut copy = scene.document.get_entity(source).unwrap().clone();
+        Scene::reset_clone_subhandles(&mut scene.document, &mut copy);
+        let EntityType::Table(copy) = copy else {
+            unreachable!()
+        };
+        assert!(copy.block_record_handle.is_none());
+        assert!(copy.block_name.is_empty());
+        assert!(table(&scene, source).block_record_handle.is_some());
     }
 }

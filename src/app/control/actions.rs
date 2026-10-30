@@ -41,10 +41,20 @@ fn control_lineweight(value: &Value) -> Result<codec::types::LineWeight, Value> 
 }
 
 fn color_value(color: codec::types::Color) -> Value {
-    if let Some((r, g, b)) = color.rgb() {
+    if let Some((r, g, b)) = color.true_color_rgb() {
         json!({"rgb":[r,g,b]})
     } else {
         json!(color.index())
+    }
+}
+/// The id a row answers to: its parameter and component for a dynamic row,
+/// the palette's static field name otherwise.
+pub(crate) fn row_id(p: &crate::scene::model::object::Property) -> String {
+    match &p.value {
+        PropValue::BlockNumber { key, .. } | PropValue::BlockChoice { key, .. } => {
+            crate::scene::block_parameter_properties::field_id(key)
+        }
+        _ => p.field.to_owned(),
     }
 }
 /// One Properties-panel row as the control protocol's JSON (`id`, `label`,
@@ -58,7 +68,10 @@ pub(crate) fn property_json(p: &crate::scene::model::object::Property) -> Value 
         PropValue::EditText(v) => ("number", json!(v), Value::Null),
         PropValue::PlainText(v) => ("text", json!(v), Value::Null),
         PropValue::Hyperlink(v) => ("hyperlink", json!(v), Value::Null),
-        PropValue::Choice { selected, options } => ("choice", json!(selected), json!(options)),
+        PropValue::Choice { selected, options }
+        | PropValue::ChoiceWithTooltip {
+            selected, options, ..
+        } => ("choice", json!(selected), json!(options)),
         PropValue::EditChoice { value, options } => {
             ("editable_choice", json!(value), json!(options))
         }
@@ -88,12 +101,35 @@ pub(crate) fn property_json(p: &crate::scene::model::object::Property) -> Value 
         PropValue::AttrText { tag, value } => {
             ("attribute", json!({"tag":tag,"value":value}), Value::Null)
         }
+        PropValue::BlockNumber { value, .. } => ("number", json!(value), Value::Null),
+        PropValue::BlockChoice {
+            selected, options, ..
+        } => (
+            "choice",
+            options
+                .get(*selected)
+                .map(|label| json!(label))
+                .unwrap_or(Value::Null),
+            json!(options),
+        ),
         other => ("specialized", json!(format!("{other:?}")), Value::Null),
     };
-    json!({"id":p.field,"label":p.label,"kind":kind,"value":value,"options":options})
+    let mut row = json!({"id":row_id(p),"label":p.label,"kind":kind,"value":value,"options":options});
+    if let PropValue::BlockNumber { key, description, .. }
+    | PropValue::BlockChoice { key, description, .. } = &p.value
+    {
+        row["description"] = json!(description);
+        row["component"] =
+            json!(crate::scene::block_parameter_properties::component_id(&key.component));
+        row["parameter"] = json!(format!("{:X}", key.parameter.value()));
+    }
+    row
 }
 pub(super) const NAMES: &[&str] = &[
     "close_modal",
+    "recovery_accept",
+    "conversion_loss_save_anyway",
+    "conversion_loss_back",
     // Native-only: the "changed outside" dialog does not exist in the web
     // build, so neither does its action set.
     #[cfg(not(target_arch = "wasm32"))]
@@ -115,9 +151,15 @@ pub(super) const NAMES: &[&str] = &[
     "tds_import_dialog",
     "tds_material_dialog",
     "tds_map_dialog",
+    "extraction_outdated",
+    "print_all",
+    "data_link_manager",
+    "data_extraction",
     "refedit_dialog",
     "pdf_password_dialog",
+    "dim_inspect_dialog",
     "hyperlink_dialog",
+    "spell_dialog",
     "pdf_shx_settings",
     "pdf_layer_toggle",
     "pc_manager_toggle",
@@ -131,7 +173,10 @@ pub(super) const NAMES: &[&str] = &[
     "ribbon_dropdown",
     "keytips",
     "dialog_ok",
+    "dialog_discard",
+    "dialog_cancel",
     "block_def_dialog",
+    "table_insert_dialog",
     "attdef_dialog",
     "field_dialog",
     "attman_dialog",
@@ -318,17 +363,6 @@ impl OpenCADStudio {
             self.push_undo_snapshot(i, "IMAGEATTACH");
             let handle = {
                 let document = &mut self.tabs[i].scene.document;
-                let definition_handle = document.allocate_handle();
-                let mut definition = codec::objects::ImageDefinition::with_dimensions(
-                    path,
-                    image.pixel_width,
-                    image.pixel_height,
-                );
-                definition.handle = definition_handle;
-                document.objects.insert(
-                    definition_handle,
-                    codec::objects::ObjectType::ImageDefinition(definition),
-                );
                 let mut entity = codec::entities::RasterImage::with_size(
                     path,
                     final_at,
@@ -337,7 +371,6 @@ impl OpenCADStudio {
                     final_width,
                     height,
                 );
-                entity.definition_handle = Some(definition_handle);
                 if let Some(l_name) = layer_name {
                     entity.common.layer = l_name.to_string();
                     if !document.layers.contains(l_name) {
@@ -353,9 +386,13 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                document
-                    .add_entity(codec::EntityType::RasterImage(entity))
-                    .map_err(|e| failure("embed_failed", e))?
+                let handle = self.tabs[i]
+                    .scene
+                    .add_entity(codec::EntityType::RasterImage(entity));
+                if handle.is_null() {
+                    return Err(failure("embed_failed", "Could not add image"));
+                }
+                handle
             };
             self.tabs[i].scene.populate_images_from_document();
             if layer_name.is_some() {
@@ -723,6 +760,20 @@ impl OpenCADStudio {
                     }
                     if req.get("upside_down").is_some() {
                         page_dialog.upside_down = request.upside_down;
+                    }
+                    // Explicit output flags win over the stored page setup too,
+                    // like paper, scale and area above.
+                    if req["transparency"].is_boolean() {
+                        page_dialog.transparency = request.transparency;
+                    }
+                    if req["lineweights"].is_boolean() {
+                        page_dialog.lineweights = request.lineweights;
+                    }
+                    if req["merge_lines"].is_boolean() {
+                        page_dialog.merge_lines = request.merge_lines;
+                    }
+                    if req["stamp"].is_boolean() {
+                        page_dialog.stamp = request.stamp;
                     }
                     // The requested table wins over the layout's own, which
                     // the stored page setup just loaded (or failed to find).
@@ -1191,7 +1242,7 @@ impl OpenCADStudio {
             .sections
             .iter()
             .flat_map(|s| &s.props)
-            .find(|p| p.field == field)
+            .find(|p| row_id(p) == field)
             .cloned()
             .ok_or_else(|| {
                 failure(
@@ -1225,7 +1276,7 @@ impl OpenCADStudio {
                 let commit = self.update(Message::PropGeomCommit(p.field));
                 Task::batch([input, commit])
             }
-            PropValue::Choice { options, .. } => {
+            PropValue::Choice { options, .. } | PropValue::ChoiceWithTooltip { options, .. } => {
                 if !options.contains(&value) {
                     return Err(failure(
                         "invalid_choice",
@@ -1296,6 +1347,24 @@ impl OpenCADStudio {
                     field,
                     value: control_lineweight(raw)?,
                 }),
+            PropValue::BlockNumber { key, .. } => {
+                let input = self.update(Message::PropBlockInput { key, value });
+                let commit = self.update(Message::PropBlockCommit(key));
+                Task::batch([input, commit])
+            }
+            PropValue::BlockChoice { key, options, .. } => {
+                let index = options
+                    .iter()
+                    .position(|option| option == &value)
+                    .or_else(|| {
+                        let index = value.trim().parse::<usize>().ok()?;
+                        (index < options.len()).then_some(index)
+                    })
+                    .ok_or_else(|| {
+                        failure("invalid_choice", "Value is not an available option")
+                    })?;
+                self.update(Message::PropBlockChoice { key, index })
+            }
             PropValue::ReadOnly(_) | PropValue::ReadOnlyWithTooltip { .. } => {
                 return Err(failure("readonly_property", "Property cannot be edited"))
             }
@@ -1309,8 +1378,20 @@ impl OpenCADStudio {
     }
     pub(super) fn control_ui_action(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         let name = string(req, "name")?;
+        // Without a prompt there is no failed open to retry.
+        if name == "recovery_accept"
+            && self.active_modal != Some(crate::app::ModalKind::RecoveryPrompt)
+        {
+            return Ok(Task::none());
+        }
         let msg = match name {
             "close_modal" => Message::CloseModal,
+            // The recovery prompt's Recover button; `close_modal` declines.
+            "recovery_accept" => Message::RecoveryAttempt,
+            // The conversion-loss warning's choices: save with the losses it
+            // lists, or drop the held-back save.
+            "conversion_loss_save_anyway" => Message::ConversionLossProceed,
+            "conversion_loss_back" => Message::ConversionLossBack,
             // Show a layout (or "Model"), as clicking its tab does.
             "layout_switch" => Message::LayoutSwitch(string(req, "value")?.into()),
             // The "changed outside" modal's suggested actions (D6): reload
@@ -1640,6 +1721,37 @@ impl OpenCADStudio {
                     return Err(failure("no_tab", "No such ribbon tab"));
                 }
                 return Ok(Task::none());
+            }
+            // The open Insert Table dialog: `style=…`, `columns=…`, `rows=…`,
+            // `width=…`, `lines=…`, `window=0|1`, `columns_fixed=0|1`,
+            // `rows_fixed=0|1`, `preview=0|1`, `styles` (the Table Style
+            // button), `ok`.
+            "table_insert_dialog" => {
+                use crate::ui::window::annotation_data::{TableInsertField as F, TableInsertion};
+                if self.active_modal != Some(crate::app::ModalKind::InsertTable) {
+                    return Err(failure("no_dialog", "The Insert Table dialog is not open"));
+                }
+                let value = string(req, "value")?;
+                let (key, v) = value.split_once('=').unwrap_or((value, ""));
+                let on = v == "1";
+                match key {
+                    "style" => Message::TableInsertStyle(v.to_string()),
+                    "columns" => Message::TableInsertField(F::Columns(v.to_string())),
+                    "rows" => Message::TableInsertField(F::DataRows(v.to_string())),
+                    "width" => Message::TableInsertField(F::ColumnWidth(v.to_string())),
+                    "lines" => Message::TableInsertField(F::RowHeight(v.to_string())),
+                    "window" => Message::TableInsertField(F::Insertion(if on {
+                        TableInsertion::Window
+                    } else {
+                        TableInsertion::Point
+                    })),
+                    "columns_fixed" => Message::TableInsertField(F::ColumnsFixed(on)),
+                    "rows_fixed" => Message::TableInsertField(F::RowsFixed(on)),
+                    "preview" => Message::TableInsertField(F::Preview(on)),
+                    "styles" => Message::TableInsertManageStyles,
+                    "ok" => Message::TableInsertApply,
+                    _ => return Err(failure("invalid_value", "Unknown Insert Table field")),
+                }
             }
             // The open Block Definition dialog: `name=…`, `open_in_editor=0|1`,
             // `base_on_screen=0|1`, `objects_on_screen=0|1`, `create_empty`,
@@ -2186,6 +2298,103 @@ impl OpenCADStudio {
                     })
                 }
             }
+            // The Check Spelling window, one step per call:
+            // "scope=drawing|space|selection", "start", "replacement=<text>",
+            // "change", "change_all", "ignore", "ignore_all", "add", "undo",
+            // "language=<name>", "settings", "option=<n>,0|1" (0 dimension
+            // text … 7 punctuation) or "close".
+            "spell_dialog" => {
+                use crate::ui::window::spell_dialog::{SpellMsg as S, SpellScope, SpellSetting};
+                if self.active_modal != Some(crate::app::ModalKind::Spell) {
+                    return Err(failure("no_dialog", "The Check Spelling window is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let message = match key {
+                    "close" => S::Help,
+                    "scope" => S::Scope(match value {
+                        "space" => SpellScope::Space,
+                        "selection" => SpellScope::Selection,
+                        _ => SpellScope::Drawing,
+                    }),
+                    "start" => S::Start,
+                    "replacement" => S::Replacement(value.to_string()),
+                    "change" => S::Change,
+                    "change_all" => S::ChangeAll,
+                    "ignore" => S::Ignore,
+                    "ignore_all" => S::IgnoreAll,
+                    "add" => S::AddWord,
+                    "undo" => S::Undo,
+                    "language" => S::Language(value.to_string()),
+                    "settings" => S::ToggleSettings,
+                    "option" => {
+                        let (n, on) = value.split_once(',').unwrap_or((value, "1"));
+                        let setting = match n {
+                            "0" => SpellSetting::Dimensions,
+                            "1" => SpellSetting::Attributes,
+                            "2" => SpellSetting::Xrefs,
+                            "3" => SpellSetting::IgnoreCapitalized,
+                            "4" => SpellSetting::IgnoreMixed,
+                            "5" => SpellSetting::IgnoreUpper,
+                            "6" => SpellSetting::IgnoreNumbers,
+                            _ => SpellSetting::IgnorePunctuation,
+                        };
+                        S::Setting(setting, on != "0")
+                    }
+                    _ => return Err(failure("invalid_value", spec)),
+                };
+                if key == "close" {
+                    Message::CloseModal
+                } else {
+                    Message::Spell(message)
+                }
+            }
+            // The Inspection Dimension window, one field per call:
+            // "shape=round|angular|none", "label_on=0|1", "label=<text>",
+            // "rate_on=0|1", "rate=<text>", "select", "remove", "ok" or
+            // "cancel".
+            "dim_inspect_dialog" => {
+                use crate::entities::dim_inspect::Shape;
+                use crate::ui::window::dim_inspect_dialog::DimInspectMsg as D;
+                if self.active_modal != Some(crate::app::ModalKind::DimInspect) {
+                    return Err(failure(
+                        "no_dialog",
+                        "The Inspection Dimension window is not open",
+                    ));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let flag = || match value {
+                    "1" => Ok(true),
+                    "0" => Ok(false),
+                    _ => Err(failure("invalid_value", spec)),
+                };
+                if key == "cancel" {
+                    Message::CloseModal
+                } else {
+                    Message::DimInspect(match key {
+                        "shape" => D::Shape(match value {
+                            "angular" => Shape::Angular,
+                            "none" => Shape::None,
+                            "round" => Shape::Round,
+                            _ => return Err(failure("invalid_value", spec)),
+                        }),
+                        "label_on" => D::LabelOn(flag()?),
+                        "label" => D::Label(value.to_string()),
+                        "rate_on" => D::RateOn(flag()?),
+                        "rate" => D::Rate(value.to_string()),
+                        "select" => D::Select,
+                        "remove" => D::Remove,
+                        "ok" => D::Ok,
+                        _ => {
+                            return Err(failure(
+                                "invalid_value",
+                                "Unknown Inspection Dimension field",
+                            ))
+                        }
+                    })
+                }
+            }
             // The Insert / Edit Hyperlink window, one field per call:
             // "address=<file, web address or file#location>", "text=<text>",
             // "target=file|view", "view=<name>", "relative=0|1", "dwf=0|1",
@@ -2510,8 +2719,174 @@ impl OpenCADStudio {
                     _ => return Err(bad()),
                 })
             }
+            // The Data Extraction wizard, one step per call: "next", "back",
+            // "finish", "settings=<file.dxex>", "begin=new|template|edit",
+            // "source=drawings|selection", "object=<name>:on|off",
+            // "property=<key>:on|off", "category=<name>:on|off",
+            // "combine|count|name=on|off", "table=on|off", "file=on|off",
+            // "path=<file>", "style=<table style>", "title=<text>",
+            // "headers=on|off".
+            "data_extraction" => {
+                use crate::ui::window::annotation_data::{
+                    DataExtractionField as F, ExtractionBegin, ExtractionSource,
+                };
+                if self.active_modal != Some(crate::app::ModalKind::DataExtraction) {
+                    return Err(failure("no_dialog", "The Data Extraction wizard is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let bad = || failure("invalid_value", spec);
+                let on = |v: &str| match v {
+                    "on" | "1" | "true" => Ok(true),
+                    "off" | "0" | "false" => Ok(false),
+                    _ => Err(bad()),
+                };
+                let named = value.rsplit_once(':');
+                match key {
+                    "next" => Message::DataExtractionNext,
+                    "back" => Message::DataExtractionBack,
+                    "finish" => Message::DataExtractionFinish,
+                    "settings" => Message::DataExtractionField(F::SettingsPath(value.to_string())),
+                    "begin" => Message::DataExtractionField(F::Begin(match value {
+                        "new" => ExtractionBegin::New,
+                        "template" => ExtractionBegin::Template,
+                        "edit" => ExtractionBegin::Edit,
+                        _ => return Err(bad()),
+                    })),
+                    "source" => Message::DataExtractionField(F::Source(match value {
+                        "drawings" => ExtractionSource::DrawingsAndFolders,
+                        "selection" => ExtractionSource::CurrentSelection,
+                        _ => return Err(bad()),
+                    })),
+                    "object" => {
+                        let (name, state) = named.ok_or_else(bad)?;
+                        let index = self
+                            .data_extraction
+                            .objects
+                            .iter()
+                            .position(|item| item.name.eq_ignore_ascii_case(name))
+                            .ok_or_else(bad)?;
+                        Message::DataExtractionField(F::Object(index, on(state)?))
+                    }
+                    "property" => {
+                        let (name, state) = named.ok_or_else(bad)?;
+                        let index = self
+                            .data_extraction
+                            .properties
+                            .iter()
+                            .position(|item| item.key == name || item.name.eq_ignore_ascii_case(name))
+                            .ok_or_else(bad)?;
+                        Message::DataExtractionField(F::Property(index, on(state)?))
+                    }
+                    "category" => {
+                        let (name, state) = named.ok_or_else(bad)?;
+                        Message::DataExtractionField(F::Category(name.to_string(), on(state)?))
+                    }
+                    "combine" => Message::DataExtractionField(F::CombineIdentical(on(value)?)),
+                    "count" => Message::DataExtractionField(F::ShowCount(on(value)?)),
+                    "name" => Message::DataExtractionField(F::ShowName(on(value)?)),
+                    "table" => Message::DataExtractionField(F::OutputTable(on(value)?)),
+                    "file" => Message::DataExtractionField(F::OutputFile(on(value)?)),
+                    "path" => Message::DataExtractionField(F::OutputPath(value.to_string())),
+                    "style" => Message::DataExtractionField(F::TableStyle(value.to_string())),
+                    "title" => Message::DataExtractionField(F::TableTitle(value.to_string())),
+                    "headers" => Message::DataExtractionField(F::PropertyHeaders(on(value)?)),
+                    _ => return Err(bad()),
+                }
+            }
+            // The Data Link Manager, one step per call: "new", "name=<text>",
+            // "path=<file>" (as the file picker sets it), "sheet=<name>",
+            // "range=entire|named|cell", "cells=<A1:C4 or name>",
+            // "write=on|off", "insert_after=on|off", "save", "cancel_edit",
+            // "select=<link name>", "edit", "delete", "insert" or "close".
+            "data_link_manager" => {
+                use crate::ui::window::annotation_data::{DataLinkField as F, LinkRange};
+                if self.active_modal != Some(crate::app::ModalKind::DataLinkManager) {
+                    return Err(failure("no_dialog", "The Data Link Manager is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let bad = || failure("invalid_value", spec);
+                let on = |v: &str| match v {
+                    "on" | "1" | "true" => Ok(true),
+                    "off" | "0" | "false" => Ok(false),
+                    _ => Err(bad()),
+                };
+                match key {
+                    "new" => Message::DataLinkNew,
+                    "name" => Message::DataLinkField(F::Name(value.to_string())),
+                    "path" => Message::DataLinkBrowseResult(Some(value.into())),
+                    "sheet" => Message::DataLinkField(F::Sheet(value.to_string())),
+                    "range" => Message::DataLinkField(F::RangeKind(match value {
+                        "entire" => LinkRange::EntireSheet,
+                        "named" => LinkRange::NamedRange,
+                        "cell" => LinkRange::CellRange,
+                        _ => return Err(bad()),
+                    })),
+                    "cells" => Message::DataLinkField(F::Range(value.to_string())),
+                    "write" => {
+                        self.data_link_manager.more_options = true;
+                        Message::DataLinkField(F::AllowWrite(on(value)?))
+                    }
+                    "insert_after" => Message::DataLinkField(F::InsertTable(on(value)?)),
+                    "save" => Message::DataLinkSave,
+                    "cancel_edit" => Message::DataLinkEditCancel,
+                    "select" => Message::DataLinkSelect(
+                        self.data_link_manager
+                            .links
+                            .iter()
+                            .find(|link| link.name.eq_ignore_ascii_case(value))
+                            .map(|link| link.handle)
+                            .ok_or_else(bad)?,
+                    ),
+                    "edit" => Message::DataLinkEdit,
+                    "delete" => Message::DataLinkDelete,
+                    "insert" => Message::DataLinkInsert,
+                    "close" => Message::DataLinkClose,
+                    _ => return Err(bad()),
+                }
+            }
             // The missing texture map window of a 3D Studio import: "ok"
             // (or "close") dismisses the shown map; the next one follows.
+            // The outdated extraction table window: "update", "update_all",
+            // "skip", "skip_all" or "close".
+            "extraction_outdated" => {
+                use crate::ui::window::extraction_outdated::OutdatedChoice as C;
+                if self.active_modal != Some(crate::app::ModalKind::ExtractionOutdated) {
+                    return Err(failure(
+                        "no_dialog",
+                        "The outdated extraction table window is not open",
+                    ));
+                }
+                let spec = string(req, "value")?;
+                match spec {
+                    "update" => Message::ExtractionOutdated(C::Update),
+                    "update_all" => Message::ExtractionOutdated(C::UpdateAll),
+                    "skip" => Message::ExtractionOutdated(C::Skip),
+                    "skip_all" => Message::ExtractionOutdated(C::SkipAll),
+                    "close" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", spec)),
+                }
+            }
+            // The Print All (PUBLISH) window: "open", "pdf=<path>" (the PDF
+            // button with its file already picked), "print" or "close". Both
+            // outputs run the DXEVAL publish check first.
+            "print_all" => {
+                let spec = string(req, "value")?;
+                let open = self.active_modal == Some(crate::app::ModalKind::PrintAll);
+                match spec.split_once('=') {
+                    _ if spec == "open" => Message::PrintAllOpen,
+                    _ if !open => {
+                        return Err(failure("no_dialog", "The Print All window is not open"));
+                    }
+                    Some(("pdf", path)) if !path.is_empty() => {
+                        Message::PrintAllPdfTo(std::path::PathBuf::from(path))
+                    }
+                    _ if spec == "print" => Message::PrintAllPrint,
+                    _ if spec == "close" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", spec)),
+                }
+            }
             "tds_map_dialog" => {
                 if self.active_modal != Some(crate::app::ModalKind::TdsMissingMap) {
                     return Err(failure("no_dialog", "The missing texture map window is not open"));
@@ -2729,6 +3104,7 @@ impl OpenCADStudio {
             }
             // The open dialog's OK button.
             "dialog_ok" => match self.active_modal {
+                Some(crate::app::ModalKind::Unsaved) => Message::UnsavedDialogSave,
                 Some(crate::app::ModalKind::XrefAttach) => {
                     Message::XrefAttach(crate::ui::window::xref_attach::XrefAttachMsg::Apply)
                 }
@@ -2749,6 +3125,16 @@ impl OpenCADStudio {
                     Message::AttMan(crate::ui::window::attman_dialog::AttManMsg::Ok)
                 }
                 _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
+            },
+            "dialog_discard" | "dialog_cancel" => match self.active_modal {
+                Some(crate::app::ModalKind::Unsaved) => {
+                    if name == "dialog_discard" {
+                        Message::UnsavedDialogDiscard
+                    } else {
+                        Message::UnsavedDialogCancel
+                    }
+                }
+                _ => return Err(failure("no_dialog", "No dialog with that button is open")),
             },
             "close_document" => Message::TabClose(self.tabs[self.active_tab].id),
             "toggle_properties" => Message::ToggleProperties,

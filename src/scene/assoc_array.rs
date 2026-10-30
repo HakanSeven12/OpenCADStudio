@@ -4,11 +4,12 @@
 //! anonymous block holding the source objects (read). The action's value
 //! parameters (Items, ItemSpacing, Rows, …) define where the items go.
 
+use codec::EntityType;
 use codec::objects::{
     AssocAction, AssocArrayActionBody, AssocDependency, AssocEvalValue, AssocValueParam,
     AssociativeData, ObjectType,
 };
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use glam::{DMat4, DVec3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,7 +32,7 @@ pub struct AssocArray {
     pub kind: ArrayKind,
 }
 
-fn dependency(document: &CadDocument, handle: Handle) -> Option<&AssocDependency> {
+fn dependency(document: &Document, handle: Handle) -> Option<&AssocDependency> {
     match document.objects.get(&handle)? {
         ObjectType::Associative(object) => match &object.data {
             AssociativeData::Dependency(dependency) => Some(dependency),
@@ -43,7 +44,7 @@ fn dependency(document: &CadDocument, handle: Handle) -> Option<&AssocDependency
     }
 }
 
-pub fn action(document: &CadDocument, handle: Handle) -> Option<&AssocAction> {
+pub fn action(document: &Document, handle: Handle) -> Option<&AssocAction> {
     match document.objects.get(&handle)? {
         ObjectType::Associative(object) => match &object.data {
             AssociativeData::Action(action) => Some(action),
@@ -53,7 +54,7 @@ pub fn action(document: &CadDocument, handle: Handle) -> Option<&AssocAction> {
     }
 }
 
-pub fn body(document: &CadDocument, handle: Handle) -> Option<&AssocArrayActionBody> {
+pub fn body(document: &Document, handle: Handle) -> Option<&AssocArrayActionBody> {
     match document.objects.get(&handle)? {
         ObjectType::Associative(object) => match &object.data {
             AssociativeData::ArrayActionBody(body) => Some(body),
@@ -65,7 +66,7 @@ pub fn body(document: &CadDocument, handle: Handle) -> Option<&AssocArrayActionB
 }
 
 /// The associative array whose array INSERT is `insert`, if any.
-pub fn array_of_insert(document: &CadDocument, insert: Handle) -> Option<AssocArray> {
+pub fn array_of_insert(document: &Document, insert: Handle) -> Option<AssocArray> {
     document.objects.iter().find_map(|(&handle, object)| {
         let ObjectType::Associative(object) = object else {
             return None;
@@ -86,7 +87,16 @@ pub fn array_of_insert(document: &CadDocument, insert: Handle) -> Option<AssocAr
             ) {
                 (true, true) if dependency.dependent_on == insert => owns_insert = true,
                 (false, true) => array_block = dependency.dependent_on,
-                (true, false) if source_block.is_null() => source_block = dependency.dependent_on,
+                // A path array also reads its path; the source is the block.
+                (true, false)
+                    if source_block.is_null()
+                        && document
+                            .block_records
+                            .iter()
+                            .any(|record| record.handle == dependency.dependent_on) =>
+                {
+                    source_block = dependency.dependent_on
+                }
                 _ => {}
             }
         }
@@ -109,7 +119,7 @@ pub fn array_of_insert(document: &CadDocument, insert: Handle) -> Option<AssocAr
 
 /// An array action whose array INSERT is gone (erased or exploded): it has
 /// nothing left to drive and is dropped when the networks are written.
-pub fn orphaned_array_action(document: &CadDocument, handle: Handle) -> bool {
+pub fn orphaned_array_action(document: &Document, handle: Handle) -> bool {
     let Some(action) = action(document, handle) else {
         return false;
     };
@@ -127,7 +137,7 @@ pub fn orphaned_array_action(document: &CadDocument, handle: Handle) -> bool {
 
 /// The value parameters of an array action: inline in the action (R2013+)
 /// or in the body's parameter section (R2007).
-pub fn value_params<'a>(document: &'a CadDocument, array: &AssocArray) -> &'a [AssocValueParam] {
+pub fn value_params<'a>(document: &'a Document, array: &AssocArray) -> &'a [AssocValueParam] {
     match action(document, array.action) {
         Some(action) if !action.values.is_empty() => &action.values,
         _ => body(document, array.body).map_or(&[], |body| &body.parameter_body.values),
@@ -166,7 +176,7 @@ pub fn set_param_value(params: &mut [AssocValueParam], name: &str, value: f64) -
 
 /// The direction columns step along: the line of the action's "RowProfile"
 /// parameter, X when the array has none.
-pub fn column_axis(document: &CadDocument, array: &AssocArray) -> DVec3 {
+pub fn column_axis(document: &Document, array: &AssocArray) -> DVec3 {
     let Some(action) = action(document, array.action) else {
         return DVec3::X;
     };
@@ -195,7 +205,7 @@ pub fn column_axis(document: &CadDocument, array: &AssocArray) -> DVec3 {
 
 /// The plane normal of an array: its "BaseNormal" vertex parameter, Z when
 /// the array has none.
-pub fn base_normal(document: &CadDocument, array: &AssocArray) -> DVec3 {
+pub fn base_normal(document: &Document, array: &AssocArray) -> DVec3 {
     let Some(action) = action(document, array.action) else {
         return DVec3::Z;
     };
@@ -273,7 +283,7 @@ fn plane_x(normal: DVec3) -> DVec3 {
 
 /// The centre of a polar array, recovered from its first item and its
 /// Radius and StartAngle.
-pub fn polar_center(document: &CadDocument, array: &AssocArray) -> Option<DVec3> {
+pub fn polar_center(document: &Document, array: &AssocArray) -> Option<DVec3> {
     let params = value_params(document, array);
     let first = body(document, array.body)?
         .items
@@ -341,6 +351,111 @@ pub fn polar_items(
     items
 }
 
+/// The curve a path array follows: what its read dependency on a drawing
+/// object (not the source block) watches.
+pub fn path_entity(document: &Document, array: &AssocArray) -> Option<(Handle, EntityType)> {
+    action(document, array.action)?
+        .dependencies
+        .iter()
+        .find_map(|link| {
+            let dependency = dependency(document, link.dependency)?;
+            if !dependency.is_read_dependency
+                || dependency.is_write_dependency
+                || dependency.dependent_on == array.source_block
+            {
+                return None;
+            }
+            let entity = document.get_entity(dependency.dependent_on)?;
+            Some((dependency.dependent_on, entity.clone()))
+        })
+}
+
+/// World to array-block coordinates: the inverse of the array reference's
+/// transform (identity when the reference is missing).
+fn array_block_from_world(document: &Document, insert: Handle) -> DMat4 {
+    let Some(EntityType::Insert(reference)) = document.get_entity(insert) else {
+        return DMat4::IDENTITY;
+    };
+    let transform = crate::scene::render_graph::insert_transform(document, reference);
+    let at = |x: f64, y: f64, z: f64| {
+        let p = transform.apply(codec::types::Vector3::new(x, y, z));
+        DVec3::new(p.x, p.y, p.z)
+    };
+    let origin = at(0.0, 0.0, 0.0);
+    DMat4::from_cols(
+        (at(1.0, 0.0, 0.0) - origin).extend(0.0),
+        (at(0.0, 1.0, 0.0) - origin).extend(0.0),
+        (at(0.0, 0.0, 1.0) - origin).extend(0.0),
+        origin.extend(1.0),
+    )
+    .inverse()
+}
+
+/// The items of a path array along `path`: `Items` of them `ItemSpacing`
+/// apart from the path's start (its end when `PathDirection` is 0), spread
+/// over the whole path when `Method` is 0 (Divide), turned to the travel
+/// direction when `AlignItems` is set. Rows step to the left of the path
+/// and levels up.
+pub fn path_items(params: &[AssocValueParam], path: &EntityType) -> Vec<([i32; 3], DMat4)> {
+    let get = |name: &str, default: f64| param_value(params, name).unwrap_or(default);
+    let Some(curve) = crate::entities::curve::entity_curve(path) else {
+        return Vec::new();
+    };
+    let length = curve.length();
+    if !length.is_finite() || length <= 0.0 {
+        return Vec::new();
+    }
+    let at = |distance: f64| DVec3::from_array(curve.point_at_distance(distance.clamp(0.0, length)));
+    let count = get("Items", 1.0).clamp(1.0, 100_000.0) as i32;
+    let (rows, levels) = (
+        get("Rows", 1.0).clamp(1.0, 1000.0) as i32,
+        get("Levels", 1.0).clamp(1.0, 1000.0) as i32,
+    );
+    let divide = param_value(params, "Method") == Some(0.0);
+    let spacing = if !divide {
+        get("ItemSpacing", 0.0)
+    } else if curve.is_closed() {
+        length / f64::from(count)
+    } else if count > 1 {
+        length / f64::from(count - 1)
+    } else {
+        0.0
+    };
+    let reversed = get("PathDirection", 1.0) == 0.0;
+    let align = get("AlignItems", 1.0) != 0.0;
+    let step = (length * 1e-6).max(1e-9);
+    let mut items = Vec::with_capacity((count * rows * levels).max(0) as usize);
+    for level in 0..levels {
+        for row in 0..rows {
+            for item in 0..count {
+                let along = (spacing * f64::from(item)).min(length);
+                let distance = if reversed { length - along } else { along };
+                let mut tangent = at(distance + step) - at(distance - step);
+                if reversed {
+                    tangent = -tangent;
+                }
+                let tangent = tangent.truncate().try_normalize().unwrap_or(glam::DVec2::X);
+                let left = DVec3::new(-tangent.y, tangent.x, 0.0);
+                let position = at(distance)
+                    + left * (f64::from(row) * get("RowSpacing", 0.0))
+                    + DVec3::Z
+                        * (f64::from(row) * get("RowElevation", 0.0)
+                            + f64::from(level) * get("LevelSpacing", 0.0));
+                let placement = if align {
+                    DMat4::from_rotation_translation(
+                        glam::DQuat::from_rotation_z(tangent.y.atan2(tangent.x)),
+                        position,
+                    )
+                } else {
+                    DMat4::from_translation(position)
+                };
+                items.push(([item, row, level], placement));
+            }
+        }
+    }
+    items
+}
+
 /// The rows the Properties palette shows for an array: (field, parameter,
 /// label, kind) where kind 0 is a count, 1 a length and 2 an angle.
 fn property_rows(kind: ArrayKind) -> &'static [(&'static str, &'static str, &'static str, u8)] {
@@ -393,15 +508,16 @@ fn property_rows(kind: ArrayKind) -> &'static [(&'static str, &'static str, &'st
     }
 }
 
-/// The Properties section of an associative array. Path arrays are shown
-/// read-only: their items follow a curve this does not re-place yet.
+/// The Properties section of an associative array.
 pub fn property_section(
-    document: &CadDocument,
+    document: &Document,
     array: &AssocArray,
 ) -> crate::scene::model::object::PropSection {
     use crate::entities::common::{format_angle, format_length};
     use crate::scene::model::object::{PropSection, PropValue, Property};
     let params = value_params(document, array);
+    // A path array whose path is gone keeps its items as they are.
+    let fixed = array.kind == ArrayKind::Path && path_entity(document, array).is_none();
     let props = property_rows(array.kind)
         .iter()
         .filter_map(|&(field, name, label, kind)| {
@@ -414,7 +530,7 @@ pub fn property_section(
             Some(Property {
                 label: crate::t!(label).into_owned(),
                 field,
-                value: if array.kind == ArrayKind::Path {
+                value: if fixed {
                     PropValue::ReadOnly(text)
                 } else {
                     PropValue::EditText(text)
@@ -470,10 +586,6 @@ pub fn update(
     changes: &[(&str, f64)],
 ) -> Result<(), String> {
     use codec::objects::AssocArrayItem;
-    use codec::EntityType;
-    if array.kind == ArrayKind::Path {
-        return Err("path arrays cannot be edited yet".into());
-    }
     let document = &scene.document;
     let mut params = value_params(document, array).to_vec();
     let center = match array.kind {
@@ -500,13 +612,37 @@ pub fn update(
         set_param_value(&mut params, "ItemSpacing", spacing);
     }
     let normal = base_normal(document, array);
+    let path = (array.kind == ArrayKind::Path)
+        .then(|| path_entity(document, array))
+        .flatten();
     let placements: Vec<([i32; 3], DMat4)> = match array.kind {
         ArrayKind::Rectangular => rectangular_items(&params, column_axis(document, array), normal)
             .into_iter()
             .map(|(location, offset)| (location, DMat4::from_translation(offset)))
             .collect(),
-        _ => polar_items(&params, center, normal),
+        ArrayKind::Polar => polar_items(&params, center, normal),
+        ArrayKind::Path => {
+            let (_, path) = path.as_ref().ok_or("the array's path is gone")?;
+            // Divide keeps the count and spreads it over the path.
+            if param_value(&params, "Method") == Some(0.0) {
+                if let Some(curve) = crate::entities::curve::entity_curve(path) {
+                    let gaps = param_value(&params, "Items").unwrap_or(1.0)
+                        - if curve.is_closed() { 0.0 } else { 1.0 };
+                    set_param_value(&mut params, "ItemSpacing", curve.length() / gaps.max(1.0));
+                }
+            }
+            // The path gives world placements; the items live in the array
+            // block, so undo where the array reference puts that block.
+            let to_block = array_block_from_world(document, array.insert);
+            path_items(&params, path)
+                .into_iter()
+                .map(|(location, placement)| (location, to_block * placement))
+                .collect()
+        }
     };
+    if placements.is_empty() {
+        return Err("the array has no items to place".into());
+    }
     let current = body(document, array.body).ok_or("array body missing")?;
     let template = current
         .items
@@ -597,6 +733,27 @@ pub fn update(
             }
         }
     }
+    // The path's cached curve follows the path.
+    if let Some((_, path)) = &path {
+        if let Some((action_type, subcurve_kind, curve)) =
+            crate::scene::model::sweep_model::assoc_edge_curve(path)
+        {
+            let owned = action(document, array.action)
+                .map(|action| action.owned_parameters.clone())
+                .unwrap_or_default();
+            for handle in owned {
+                if let Some(ObjectType::Associative(object)) = document.objects.get_mut(&handle) {
+                    if let AssociativeData::EdgeActionParam(edge) = &mut object.data {
+                        if edge.single_dependency.action_param.name == "RowProfile" {
+                            edge.action_type = action_type;
+                            edge.subcurve_kind = subcurve_kind;
+                            edge.curve = curve.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
     scene.bump_geometry();
     Ok(())
 }
@@ -637,9 +794,15 @@ const ARRAY_CLASSES: &[(&str, &str, i32, i32)] = &[
         29,
         55,
     ),
+    (
+        "ACDBASSOCARRAYPATHPARAMETERS",
+        "AcDbAssocArrayPathParameters",
+        29,
+        55,
+    ),
 ];
 
-fn register_array_classes(document: &mut CadDocument) {
+fn register_array_classes(document: &mut Document) {
     for &(dxf_name, cpp_class_name, dwg_version, maintenance_version) in ARRAY_CLASSES {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
@@ -662,7 +825,7 @@ fn register_array_classes(document: &mut CadDocument) {
     }
 }
 
-fn next_anonymous_name(document: &CadDocument) -> String {
+pub(crate) fn next_anonymous_name(document: &Document) -> String {
     let next = document
         .block_records
         .iter()
@@ -672,7 +835,7 @@ fn next_anonymous_name(document: &CadDocument) -> String {
     format!("*U{next}")
 }
 
-fn associative(
+pub(crate) fn associative(
     handle: Handle,
     owner: Handle,
     dxf_name: &str,
@@ -686,7 +849,7 @@ fn associative(
     ObjectType::Associative(object)
 }
 
-fn dictionary_entry(document: &CadDocument, dictionary: Handle, key: &str) -> Option<Handle> {
+fn dictionary_entry(document: &Document, dictionary: Handle, key: &str) -> Option<Handle> {
     match document.objects.get(&dictionary)? {
         ObjectType::Dictionary(dictionary) => dictionary.get(key),
         _ => None,
@@ -694,7 +857,7 @@ fn dictionary_entry(document: &CadDocument, dictionary: Handle, key: &str) -> Op
 }
 
 /// A dictionary stored under `key` in `parent`, created when absent.
-fn child_dictionary(document: &mut CadDocument, parent: Handle, key: &str) -> Handle {
+fn child_dictionary(document: &mut Document, parent: Handle, key: &str) -> Handle {
     if let Some(handle) = dictionary_entry(document, parent, key).filter(|handle| {
         matches!(
             document.objects.get(handle),
@@ -719,10 +882,16 @@ fn child_dictionary(document: &mut CadDocument, parent: Handle, key: &str) -> Ha
 
 /// The network holding the actions of model space, created with the root
 /// network above it when the drawing has none.
-fn model_space_network(document: &mut CadDocument) -> Handle {
-    const KEY: &str = "ACAD_ASSOCNETWORK";
+fn model_space_network(document: &mut Document) -> Handle {
     let model = document.header.model_space_block_handle;
-    let scope = document.ensure_extension_dictionary(model);
+    block_network(document, model)
+}
+
+/// The network holding the actions of the space (block record) `owner`,
+/// created with the root network above it when the drawing has none.
+pub(crate) fn block_network(document: &mut Document, owner: Handle) -> Handle {
+    const KEY: &str = "ACAD_ASSOCNETWORK";
+    let scope = document.ensure_extension_dictionary(owner);
     let holder = child_dictionary(document, scope, KEY);
     if let Some(network) = dictionary_entry(document, holder, KEY).filter(|handle| {
         matches!(
@@ -877,7 +1046,87 @@ pub fn polar_params(
     ]
 }
 
-/// What ARRAYRECT / ARRAYPOLAR ask for an associative array.
+impl crate::scene::Scene {
+    /// Place again the items of every path array whose path is among
+    /// `changes`, so the array follows its path. Returns the array
+    /// references it re-placed.
+    pub(crate) fn refresh_associative_path_arrays(
+        &mut self,
+        changes: &[(Handle, crate::scene::ChangeKind)],
+    ) -> Vec<(Handle, crate::scene::ChangeKind)> {
+        let mut arrays: Vec<AssocArray> = Vec::new();
+        for (handle, kind) in changes {
+            if matches!(kind, crate::scene::ChangeKind::Removed) {
+                continue;
+            }
+            let Some(entity) = self.document.get_entity(*handle) else {
+                continue;
+            };
+            for reactor in &entity.common().reactors {
+                let Some(ObjectType::Associative(object)) = self.document.objects.get(reactor)
+                else {
+                    continue;
+                };
+                let AssociativeData::Dependency(watch) = &object.data else {
+                    continue;
+                };
+                if !watch.is_read_dependency || watch.is_write_dependency {
+                    continue;
+                }
+                // The array reference is what the action both reads and writes.
+                let insert = action(&self.document, object.owner).and_then(|action| {
+                    action.dependencies.iter().find_map(|link| {
+                        let link = dependency(&self.document, link.dependency)?;
+                        (link.is_read_dependency && link.is_write_dependency)
+                            .then_some(link.dependent_on)
+                    })
+                });
+                let Some(array) = insert.and_then(|insert| array_of_insert(&self.document, insert))
+                else {
+                    continue;
+                };
+                if array.kind == ArrayKind::Path && !arrays.iter().any(|a| a.insert == array.insert)
+                {
+                    arrays.push(array);
+                }
+            }
+        }
+        if arrays.is_empty() {
+            return Vec::new();
+        }
+        // The items are rebuilt outside the entity delta.
+        self.poison_undo_recording();
+        arrays
+            .into_iter()
+            .filter(|array| update(self, array, &[]).is_ok())
+            .map(|array| (array.insert, crate::scene::ChangeKind::Modified))
+            .collect()
+    }
+}
+
+/// The value parameters of a new path array, in the order the reference
+/// product writes them. Measure keeps `spacing`; Divide (Method 0, the path
+/// filled) derives it from the path's length.
+pub fn path_params(items: u32, spacing: f64, divide: bool, reversed: bool) -> Vec<AssocValueParam> {
+    vec![
+        value_param("ItemSpacing", 1, spacing, false),
+        value_param("Items", 0, f64::from(items.max(1)), true),
+        value_param("LevelSpacing", 1, 1.0, false),
+        value_param("Levels", 0, 1.0, true),
+        value_param("RowElevation", 1, 1.0, false),
+        value_param("RowSpacing", 1, spacing.abs().max(1.0), false),
+        value_param("Rows", 0, 1.0, true),
+        value_param("PathDirection", 0, if reversed { 0.0 } else { 1.0 }, true),
+        value_param("AlignItems", 0, 1.0, true),
+        value_param("FillPath", 0, if divide { 1.0 } else { 0.0 }, false),
+        value_param("MaintainZ", 0, 1.0, false),
+        value_param("TangentOrientationAngle", 0, 0.0, false),
+        value_param("Orientation", 0, 1.0, true),
+        value_param("Method", 0, if divide { 0.0 } else { 1.0 }, true),
+    ]
+}
+
+/// What ARRAYRECT / ARRAYPOLAR / ARRAYPATH ask for an associative array.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AssocArraySpec {
     Rectangular {
@@ -890,6 +1139,13 @@ pub enum AssocArraySpec {
         center: DVec3,
         items: u32,
         fill_angle: f64,
+    },
+    Path {
+        path: Handle,
+        items: u32,
+        spacing: f64,
+        divide: bool,
+        reversed: bool,
     },
 }
 
@@ -906,12 +1162,12 @@ pub fn create(
     base: DVec3,
     kind: ArrayKind,
     params: Vec<AssocValueParam>,
+    path: Option<Handle>,
 ) -> Result<Handle, String> {
     use codec::objects::{
         AssocActionBody, AssocActionDependency, AssocActionParam, AssocArrayItem,
         AssocSingleDependencyActionParam, AssocVertexActionParam,
     };
-    use codec::EntityType;
     let normal = DVec3::Z;
     let placements: Vec<([i32; 3], DMat4)> = match kind {
         ArrayKind::Rectangular => rectangular_items(&params, DVec3::X, normal)
@@ -919,8 +1175,16 @@ pub fn create(
             .map(|(location, offset)| (location, DMat4::from_translation(offset)))
             .collect(),
         ArrayKind::Polar => polar_items(&params, DVec3::ZERO, normal),
-        ArrayKind::Path => return Err("path arrays cannot be created yet".into()),
+        ArrayKind::Path => {
+            let curve = path
+                .and_then(|path| scene.document.get_entity(path))
+                .ok_or("the path is gone")?;
+            path_items(&params, curve)
+        }
     };
+    if placements.is_empty() {
+        return Err("the array has no items to place".into());
+    }
     let mut entities: Vec<EntityType> = sources
         .iter()
         .filter_map(|handle| scene.document.get_entity(*handle).cloned())
@@ -929,16 +1193,44 @@ pub fn create(
         return Err("nothing to array".into());
     }
     let layer = scene.document.header.current_layer_name.clone();
+    // The source block holds the objects as the first item draws them: a
+    // path array's first item sits on the path, turned to it, so the
+    // objects keep where they are drawn.
+    let to_block = match kind {
+        ArrayKind::Path => {
+            let first = placements[0].1;
+            let turn = first.x_axis.y.atan2(first.x_axis.x);
+            vec![
+                crate::command::EntityTransform::Translate(-first.w_axis.truncate()),
+                crate::command::EntityTransform::Rotate {
+                    center: DVec3::ZERO,
+                    axis: DVec3::Z,
+                    angle_rad: -turn,
+                },
+            ]
+        }
+        _ => vec![crate::command::EntityTransform::Translate(-source_point)],
+    };
     for entity in &mut entities {
-        crate::scene::view::dispatch::apply_transform(
-            entity,
-            &crate::command::EntityTransform::Translate(-source_point),
-        );
+        for transform in &to_block {
+            crate::scene::view::dispatch::apply_transform(entity, transform);
+        }
     }
     register_array_classes(&mut scene.document);
 
+    let originals: Vec<Handle> = sources
+        .iter()
+        .copied()
+        .filter(|handle| scene.document.get_entity(*handle).is_some())
+        .collect();
     let source_name = next_anonymous_name(&scene.document);
     scene.define_block_raw(&source_name, codec::types::Vector3::ZERO, entities);
+    // The copies must not keep the sources' extension dictionaries.
+    if let Some(record) = scene.document.block_records.get(&source_name) {
+        let copies = record.entity_handles.clone();
+        scene.own_copied_xdicts(originals, copies);
+    }
+
     let item = |offset: DMat4| {
         let position = offset.w_axis.truncate();
         let mut insert = codec::entities::Insert::new(
@@ -962,7 +1254,7 @@ pub fn create(
             .map(|(_, placement)| item(*placement))
             .collect(),
     );
-    let record = |document: &CadDocument, name: &str| {
+    let record = |document: &Document, name: &str| {
         document
             .block_records
             .get(name)
@@ -993,6 +1285,7 @@ pub fn create(
     let network = model_space_network(document);
     let [action, body, write_dep, read_dep, both_dep] =
         std::array::from_fn(|_| document.allocate_handle());
+    let path_dep = path.map(|_| document.allocate_handle());
     let mut owned_parameters = Vec::new();
     let vertex_params = [
         ("BaseNormal", normal),
@@ -1023,11 +1316,53 @@ pub fn create(
         );
         owned_parameters.push(handle);
     }
-    for (handle, read, write, order, target, id) in [
-        (write_dep, false, true, 0, array_block, 1),
-        (read_dep, true, false, 0, source_block, 2),
-        (both_dep, true, true, i32::MIN, insert, 3),
-    ] {
+    // A path array reads its path first, as the reference lists it, and
+    // keeps the path's curve in its RowProfile parameter.
+    let mut links = Vec::new();
+    if let (Some(path), Some(path_dep)) = (path, path_dep) {
+        links.push((path_dep, true, false, 0, path));
+        if let Some(entity) = document.get_entity_mut(path) {
+            entity.common_mut().reactors.push(path_dep);
+        }
+        let curve = document
+            .get_entity(path)
+            .and_then(crate::scene::model::sweep_model::assoc_edge_curve);
+        if let Some((action_type, subcurve_kind, curve)) = curve {
+            let handle = document.allocate_handle();
+            document.objects.insert(
+                handle,
+                associative(
+                    handle,
+                    action,
+                    "ACDBASSOCEDGEACTIONPARAM",
+                    "AcDbAssocEdgeActionParam",
+                    AssociativeData::EdgeActionParam(codec::objects::AssocEdgeActionParam {
+                        single_dependency: AssocSingleDependencyActionParam {
+                            action_param: AssocActionParam {
+                                is_r2013: 1,
+                                version: 0,
+                                name: "RowProfile".to_string(),
+                            },
+                            dependency: path_dep,
+                            ..Default::default()
+                        },
+                        parameter: Handle::NULL,
+                        has_action: true,
+                        action_type,
+                        subcurve_kind,
+                        curve,
+                    }),
+                ),
+            );
+            owned_parameters.push(handle);
+        }
+    }
+    links.extend([
+        (write_dep, false, true, 0, array_block),
+        (read_dep, true, false, 0, source_block),
+        (both_dep, true, true, i32::MIN, insert),
+    ]);
+    for (id, (handle, read, write, order, target)) in (1..).zip(links.iter().copied()) {
         document.objects.insert(
             handle,
             associative(
@@ -1052,6 +1387,8 @@ pub fn create(
     if let Some(EntityType::Insert(array)) = document.get_entity_mut(insert) {
         array.common.reactors.push(both_dep);
     }
+    document.add_object_reactor(array_block, write_dep);
+    document.add_object_reactor(source_block, read_dep);
     let items = placements
         .iter()
         .zip(&item_handles)
@@ -1079,7 +1416,8 @@ pub fn create(
         .collect();
     let parameter_block = match kind {
         ArrayKind::Polar => "AcDbAssocArrayPolarParameters",
-        _ => "AcDbAssocArrayRectangularParameters",
+        ArrayKind::Path => "AcDbAssocArrayPathParameters",
+        ArrayKind::Rectangular => "AcDbAssocArrayRectangularParameters",
     };
     document.objects.insert(
         body,
@@ -1125,13 +1463,14 @@ pub fn create(
                 owning_network: network,
                 action_body: body,
                 action_index,
-                max_dependency_index: 3,
-                dependencies: [write_dep, read_dep, both_dep]
-                    .map(|dependency| AssocActionDependency {
+                max_dependency_index: links.len() as i32,
+                dependencies: links
+                    .iter()
+                    .map(|&(dependency, ..)| AssocActionDependency {
                         is_owned: true,
                         dependency,
                     })
-                    .to_vec(),
+                    .collect(),
                 owned_parameters,
                 values: params,
                 ..Default::default()
@@ -1163,6 +1502,7 @@ pub fn create_from_spec(
             source_point,
             ArrayKind::Rectangular,
             rectangular_params(columns, rows, column_spacing, row_spacing),
+            None,
         ),
         AssocArraySpec::Polar {
             center,
@@ -1183,7 +1523,388 @@ pub fn create_from_spec(
                 center,
                 ArrayKind::Polar,
                 params,
+                None,
             )
         }
+        AssocArraySpec::Path {
+            path,
+            items,
+            spacing,
+            divide,
+            reversed,
+        } => create(
+            scene,
+            sources,
+            source_point,
+            DVec3::ZERO,
+            ArrayKind::Path,
+            path_params(items, spacing, divide, reversed),
+            Some(path),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codec::objects::{AssociativeData, ObjectType};
+
+    #[test]
+    fn saved_array_networks_keep_the_dxf_name_autocad_reads() {
+        let mut scene = crate::scene::Scene::new();
+        let circle = scene.add_entity(codec::EntityType::Circle(
+            codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 5.0),
+        ));
+        let spec = AssocArraySpec::Rectangular {
+            columns: 3,
+            rows: 3,
+            column_spacing: 20.0,
+            row_spacing: 20.0,
+        };
+        create_from_spec(&mut scene, &[circle], DVec3::ZERO, &spec).unwrap();
+        // Saving rebuilds the networks around the array action.
+        scene.sync_native_parametric_graph();
+
+        let names: Vec<_> = scene
+            .document
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                ObjectType::Associative(object)
+                    if matches!(object.data, AssociativeData::Network(_)) =>
+                {
+                    Some(object.dxf_name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, ["ACDBASSOCNETWORK", "ACDBASSOCNETWORK"]);
+
+        let dxf = codec::DxfWriter::new(&scene.document)
+            .write_to_vec()
+            .unwrap();
+        let text = String::from_utf8_lossy(&dxf).replace("\r\n", "\n");
+        assert!(!text.contains("\n  0\nASSOCNETWORK\n"), "dxf object name");
+        assert_eq!(text.matches("\n  0\nACDBASSOCNETWORK\n").count(), 2);
+    }
+
+    fn assert_block_dependency_reactors(document: &Document, insert: Handle) {
+        let array = array_of_insert(document, insert).unwrap();
+        let action = action(document, array.action).unwrap();
+        for (block, read, write, label) in [
+            (array.array_block, false, true, "item"),
+            (array.source_block, true, false, "source"),
+        ] {
+            assert!(
+                document
+                    .block_records
+                    .iter()
+                    .any(|record| { record.handle == block && record.flags.anonymous }),
+                "{label} must be an anonymous BLOCK_RECORD"
+            );
+            let dependency_handle = action
+                .dependencies
+                .iter()
+                .find_map(|link| {
+                    let dep = dependency(document, link.dependency)?;
+                    (dep.dependent_on == block
+                        && dep.is_read_dependency == read
+                        && dep.is_write_dependency == write)
+                        .then_some(link.dependency)
+                })
+                .expect("array block dependency");
+            assert!(
+                document.object_reactors(block).contains(&dependency_handle),
+                "{label} BLOCK_RECORD must carry its dependency reactor",
+            );
+        }
+    }
+
+    #[test]
+    fn rectangular_array_block_records_carry_their_dependency_reactors() {
+        let mut scene = crate::scene::Scene::new();
+        let source = scene.add_entity(codec::EntityType::Circle(
+            codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
+        ));
+        let spec = AssocArraySpec::Rectangular {
+            columns: 2,
+            rows: 2,
+            column_spacing: 20.0,
+            row_spacing: 20.0,
+        };
+        let insert = create_from_spec(&mut scene, &[source], DVec3::ZERO, &spec).unwrap();
+        assert_block_dependency_reactors(&scene.document, insert);
+    }
+
+    #[test]
+    fn path_array_block_records_carry_their_dependency_reactors() {
+        for divide in [true, false] {
+            let mut scene = crate::scene::Scene::new();
+            let source = scene.add_entity(codec::EntityType::Circle(
+                codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
+            ));
+            let path = scene.add_entity(codec::EntityType::Line(
+                codec::entities::Line::from_coords(0.0, 0.0, 0.0, 60.0, 0.0, 0.0),
+            ));
+            let spec = AssocArraySpec::Path {
+                path,
+                items: 3,
+                spacing: 20.0,
+                divide,
+                reversed: false,
+            };
+            let insert = create_from_spec(&mut scene, &[source], DVec3::ZERO, &spec).unwrap();
+            assert_block_dependency_reactors(&scene.document, insert);
+        }
+    }
+
+    #[test]
+    fn path_array_moved_with_its_path_stays_on_the_path() {
+        let mut scene = crate::scene::Scene::new();
+        let source = scene.add_entity(codec::EntityType::Circle(
+            codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
+        ));
+        let path = scene.add_entity(codec::EntityType::Line(codec::entities::Line::from_coords(
+            0.0, 0.0, 0.0, 100.0, 0.0, 0.0,
+        )));
+        let spec = AssocArraySpec::Path {
+            path,
+            items: 5,
+            spacing: 25.0,
+            divide: false,
+            reversed: false,
+        };
+        let insert = create_from_spec(&mut scene, &[source], DVec3::ZERO, &spec).unwrap();
+        scene.transform_entities(
+            &[path, insert],
+            &crate::command::EntityTransform::Translate(DVec3::new(0.0, 20.0, 0.0)),
+        );
+
+        let document = &scene.document;
+        let array = array_of_insert(document, insert).unwrap();
+        let Some(EntityType::Insert(reference)) = document.get_entity(insert) else {
+            panic!("array reference");
+        };
+        let to_world = crate::scene::render_graph::insert_transform(document, reference);
+        let mut world: Vec<(f64, f64)> = document
+            .block_records
+            .iter()
+            .find(|record| record.handle == array.array_block)
+            .unwrap()
+            .entity_handles
+            .iter()
+            .filter_map(|handle| match document.get_entity(*handle) {
+                Some(EntityType::Insert(item)) => {
+                    let p = to_world.apply(item.insert_point);
+                    Some((p.x, p.y))
+                }
+                _ => None,
+            })
+            .collect();
+        world.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(world.len(), 5);
+        for (index, (x, y)) in world.into_iter().enumerate() {
+            assert!((x - 25.0 * index as f64).abs() < 1e-9, "item {index} x {x}");
+            assert!(
+                (y - 20.0).abs() < 1e-9,
+                "item {index} y {y} off the moved path"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod xdict_tests {
+    use super::*;
+    use crate::scene::Scene;
+    use codec::entities::{AttributeEntity, Insert, Line};
+    use codec::objects::{XRecord, XRecordValue};
+    use codec::types::Vector3;
+    use codec::EntityType;
+
+    fn attach_test_record(scene: &mut Scene, owner: Handle, peer: Handle) -> (Handle, Handle) {
+        let root = scene.document.ensure_extension_dictionary(owner);
+        let record = scene.document.allocate_handle();
+        let mut xrecord = XRecord::named("TEST");
+        xrecord.handle = record;
+        xrecord.owner = root;
+        xrecord.reactors.push(root);
+        xrecord.add_string(1, "payload");
+        for (code, handle) in [(330, root), (340, owner), (350, peer), (360, record)] {
+            xrecord.add_handle(code, handle);
+        }
+        scene
+            .document
+            .objects
+            .insert(record, ObjectType::XRecord(xrecord));
+        let Some(ObjectType::Dictionary(dictionary)) = scene.document.objects.get_mut(&root) else {
+            panic!("extension dictionary must exist");
+        };
+        dictionary.add_entry("TEST", record);
+        dictionary.reactors.push(owner);
+        (root, record)
+    }
+
+    fn assert_tree(scene: &Scene, owner: Handle, root: Handle, peer: Handle) {
+        let Some(ObjectType::Dictionary(dictionary)) = scene.document.objects.get(&root) else {
+            panic!("copied dictionary must exist");
+        };
+        assert_eq!(dictionary.handle, root);
+        assert_eq!(dictionary.owner, owner);
+        assert_eq!(dictionary.reactors, vec![owner]);
+        let record = dictionary.get("TEST").expect("TEST entry preserved");
+        let Some(ObjectType::XRecord(xrecord)) = scene.document.objects.get(&record) else {
+            panic!("copied TEST XRECORD must exist");
+        };
+        assert_eq!(xrecord.handle, record);
+        assert_eq!(xrecord.owner, root);
+        assert_eq!(xrecord.reactors, vec![root]);
+        assert_eq!(xrecord.get_string(1), Some("payload"));
+        for (code, handle) in [(330, root), (340, owner), (350, peer), (360, record)] {
+            assert!(xrecord
+                .entries
+                .iter()
+                .any(|entry| entry.code == code && entry.value == XRecordValue::Handle(handle)));
+        }
+    }
+
+    #[test]
+    fn associative_array_deep_clones_member_xdict() {
+        for spec in [
+            AssocArraySpec::Rectangular {
+                columns: 2,
+                rows: 2,
+                column_spacing: 20.0,
+                row_spacing: 20.0,
+            },
+            AssocArraySpec::Polar {
+                center: DVec3::ZERO,
+                items: 4,
+                fill_angle: std::f64::consts::TAU,
+            },
+        ] {
+            let mut scene = Scene::new();
+            let a = scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::UNIT_X,
+            )));
+            let b = scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::UNIT_Y,
+            )));
+            let (root, record) = attach_test_record(&mut scene, a, b);
+            scene
+                .document
+                .get_entity_mut(a)
+                .unwrap()
+                .common_mut()
+                .reactors = vec![b, root];
+            let root_before = scene.document.objects[&root].clone();
+            let record_before = scene.document.objects[&record].clone();
+            scene.begin_undo_recording();
+            let insert = create_from_spec(&mut scene, &[a, b], DVec3::ZERO, &spec).unwrap();
+            let array = array_of_insert(&scene.document, insert).unwrap();
+            let copies = scene
+                .document
+                .block_records
+                .iter()
+                .find(|r| r.handle == array.source_block)
+                .unwrap()
+                .entity_handles
+                .clone();
+            assert_eq!(copies.len(), 2);
+            let copy = scene.document.get_entity(copies[0]).unwrap();
+            let copy_root = copy.common().xdictionary_handle.expect("copied dictionary");
+            assert_ne!(
+                copy_root, root,
+                "copy must not share the source extension dictionary"
+            );
+            assert_eq!(copy.common().reactors, vec![copies[1]]);
+            assert_tree(&scene, copies[0], copy_root, copies[1]);
+            let Some(ObjectType::Dictionary(dictionary)) = scene.document.objects.get(&copy_root)
+            else {
+                unreachable!();
+            };
+            assert_ne!(dictionary.get("TEST"), Some(record));
+            assert!(scene.document.get_entity(a).is_none());
+            assert!(scene.document.get_entity(b).is_none());
+            assert_eq!(scene.document.objects.get(&root), Some(&root_before));
+            assert_eq!(scene.document.objects.get(&record), Some(&record_before));
+            assert!(scene.take_undo_recording().unwrap().is_poisoned());
+            let copy_tree = scene.document.objects[&copy_root].clone();
+            update(&mut scene, &array, &[("Items", 3.0)]).unwrap();
+            assert_eq!(scene.document.objects.get(&copy_root), Some(&copy_tree));
+            assert_tree(&scene, copies[0], copy_root, copies[1]);
+            for entity in scene.document.entities() {
+                if let Some(dictionary) = entity.common().xdictionary_handle {
+                    assert_ne!(
+                        dictionary, root,
+                        "no live entity may claim the consumed source's dictionary"
+                    );
+                    let Some(ObjectType::Dictionary(d)) = scene.document.objects.get(&dictionary)
+                    else {
+                        panic!("live extension dictionary must exist");
+                    };
+                    assert_eq!(d.owner, entity.common().handle);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn associative_array_deep_clones_inline_attribute_xdict() {
+        let mut scene = Scene::new();
+        scene.define_block_raw("B", Vector3::ZERO, vec![]);
+        let source = scene.add_entity(EntityType::Insert(Insert::new("B", Vector3::ZERO)));
+        let attribute = scene.document.allocate_handle();
+        let (root, record) = attach_test_record(&mut scene, attribute, source);
+        let mut att = AttributeEntity::new("TAG".into(), "value".into());
+        att.common.handle = attribute;
+        att.common.owner_handle = source;
+        att.common.xdictionary_handle = Some(root);
+        att.common.reactors = vec![source];
+        let Some(EntityType::Insert(insert)) = scene.document.get_entity_mut(source) else {
+            unreachable!();
+        };
+        insert.attributes.push(att);
+        let result = create_from_spec(
+            &mut scene,
+            &[source],
+            DVec3::ZERO,
+            &AssocArraySpec::Rectangular {
+                columns: 2,
+                rows: 2,
+                column_spacing: 20.0,
+                row_spacing: 20.0,
+            },
+        )
+        .unwrap();
+        let array = array_of_insert(&scene.document, result).unwrap();
+        let copy = scene
+            .document
+            .block_records
+            .iter()
+            .find(|r| r.handle == array.source_block)
+            .unwrap()
+            .entity_handles[0];
+        let Some(EntityType::Insert(insert)) = scene.document.get_entity(copy) else {
+            unreachable!();
+        };
+        let att = &insert.attributes[0];
+        let copy_root = att.common.xdictionary_handle.unwrap();
+        assert_ne!(att.common.handle, attribute);
+        assert_ne!(copy_root, root);
+        assert_eq!(att.common.owner_handle, copy);
+        assert_eq!(att.common.reactors, vec![copy]);
+        assert_tree(&scene, att.common.handle, copy_root, copy);
+        let Some(ObjectType::Dictionary(dictionary)) = scene.document.objects.get(&copy_root)
+        else {
+            unreachable!();
+        };
+        assert_ne!(dictionary.get("TEST"), Some(record));
+        assert!(scene
+            .document
+            .entities()
+            .all(|entity| entity.common().xdictionary_handle != Some(root)));
     }
 }

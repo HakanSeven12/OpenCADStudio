@@ -22,7 +22,7 @@ pub struct AuthoringVisualOptions {
 impl AuthoringVisualOptions {
     pub(crate) fn new(
         prefs: &crate::app::settings::BlockEditorPreferences,
-        doc: &codec::CadDocument,
+        doc: &codec::Document,
         bg: [f32; 4],
     ) -> Self {
         let foreground = if bg[0] * 0.2126 + bg[1] * 0.7152 + bg[2] * 0.0722 < 0.5 {

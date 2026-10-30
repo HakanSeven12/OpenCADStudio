@@ -4,7 +4,9 @@ use std::any::Any;
 
 use codec::tables::AppId;
 use codec::xdata::ExtendedDataRecord;
-use ocs_plugin_api::host::{CadDocument, EntityType, Handle, HostApi, HostSettingValue};
+use ocs_plugin_api::host::{
+    Document, EntityType, Handle, HostApi, HostSettingValue, PluginClassParameterRow,
+};
 use ocs_plugin_api::shm::{DocumentSnapshotStore, DocumentViewData};
 
 use super::OpenCADStudio;
@@ -107,11 +109,11 @@ impl<'a> HostSession<'a> {
         }
     }
 
-    pub fn document(&self) -> &CadDocument {
+    pub fn document(&self) -> &Document {
         &self.app.tabs[self.tab].scene.document
     }
 
-    pub fn document_mut(&mut self) -> &mut CadDocument {
+    pub fn document_mut(&mut self) -> &mut Document {
         &mut self.app.tabs[self.tab].scene.document
     }
 
@@ -311,38 +313,6 @@ impl<'a> HostSession<'a> {
         Ok(())
     }
 
-    /// The `ACAD_IMAGE_DICT` dictionary under the named-objects root, created
-    /// when the drawing has none. `None` when the drawing has no root dictionary.
-    fn ensure_image_dictionary(&mut self) -> Option<Handle> {
-        use codec::objects::{Dictionary, ObjectType};
-        let root = self.document().header.named_objects_dict_handle;
-        let Some(ObjectType::Dictionary(root_dictionary)) = self.document().objects.get(&root)
-        else {
-            return None;
-        };
-        if let Some(existing) = root_dictionary.get("ACAD_IMAGE_DICT") {
-            if matches!(
-                self.document().objects.get(&existing),
-                Some(ObjectType::Dictionary(_))
-            ) {
-                return Some(existing);
-            }
-        }
-        let handle = self.document_mut().allocate_handle();
-        let mut dictionary = Dictionary::new();
-        dictionary.handle = handle;
-        dictionary.owner = root;
-        self.document_mut()
-            .objects
-            .insert(handle, ObjectType::Dictionary(dictionary));
-        if let Some(ObjectType::Dictionary(root_dictionary)) =
-            self.document_mut().objects.get_mut(&root)
-        {
-            root_dictionary.add_entry("ACAD_IMAGE_DICT", handle);
-        }
-        Some(handle)
-    }
-
     /// A scripted RasterImage names a file; the host creates the image
     /// definition object it needs (pixel size read from the file) and links it.
     fn prepare_scripted_raster_image(&mut self, entity: &mut EntityType) -> Result<(), String> {
@@ -381,27 +351,14 @@ impl<'a> HostSession<'a> {
                 );
                 definition.handle = handle;
                 definition.is_loaded = true;
-                // Register it in ACAD_IMAGE_DICT under the file's name, and let
-                // that dictionary own it, like an image AutoCAD attached.
-                let stem = std::path::Path::new(&image.file_path)
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or("IMAGE")
-                    .to_owned();
-                if let Some(dictionary) = self.ensure_image_dictionary() {
+                if let Some(dictionary) =
+                    crate::app::command_driver::clipboard::register_image_definition(
+                        self.document_mut(),
+                        handle,
+                        &image.file_path,
+                    )
+                {
                     definition.owner = dictionary;
-                    if let Some(codec::objects::ObjectType::Dictionary(entries)) =
-                        self.document_mut().objects.get_mut(&dictionary)
-                    {
-                        let mut key = stem.clone();
-                        let mut suffix = 1;
-                        while entries.get(&key).is_some() {
-                            suffix += 1;
-                            key = format!("{stem}_{suffix}");
-                        }
-                        entries.add_entry(key, handle);
-                    }
                 }
                 self.document_mut().objects.insert(
                     handle,
@@ -1299,9 +1256,65 @@ impl<'a> HostSession<'a> {
     }
 
     pub fn push_undo(&mut self, label: &str) {
+        if self.undo_group_open() {
+            return;
+        }
         self.app.push_undo_snapshot(self.tab, label);
         if let Some(pending) = self.app.tabs[self.tab].history.pending.as_mut() {
             pending.plugin_owned = true;
+        }
+    }
+
+    fn undo_group_open(&self) -> bool {
+        self.app.tabs[self.tab]
+            .history
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.held)
+    }
+
+    pub fn begin_undo_group(&mut self, label: &str) {
+        self.push_undo(label);
+        if let Some(pending) = self.app.tabs[self.tab].history.pending.as_mut() {
+            pending.held = true;
+        }
+    }
+
+    pub fn query_entities(
+        &mut self,
+        query: &str,
+    ) -> Result<ocs_plugin_api::host::EntityPage, String> {
+        let mut request: serde_json::Value =
+            serde_json::from_str(query).map_err(|e| format!("query: {e}"))?;
+        if !request.is_object() {
+            return Err("query: expected a JSON object".to_owned());
+        }
+        request["detail"] = serde_json::json!("summary");
+        request["fields"] = serde_json::json!([]);
+        let answer = self.app.entity_query(self.tab, &request);
+        if answer["ok"] != true {
+            return Err(answer["error"].as_str().unwrap_or("query failed").to_owned());
+        }
+        let entities = answer["entities"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entity| u64::from_str_radix(entity["handle"].as_str()?, 16).ok())
+            .filter_map(|handle| self.document().get_entity(Handle::new(handle)).cloned())
+            .collect();
+        Ok(ocs_plugin_api::host::EntityPage {
+            entities,
+            count: answer["count"].as_u64().unwrap_or(0),
+            next_offset: answer["next_offset"].as_u64(),
+        })
+    }
+
+    pub fn end_undo_group(&mut self) {
+        if self.undo_group_open() {
+            if let Some(pending) = self.app.tabs[self.tab].history.pending.as_mut() {
+                pending.held = false;
+            }
+            self.app.finish_pending_history(self.tab);
         }
     }
 
@@ -1318,7 +1331,26 @@ impl<'a> HostSession<'a> {
             "CTAB" => Some(HostSettingValue::Text(
                 self.app.tabs[self.tab].scene.current_layout.clone(),
             )),
-            _ => None,
+            "CTEXTSTYLE" => Some(HostSettingValue::Text(
+                self.document().header.current_text_style_name.clone(),
+            )),
+            "CELTYPE" => Some(HostSettingValue::Text(
+                self.document().header.current_linetype_name.clone(),
+            )),
+            // Every numeric and point variable `getvar` reads; a point comes
+            // as "x,y,z".
+            other => {
+                let read = crate::app::quick_calc::sysvars(&self.app.tabs[self.tab]);
+                match (read.0)(&other.to_ascii_lowercase())? {
+                    crate::app::calc::SysVar::Number(value) => {
+                        Some(HostSettingValue::Number(value))
+                    }
+                    crate::app::calc::SysVar::Point(p) => {
+                        Some(HostSettingValue::Text(format!("{},{},{}", p.x, p.y, p.z)))
+                    }
+                    crate::app::calc::SysVar::Text => None,
+                }
+            }
         }
     }
 
@@ -1421,7 +1453,7 @@ impl<'a> HostSession<'a> {
         operation: ocs_plugin_api::host::TableOperation,
     ) -> Result<Handle, String> {
         use ocs_plugin_api::host::TableOperation;
-        let layer_handle = |doc: &CadDocument, name: &str| -> Result<Handle, String> {
+        let layer_handle = |doc: &Document, name: &str| -> Result<Handle, String> {
             doc.layers
                 .get(name)
                 .map(|layer| layer.handle)
@@ -2098,7 +2130,7 @@ impl<'a> HostSession<'a> {
                 "layout operations act on the active document; switch to it first".to_owned(),
             );
         }
-        let find = |doc: &CadDocument, name: &str| -> Result<(String, Handle), String> {
+        let find = |doc: &Document, name: &str| -> Result<(String, Handle), String> {
             doc.objects
                 .values()
                 .find_map(|object| match object {
@@ -2321,7 +2353,7 @@ impl<'a> HostSession<'a> {
     ) -> Result<Handle, String> {
         use codec::entities::EntityType as E;
         use ocs_plugin_api::host::TableOperation;
-        let editable_block = |doc: &CadDocument, name: &str| -> Result<(String, Handle), String> {
+        let editable_block = |doc: &Document, name: &str| -> Result<(String, Handle), String> {
             let record = doc
                 .block_records
                 .get(name)
@@ -2622,7 +2654,7 @@ impl<'a> HostSession<'a> {
             TableStyleKind::Text => StyleKind::Text,
             TableStyleKind::Dim => StyleKind::Dim,
         };
-        let stored = |doc: &CadDocument,
+        let stored = |doc: &Document,
                       kind: TableStyleKind,
                       name: &str|
          -> Result<(String, Handle), String> {
@@ -3508,6 +3540,286 @@ impl<'a> HostSession<'a> {
         request.app.drive_headless_task(task)
     }
 
+    /// Turn a declared parametric chain into reference-only display geometry
+    /// (API v14 — the engine lives in `crate::parametric`; the generic ramp
+    /// evaluation, the seam audit and the entity builds happen before any
+    /// change, so every refusal leaves the document untouched and records
+    /// no undo step. `reference_name` is the caller's identity for the
+    /// staged set (echoed in refusals); the host keeps no registry.
+    pub fn stage_parametric_chain(
+        &mut self,
+        reference_name: &str,
+        chain: &ocs_plugin_api::host::ParametricChain,
+        tolerance: f64,
+    ) -> Result<Vec<Handle>, String> {
+        if chain.segments.is_empty() {
+            return Err(format!(
+                "chain {reference_name:?} stages nothing: the chain carries no segments"
+            ));
+        }
+        let (entities, _carriers) = crate::parametric::build_display_entities(chain, tolerance)
+            .map_err(|e| format!("chain {reference_name:?}: {e}"))?;
+        let own_scope = self.ensure_xrecord_undo_scope("Stage parametric chain");
+        let handles = self.add_entities(entities);
+        for handle in &handles {
+            // Designation one-by-one inside the SAME scope, with the
+            // before-image pending-scoped the way set_reference_only does.
+            let before = self.app.tabs[self.tab].scene.reference_only.is_marked(*handle);
+            self.app
+                .record_reference_designation_before_pending(self.tab, *handle, before);
+            self.app
+                .tabs[self.tab]
+                .scene
+                .set_reference_only_membership(*handle, true);
+        }
+        self.bump_geometry();
+        self.set_dirty();
+        self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
+        Ok(handles)
+    }
+
+    /// Evaluate a declared parametric chain at chain position `s` (API v14,
+    /// additive): a pure read — no document state, no undo, no publish.
+    pub fn sample_parametric(
+        &self,
+        chain: &ocs_plugin_api::host::ParametricChain,
+        s: f64,
+    ) -> Result<Option<ocs_plugin_api::host::ParametricSample>, String> {
+        crate::parametric::sample_chain(chain, s)
+    }
+
+    // ── API v14: plugin class objects (additive) ─────────────────────────
+
+    /// Register a plugin-scoped entity class (API v14, additive): TAB-SCOPED
+    /// display-session state (the class survives across requests of the
+    /// owning plugin's session — unlike a session-local registry, the store
+    /// rides the tab like the grip sets do; nothing persists: entries die
+    /// with the plugin, re-declared per load). Re-registering the same
+    /// identity with an equal schema is idempotent; a mismatch refuses
+    /// without touching the live class — a parameter-set change re-stages
+    /// the instances, it never hot-swaps a schema under live entities. The
+    /// plugin id never travels the wire: the runner supplies the serving
+    /// process's own id, so a plugin can only declare in its own name.
+    pub fn register_plugin_class(
+        &mut self,
+        plugin_id: &str,
+        class: &ocs_plugin_api::host::PluginClassDeclaration,
+    ) -> Result<(), String> {
+        let known = crate::plugin::grip_points::visibility(&self.app.disabled_plugins)(plugin_id);
+        if !known {
+            return Err(format!(
+                "plugin {plugin_id:?} is not a loaded, alive plugin; classes must be declared \
+                 by their owner"
+            ));
+        }
+        if class.class_id.is_empty() {
+            return Err("a plugin class declaration needs its identity key".to_owned());
+        }
+        if let Some(entry) = class
+            .grip_schema
+            .iter()
+            .find(|entry| entry.param_name.is_empty())
+        {
+            return Err(format!(
+                "class {}: grip schema entry {} needs its parameter name",
+                class.class_id, entry.grip_id
+            ));
+        }
+        let mut ids: Vec<u64> = class
+            .grip_schema
+            .iter()
+            .map(|entry| entry.grip_id)
+            .collect();
+        ids.sort_unstable();
+        if ids.len() > 1 && ids.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(format!(
+                "class {} declares duplicate grip ids in its schema",
+                class.class_id
+            ));
+        }
+        for parameter in &class.parameters {
+            if parameter.name.is_empty() {
+                return Err(format!(
+                    "class {}: a declared parameter needs its name",
+                    class.class_id
+                ));
+            }
+        }
+        let mut sorted: Vec<&str> = class.parameters.iter().map(|p| p.name.as_str()).collect();
+        sorted.sort_unstable();
+        if sorted.len() > 1 && sorted.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(format!(
+                "class {} declares duplicate parameter names in its schema",
+                class.class_id
+            ));
+        }
+        self.app.tabs[self.tab]
+            .plugin_classes
+            .declare(plugin_id, class.clone())
+    }
+
+    /// Stage one instance of a plugin-registered class (API v14, additive) —
+    /// [`HostSession::stage_parametric_chain`]'s contract generalized: the
+    /// design descriptor is host-evaluated before any change (the v14 engine
+    /// for the `ParametricChain` kind; a kind the host does not know refuses
+    /// at the contract), the staged set carries the class identity key in
+    /// XDATA and a reference-only designation, and the undo composition is
+    /// the entity-write contract. The caller must be the class's owner (the
+    /// store is keyed by declaring plugin; the plugin id never travels the
+    /// wire — the server supplies the process's own id).
+    pub fn stage_plugin_class_instance(
+        &mut self,
+        plugin_id: &str,
+        instance: &ocs_plugin_api::host::PluginClassInstance,
+    ) -> Result<Vec<Handle>, String> {
+        let known = crate::plugin::grip_points::visibility(&self.app.disabled_plugins)(plugin_id);
+        if !known {
+            return Err(format!(
+                "plugin {plugin_id:?} is not a loaded, alive plugin; instances must be staged \
+                 by their owner"
+            ));
+        }
+        let registry = &self.app.tabs[self.tab].plugin_classes;
+        let registered = registry
+            .find(plugin_id, &instance.class_id)
+            .ok_or_else(|| {
+                let owner = registry.owner_of(&instance.class_id);
+                match owner {
+                    Some(owner) => format!(
+                        "class {:?} is owned by plugin {owner:?}; instances must be staged by \
+                         their owner",
+                        instance.class_id
+                    ),
+                    None => format!(
+                        "class {:?} is not registered in this session; register it before \
+                         staging instances",
+                        instance.class_id
+                    ),
+                }
+            })?;
+        if registered.schema_version != instance.schema_version {
+            return Err(format!(
+                "instance of class {:?} was authored for schema version {}, the session \
+                 declares {}",
+                instance.class_id, instance.schema_version, registered.schema_version
+            ));
+        }
+        // The exhaustive match is the expand-velocity point: a newer
+        // plugin kind lands here as a compile-time arm, never as a guess.
+        let (entities, _carriers) = match &instance.design {
+            ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(chain) => {
+                crate::parametric::build_display_entities(chain, instance.tolerance).map_err(
+                    |e| format!("instance of class {:?}: {e}", instance.class_id),
+                )?
+            }
+        };
+        if entities.is_empty() {
+            // Zero-geometry designs record nothing, like zero-length chains.
+            return Ok(Vec::new());
+        }
+        let own_scope = self.ensure_xrecord_undo_scope("Stage plugin class instance");
+        let handles = self.add_entities(entities);
+        for handle in &handles {
+            // Identity stamp: the class key as the XDATA application on every
+            // staged entity (write_record registers the APPID so the stamp
+            // survives the file), carrying the schema version and the record
+            // linkage.
+            let mut stamp = ocs_plugin_api::host::codec::xdata::ExtendedDataRecord::new(
+                instance.class_id.clone(),
+            );
+            stamp.add_value(ocs_plugin_api::host::codec::xdata::XDataValue::Integer32(
+                instance.schema_version as i32,
+            ));
+            if !instance.design_record.is_empty() {
+                stamp.add_value(ocs_plugin_api::host::codec::xdata::XDataValue::String(
+                    instance.design_record.clone(),
+                ));
+            }
+            self.write_record(*handle, stamp);
+            // Designation inside the SAME scope, the before-image
+            // pending-scoped the way set_reference_only does.
+            let before = self.app.tabs[self.tab].scene.reference_only.is_marked(*handle);
+            self.app
+                .record_reference_designation_before_pending(self.tab, *handle, before);
+            self.app
+                .tabs[self.tab]
+                .scene
+                .set_reference_only_membership(*handle, true);
+        }
+        self.bump_geometry();
+        self.set_dirty();
+        self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
+        Ok(handles)
+    }
+
+    /// Read a class instance's declared parameter rows (API v14, additive):
+    /// the identity stamp (XDATA class key) resolves against the tab's
+    /// registry, the design-record linkage resolves under the NOD (root
+    /// pass, then one sub-dictionary level), and every declared parameter
+    /// reads its (name, value) entry pair. Values print exactly what the
+    /// record row carries â€” the host never invents units or semantics for a
+    /// name or kind it does not declare. Strict on purpose (a broken
+    /// linkage or a stale stamp refuses â€” the caller re-stages); the host's
+    /// properties panel renders through the shared core directly, with the
+    /// graceful declared-rows-with-absent-values view. The wire carries the
+    /// read (`PluginRequest::PluginClassInstanceProperties` served through
+    /// the [`HostApi`] impl here; the python `ocs` surface exposes it too).
+    pub fn plugin_class_instance_properties(
+        &self,
+        handle: Handle,
+    ) -> Result<Vec<PluginClassParameterRow>, String> {
+        let binding = resolve_plugin_class_binding(self.app, self.tab, handle)?;
+        let (_, entries) =
+            find_design_record_entries(self.app, self.tab, handle, &binding.design_record)?;
+        rows_from_entries(&binding, &entries)
+    }
+
+    /// Write one declared, editable parameter's (name, value) pair (API v14,
+    /// additive): the design record's entries are patched in place through
+    /// the session's XRecord update path — one undo step of its own (a
+    /// scope-less call), the record marked dirty so the declaring plugin
+    /// re-stages. Refusals — absent entity, no registered class key, a
+    /// stale schema, an unknown or non-editable parameter, a value that
+    /// does not parse per the declared kind, a record without the
+    /// parameter's pair — all happen before any change.
+    pub fn update_plugin_class_instance_parameter(
+        &mut self,
+        handle: Handle,
+        name: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        let binding = resolve_plugin_class_binding(self.app, self.tab, handle)?;
+        let parameter = binding
+            .parameters
+            .iter()
+            .find(|p| p.name == name)
+            .ok_or_else(|| {
+                format!(
+                    "class {:?} has no parameter named {:?}; the host never invents parameter \
+                     semantics",
+                    binding.class_id, name
+                )
+            })?;
+        if !parameter.editable {
+            return Err(format!(
+                "parameter {name:?} of class {:?} is declared read-only; its row never writes",
+                binding.class_id
+            ));
+        }
+        let (path, entries) =
+            find_design_record_entries(self.app, self.tab, handle, &binding.design_record)?;
+        let entries = update_parameter_pair(&binding, name, parameter.value_kind, value, entries)?;
+        let path: Vec<&str> = path.iter().map(String::as_str).collect();
+        self.update_xrecord(&path, &binding.design_record, entries)?;
+        Ok(())
+    }
+
     /// Read several XRecords in one call (API v13): per-entry results, `Err`
     /// per missing path/name instead of failing the whole batch.
     pub fn read_xrecords(
@@ -3626,8 +3938,320 @@ impl<'a> HostSession<'a> {
     }
 }
 
+/// The resolved binding of an entity stamped as a plugin class instance
+/// (API v14): the registered class, its live declared parameter schema, and
+/// the design-record linkage the identity stamp carries.
+pub(in crate::app) struct PluginClassInstanceBinding {
+    pub class_id: String,
+    pub parameters: Vec<ocs_plugin_api::host::PluginClassParameter>,
+    pub design_record: String,
+}
+
+/// Resolve an entity stamped as a plugin class instance (API v14 core,
+/// shared by the session pair and the properties panel): the first XDATA
+/// record whose application name is a registered class key wins; its
+/// Integer32 schema version and String design-record linkage read like
+/// staging wrote them; a stale schema refuses (the record layer stays
+/// authoritative — the stamp re-stages instead of rendering).
+pub(in crate::app) fn resolve_plugin_class_binding(
+    app: &OpenCADStudio,
+    tab: usize,
+    handle: codec::Handle,
+) -> Result<PluginClassInstanceBinding, String> {
+    let Some(entity) = app.tabs[tab].scene.document.get_entity(handle) else {
+        return Err(format!("entity {handle:?} does not exist"));
+    };
+    let registry = &app.tabs[tab].plugin_classes;
+    for record in entity.common().extended_data.records() {
+        if record.application_name.is_empty() {
+            continue;
+        }
+        let Some(owner) = registry.owner_of(&record.application_name) else {
+            continue;
+        };
+        let Some(declaration) = registry.find(owner, &record.application_name) else {
+            continue;
+        };
+        let Some(codec::xdata::XDataValue::Integer32(schema)) = record.values.first() else {
+            return Err(format!(
+                "entity {handle:?} carries the class stamp {:?} without its schema version",
+                record.application_name
+            ));
+        };
+        let schema = u32::try_from(*schema).map_err(|_| {
+            format!(
+                "entity {handle:?} carries class stamp {:?} with a version that is not a \
+                 version number",
+                record.application_name
+            )
+        })?;
+        let design_record = match record.values.get(1) {
+            Some(codec::xdata::XDataValue::String(linkage)) => linkage.clone(),
+            _ => String::new(),
+        };
+        if schema != declaration.schema_version {
+            return Err(format!(
+                "entity {handle:?} carries an instance of class {:?} authored for schema \
+                 version {schema}, the session declares {}",
+                declaration.class_id, declaration.schema_version
+            ));
+        }
+        return Ok(PluginClassInstanceBinding {
+            class_id: record.application_name.clone(),
+            parameters: declaration.parameters.clone(),
+            design_record,
+        });
+    }
+    Err(format!(
+        "entity {handle:?} carries no registered plugin class key in its XDATA"
+    ))
+}
+
+/// Resolve the design record the binding links (API v14 core): NOD root
+/// first, then one sub-dictionary level (a plugin keeps its records under
+/// one) — the identity stamp names the record, never its
+/// path, so the resolver searches rather than invents a layout. Returns the
+/// dictionary path (usable by the XRecord update) and the entries.
+pub(in crate::app) fn find_design_record_entries(
+    app: &OpenCADStudio,
+    tab: usize,
+    _handle: codec::Handle,
+    name: &str,
+) -> Result<(Vec<String>, Vec<codec::objects::XRecordEntry>), String> {
+    use codec::objects::ObjectType;
+    let name = validated_symbol_name(name, "a design record name")?;
+    let doc = &app.tabs[tab].scene.document;
+    let root = doc.header.named_objects_dict_handle;
+    let is_dictionary = |candidate: codec::Handle| {
+        matches!(doc.objects.get(&candidate), Some(ObjectType::Dictionary(_)))
+    };
+    if is_dictionary(root) {
+        let Some(ObjectType::Dictionary(root_dict)) = doc.objects.get(&root) else {
+            unreachable!("checked by is_dictionary");
+        };
+        if let Some(record) = root_dict.get(&name) {
+            return match doc.objects.get(&record) {
+                Some(ObjectType::XRecord(xrecord)) => Ok((Vec::new(), xrecord.entries.clone())),
+                _ => Err(format!("dictionary entry {name:?} is not an XRecord")),
+            };
+        }
+        for (key, child) in &root_dict.entries {
+            if !is_dictionary(*child) {
+                continue;
+            }
+            let Some(ObjectType::Dictionary(sub)) = doc.objects.get(child) else {
+                unreachable!("checked by is_dictionary");
+            };
+            if let Some(record) = sub.get(&name) {
+                return match doc.objects.get(&record) {
+                    Some(ObjectType::XRecord(xrecord)) => {
+                        Ok((vec![key.clone()], xrecord.entries.clone()))
+                    }
+                    _ => Err(format!("dictionary entry {name:?} is not an XRecord")),
+                };
+            }
+        }
+    }
+    Err(format!(
+        "the design record {name:?} cannot be resolved from the NOD root or one level of its \
+         sub-dictionaries; the identity stamp names the record, not its path"
+    ))
+}
+
+/// The declared schema as rows with absent values (API v14 core, the
+/// panel's base view: the host renders the declaration, the record fills
+/// the values).
+pub(in crate::app) fn rows_from_schema(
+    binding: &PluginClassInstanceBinding,
+) -> Vec<PluginClassParameterRow> {
+    binding
+        .parameters
+        .iter()
+        .map(|parameter| PluginClassParameterRow {
+            name: parameter.name.clone(),
+            value_kind: parameter.value_kind,
+            editable: parameter.editable,
+            value: None,
+        })
+        .collect()
+}
+
+/// The rows read the declared layout: alternating (String name, value)
+/// entries from the record's first entry — the pair layout the declaration
+/// owns; names the schema does not declare are the plugin's own pairs and
+/// stay untouched by the reader.
+pub(in crate::app) fn rows_from_entries(
+    binding: &PluginClassInstanceBinding,
+    entries: &[codec::objects::XRecordEntry],
+) -> Result<Vec<PluginClassParameterRow>, String> {
+    use codec::objects::XRecordValue;
+    use ocs_plugin_api::host::PluginClassParameterKind;
+    let mut rows = rows_from_schema(binding);
+    let mut index = 0usize;
+    while index + 1 < entries.len() {
+        let codec::objects::XRecordValue::String(pair_name) = &entries[index].value else {
+            return Err(format!(
+                "the design record of class {:?} breaks its alternating (name, value) pair \
+                 layout at entry {index}",
+                binding.class_id
+            ));
+        };
+        let value_entry = &entries[index + 1];
+        if let Some(row) = rows.iter_mut().find(|row| row.name == *pair_name) {
+            let printed = match row.value_kind {
+                PluginClassParameterKind::Real => match &value_entry.value {
+                    XRecordValue::Double(v) => Some(v.to_string()),
+                    XRecordValue::Int16(v) => Some(f64::from(*v).to_string()),
+                    XRecordValue::Int32(v) => Some(f64::from(*v).to_string()),
+                    XRecordValue::Int64(v) => Some((*v as f64).to_string()),
+                    other => {
+                        return Err(format!(
+                            "parameter {:?} of class {:?} is declared a Real; the record row \
+                             carries {other:?}",
+                            row.name, binding.class_id
+                        ))
+                    }
+                },
+                PluginClassParameterKind::Integer => match &value_entry.value {
+                    XRecordValue::Int16(v) => Some(i64::from(*v).to_string()),
+                    XRecordValue::Int32(v) => Some(i64::from(*v).to_string()),
+                    XRecordValue::Int64(v) => Some(v.to_string()),
+                    other => {
+                        return Err(format!(
+                            "parameter {:?} of class {:?} is declared an Integer; the record \
+                             row carries {other:?}",
+                            row.name, binding.class_id
+                        ))
+                    }
+                },
+                PluginClassParameterKind::Text => match &value_entry.value {
+                    XRecordValue::String(v) => Some(v.clone()),
+                    other => {
+                        return Err(format!(
+                            "parameter {:?} of class {:?} is declared Text; the record row \
+                             carries {other:?}",
+                            row.name, binding.class_id
+                        ))
+                    }
+                },
+            };
+            row.value = printed;
+        }
+        index += 2;
+    }
+    Ok(rows)
+}
+
+/// Patch one declared parameter's (name, value) pair in the design record's
+/// entries (API v14 core): the value entry's group code and its neighbours
+/// stay untouched; nothing is created in the plugin's record layer.
+pub(in crate::app) fn update_parameter_pair(
+    binding: &PluginClassInstanceBinding,
+    name: &str,
+    value_kind: ocs_plugin_api::host::PluginClassParameterKind,
+    value: &str,
+    entries: Vec<codec::objects::XRecordEntry>,
+) -> Result<Vec<codec::objects::XRecordEntry>, String> {
+    let Some(name_index) =
+        find_parameter_pair(&binding.class_id, &binding.design_record, name, &entries)?
+    else {
+        return Err(format!(
+            "the design record {:?} of class {:?} does not carry {:?}; the host creates \
+             nothing in the plugin's record layer",
+            binding.design_record, binding.class_id, name
+        ));
+    };
+    let parsed = parse_parameter_value(value_kind, value, &binding.class_id, name)?;
+    let value_index = name_index + 1;
+    let code = entries[value_index].code;
+    let mut entries = entries;
+    entries[value_index] = codec::objects::XRecordEntry::new(code, parsed);
+    Ok(entries)
+}
+
+/// Locate the named pair in the alternating (name, value) layout: the index
+/// of the name entry whose value entry follows. Duplicates and a name
+/// without its value refuse.
+fn find_parameter_pair(
+    class_id: &str,
+    record_name: &str,
+    name: &str,
+    entries: &[codec::objects::XRecordEntry],
+) -> Result<Option<usize>, String> {
+    let mut found: Option<usize> = None;
+    let mut index = 0usize;
+    while index < entries.len() {
+        let codec::objects::XRecordValue::String(pair_name) = &entries[index].value else {
+            return Err(format!(
+                "the design record {record_name:?} of class {class_id:?} breaks its \
+                 alternating (name, value) pair layout at entry {index}"
+            ));
+        };
+        if pair_name == name {
+            if found.is_some() {
+                return Err(format!(
+                    "the design record {record_name:?} of class {class_id:?} names {name:?} \
+                     more than once"
+                ));
+            }
+            if index + 1 >= entries.len() {
+                return Err(format!(
+                    "the design record {record_name:?} of class {class_id:?} carries {name:?} \
+                     without its value pair"
+                ));
+            }
+            found = Some(index);
+        }
+        index += 2;
+    }
+    Ok(found)
+}
+
+/// Parse one parameter value per its declared kind (API v14 core): Real =
+/// a finite double, Integer = an integer carried Int32-when-it-fits,
+/// Text = the string verbatim.
+fn parse_parameter_value(
+    value_kind: ocs_plugin_api::host::PluginClassParameterKind,
+    value: &str,
+    class_id: &str,
+    name: &str,
+) -> Result<codec::objects::XRecordValue, String> {
+    use codec::objects::XRecordValue;
+    use ocs_plugin_api::host::PluginClassParameterKind;
+    match value_kind {
+        PluginClassParameterKind::Real => {
+            let parsed: f64 = value.trim().parse().map_err(|_| {
+                format!(
+                    "parameter {name:?} of class {class_id:?} needs a number; {value:?} does \
+                     not parse"
+                )
+            })?;
+            if !parsed.is_finite() {
+                return Err(format!(
+                    "parameter {name:?} of class {class_id:?} writes a finite number only"
+                ));
+            }
+            Ok(XRecordValue::Double(parsed))
+        }
+        PluginClassParameterKind::Integer => {
+            let parsed: i64 = value.trim().parse().map_err(|_| {
+                format!(
+                    "parameter {name:?} of class {class_id:?} needs an integer; {value:?} \
+                     does not parse"
+                )
+            })?;
+            if (i32::MIN as i64..=i32::MAX as i64).contains(&parsed) {
+                Ok(XRecordValue::Int32(parsed as i32))
+            } else {
+                Ok(XRecordValue::Int64(parsed))
+            }
+        }
+        PluginClassParameterKind::Text => Ok(XRecordValue::String(value.to_string())),
+    }
+}
+
 /// True when block `outer` (transitively) contains an insert of `target`.
-fn block_nests(doc: &CadDocument, outer: &str, target: &str, depth: usize) -> bool {
+fn block_nests(doc: &Document, outer: &str, target: &str, depth: usize) -> bool {
     if depth > 64 {
         return true;
     }
@@ -3758,7 +4382,7 @@ fn apply_text_style_config(
 /// refused; unknown keys and wrongly typed values are refused too. `dimtxsty`
 /// must name an existing text style, whose handle is linked here.
 fn apply_dim_style_json(
-    doc: &CadDocument,
+    doc: &Document,
     base: &codec::tables::DimStyle,
     properties: &str,
 ) -> Result<codec::tables::DimStyle, String> {
@@ -3808,8 +4432,8 @@ fn apply_dim_style_json(
 /// The stored spelling of `name` in the drawing's linetype table, loading the
 /// standard linetypes first when it is not there yet. `None` when the drawing
 /// cannot supply it: a layer must not reference a linetype that does not exist.
-fn resolve_linetype(doc: &mut codec::CadDocument, name: &str) -> Option<String> {
-    let stored = |doc: &codec::CadDocument| doc.line_types.get(name).map(|lt| lt.name.clone());
+fn resolve_linetype(doc: &mut codec::Document, name: &str) -> Option<String> {
+    let stored = |doc: &codec::Document| doc.line_types.get(name).map(|lt| lt.name.clone());
     stored(doc).or_else(|| {
         crate::io::linetypes::populate_document(doc);
         stored(doc)
@@ -3825,10 +4449,10 @@ impl HostApi for HostSession<'_> {
     fn tab_index(&self) -> usize {
         self.tab_index()
     }
-    fn document(&self) -> &CadDocument {
+    fn document(&self) -> &Document {
         self.document()
     }
-    fn document_mut(&mut self) -> &mut CadDocument {
+    fn document_mut(&mut self) -> &mut Document {
         self.document_mut()
     }
     fn add_entity(&mut self, entity: EntityType) -> Handle {
@@ -3877,6 +4501,18 @@ impl HostApi for HostSession<'_> {
     fn push_undo(&mut self, label: &str) {
         self.push_undo(label)
     }
+    fn begin_undo_group(&mut self, label: &str) {
+        self.begin_undo_group(label)
+    }
+    fn end_undo_group(&mut self) {
+        self.end_undo_group()
+    }
+    fn query_entities(
+        &mut self,
+        query: &str,
+    ) -> Result<ocs_plugin_api::host::EntityPage, String> {
+        self.query_entities(query)
+    }
     fn set_dirty(&mut self) {
         self.set_dirty()
     }
@@ -3890,8 +4526,12 @@ impl HostApi for HostSession<'_> {
         self.push_error(msg)
     }
     fn start_interactive(&mut self, command: Box<dyn ocs_plugin_api::host::InteractiveCommand>) {
+        let dialog = command.modal_dialog();
         self.app.tabs[self.tab].active_cmd =
             Some(Box::new(PluginInteractiveAdapter { inner: command }));
+        if let Some(def) = dialog {
+            self.app.open_plugin_dialog(def);
+        }
     }
     fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)> {
         self.app.tabs[self.tab]
@@ -4045,6 +4685,154 @@ impl HostApi for HostSession<'_> {
     ) -> Result<Vec<(String, Vec<ocs_plugin_api::host::XRecordEntry>)>, String> {
         self.list_xrecords_with_entries(dictionary_path)
     }
+    fn stage_parametric_chain(
+        &mut self,
+        reference_name: &str,
+        chain: &ocs_plugin_api::host::ParametricChain,
+        tolerance: f64,
+    ) -> Result<Vec<Handle>, String> {
+        self.stage_parametric_chain(reference_name, chain, tolerance)
+    }
+    fn sample_parametric(
+        &self,
+        chain: &ocs_plugin_api::host::ParametricChain,
+        s: f64,
+    ) -> Result<Option<ocs_plugin_api::host::ParametricSample>, String> {
+        self.sample_parametric(chain, s)
+    }
+    fn register_plugin_class(
+        &mut self,
+        plugin_id: &str,
+        class: &ocs_plugin_api::host::PluginClassDeclaration,
+    ) -> Result<(), String> {
+        self.register_plugin_class(plugin_id, class)
+    }
+    fn stage_plugin_class_instance(
+        &mut self,
+        plugin_id: &str,
+        instance: &ocs_plugin_api::host::PluginClassInstance,
+    ) -> Result<Vec<Handle>, String> {
+        self.stage_plugin_class_instance(plugin_id, instance)
+    }
+    fn plugin_class_instance_properties(
+        &self,
+        handle: Handle,
+    ) -> Result<Vec<ocs_plugin_api::host::PluginClassParameterRow>, String> {
+        // API v14 (additive): the wire frame serves the session's own read —
+        // the identity stamp resolves, the design record prints its declared
+        // rows. Same-name inherent call resolution: see register_plugin_class.
+        self.plugin_class_instance_properties(handle)
+    }
+
+    fn show_dialog(&mut self, dialog: ocs_plugin_api::dialog::DialogDef) -> ocs_plugin_api::dialog::DialogResponse {
+        self.app.open_plugin_dialog(dialog);
+        ocs_plugin_api::dialog::DialogResponse::Cancelled
+    }
+    fn register_panel(&mut self, panel: ocs_plugin_api::dialog::PanelDef) -> bool {
+        let id = panel.id.clone();
+        let cmd_opt = panel.command.clone();
+        let num = if let Some(&existing_num) = self.app.plugin_panel_ids.get(&id) {
+            existing_num
+        } else {
+            let next_num = (self.app.plugin_panel_ids.len() as u32) + 1;
+            self.app.plugin_panel_ids.insert(id.clone(), next_num);
+            self.app.plugin_panel_by_num.insert(next_num, id.clone());
+            next_num
+        };
+
+        let panel_enum = crate::ui::dock::PanelId::Plugin(num);
+        if self.app.dock.location(panel_enum).is_none() {
+            self.app.dock.dock(panel_enum, crate::app::config::DockSide::Right, usize::MAX);
+        }
+        if let Some(w) = panel.width {
+            let mut panel_settings = self.app.dock.settings(panel_enum);
+            panel_settings.width = w;
+            self.app.dock.panels.insert(panel_enum, panel_settings);
+        }
+
+        let state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
+        self.app.plugin_panels.insert(id.clone(), state);
+
+        // Keep command line autocomplete updated with dynamic panel commands
+        if let Some(ref c) = cmd_opt {
+            let cu = c.to_uppercase();
+            if !self.app.command_line.dynamic_commands.contains(&cu) {
+                self.app.command_line.dynamic_commands.push(cu);
+            }
+        }
+        let id_u = id.to_uppercase();
+        if !self.app.command_line.dynamic_commands.contains(&id_u) {
+            self.app.command_line.dynamic_commands.push(id_u);
+        }
+
+        true
+    }
+    fn update_panel(
+        &mut self,
+        panel_id: &str,
+        values: std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
+    ) -> bool {
+        if let Some(panel) = self.app.plugin_panels.get_mut(panel_id) {
+            panel.update_values(values);
+            return true;
+        }
+        let lower = panel_id.to_lowercase();
+        if let Some((_, panel)) = self.app.plugin_panels.iter_mut().find(|(k, _)| k.to_lowercase() == lower) {
+            panel.update_values(values);
+            return true;
+        }
+        false
+    }
+    fn toggle_panel(&mut self, panel_id: &str, show: Option<bool>) -> bool {
+        let matched_id = if self.app.plugin_panel_ids.contains_key(panel_id) {
+            Some(panel_id.to_string())
+        } else {
+            let lower = panel_id.to_lowercase();
+            let stripped = lower.replace([' ', '_', '-'], "");
+            self.app.plugin_panel_ids.keys().find(|k| {
+                k.to_lowercase() == lower || k.replace([' ', '_', '-'], "").to_lowercase() == stripped
+            }).cloned().or_else(|| {
+                self.app.plugin_panels.iter().find(|(k, state)| {
+                    k.to_lowercase() == lower
+                        || k.replace([' ', '_', '-'], "").to_lowercase() == stripped
+                        || state.def.title.to_lowercase() == lower
+                        || state.def.title.replace([' ', '_', '-'], "").to_lowercase() == stripped
+                        || state.def.command.as_ref().is_some_and(|c| {
+                            c.to_lowercase() == lower || c.replace([' ', '_', '-'], "").to_lowercase() == stripped
+                        })
+                }).map(|(k, _)| k.clone())
+            })
+        };
+
+        if let Some(ref id) = matched_id {
+            if let Some(&num) = self.app.plugin_panel_ids.get(id) {
+                let panel_enum = crate::ui::dock::PanelId::Plugin(num);
+                let is_currently_open = self.app.plugin_panels.get(id).map(|p| p.visible).unwrap_or(false);
+
+                let new_visible = if let Some(s) = show {
+                    s
+                } else {
+                    !is_currently_open
+                };
+
+                if let Some(panel) = self.app.plugin_panels.get_mut(id) {
+                    panel.visible = new_visible;
+                }
+
+                if new_visible {
+                    if self.app.dock.location(panel_enum).is_none() {
+                        self.app.dock.dock(panel_enum, crate::app::config::DockSide::Right, usize::MAX);
+                    }
+                    self.app.dock_reveal(panel_enum);
+                } else {
+                    let _ = self.app.dock_set_open(panel_enum, false);
+                }
+                return true;
+            }
+        }
+        false
+
+    }
 }
 
 /// Bridges a plugin's [`InteractiveCommand`](ocs_plugin_api::host::InteractiveCommand)
@@ -4058,6 +4846,12 @@ struct PluginInteractiveAdapter {
 impl crate::command::CadCommand for PluginInteractiveAdapter {
     fn name(&self) -> &'static str {
         "PLUGIN"
+    }
+    fn preserve_commit_style(&self) -> bool {
+        true
+    }
+    fn preserve_commit_layer(&self) -> bool {
+        true
     }
     // Every call into the plugin runs under a panic guard (#145): a buggy plugin
     // that panics mid-command leaves the host running — the command just ends.
@@ -4130,6 +4924,23 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
     fn entity_pick_highlights_hover(&self) -> bool {
         self.needs_entity_pick() || self.is_selection_gathering()
     }
+    fn modal_dialog(&self) -> Option<ocs_plugin_api::dialog::DialogDef> {
+        crate::plugin::guard("InteractiveCommand::modal_dialog", || self.inner.modal_dialog())
+            .unwrap_or(None)
+    }
+    fn on_dialog_response(&mut self, response: ocs_plugin_api::dialog::DialogResponse) -> crate::command::CmdResult {
+        crate::plugin::guard("InteractiveCommand::on_dialog_response", || {
+            self.inner.on_dialog_response(response)
+        })
+        .map(plugin_step_to_result)
+        .unwrap_or(crate::command::CmdResult::Cancel)
+    }
+    fn take_pending_panel_updates(&mut self) -> Vec<(String, std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>)> {
+        crate::plugin::guard("InteractiveCommand::take_pending_panel_updates", || {
+            self.inner.take_pending_panel_updates()
+        })
+        .unwrap_or_default()
+    }
 }
 
 /// Bridges an out-of-process plugin's interactive command to the host's
@@ -4200,6 +5011,12 @@ impl Drop for PluginProcessInteractiveAdapter {
 impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
     fn name(&self) -> &'static str {
         "PLUGIN"
+    }
+    fn preserve_commit_style(&self) -> bool {
+        true
+    }
+    fn preserve_commit_layer(&self) -> bool {
+        true
     }
     fn prompt(&self) -> String {
         self.prompt.clone().unwrap_or_default()
@@ -4322,6 +5139,30 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
     }
     fn selection_rejects_locked_layers(&self) -> bool {
         self.selection_rejects_locked_layers.unwrap_or(false)
+    }
+    fn modal_dialog(&self) -> Option<ocs_plugin_api::dialog::DialogDef> {
+        self.process.get_modal_dialog(self.command_id).ok().flatten()
+    }
+    fn on_dialog_response(&mut self, response: ocs_plugin_api::dialog::DialogResponse) -> crate::command::CmdResult {
+        use ocs_plugin_api::ipc::protocol::InteractiveEvent;
+        let result = self
+            .process
+            .interactive_event(self.command_id, InteractiveEvent::DialogResponse(response))
+            .map(plugin_step_to_result)
+            .unwrap_or(crate::command::CmdResult::Cancel);
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Done
+                | crate::command::CmdResult::Script(_)
+                | crate::command::CmdResult::Cancel
+        ) {
+            self.is_done = true;
+        } else {
+            self.refresh();
+        }
+        result
     }
 }
 
@@ -4648,25 +5489,25 @@ mod tests {
 
         // Create seeds the namespace: the dictionary chain is auto-created and
         // reading returns the entries verbatim.
-        let alpha = host.create_xrecord(&["CVIFC"], "alpha", entries()).unwrap();
+        let alpha = host.create_xrecord(&["PLUGIN"], "alpha", entries()).unwrap();
         assert!(!alpha.is_null());
-        assert_eq!(host.read_xrecord(&["CVIFC"], "alpha").unwrap(), entries());
+        assert_eq!(host.read_xrecord(&["PLUGIN"], "alpha").unwrap(), entries());
         // Dictionary lookup is case-insensitive, both for the path …
-        assert_eq!(host.read_xrecord(&["cvifc"], "alpha").unwrap(), entries());
-        // … and re-creating an existing name is refused without any change.
+assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
+        // â€¦ and re-creating an existing name is refused without any change.
         assert!(host
-            .create_xrecord(&["cvifc"], "ALPHA", entries())
+            .create_xrecord(&["plugin"], "ALPHA", entries())
             .unwrap_err()
             .contains("already exists"));
 
-        // Namespace reuse is idempotent: the root still holds one CVIFC entry.
-        let beta = host.create_xrecord(&["CVIFC"], "beta", entries()).unwrap();
+        // Namespace reuse is idempotent: the root still holds one PLUGIN entry.
+        let beta = host.create_xrecord(&["PLUGIN"], "beta", entries()).unwrap();
         let root = host.document().header.named_objects_dict_handle;
         let cvifc_entries = match host.document().objects.get(&root) {
             Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
                 .entries
                 .iter()
-                .filter(|(key, _)| key.eq_ignore_ascii_case("CVIFC"))
+                .filter(|(key, _)| key.eq_ignore_ascii_case("PLUGIN"))
                 .count(),
             _ => 0,
         };
@@ -4674,14 +5515,14 @@ mod tests {
 
         // Listing names only the keys that address XRecords, in dictionary
         // order; a nested dictionary is not an XRecord.
-        host.create_xrecord(&["CVIFC", "LAYOUTS"], "nested", entries())
+        host.create_xrecord(&["PLUGIN", "LAYOUTS"], "nested", entries())
             .unwrap();
         assert_eq!(
-            host.list_xrecords(&["CVIFC"]).unwrap(),
+            host.list_xrecords(&["PLUGIN"]).unwrap(),
             vec!["alpha".to_owned(), "beta".to_owned()]
         );
         assert_eq!(
-            host.list_xrecords(&["CVIFC", "LAYOUTS"]).unwrap(),
+            host.list_xrecords(&["PLUGIN", "LAYOUTS"]).unwrap(),
             vec!["nested".to_owned()]
         );
         // The root dictionary holds non-XRecord entries (ACAD_LAYOUT et al.);
@@ -4693,14 +5534,14 @@ mod tests {
 
         // Update refuses on a missing name and never creates anything.
         assert!(host
-            .update_xrecord(&["CVIFC"], "gamma", entries())
+            .update_xrecord(&["PLUGIN"], "gamma", entries())
             .unwrap_err()
             .contains("does not exist"));
         // Case-insensitive resolution finds the stored ALPHA and replaces its
         // entries atomically; the handle is stable.
         assert_eq!(
             host.update_xrecord(
-                &["CVIFC"],
+                &["PLUGIN"],
                 "ALPHA",
                 vec![codec::objects::XRecordEntry::string(1, "v2")]
             )
@@ -4708,7 +5549,7 @@ mod tests {
             alpha
         );
         assert_eq!(
-            host.read_xrecord(&["CVIFC"], "alpha").unwrap(),
+            host.read_xrecord(&["PLUGIN"], "alpha").unwrap(),
             vec![codec::objects::XRecordEntry::string(1, "v2")]
         );
 
@@ -4716,7 +5557,7 @@ mod tests {
         // group codes refuse (5 and 105 are the object handle codes).
         assert!(host
             .create_xrecord(
-                &["CVIFC"],
+                &["PLUGIN"],
                 "gamma",
                 vec![codec::objects::XRecordEntry::int16(5, 1)]
             )
@@ -4724,7 +5565,7 @@ mod tests {
             .contains("reserved"));
         assert!(host
             .create_xrecord(
-                &["CVIFC"],
+                &["PLUGIN"],
                 "gamma",
                 vec![codec::objects::XRecordEntry::int16(400, 1)]
             )
@@ -4732,21 +5573,21 @@ mod tests {
             .contains("out of range"));
         assert!(host
             .update_xrecord(
-                &["CVIFC"],
+                &["PLUGIN"],
                 "alpha",
                 vec![codec::objects::XRecordEntry::int16(105, 1)]
             )
             .is_err());
         assert_eq!(
-            host.read_xrecord(&["CVIFC"], "alpha").unwrap(),
+            host.read_xrecord(&["PLUGIN"], "alpha").unwrap(),
             vec![codec::objects::XRecordEntry::string(1, "v2")]
         );
         // Dictionary and record names are symbol names.
-        assert!(host.create_xrecord(&["CVIFC"], "  ", entries()).is_err());
+        assert!(host.create_xrecord(&["PLUGIN"], "  ", entries()).is_err());
         assert!(host
-            .create_xrecord(&["CVIFC", "A|B"], "gamma", entries())
+            .create_xrecord(&["PLUGIN", "A|B"], "gamma", entries())
             .is_err());
-        assert!(host.create_xrecord(&["CVIFC"], "a<b", entries()).is_err());
+        assert!(host.create_xrecord(&["PLUGIN"], "a<b", entries()).is_err());
 
         // Reads distinguish a missing dictionary, a missing name and a name
         // that addresses another object kind.
@@ -4755,27 +5596,27 @@ mod tests {
             .unwrap_err()
             .contains("does not exist"));
         assert!(host
-            .read_xrecord(&["CVIFC", "LAYOUTS"], "alpha")
+            .read_xrecord(&["PLUGIN", "LAYOUTS"], "alpha")
             .unwrap_err()
             .contains("does not exist"));
         assert!(host
-            .delete_xrecord(&["CVIFC"], "LAYOUTS")
+            .delete_xrecord(&["PLUGIN"], "LAYOUTS")
             .unwrap_err()
             .contains("not an XRecord"));
 
         // Delete removes exactly the named record and returns its content.
-        let removed = host.delete_xrecord(&["CVIFC"], "beta").unwrap();
+        let removed = host.delete_xrecord(&["PLUGIN"], "beta").unwrap();
         assert_eq!(removed.handle, beta);
         assert_eq!(removed.entries, entries());
         assert_eq!(
-            host.list_xrecords(&["CVIFC"]).unwrap(),
+            host.list_xrecords(&["PLUGIN"]).unwrap(),
             vec!["alpha".to_owned()]
         );
         assert!(host
-            .read_xrecord(&["CVIFC"], "beta")
+            .read_xrecord(&["PLUGIN"], "beta")
             .unwrap_err()
             .contains("does not exist"));
-        assert!(host.delete_xrecord(&["CVIFC"], "beta").is_err());
+        assert!(host.delete_xrecord(&["PLUGIN"], "beta").is_err());
     }
 
     #[test]
@@ -4793,34 +5634,34 @@ mod tests {
         {
             let mut host = HostSession::new(&mut app, 0);
             alpha = host
-                .create_xrecord(&["CVIFC"], "alpha", original_entries())
+                .create_xrecord(&["PLUGIN"], "alpha", original_entries())
                 .unwrap();
             beta = host
-                .create_xrecord(&["CVIFC"], "beta", original_entries())
+                .create_xrecord(&["PLUGIN"], "beta", original_entries())
                 .unwrap();
             // Refusals record no undo step.
             assert!(host
-                .create_xrecord(&["CVIFC"], "alpha", original_entries())
+                .create_xrecord(&["PLUGIN"], "alpha", original_entries())
                 .is_err());
             assert!(host
-                .update_xrecord(&["CVIFC"], "gamma", original_entries())
+                .update_xrecord(&["PLUGIN"], "gamma", original_entries())
                 .is_err());
-            host.update_xrecord(&["CVIFC"], "alpha", changed_entries())
+            host.update_xrecord(&["PLUGIN"], "alpha", changed_entries())
                 .unwrap();
-            let removed = host.delete_xrecord(&["CVIFC"], "beta").unwrap();
+            let removed = host.delete_xrecord(&["PLUGIN"], "beta").unwrap();
             assert_eq!(removed.handle, beta);
         }
         app.finish_pending_history(0);
         // Four mutating calls = four undo steps; the refusals recorded none.
         assert_eq!(app.tabs[0].history.undo_stack.len(), 4);
 
-        let xrecord = |doc: &CadDocument, handle: Handle| -> Option<codec::objects::XRecord> {
+        let xrecord = |doc: &Document, handle: Handle| -> Option<codec::objects::XRecord> {
             match doc.objects.get(&handle) {
                 Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
                 _ => None,
             }
         };
-        let has_dictionary_entry = |doc: &CadDocument, name: &str| -> bool {
+        let has_dictionary_entry = |doc: &Document, name: &str| -> bool {
             let root = doc.header.named_objects_dict_handle;
             match doc.objects.get(&root) {
                 Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
@@ -4853,7 +5694,7 @@ mod tests {
         let document = &app.tabs[0].scene.document;
         assert!(xrecord(document, alpha).is_none());
         assert!(
-            !has_dictionary_entry(document, "CVIFC"),
+            !has_dictionary_entry(document, "PLUGIN"),
             "undoing the first create removed the auto-created dictionary"
         );
         // Redo re-applies the whole ladder.
@@ -4882,26 +5723,26 @@ mod tests {
         let (alpha, nested, entity);
         {
             let mut host = HostSession::new(&mut app, 0);
-            host.push_undo("CVI: import");
+            host.push_undo("PLUGIN: import");
             alpha = host
-                .create_xrecord(&["CVIFC"], "alpha", original_entries())
+                .create_xrecord(&["PLUGIN"], "alpha", original_entries())
                 .unwrap();
             nested = host
-                .create_xrecord(&["CVIFC", "LAYOUTS"], "nested", original_entries())
+                .create_xrecord(&["PLUGIN", "LAYOUTS"], "nested", original_entries())
                 .unwrap();
             // A refusal inside the scope records nothing at all.
             assert!(host
-                .create_xrecord(&["CVIFC"], "ALPHA", original_entries())
+                .create_xrecord(&["PLUGIN"], "ALPHA", original_entries())
                 .is_err());
             assert_eq!(
-                host.update_xrecord(&["CVIFC"], "alpha", changed_entries())
+                host.update_xrecord(&["PLUGIN"], "alpha", changed_entries())
                     .unwrap(),
                 alpha
             );
             let beta = host
-                .create_xrecord(&["CVIFC"], "beta", original_entries())
+                .create_xrecord(&["PLUGIN"], "beta", original_entries())
                 .unwrap();
-            let removed = host.delete_xrecord(&["CVIFC"], "beta").unwrap();
+            let removed = host.delete_xrecord(&["PLUGIN"], "beta").unwrap();
             assert_eq!(removed.handle, beta);
             // Entity writes join the same scope and land in the same step.
             entity = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
@@ -4911,15 +5752,15 @@ mod tests {
         app.finish_pending_history(0);
         // The whole plugin operation is ONE undo step under the plugin's label.
         assert_eq!(app.tabs[0].history.undo_stack.len(), 1);
-        assert_eq!(app.tabs[0].history.undo_stack[0].label(), "CVI: import");
+        assert_eq!(app.tabs[0].history.undo_stack[0].label(), "PLUGIN: import");
 
-        let xrecord = |doc: &CadDocument, handle: Handle| -> Option<codec::objects::XRecord> {
+        let xrecord = |doc: &Document, handle: Handle| -> Option<codec::objects::XRecord> {
             match doc.objects.get(&handle) {
                 Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
                 _ => None,
             }
         };
-        let has_dictionary_entry = |doc: &CadDocument, name: &str| -> bool {
+        let has_dictionary_entry = |doc: &Document, name: &str| -> bool {
             let root = doc.header.named_objects_dict_handle;
             match doc.objects.get(&root) {
                 Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
@@ -4936,7 +5777,7 @@ mod tests {
         assert!(xrecord(document, alpha).is_none());
         assert!(xrecord(document, nested).is_none());
         assert!(
-            !has_dictionary_entry(document, "CVIFC"),
+            !has_dictionary_entry(document, "PLUGIN"),
             "undoing the operation removed its auto-created dictionary namespace"
         );
         app.redo_steps(1);
@@ -4949,7 +5790,7 @@ mod tests {
         assert_eq!(alpha_record.entries, changed_entries());
         assert!(xrecord(document, nested).is_some());
         assert!(
-            has_dictionary_entry(document, "CVIFC"),
+            has_dictionary_entry(document, "PLUGIN"),
             "redoing the operation re-seeded its namespace"
         );
     }
@@ -4972,16 +5813,16 @@ mod tests {
         // writers preferred stale raw bytes over the typed entries, the loaded
         // record would still read "stale".
         host.create_xrecord(
-            &["CVIFC", "RECORDS"],
+            &["PLUGIN", "RECORDS"],
             "alpha",
             vec![codec::objects::XRecordEntry::string(1, "stale")],
         )
         .unwrap();
-        host.update_xrecord(&["CVIFC", "RECORDS"], "alpha", entries())
+        host.update_xrecord(&["PLUGIN", "RECORDS"], "alpha", entries())
             .unwrap();
 
         let find_xrecord =
-            |doc: &CadDocument, path: &[&str], name: &str| -> Option<codec::objects::XRecord> {
+            |doc: &Document, path: &[&str], name: &str| -> Option<codec::objects::XRecord> {
                 let mut current = doc.header.named_objects_dict_handle;
                 for fragment in path {
                     match doc.objects.get(&current) {
@@ -5008,7 +5849,7 @@ mod tests {
             codec::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
-        let reloaded = find_xrecord(&dwg, &["CVIFC", "RECORDS"], "alpha")
+        let reloaded = find_xrecord(&dwg, &["PLUGIN", "RECORDS"], "alpha")
             .expect("XRecord in the reloaded DWG");
         assert_eq!(reloaded.entries, entries());
 
@@ -5019,7 +5860,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        let reloaded = find_xrecord(&dxf, &["CVIFC", "RECORDS"], "alpha")
+        let reloaded = find_xrecord(&dxf, &["PLUGIN", "RECORDS"], "alpha")
             .expect("XRecord in the reloaded DXF");
         assert_eq!(reloaded.entries, entries());
     }
@@ -5467,7 +6308,7 @@ mod tests {
         assert_eq!(edited.thickness, created.thickness);
         assert_eq!(host.selection(), vec![handle]);
 
-        let assert_real_glyph = |entity: &EntityType, document: &CadDocument| {
+        let assert_real_glyph = |entity: &EntityType, document: &Document| {
             let EntityType::Shape(shape) = entity else {
                 panic!("expected Shape");
             };
@@ -5730,7 +6571,7 @@ mod tests {
                 .contains(message));
         }
 
-        let assert_persisted = |label: &str, document: &CadDocument, full_text_state: bool| {
+        let assert_persisted = |label: &str, document: &Document, full_text_state: bool| {
             let actual = document.get_entity(handle);
             assert!(
                 matches!(actual, Some(EntityType::AttributeDefinition(value))
@@ -5781,7 +6622,7 @@ mod tests {
             ),
         );
         assert!(host.document().get_entity(handle).is_none());
-        // CadDocument intentionally leaves the block membership slot in place
+        // Document intentionally leaves the block membership slot in place
         // so delta undo can restore the shared entity without rewriting the
         // record. Writers must still omit the absent entity.
         let deleted_dwg = codec::DwgWriter::write_to_vec(host.document()).unwrap();
@@ -5977,7 +6818,7 @@ mod tests {
                 .contains(message));
         }
 
-        let assert_saved = |document: &CadDocument| {
+        let assert_saved = |document: &Document| {
             assert!(
                 matches!(document.get_entity(insert_handle), Some(EntityType::Insert(insert))
                 if insert.attributes.len() == 1
@@ -6011,7 +6852,7 @@ mod tests {
             ),
         );
         assert!(host.nested_attribute(attribute_handle).is_none());
-        let assert_deleted = |document: &CadDocument| {
+        let assert_deleted = |document: &Document| {
             assert!(
                 matches!(document.get_entity(insert_handle), Some(EntityType::Insert(insert))
                     if insert.attributes.is_empty())
@@ -6194,7 +7035,7 @@ mod tests {
             assert!(host.app.command_line.history.last().unwrap().text.contains(message));
         }
 
-        let assert_saved = |document: &CadDocument| {
+        let assert_saved = |document: &Document| {
             assert!(
                 matches!(document.get_entity(hatch_handle), Some(EntityType::Hatch(hatch))
                 if !hatch.is_solid && hatch.pattern.name == "TEST"
@@ -6363,7 +7204,7 @@ mod tests {
         assert_eq!(created_leader.annotation_handle, text_handle);
         assert_eq!(created_leader.vertices.len(), 3);
 
-        let assert_geometry = |entity: &EntityType, document: &CadDocument| {
+        let assert_geometry = |entity: &EntityType, document: &Document| {
             let EntityType::Leader(leader) = entity else {
                 panic!("expected Leader")
             };
@@ -6497,7 +7338,7 @@ mod tests {
         // storing them (opencadcodec writes them for R13-R2007/R13-R14 only), so
         // only DXF must round-trip those three.
         let assert_saved =
-            |document: &CadDocument, is_dxf: bool| {
+            |document: &Document, is_dxf: bool| {
                 let Some(EntityType::Leader(leader)) = document.get_entity(leader_handle) else {
                     panic!("Leader missing after reopen");
                 };
@@ -6709,7 +7550,7 @@ mod tests {
             (vertex.direction.x - 1.0).abs() < 1e-9 && (vertex.miter.y.abs() - 1.0).abs() < 1e-9
         }));
         let assert_lines =
-            |entity: &EntityType, document: &CadDocument, expected_vertices: usize| {
+            |entity: &EntityType, document: &Document, expected_vertices: usize| {
                 let EntityType::MLine(mline) = entity else {
                     panic!("expected MLine")
                 };
@@ -6808,7 +7649,7 @@ mod tests {
         );
         assert_eq!(host.document().get_entity(handle), Some(&expected));
 
-        let assert_saved = |document: &CadDocument| {
+        let assert_saved = |document: &Document| {
             let Some(EntityType::MLine(mline)) = document.get_entity(handle) else {
                 panic!("MLine missing after reopen");
             };
@@ -6986,7 +7827,7 @@ mod tests {
                 D::LargeRadial(_) => "LargeRadial",
             }
         };
-        let handles_by_subtype = |document: &CadDocument| {
+        let handles_by_subtype = |document: &Document| {
             let mut map = std::collections::BTreeMap::new();
             for entity in document.entities() {
                 if let EntityType::Dimension(dimension) = entity {
@@ -7002,7 +7843,7 @@ mod tests {
             "created: {handles:?}; {}",
             last_output(&host)
         );
-        let measured = |document: &CadDocument, handle: Handle| -> f64 {
+        let measured = |document: &Document, handle: Handle| -> f64 {
             let Some(EntityType::Dimension(dimension)) = document.get_entity(handle) else {
                 panic!("Dimension missing");
             };
@@ -7020,7 +7861,7 @@ mod tests {
                 unreachable!()
             };
             assert_eq!(
-                dimension.measurement(),
+                dimension.stored_measurement(),
                 value,
                 "{subtype}: stored measurement is derived"
             );
@@ -8391,8 +9232,10 @@ mod tests {
             expect_reedited: "Polygonal Inside n3 at2.0,3.0 u12.0 v6.0",
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
+            // DXF writes a polygonal boundary closed (the first vertex
+            // again at the end), and reads it back that way.
+            expect_edited_dxf: "Polygonal Inside n4 at2.0,3.0 u10.0 v6.0",
+            expect_reedited_dxf: "Polygonal Inside n4 at2.0,3.0 u12.0 v6.0",
         });
     }
 
@@ -9343,7 +10186,7 @@ mod tests {
             body
         };
         let boxed = sm::box_solid([0.0, 0.0, 0.0], 10.0, 6.0, 4.0).unwrap();
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let solid = make(&boxed);
         report("created box", &solid);
         let handle = doc.add_entity(EntityType::Solid3D(solid.clone())).unwrap();
@@ -9950,7 +10793,7 @@ mod tests {
             list.sort_by_key(|h| h.value());
             list
         };
-        let extent_in = |document: &CadDocument, handle: Handle| {
+        let extent_in = |document: &Document, handle: Handle| {
             let Some(EntityType::Region(region)) = document.get_entity(handle) else {
                 panic!("no region {handle:?}")
             };
@@ -10160,7 +11003,7 @@ mod tests {
                 "{format} re-edit"
             );
         }
-        fn regions_in(document: &CadDocument) -> Vec<Handle> {
+        fn regions_in(document: &Document) -> Vec<Handle> {
             document
                 .entities()
                 .filter_map(|e| match e {
@@ -10224,7 +11067,7 @@ mod tests {
             list.sort_by_key(|h| h.value());
             list
         };
-        let surfaces_in = |document: &CadDocument| {
+        let surfaces_in = |document: &Document| {
             sorted(
                 document
                     .entities()
@@ -10235,7 +11078,7 @@ mod tests {
                     .collect(),
             )
         };
-        let solids_in = |document: &CadDocument| {
+        let solids_in = |document: &Document| {
             sorted(
                 document
                     .entities()
@@ -10246,7 +11089,7 @@ mod tests {
                     .collect(),
             )
         };
-        let body_of = |document: &CadDocument, handle: Handle| match document.get_entity(handle) {
+        let body_of = |document: &Document, handle: Handle| match document.get_entity(handle) {
             Some(EntityType::Surface(s)) => {
                 kernel_acis_body(&s.acis_data).expect("surface payload lifts losslessly")
             }
@@ -10255,11 +11098,11 @@ mod tests {
             }
             other => panic!("no surface or solid {handle:?}: {other:?}"),
         };
-        let extent_in = |document: &CadDocument, handle: Handle| {
+        let extent_in = |document: &Document, handle: Handle| {
             sm::extent(&body_of(document, handle)).unwrap()
         };
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
-        let kind_in = |document: &CadDocument, handle: Handle| match document.get_entity(handle) {
+        let kind_in = |document: &Document, handle: Handle| match document.get_entity(handle) {
             Some(EntityType::Surface(s)) => s.kind,
             other => panic!("no surface {handle:?}: {other:?}"),
         };
@@ -10617,7 +11460,7 @@ mod tests {
         };
         let last =
             |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
-        let solids_in = |document: &CadDocument| {
+        let solids_in = |document: &Document| {
             let mut list: Vec<Handle> = document
                 .entities()
                 .filter_map(|e| match e {
@@ -10628,15 +11471,15 @@ mod tests {
             list.sort_by_key(|h| h.value());
             list
         };
-        let body_in = |document: &CadDocument, handle: Handle| {
+        let body_in = |document: &Document, handle: Handle| {
             let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
                 panic!("no solid {handle:?}")
             };
             kernel_body(solid).expect("payload lifts losslessly")
         };
         let volume_in =
-            |document: &CadDocument, handle: Handle| sm::volume(&body_in(document, handle));
-        let extent_in = |document: &CadDocument, handle: Handle| {
+            |document: &Document, handle: Handle| sm::volume(&body_in(document, handle));
+        let extent_in = |document: &Document, handle: Handle| {
             sm::extent(&body_in(document, handle)).unwrap()
         };
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6 * b.abs().max(1.0);
@@ -11392,7 +12235,7 @@ mod tests {
             .save(&path)
             .unwrap();
         for linked in [false, true] {
-            let mut doc = codec::CadDocument::new();
+            let mut doc = codec::Document::new();
             let mut img = codec::entities::RasterImage::with_size(
                 &path,
                 codec::types::Vector3::ZERO,
@@ -11485,7 +12328,7 @@ mod tests {
                 .unwrap());
             let _ = std::fs::remove_file(&script);
         };
-        let report = |document: &CadDocument| -> (Vec<String>, Vec<String>) {
+        let report = |document: &Document| -> (Vec<String>, Vec<String>) {
             let name = document
                 .layers
                 .iter()
@@ -11536,7 +12379,7 @@ check('currentmissing', lambda: L.set_current('Nope'))
         );
         assert_eq!(refused.len(), 19, "{refused:?}");
 
-        let check_state = |label: &str, document: &CadDocument| {
+        let check_state = |label: &str, document: &Document| {
             let names: Vec<_> = document.layers.iter().map(|l| l.name.as_str()).collect();
             assert!(
                 !names.iter().any(|n| n.eq_ignore_ascii_case("Walls")),
@@ -11688,7 +12531,7 @@ L.delete('Structure', erase_objects=True)
                 .unwrap());
             let _ = std::fs::remove_file(&script);
         };
-        let report = |document: &CadDocument| -> (usize, Vec<String>) {
+        let report = |document: &Document| -> (usize, Vec<String>) {
             let name = document
                 .layers
                 .iter()
@@ -11750,7 +12593,7 @@ check('d_modmissing', lambda: D.modify('Nope', dimscale=2))
         );
         assert_eq!(refused, 26);
 
-        let check_state = |label: &str, document: &CadDocument| {
+        let check_state = |label: &str, document: &Document| {
             assert!(
                 document.text_styles.get("Title").is_none()
                     && document.text_styles.get("Notes").is_none(),
@@ -11924,7 +12767,7 @@ S.delete('Heading')
                 .unwrap());
             let _ = std::fs::remove_file(&script);
         };
-        let report = |document: &CadDocument| -> (usize, Vec<String>) {
+        let report = |document: &Document| -> (usize, Vec<String>) {
             let name = document
                 .layers
                 .iter()
@@ -11979,7 +12822,7 @@ check('modify_missing', lambda: B.modify('Nope', description='x'))
         );
         assert_eq!(refused, 18);
 
-        let check_state = |label: &str, document: &CadDocument| {
+        let check_state = |label: &str, document: &Document| {
             assert!(
                 document.block_records.get("Widget").is_none(),
                 "{label}: old block name gone"
@@ -12188,7 +13031,7 @@ B.delete('Widget2')
                 .unwrap());
             let _ = std::fs::remove_file(&script);
         };
-        let report = |document: &CadDocument| -> (usize, Vec<String>) {
+        let report = |document: &Document| -> (usize, Vec<String>) {
             let name = document
                 .layers
                 .iter()
@@ -12235,7 +13078,7 @@ check('unknown_insert_block', lambda: doc.create_entity('Insert', block_name='Gh
         );
         assert_eq!(refused, 9);
 
-        let check_state = |label: &str, document: &CadDocument| {
+        let check_state = |label: &str, document: &Document| {
             let record = document
                 .block_records
                 .get("Part")
@@ -12390,7 +13233,7 @@ check('unknown_insert_block', lambda: doc.create_entity('Insert', block_name='Gh
                 .unwrap());
             let _ = std::fs::remove_file(&script);
         };
-        let report = |document: &CadDocument| -> (usize, Vec<String>) {
+        let report = |document: &Document| -> (usize, Vec<String>) {
             let name = document
                 .layers
                 .iter()
@@ -12466,7 +13309,7 @@ check('ly_badscale', lambda: LY.set_page('Sheet1', scale=(0, 1)))
         );
         assert_eq!(refused, 34);
 
-        let check_state = |label: &str, document: &CadDocument| {
+        let check_state = |label: &str, document: &Document| {
             assert!(
                 document.line_types.get("Dots").is_none(),
                 "{label}: old linetype name gone"
@@ -12660,7 +13503,7 @@ LT.delete('Temp')
                 .unwrap());
             let _ = std::fs::remove_file(&script);
         };
-        let report = |document: &CadDocument| -> (usize, Vec<String>) {
+        let report = |document: &Document| -> (usize, Vec<String>) {
             let name = document
                 .layers
                 .iter()
@@ -13012,7 +13855,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 "#,
         );
         assert!(report(host.document()).1.is_empty());
-        let moved = |document: &CadDocument, x: f64| {
+        let moved = |document: &Document, x: f64| {
             document.entities().any(|e| matches!(e, EntityType::Circle(c) if near(c.center.x, x) && near(c.center.y, 0.0)))
         };
         assert!(moved(host.document(), 1007.0));
@@ -13264,7 +14107,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let _ = std::fs::remove_file(&script);
 
         // The structure: one definition per file, registered and owned by ACAD_IMAGE_DICT.
-        let structure = |document: &CadDocument| {
+        let structure = |document: &Document| {
             let root = document.header.named_objects_dict_handle;
             let Some(ObjectType::Dictionary(root_dict)) = document.objects.get(&root) else {
                 panic!("no root dictionary")
@@ -13296,7 +14139,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             images.sort_by_key(|(h, _, _)| h.value());
             (dict_handle, entries, defs, images)
         };
-        let check = |label: &str, document: &CadDocument| {
+        let check = |label: &str, document: &Document| {
             let (dict, entries, defs, images) = structure(document);
             let dict = dict.unwrap_or_else(|| panic!("{label}: no ACAD_IMAGE_DICT"));
             assert_eq!(defs.len(), 2, "{label}: one definition per file");
@@ -14059,7 +14902,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // Inside a plugin-opened push_undo scope the designation joins the
         // scope: an entity write plus two markings is ONE step under the
         // plugin's label.
-        host.push_undo("CVI: refresh");
+        host.push_undo("PLUGIN: refresh");
         let preview = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
             3.0, 0.0, 0.0,
         ))));
@@ -14068,7 +14911,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         drop(host);
         app.finish_pending_history(0);
         assert_eq!(app.tabs[0].history.undo_stack.len(), 3);
-        assert_eq!(app.tabs[0].history.undo_stack[2].label(), "CVI: refresh");
+        assert_eq!(app.tabs[0].history.undo_stack[2].label(), "PLUGIN: refresh");
 
         // Undoing the plugin operation reverts it whole.
         app.undo_steps(1);
@@ -14162,7 +15005,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         // The plugin erase path removes a designated entity inside a scope:
         // entity and set entry leave together.
-        host.push_undo("CVI: replace the underlying model");
+        host.push_undo("PLUGIN: replace the underlying model");
         host.remove_entity(handle);
         drop(host);
         app.finish_pending_history(0);
@@ -14943,39 +15786,39 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
 
-        // Verify COGO_LINES does not exist initially
-        assert!(!app.tabs[0].scene.document.layers.contains("COGO_LINES"));
+        // Verify DYNAMIC_PLUGIN_LINES does not exist initially
+        assert!(!app.tabs[0].scene.document.layers.contains("DYNAMIC_PLUGIN_LINES"));
         assert!(!app
             .ribbon
             .layer_infos
             .iter()
-            .any(|l| l.name == "COGO_LINES"));
+            .any(|l| l.name == "DYNAMIC_PLUGIN_LINES"));
 
         // 1. Add entity via HostSession (simulating plugin add_entity / add_line)
         {
             let mut host = HostSession::new(&mut app, 0);
             let mut line = codec::entities::Line::from_coords(0.0, 0.0, 0.0, 10.0, 10.0, 0.0);
-            line.common.layer = "COGO_LINES".to_string();
+            line.common.layer = "DYNAMIC_PLUGIN_LINES".to_string();
             let handle = host.add_entity(codec::EntityType::Line(line));
             assert_ne!(handle, codec::Handle::NULL);
         }
 
         // Verify layer is created in document AND refreshed in ribbon + layer panel
-        assert!(app.tabs[0].scene.document.layers.contains("COGO_LINES"));
+        assert!(app.tabs[0].scene.document.layers.contains("DYNAMIC_PLUGIN_LINES"));
         assert!(
             app.ribbon
                 .layer_infos
                 .iter()
-                .any(|l| l.name == "COGO_LINES"),
-            "Ribbon layers should contain COGO_LINES after add_entity"
+                .any(|l| l.name == "DYNAMIC_PLUGIN_LINES"),
+            "Ribbon layers should contain DYNAMIC_PLUGIN_LINES after add_entity"
         );
         assert!(
             app.tabs[0]
                 .layers
                 .layers
                 .iter()
-                .any(|l| l.name == "COGO_LINES"),
-            "Layer panel should contain COGO_LINES after add_entity"
+                .any(|l| l.name == "DYNAMIC_PLUGIN_LINES"),
+            "Layer panel should contain DYNAMIC_PLUGIN_LINES after add_entity"
         );
 
         // 2. Commit entity via command driver (simulating interactive tool / palette commit)
@@ -15100,5 +15943,900 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let initial_grid = host.app.show_grid;
         assert!(host.execute_command("GRID\n"));
         assert_eq!(host.app.show_grid, !initial_grid);
+    }
+
+    /// The session tests' profile chain: one ramp-declared parabola
+    /// (slope 0 -> 0.1 over the run), expressed against the API v14 wire
+    /// types (rebuilt here so the session tests stay independent of the
+    /// engine module's own fixtures).
+    fn staging_profile_chain() -> ocs_plugin_api::host::ParametricChain {
+        ocs_plugin_api::host::ParametricChain {
+            plane: ocs_plugin_api::host::ParametricPlane::Profile,
+            segments: vec![ocs_plugin_api::host::ParametricSegment {
+                def: ocs_plugin_api::host::CurveSegmentDef {
+                    length: 80.0,
+                    ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                        degree: 1,
+                        coeffs: [0.0, 0.1, 0.0, 0.0],
+                    },
+                    cross_slope: None,
+                },
+                start_point: [0.0, 100.0],
+                start_direction: 0.0,
+            }],
+            layer: "PLUGIN_PROFILE".to_string(),
+        }
+    }
+
+    fn staging_plan_chain() -> ocs_plugin_api::host::ParametricChain {
+        ocs_plugin_api::host::ParametricChain {
+            plane: ocs_plugin_api::host::ParametricPlane::Plan,
+            segments: vec![ocs_plugin_api::host::ParametricSegment {
+                def: ocs_plugin_api::host::CurveSegmentDef {
+                    // Curvature ramp 0 -> -1/300 over the arc length (the
+                    // record's straight-to-circle spiral restated as data).
+                    length: 60.0,
+                    ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                        degree: 1,
+                        coeffs: [0.0, -1.0 / 300.0, 0.0, 0.0],
+                    },
+                    cross_slope: None,
+                },
+                start_point: [0.0, 0.0],
+                start_direction: 0.0,
+            }],
+            layer: "PLUGIN_DISPLAY".to_string(),
+        }
+    }
+
+    #[test]
+    fn parametric_staging_is_reference_only_in_one_undo_step() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let chain = staging_plan_chain();
+        let handles;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            handles = host
+                .stage_parametric_chain("align-1", &chain, 1e-3)
+                .expect("the demo plan chain stages");
+            assert!(!handles.is_empty());
+            for handle in &handles {
+                assert!(
+                    host.app.tabs[0].scene.is_reference_only(*handle),
+                    "staged display data must be reference-only"
+                );
+                assert!(host.document().get_entity(*handle).is_some());
+            }
+        }
+        app.finish_pending_history(0);
+        // The whole staging (add + designations) = ONE undo step.
+        assert_eq!(app.tabs[0].history.undo_stack.len(), 1);
+        app.undo_steps(1);
+        for handle in &handles {
+            assert!(
+                app.tabs[0].scene.document.get_entity(*handle).is_none(),
+                "undo removed the staged display set (byte-exact restore)"
+            );
+            assert!(
+                !app.tabs[0].scene.is_reference_only(*handle),
+                "the designation rolled back with the entities"
+            );
+        }
+        // Redo re-applies the whole step.
+        app.redo_steps(1);
+        for handle in &handles {
+            assert!(app.tabs[0].scene.document.get_entity(*handle).is_some());
+            assert!(app.tabs[0].scene.is_reference_only(*handle));
+        }
+    }
+
+    #[test]
+    fn parametric_staging_refusals_change_nothing_and_record_no_steps() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut broken = staging_plan_chain();
+        let mut host = HostSession::new(&mut app, 0);
+        let epoch_before = host.app.tabs[0].scene.geometry_epoch;
+        // Broken tolerances refuse before anything changes.
+        assert!(host.stage_parametric_chain("bad", &broken, 0.0).is_err());
+        assert!(host.stage_parametric_chain("bad", &broken, -1.0).is_err());
+        // Broken declared data refuses too.
+        broken.segments[0].def.length = -1.0;
+        assert!(host.stage_parametric_chain("bad", &broken, 1e-3).is_err());
+        assert_eq!(host.document().entities().count(), 0);
+        assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
+    }
+
+    // ── API v14: plugin class objects ──────────────────────────────────────
+
+    /// Becomes the owner plugin in these tests: the in-process sink installs
+    /// the thread-local liveness the visibility predicate consults in tests.
+    fn install_class_owner() {
+        crate::plugin::grip_points::install_in_process_sink("PLUGIN", |_host, _event| {
+            ocs_plugin_api::host::CustomGripResponse::default()
+        });
+    }
+
+    fn traverse_class() -> ocs_plugin_api::host::PluginClassDeclaration {
+        ocs_plugin_api::host::PluginClassDeclaration {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            grip_schema: vec![ocs_plugin_api::host::PluginGripSchemaEntry {
+                grip_id: 1,
+                param_name: "peak_gradient".to_string(),
+                drives: None,
+            }],
+            parameters: vec![],
+        }
+    }
+
+    fn traverse_instance() -> ocs_plugin_api::host::PluginClassInstance {
+        ocs_plugin_api::host::PluginClassInstance {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            design: ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                staging_profile_chain(),
+            ),
+            tolerance: 1e-3,
+            layer: "PLUGIN_PROFILE".to_string(),
+            design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+        }
+    }
+
+    #[test]
+    fn plugin_class_registration_is_owned_idempotent_and_refusing() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+        let not_owner = host.register_plugin_class("ghost", &traverse_class()).unwrap_err();
+        assert!(not_owner.contains("not a loaded, alive plugin"), "got: {not_owner}");
+        install_class_owner();
+        // Register, then re-register identical: idempotent, still one entry.
+        assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+        assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+        assert_eq!(host.app.tabs[0].plugin_classes.total(), 1);
+        // A different schema refuses without touching the live class.
+        let mut bumped = traverse_class();
+        bumped.schema_version = 5;
+        let err = host.register_plugin_class("PLUGIN", &bumped).unwrap_err();
+        assert!(err.contains("different schema"), "got: {err}");
+        assert_eq!(
+            host.app.tabs[0].plugin_classes.find("PLUGIN", "PLUGIN_ALIGN_DISPLAY").expect("live entry").schema_version,
+            4
+        );
+        // Malformed declarations refuse: empty identity, unnamed grip
+        // parameter, duplicate grip ids.
+        let mut empty = traverse_class();
+        empty.class_id = String::new();
+        assert!(host.register_plugin_class("PLUGIN", &empty).is_err());
+        let mut unnamed = traverse_class();
+        unnamed.grip_schema[0].param_name = String::new();
+        assert!(host.register_plugin_class("PLUGIN", &unnamed).is_err());
+        let mut dup = traverse_class();
+        dup.grip_schema.push(ocs_plugin_api::host::PluginGripSchemaEntry {
+            grip_id: 1,
+            param_name: "other".to_string(),
+            drives: None,
+        });
+        assert!(host.register_plugin_class("PLUGIN", &dup).is_err());
+        assert_eq!(host.app.tabs[0].plugin_classes.total(), 1);
+    }
+
+    #[test]
+    fn plugin_class_registry_survives_across_request_sessions() {
+        // The registry is TAB state, not session state: HostSession lives one
+        // request; the class declaration must outlive the dropping session
+        // (this is the regression for the per-session-registry defect).
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+        }
+        // Session B: a DIFFERENT HostSession over the same tab (the IPC
+        // server's per-request reality) stages the instance.
+        let mut host = HostSession::new(&mut app, 0);
+        let handles = host
+            .stage_plugin_class_instance("PLUGIN", &traverse_instance())
+            .expect("the class outlives its declaring session");
+        assert!(!handles.is_empty());
+        assert!(host.app.tabs[0].scene.is_reference_only(handles[0]));
+    }
+
+    #[test]
+    fn plugin_class_instances_refuse_foreign_owners() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+        // Another alive plugin sees the class but cannot stage it.
+        crate::plugin::grip_points::install_in_process_sink("PLUGIN_RIVAL", |_host, _event| {
+            ocs_plugin_api::host::CustomGripResponse::default()
+        });
+        let err = host
+            .stage_plugin_class_instance("PLUGIN_RIVAL", &traverse_instance())
+            .unwrap_err();
+        assert!(err.contains("owned by plugin"), "got: {err}");
+        assert!(err.contains("PLUGIN"), "got: {err}");
+        assert_eq!(host.document().entities().count(), 0);
+    }
+
+    #[test]
+    fn plugin_class_instance_stages_reference_only_with_identity_stamp() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let instance = traverse_instance();
+        let handles;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+            handles = host
+                .stage_plugin_class_instance("PLUGIN", &instance)
+                .expect("the class instance stages");
+            assert!(!handles.is_empty());
+            for handle in &handles {
+                // The identity stamp: class key as the XDATA application, the
+                // schema version + the record linkage as its values, the
+                // APPID auto-registered so the stamp survives the file.
+                let stamped = host
+                    .read_record(*handle, "PLUGIN_ALIGN_DISPLAY")
+                    .expect("the class identity stamp");
+                assert_eq!(stamped.values.len(), 2);
+                let ocs_plugin_api::host::codec::xdata::XDataValue::Integer32(version) =
+                    stamped.values[0]
+                else {
+                    panic!("the stamp carries the schema version as an integer");
+                };
+                assert_eq!(version, 4);
+                let ocs_plugin_api::host::codec::xdata::XDataValue::String(record) =
+                    stamped.values[1].clone()
+                else {
+                    panic!("the stamp carries the design record linkage");
+                };
+                assert_eq!(record, "PLUGIN_ALIGN_DISPLAY");
+                assert!(host.document().app_ids.contains("PLUGIN_ALIGN_DISPLAY"));
+                assert!(
+                    host.app.tabs[0].scene.is_reference_only(*handle),
+                    "staged class display must be reference-only"
+                );
+            }
+        }
+        app.finish_pending_history(0);
+        // Stamp + designation + add: ONE undo step, the entity-write contract.
+        assert_eq!(app.tabs[0].history.undo_stack.len(), 1);
+        app.undo_steps(1);
+        for handle in &handles {
+            assert!(app.tabs[0].scene.document.get_entity(*handle).is_none());
+        }
+    }
+
+    #[test]
+    fn class_stamp_and_display_set_survive_dxf_and_dwg_round_trips() {
+        // The stamp's file-level law: the identity stamp (the XDATA record
+        // under the auto-registered APPID) and the staged display set
+        // survive BOTH file formats with empty loss rows; the stamp values
+        // (schema version + record linkage) stay byte-identical.
+        use codec::{Dwg, Dxf, Format};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let handles;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+            handles = host
+                .stage_plugin_class_instance("PLUGIN", &traverse_instance())
+                .expect("the class instance stages");
+        }
+        let read_stamp = |document: &codec::Document, handle: codec::Handle| {
+            let entity = document
+                .get_entity(handle)
+                .unwrap_or_else(|| panic!("staged entity {handle:?} lost"));
+            entity
+                .common()
+                .extended_data
+                .get_record("PLUGIN_ALIGN_DISPLAY")
+                .unwrap_or_else(|| panic!("the class identity stamp was lost"))
+                .values
+                .clone()
+        };
+        fn round_trip<F: Format>(
+            format: &F,
+            document: &codec::Document,
+            handles: &[codec::Handle],
+            stamp: &dyn Fn(&codec::Document, codec::Handle) -> Vec<codec::xdata::XDataValue>,
+            name: &str,
+        ) {
+            let (bytes, losses) = format.write(document).unwrap();
+            assert!(losses.is_empty(), "{name} write must not lose anything: {losses:?}");
+            let (back, read_losses) = format.read(&bytes).unwrap();
+            assert!(
+                read_losses.is_empty(),
+                "{name} read must not lose anything: {read_losses:?}"
+            );
+            for handle in handles {
+                let expected = stamp(document, *handle);
+                assert_eq!(
+                    stamp(&back, *handle),
+                    expected,
+                    "{name}: the class stamp must be byte-identical"
+                );
+            }
+        }
+        round_trip(&Dxf, &app.tabs[0].scene.document, &handles, &read_stamp, "DXF");
+        round_trip(&Dwg, &app.tabs[0].scene.document, &handles, &read_stamp, "DWG");
+    }
+
+    #[test]
+    fn plugin_class_instance_refusals_change_nothing_and_record_no_steps() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+        let epoch_before = host.app.tabs[0].scene.geometry_epoch;
+        // Unregistered class.
+        let mut ghost = traverse_instance();
+        ghost.class_id = "GHOST".to_owned();
+        assert!(host.stage_plugin_class_instance("PLUGIN", &ghost).is_err());
+        // Schema version mismatch.
+        let mut mismatch = traverse_instance();
+        mismatch.schema_version = 5;
+        assert!(host.stage_plugin_class_instance("PLUGIN", &mismatch).is_err());
+        // Broken design parameter (the chain audit refuses at the contract).
+        let mut broken = traverse_instance();
+        let ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(chain) =
+            &mut broken.design;
+        chain.segments[0].start_direction = f64::NAN;
+        broken.tolerance = 1e-3;
+        assert!(host.stage_plugin_class_instance("PLUGIN", &broken).is_err());
+        // Broken tolerance.
+        assert!(host.stage_plugin_class_instance("PLUGIN", &traverse_instance_for(0.0)).is_err());
+        assert_eq!(host.document().entities().count(), 0);
+        assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
+    }
+
+    fn traverse_instance_for(tolerance: f64) -> ocs_plugin_api::host::PluginClassInstance {
+        let mut instance = traverse_instance();
+        instance.tolerance = tolerance;
+        instance
+    }
+
+    #[test]
+    fn parametric_sample_is_a_pure_read() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let chain = staging_profile_chain();
+        {
+            let host = HostSession::new(&mut app, 0);
+            let epoch_before = host.app.tabs[0].scene.geometry_epoch;
+            // The profile parabola h(s) = 100 + s^2/(2*800): the midpoint value.
+            let mid = host.sample_parametric(&chain, 40.0).unwrap().unwrap();
+            assert!((mid.point[1] - 101.0).abs() < 1e-9);
+            assert!((mid.point[0] - 40.0).abs() < 1e-9);
+            // The tangent stays (1, g)/|..| with g = s/800.
+            assert!((mid.direction[1] / mid.direction[0] - 0.05).abs() < 1e-9);
+            assert!(host.sample_parametric(&chain, -1.0).unwrap().is_none());
+            assert!(host.sample_parametric(&chain, 141.0).unwrap().is_none());
+            assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
+        }
+        assert_eq!(app.tabs[0].history.undo_stack.len(), 0, "the sample records nothing");
+    }
+
+    #[test]
+    fn parametric_staging_joins_a_plugin_scope() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let plan = staging_plan_chain();
+        let profile = staging_profile_chain();
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.push_undo("PLUGIN: refresh alignment display");
+            let _ = host.stage_parametric_chain("plan", &plan, 1e-3).unwrap();
+            let _ = host.stage_parametric_chain("profile", &profile, 1e-3).unwrap();
+        }
+        app.finish_pending_history(0);
+        assert_eq!(
+            app.tabs[0].history.undo_stack.len(),
+            1,
+            "the plugin's scope carried both stagings"
+        );
+    }
+
+    /// The grip-edit restage fixture (the domain crest as ramp data):
+    /// [constant slope 0.01 over 100 -> slope-linear 0.01 to 0.06 over
+    /// 200 -> constant slope 0.06 over 80 at the exact end (300, 8.0)],
+    /// entering at (0, 0). Every segment stages the count-stable exact
+    /// carrier (line, degree-2 spline, line).
+    fn crest_profile_chain() -> ocs_plugin_api::host::ParametricChain {
+        ocs_plugin_api::host::ParametricChain {
+            plane: ocs_plugin_api::host::ParametricPlane::Profile,
+            segments: vec![
+                ocs_plugin_api::host::ParametricSegment {
+                    def: ocs_plugin_api::host::CurveSegmentDef {
+                        length: 100.0,
+                        ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                            degree: 0,
+                            coeffs: [0.01, 0.0, 0.0, 0.0],
+                        },
+                        cross_slope: None,
+                    },
+                    start_point: [0.0, 0.0],
+                    start_direction: 0.01f64.atan(),
+                },
+                ocs_plugin_api::host::ParametricSegment {
+                    def: ocs_plugin_api::host::CurveSegmentDef {
+                        // Slope-linear ramp 0.01 -> 0.06 (the declared
+                        // crest restated as data).
+                        length: 200.0,
+                        ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                            degree: 1,
+                            coeffs: [0.01, 0.05, 0.0, 0.0],
+                        },
+                        cross_slope: None,
+                    },
+                    start_point: [100.0, 1.0],
+                    start_direction: 0.01f64.atan(),
+                },
+                ocs_plugin_api::host::ParametricSegment {
+                    def: ocs_plugin_api::host::CurveSegmentDef {
+                        length: 80.0,
+                        ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                            degree: 0,
+                            coeffs: [0.06, 0.0, 0.0, 0.0],
+                        },
+                        cross_slope: None,
+                    },
+                    start_point: [300.0, 8.0],
+                    start_direction: 0.06f64.atan(),
+                },
+            ],
+            layer: "PLUGIN_PROFILE".to_string(),
+        }
+    }
+
+    #[test]
+    fn grip_edit_restage_updates_the_display_set_in_place() {
+        // The grip-edit restage arc (session level): a drag edits the
+        // declared crest parameter, the lane re-derives the edited design's
+        // entity set, and the honest restage applies it over the SAME
+        // handles through `update_entities_transaction`. Read semantics
+        // (this test pins them): the transaction preserves the reference-
+        // only designation by construction (it is scene state keyed by
+        // handle and the write never touches it), and the XDATA identity
+        // stamp survives because the honest lane bases the replacement on
+        // the stamped clone and patches only geometry — no re-stamping.
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let handles;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert!(host.register_plugin_class("PLUGIN", &traverse_class()).is_ok());
+            let mut instance = traverse_instance();
+            instance.design = ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                crest_profile_chain(),
+            );
+            instance.tolerance = 1e-3;
+            handles = host
+                .stage_plugin_class_instance("PLUGIN", &instance)
+                .expect("the crest instance stages");
+            assert_eq!(handles.len(), 3, "three exact carriers (line, spline, line)");
+            let EntityType::Spline(spline) = host.document().get_entity(handles[1]).expect("live")
+            else {
+                panic!("the crest stages a degree-2 spline");
+            };
+            assert_eq!(spline.degree, 2);
+            assert!((spline.control_points[2].y - 8.0).abs() < 1e-9, "the declared crest height");
+        }
+        app.finish_pending_history(0);
+        assert_eq!(app.tabs[0].history.undo_stack.len(), 1, "staging stays one step");
+
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            // THE DRAG (host-local, the grip-edit policy): the crest's end
+            // gradient 0.06 -> 0.09 — the ramp's end value revised; the
+            // joint re-derived from the engine's sampling and the honest
+            // upstream re-declared.
+            let mut edited = crest_profile_chain();
+            edited.segments[1].def.ramp = ocs_plugin_api::host::Ramp::Polynomial {
+                degree: 1,
+                coeffs: [0.01, 0.08, 0.0, 0.0],
+            };
+            let front = ocs_plugin_api::host::ParametricChain {
+                plane: ocs_plugin_api::host::ParametricPlane::Profile,
+                segments: edited.segments[..2].to_vec(),
+                layer: String::new(),
+            };
+            let joint = host
+                .sample_parametric(&front, 300.0)
+                .expect("the front samples")
+                .expect("the joint sits at the front chain's end");
+            assert!((joint.point[1] - 11.0).abs() < 1e-9, "the crest moved to 11.0");
+            let joint_gradient = joint.direction[1] / joint.direction[0];
+            edited.segments[2].start_point = joint.point;
+            edited.segments[2].start_direction = joint_gradient.atan();
+            // The tail's slope law restates the propagated joint slope (the
+            // ramp data in place of the old gradient pair).
+            edited.segments[2].def.ramp = ocs_plugin_api::host::Ramp::Polynomial {
+                degree: 0,
+                coeffs: [joint_gradient, 0.0, 0.0, 0.0],
+            };
+
+            // Re-derive the edited design's entity set: same carriers, same
+            // count, in the same order (the staging builds per segment).
+            let (new_entities, carriers) =
+                crate::parametric::build_display_entities(&edited, 1e-3).expect("the edited design derives");
+            assert_eq!(new_entities.len(), handles.len(), "the edited set is count-stable");
+            assert!(matches!(carriers[1], crate::parametric::StagedCarrier::Exact));
+            let EntityType::Spline(fresh) = &new_entities[1] else {
+                panic!("the edited crest still carries the exact spline carrier");
+            };
+            assert!((fresh.control_points[2].y - 11.0).abs() < 1e-9);
+
+            // The honest lane: clone the live entities (identity, layer and
+            // the XDATA stamp ride along) and patch ONLY the geometry from
+            // the re-derived carriers.
+            let mut restaged: Vec<EntityType> = handles
+                .iter()
+                .map(|h| {
+                    host.document()
+                        .get_entity(*h)
+                        .expect("the staged entity is live")
+                        .clone()
+                })
+                .collect();
+            for (slot, fresh) in restaged.iter_mut().zip(new_entities.iter()) {
+                match (slot, fresh) {
+                    (EntityType::Line(old), EntityType::Line(newer)) => {
+                        old.start = newer.start;
+                        old.end = newer.end;
+                    }
+                    (EntityType::Spline(old), EntityType::Spline(newer)) => {
+                        old.degree = newer.degree;
+                        old.control_points = newer.control_points.clone();
+                        old.knots = newer.knots.clone();
+                        old.weights = newer.weights.clone();
+                        old.begin_tangent = newer.begin_tangent;
+                        old.end_tangent = newer.end_tangent;
+                    }
+                    _ => panic!("the re-derived set keeps the staged carrier shape"),
+                }
+            }
+            host.update_entities_transaction("PLUGIN: grip edit", restaged)
+                .expect("the restage applies over the same handles");
+        }
+        app.finish_pending_history(0);
+        assert_eq!(
+            app.tabs[0].history.undo_stack.len(),
+            2,
+            "the restage composes as exactly one more undo step"
+        );
+
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert_eq!(
+                host.document().entities().count(),
+                3,
+                "the restage updates the display set in place"
+            );
+            // The changed carrier vertices are the document's state now...
+            let EntityType::Spline(spline) =
+                host.document().get_entity(handles[1]).expect("the spline keeps its handle")
+            else {
+                panic!("the carrier keeps its kind over the restage");
+            };
+            assert!((spline.control_points[2].y - 11.0).abs() < 1e-9, "the edited crest rides");
+            let EntityType::Line(tail) = host.document().get_entity(handles[2]).expect("live") else {
+                panic!("the tail keeps its kind");
+            };
+            assert!(
+                (tail.end.y - (11.0 + 0.09 * 80.0)).abs() < 1e-9,
+                "the tail line follows the moved joint"
+            );
+            for handle in &handles {
+                // ... and the designations and the identity stamps are
+                // intact (the in-place policy: no re-stamp, no re-designate).
+                assert!(
+                    host.app.tabs[0].scene.is_reference_only(*handle),
+                    "the designated display set stays reference-only"
+                );
+                let stamped = host.read_record(*handle, "PLUGIN_ALIGN_DISPLAY").expect("the stamp");
+                assert_eq!(stamped.values.len(), 2, "the identity stamp survives the restage");
+            }
+        }
+
+        // ONE undo step round-trips the original display set.
+        app.undo_steps(1);
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert_eq!(host.document().entities().count(), 3, "nothing added or removed");
+            let EntityType::Spline(spline) =
+                host.document().get_entity(handles[1]).expect("the spline keeps its handle")
+            else {
+                panic!("the carrier keeps its kind over the undo");
+            };
+            assert!(
+                (spline.control_points[2].y - 8.0).abs() < 1e-9,
+                "the original crest is back after the one undo step"
+            );
+            for handle in &handles {
+                assert!(
+                    host.app.tabs[0].scene.is_reference_only(*handle),
+                    "the designations survive the undo round trip"
+                );
+                assert!(
+                    host.read_record(*handle, "PLUGIN_ALIGN_DISPLAY").is_some(),
+                    "the identity stamp survives the undo round trip"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_class_parameters_read_write_and_refuse() {
+        // The session pair over a host-staged instance: the declared
+        // schema renders rows straight from the design record; an editable
+        // parameter writes through the record's (name, value) pair in ONE
+        // undo step; unknown names, read-only rows, and unparseable values
+        // refuse before any change.
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let handles;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            let mut declaration = traverse_class();
+            declaration.parameters = vec![
+                ocs_plugin_api::host::PluginClassParameter {
+                    name: "peak_gradient".to_string(),
+                    value_kind: ocs_plugin_api::host::PluginClassParameterKind::Real,
+                    editable: true,
+                },
+                ocs_plugin_api::host::PluginClassParameter {
+                    name: "segments".to_string(),
+                    value_kind: ocs_plugin_api::host::PluginClassParameterKind::Integer,
+                    editable: true,
+                },
+                ocs_plugin_api::host::PluginClassParameter {
+                    name: "locked_note".to_string(),
+                    value_kind: ocs_plugin_api::host::PluginClassParameterKind::Text,
+                    editable: false,
+                },
+            ];
+            host.register_plugin_class("PLUGIN", &declaration)
+                .expect("the parameter schema registers");
+            let mut instance = traverse_instance();
+            instance.design = ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                crest_profile_chain(),
+            );
+            handles = host
+                .stage_plugin_class_instance("PLUGIN", &instance)
+                .expect("the instance stages");
+            // The declared (name, value) pair layout: alternating String
+            // name / value entries — the layout the declaration owns.
+            host.create_xrecord(
+                &["PLUGIN"],
+                "PLUGIN_ALIGN_DISPLAY",
+                vec![
+                    codec::objects::XRecordEntry::string(1, "peak_gradient"),
+                    codec::objects::XRecordEntry::new(
+                        140,
+                        codec::objects::XRecordValue::Double(0.06),
+                    ),
+                    codec::objects::XRecordEntry::string(1, "segments"),
+                    codec::objects::XRecordEntry::new(
+                        90,
+                        codec::objects::XRecordValue::Int32(3),
+                    ),
+                    codec::objects::XRecordEntry::string(1, "locked_note"),
+                    codec::objects::XRecordEntry::string(1, "per alignment sheet"),
+                ],
+            )
+            .expect("the design record seeds its namespace");
+        }
+        app.finish_pending_history(0);
+        let undo_before = app.tabs[0].history.undo_stack.len();
+        assert_eq!(undo_before, 2, "staging + record seeding compose as two steps");
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.update_plugin_class_instance_parameter(handles[0], "peak_gradient", "0.09")
+                .expect("the editable row writes");
+        }
+        app.finish_pending_history(0);
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert_eq!(
+                host.app.tabs[0].history.undo_stack.len(),
+                undo_before + 1,
+                "the parameter write composes as exactly one more undo step"
+            );
+            let rows = host
+                .plugin_class_instance_properties(handles[0])
+                .expect("the rows re-read");
+            assert_eq!(
+                rows[0].value.as_deref(),
+                Some("0.09"),
+                "the written pair is the read truth"
+            );
+            // The record's OTHER pairs (and the plugin's own layout) stayed
+            // exactly as the plugin laid them.
+            let entries = host
+                .read_xrecord(&["PLUGIN"], "PLUGIN_ALIGN_DISPLAY")
+                .expect("the record");
+            assert_eq!(entries.len(), 6);
+            assert_eq!(format!("{:?}", entries[3].value), "Int32(3)");
+            assert_eq!(format!("{:?}", entries[5].value), "String(\"per alignment sheet\")");
+
+            // REFUSALS: unknown name, read-only row, unparseable and
+            // non-finite values — each before any change, each recording
+            // nothing.
+            let steps_before = host.app.tabs[0].history.undo_stack.len();
+            assert!(
+                host.update_plugin_class_instance_parameter(handles[0], "not_a_parameter", "2.0")
+                    .unwrap_err()
+                    .contains("has no parameter named"),
+                "an unknown parameter refuses honestly"
+            );
+            assert!(
+                host.update_plugin_class_instance_parameter(handles[0], "locked_note", "edited")
+                    .unwrap_err()
+                    .contains("read-only"),
+                "a read-only row never writes"
+            );
+            assert!(
+                host.update_plugin_class_instance_parameter(handles[0], "peak_gradient", "abc")
+                    .unwrap_err()
+                    .contains("does not parse"),
+                "a non-numerical value refuses honestly"
+            );
+            assert!(
+                host.update_plugin_class_instance_parameter(handles[0], "peak_gradient", "inf")
+                    .unwrap_err()
+                    .contains("finite"),
+                "a non-finite value refuses honestly"
+            );
+            assert_eq!(
+                host.app.tabs[0].history.undo_stack.len(),
+                steps_before,
+                "refusals record nothing"
+            );
+            let entries_after = host
+                .read_xrecord(&["PLUGIN"], "PLUGIN_ALIGN_DISPLAY")
+                .expect("the record");
+            assert_eq!(entries_after.len(), entries.len(), "refusals changed nothing");
+            for (before, after) in entries.iter().zip(entries_after.iter()) {
+                assert_eq!(before.code, after.code, "refusals changed nothing");
+                assert_eq!(format!("{:?}", before.value), format!("{:?}", after.value));
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_class_parameters_panel_binds_and_commits() {
+        // The panel surface (API v14): a stamped selectable entity (the
+        // v10/v12 lane's own anchor) rides its class's declared rows, and
+        // the commit route writes the record row through the session pair.
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let handle;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            let mut declaration = traverse_class();
+            declaration.parameters = vec![ocs_plugin_api::host::PluginClassParameter {
+                name: "peak_gradient".to_string(),
+                value_kind: ocs_plugin_api::host::PluginClassParameterKind::Real,
+                editable: true,
+            }];
+            host.register_plugin_class("PLUGIN", &declaration)
+                .expect("the parameter schema registers");
+            handle = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+                12.0, 3.0, 0.0,
+            ))));
+            let mut stamp = codec::xdata::ExtendedDataRecord::new("PLUGIN_ALIGN_DISPLAY");
+            stamp.add_value(codec::xdata::XDataValue::Integer32(4));
+            stamp.add_value(codec::xdata::XDataValue::String(
+                "PLUGIN_ALIGN_DISPLAY".to_string(),
+            ));
+            assert!(host.write_record(handle, stamp), "the stamp rides");
+            host.create_xrecord(
+                &["PLUGIN"],
+                "PLUGIN_ALIGN_DISPLAY",
+                vec![
+                    codec::objects::XRecordEntry::string(1, "peak_gradient"),
+                    codec::objects::XRecordEntry::new(
+                        140,
+                        codec::objects::XRecordValue::Double(0.06),
+                    ),
+                ],
+            )
+            .expect("the design record seeds its namespace");
+        }
+        app.finish_pending_history(0);
+
+        // Select the anchor entity; the panel builds the section.
+        app.tabs[0].scene.selected.insert(handle);
+        app.refresh_properties();
+        {
+            let panel = &app.tabs[0].properties;
+            let section = panel
+                .sections
+                .iter()
+                .find(|section| {
+                    section.title == crate::t!("Plugin class parameters").into_owned()
+                })
+                .expect("the stamped selection rides its class's rows");
+            assert_eq!(section.props.len(), 2, "the source line + the declared row");
+            assert_eq!(section.props[0].label, "Source");
+            assert!(
+                matches!(
+                    &section.props[0].value,
+                    crate::scene::model::object::PropValue::ReadOnly(source)
+                        if source.contains("PLUGIN_ALIGN_DISPLAY")
+                ),
+                "the derived-view line points at the owning record row"
+            );
+            let row = &section.props[1];
+            assert_eq!(row.label, "peak_gradient");
+            assert!(
+                matches!(
+                    &row.value,
+                    crate::scene::model::object::PropValue::PluginParam {
+                        name,
+                        value,
+                        editable: true,
+                    } if name == "peak_gradient" && value == "0.06"
+                ),
+                "a selectable lane entity rides editable rows"
+            );
+        }
+
+        // The commit route: typing + Enter === the record row writes.
+        let _ = app.update(crate::app::Message::PropPluginParamInput {
+            name: "peak_gradient".to_string(),
+            value: "0.09".to_string(),
+        });
+        let _ = app.update(crate::app::Message::PropPluginParamCommit(
+            "peak_gradient".to_string(),
+        ));
+        {
+            let host = HostSession::new(&mut app, 0);
+            let rows = host
+                .plugin_class_instance_properties(handle)
+                .expect("the rows record the commit");
+            assert_eq!(
+                rows[0].value.as_deref(),
+                Some("0.09"),
+                "the committed value landed on the record row"
+            );
+        }
+
+        // A selection without a registered class stamp renders no section.
+        let mut plain = OpenCADStudio::new_for_test();
+        plain.tabs[0].is_start = false;
+        {
+            let mut host = HostSession::new(&mut plain, 0);
+            let unstamped = host
+                .add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+                    1.0, 1.0, 0.0,
+                ))));
+            plain.tabs[0].scene.selected.insert(unstamped);
+        }
+        plain.refresh_properties();
+        assert!(
+            plain
+                .tabs[0]
+                .properties
+                .sections
+                .iter()
+                .all(|section| section.title != crate::t!("Plugin class parameters").into_owned()),
+            "an unstamped selection rides no class rows"
+        );
     }
 }

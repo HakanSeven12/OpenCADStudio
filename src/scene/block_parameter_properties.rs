@@ -4,12 +4,12 @@ use super::model::object::{
     BlockParameterComponent as Component, BlockParameterKey as Key, PropValue, Property,
 };
 use codec::objects::{DynamicBlockData as Data, ObjectType};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use glam::DVec3;
 
 mod table;
 
-pub(crate) fn current_table_row(doc: &CadDocument, baseline: Option<&CadDocument>, insert: Handle) -> Option<usize> {
+pub(crate) fn current_table_row(doc: &Document, baseline: Option<&Document>, insert: Handle) -> Option<usize> {
     let definition = instance::definition(doc, insert)?;
     let view = super::block_properties_table::table(baseline.unwrap_or(doc), definition).ok()??;
     table::current_row(doc, baseline, insert, definition, &view).ok().flatten()
@@ -21,7 +21,7 @@ struct Descriptor<'a> {
     description: &'a str,
 }
 fn descriptors<'a>(
-    doc: &'a CadDocument,
+    doc: &'a Document,
     definition: Handle,
     p: &Parameter,
 ) -> Result<Vec<Descriptor<'a>>, &'static str> {
@@ -77,30 +77,44 @@ fn descriptors<'a>(
     }
     Ok(result)
 }
-fn flip_labels(doc: &CadDocument, parameter: Handle) -> Vec<String> {
+fn flip_labels(doc: &Document, parameter: Handle) -> Vec<String> {
+    [false, true]
+        .into_iter()
+        .filter_map(|state| flip_state_label(doc, parameter, state))
+        .collect()
+}
+
+/// Empty native labels use UI defaults; authored labels are never translated.
+pub(crate) fn flip_state_label(
+    doc: &Document,
+    parameter: Handle,
+    state: bool,
+) -> Option<String> {
     let Some(ObjectType::DynamicBlock(object)) = doc.objects.get(&parameter) else {
-        return vec![];
+        return None;
     };
     let Data::FlipParameter(p) = &object.data else {
-        return vec![];
+        return None;
     };
-    [
-        (&p.base_state_label, "Not flipped"),
-        (&p.flipped_state_label, "Flipped"),
-    ]
-    .into_iter()
-    .map(|(label, fallback)| {
-        if label.is_empty() {
-            fallback.to_owned()
+    let label = if state {
+        &p.flipped_state_label
+    } else {
+        &p.base_state_label
+    };
+    Some(if label.is_empty() {
+        if state {
+            crate::tr!("block-grip", "flipped")
         } else {
-            label.clone()
+            crate::tr!("block-grip", "not-flipped")
         }
+    } else {
+        label.clone()
     })
-    .collect()
 }
+
 fn frame(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
     p: &Parameter,
 ) -> Result<instance::ParameterFrame, &'static str> {
@@ -133,13 +147,57 @@ fn number(
         Err("The reference parameter value is not finite.")
     }
 }
+
+/// Stable component name shared by the row id and the protocol metadata.
+pub(crate) fn component_id(component: &Component) -> String {
+    match component {
+        Component::X => "X".to_owned(),
+        Component::Y => "Y".to_owned(),
+        Component::Distance => "Distance".to_owned(),
+        Component::Angle => "Angle".to_owned(),
+        Component::Flip => "Flip".to_owned(),
+        Component::TableRow(_) => "TableRow".to_owned(),
+        Component::LookupOutput { column, .. } => format!("Lookup{column}"),
+    }
+}
+
+/// One dynamic row per parameter component, so a caller can address it alone.
+pub(crate) fn field_id(key: &Key) -> String {
+    format!(
+        "dyn_{:X}_{}",
+        key.parameter.value(),
+        component_id(&key.component).to_ascii_lowercase()
+    )
+}
+
+/// Rows follow the drawing's precision: lengths at LUPREC, angles at AUPREC
+/// as plain numbers (the reference prints parameter angles without a mark).
+fn display(value: f64, component: Component) -> String {
+    if component == Component::Angle {
+        let precision = crate::entities::common::unit_context()
+            .auprec
+            .max(0)
+            .min(15) as usize;
+        return crate::entities::common::without_negative_zero(format!(
+            "{:.*}",
+            precision, value
+        ));
+    }
+    crate::entities::common::format_length(value)
+}
+
 /// Values are in definition-plane drawing units, with angles in degrees.
 pub(crate) fn properties(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     document: u64,
     insert: Handle,
 ) -> Vec<Property> {
+    // The rows print with the drawing's LUNITS/LUPREC/AUPREC, so a headless
+    // caller or a non-active tab never formats with another drawing's settings.
+    crate::entities::common::set_unit_context(
+        crate::entities::common::UnitContext::from_header(&doc.header),
+    );
     let Some(definition) = instance::definition(doc, insert) else {
         return vec![];
     };
@@ -177,7 +235,7 @@ pub(crate) fn properties(
                     .and_then(|frame| number(&p, frame, field.component))
                     .map(|number| PropValue::BlockNumber {
                         key,
-                        value: number.to_string(),
+                        value: display(number, field.component),
                         description: field.description.to_owned(),
                     })
             };
@@ -203,11 +261,11 @@ pub(crate) enum Input {
 
 /// Stage the same complete-frame evaluation used by native grips.
 pub(crate) fn evaluate(
-    doc: &CadDocument,
-    baseline: Option<&CadDocument>,
+    doc: &Document,
+    baseline: Option<&Document>,
     key: Key,
     input: Input,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     if instance::definition(doc, key.insert) != Some(key.definition) {
         return Err("The reference parameter property is stale.");
     }

@@ -6,7 +6,7 @@
 
 use codec::objects::AssocDimensionReference;
 use codec::types::{Handle, Matrix4, Transform, Vector3};
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 use kernel::geom2d::{closest_point, Curve as KernelCurve};
 use kernel::space::Plane;
 
@@ -103,7 +103,7 @@ pub(crate) enum ChainError {
 /// neither is the geometry. A chain that is nothing but INSERTs (dimensioning
 /// a block reference's insertion point) ends on the innermost INSERT.
 pub(crate) fn walk_chain(
-    document: &CadDocument,
+    document: &Document,
     xrefs: &[Handle],
 ) -> Result<ReferenceChain, ChainError> {
     if xrefs.is_empty() {
@@ -219,7 +219,7 @@ pub(crate) struct FeatureContext {
 /// evaluate, or when the geometry no longer supports it. The caller keeps the
 /// reference data intact and leaves the dimension where it was.
 pub(crate) fn feature_point(
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
     reference: &AssocDimensionReference,
     context: FeatureContext,
@@ -418,6 +418,18 @@ fn nearest_point(
         _ => {
             let parameter = reference.osnap_distance;
             if parameter.is_finite() && (0.0..=1.0).contains(&parameter) {
+                // An edge subentity (as AutoCAD writes it) names one segment of
+                // a polyline, and the parameter runs along that segment only.
+                if let KernelCurve::Polyline(_) = &planar.curve {
+                    if reference.main_subent_type == 2 {
+                        let segment = planar
+                            .curve
+                            .segments()
+                            .into_iter()
+                            .nth(segment_index(reference)?)?;
+                        return Some(lift(&planar.plane, segment.point_at(parameter)));
+                    }
+                }
                 return Some(lift(&planar.plane, planar.curve.point_at(parameter)));
             }
             // No usable parameter: fall back to the point on the curve nearest
@@ -478,7 +490,7 @@ fn spline_tangent_point(
 /// kernel's exact/converged intersection solver. Apparent intersections may
 /// project noncoplanar curves; only straight lines support an extended crossing.
 fn intersection_point(
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
     reference: &AssocDimensionReference,
     hint: Vector3,
@@ -587,4 +599,66 @@ fn imported_endpoint(
         _ => return None,
     };
     Some(point)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codec::entities::LwPolyline;
+    use codec::types::Vector2;
+
+    /// Three segments of different lengths, so a segment parameter and a
+    /// whole-curve parameter land in different places.
+    fn polyline() -> EntityType {
+        EntityType::LwPolyline(LwPolyline::from_points(vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(10.0, 0.0),
+            Vector2::new(10.0, 1.0),
+            Vector2::new(40.0, 1.0),
+        ]))
+    }
+
+    fn near(
+        main_subent_type: i32,
+        main_gs_marker: i32,
+        osnap_distance: f64,
+    ) -> AssocDimensionReference {
+        AssocDimensionReference {
+            osnap_type: osnap::NEAR,
+            main_subent_type,
+            main_gs_marker,
+            osnap_distance,
+            ..Default::default()
+        }
+    }
+
+    /// AutoCAD stores NEAR on a polyline as an edge subentity: the marker names
+    /// the segment (marker 1 = first segment) and the parameter runs along it.
+    #[test]
+    fn near_on_polyline_edge_runs_along_the_named_segment() {
+        let entity = polyline();
+        let point = nearest_point(&entity, &near(2, 1, 0.5), None).unwrap();
+        assert!(
+            (point.x - 5.0).abs() < 1e-9 && point.y.abs() < 1e-9,
+            "{point:?}"
+        );
+        let point = nearest_point(&entity, &near(2, 3, 0.25), None).unwrap();
+        assert!(
+            (point.x - 17.5).abs() < 1e-9 && (point.y - 1.0).abs() < 1e-9,
+            "{point:?}"
+        );
+    }
+
+    /// References OCS writes itself (subentity type 1, marker 0) keep the
+    /// whole-curve parameter.
+    #[test]
+    fn near_without_edge_subentity_keeps_the_whole_curve_parameter() {
+        let entity = polyline();
+        let planar = entity_curve(&entity).unwrap();
+        let expected = lift(&planar.plane, planar.curve.point_at(0.5));
+        assert_eq!(
+            nearest_point(&entity, &near(1, 0, 0.5), None),
+            Some(expected)
+        );
+    }
 }

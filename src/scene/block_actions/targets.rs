@@ -2,7 +2,7 @@
 use super::*;
 
 pub(super) fn geometry(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     kind: Kind,
     parameter_id: i32,

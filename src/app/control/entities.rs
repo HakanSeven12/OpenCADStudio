@@ -42,7 +42,7 @@ pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<codec::Handle>> 
 /// Every handle must exist in the document; otherwise `entity_absent` naming
 /// the missing ones so the caller can refresh instead of guessing.
 pub(super) fn require_existing(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handles: &[codec::Handle],
 ) -> Parsed<()> {
     let missing: Vec<String> = handles

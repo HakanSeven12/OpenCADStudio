@@ -1,5 +1,5 @@
 use codec::types::aci_table::aci_to_rgb;
-use codec::CadDocument;
+use codec::Document;
 
 use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke};
 use crate::scene::text::font_face::Face;
@@ -49,7 +49,7 @@ pub struct ResolvedTextStyle {
     pub is_vertical: bool,
 }
 
-pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedTextStyle {
+pub fn resolve_text_style(style_name: &str, document: &Document) -> ResolvedTextStyle {
     let style = document.text_styles.iter().find(|entry| {
         entry.name.eq_ignore_ascii_case(style_name)
             || (style_name.trim().is_empty() && entry.name.eq_ignore_ascii_case("Standard"))
@@ -183,6 +183,11 @@ pub struct TextLocalBounds {
     /// inter-glyph spacing. Drives horizontal alignment so spaces in the string
     /// keep their width instead of collapsing to the first / last inked glyph.
     pub advance: f32,
+}
+
+/// The descender depth of `font_name` as a fraction of the text height.
+pub fn descent_ratio(font_name: &str) -> f32 {
+    Face::resolve(font_name).descent_ratio()
 }
 
 pub fn text_local_bounds(
@@ -1222,6 +1227,51 @@ fn trailing_letter_gap(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font
     })
 }
 
+/// The side bearings a TrueType line drops at its ends: the first glyph's
+/// left bearing and the last glyph's right bearing. An MTEXT line spans its
+/// ink (measured: the box of an `o` runs from bowl to bowl, and a centred or
+/// right-aligned line puts that ink on the anchor), so positive bearings are
+/// dropped; negative ones and stroke fonts keep their pen extent.
+fn side_bearing(
+    atom: &LayoutAtom,
+    entity_h: f32,
+    base_wf: f32,
+    base_font: &str,
+    trailing: bool,
+) -> f32 {
+    let AtomKind::Word(text) = &atom.kind else {
+        return 0.0;
+    };
+    let font_name = resolve_font(&atom.state, base_font);
+    let face = Face::resolve(&font_name);
+    if face.ttf_family().is_none() {
+        return 0.0;
+    }
+    let mut chars = text.chars().filter(|c| *c != LRM);
+    let ch = if trailing { chars.last() } else { chars.next() };
+    let Some(glyph) = ch.and_then(|c| face.glyph(c)) else {
+        return 0.0;
+    };
+    let xs = || {
+        glyph
+            .strokes
+            .iter()
+            .flatten()
+            .chain(glyph.fill_tris.iter())
+            .map(|point| point[0])
+    };
+    let bearing = if trailing {
+        glyph.advance - xs().fold(f32::NEG_INFINITY, f32::max)
+    } else {
+        xs().fold(f32::INFINITY, f32::min)
+    };
+    if bearing.is_finite() && bearing > 0.0 {
+        bearing * run_scale(&atom.state, entity_h, base_wf)
+    } else {
+        0.0
+    }
+}
+
 pub fn measure_space(state: &RunState, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
@@ -1378,6 +1428,14 @@ pub fn line_total_width(
         }
     }
     x - line_start_x
+}
+
+/// A run's inline colour index, when it has one.
+fn inline_aci(state: &RunState) -> Option<u8> {
+    match state.color {
+        Some(InlineColor::Aci(index)) => Some(index),
+        _ => None,
+    }
 }
 
 pub fn resolve_inline_color(c: &InlineColor) -> Option<[f32; 3]> {
@@ -2088,11 +2146,42 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             .collect()
     };
     let total_depth = -line_y_offset.iter().copied().fold(0.0_f32, f32::min);
+    // The bottom of the text is the ink of its deepest line, not its baseline:
+    // AutoCAD 2025 seats a bottom-attached "-3,45" in romand.shx 0.1905·h above
+    // the point (the comma's depth), "Agp" 0.3333·h, and "ABC" on it. A
+    // descender on an earlier line does not count.
+    let last_line_descent = line_y_offset
+        .iter()
+        .enumerate()
+        .min_by(|a, b| a.1.total_cmp(b.1))
+        .and_then(|(index, _)| sub_lines.get(index))
+        .map(|line| {
+            line.atoms
+                .iter()
+                .filter_map(|atom| {
+                    let AtomKind::Word(text) = &atom.kind else {
+                        return None;
+                    };
+                    let font = resolve_font(&atom.state, &base_font_name);
+                    text_local_bounds(
+                        &font,
+                        text,
+                        atom.state.height_mul * entity_h,
+                        atom.state.width_mul * base_wf.abs(),
+                        atom.state.oblique_rad,
+                    )
+                    .map(|b| -b.ink_min[1])
+                })
+                .fold(0.0_f32, f32::max)
+        })
+        .unwrap_or(0.0);
 
     let v_offset = match opts.v_anchor {
         MTextVAnchor::Top => -first_line_ascent,
-        MTextVAnchor::Middle => (total_depth - h) * 0.5,
-        MTextVAnchor::Bottom => total_depth,
+        // Centred on the ink box, from the first line's top to the last
+        // line's bottom.
+        MTextVAnchor::Middle => (total_depth + last_line_descent - first_line_ascent) * 0.5,
+        MTextVAnchor::Bottom => total_depth + last_line_descent,
         MTextVAnchor::MiddleOfTopLine => -h * 0.5,
         MTextVAnchor::MiddleOfBottomLine => total_depth - h * 0.5,
         MTextVAnchor::BottomOfTopLine => 0.0,
@@ -2272,6 +2361,19 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         - sub.atoms[..visible_atoms]
             .last()
             .map_or(0.0, |atom| trailing_letter_gap(atom, entity_h, base_wf, &base_font_name));
+        // A TrueType line spans its glyphs' ink.
+        let (lead, trail) = if opts.vertical_text {
+            (0.0, 0.0)
+        } else {
+            let visible = &sub.atoms[..visible_atoms];
+            let bearing = |atom: Option<&LayoutAtom>, trailing| {
+                atom.map_or(0.0, |atom| {
+                    side_bearing(atom, entity_h, base_wf, &base_font_name, trailing)
+                })
+            };
+            (bearing(visible.first(), false), bearing(visible.last(), true))
+        };
+        let line_w = line_w - lead - trail;
         line_widths.push(line_w);
 
         let cursor_start = if rect_w > 0.0 {
@@ -2358,7 +2460,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         let mut cursor_x = if opts.vertical_text {
             0.0
         } else {
-            cursor_start
+            cursor_start - lead
         };
         for (ai, atom) in sub.atoms.iter().enumerate() {
             match &atom.kind {
@@ -2424,6 +2526,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     oblique,
                                     tracking: atom.state.tracking,
                                     bold: atom.state.bold,
+                                    aci: inline_aci(&atom.state),
                                 }),
                             });
                             let gx = line_lx + col_dx;
@@ -2502,6 +2605,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                 oblique,
                                 tracking,
                                 bold: atom.state.bold,
+                                aci: inline_aci(&atom.state),
                             }),
                         });
                         // Underline / overline / strike are lines, not glyphs;
@@ -2704,10 +2808,18 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                 oblique,
                                 tracking,
                                 bold: atom.state.bold,
+                                aci: inline_aci(&atom.state),
                             }),
                         });
                     };
-                    emit(denominator, valign_dy);
+                    // A `^` stack with no top half is a subscript: its
+                    // bottom half drops below the baseline (#2236).
+                    let bottom_dy = if numerator.is_empty() && !*bar {
+                        valign_dy - run_h * STACK_RAISE * 0.5
+                    } else {
+                        valign_dy
+                    };
+                    emit(denominator, bottom_dy);
                     emit(numerator, valign_dy + run_h * STACK_RAISE);
 
                     if opts.want_glyph_boxes {
@@ -2715,6 +2827,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             + denominator.chars().count()
                             + usize::from(!denominator.is_empty());
                         if slots > 0 {
+                            let valign_dy = bottom_dy;
                             let top = valign_dy + run_h * (STACK_RAISE + STACK_HALF_SCALE);
                             for index in 0..slots {
                                 let x0 = cursor_x + slot_w * index as f32 / slots as f32;
@@ -2987,6 +3100,50 @@ mod tests {
             .iter()
             .map(|s| s.strokes.iter().map(Vec::len).sum::<usize>() + s.fill_tris.len())
             .sum()
+    }
+
+    /// AutoCAD 2025 places a bottom-attached MTEXT by the ink of its last
+    /// line (in romand.shx "-3,45" sits 0.1905·h up, "Agp" 0.3333·h, "ABC"
+    /// on the point) and centres a middle-attached one on its ink box.
+    #[test]
+    fn bottom_and_middle_attachments_follow_the_ink() {
+        let layout = |value: &str, v_anchor| {
+            layout_mtext(&MTextRenderOpts {
+                columns: Default::default(),
+                value,
+                insertion: [0.0, 0.0, 0.0],
+                height: 10.0,
+                rect_w: 0.0,
+                rotation: 0.0,
+                style: &style("txt"),
+                attach_h_anchor: 0.5,
+                v_anchor,
+                line_spacing_factor: 1.0,
+                exact_line_spacing: false,
+                rectangle_height: 0.0,
+                vertical_text: false,
+                want_glyph_boxes: false,
+            })
+        };
+
+        // Baseline above the point, as AutoCAD measures with txt.shx at h 10.
+        let close = |value: &str, v_anchor, expected: f32| {
+            let v_offset = layout(value, v_anchor).v_offset;
+            assert!(
+                (v_offset - expected).abs() < 1e-3,
+                "{value}: {v_offset} != {expected}"
+            );
+        };
+        close("ABC", MTextVAnchor::Bottom, 0.0);
+        close("Agp", MTextVAnchor::Bottom, 10.0 / 3.0);
+        close("ABC", MTextVAnchor::Middle, -5.0);
+        close("Agp", MTextVAnchor::Middle, -10.0 / 3.0);
+
+        // Only the last line's descender counts.
+        let two = layout("Agp\\PABC", MTextVAnchor::Bottom);
+        assert!((two.v_offset - two.line_height).abs() < 1e-3);
+        let two = layout("ABC\\PAgp", MTextVAnchor::Bottom);
+        assert!((two.v_offset - two.line_height - 10.0 / 3.0).abs() < 1e-3);
     }
 
     #[test]
@@ -3601,7 +3758,7 @@ mod font_style_tests {
         };
         assert!(width(&bold) > width(family), "the bold face was not used");
 
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let mut style = codec::tables::TextStyle::with_truetype("B", family);
         style.true_type_font_flags |= TTF_FLAG_BOLD;
         style.handle = doc.allocate_handle();

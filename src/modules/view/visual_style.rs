@@ -85,6 +85,19 @@ impl VisualStyle {
     }
 }
 
+/// One-key answers to the style prompt (#2173): the digit or letter of the
+/// common style names, each mapped to the mode that draws it.
+pub const SHORT_KEYS: &[(&str, &str)] = &[
+    ("2", "WIREFRAME2D"),
+    ("3", "WIREFRAME3D"),
+    ("W", "WIREFRAME3D"),
+    ("H", "HIDDENLINE"),
+    ("S", "GOURAUDSHADED"),
+    ("R", "GOURAUDSHADED"),
+    ("C", "GOURAUDSHADED"),
+    ("E", "GOURAUDSHADEDWITHEDGES"),
+];
+
 /// The choices an interactive style prompt offers, in table order.
 pub fn keyword_choices() -> Vec<(&'static str, &'static str, Option<&'static str>)> {
     VISUAL_STYLES
@@ -142,6 +155,10 @@ pub fn style_name_for(mode: Mode) -> &'static str {
 /// nearest neighbour, because there is no longer anything else to map from.
 pub fn mode_for_keyword(keyword: &str) -> Option<Mode> {
     let keyword = keyword.trim().to_uppercase();
+    let keyword = SHORT_KEYS
+        .iter()
+        .find(|(key, _)| *key == keyword)
+        .map_or(keyword.as_str(), |(_, keyword)| keyword);
     VISUAL_STYLES
         .iter()
         .find(|style| style.keyword() == keyword)

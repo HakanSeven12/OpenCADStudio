@@ -7,7 +7,7 @@ use codec::{entities::Insert, DwgReader, DwgWriter, DxfReader, DxfWriter};
 use std::io::Cursor;
 
 struct Fixture {
-    doc: CadDocument,
+    doc: Document,
     definition: Handle,
     parameter: Parameter,
     action: Handle,
@@ -122,7 +122,7 @@ fn fixture(kind: Kind) -> Fixture {
     }
 }
 
-fn lines(doc: &CadDocument, insert: Handle) -> Vec<(DVec3, DVec3)> {
+fn lines(doc: &Document, insert: Handle) -> Vec<(DVec3, DVec3)> {
     let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
         panic!()
     };
@@ -179,7 +179,7 @@ fn block_action_self_grip_dependencies_preserve_frames_and_native_records() {
             .read()
             .unwrap(),
         ] {
-            let check = |doc: &CadDocument| {
+            let check = |doc: &Document| {
                 let actual = lines(doc, f.first);
                 assert!(
                     actual[0].0.distance(expected.0) < 1e-8,

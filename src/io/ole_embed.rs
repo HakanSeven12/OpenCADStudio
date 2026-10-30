@@ -199,7 +199,7 @@ pub fn build_embedded_ole(
 /// Non-interactive embed used by the control API: add the entity to `doc` and
 /// return its handle. The undo snapshot is the caller's responsibility.
 pub fn add_embedded_image(
-    doc: &mut codec::CadDocument,
+    doc: &mut codec::Document,
     image: &EmbeddedImage,
     origin: Vector3,
     width: f64,
@@ -271,7 +271,7 @@ mod tests {
             pixel_height: 3,
             name: "t.png".into(),
         };
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let handle =
             add_embedded_image(&mut doc, &image, Vector3::new(10.0, 10.0, 0.0), 20.0).unwrap();
 
@@ -280,7 +280,7 @@ mod tests {
         let path = dir.join("embedded_roundtrip.dwg");
         codec::DwgWriter::write_to_file(&path, &doc).unwrap();
 
-        let mut reader = codec::io::dwg::DwgReader::from_file(&path).unwrap();
+        let mut reader = codec::DwgReader::from_file(&path).unwrap();
         let reopened = reader.read().unwrap();
         std::fs::remove_file(&path).ok();
 

@@ -4,11 +4,11 @@ use crate::scene::block_authoring::{edit, metadata};
 use crate::scene::block_grips::runtime;
 use codec::{
     objects::{DynamicBlockData, ObjectType},
-    CadDocument,
+    Document,
 };
 
 fn description(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     parameter: Handle,
     component: Option<usize>,
@@ -148,6 +148,7 @@ impl OpenCADStudio {
             || tab.active_grip.is_some()
             || self.grip_popup.is_some()
             || self.visibility_popup.is_some()
+            || self.flip_popup.is_some()
             || !tab
                 .selected_grips
                 .iter()

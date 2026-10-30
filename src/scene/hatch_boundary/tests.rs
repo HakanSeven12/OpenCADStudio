@@ -1,5 +1,8 @@
+use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::Scene;
-use codec::entities::hatch::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge, SplineEdge};
+use codec::entities::hatch::{
+    BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, LineEdge, PolylineEdge, SplineEdge,
+};
 use codec::types::{Vector2, Vector3};
 use kernel::geom2d::{refine_spline_boundary, triangulate_rings, Curve, NurbsCurve};
 use kernel::tessellation::DEFAULT_ANGLE;
@@ -270,4 +273,102 @@ fn recovery_respects_the_total_hatch_vertex_cap() {
         .map(|p| project(p).map(|v| v as f32))
         .collect();
     assert_eq!(&model.boundary[..expected.len()], expected.as_slice());
+}
+
+fn filled_area(model: &HatchModel) -> f64 {
+    let (vertices, indices) = model.fill_mesh();
+    indices
+        .chunks_exact(3)
+        .map(|triangle| {
+            let [a, b, c] = [triangle[0], triangle[1], triangle[2]]
+                .map(|i| vertices[i as usize].map(f64::from));
+            ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) * 0.5
+        })
+        .sum()
+}
+
+/// Square from line edges whose last edge stops `gap` short of the start.
+fn square_with_gap(gap: f64) -> BoundaryPath {
+    let points = [
+        [0.0, 0.0],
+        [10.0, 0.0],
+        [10.0, 10.0],
+        [0.0, 10.0],
+        [0.0, gap],
+    ];
+    let mut path = BoundaryPath::new();
+    for pair in points.windows(2) {
+        path.add_edge(BoundaryEdge::Line(LineEdge {
+            start: Vector2::new(pair[0][0], pair[0][1]),
+            end: Vector2::new(pair[1][0], pair[1][1]),
+        }));
+    }
+    path
+}
+
+// Same cases as a test sheet checked in DWG TrueView: AutoCAD skips each loop
+// flagged not closed (bit 5), closed or not, and still fills the hatch's other
+// loops; a loop with a real gap but no flag fills.
+#[test]
+fn loops_flagged_not_closed_are_skipped_like_autocad() {
+    let flagged = |mut path: BoundaryPath| {
+        path.flags = BoundaryPathFlags::from_bits(1 | 32);
+        path
+    };
+    let square = |a: [f64; 2], b: [f64; 2]| rectangle(a, b, [0.0; 2]);
+    let area = |paths: Vec<BoundaryPath>| {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        hatch.paths = paths;
+        Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map(|model| filled_area(&model))
+    };
+    let close_to =
+        |area: Option<f64>, expected: f64| area.is_some_and(|area| (area - expected).abs() < 1e-3);
+
+    assert!(area(vec![flagged(square([0.0, 0.0], [10.0, 10.0]))]).is_none());
+    assert!(area(vec![flagged(square_with_gap(0.02))]).is_none());
+    assert!(close_to(area(vec![square_with_gap(0.02)]), 100.0));
+    // Flagged island: no hole.
+    assert!(close_to(
+        area(vec![
+            square([0.0, 0.0], [10.0, 10.0]),
+            flagged(square([3.0, 3.0], [7.0, 7.0])),
+        ]),
+        100.0
+    ));
+    // Flagged outer loop: only the island fills.
+    assert!(close_to(
+        area(vec![
+            flagged(square([0.0, 0.0], [10.0, 10.0])),
+            square([3.0, 3.0], [7.0, 7.0]),
+        ]),
+        16.0
+    ));
+    // Side by side: only the unflagged loop fills.
+    assert!(close_to(
+        area(vec![
+            square([0.0, 0.0], [4.5, 10.0]),
+            flagged(square([5.5, 0.0], [10.0, 10.0])),
+        ]),
+        45.0
+    ));
+}
+
+// AutoCAD leaves these loops out of the drawing extents too: DWG TrueView's
+// ZOOM Extents frames a drawing without them.
+#[test]
+fn loops_flagged_not_closed_stay_out_of_the_extents() {
+    let mut scene = Scene::new();
+    let mut line = codec::entities::Line::new();
+    line.end = Vector3::new(10.0, 10.0, 0.0);
+    scene.add_entity(codec::EntityType::Line(line));
+    let mut path = rectangle([100.0, 100.0], [110.0, 110.0], [0.0; 2]);
+    path.flags = BoundaryPathFlags::from_bits(1 | 32);
+    let mut hatch = Hatch::new();
+    hatch.is_solid = true;
+    hatch.paths.push(path);
+    scene.add_entity(codec::EntityType::Hatch(Box::new(hatch)));
+
+    let (_, max) = scene.model_space_extents().unwrap();
+    assert!(max.x < 10.5 && max.y < 10.5, "{max:?}");
 }

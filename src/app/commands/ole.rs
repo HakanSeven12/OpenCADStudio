@@ -282,7 +282,7 @@ impl OpenCADStudio {
 }
 
 /// MSOLESCALE of the drawing (1 when not set).
-fn ms_ole_scale(document: &codec::CadDocument) -> f64 {
+fn ms_ole_scale(document: &codec::Document) -> f64 {
     crate::io::drawing_variable(document, "MSOLESCALE")
         .and_then(|value| value.trim().parse::<f64>().ok())
         .unwrap_or(1.0)

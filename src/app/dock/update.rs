@@ -277,7 +277,12 @@ impl OpenCADStudio {
                 };
             }
             Some(DockDrag::Move { .. } | DockDrag::LayerColumn) | None => {}
-            Some(DockDrag::Width(_) | DockDrag::Split { .. } | DockDrag::FloatSize { .. }) => {
+            Some(
+                DockDrag::Width(_)
+                | DockDrag::Split { .. }
+                | DockDrag::FloatSize { .. }
+                | DockDrag::QuickProperties,
+            ) => {
                 changed = true;
             }
         }
@@ -413,6 +418,11 @@ impl OpenCADStudio {
                 self.dock
                     .resize_float(panel, edge, start, point.x - origin.x, point.y - origin.y);
             }
+            DockDrag::QuickProperties => {
+                let Some(last) = last else { return };
+                let pos = self.quick_properties_pos + (point - last);
+                self.quick_properties_pos = iced::Point::new(pos.x.max(0.0), pos.y.max(0.0));
+            }
             DockDrag::LayerColumn => {
                 let Some(last) = last else { return };
                 self.layer_name_col_w =
@@ -539,7 +549,21 @@ impl OpenCADStudio {
                         self.sync_ribbon_layers();
                         self.show_layers = true;
                     }
+                    // The walk session is the pallet's state, so opening from
+                    // a collapsed tab starts a walk exactly like LAYWALK does.
+                    PanelId::Laywalk => {
+                        if self.tabs[self.active_tab].layer_walk.is_none() {
+                            self.open_layer_walk();
+                        }
+                    }
                     PanelId::QuickCalc => self.quick_calc.show = true,
+                    PanelId::Plugin(num) => {
+                        if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
+                            if let Some(panel) = self.plugin_panels.get_mut(panel_id) {
+                                panel.visible = true;
+                            }
+                        }
+                    }
                 }
             }
             self.dock_reveal(id);
@@ -574,12 +598,20 @@ impl OpenCADStudio {
                 self.show_layers = false;
                 self.ribbon.deactivate_tool_if("LAYERS");
             }
+            PanelId::Laywalk => self.close_layer_walk(false),
             PanelId::QuickCalc => self.quick_calc.show = false,
             PanelId::GraphicAttributes => {
                 self.show_graphic_attributes = false;
                 self.ribbon.set_graphic_attributes(false);
                 self.graphic_attributes.close_popups();
                 self.save_config();
+            }
+            PanelId::Plugin(num) => {
+                if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
+                    if let Some(panel) = self.plugin_panels.get_mut(panel_id) {
+                        panel.visible = false;
+                    }
+                }
             }
         }
         self.dock_unpeek(id);
@@ -657,8 +689,23 @@ impl OpenCADStudio {
             PanelId::Count => self.count_palette.show,
             PanelId::SheetSetManager => self.sheet_set.show,
             PanelId::Layers => self.show_layers,
+            // The walk session is the pallet's state. While the Select Objects
+            // prompt owns the pointer the pallet steps out of the way, and
+            // comes back when the pick ends or is cancelled.
+            PanelId::Laywalk => {
+                let tab = &self.tabs[self.active_tab];
+                tab.layer_walk.is_some()
+                    && !(tab.layer_walk_picking && tab.active_cmd.is_some())
+            }
             PanelId::QuickCalc => self.quick_calc.show,
             PanelId::GraphicAttributes => self.show_graphic_attributes,
+            PanelId::Plugin(num) => {
+                if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
+                    self.plugin_panels.get(panel_id).map(|p| p.visible).unwrap_or(false)
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -706,6 +753,17 @@ impl OpenCADStudio {
 
     /// The group `side` draws: the one it shows, or the first with an open
     /// pallet when that one has none.
+    /// Whether open pallet `id` is drawn: floating, or in the shown group of
+    /// an expanded edge.
+    pub(crate) fn dock_panel_on_screen(&self, id: crate::ui::dock::PanelId) -> bool {
+        match self.dock.location(id) {
+            Some((side, group)) => {
+                self.dock_shown_group(side) == Some(group) && self.dock_edge_expanded(side)
+            }
+            None => true,
+        }
+    }
+
     pub(crate) fn dock_shown_group(&self, side: crate::app::config::DockSide) -> Option<usize> {
         let visible = self.dock_visible_groups(side);
         let shown = self.dock.shown(side);

@@ -1,6 +1,6 @@
 [package]
 name = "OpenCADStudio"
-version = "2026.42.0"
+version = "2026.43.0"
 edition = "2021"
 build = "build.rs"
 default-run = "OpenCADStudio"
@@ -37,10 +37,10 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-codec = { package = "acadrust", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "e80d1a9", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "3ee4d3b", features = ["acis", "offset"] }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "3ee4d3b" }
-graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "07f58dd" }
+codec = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "d657f94", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "3d6c6e8", features = ["acis", "offset"] }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "3d6c6e8" }
+graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # Shared SAVE serialization dispatch + web-worker wire format: one
 # implementation for the inline (fallback/native) path and the worker path.
@@ -280,6 +280,10 @@ name = "model_space_handle_lookup"
 harness = false
 
 [[bench]]
+name = "dimension_association_refresh"
+harness = false
+
+[[bench]]
 name = "parametric_presolve_fixpoint"
 harness = false
 
@@ -289,6 +293,46 @@ harness = false
 
 [[bench]]
 name = "tds_material_groups"
+harness = false
+
+[[bench]]
+name = "associative_refresh_dedup"
+harness = false
+
+[[bench]]
+name = "centerline_refresh_scan"
+harness = false
+
+[[bench]]
+name = "navigation_selection_bounds"
+harness = false
+
+[[bench]]
+name = "paper_viewport_hidden_handles"
+harness = false
+
+[[bench]]
+name = "i18n_label_render"
+harness = false
+
+[[bench]]
+name = "dependency_index_rebuild"
+harness = false
+
+[[bench]]
+name = "parametric_display_staging"
+harness = false
+
+[[bench]]
+name = "mesh_export"
+harness = false
+
+[[bench]]
+name = "hatch_pattern_segments"
+harness = false
+
+[[bench]]
+name = "scene_pick_micro"
 harness = false
 
 [[test]]

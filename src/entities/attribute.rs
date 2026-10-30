@@ -107,7 +107,7 @@ fn mtext_flag_str(f: MTextFlag) -> &'static str {
 /// glyph boxes, the point they are relative to and the layout rotation.
 pub(crate) type AttrCells = (Vec<crate::entities::text_support::GlyphBox>, [f64; 2], f32);
 
-fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::CadDocument) -> RenderEntity {
+fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::Document) -> RenderEntity {
     build_attr_layout(input, document, None)
 }
 
@@ -115,7 +115,7 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::CadDocument) -
 /// character cells in `cells` (left `None` for a single-line one).
 fn build_attr_layout(
     mut input: AttrTextInputs<'_>,
-    document: &codec::CadDocument,
+    document: &codec::Document,
     mut cells: Option<&mut Option<AttrCells>>,
 ) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
@@ -327,11 +327,19 @@ fn build_attr_layout(
                 AHA::Center | AHA::Middle => b.advance * 0.5,
                 AHA::Right | AHA::Aligned | AHA::Fit => b.advance,
             };
+            // As TEXT: the font's height and descender decide, Middle
+            // (72 = 4) centres on the strokes.
             let ay = match input.vertical_alignment {
+                _ if matches!(input.horizontal_alignment, AHA::Middle) => {
+                    (b.ink_min[1] + b.ink_max[1]) * 0.5
+                }
                 AVA::Baseline => 0.0,
-                AVA::Bottom => b.ink_min[1],
-                AVA::Middle => (b.ink_min[1] + b.ink_max[1]) * 0.5,
-                AVA::Top => b.ink_max[1],
+                AVA::Bottom => {
+                    -(input.height as f32)
+                        * crate::entities::text_support::descent_ratio(&resolved.font_name)
+                }
+                AVA::Middle => input.height as f32 * 0.5,
+                AVA::Top => input.height as f32,
             };
             (ax, ay)
         } else {
@@ -379,6 +387,7 @@ fn build_attr_layout(
                 oblique: oblique_angle,
                 tracking: 1.0,
                 bold: false,
+                aci: None,
             }),
         });
     }
@@ -397,7 +406,7 @@ fn build_attr_layout(
 // ── AttributeDefinition ───────────────────────────────────────────────────────
 
 impl RenderConvertible for AttributeDefinition {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         // A definition shows its tag; the value appears only on the block
         // references (block content renders a constant one's value itself).
         Some(build_attr_render(
@@ -563,10 +572,18 @@ fn justify_offset(a: &AttributeDefinition) -> Option<(f64, f64)> {
         AHA::Right | AHA::Aligned | AHA::Fit => b.advance as f64,
     };
     let ay = match a.vertical_alignment {
+        _ if matches!(a.horizontal_alignment, AHA::Middle) => {
+            (b.ink_min[1] + b.ink_max[1]) as f64 * 0.5
+        }
         AVA::Baseline => 0.0,
-        AVA::Bottom => b.ink_min[1] as f64,
-        AVA::Middle => (b.ink_min[1] + b.ink_max[1]) as f64 * 0.5,
-        AVA::Top => b.ink_max[1] as f64,
+        AVA::Bottom => {
+            -a.height
+                * crate::entities::text_support::descent_ratio(
+                    &crate::entities::common::style_font(&a.text_style),
+                ) as f64
+        }
+        AVA::Middle => a.height * 0.5,
+        AVA::Top => a.height,
     };
     Some((ax, ay))
 }
@@ -947,7 +964,7 @@ impl Transformable for AttributeDefinition {
 /// single-line attribute.
 pub(crate) fn attribute_cells(
     a: &AttributeEntity,
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> Option<AttrCells> {
     let mut out = None;
     build_attr_layout(attr_inputs(a), document, Some(&mut out));
@@ -975,7 +992,7 @@ fn attr_inputs(a: &AttributeEntity) -> AttrTextInputs<'_> {
 }
 
 impl RenderConvertible for AttributeEntity {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         Some(build_attr_render(
             AttrTextInputs {
                 value: &self.value,

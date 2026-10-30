@@ -29,6 +29,34 @@ impl OpenCADStudio {
         self.tabs[i].snap_result = None;
     }
 
+    /// One answer of DIMREASSOCIATE: the point (or object) is applied at
+    /// once; the whole command is one undo step.
+    pub(super) fn handle_reassociate_dimension(
+        &mut self,
+        dimension: Handle,
+        target: crate::command::ReassociateTarget,
+        last: bool,
+    ) {
+        let i = self.active_tab;
+        if self.tabs[i].history.pending.is_none() {
+            self.push_undo_snapshot(i, "DIMREASSOCIATE");
+        }
+        if self.tabs[i].scene.reassociate_dimension(dimension, &target) {
+            self.invalidate_property_targets(i, &[dimension]);
+            self.tabs[i].dirty = true;
+        } else {
+            self.command_line
+                .push_info(crate::t!("Dimension point not reassociated.").as_ref());
+        }
+        if last {
+            self.tabs[i].active_cmd = None;
+            self.tabs[i].snap_result = None;
+            self.command_line.set_step_options(Vec::new());
+        } else {
+            let _ = self.handle_need_point();
+        }
+    }
+
     pub(super) fn handle_edit_dimension_jog(
         &mut self,
         dimension: Handle,
@@ -89,14 +117,46 @@ impl OpenCADStudio {
         spacing: Option<f64>,
     ) {
         let i = self.active_tab;
-        self.push_undo_snapshot(i, "DIMSPACE");
-        if apply_dimspace(&mut self.tabs[i].scene, base, &others, spacing) {
-            self.tabs[i].dirty = true;
-            self.command_line
-                .push_output(crate::t!("DIMSPACE  Spacing adjusted.").as_ref());
+        // DIM's aliGn comes back to DIM's prompt, quietly.
+        let in_dim = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.name() == "DIM");
+        if !others.is_empty() {
+            self.push_undo_snapshot(i, if in_dim { "DIM" } else { "DIMSPACE" });
+            if apply_dimspace(&mut self.tabs[i].scene, base, &others, spacing) {
+                self.tabs[i].dirty = true;
+                if !in_dim {
+                    self.command_line
+                        .push_output(crate::t!("DIMSPACE  Spacing adjusted.").as_ref());
+                }
+            }
         }
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
+        if in_dim {
+            self.tabs[i].scene.deselect_all();
+            self.start_dim(i);
+        }
+    }
+
+    pub(super) fn handle_distribute_dimensions(
+        &mut self,
+        base: Option<Handle>,
+        dimensions: Vec<Handle>,
+        offset: Option<f64>,
+    ) {
+        let i = self.active_tab;
+        if !dimensions.is_empty() {
+            self.push_undo_snapshot(i, "DIM");
+            if apply_dim_distribute(&mut self.tabs[i].scene, base, &dimensions, offset) {
+                self.tabs[i].dirty = true;
+            }
+        }
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.deselect_all();
+        self.start_dim(i);
     }
 }
 
@@ -143,7 +203,7 @@ fn segment_intersection_xy(
     ))
 }
 
-fn break_object_handle(document: &codec::CadDocument, dimension: Handle) -> Option<Handle> {
+fn break_object_handle(document: &codec::Document, dimension: Handle) -> Option<Handle> {
     document.objects.iter().find_map(|(handle, object)| {
         let codec::objects::ObjectType::DataObject(object) = object else {
             return None;
@@ -155,7 +215,7 @@ fn break_object_handle(document: &codec::CadDocument, dimension: Handle) -> Opti
     })
 }
 
-fn remove_dimension_break_data(document: &mut codec::CadDocument, dimension: Handle) -> bool {
+fn remove_dimension_break_data(document: &mut codec::Document, dimension: Handle) -> bool {
     let handles: Vec<_> = document
         .objects
         .iter()
@@ -193,7 +253,7 @@ fn remove_dimension_break_data(document: &mut codec::CadDocument, dimension: Han
 }
 
 fn write_dimension_break_data(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     dimension: Handle,
     reserved_reference: Handle,
     references: Vec<codec::objects::BreakPointReference>,
@@ -303,17 +363,14 @@ fn apply_dimbreak(
             .filter(|handle| remove_dimension_break_data(&mut scene.document, *handle))
             .collect();
         return DimBreakResult {
-            message: crate::tf!(
-                "DIMBREAK: removed breaks from {} dimension(s).",
-                changed.len()
-            )
-            .into_owned(),
+            message: objects_modified(changed.len()),
             changed,
         };
     }
 
-    let crossing_handles: Vec<Handle> = match operation {
-        DimensionBreakOperation::Object(handle) => vec![handle],
+    let crossing_handles: Vec<Handle> = match &operation {
+        DimensionBreakOperation::Objects(handles) => handles.clone(),
+        DimensionBreakOperation::Object(handle) => vec![*handle],
         DimensionBreakOperation::Auto => scene
             .document
             .entities()
@@ -355,7 +412,9 @@ fn apply_dimbreak(
             DimensionBreakOperation::Manual(first, second) => {
                 references.push(break_reference(references.len() as i32, 2, first, second));
             }
-            DimensionBreakOperation::Auto | DimensionBreakOperation::Object(_) => {
+            DimensionBreakOperation::Auto
+            | DimensionBreakOperation::Objects(_)
+            | DimensionBreakOperation::Object(_) => {
                 let dimension_segments = wire_segments(&scene.wire_models_for(&[*dimension]));
                 let mut intersections = Vec::new();
                 for dim_segment in &dimension_segments {
@@ -391,6 +450,9 @@ fn apply_dimbreak(
 
     let reserved = match operation {
         DimensionBreakOperation::Object(handle) => handle,
+        DimensionBreakOperation::Objects(handles) => {
+            handles.first().copied().unwrap_or(Handle::NULL)
+        }
         _ => Handle::NULL,
     };
     let changed: Vec<_> = pending
@@ -401,13 +463,350 @@ fn apply_dimbreak(
         })
         .collect();
     DimBreakResult {
-        message: if changed.is_empty() {
-            crate::t!("DIMBREAK: no intersections were found.").into_owned()
-        } else {
-            crate::tf!("DIMBREAK: updated {} dimension(s).", changed.len()).into_owned()
-        },
+        message: objects_modified(changed.len()),
         changed,
     }
+}
+
+/// The count line DIMBREAK ends with.
+fn objects_modified(count: usize) -> String {
+    if count == 1 {
+        crate::t!("1 object modified").into_owned()
+    } else {
+        crate::tf!("{count} objects modified").into_owned()
+    }
+}
+
+/// The linear and aligned dimensions of the same space whose dimension line
+/// lies on `new`'s and shares part of its length.
+pub(super) fn overlapping_dimensions(scene: &crate::scene::Scene, new: Handle) -> Vec<Handle> {
+    let Some((axis, _, definition)) = spacing_axis(scene, new) else {
+        return Vec::new();
+    };
+    let length = axis[0].hypot(axis[1]);
+    if length <= 0.0 {
+        return Vec::new();
+    }
+    let along = |p: [f64; 3]| (p[0] * axis[0] + p[1] * axis[1]) / length;
+    let across = |p: [f64; 3]| (p[1] * axis[0] - p[0] * axis[1]) / length;
+    let span = |handle: Handle| {
+        let dimension = scene
+            .document
+            .get_entity(handle)
+            .and_then(crate::entities::dimension::as_dimension)?;
+        let (a, b) = match dimension {
+            codec::entities::Dimension::Linear(d) => (d.first_point, d.second_point),
+            codec::entities::Dimension::Aligned(d) => (d.first_point, d.second_point),
+            _ => return None,
+        };
+        let (a, b) = (along([a.x, a.y, a.z]), along([b.x, b.y, b.z]));
+        Some((a.min(b), a.max(b)))
+    };
+    let Some((low, high)) = span(new) else {
+        return Vec::new();
+    };
+    let owner = scene.document.get_entity(new).map(|e| e.common().owner_handle);
+    let line = across(definition);
+    let tolerance = (high - low).abs().max(1.0) * 1.0e-9;
+    scene
+        .document
+        .entities()
+        .map(|entity| entity.common().handle)
+        .filter(|&handle| handle != new)
+        .filter(|&handle| {
+            scene.document.get_entity(handle).map(|e| e.common().owner_handle) == owner
+        })
+        .filter(|&handle| {
+            let Some((other_axis, _, other_definition)) = spacing_axis(scene, handle) else {
+                return false;
+            };
+            let cross = axis[0] * other_axis[1] - axis[1] * other_axis[0];
+            let other_length = other_axis[0].hypot(other_axis[1]);
+            if other_length <= 0.0 || (cross / (length * other_length)).abs() > 1.0e-9 {
+                return false;
+            }
+            if (across(other_definition) - line).abs() > tolerance {
+                return false;
+            }
+            span(handle).is_some_and(|(a, b)| a.max(low) < b.min(high) - tolerance)
+        })
+        .collect()
+}
+
+/// DIM's answer to an overlap: Move away steps the overlapped dimensions one
+/// DIMDLI towards what they measure, Break up breaks them where the new one
+/// crosses, Replace erases them, None leaves them.
+pub(super) fn apply_dim_overlap(
+    scene: &mut crate::scene::Scene,
+    choice: char,
+    new: Handle,
+    others: &[Handle],
+    dimdli: f64,
+) {
+    match choice {
+        'M' => {
+            let mut changes = Vec::new();
+            for &handle in others {
+                let Some((axis, normal, definition)) = spacing_axis(scene, handle) else {
+                    continue;
+                };
+                let Some(frame) = kernel::space::dimension_spacing_frame(axis, normal, definition)
+                else {
+                    continue;
+                };
+                let p = frame.perpendicular;
+                let measured = match scene
+                    .document
+                    .get_entity(handle)
+                    .and_then(crate::entities::dimension::as_dimension)
+                {
+                    Some(codec::entities::Dimension::Linear(d)) => d.first_point,
+                    Some(codec::entities::Dimension::Aligned(d)) => d.first_point,
+                    _ => continue,
+                };
+                let toward = (measured.x - definition[0]) * p[0]
+                    + (measured.y - definition[1]) * p[1]
+                    + (measured.z - definition[2]) * p[2];
+                let target = frame.coordinate + dimdli * toward.signum();
+                if let Some(codec::EntityType::Dimension(dim)) =
+                    scene.document.get_entity_mut(handle)
+                {
+                    let slide = |point: &mut codec::types::Vector3| {
+                        let moved = kernel::space::move_to_dimension_spacing(
+                            [point.x, point.y, point.z],
+                            frame,
+                            target,
+                        );
+                        *point = codec::types::Vector3::new(moved[0], moved[1], moved[2]);
+                    };
+                    match &mut **dim {
+                        codec::entities::Dimension::Linear(d) => {
+                            slide(&mut d.definition_point);
+                            d.base.definition_point = d.definition_point;
+                        }
+                        codec::entities::Dimension::Aligned(d) => {
+                            slide(&mut d.definition_point);
+                            d.base.definition_point = d.definition_point;
+                        }
+                        _ => continue,
+                    }
+                    scene.invalidate_dim_block_recorded(handle);
+                    changes.push((handle, crate::scene::ChangeKind::Modified));
+                }
+            }
+            if !changes.is_empty() {
+                scene.bump_entities(&changes);
+            }
+        }
+        'B' => break_up_dimensions(scene, new, others),
+        'R' => scene.erase_entities(others),
+        _ => {}
+    }
+}
+
+/// Break up: `new` and the dimensions it lies over become a chain on the same
+/// dimension line, split at every extension line origin of them all. Each
+/// piece is a new dimension made like `new`; the originals are erased.
+fn break_up_dimensions(scene: &mut crate::scene::Scene, new: Handle, others: &[Handle]) {
+    use codec::entities::Dimension;
+    use codec::types::Vector3;
+    let Some((axis, _, definition)) = spacing_axis(scene, new) else {
+        return;
+    };
+    let length = axis[0].hypot(axis[1]);
+    let Some(template) = scene.document.get_entity(new).cloned() else {
+        return;
+    };
+    if length <= 0.0 {
+        return;
+    }
+    let u = [axis[0] / length, axis[1] / length];
+    let along = |p: Vector3| p.x * u[0] + p.y * u[1];
+    let mut points: Vec<Vector3> = std::iter::once(new)
+        .chain(others.iter().copied())
+        .filter_map(|handle| {
+            match scene
+                .document
+                .get_entity(handle)
+                .and_then(crate::entities::dimension::as_dimension)?
+            {
+                Dimension::Linear(d) => Some([d.first_point, d.second_point]),
+                Dimension::Aligned(d) => Some([d.first_point, d.second_point]),
+                _ => None,
+            }
+        })
+        .flatten()
+        .collect();
+    points.sort_by(|a, b| along(*a).total_cmp(&along(*b)));
+    let tolerance = match (points.first(), points.last()) {
+        (Some(a), Some(b)) => (along(*b) - along(*a)).abs().max(1.0) * 1.0e-9,
+        _ => return,
+    };
+    points.dedup_by(|b, a| (along(*b) - along(*a)).abs() <= tolerance);
+    let line = definition[0] * u[0] + definition[1] * u[1];
+    let mut pieces = Vec::new();
+    for pair in points.windows(2) {
+        let mut entity = template.clone();
+        let Some(dimension) = crate::entities::dimension::as_dimension_mut(&mut entity) else {
+            continue;
+        };
+        // On the dimension line, across from the piece's second point.
+        let shift = along(pair[1]) - line;
+        let at = Vector3::new(
+            definition[0] + shift * u[0],
+            definition[1] + shift * u[1],
+            definition[2],
+        );
+        match dimension {
+            Dimension::Linear(d) => {
+                (d.first_point, d.second_point, d.definition_point) = (pair[0], pair[1], at);
+            }
+            Dimension::Aligned(d) => {
+                (d.first_point, d.second_point, d.definition_point) = (pair[0], pair[1], at);
+            }
+            _ => continue,
+        }
+        crate::entities::dimension::normalize_scripted_dimension(dimension);
+        let base = dimension.base_mut();
+        base.text_user_positioned = false;
+        base.block_name.clear();
+        pieces.push(entity);
+    }
+    let mut erased = vec![new];
+    erased.extend_from_slice(others);
+    scene.erase_entities(&erased);
+    for piece in pieces {
+        scene.add_entity_clone(piece);
+    }
+}
+
+/// The axis, normal and dimension-line point of a linear or aligned dimension.
+fn spacing_axis(
+    scene: &crate::scene::Scene,
+    handle: Handle,
+) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
+    use codec::entities::Dimension;
+    match scene
+        .document
+        .get_entity(handle)
+        .and_then(crate::entities::dimension::as_dimension)?
+    {
+        Dimension::Linear(d) => Some((
+            [d.rotation.cos(), d.rotation.sin(), 0.0],
+            [d.base.normal.x, d.base.normal.y, d.base.normal.z],
+            [d.definition_point.x, d.definition_point.y, d.definition_point.z],
+        )),
+        Dimension::Aligned(d) => Some((
+            [
+                d.second_point.x - d.first_point.x,
+                d.second_point.y - d.first_point.y,
+                d.second_point.z - d.first_point.z,
+            ],
+            [d.base.normal.x, d.base.normal.y, d.base.normal.z],
+            [d.definition_point.x, d.definition_point.y, d.definition_point.z],
+        )),
+        _ => None,
+    }
+}
+
+/// DIM's Distribute. Equal (`offset` None) keeps the outermost two of the
+/// dimensions parallel to the first and spaces the rest evenly between them;
+/// Offset keeps `base` and steps the others away from it, nearest first, on
+/// the side each lies.
+fn apply_dim_distribute(
+    scene: &mut crate::scene::Scene,
+    base: Option<Handle>,
+    dimensions: &[Handle],
+    offset: Option<f64>,
+) -> bool {
+    let Some(reference) = base.or_else(|| dimensions.first().copied()) else {
+        return false;
+    };
+    let Some((axis, normal, definition)) = spacing_axis(scene, reference) else {
+        return false;
+    };
+    let Some(frame) = kernel::space::dimension_spacing_frame(axis, normal, definition) else {
+        return false;
+    };
+    let p = frame.perpendicular;
+    let coordinate = |point: [f64; 3]| point[0] * p[0] + point[1] * p[1] + point[2] * p[2];
+    let parallel = |handle: Handle| {
+        spacing_axis(scene, handle).and_then(|(other, _, point)| {
+            let cross = axis[0] * other[1] - axis[1] * other[0];
+            let length = axis[0].hypot(axis[1]) * other[0].hypot(other[1]);
+            (length > 0.0 && (cross / length).abs() < 1.0e-6).then(|| coordinate(point))
+        })
+    };
+    let mut placed: Vec<(Handle, f64)> = dimensions
+        .iter()
+        .filter(|&&handle| Some(handle) != base)
+        .filter_map(|&handle| parallel(handle).map(|at| (handle, at)))
+        .collect();
+    let mut targets = Vec::new();
+    match (base, offset) {
+        (Some(base), Some(offset)) => {
+            let Some(origin) = parallel(base) else {
+                return false;
+            };
+            placed.sort_by(|a, b| (a.1 - origin).abs().total_cmp(&(b.1 - origin).abs()));
+            let (mut above, mut below) = (0.0, 0.0);
+            for (handle, at) in placed {
+                let step = if at >= origin {
+                    above += 1.0;
+                    above
+                } else {
+                    below -= 1.0;
+                    below
+                };
+                targets.push((handle, origin + offset * step));
+            }
+        }
+        _ => {
+            if placed.len() < 3 {
+                return false;
+            }
+            placed.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let (low, high) = (placed[0].1, placed[placed.len() - 1].1);
+            let gap = (high - low) / (placed.len() - 1) as f64;
+            for (index, (handle, _)) in placed.iter().enumerate() {
+                targets.push((*handle, low + gap * index as f64));
+            }
+        }
+    }
+    // The frame measures from its own origin; the coordinates above are
+    // plain projections.
+    let shift = frame.coordinate - coordinate(definition);
+    let mut changes = Vec::new();
+    for (handle, target) in targets {
+        let target = target + shift;
+        if let Some(codec::EntityType::Dimension(dim)) = scene.document.get_entity_mut(handle) {
+            let slide = |point: &mut codec::types::Vector3| {
+                let moved = kernel::space::move_to_dimension_spacing(
+                    [point.x, point.y, point.z],
+                    frame,
+                    target,
+                );
+                *point = codec::types::Vector3::new(moved[0], moved[1], moved[2]);
+            };
+            match &mut **dim {
+                codec::entities::Dimension::Linear(d) => {
+                    slide(&mut d.definition_point);
+                    d.base.definition_point = d.definition_point;
+                }
+                codec::entities::Dimension::Aligned(d) => {
+                    slide(&mut d.definition_point);
+                    d.base.definition_point = d.definition_point;
+                }
+                _ => continue,
+            }
+            scene.invalidate_dim_block_recorded(handle);
+            changes.push((handle, crate::scene::ChangeKind::Modified));
+        }
+    }
+    if !changes.is_empty() {
+        scene.bump_entities(&changes);
+    }
+    !changes.is_empty()
 }
 
 fn apply_dimspace(
@@ -505,7 +904,7 @@ fn apply_dimspace(
 }
 
 fn dimension_auto_spacing(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     dimension: &codec::entities::Dimension,
     annotation_multiplier: f64,
 ) -> f64 {

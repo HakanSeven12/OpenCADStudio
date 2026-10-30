@@ -9,11 +9,11 @@
 
 use codec::fields::FieldContext;
 use codec::types::Handle;
-use codec::CadDocument;
+use codec::Document;
 
 /// OCS's environment provider for field evaluation. With the document at
 /// hand it also answers the system variables the engine asks the host for.
-struct OcsFieldContext<'a>(Option<&'a CadDocument>);
+struct OcsFieldContext<'a>(Option<&'a Document>);
 
 impl FieldContext for OcsFieldContext<'_> {
     fn now_julian(&self) -> f64 {
@@ -108,14 +108,14 @@ pub fn set_sheet_sets(sets: Vec<codec::sheet_set::SheetSetDatabase>) {
 
 /// Re-evaluate the field hosted by entity `host` (usually an MTEXT), or `None`
 /// to keep the cached text. Thin wrapper over the library engine.
-pub fn resolve(document: &CadDocument, host: Handle) -> Option<String> {
+pub fn resolve(document: &Document, host: Handle) -> Option<String> {
     codec::fields::resolve(document, host, &OcsFieldContext(Some(document)))
 }
 
 /// FIELDEVAL of the drawing (kept in its variable dictionary; default 31):
 /// the events that update fields — 1 open, 2 save, 4 plot, 8 eTransmit,
 /// 16 regen.
-pub fn fieldeval(document: &CadDocument) -> i32 {
+pub fn fieldeval(document: &Document) -> i32 {
     crate::io::drawing_variable(document, "FIELDEVAL")
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(31)
@@ -126,7 +126,7 @@ pub fn fieldeval(document: &CadDocument) -> i32 {
 /// an explicit UPDATEFIELD. `hosts` limits it to those hosts. Returns the
 /// hosts whose text changed and the number of fields the hosts hold.
 pub fn update_fields(
-    document: &mut CadDocument,
+    document: &mut Document,
     event: i32,
     hosts: Option<&[Handle]>,
 ) -> (Vec<Handle>, usize) {
@@ -144,7 +144,7 @@ pub fn update_fields(
 
 /// Recompute a table's cell formulas into its block after the table changed;
 /// returns the cell texts that changed.
-pub fn refresh_table_formulas(document: &mut CadDocument, table: Handle) -> Vec<Handle> {
+pub fn refresh_table_formulas(document: &mut Document, table: Handle) -> Vec<Handle> {
     // Copying the drawing is only worth it for a table with a field.
     let has_field = matches!(
         document.get_entity(table),
@@ -164,14 +164,14 @@ pub fn refresh_table_formulas(document: &mut CadDocument, table: Handle) -> Vec<
 
 /// The text a table cell shows for its field: a formula is evaluated live
 /// (it reads other cells), any other field shows its stored value.
-pub fn cell_text(document: &CadDocument, field: Handle, table: Handle) -> Option<String> {
+pub fn cell_text(document: &Document, field: Handle, table: Handle) -> Option<String> {
     codec::fields::cell_field_text(document, field, table, &OcsFieldContext(Some(document)))
 }
 
 /// Evaluate one field code (`\AcVar Date \f "yyyy-MM-dd"`, or the `%<…>%`
 /// form) for a preview; `None` when it cannot be evaluated.
 pub fn evaluate(
-    document: &CadDocument,
+    document: &Document,
     code: &str,
     objects: &[Handle],
     host: Option<Handle>,
@@ -233,8 +233,26 @@ fn num(v: f64) -> String {
     format!("{v:.6}")
 }
 
+/// The property a `CustomDP.<Name>` field variable names (the stored code
+/// for a custom drawing property).
+pub fn custom_property_name(variable: &str) -> Option<&str> {
+    let variable = variable.trim();
+    let prefix = variable.get(..CUSTOM_PROPERTY_PREFIX.len())?;
+    prefix
+        .eq_ignore_ascii_case(CUSTOM_PROPERTY_PREFIX)
+        .then(|| variable[CUSTOM_PROPERTY_PREFIX.len()..].trim())
+}
+
+/// The variable prefix of a custom drawing property in a field code.
+pub const CUSTOM_PROPERTY_PREFIX: &str = "CustomDP.";
+
+/// The field code that shows custom drawing property `name`.
+pub fn custom_property_code(name: &str) -> String {
+    format!("\\AcVar {CUSTOM_PROPERTY_PREFIX}{name}")
+}
+
 /// A system variable's value as a field shows it.
-pub fn sysvar(document: &CadDocument, name: &str) -> Option<String> {
+pub fn sysvar(document: &Document, name: &str) -> Option<String> {
     let h = &document.header;
     let path = document.source_path.as_deref().unwrap_or("");
     let (folder, file) = match path.rfind(['/', '\\']) {
@@ -318,10 +336,52 @@ fn epoch_secs() -> i64 {
     }
 }
 
+/// The one field a text is made of, as FIELD inserts it: the field's code
+/// and the objects it reads. `None` when the text has no field, or text
+/// around or between its fields.
+pub fn whole_text_field(document: &Document, host: Handle) -> Option<(String, Vec<Handle>)> {
+    let owner = |handle: Handle| -> Option<Handle> {
+        if let Some(field) = document.fields.get(&handle) {
+            return Some(field.owner);
+        }
+        match document.objects.get(&handle)? {
+            codec::objects::ObjectType::Dictionary(dictionary) => Some(dictionary.owner),
+            _ => None,
+        }
+    };
+    // The text container sits a few dictionaries below its host.
+    let hosted_by = |mut handle: Handle| {
+        for _ in 0..12 {
+            match owner(handle) {
+                Some(next) if next == host => return true,
+                Some(next) => handle = next,
+                None => return false,
+            }
+        }
+        false
+    };
+    let container = document
+        .fields
+        .values()
+        .find(|field| field.evaluator == "_text" && hosted_by(field.handle))?;
+    if container.code.trim() != "%<\\_FldIdx 0>%" {
+        return None;
+    }
+    let mut children = document
+        .fields
+        .values()
+        .filter(|field| field.owner == container.handle);
+    let child = children.next()?;
+    children
+        .next()
+        .is_none()
+        .then(|| (child.code.clone(), child.objects.clone()))
+}
+
 /// Attach `field` (its code and referenced objects) to `host`, showing
 /// `value`; `None` removes the host's field.
 pub fn set_text_field(
-    document: &mut CadDocument,
+    document: &mut Document,
     host: Handle,
     field: Option<(String, Vec<Handle>)>,
     value: &str,
@@ -340,7 +400,7 @@ pub fn set_text_field(
 
 /// Month and day names and the regional date / time pictures, as date
 /// fields show them: the operating system's regional settings.
-fn os_date_locale() -> codec::fields::DateLocale {
+pub(crate) fn os_date_locale() -> codec::fields::DateLocale {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::Globalization::GetLocaleInfoEx;
@@ -419,13 +479,13 @@ pub const BOX_ABOVE: f64 = 1.19;
 pub const BACKGROUND: [f32; 4] = [203.0 / 255.0, 203.0 / 255.0, 203.0 / 255.0, 1.0];
 
 /// Whether `entity` hosts a field: its extension dictionary has ACAD_FIELD.
-pub fn hosts_field(document: &CadDocument, entity: &codec::entities::EntityType) -> bool {
+pub fn hosts_field(document: &Document, entity: &codec::entities::EntityType) -> bool {
     common_hosts_field(document, entity.common())
 }
 
 /// [`hosts_field`] for an entity known only by its common data, such as an
 /// attribute of a block reference.
-pub fn common_hosts_field(document: &CadDocument, common: &codec::entities::EntityCommon) -> bool {
+pub fn common_hosts_field(document: &Document, common: &codec::entities::EntityCommon) -> bool {
     let Some(xdict) = common.xdictionary_handle else {
         return false;
     };
@@ -467,7 +527,7 @@ pub fn utc_offset_days() -> f64 {
 
 /// A DWG stores its header dates in universal time only; the local TDCREATE
 /// and TDUPDATE come from the zone, as the reference derives them on load.
-pub fn local_header_dates(document: &mut CadDocument) {
+pub fn local_header_dates(document: &mut Document) {
     let h = &mut document.header;
     let offset = utc_offset_days();
     if h.universal_create_date_julian != 0.0
@@ -484,7 +544,7 @@ pub fn local_header_dates(document: &mut CadDocument) {
 
 /// Stamp the header's update date (and the creation date of a new drawing)
 /// in local and universal time before a save.
-pub fn stamp_save_dates(document: &mut CadDocument) {
+pub fn stamp_save_dates(document: &mut Document) {
     let utc = now_utc_julian();
     let local = utc + utc_offset_days();
     let h = &mut document.header;
@@ -516,7 +576,7 @@ fn display_name() -> Option<String> {
 /// Copy each attribute definition's field onto the matching attribute of a
 /// new block reference (block placeholders resolve against the reference).
 /// Returns the attributes that received a field.
-pub fn attach_attribute_fields(document: &mut CadDocument, insert: Handle) -> Vec<Handle> {
+pub fn attach_attribute_fields(document: &mut Document, insert: Handle) -> Vec<Handle> {
     let context = OcsFieldContext(None);
     document.attach_attribute_fields(insert, &context)
 }
@@ -524,7 +584,7 @@ pub fn attach_attribute_fields(document: &mut CadDocument, insert: Handle) -> Ve
 /// Store fresh values for the sheet set fields (after a sheet set changed)
 /// and return the hosts whose text changed. A field no open sheet set
 /// resolves (`####`: its set was closed or not found) keeps its stored value.
-pub fn refresh_sheet_set_fields(document: &mut CadDocument) -> Vec<Handle> {
+pub fn refresh_sheet_set_fields(document: &mut Document) -> Vec<Handle> {
     let context = OcsFieldContext(None);
     let unresolved: Vec<(Handle, String)> = document
         .fields
@@ -554,9 +614,24 @@ pub fn refresh_sheet_set_fields(document: &mut CadDocument) -> Vec<Handle> {
     changed
 }
 
+/// The hosts holding an `\AcVar` field (document properties, system
+/// variables, dates), each once: what a change to the drawing's summary
+/// information can alter.
+pub fn acvar_hosts(document: &Document) -> Vec<Handle> {
+    let mut hosts: Vec<Handle> = document
+        .fields
+        .values()
+        .filter(|f| f.evaluator.starts_with("AcVar"))
+        .filter_map(|f| field_host(document, f.handle))
+        .collect();
+    hosts.sort_by_key(|h| h.value());
+    hosts.dedup();
+    hosts
+}
+
 /// The entity hosting field `field`: up its owner chain (fields, then the
 /// field dictionary and extension dictionary) to the first non-object.
-fn field_host(document: &CadDocument, field: Handle) -> Option<Handle> {
+fn field_host(document: &Document, field: Handle) -> Option<Handle> {
     let owner = |h: Handle| -> Option<Handle> {
         if let Some(f) = document.fields.get(&h) {
             return Some(f.owner);
@@ -589,7 +664,7 @@ pub fn long_date_time_now() -> String {
 
 /// [`attach_attribute_fields`] with every field code passed through `map`.
 pub fn attach_attribute_fields_mapped(
-    document: &mut CadDocument,
+    document: &mut Document,
     insert: Handle,
     map: &dyn Fn(&str) -> String,
 ) -> Vec<Handle> {
@@ -598,7 +673,7 @@ pub fn attach_attribute_fields_mapped(
 }
 
 /// Whether any attribute definition of `block` hosts a field.
-pub fn block_has_attribute_fields(document: &CadDocument, block: &str) -> bool {
+pub fn block_has_attribute_fields(document: &Document, block: &str) -> bool {
     let Some(record) = document
         .block_records
         .iter()
@@ -618,7 +693,7 @@ pub fn block_has_attribute_fields(document: &CadDocument, block: &str) -> bool {
 
 /// Give plot-time fields (PlotDate) the plot's time; returns the hosts whose
 /// text changed.
-pub fn stamp_plot_fields(document: &mut CadDocument) -> Vec<Handle> {
+pub fn stamp_plot_fields(document: &mut Document) -> Vec<Handle> {
     // The context reads a snapshot of the whole drawing; most drawings hold
     // no field, and a large one should not be copied for every plot.
     let has_fields = document
@@ -660,5 +735,94 @@ impl FieldContext for PlotContext<'_> {
     }
     fn getenv(&self, name: &str) -> Option<String> {
         self.0.getenv(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codec::entities::{EntityType, MText};
+
+    fn document_with_properties() -> Document {
+        let mut document = Document::new();
+        document.summary_info.custom_properties = vec![
+            ("Client".into(), "Acme".into()),
+            ("Job No".into(), "42-7".into()),
+        ];
+        document
+    }
+
+    fn shown(document: &Document, host: Handle) -> String {
+        match document.get_entity(host) {
+            Some(EntityType::MText(m)) => m.value.clone(),
+            other => panic!("expected an MText, got {other:?}"),
+        }
+    }
+
+    /// S6: the field code evaluates to the property's value, and the name
+    /// matches without regard to case.
+    #[test]
+    fn a_custom_property_field_evaluates_to_the_value() {
+        let document = document_with_properties();
+        for code in [
+            r"\AcVar CustomDP.Client",
+            r"\AcVar CustomDP.client",
+            r"\AcVar CustomDP.CLIENT",
+            r"%<\AcVar CustomDP.Client>%",
+        ] {
+            assert_eq!(evaluate(&document, code, &[], None).as_deref(), Some("Acme"), "{code}");
+        }
+        assert_eq!(
+            evaluate(&document, r"\AcVar CustomDP.job no", &[], None).as_deref(),
+            Some("42-7")
+        );
+    }
+
+    /// S6: a property the drawing lacks is as unresolvable as any other
+    /// unknown variable.
+    #[test]
+    fn a_missing_custom_property_is_unresolved_like_an_unknown_variable() {
+        let document = document_with_properties();
+        let unknown = evaluate(&document, r"\AcVar NoSuchVariable", &[], None);
+        assert_eq!(
+            evaluate(&document, r"\AcVar CustomDP.Missing", &[], None),
+            unknown
+        );
+        let mut document = document;
+        let host = document
+            .add_entity(EntityType::MText(Box::new(MText::new())))
+            .unwrap();
+        set_text_field(
+            &mut document,
+            host,
+            Some((r"\AcVar CustomDP.Missing".into(), vec![])),
+            "old",
+        );
+        update_fields(&mut document, 32, None);
+        let missing = shown(&document, host);
+        set_text_field(
+            &mut document,
+            host,
+            Some((r"\AcVar NoSuchVariable".into(), vec![])),
+            "old",
+        );
+        update_fields(&mut document, 32, None);
+        assert_eq!(missing, shown(&document, host));
+    }
+
+    /// Existing behavior: `\AcVar <Name>` keeps resolving summary fields.
+    #[test]
+    fn an_acvar_summary_field_still_evaluates() {
+        let mut document = document_with_properties();
+        document.summary_info.author = "Ana".into();
+        assert_eq!(
+            evaluate(&document, r"\AcVar Author", &[], None).as_deref(),
+            Some("Ana")
+        );
+        // A bare custom property name keeps working as before.
+        assert_eq!(
+            evaluate(&document, r"\AcVar Client", &[], None).as_deref(),
+            Some("Acme")
+        );
     }
 }

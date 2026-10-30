@@ -123,48 +123,18 @@ pub fn measure(plane: WorkingPlane, p1: DVec3, p2: DVec3) -> PointPair {
 }
 
 /// The rubber band from the first picked point to the cursor.
+///
+/// Built with [`WireModel::solid_f64`] so it carries the double-single
+/// residual: the renderer works relative to the eye and a plain f32 vertex is
+/// quantised to ~0.5 m at UTM-scale coordinates, which left the preview line
+/// visibly offset from the snapped points (and from the readout).
 pub fn rubber_band(p1: DVec3, pt: DVec3) -> WireModel {
-    // The preview wire is purely visual, so f32 vertices are fine here.
-    WireModel {
-        bg_adapt: None,
-        point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
-        world_width: 0.0,
-        depth_override: None,
-        display_visible: true,
-        snap_only: false,
-        plot_visible: true,
-        fill_is_3d: false,
-        fill_is_2d_solid: false,
-        render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
-        dash_from_start: false,
-        dash_align_end: None,
-        text_verts: Vec::new(),
-        name: "dist_preview".into(),
-        points: vec![
-            [p1.x as f32, p1.y as f32, p1.z as f32],
-            [pt.x as f32, pt.y as f32, pt.z as f32],
-        ],
-        points_low: Vec::new(),
-        color: WireModel::CYAN,
-        selected: false,
-        pattern_length: 0.0,
-        pattern: [0.0; 8],
-        line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        aci: 0,
-        key_vertices: vec![],
-        aabb: WireModel::UNBOUNDED_AABB,
-        plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-
-        ..Default::default()
-    }
+    WireModel::solid_f64(
+        "dist_preview".into(),
+        vec![p1.to_array(), pt.to_array()],
+        WireModel::CYAN,
+        false,
+    )
 }
 
 // ── Autocomplete registry ─────────────────────────────────
@@ -177,6 +147,29 @@ mod tests {
     use crate::entities::common::{set_unit_context, UnitContext};
 
     #[test]
+    fn dist_rubber_band_keeps_full_precision_at_utm_scale() {
+        // UTM-scale picks quantise to ~0.5 m in absolute f32; the rubber band
+        // must reconstruct its endpoints through the double-single pair so the
+        // preview stays on the points reported by the measurement.
+        let p1 = DVec3::new(1_649_905.55, 4_945_694.94, 12.0);
+        let pt = DVec3::new(1_649_906.73, 4_945_695.38, 12.0);
+        let wire = rubber_band(p1, pt);
+        for (index, expected) in [p1, pt].into_iter().enumerate() {
+            let high = wire.points[index];
+            let low = wire.points_low[index];
+            let actual = DVec3::new(
+                high[0] as f64 + low[0] as f64,
+                high[1] as f64 + low[1] as f64,
+                high[2] as f64 + low[2] as f64,
+            );
+            assert!(
+                actual.distance(expected) < 1e-6,
+                "endpoint {index}: {actual:?} vs {expected:?}"
+            );
+        }
+    }
+
+    #[test]
     fn dist_respects_precision_zero() {
         let mut cmd = DistCommand::new();
         set_unit_context(UnitContext {
@@ -186,6 +179,7 @@ mod tests {
             auprec: 0,
             angbase: 0.0,
             angdir_cw: false,
+            dimzin: 0,
         });
 
         assert!(matches!(
@@ -230,6 +224,7 @@ mod tests {
             auprec: 2,
             angbase: 0.0,
             angdir_cw: false,
+            dimzin: 0,
         });
 
         assert!(matches!(
@@ -270,6 +265,7 @@ mod tests {
             auprec: 0,
             angbase: 0.0,
             angdir_cw: false,
+            dimzin: 0,
         });
 
         assert!(matches!(

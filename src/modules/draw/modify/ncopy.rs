@@ -2,7 +2,7 @@ use crate::command::{CadCommand, CmdOption, CmdResult, EntityTransform};
 use crate::entities::traits::EntityTypeOps;
 use crate::scene::convert::acad_to_render::RenderObject;
 use codec::nested_copy::{NestedCopyMode, NestedCopySymbolNames};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use glam::DVec3;
 use std::collections::{HashMap, HashSet};
 
@@ -26,10 +26,10 @@ pub struct NcopyCommand {
     bind_names: NestedCopySymbolNames,
 }
 impl NcopyCommand {
-    pub fn new(document: &CadDocument, bind: bool) -> Self {
+    pub fn new(document: &Document, bind: bool) -> Self {
         fn leaves(
             entity: &EntityType,
-            document: &CadDocument,
+            document: &Document,
             path: &mut HashSet<String>,
             output: &mut Vec<EntityType>,
         ) {

@@ -3,6 +3,8 @@ use super::*;
 use crate::command::{AreaPreviewRegion, AreaPreviewSource};
 use crate::scene::model::hatch_model::HatchPattern;
 
+mod block_parameter;
+
 impl Scene {
     // ── Preview wire ──────────────────────────────────────────────────────
 
@@ -338,6 +340,7 @@ impl Scene {
     }
 
     pub fn clear_preview_wire(&mut self) {
+        self.set_command_preview_hidden(&[]);
         // No geometry bump — see `set_preview_wires`. Dropping the overlay
         // flips the wire content id back to the base tessellation id, which
         // re-uploads the base wires (without the preview) on the next frame.

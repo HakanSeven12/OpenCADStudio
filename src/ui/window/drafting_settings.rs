@@ -55,6 +55,8 @@ pub struct DraftingSettingsState {
     pub dyn_input_on: bool,
     // Quick Properties
     pub quick_props_on: bool,
+    /// Palette location: floating rather than by the cursor (QPLOCATION).
+    pub quick_props_float: bool,
     // Selection Cycling
     pub selection_cycling_on: bool,
 }
@@ -88,6 +90,7 @@ impl DraftingSettingsState {
             || self.snap3d_modes != saved.snap3d_modes
             || self.dyn_input_on != saved.dyn_input_on
             || self.quick_props_on != saved.quick_props_on
+            || self.quick_props_float != saved.quick_props_float
             || self.selection_cycling_on != saved.selection_cycling_on
     }
 }
@@ -525,6 +528,13 @@ pub fn view_window<'a>(
                 text_input("25", &state.osnap_aperture_input)
                     .on_input(Message::DraftingSettingsOsnapApertureChanged)
                     .width(70),
+                // The accepted range, so a refused value is not a surprise (#2167).
+                text(format!(
+                    "{}–{}",
+                    crate::snap::MIN_OSNAP_RADIUS_PX,
+                    crate::snap::MAX_OSNAP_RADIUS_PX
+                ))
+                .size(11),
             ]
             .spacing(10)
             .align_y(iced::Center),
@@ -631,13 +641,17 @@ pub fn view_window<'a>(
             crate::t!("Palette Location"),
             column![
                 row![
-                    checkbox(true).size(14),
+                    checkbox(!state.quick_props_float)
+                        .size(14)
+                        .on_toggle(|_| Message::DraftingSettingsQuickPropsFloat(false)),
                     text(crate::t!("Cursor-dependent position")).size(11),
                 ]
                 .spacing(7)
                 .align_y(iced::Center),
                 row![
-                    checkbox(false).size(14),
+                    checkbox(state.quick_props_float)
+                        .size(14)
+                        .on_toggle(|_| Message::DraftingSettingsQuickPropsFloat(true)),
                     text(crate::t!("Static quadrant location")).size(11),
                 ]
                 .spacing(7)

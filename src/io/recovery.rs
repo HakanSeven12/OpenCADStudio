@@ -558,15 +558,12 @@ fn structured_diagnostic_line(diagnostic: &codec::ReadDiagnostic) -> String {
     )
 }
 
+/// The acadrust commit the DWG/DXF reader was built from.
 fn reader_revision() -> String {
-    include_str!("../../Cargo.toml")
-        .lines()
-        .find(|line| line.trim_start().starts_with("codec = ") && line.contains("opencadcodec.git"))
-        .and_then(|line| line.split("rev = \"").nth(1))
-        .and_then(|value| value.split('"').next())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("unknown")
-        .to_string()
+    use ocs_plugin_api::version_info::{acadrust_source_hash, host_acadrust_source};
+    acadrust_source_hash(host_acadrust_source())
+        .map(|hash| hash[..7].to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn diagnostic_platform() -> String {

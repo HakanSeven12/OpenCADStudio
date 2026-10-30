@@ -3,7 +3,7 @@
 //! mesh a polyface mesh on a layer chosen by object, material, object colour
 //! or a single layer, with its material; each camera a named view.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use codec::entities::{PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
 use codec::types::Vector3;
@@ -74,14 +74,23 @@ pub struct TdsScene {
 impl TdsScene {
     /// The materials a mesh uses, in the order the file defines them.
     pub fn mesh_materials(&self, mesh: &TdsMesh) -> Vec<String> {
+        // One pass over the groups instead of a full scan per scene material.
+        let present: HashSet<&str> = mesh
+            .groups
+            .iter()
+            .filter(|(_, faces)| !faces.is_empty())
+            .map(|(name, _)| name.as_str())
+            .collect();
         let mut used: Vec<String> = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
         for m in &self.materials {
-            if mesh.groups.iter().any(|(name, faces)| !faces.is_empty() && *name == m.name) {
+            if present.contains(m.name.as_str()) {
                 used.push(m.name.clone());
+                seen.insert(m.name.as_str());
             }
         }
         for (name, faces) in &mesh.groups {
-            if !faces.is_empty() && !used.contains(name) {
+            if !faces.is_empty() && seen.insert(name.as_str()) {
                 used.push(name.clone());
             }
         }
@@ -482,18 +491,29 @@ pub fn convert(scene: &TdsScene, options: &TdsOptions) -> TdsImport {
                 let all: Vec<usize> = (0..mesh.faces.len()).collect();
                 let pieces: Vec<(Option<String>, Vec<usize>)> = if materials.len() > 1 {
                     match options.multi.get(name).cloned().unwrap_or(MultiMaterial::Split) {
-                        MultiMaterial::Split => materials
-                            .iter()
-                            .map(|m| {
-                                let faces = mesh
-                                    .groups
-                                    .iter()
-                                    .filter(|(g, _)| g == m)
-                                    .flat_map(|(_, f)| f.iter().copied())
-                                    .collect();
-                                (Some(m.clone()), faces)
-                            })
-                            .collect(),
+                        MultiMaterial::Split => {
+                            // Index the groups once; the old code scanned the
+                            // whole list again for every material.
+                            let mut by_material: HashMap<&str, Vec<usize>> = HashMap::new();
+                            for (group_name, faces) in &mesh.groups {
+                                if !faces.is_empty() {
+                                    by_material
+                                        .entry(group_name.as_str())
+                                        .or_default()
+                                        .extend_from_slice(faces);
+                                }
+                            }
+                            materials
+                                .iter()
+                                .map(|m| {
+                                    let faces = by_material
+                                        .get(m.as_str())
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    (Some(m.clone()), faces)
+                                })
+                                .collect()
+                        }
                         MultiMaterial::First => vec![(materials.first().cloned(), all)],
                         MultiMaterial::Material(m) => vec![(m, all)],
                     }

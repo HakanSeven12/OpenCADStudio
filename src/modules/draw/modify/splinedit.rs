@@ -1011,7 +1011,7 @@ impl CadCommand for SplineditCommand {
 }
 /// Apply a spline operation (CLOSE/OPEN/REVERSE) to a spline entity.
 /// Called from `cmd_result.rs` when the ReplaceEntity sentinel is detected.
-pub fn apply_spline_op(doc: &mut codec::CadDocument, handle: codec::Handle, op: &str) {
+pub fn apply_spline_op(doc: &mut codec::Document, handle: codec::Handle, op: &str) {
     let Some(EntityType::Spline(spline)) = doc.get_entity_mut(handle) else {
         return;
     };

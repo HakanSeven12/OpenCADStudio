@@ -10,7 +10,7 @@
 use crate::app::{Message, StyleKind};
 use crate::t;
 use iced::widget::button::{Status, Style};
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Length, Theme};
 use std::borrow::Cow;
 
@@ -38,6 +38,8 @@ pub struct Scaffold<'a, 'b> {
     pub on_new: Message,
     pub on_copy: Message,
     pub on_delete: Message,
+    /// Present only for styles that can be imported from another drawing.
+    pub on_import: Option<Message>,
     /// Tuple-variant constructor for the per-row select message
     /// (e.g. `Message::TextStyleDialogSelect`).
     pub on_select: fn(String) -> Message,
@@ -48,6 +50,9 @@ pub struct Scaffold<'a, 'b> {
     /// Referenced styles may be copied but not changed, renamed, deleted, or
     /// made current.
     pub read_only: bool,
+    /// "Styles in use" list filter: whether it is on and the message that
+    /// sets it. `None` for managers without one.
+    pub in_use_filter: Option<(bool, fn(bool) -> Message)>,
     pub editor: Element<'a, Message>,
 }
 
@@ -55,16 +60,22 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
     let width = s.sizing.width;
     let height = s.sizing.height;
     // ── Toolbar: New / Copy / Delete | … | Set Current / Apply ────────────
-    let bar = row![
+    let mut bar = row![
         tb_button(t!("New"), s.on_new, false),
         tb_button(t!("Copy"), s.on_copy, false),
         tb_button_enabled(t!("Delete"), s.on_delete, false, !s.read_only),
-        Space::new().width(width),
-        tb_button_enabled(t!("Set Current"), s.on_set_current, false, !s.read_only),
-        tb_button_enabled(t!("Apply"), s.on_apply, true, !s.read_only),
-    ]
-    .spacing(4)
-    .align_y(iced::Center);
+    ];
+    if let Some(message) = s.on_import {
+        bar = bar.push(tb_button(t!("Import"), message, false));
+    }
+    let bar = bar
+        .push(Space::new().width(width))
+        .push(tb_button_enabled(
+            t!("Set Current"), s.on_set_current, false, !s.read_only,
+        ))
+        .push(tb_button_enabled(t!("Apply"), s.on_apply, true, !s.read_only))
+        .spacing(4)
+        .align_y(iced::Center);
     let toolbar = container(bar)
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.weak.color)),
@@ -93,9 +104,19 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         })
         .collect();
 
+    let filter: Element<'_, Message> = match s.in_use_filter {
+        Some((on, message)) => checkbox(on)
+            .label(t!("Styles in use"))
+            .on_toggle(message)
+            .size(12)
+            .text_size(11)
+            .into(),
+        None => Space::new().height(0).into(),
+    };
     let list_panel = container(
         column![
             text(t!("Styles")).size(10).style(muted_text_style),
+            filter,
             container(scrollable(column(rows).spacing(1)).height(height))
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
@@ -134,6 +155,63 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         })
         .width(width)
         .height(height)
+        .into()
+}
+
+/// Choose source styles, then confirm each name collision individually.
+pub(crate) fn import_view<'a>(
+    draft: &'a crate::app::StyleImportDraft,
+    target: &codec::Document,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let mut content = column![
+        text(draft.file.clone()).size(12),
+        text(t!("Select the styles to import")).size(11),
+    ]
+    .spacing(8);
+    if let Some(name) = &draft.conflict {
+        content = content
+            .push(text(name.clone()).size(14))
+            .push(text(t!("A style with this name already exists. Overwrite it?")))
+            .push(row![
+                button(text(t!("Overwrite"))).on_press(Message::StyleImportConfirm(true)),
+                button(text(t!("Skip"))).on_press(Message::StyleImportConfirm(false)),
+                button(text(t!("Cancel"))).on_press(Message::StyleImportCancel),
+            ]
+            .spacing(8));
+    } else {
+        let mut rows = column![].spacing(4);
+        for (name, on) in &draft.selected {
+            let label = if crate::app::style_import_exists(target, draft.kind, name) {
+                format!("{} ({})", name, t!("Existing"))
+            } else {
+                name.clone()
+            };
+            let key = name.clone();
+            rows = rows.push(
+                checkbox(*on)
+                    .label(label)
+                    .on_toggle(move |_| Message::StyleImportToggle(key.clone())),
+            );
+        }
+        if draft.selected.is_empty() {
+            rows = rows.push(text(t!("No styles found in this drawing.")));
+        }
+        content = content
+            .push(scrollable(rows).height(sizing.height))
+            .push(row![
+                button(text(t!("Import"))).on_press_maybe(
+                    draft.selected.iter().any(|(_, on)| *on)
+                        .then_some(Message::StyleImportApply)
+                ),
+                button(text(t!("Cancel"))).on_press(Message::StyleImportCancel),
+            ]
+            .spacing(8));
+    }
+    container(content)
+        .padding(16)
+        .width(sizing.width)
+        .height(sizing.height)
         .into()
 }
 

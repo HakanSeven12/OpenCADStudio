@@ -12,7 +12,7 @@ fn mgr() -> std::sync::MutexGuard<'static, HostV4SnapshotManager> {
 }
 
 /// Open (or refresh) the V4 shared document view for `tab_id`.
-pub fn open_document_view_v4(tab_id: u64, doc: &codec::CadDocument) -> Option<DocumentViewInfo> {
+pub fn open_document_view_v4(tab_id: u64, doc: &codec::Document) -> Option<DocumentViewInfo> {
     mgr().open(tab_id, doc)
 }
 
@@ -23,7 +23,7 @@ pub fn close_document_view_v4(tab_id: u64) {
 
 /// Publish the latest document to the V4 shared view for `tab_id` and broadcast
 /// a change notification when successful.
-pub fn publish_document_view_v4(tab_id: u64, doc: &codec::CadDocument) {
+pub fn publish_document_view_v4(tab_id: u64, doc: &codec::Document) {
     let info = mgr().publish(tab_id, doc);
     if let Some(info) = info {
         broadcast(HostNotification::DocumentChangedV4 {
@@ -102,6 +102,21 @@ pub fn publish_command_state_changed(tab_id: u64, command: Option<String>) {
 /// Broadcast drawing changes independently of shared-view subscriptions.
 pub fn publish_drawing_changed(tab_id: u64, epoch: u64) {
     broadcast(HostNotification::DrawingChanged { tab_id, epoch });
+}
+
+/// Broadcast a panel control interaction or button click to plugins.
+pub fn publish_panel_action(
+    panel_id: String,
+    control_id: String,
+    action: String,
+    value: Option<ocs_plugin_api::dialog::DialogValue>,
+) {
+    broadcast(HostNotification::PanelAction {
+        panel_id,
+        control_id,
+        action,
+        value,
+    });
 }
 
 /// V4 notification handler installed on the plugin manager.

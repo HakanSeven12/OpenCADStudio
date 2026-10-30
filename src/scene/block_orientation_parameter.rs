@@ -8,7 +8,7 @@ use codec::objects::{
     DynamicBlockData, ObjectType,
 };
 use codec::types::{Transform, Vector3};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -66,7 +66,7 @@ pub(crate) struct Parameter<'a> {
     pub offset: f64,
 }
 
-fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
+fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     match document
         .objects
         .get(&super::block_authoring::definition_dictionary(document, definition)?)?
@@ -76,7 +76,7 @@ fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
     }
 }
 
-pub(crate) fn parameters(document: &CadDocument, definition: Handle) -> Vec<Parameter<'_>> {
+pub(crate) fn parameters(document: &Document, definition: Handle) -> Vec<Parameter<'_>> {
     let Some(graph) = graph_handle(document, definition) else {
         return vec![];
     };
@@ -132,7 +132,7 @@ pub(crate) fn parameters(document: &CadDocument, definition: Handle) -> Vec<Para
 }
 
 pub(crate) fn set_alignment_type(
-    document: &mut CadDocument, definition: Handle, handle: Handle, perpendicular: bool,
+    document: &mut Document, definition: Handle, handle: Handle, perpendicular: bool,
 ) -> Result<bool, &'static str> {
     if !parameters(document, definition).iter().any(|p| p.handle == handle && p.kind == Kind::Alignment) {
         return Err("Select an Alignment parameter in the active block definition.");
@@ -145,7 +145,7 @@ pub(crate) fn set_alignment_type(
 }
 
 pub(crate) fn placement_error(
-    document: &CadDocument,
+    document: &Document,
     definition: Handle,
     kind: Kind,
 ) -> Option<&'static str> {
@@ -186,7 +186,7 @@ pub(crate) fn points_error(
 }
 
 pub(crate) fn create(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     kind: Kind,
     base: Vector3,
@@ -294,8 +294,9 @@ pub(crate) fn create(
         Kind::Flip => DynamicBlockData::FlipParameter(BlockFlipParameter {
             parameter: native,
             flip_label: label,
-            base_state_label: "Not flipped".into(),
-            flipped_state_label: "Flipped".into(),
+            // Unset labels use UI defaults without persisting a UI language.
+            base_state_label: String::new(),
+            flipped_state_label: String::new(),
             definition_label_point: reference,
             flags_96: slots.eval + 1,
             tooltip: "UpdatedFlip".into(),
@@ -460,7 +461,7 @@ pub(crate) fn marker_tail(parameter: &Parameter<'_>) -> Vector3 {
 }
 
 pub(crate) fn reframe(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     transform: &Transform,
 ) -> usize {

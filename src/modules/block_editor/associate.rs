@@ -1,6 +1,6 @@
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickContext};
 use crate::scene::block_actions::{self as actions, Kind, Parameter, XyKeyPoint};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {
@@ -29,7 +29,7 @@ impl AssociateCommand {
     pub(crate) fn new(
         document: u64,
         definition: Handle,
-        doc: &CadDocument,
+        doc: &Document,
         selected: Option<Handle>,
     ) -> Self {
         let orphaned = actions::association::orphaned(doc, definition);

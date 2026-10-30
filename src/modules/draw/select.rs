@@ -46,6 +46,9 @@ pub struct SelectObjectsCommand {
     keep: Option<fn(&codec::EntityType) -> bool>,
     /// A SEttings keyword at the prompt, and what it does.
     settings: Option<fn() -> CmdResult>,
+    /// A command's own keyword at the prompt (its label, the keyword and
+    /// what it does).
+    keyword: Option<(&'static str, &'static str, fn() -> CmdResult)>,
 }
 
 impl SelectObjectsCommand {
@@ -64,6 +67,7 @@ impl SelectObjectsCommand {
             associative_dimensions_only: false,
             keep: None,
             settings: None,
+            keyword: None,
         }
     }
 
@@ -83,6 +87,7 @@ impl SelectObjectsCommand {
             associative_dimensions_only: false,
             keep: None,
             settings: None,
+            keyword: None,
         }
     }
 
@@ -102,6 +107,7 @@ impl SelectObjectsCommand {
             associative_dimensions_only: false,
             keep: None,
             settings: None,
+            keyword: None,
         }
     }
 
@@ -121,6 +127,7 @@ impl SelectObjectsCommand {
             associative_dimensions_only: false,
             keep: None,
             settings: None,
+            keyword: None,
         }
     }
 
@@ -153,6 +160,21 @@ impl SelectObjectsCommand {
     ) -> Self {
         let mut command = Self::with_prompt(prompt_cmd, pending_cmd, prompt_text);
         command.keep = Some(keep);
+        command
+    }
+
+    /// The command's own wording with one keyword of its own (`label`, typed
+    /// as `keyword` or its capitals).
+    pub fn with_keyword(
+        prompt_cmd: &str,
+        pending_cmd: &str,
+        prompt_text: &'static str,
+        label: &'static str,
+        keyword: &'static str,
+        action: fn() -> CmdResult,
+    ) -> Self {
+        let mut command = Self::with_prompt(prompt_cmd, pending_cmd, prompt_text);
+        command.keyword = Some((label, keyword, action));
         command
     }
 
@@ -270,7 +292,10 @@ impl CadCommand for SelectObjectsCommand {
     // the on-screen keyboard-less case needs.
     fn options(&self) -> Vec<CmdOption> {
         if self.settings.is_some() && self.pick.is_none() {
-            return vec![CmdOption::new("SEttings", "SE")];
+            return vec![CmdOption::new(t!("Settings").as_ref(), "SE")];
+        }
+        if let (Some((label, keyword, _)), None) = (self.keyword, self.pick.as_ref()) {
+            return vec![CmdOption::new(label, keyword)];
         }
         if self.commit_on_enter && self.show_options {
             if self.auto_constrain_settings {
@@ -345,6 +370,12 @@ impl CadCommand for SelectObjectsCommand {
         if let Some(settings) = self.settings {
             if word.len() >= 2 && "SETTINGS".starts_with(word.as_str()) {
                 return Some(settings());
+            }
+        }
+        if let Some((label, keyword, action)) = self.keyword {
+            let capitals: String = label.chars().filter(char::is_ascii_uppercase).collect();
+            if word == keyword || word == capitals || word == label.to_ascii_uppercase() {
+                return Some(action());
             }
         }
         match text.trim().to_uppercase().as_str() {
@@ -424,6 +455,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "COPY",
         "COPYCLIP",
         "CUTCLIP",
+        "DCDISPLAY",
+        "DIMDISASSOCIATE",
+        "DIMREASSOCIATE",
         "ERASE",
         "EXPLODE",
         "GROUP",

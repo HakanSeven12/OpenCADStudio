@@ -6,9 +6,9 @@ use codec::objects::{
     DynamicBlockData, ObjectType,
 };
 use codec::types::{Transform, Vector3};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 
-fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
+fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     match document
         .objects
         .get(&super::block_authoring::definition_dictionary(document, definition)?)?
@@ -19,7 +19,7 @@ fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
 }
 
 pub(crate) fn parameters(
-    document: &CadDocument,
+    document: &Document,
     definition: Handle,
 ) -> Vec<(Handle, &BlockPointParameter)> {
     let Some(graph) = graph_handle(document, definition) else {
@@ -44,12 +44,12 @@ pub(crate) fn parameters(
         .collect()
 }
 
-pub(crate) fn placement_error(document: &CadDocument, definition: Handle) -> Option<&'static str> {
+pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option<&'static str> {
     authoring::graph(document, definition).err()
 }
 
 pub(crate) fn create(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     location: Vector3,
     label: Vector3,
@@ -157,7 +157,7 @@ pub(crate) fn create(
 }
 
 pub(crate) fn reframe(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     transform: &Transform,
 ) -> usize {
@@ -338,7 +338,7 @@ mod tests {
     }
 
     fn graph_data(
-        document: &CadDocument,
+        document: &Document,
         definition: Handle,
     ) -> &codec::objects::BlockEvaluationGraph {
         let ObjectType::DynamicBlock(object) =

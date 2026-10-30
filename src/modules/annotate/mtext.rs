@@ -1,4 +1,5 @@
 use codec::entities::mtext::AttachmentPoint;
+use codec::entities::LineSpacingStyle;
 use codec::types::Vector3;
 use codec::MText;
 use glam::DVec3;
@@ -25,14 +26,17 @@ enum Step {
     OppositeCorner,
     Height,
     Justify,
+    LineSpacingType,
     LineSpacing,
     Rotation,
     Style,
     Width,
     ColumnMode,
+    TotalWidth,
     ColumnCount,
     ColumnWidth,
     ColumnGutter,
+    ColumnHeight,
 }
 
 pub struct MTextCommand {
@@ -43,12 +47,16 @@ pub struct MTextCommand {
     style: String,
     attachment: AttachmentPoint,
     line_spacing: f64,
+    line_spacing_style: LineSpacingStyle,
     rotation: f64,
     width: Option<f64>,
     column_type: i16,
     column_count: i32,
     column_width: f64,
     column_gutter: f64,
+    column_height: f64,
+    total_width: f64,
+    annotative: bool,
 }
 
 impl MTextCommand {
@@ -61,13 +69,65 @@ impl MTextCommand {
             style,
             attachment: AttachmentPoint::TopLeft,
             line_spacing: 1.0,
+            line_spacing_style: LineSpacingStyle::AtLeast,
             rotation: 0.0,
             width: None,
             column_type: 0,
             column_count: 2,
             column_width: 0.0,
             column_gutter: 0.0,
+            column_height: 0.0,
+            total_width: 0.0,
+            annotative: false,
         }
+    }
+
+    /// Whether the current text style is annotative (shown in the header).
+    pub fn with_annotative(mut self, annotative: bool) -> Self {
+        self.annotative = annotative;
+        self
+    }
+
+    fn attachment_label(&self) -> &'static str {
+        match self.attachment {
+            AttachmentPoint::TopLeft => "TL",
+            AttachmentPoint::TopCenter => "TC",
+            AttachmentPoint::TopRight => "TR",
+            AttachmentPoint::MiddleLeft => "ML",
+            AttachmentPoint::MiddleCenter => "MC",
+            AttachmentPoint::MiddleRight => "MR",
+            AttachmentPoint::BottomLeft => "BL",
+            AttachmentPoint::BottomCenter => "BC",
+            AttachmentPoint::BottomRight => "BR",
+        }
+    }
+
+    /// Column defaults scale with the text height (measured at 2.5: column
+    /// width 75, total width 200, gutter 12.5, height 25).
+    fn column_default(&self, step: Step) -> f64 {
+        let h = self.height;
+        match step {
+            Step::TotalWidth if self.total_width > 0.0 => self.total_width,
+            Step::TotalWidth => h * 80.0,
+            Step::ColumnWidth if self.column_width > 0.0 => self.column_width,
+            Step::ColumnWidth => h * 30.0,
+            Step::ColumnGutter if self.column_gutter > 0.0 => self.column_gutter,
+            Step::ColumnGutter => h * 5.0,
+            Step::ColumnHeight if self.column_height > 0.0 => self.column_height,
+            Step::ColumnHeight => h * 10.0,
+            _ => 0.0,
+        }
+    }
+
+    /// Static columns share the total width; both kinds go back to the box.
+    fn finish_columns(&mut self) {
+        if self.column_type == 1 {
+            let count = self.column_count.max(1) as f64;
+            let gutter = self.column_default(Step::ColumnGutter);
+            let total = self.column_default(Step::TotalWidth);
+            self.column_width = ((total - gutter * (count - 1.0)) / count).max(1e-6);
+        }
+        self.resume_point_step();
     }
 
     fn resume_point_step(&mut self) {
@@ -94,7 +154,7 @@ impl MTextCommand {
         self.step = match keyword {
             "H" | "HEIGHT" => Step::Height,
             "J" | "JUSTIFY" => Step::Justify,
-            "L" | "LINESPACING" | "LINE SPACING" => Step::LineSpacing,
+            "L" | "LINESPACING" | "LINE SPACING" => Step::LineSpacingType,
             "R" | "ROTATION" => Step::Rotation,
             "S" | "STYLE" => Step::Style,
             "W" | "WIDTH" => Step::Width,
@@ -177,6 +237,7 @@ impl MTextCommand {
         template.style = self.style.clone();
         template.attachment_point = self.attachment;
         template.line_spacing_factor = self.line_spacing;
+        template.line_spacing_style = self.line_spacing_style;
         template.column_data.column_type = self.column_type;
         if self.column_type != 0 {
             template.column_data.column_count =
@@ -194,6 +255,9 @@ impl MTextCommand {
             } else {
                 self.height
             };
+            if self.column_height > 0.0 {
+                template.rectangle_height = Some(self.column_height);
+            }
         }
         CmdResult::OpenMTextEditor {
             pos: insertion,
@@ -215,42 +279,73 @@ impl CadCommand for MTextCommand {
     }
 
     fn prompt(&self) -> String {
-        match self.step {
-            Step::FirstCorner => t!("MTEXT  Specify first corner:").into_owned(),
-            Step::OppositeCorner => t!("MTEXT  Specify opposite corner:").into_owned(),
-            Step::Height => {
-                crate::tf!("MTEXT  Specify text height <{}>:", self.height).into_owned()
-            }
+        let num = crate::modules::annotate::text::number_text;
+        let text = match self.step {
+            Step::FirstCorner => format!(
+                "{}\nMTEXT  {}",
+                crate::tr!(
+                    "mtext-cmd",
+                    "header",
+                    style = self.style.clone(),
+                    height = num(self.height),
+                    annotative = if self.annotative { t!("Yes") } else { t!("No") }.into_owned()
+                ),
+                crate::tr!("mtext-cmd", "first-corner")
+            ),
+            Step::OppositeCorner => crate::tr!("mtext-cmd", "opposite-corner"),
+            Step::Height => crate::tr!("mtext-cmd", "height", default = num(self.height)),
             Step::Justify => {
-                t!("MTEXT  Enter justification [TL / TC / TR / ML / MC / MR / BL / BC / BR] <TL>:")
-                    .into_owned()
+                crate::tr!("mtext-cmd", "justify", default = self.attachment_label())
             }
-            Step::LineSpacing => crate::tf!(
-                "MTEXT  Enter line spacing factor (0.25-4.00) <{}>:",
-                self.line_spacing
-            )
-            .into_owned(),
-            Step::Rotation => crate::tf!(
-                "MTEXT  Specify rotation angle <{}>:",
-                self.rotation.to_degrees()
-            )
-            .into_owned(),
-            Step::Style => crate::tf!("MTEXT  Enter text style <{}>:", self.style).into_owned(),
-            Step::Width => crate::tf!(
-                "MTEXT  Specify boundary width <{}>:",
-                self.width.unwrap_or(0.0)
-            )
-            .into_owned(),
-            Step::ColumnMode => t!("MTEXT  Columns [None / Static / Dynamic] <None>:").into_owned(),
+            Step::LineSpacingType => crate::tr!(
+                "mtext-cmd",
+                "spacing-type",
+                default = match self.line_spacing_style {
+                    LineSpacingStyle::Exactly => "Exactly",
+                    _ => "At least",
+                }
+            ),
+            Step::LineSpacing => crate::tr!(
+                "mtext-cmd",
+                "spacing",
+                default = format!("{}x", num(self.line_spacing))
+            ),
+            Step::Rotation => crate::tr!(
+                "mtext-cmd",
+                "rotation",
+                default = num(self.rotation.to_degrees())
+            ),
+            Step::Style => crate::tr!("mtext-cmd", "style", default = self.style.clone()),
+            Step::Width => crate::tr!("mtext-cmd", "width"),
+            Step::ColumnMode => crate::tr!("mtext-cmd", "column-type"),
+            Step::TotalWidth => crate::tr!(
+                "mtext-cmd",
+                "total-width",
+                default = num(self.column_default(Step::TotalWidth))
+            ),
             Step::ColumnCount => {
-                crate::tf!("MTEXT  Enter column count <{}>:", self.column_count).into_owned()
+                crate::tr!("mtext-cmd", "column-count", default = self.column_count.to_string())
             }
-            Step::ColumnWidth => {
-                crate::tf!("MTEXT  Enter column width <{}>:", self.column_width).into_owned()
-            }
-            Step::ColumnGutter => {
-                crate::tf!("MTEXT  Enter column gutter <{}>:", self.column_gutter).into_owned()
-            }
+            Step::ColumnWidth => crate::tr!(
+                "mtext-cmd",
+                "column-width",
+                default = num(self.column_default(Step::ColumnWidth))
+            ),
+            Step::ColumnGutter => crate::tr!(
+                "mtext-cmd",
+                "gutter",
+                default = num(self.column_default(Step::ColumnGutter))
+            ),
+            Step::ColumnHeight => crate::tr!(
+                "mtext-cmd",
+                "column-height",
+                default = num(self.column_default(Step::ColumnHeight))
+            ),
+        };
+        if text.starts_with("MTEXT  ") {
+            text
+        } else {
+            format!("MTEXT  {text}")
         }
     }
 
@@ -262,9 +357,13 @@ impl CadCommand for MTextCommand {
                 .map(|value| CmdOption::new(value, value))
                 .collect(),
             Step::ColumnMode => vec![
-                CmdOption::new("None", "NONE"),
-                CmdOption::new("Static", "STATIC"),
-                CmdOption::new("Dynamic", "DYNAMIC"),
+                CmdOption::new("Dynamic", "D"),
+                CmdOption::new("Static", "S"),
+                CmdOption::new("No columns", "N"),
+            ],
+            Step::LineSpacingType => vec![
+                CmdOption::new("At least", "A"),
+                CmdOption::new("Exactly", "E"),
             ],
             _ => Vec::new(),
         }
@@ -290,9 +389,11 @@ impl CadCommand for MTextCommand {
             Step::Height
             | Step::LineSpacing
             | Step::Width
+            | Step::TotalWidth
             | Step::ColumnCount
             | Step::ColumnWidth
-            | Step::ColumnGutter => DynField::Scalar,
+            | Step::ColumnGutter
+            | Step::ColumnHeight => DynField::Scalar,
             _ => DynField::Point,
         }
     }
@@ -310,7 +411,7 @@ impl CadCommand for MTextCommand {
             Step::Height => {
                 let value = crate::entities::common::parse_typed_length(trimmed)?;
                 if value <= 0.0 {
-                    return None;
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "positive")));
                 }
                 self.height = value;
                 self.resume_point_step();
@@ -326,14 +427,34 @@ impl CadCommand for MTextCommand {
                     "BL" => AttachmentPoint::BottomLeft,
                     "BC" => AttachmentPoint::BottomCenter,
                     "BR" => AttachmentPoint::BottomRight,
-                    _ => return None,
+                    _ => return Some(CmdResult::ReportError(crate::tr!("text-cmd", "invalid-keyword"))),
                 };
                 self.resume_point_step();
             }
+            Step::LineSpacingType => {
+                let word = upper.trim_start_matches(['_', '.']);
+                self.line_spacing_style = if "AT LEAST".starts_with(word) {
+                    LineSpacingStyle::AtLeast
+                } else if "EXACTLY".starts_with(word) {
+                    LineSpacingStyle::Exactly
+                } else {
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "invalid-keyword")));
+                };
+                self.step = Step::LineSpacing;
+            }
             Step::LineSpacing => {
-                let value = trimmed.replace(',', ".").parse::<f64>().ok()?;
+                // `1.5x` is a factor of the single spacing; a bare value a
+                // distance between baselines (5/3 of the height is single).
+                let lower = trimmed.to_ascii_lowercase();
+                let value = match lower.strip_suffix('x') {
+                    Some(factor) => factor.trim().replace(',', ".").parse::<f64>().ok()?,
+                    None => {
+                        crate::entities::common::parse_typed_length(trimmed)?
+                            / (self.height * 5.0 / 3.0)
+                    }
+                };
                 if !(0.25..=4.0).contains(&value) {
-                    return None;
+                    return Some(CmdResult::ReportError(crate::tr!("mtext-cmd", "spacing-range")));
                 }
                 self.line_spacing = value;
                 self.resume_point_step();
@@ -349,39 +470,57 @@ impl CadCommand for MTextCommand {
                 self.style = trimmed.to_string();
                 self.resume_point_step();
             }
+            // The width ends the box: the editor opens at once, the text
+            // area as high as its text.
             Step::Width => {
                 let value = crate::entities::common::parse_typed_length(trimmed)?;
                 if value < 0.0 {
-                    return None;
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "positive")));
                 }
                 self.width = Some(value);
-                self.resume_point_step();
+                let first = self.first?;
+                return Some(self.open_editor(first));
             }
             Step::ColumnMode => {
-                self.column_type = match upper.as_str() {
-                    "N" | "NONE" => 0,
-                    "S" | "STATIC" => 1,
-                    "D" | "DYNAMIC" => 2,
-                    _ => return None,
-                };
-                if self.column_type == 0 {
-                    self.resume_point_step();
+                let word = upper.trim_start_matches(['_', '.']);
+                self.column_type = if "DYNAMIC".starts_with(word) {
+                    2
+                } else if "STATIC".starts_with(word) {
+                    1
+                } else if "NO COLUMNS".starts_with(word) {
+                    0
                 } else {
-                    self.step = Step::ColumnCount;
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "invalid-keyword")));
+                };
+                self.step = match self.column_type {
+                    0 => {
+                        self.resume_point_step();
+                        self.step
+                    }
+                    1 => Step::TotalWidth,
+                    _ => Step::ColumnWidth,
+                };
+            }
+            Step::TotalWidth => {
+                let value = crate::entities::common::parse_typed_length(trimmed)?;
+                if value <= 0.0 {
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "positive")));
                 }
+                self.total_width = value;
+                self.step = Step::ColumnCount;
             }
             Step::ColumnCount => {
                 let value = trimmed.parse::<i32>().ok()?;
                 if !(1..=crate::entities::text_support::MAX_MTEXT_COLUMNS).contains(&value) {
-                    return None;
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "positive")));
                 }
                 self.column_count = value;
-                self.step = Step::ColumnWidth;
+                self.step = Step::ColumnGutter;
             }
             Step::ColumnWidth => {
                 let value = crate::entities::common::parse_typed_length(trimmed)?;
                 if value <= 0.0 {
-                    return None;
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "positive")));
                 }
                 self.column_width = value;
                 self.step = Step::ColumnGutter;
@@ -389,10 +528,18 @@ impl CadCommand for MTextCommand {
             Step::ColumnGutter => {
                 let value = crate::entities::common::parse_typed_length(trimmed)?;
                 if value < 0.0 {
-                    return None;
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "positive")));
                 }
                 self.column_gutter = value;
-                self.resume_point_step();
+                self.step = Step::ColumnHeight;
+            }
+            Step::ColumnHeight => {
+                let value = crate::entities::common::parse_typed_length(trimmed)?;
+                if value <= 0.0 {
+                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "positive")));
+                }
+                self.column_height = value;
+                self.finish_columns();
             }
             Step::FirstCorner | Step::OppositeCorner => return None,
         }
@@ -413,16 +560,46 @@ impl CadCommand for MTextCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
+            Step::LineSpacingType => {
+                self.step = Step::LineSpacing;
+                CmdResult::NeedPoint
+            }
+            // Enter takes the offered default and goes on.
+            Step::ColumnMode => {
+                self.column_type = 2;
+                self.step = Step::ColumnWidth;
+                CmdResult::NeedPoint
+            }
+            Step::TotalWidth => {
+                self.total_width = self.column_default(Step::TotalWidth);
+                self.step = Step::ColumnCount;
+                CmdResult::NeedPoint
+            }
+            Step::ColumnCount => {
+                self.step = Step::ColumnGutter;
+                CmdResult::NeedPoint
+            }
+            Step::ColumnWidth => {
+                self.column_width = self.column_default(Step::ColumnWidth);
+                self.step = Step::ColumnGutter;
+                CmdResult::NeedPoint
+            }
+            Step::ColumnGutter => {
+                self.column_gutter = self.column_default(Step::ColumnGutter);
+                self.step = Step::ColumnHeight;
+                CmdResult::NeedPoint
+            }
+            Step::ColumnHeight => {
+                self.column_height = self.column_default(Step::ColumnHeight);
+                self.finish_columns();
+                CmdResult::NeedPoint
+            }
             Step::Height
             | Step::Justify
             | Step::LineSpacing
             | Step::Rotation
             | Step::Style
-            | Step::Width
-            | Step::ColumnMode
-            | Step::ColumnCount
-            | Step::ColumnWidth
-            | Step::ColumnGutter => {
+            | Step::Width => {
                 self.resume_point_step();
                 CmdResult::NeedPoint
             }

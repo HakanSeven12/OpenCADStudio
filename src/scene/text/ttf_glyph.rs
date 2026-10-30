@@ -9,8 +9,7 @@
 // engine uses**: a capital letter is 9 units tall with the baseline at y = 0.
 // That makes a TTF glyph a drop-in for an LFF one — the existing text layout
 // scales both by `height / 9.0`, so TTF and stroke text share one pipeline.
-// Cap height comes from the font's OS/2 table; if absent we approximate it as
-// 0.7 × units-per-em.
+// Cap height is the top of the capital A's box (see `capital_units`).
 //
 // Unlike LFF single-stroke glyphs, TTF contours are closed outlines (the glyph
 // boundary). Counters — the hole in "O" or "A" — come through as separate
@@ -388,16 +387,51 @@ pub(crate) fn is_full_width(ch: char) -> bool {
     )
 }
 
-/// Font-unit → 9-unit-cap-height factor for a parsed face. Cap height comes
-/// from the OS/2 table; absent, we approximate it as 0.7 × units-per-em.
+/// Font-unit → 9-unit-cap-height factor for a parsed face (see
+/// [`capital_units`]).
 fn cap_scale(face: &ttf_parser::Face) -> f32 {
-    let upem = face.units_per_em() as f32;
-    let cap = face
-        .capital_height()
-        .filter(|&c| c > 0)
-        .map(|c| c as f32)
-        .unwrap_or(0.7 * upem);
-    CAP_UNITS / cap
+    CAP_UNITS / capital_units(face)
+}
+
+/// The font units a TrueType text height spans, as the reference measures
+/// it: the top of the capital A's box (Times New Roman's apex rises above
+/// its OS/2 cap height, MS Gothic's box above its outline), else the OS/2
+/// cap height, else 0.7 em. A symbol font's A sits at U+F041.
+pub(crate) fn capital_units(face: &ttf_parser::Face) -> f32 {
+    face.glyph_index('A')
+        .or_else(|| {
+            face.tables()
+                .cmap?
+                .subtables
+                .into_iter()
+                .find_map(|table| table.glyph_index(0xF041))
+        })
+        .and_then(|id| face.glyph_bounding_box(id))
+        .map(|bounds| f32::from(bounds.y_max))
+        .filter(|height| *height > 0.0)
+        .or_else(|| face.capital_height().filter(|&c| c > 0).map(f32::from))
+        .unwrap_or(0.7 * face.units_per_em() as f32)
+}
+
+/// Shaping without pair kerning or optional ligatures: the reference sets
+/// TrueType TEXT and MTEXT from each character's own glyph and advance
+/// (`fi` stays an f and an i).
+fn unkerned() -> cosmic_text::FontFeatures {
+    let mut features = cosmic_text::FontFeatures::new();
+    features.disable(cosmic_text::FeatureTag::KERNING);
+    features.disable(cosmic_text::FeatureTag::STANDARD_LIGATURES);
+    features.disable(cosmic_text::FeatureTag::CONTEXTUAL_LIGATURES);
+    features
+}
+
+/// The face's descender depth over its cap height (see [`cap_scale`]).
+pub fn descent_ratio(family: &str) -> Option<f32> {
+    sysfont::with_face_data(family, |data, index| {
+        let face = ttf_parser::Face::parse(data, index).ok()?;
+        let depth = (face.descender() as f32).abs() * cap_scale(&face) / CAP_UNITS;
+        (depth > 0.0).then_some(depth)
+    })
+    .flatten()
 }
 
 fn triangulate_contours(contours: &[Vec<[f32; 2]>]) -> Vec<[f32; 2]> {
@@ -904,11 +938,7 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
 
     let primary_face = ttf_parser::Face::parse(&fonts[0], 0).ok()?;
     let upem = primary_face.units_per_em() as f32;
-    let cap = primary_face
-        .capital_height()
-        .filter(|height| *height > 0)
-        .map(|height| height as f32)
-        .unwrap_or(0.7 * upem);
+    let cap = capital_units(&primary_face);
     let px_to_9 = CAP_UNITS * upem / (SHAPE_FS * cap);
 
     let mut database = fontdb::Database::new();
@@ -918,7 +948,9 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
     database.set_sans_serif_family(crate::scene::text::web_font::primary_script().family());
     let mut font_system =
         FontSystem::new_with_locale_and_db(crate::i18n::active_language_tag(), database);
-    let attrs = Attrs::new().family(Family::SansSerif);
+    let attrs = Attrs::new()
+        .family(Family::SansSerif)
+        .font_features(unkerned());
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(SHAPE_FS, SHAPE_FS));
     buffer.set_size(&mut font_system, None, None);
     // A leading left-to-right mark keeps the paragraph direction left to
@@ -997,13 +1029,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
 
     let mut primary_metrics = sysfont::with_face_data(family, |data, idx| {
         let f = ttf_parser::Face::parse(data, idx).ok()?;
-        let upem = f.units_per_em() as f32;
-        let cap = f
-            .capital_height()
-            .filter(|&c| c > 0)
-            .map(|c| c as f32)
-            .unwrap_or(0.7 * upem);
-        Some((upem, cap))
+        Some((f.units_per_em() as f32, capital_units(&f)))
     })
     .flatten();
 
@@ -1024,7 +1050,8 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
         attrs.style(cosmic_text::Style::Italic)
     } else {
         attrs
-    };
+    }
+    .font_features(unkerned());
     let mut buf = Buffer::new(&mut fs, Metrics::new(SHAPE_FS, SHAPE_FS));
     // No wrapping: a run is a single line.
     buf.set_size(&mut fs, None, None);
@@ -1044,13 +1071,8 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
                 let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
                 if let Some(font) = fs.get_font(g.font_id, g.font_weight) {
                     if let Ok(face) = ttf_parser::Face::parse(font.data(), face_index) {
-                        let upem = face.units_per_em() as f32;
-                        let cap = face
-                            .capital_height()
-                            .filter(|&c| c > 0)
-                            .map(|c| c as f32)
-                            .unwrap_or(0.7 * upem);
-                        primary_metrics = Some((upem, cap));
+                        primary_metrics =
+                            Some((face.units_per_em() as f32, capital_units(&face)));
                         break;
                     }
                 }

@@ -103,6 +103,10 @@ impl CircleGpu {
     }
 }
 
+/// Largest radius drawn as an analytical quad. Past it the f32 quad
+/// interpolation drifts visibly, so the circle stays on the wire path.
+pub const ANALYTIC_MAX_RADIUS: f64 = 1e6;
+
 /// Build the base and xray circle pipelines.
 pub fn create_pipelines(
     device: &wgpu::Device,
@@ -258,7 +262,7 @@ pub fn extract_circle_instance_from_geom_indexed(
         || !radius.is_finite()
         || !start_angle.is_finite()
         || !end_angle.is_finite()
-        || radius > 1e6
+        || radius > ANALYTIC_MAX_RADIUS
     {
         return None;
     }
@@ -338,15 +342,18 @@ pub fn can_extract_circle_instances(wire: &crate::scene::WireModel) -> bool {
         || wire.fill_is_3d
         || !wire.text_verts.is_empty()
         || wire.render_instance.is_some()
+        // A thickness sweep adds the top curve and the connecting edges as
+        // further runs; the analytical instance would draw the base alone.
+        || wire.points.iter().any(|point| point[0].is_nan())
     {
         return false;
     }
     wire.tangent_geoms.iter().all(|geom| match *geom {
         crate::scene::model::wire_model::TangentGeom::Circle { radius, .. } => {
-            radius > 0.0 && radius.is_finite() && radius <= 1e6
+            radius > 0.0 && radius.is_finite() && radius as f64 <= ANALYTIC_MAX_RADIUS
         }
         crate::scene::model::wire_model::TangentGeom::PlanarCircle { radius, .. } => {
-            radius > 0.0 && radius.is_finite() && radius <= 1e6
+            radius > 0.0 && radius.is_finite() && radius <= ANALYTIC_MAX_RADIUS
         }
         crate::scene::model::wire_model::TangentGeom::Arc {
             radius,
@@ -358,7 +365,7 @@ pub fn can_extract_circle_instances(wire: &crate::scene::WireModel) -> bool {
                 && radius.is_finite()
                 && (start_angle as f32).is_finite()
                 && (end_angle as f32).is_finite()
-                && radius <= 1e6
+                && radius <= ANALYTIC_MAX_RADIUS
         }
         _ => false,
     })
@@ -371,13 +378,7 @@ pub fn extract_circle_instances_into(
     draw_depth: f32,
     out: &mut Vec<CircleInstance>,
 ) -> bool {
-    if wire.pattern_length > 0.0
-        || wire.tangent_geoms.is_empty()
-        || !wire.fill_tris.is_empty()
-        || wire.fill_is_3d
-        || !wire.text_verts.is_empty()
-        || wire.render_instance.is_some()
-    {
+    if !can_extract_circle_instances(wire) {
         return false;
     }
 
@@ -582,8 +583,8 @@ mod tests {
 
     #[test]
     fn test_donut_polyline_tessellates_to_analytical_arcs() {
-        use codec::CadDocument;
-        let mut doc = CadDocument::new();
+        use codec::Document;
+        let mut doc = Document::new();
         let donut = crate::modules::draw::draw::donut::make_donut(10.0, 20.0, 0.0, 10.0, 30.0);
         let h = doc.add_entity(donut).unwrap();
         let entity = doc.get_entity(h).unwrap();

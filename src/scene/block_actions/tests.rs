@@ -41,7 +41,7 @@ fn signed_value_set_increments_preserve_negative_axis_values() {
     assert_eq!(constrain_value_set(5.0, &set), 6.0);
 }
 
-pub(super) fn fixture() -> (CadDocument, Handle, Vec<Handle>) {
+pub(super) fn fixture() -> (Document, Handle, Vec<Handle>) {
     let mut scene = Scene::new();
     scene.define_block_raw(
         "ACTIONS",
@@ -63,7 +63,7 @@ pub(super) fn fixture() -> (CadDocument, Handle, Vec<Handle>) {
 }
 
 fn orientation(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     def: Handle,
     kind: super::super::block_orientation_parameter::Kind,
 ) -> Handle {
@@ -262,7 +262,7 @@ fn block_actions_rotate_flip_test_baseline_reversible_and_invalid_atomic() {
     assert!(evaluate(&mut doc, &unsupported, def, r, DVec3::new(0., 10., 0.)).is_err());
     assert_eq!(doc, unsupported);
 }
-fn linear(doc: &mut CadDocument, def: Handle) -> Handle {
+fn linear(doc: &mut Document, def: Handle) -> Handle {
     distance::create(
         doc,
         def,
@@ -422,14 +422,14 @@ fn xy_box_set_actions_apply_their_key_point_axis_deltas() {
     }
 }
 
-fn start(doc: &CadDocument, h: Handle) -> Vector3 {
+fn start(doc: &Document, h: Handle) -> Vector3 {
     let EntityType::Line(l) = doc.get_entity(h).unwrap() else {
         panic!()
     };
     l.start
 }
 
-fn instance_line(doc: &CadDocument, insert: Handle) -> Vector3 {
+fn instance_line(doc: &Document, insert: Handle) -> Vector3 {
     let EntityType::Insert(i) = doc.get_entity(insert).unwrap() else {
         panic!()
     };
@@ -865,7 +865,7 @@ fn block_actions_reframe_moves_markers_and_retains_targets_and_connections() {
     assert_eq!(s.connections, b.connections);
 }
 
-fn stretch_fixture() -> (CadDocument, Handle, Vec<Handle>, Handle, Handle) {
+fn stretch_fixture() -> (Document, Handle, Vec<Handle>, Handle, Handle) {
     let mut scene = Scene::new();
     let mut poly = codec::entities::LwPolyline::from_points(vec![
         codec::types::Vector2::new(0., 1.),
@@ -907,7 +907,7 @@ fn stretch_fixture() -> (CadDocument, Handle, Vec<Handle>, Handle, Handle) {
     (doc, def, handles, p, action)
 }
 
-fn polar_stretch_fixture() -> (CadDocument, Handle, Vec<Handle>, Handle, Handle) {
+fn polar_stretch_fixture() -> (Document, Handle, Vec<Handle>, Handle, Handle) {
     let mut scene = Scene::new();
     scene.define_block_raw(
         "POLAR_STRETCH",

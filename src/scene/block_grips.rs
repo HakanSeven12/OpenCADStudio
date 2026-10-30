@@ -4,7 +4,7 @@ pub(crate) mod runtime;
 use codec::{
     objects::{BlockGrip, DynamicBlockData, ObjectType},
     types::Vector3,
-    CadDocument, Handle,
+    Document, Handle,
 };
 
 pub(crate) struct GripInfo {
@@ -45,7 +45,7 @@ fn grip_mut(data: &mut DynamicBlockData) -> Option<&mut BlockGrip> {
     }
 }
 
-pub(crate) fn grips(doc: &CadDocument, definition: Handle) -> Result<Vec<GripInfo>, &'static str> {
+pub(crate) fn grips(doc: &Document, definition: Handle) -> Result<Vec<GripInfo>, &'static str> {
     let Some(graph) = super::block_authoring::graph(doc, definition)? else {
         return Ok(vec![]);
     };
@@ -107,7 +107,7 @@ pub(crate) fn grips(doc: &CadDocument, definition: Handle) -> Result<Vec<GripInf
 }
 
 pub(crate) fn set_cycle_order(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     rows: &[(Handle, bool)],
 ) -> Result<bool, &'static str> {
@@ -152,7 +152,7 @@ pub(crate) fn set_cycle_order(
     Ok(true)
 }
 
-pub(crate) fn insertion_points(doc: &CadDocument, definition: Handle) -> Vec<Vector3> {
+pub(crate) fn insertion_points(doc: &Document, definition: Handle) -> Vec<Vector3> {
     grips(doc, definition)
         .unwrap_or_default()
         .into_iter()

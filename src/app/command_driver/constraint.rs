@@ -1,4 +1,5 @@
 use super::*;
+use codec::EntityType;
 
 impl OpenCADStudio {
     pub(super) fn handle_open_auto_constrain_settings(&mut self) {
@@ -98,7 +99,7 @@ impl OpenCADStudio {
             .collect();
         self.tabs[i]
             .scene
-            .bump_entities_with_parametric_policy(&changes, &[], retain_size);
+            .bump_entities_after_constraint_added(&changes, &[], retain_size, &[]);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
@@ -210,6 +211,19 @@ impl OpenCADStudio {
         self.tabs[i]
             .scene
             .record_undo_parametric_constraints_before(scope, constraints_before);
+        // Taken before the follower resize below so the published delta still
+        // names a follower the reference actually resized.
+        let pre_move: Vec<(Handle, EntityType)> = touched
+            .iter()
+            .filter_map(|handle| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(*handle)
+                    .cloned()
+                    .map(|entity| (*handle, entity))
+            })
+            .collect();
         // The reference resizes the follower in place — its start (a
         // circle its center) and direction stay, only its length or
         // radius takes the first object's — so do that first and let
@@ -235,10 +249,11 @@ impl OpenCADStudio {
             .into_iter()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect::<Vec<_>>();
-        self.tabs[i].scene.bump_entities_with_parametric_policy(
+        self.tabs[i].scene.bump_entities_after_constraint_added(
             &changes,
             &[],
             self.constraint_solve_mode,
+            &pre_move,
         );
         self.tabs[i].dirty = true;
         self.refresh_properties();
@@ -480,7 +495,7 @@ impl OpenCADStudio {
         // `retain_size`: the typed value is the new length.
         self.tabs[i]
             .scene
-            .bump_entities_with_parametric_policy(&changes, &anchors, false);
+            .bump_entities_after_constraint_added(&changes, &anchors, false, &[]);
         // DYNCONSTRAINTDISPLAY 0 also keeps a new dynamic dimension off screen.
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
@@ -659,7 +674,7 @@ impl OpenCADStudio {
         let changes = vec![(circle.entity, crate::scene::ChangeKind::Modified)];
         self.tabs[i]
             .scene
-            .bump_entities_with_parametric_policy(&changes, &anchors, false);
+            .bump_entities_after_constraint_added(&changes, &anchors, false, &[]);
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
         self.tabs[i].dirty = true;
@@ -874,7 +889,7 @@ impl OpenCADStudio {
             .collect();
         self.tabs[i]
             .scene
-            .bump_entities_with_parametric_policy(&changes, &anchors, false);
+            .bump_entities_after_constraint_added(&changes, &anchors, false, &[]);
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
         self.tabs[i].dirty = true;
@@ -961,10 +976,11 @@ impl OpenCADStudio {
             // settles whatever else is tied to them.
             let mut pins = first_ends.to_vec();
             pins.extend(second_ends);
-            self.tabs[i].scene.bump_entities_with_parametric_policy(
+            self.tabs[i].scene.bump_entities_after_constraint_added(
                 &[(second_line.entity, crate::scene::ChangeKind::Modified)],
                 &pins,
                 self.constraint_solve_mode,
+                &[],
             );
             self.tabs[i].dirty = true;
             if let Some(pd) = pending {
@@ -1214,6 +1230,19 @@ impl OpenCADStudio {
         self.tabs[i]
             .scene
             .record_undo_parametric_constraints_before(scope, constraints_before);
+        // Taken before the pre-alignment writes below so the published delta
+        // still names the object the reference turned onto the axis.
+        let pre_move: Vec<(Handle, EntityType)> = touched
+            .iter()
+            .filter_map(|handle| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(*handle)
+                    .cloned()
+                    .map(|entity| (*handle, entity))
+            })
+            .collect();
         // Two points on different objects: the reference slides the
         // second object rigidly onto the axis through the first
         // point instead of re-solving its shape, so move it first
@@ -1306,10 +1335,11 @@ impl OpenCADStudio {
             .into_iter()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect::<Vec<_>>();
-        self.tabs[i].scene.bump_entities_with_parametric_policy(
+        self.tabs[i].scene.bump_entities_after_constraint_added(
             &changes,
             &initial_fixed,
             self.constraint_solve_mode,
+            &pre_move,
         );
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
@@ -1774,10 +1804,11 @@ impl OpenCADStudio {
             .copied()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect();
-        self.tabs[i].scene.bump_entities_with_parametric_policy(
+        self.tabs[i].scene.bump_entities_after_constraint_added(
             &changes,
             &[first_ref],
             self.constraint_solve_mode,
+            &[],
         );
         self.tabs[i].dirty = true;
         self.tabs[i].snap_result = None;

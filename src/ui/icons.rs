@@ -906,6 +906,13 @@ pub fn mtp_icon() -> &'static [u8] {
     OSNAP_MTP
 }
 
+/// Base marker and offset arrow for the FROM point modifier.
+pub fn from_icon() -> &'static [u8] {
+    br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.5">
+<circle cx="5" cy="18" r="3"/><path d="M7 16L19 4M12 4h7v7"/>
+</svg>"##
+}
+
 /// Context-menu glyphs for the transparent navigation rows.
 pub fn pan_icon() -> &'static [u8] {
     NAV_PAN

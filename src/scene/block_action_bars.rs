@@ -1,6 +1,6 @@
 //! Read-only groups of native actions for parameter action bars.
 use super::block_actions::{self as actions, Kind};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use glam::DVec3;
 
 #[derive(Clone, Copy, Debug)]
@@ -26,7 +26,7 @@ pub(crate) struct Group {
     pub entries: Vec<Entry>,
 }
 
-pub(crate) fn groups(doc: &CadDocument, definition: Handle) -> Vec<Group> {
+pub(crate) fn groups(doc: &Document, definition: Handle) -> Vec<Group> {
     let parameters = actions::all_parameters(doc, definition);
     let mut groups: Vec<Group> = vec![];
     for (handle, action, kind, id) in actions::actions(doc, definition) {
@@ -91,7 +91,7 @@ pub(crate) fn groups(doc: &CadDocument, definition: Handle) -> Vec<Group> {
     groups
 }
 
-pub(crate) fn is_action(doc: &CadDocument, handle: Handle) -> bool {
+pub(crate) fn is_action(doc: &Document, handle: Handle) -> bool {
     use codec::objects::{DynamicBlockData as D, ObjectType};
     matches!(doc.objects.get(&handle),Some(ObjectType::DynamicBlock(object)) if matches!(object.data,
         D::MoveAction(_)|D::StretchAction(_)|D::PolarStretchAction(_)|D::RotateAction(_)|D::ScaleAction(_)|D::FlipAction(_)|D::ArrayAction(_)))

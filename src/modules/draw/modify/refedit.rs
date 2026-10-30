@@ -201,7 +201,7 @@ pub type LevelHits = Vec<(Handle, Vec<Vec<[f64; 3]>>)>;
 /// block references recurse into their definitions).
 pub fn hit_paths(
     entity: &EntityType,
-    document: &codec::CadDocument,
+    document: &codec::Document,
     depth: usize,
 ) -> Vec<Vec<[f64; 3]>> {
     use crate::entities::traits::EntityTypeOps;
@@ -260,7 +260,7 @@ pub fn paths_distance(paths: &[Vec<[f64; 3]>], point: DVec3) -> Option<f64> {
 }
 
 /// The world-space objects of `level`'s definition with their hit paths.
-pub fn level_hits(document: &codec::CadDocument, level: &ChainLevel) -> LevelHits {
+pub fn level_hits(document: &codec::Document, level: &ChainLevel) -> LevelHits {
     let Some(br) = document.block_records.get(&level.block_name) else {
         return Vec::new();
     };
@@ -285,7 +285,7 @@ pub fn level_hits(document: &codec::CadDocument, level: &ChainLevel) -> LevelHit
 /// reference, then every definition-owned reference the nearest object under
 /// the point sits in. Without a point only the top level is returned.
 pub fn nesting_chain(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     top: Handle,
     point: Option<DVec3>,
 ) -> Vec<ChainLevel> {

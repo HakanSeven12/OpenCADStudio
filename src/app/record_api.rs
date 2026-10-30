@@ -496,7 +496,7 @@ fn collection_records(
     }
 }
 
-fn collection_count(document: &codec::CadDocument, collection: &str) -> usize {
+fn collection_count(document: &codec::Document, collection: &str) -> usize {
     match collection {
         "entities" => document.entities().count(),
         "objects" => document.objects.len(),
@@ -1280,6 +1280,7 @@ impl OpenCADStudio {
                 "entities_transform":true,
                 "file_identity":true,
                 "group_create":true,
+                "node_graph":true,
                 "layout_create":true,
                 "page_setup_set":true,
                 "selection_set_load":true,

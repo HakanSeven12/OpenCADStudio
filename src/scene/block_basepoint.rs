@@ -6,11 +6,11 @@ use codec::objects::{
 };
 use codec::{
     types::{Transform, Vector3},
-    CadDocument, Handle,
+    Document, Handle,
 };
 
 pub(crate) fn parameter(
-    document: &CadDocument,
+    document: &Document,
     definition: Handle,
 ) -> Option<(Handle, &BlockBasePointParameter)> {
     let ObjectType::Dictionary(dictionary) = document
@@ -36,11 +36,11 @@ pub(crate) fn parameter(
             _ => None,
         })
 }
-pub(crate) fn placement_error(document: &CadDocument, definition: Handle) -> Option<&'static str> {
+pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option<&'static str> {
     authoring::graph(document, definition).err()
 }
 pub(crate) fn create(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     location: Vector3,
 ) -> Result<Handle, &'static str> {
@@ -112,7 +112,7 @@ pub(crate) fn create(
     Ok(handle)
 }
 
-fn move_attributes(document: &mut CadDocument, name: &str, old: Vector3, new: Vector3) {
+fn move_attributes(document: &mut Document, name: &str, old: Vector3, new: Vector3) {
     let handles = document
         .entities()
         .filter_map(|entity| match entity {
@@ -135,7 +135,7 @@ fn move_attributes(document: &mut CadDocument, name: &str, old: Vector3, new: Ve
     }
 }
 pub(crate) fn reframe(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     transform: &Transform,
 ) -> usize {

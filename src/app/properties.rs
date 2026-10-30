@@ -445,12 +445,17 @@ impl OpenCADStudio {
             let xd = &source_entity.common().extended_data;
             if !xd.is_empty() && !matches!(source_entity, codec::EntityType::Ole2Frame(_)) {
                 let mut xd_props = Vec::new();
-                // A hyperlink shows on its own row.
-                for rec in xd
-                    .records()
-                    .iter()
-                    .filter(|rec| rec.application_name != crate::scene::hyperlink::APP)
-                {
+                // A hyperlink shows on its own row; inspection data is the
+                // dimension's own; a centre object's association shows as its
+                // own Geometry rows (the stored object carries no such data).
+                for rec in xd.records().iter().filter(|rec| {
+                    rec.application_name != crate::scene::hyperlink::APP
+                        && rec.application_name != crate::entities::dim_inspect::APP
+                        && rec.application_name
+                            != codec::entities::CENTERMARK_XDATA_APPLICATION
+                        && rec.application_name
+                            != codec::entities::CENTERLINE_XDATA_APPLICATION
+                }) {
                     let value_text = rec
                         .values
                         .iter()
@@ -582,14 +587,19 @@ impl OpenCADStudio {
                     _ => None,
                 })
                 .collect();
-            // A leader with no linetype handle draws ByBlock; expose that
-            // as the first option so the default is selectable.
-            let ltype_names: Vec<String> = std::iter::once("ByBlock".to_string())
+            // ByLayer and ByBlock lead the list once (a leader with no
+            // linetype handle draws ByBlock), then the drawing's linetypes.
+            let ltype_names: Vec<String> = ["ByLayer".to_string(), "ByBlock".to_string()]
+                .into_iter()
                 .chain(
                     doc.line_types
                         .iter()
                         .map(|l| l.name.clone())
-                        .filter(|n| !n.is_empty()),
+                        .filter(|n| {
+                            !n.is_empty()
+                                && !n.eq_ignore_ascii_case("ByLayer")
+                                && !n.eq_ignore_ascii_case("ByBlock")
+                        }),
                 )
                 .collect();
             // Arrowheads are blocks; the closed-filled default has no
@@ -784,6 +794,26 @@ impl OpenCADStudio {
             }
         }
 
+        // Centre marks and centre lines: the General rows end with whether
+        // the object still follows its source (read-only), as the reference
+        // lists them; a line's thickness and handle rows are not shown.
+        if let Some((_, associated)) = self.tabs[i].scene.center_object_state(handle) {
+            for section in sections.iter_mut() {
+                section
+                    .props
+                    .retain(|property| !matches!(property.field, "handle" | "thickness"));
+            }
+            if let Some(general) = sections.first_mut() {
+                general.props.push(crate::scene::model::object::Property {
+                    label: t!("Associative").into_owned(),
+                    field: "associative",
+                    value: crate::scene::model::object::PropValue::ReadOnly(
+                        if associated { t!("Yes") } else { t!("No") }.into_owned(),
+                    ),
+                });
+            }
+        }
+
         // Inject DimStyle picker + style-derived groups for Dimensions.
         if let codec::EntityType::Dimension(d) = entity {
             if let Some(general) = sections.first_mut() {
@@ -901,10 +931,19 @@ impl OpenCADStudio {
             // unit-scale factor against the drawing's INSUNITS.
             codec::EntityType::Insert(ins) => {
                 let host = doc.header.insertion_units;
-                let src = doc
-                    .block_records
-                    .get(&ins.block_name)
-                    .map(|br| br.units)
+                // An evaluated instance is named `*U…`; the row shows the
+                // definition it belongs to, and that definition carries the
+                // units the reference was authored in.
+                let (display_name, definition, _) =
+                    crate::app::control::block_ops::resolve_effective_block(doc, ins);
+                let src = definition
+                    .and_then(|handle| {
+                        doc.block_records
+                            .iter()
+                            .find(|record| record.handle == handle)
+                    })
+                    .or_else(|| doc.block_records.get(&ins.block_name))
+                    .map(|record| record.units)
                     .unwrap_or(0);
                 set_row(&mut sections, "block_unit", insunits_name(src).to_string());
                 let factor = insert_unit_scale(host, src).unwrap_or(1.0);
@@ -939,6 +978,8 @@ impl OpenCADStudio {
                             options,
                         },
                     );
+                } else {
+                    set_row(&mut sections, "block", display_name);
                 }
                 if let Some(br) = doc
                     .block_records
@@ -1252,6 +1293,12 @@ impl OpenCADStudio {
                 use codec::entities::table::{
                     CellEdgeFlags, CellStylePropertyFlags, CellValueType,
                 };
+                // A table shows its linetype scale but does not take one.
+                set_row(
+                    &mut sections,
+                    "linetype_scale",
+                    crate::entities::common::format_length(table.common.linetype_scale),
+                );
 
                 let mut names: Vec<String> = doc
                     .objects
@@ -1299,6 +1346,18 @@ impl OpenCADStudio {
                 let flow_up = crate::entities::table::resolved_flow_up(table, selected_style);
                 let (horizontal_margin, vertical_margin) =
                     crate::entities::table::resolved_table_margins(table, selected_style);
+                // A spacing the table never stored shows its default: five
+                // and a half data-text heights (0.18 high text without data rows).
+                if table.break_spacing <= 0.0 {
+                    let data_height = selected_style
+                        .filter(|_| table.rows.len() > 2)
+                        .map_or(0.18, |style| style.data_row_style.text_height);
+                    update_row_text(
+                        &mut sections,
+                        "tbl_break_spacing",
+                        crate::entities::common::format_length(5.5 * data_height),
+                    );
+                }
                 update_row_toggle(&mut sections, "tbl_title_suppressed", title_suppressed);
                 update_row_toggle(&mut sections, "tbl_header_suppressed", header_suppressed);
                 update_row_text(
@@ -1540,10 +1599,9 @@ impl OpenCADStudio {
                 | codec::EntityType::Insert(_)
                 | codec::EntityType::Leader(_)
                 | codec::EntityType::Hatch(_) => Some(("annotative", None)),
-                codec::EntityType::MultiLeader(_) => Some(("enable_annotation_scale", None)),
+                codec::EntityType::MultiLeader(_) => Some(("annotative", None)),
                 codec::EntityType::Dimension(_) => Some(("annotative", Some("style_name"))),
                 codec::EntityType::Tolerance(_) => Some(("annotative", Some("tol_dim_style"))),
-                codec::EntityType::Table(_) => Some(("annotative", Some("tbl_style_handle"))),
                 _ => None,
             };
             if let Some((anno_field, insert_after)) = anno {
@@ -1612,7 +1670,8 @@ impl OpenCADStudio {
                         | codec::EntityType::Insert(_)
                         | codec::EntityType::Leader(_)
                         | codec::EntityType::Hatch(_)
-                        | codec::EntityType::Dimension(_) => {
+                        | codec::EntityType::Dimension(_)
+                        | codec::EntityType::MultiLeader(_) => {
                             set_row_value(&mut sections, "annotative", yes_no_choice(is_anno))
                         }
                         _ => set_row(
@@ -1824,6 +1883,64 @@ impl OpenCADStudio {
             title,
         );
         (sections, title)
+    }
+
+    /// The "Plugin class parameters" section (API v14): binds to ONE
+    /// selected entity whose XDATA carries a registered class key. The
+    /// section exists only when the stamp resolves to the LIVE declaration
+    /// (schema match — a stale stamp re-stages instead of rendering). A
+    /// reference-only (host-staged) instance renders every row read-only;
+    /// the source line points at the owning record row either way — the
+    /// values live on the record layer, the host never invents semantics
+    /// for a name or kind the declaration does not spell.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn plugin_class_parameter_section(
+        &self,
+        i: usize,
+        handle: codec::Handle,
+    ) -> Option<crate::scene::model::object::PropSection> {
+        use crate::scene::model::object::{PropSection, PropValue, Property};
+        let binding =
+            crate::app::plugin_host::resolve_plugin_class_binding(self, i, handle).ok()?;
+        let reference_only = self.tabs[i].scene.is_reference_only(handle);
+        let mut rows = crate::app::plugin_host::rows_from_schema(&binding);
+        if !binding.design_record.is_empty() {
+            if let Ok((_, entries)) = crate::app::plugin_host::find_design_record_entries(
+                self, i, handle, &binding.design_record,
+            ) {
+                if let Ok(read_rows) =
+                    crate::app::plugin_host::rows_from_entries(&binding, &entries)
+                {
+                    rows = read_rows;
+                }
+            }
+        }
+        let mut props = Vec::new();
+        let source = if binding.design_record.is_empty() {
+            crate::t!("No record linkage on the identity stamp").into_owned()
+        } else {
+            crate::tf!("Values on record {}", binding.design_record).into_owned()
+        };
+        props.push(Property {
+            label: crate::t!("Source").into_owned(),
+            field: "plugin_class_source",
+            value: PropValue::ReadOnly(source),
+        });
+        for row in rows {
+            props.push(Property {
+                label: row.name.clone(),
+                field: "plugin_class_parameter",
+                value: PropValue::PluginParam {
+                    name: row.name,
+                    value: row.value.unwrap_or_default(),
+                    editable: row.editable && !reference_only,
+                },
+            });
+        }
+        Some(PropSection {
+            title: crate::t!("Plugin class parameters").into_owned(),
+            props,
+        })
     }
 
     pub(super) fn refresh_properties(&mut self) {
@@ -2165,7 +2282,7 @@ impl OpenCADStudio {
                                                     .document
                                                     .current_entity_transparency(),
                                             ),
-                                        options: vec!["ByLayer".to_string(), "ByBlock".to_string()],
+                                        options: crate::scene::creation_style::transparency_options(),
                                     },
                                 },
                                 read_only(
@@ -2545,9 +2662,14 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                         props: self.tabs[i].active_block_edit_session()
                             .and_then(|session| crate::scene::block_authoring::metadata::read(&self.tabs[i].scene.document, session.br_handle, item.handle).ok())
                             .map(|metadata| {
-                                let mut props: Vec<Property> = metadata.text.into_iter().map(|text| Property {
-                                    label: crate::t!(text.label).into_owned(), field: text.field.key(),
-                                    value: PropValue::PlainText(text.value.to_owned()),
+                                let mut props: Vec<Property> = metadata.text.into_iter().map(|text| {
+                                    use crate::scene::block_authoring::metadata::Field;
+                                    let label = match text.field {
+                                        Field::BaseStateLabel => crate::tr!("block-flip", "base-state-label"),
+                                        Field::FlippedStateLabel => crate::tr!("block-flip", "flipped-state-label"),
+                                        _ => crate::t!(text.label).into_owned(),
+                                    };
+                                    Property { label, field: text.field.key(), value: PropValue::PlainText(text.value.to_owned()) }
                                 }).collect();
                                 if let Some(visible) = metadata.visible {
                                     props.push(Property { label: crate::t!("Show in Properties").into_owned(), field: "authoring_show_properties", value: PropValue::BoolToggle { field: "authoring_show_properties", value: visible } });
@@ -2812,6 +2934,18 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
             // `PropSyncActive`; derived from `sections`, so rebuild it here.
             panel.field_key_by_id = crate::ui::properties::build_field_key_map(&panel.sections);
             let new_handles: Vec<codec::Handle> = selected.iter().map(|(h, _)| *h).collect();
+            // The plugin class parameter surface (API v14): one stamped
+            // selection rides its class's declared rows. Only the native build
+            // carries plugin classes (the wasm build has no plugin registry the
+            // section could bind to).
+            #[cfg(not(target_arch = "wasm32"))]
+            if new_handles.len() == 1 {
+                if let Some(section) = self.plugin_class_parameter_section(i, new_handles[0]) {
+                    panel.sections.push(section);
+                    panel.field_key_by_id =
+                        crate::ui::properties::build_field_key_map(&panel.sections);
+                }
+            }
             // Carry the in-progress edits only when the selection is unchanged
             // (a commit-triggered rebuild); a genuine selection change starts
             // with a clean buffer so no stale value leaks onto the new entity.
@@ -3471,40 +3605,50 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             None
         };
         if let codec::EntityType::Table(table) = &mut entity {
+            if let Some(settings) = table
+                .name
+                .strip_prefix(crate::modules::annotate::data_link::EXTRACTION_PENDING)
+                .map(str::to_string)
+            {
+                table.name.clear();
+                let link = crate::app::annotation_data::add_extraction_link(
+                    &mut self.tabs[i].scene.document,
+                    &settings,
+                );
+                crate::modules::annotate::data_link::link_cells(table, link, 1);
+            }
             const PREFIX: &str = "__OPENCAD_LINK_PENDING__";
             if let Some(path) = table.name.strip_prefix(PREFIX).map(str::to_string) {
-                use codec::entities::table::CellStateFlags;
-                use codec::objects::{ClassObject, ClassObjectData, DataLink, ObjectType};
                 let document = &mut self.tabs[i].scene.document;
-                let link_handle = document.allocate_handle();
-                let mut object = ClassObject::new(ClassObjectData::DataLink(DataLink {
-                    data_adapter: "CSV".to_string(),
-                    description: path.clone(),
-                    tooltip: path.clone(),
-                    connection_string: path.clone(),
-                    status_flags: 1,
-                    update_status: "Linked".to_string(),
-                    ..DataLink::default()
-                }));
-                object.handle = link_handle;
-                document
-                    .objects
-                    .insert(link_handle, ObjectType::ClassObject(object));
-                let rows = table.row_count() as i32;
-                let columns = table.column_count() as i32;
-                for row in &mut table.rows {
-                    for cell in &mut row.cells {
-                        cell.has_linked_data = true;
-                        cell.data_link_handle = Some(link_handle);
-                        cell.data_link_rows = rows;
-                        cell.data_link_columns = columns;
-                        cell.state.insert(
-                            CellStateFlags::LINKED
-                                | CellStateFlags::CONTENT_LOCKED
-                                | CellStateFlags::FORMAT_LOCKED,
-                        );
-                    }
+                let stem = std::path::Path::new(&path)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("Data Link")
+                    .to_string();
+                let names = crate::app::annotation_data::data_link_entries(document);
+                let mut name = stem.clone();
+                let mut n = 1;
+                while names.iter().any(|(known, _)| known.eq_ignore_ascii_case(&name)) {
+                    n += 1;
+                    name = format!("{stem} ({n})");
                 }
+                let mut link = codec::objects::DataLink::default();
+                crate::app::annotation_data::set_spreadsheet_link(
+                    &mut link,
+                    &crate::app::annotation_data::SpreadsheetLinkSettings {
+                        path: &path,
+                        stored_path: &path,
+                        sheet: "",
+                        kind: crate::ui::window::annotation_data::LinkRange::EntireSheet,
+                        range: None,
+                        path_option: 1,
+                        allow_write: false,
+                        use_source_formatting: true,
+                        keep_source_formatting: true,
+                    },
+                );
+                let link_handle = crate::app::annotation_data::add_data_link(document, &name, link);
+                crate::modules::annotate::data_link::link_cells(table, link_handle, 0);
                 table.name = std::path::Path::new(&path)
                     .file_stem()
                     .and_then(|value| value.to_str())
@@ -3534,9 +3678,30 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         if let Some(layer) = explicit_mleader_layer {
             entity.as_entity_mut().set_layer(layer);
         } else if !preserve_entity_layer {
-            let layer = &self.tabs[i].active_layer;
+            // DIMLAYER and MLEADERLAYER put new dimensions and
+            // multileaders on their own layers.
+            let xref = match &entity {
+                codec::EntityType::Insert(insert) => self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .get(&insert.block_name)
+                    .is_some_and(|record| record.flags.is_xref),
+                _ => false,
+            };
+            let layer = if matches!(entity, codec::EntityType::Dimension(_)) {
+                self.new_dimension_layer(i)
+            } else if matches!(entity, codec::EntityType::MultiLeader(_)) {
+                self.new_mleader_layer(i)
+            } else if matches!(entity, codec::EntityType::Hatch(_)) {
+                self.new_variable_layer(i, "HATCHLAYER")
+            } else if xref {
+                self.new_variable_layer(i, "XREFLAYER")
+            } else {
+                self.tabs[i].active_layer.clone()
+            };
             if layer != "0" || entity.as_entity().layer().is_empty() {
-                entity.as_entity_mut().set_layer(layer.clone());
+                entity.as_entity_mut().set_layer(layer);
             }
         }
 
@@ -3612,12 +3777,24 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             codec::entities::CenterMarkAssociation::read(&entity.common().extended_data).is_some();
         if center_line || center_mark {
             let settings = self.tabs[i].scene.centerline_settings();
-            if !settings.layer.eq_ignore_ascii_case("Current") {
-                entity.common_mut().layer = settings.layer;
+            // CENTERLAYER: "." is the current layer; a named layer is made
+            // when the drawing does not have it yet.
+            let layer = settings.layer.trim();
+            if !layer.is_empty() && layer != "." {
+                self.tabs[i].scene.ensure_layer(layer);
+                entity.common_mut().layer = layer.to_string();
             }
-            if !settings.linetype.eq_ignore_ascii_case("Current") {
-                entity.common_mut().linetype = settings.linetype;
-            }
+            // CENTERLTYPE: empty is CENTER2, "." the current linetype.
+            let linetype = match settings.linetype.trim() {
+                "" => "CENTER2".to_string(),
+                "." => self.tabs[i].scene.document.header.current_linetype_name.clone(),
+                other => other.to_string(),
+            };
+            crate::io::linetypes::ensure_catalog_linetype(
+                &mut self.tabs[i].scene.document,
+                &linetype,
+            );
+            entity.common_mut().linetype = linetype;
             entity.common_mut().linetype_scale = settings.linetype_scale;
             let application = if center_mark {
                 codec::entities::CENTERMARK_XDATA_APPLICATION
@@ -3707,6 +3884,25 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         } else {
             Some(self.tabs[i].scene.add_entity(entity))
         };
+
+        // A linked table is one of its data link's connected objects.
+        if let Some(handle) = new_handle {
+            let link = match self.tabs[i].scene.document.get_entity(handle) {
+                Some(codec::EntityType::Table(table)) => table
+                    .rows
+                    .iter()
+                    .flat_map(|row| row.cells.iter())
+                    .find_map(|cell| cell.data_link_handle),
+                _ => None,
+            };
+            if let Some(link) = link {
+                crate::app::annotation_data::connect_data_link(
+                    &mut self.tabs[i].scene.document,
+                    link,
+                    handle,
+                );
+            }
+        }
 
         if needs_annotation_context {
             if let (Some(handle), Some(scale)) = (
@@ -3798,6 +3994,7 @@ fn make_sections_read_only(
             }
             PropValue::Stepper { display, .. } => display.clone(),
             PropValue::AttrText { value, .. } => value.clone(),
+            PropValue::PluginParam { value, .. } => value.clone(),
             // The Constraints/Parameters sections aren't per-entity editable
             // fields to begin with (a constraint link is a navigation
             // action, not a value; a parameter belongs to the whole
@@ -4013,7 +4210,7 @@ pub(super) fn aggregate_sections(
 }
 
 fn aggregate_solid_history_sections(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handles: &[Handle],
 ) -> Vec<crate::scene::model::object::PropSection> {
     let mut sections = handles
@@ -4622,7 +4819,7 @@ pub(crate) fn dimtad_from_label(label: &str) -> i16 {
 /// Resolve a dimension style by name (case-insensitive), falling back to
 /// "Standard" when the name is blank.
 fn find_dim_style<'a>(
-    doc: &'a codec::CadDocument,
+    doc: &'a codec::Document,
     name: &str,
 ) -> Option<&'a codec::tables::DimStyle> {
     doc.dim_styles.iter().find(|s| {
@@ -4689,7 +4886,7 @@ pub(crate) fn arrowhead_label(name: &str) -> String {
 
 /// The leader's arrowhead label, resolved from the dim style's DIMLDRBLK block.
 fn leader_arrow_label(
-    doc: &codec::CadDocument,
+    doc: &codec::Document,
     ds: &codec::tables::DimStyle,
     arrow_enabled: bool,
 ) -> String {

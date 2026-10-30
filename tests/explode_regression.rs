@@ -9,7 +9,7 @@ use codec::entities::{
 };
 use codec::tables::BlockRecord;
 use codec::types::{Vector2, Vector3};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use OpenCADStudio::modules::draw::modify::explode::{
     apply_explode_replacements, explode_batch, explode_entity, plan_explode,
 };
@@ -19,7 +19,7 @@ const BLOCK_NAME: &str = "TEST_BLOCK";
 
 /// Register a 6-line block the way baked blocks look: members in the
 /// document, `entity_handles` filled, record in `block_records`.
-fn add_test_block(doc: &mut CadDocument) {
+fn add_test_block(doc: &mut Document) {
     let mut member_handles = Vec::new();
     for k in 0..6 {
         let mut line = Line::new();
@@ -37,7 +37,7 @@ fn add_test_block(doc: &mut CadDocument) {
 
 #[test]
 fn explode_lwpolyline_golden_line_then_arc() {
-    let doc = CadDocument::new();
+    let doc = Document::new();
     let mut pl = LwPolyline::new();
     let mut mid = LwVertex::new(Vector2::new(10.0, 0.0));
     mid.bulge = 1.0; // second segment becomes an arc
@@ -54,7 +54,7 @@ fn explode_lwpolyline_golden_line_then_arc() {
 
 #[test]
 fn explode_polyline_family_golden_all_lines() {
-    let doc = CadDocument::new();
+    let doc = Document::new();
 
     let mut p2 = Polyline2D::new();
     p2.vertices = vec![
@@ -98,7 +98,7 @@ fn explode_polyline_family_golden_all_lines() {
 
 #[test]
 fn explode_insert_golden_block_members() {
-    let mut doc = CadDocument::new();
+    let mut doc = Document::new();
     add_test_block(&mut doc);
     let insert = Insert::new(BLOCK_NAME, Vector3::new(0.0, 0.0, 0.0));
     let pieces = explode_entity(&EntityType::Insert(insert), &doc);
@@ -112,7 +112,7 @@ fn explode_insert_golden_block_members() {
 
 #[test]
 fn explode_mline_golden_three_lines_per_segment() {
-    let doc = CadDocument::new();
+    let doc = Document::new();
     let ml = MLine::from_points(&[
         Vector3::new(0.0, 0.0, 0.0),
         Vector3::new(4.0, 0.0, 0.0),
@@ -126,7 +126,7 @@ fn explode_mline_golden_three_lines_per_segment() {
 
 #[test]
 fn explode_dimension_linear_golden_segments() {
-    let doc = CadDocument::new();
+    let doc = Document::new();
     let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
     d.definition_point = Vector3::new(5.0, 3.0, 0.0);
     d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
@@ -165,7 +165,7 @@ fn explode_dimension_linear_golden_segments() {
 
 #[test]
 fn centermark_associated_line_explodes_without_leaking_association() {
-    let mut doc = CadDocument::new();
+    let mut doc = Document::new();
     let source = doc.allocate_handle();
     let mut line = Line::new();
     line.start = Vector3::new(0.0, 0.0, 0.0);
@@ -210,7 +210,7 @@ fn centermark_associated_line_explodes_without_leaking_association() {
 
 #[test]
 fn lwpolyline_explode_preserves_length_and_closed_counts() {
-    let doc = CadDocument::new();
+    let doc = Document::new();
 
     let mut pl = LwPolyline::new();
     pl.vertices = vec![
@@ -278,7 +278,7 @@ fn plan_explode_drops_empty_and_keeps_order() {
 /// Frozen reference implementation of the pre-refactor EXPLODE command arm.
 fn legacy_apply(scene: &mut Scene, replacements: &[(Handle, Vec<EntityType>)]) {
     for (handle, pieces) in replacements {
-        scene.erase_entities(&[*handle]);
+        scene.erase_entities_exact(&[*handle]);
         for piece in pieces {
             scene.add_entity(piece.clone());
         }
@@ -360,9 +360,9 @@ fn build_differential_scene() -> (Scene, FixtureHandles) {
     l2.annotation_handle = poly;
     let leader2 = scene.add_entity(EntityType::Leader(l2));
 
-    // User-style selection: survivor + all three explodable sources (the
-    // two leaders ride along through annotation expansion when poly is
-    // selected; they are never planned, only coupling-erased).
+    // User-style selection: survivor + three explodable sources; the two
+    // leaders ride along through annotation expansion when poly is selected
+    // and explode into their own pieces.
     scene.select_entity(survivor, false);
     scene.select_entity(poly, false);
     scene.select_entity(mline, false);
@@ -395,7 +395,7 @@ fn apply_explode_replacements_matches_legacy_loop() {
     let (mut scene_legacy, handles_prior) = build_differential_scene();
     let (mut scene_batched, handles) = build_differential_scene();
     // Both builds must start from identical handle sequences: allocation is
-    // a per-document monotonic counter (CadDocument::allocate_handle), never
+    // a per-document monotonic counter (Document::allocate_handle), never
     // global/atomic — these assertions make that assumption explicit so a
     // future allocator change fails here, not as an opaque state mismatch.
     assert_eq!(handles_prior.poly, handles.poly);
@@ -403,12 +403,18 @@ fn apply_explode_replacements_matches_legacy_loop() {
 
     let replacements = plan_from_selection(&scene_legacy);
     assert!(
-        replacements.len() >= 3,
-        "poly, mline, insert must be planned"
+        replacements.len() >= 5,
+        "poly, both leaders, mline, insert must be planned"
     );
     assert_eq!(
         replacements.iter().map(|(h, _)| *h).collect::<Vec<_>>(),
-        vec![handles.poly, handles.mline, handles.insert],
+        vec![
+            handles.poly,
+            handles.leader1,
+            handles.leader2,
+            handles.mline,
+            handles.insert
+        ],
         "planning must preserve selection order poly → mline → insert — this \
          multi-source ordering is the guard that a mis-ordered flattened add \
          fails the document_state comparison below"
@@ -444,11 +450,11 @@ fn apply_explode_replacements_matches_legacy_loop() {
         );
         assert!(
             scene.document.get_entity(handles.leader1).is_none(),
-            "leader coupling L1"
+            "leader L1 exploded"
         );
         assert!(
             scene.document.get_entity(handles.leader2).is_none(),
-            "leader coupling L2"
+            "leader L2 exploded"
         );
         assert!(
             scene.document.get_entity(handles.survivor).is_some(),
@@ -514,7 +520,7 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
     let parsed_sat = SatDocument::parse(&sat_text).expect("sat parse");
     let sab_bytes = SabWriter::write(&parsed_sat);
 
-    let doc = CadDocument::new();
+    let doc = Document::new();
 
     for (label, acis_data) in [
         ("SAT", AcisData::from_sat(&sat_text)),
@@ -596,7 +602,7 @@ fn explode_region_tilted_plane_arc_and_multi_island() {
     let mut region = Region::new();
     region.acis_data = AcisData::from_sat(&sat.to_sat_string());
 
-    let doc = CadDocument::new();
+    let doc = Document::new();
     let pieces = explode_entity(&EntityType::Region(region), &doc);
     assert_eq!(pieces.len(), 2, "D-region must explode to 1 Line + 1 Arc");
 
@@ -718,7 +724,7 @@ fn explode_region_acis_with_body_transform() {
     region.acis_data = AcisData::from_sat(&sat.to_sat_string());
     region.common.layer = "TRANSFORMED".to_string();
 
-    let doc = CadDocument::new();
+    let doc = Document::new();
     let pieces = explode_entity(&EntityType::Region(region), &doc);
     assert_eq!(pieces.len(), 4, "placed region must explode to 4 lines");
 
@@ -754,7 +760,7 @@ fn explode_region_elliptical_and_spline_boundaries() {
     use kernel::space::Plane;
 
     let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
-    let doc = CadDocument::new();
+    let doc = Document::new();
 
     // 1. Full non-circular ellipse region (major 8.0, minor 4.0).
     let ell_loop = vec![KCurve::Ellipse(KEllipseArc::full(KEllipse {

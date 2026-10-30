@@ -5,7 +5,7 @@
 
 use crate::t;
 use codec::types::Vector3;
-use codec::{CadDocument, EntityType, Handle, Spline};
+use codec::{Document, EntityType, Handle, Spline};
 use std::collections::HashMap;
 
 use crate::command::{CadCommand, CmdResult};
@@ -65,7 +65,7 @@ impl SplineCommand {
         }
     }
 
-    pub fn with_document(mut self, document: &CadDocument) -> Self {
+    pub fn with_document(mut self, document: &Document) -> Self {
         self.convertible = document
             .entities()
             .filter_map(|entity| {

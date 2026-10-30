@@ -195,11 +195,16 @@ impl OpenCADStudio {
             })
             .unwrap_or_default();
         let base = crate::scene::render_graph::block_base_point(doc, block);
+        // A dynamic block's references point at their own anonymous
+        // representation, so they are found through the definition.
+        let def = doc.block_records.get(block).map(|br| br.handle);
         let inserts: Vec<_> = doc
             .entities()
             .filter_map(|entity| match entity {
                 codec::EntityType::Insert(insert)
-                    if insert.block_name.eq_ignore_ascii_case(block)
+                    if (insert.block_name.eq_ignore_ascii_case(block)
+                        || def.is_some()
+                            && doc.dynamic_definition_for_insert(insert.common.handle) == def)
                         && !self.tabs[i].scene.is_layer_locked(insert.common.handle) =>
                 {
                     Some(insert.common.handle)

@@ -1,7 +1,7 @@
 //! Reconnect orphaned native actions without replacing their identities.
 use super::*;
 
-pub(crate) fn orphaned(doc: &CadDocument, definition: Handle) -> Vec<Handle> {
+pub(crate) fn orphaned(doc: &Document, definition: Handle) -> Vec<Handle> {
     actions(doc, definition)
         .into_iter()
         .filter(|(_, _, kind, id)| {
@@ -14,7 +14,7 @@ pub(crate) fn orphaned(doc: &CadDocument, definition: Handle) -> Vec<Handle> {
 }
 
 pub(crate) fn associate(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     action: Handle,
     parameter: Handle,
@@ -97,7 +97,7 @@ mod tests {
     use codec::{DwgReader, DwgWriter, DxfReader, DxfWriter};
     use std::io::Cursor;
 
-    fn parameter(doc: &mut CadDocument, definition: Handle, kind: Kind) -> Handle {
+    fn parameter(doc: &mut Document, definition: Handle, kind: Kind) -> Handle {
         if matches!(kind, Kind::Rotate | Kind::Flip) {
             orientation::create(
                 doc,

@@ -155,7 +155,7 @@ pub(crate) fn symbol_font_switch(inner: &str) -> Option<char> {
 /// every DWG-read tolerance to "Standard" and pick the wrong metrics.
 pub(crate) fn resolve_dim_style<'a>(
     tol: &Tolerance,
-    doc: &'a codec::CadDocument,
+    doc: &'a codec::Document,
 ) -> Option<&'a codec::tables::DimStyle> {
     if let Some(h) = tol.dimension_style_handle {
         if !h.is_null() {
@@ -255,7 +255,7 @@ struct TolCell {
 ///     `GlyphRun` so the cell renders as SDF text (frame stays geometry).
 fn tessellate_tolerance(
     tol: &Tolerance,
-    doc: &codec::CadDocument,
+    doc: &codec::Document,
 ) -> (Vec<Vec<[f32; 2]>>, Vec<TolCell>) {
     if tol.text.is_empty() {
         return (vec![], vec![]);
@@ -418,7 +418,7 @@ fn tessellate_tolerance(
     (box_out, cells)
 }
 
-pub(crate) fn preview_strokes(tol: &Tolerance, doc: &codec::CadDocument) -> Vec<Vec<[f32; 2]>> {
+pub(crate) fn preview_strokes(tol: &Tolerance, doc: &codec::Document) -> Vec<Vec<[f32; 2]>> {
     tessellate_tolerance(tol, doc).0
 }
 
@@ -436,7 +436,7 @@ fn frame_basis(tol: &Tolerance) -> (glam::DVec3, glam::DVec3) {
 // ── RenderConvertible ──────────────────────────────────────────────────────────
 
 impl RenderConvertible for Tolerance {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         if self.text.is_empty() {
             return None;
         }
@@ -538,6 +538,7 @@ impl RenderConvertible for Tolerance {
                     // measure wider than the text they drew.
                     tracking: 1.0,
                     bold: false,
+                    aci: None,
                 }),
             });
         }
@@ -755,7 +756,7 @@ mod tests {
     #[test]
     fn the_frame_is_sized_from_the_dimension_style_not_the_entity_default() {
         use codec::tables::DimStyle;
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let handle = codec::Handle::from(0x27_u64);
         let mut style = DimStyle::new("ISO-25");
         style.handle = handle;
@@ -790,7 +791,7 @@ mod tests {
         use codec::tables::DimStyle;
         use codec::xdata::XDataValue;
 
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let handle = codec::Handle::from(0x27_u64);
         let mut style = DimStyle::new("ISO-25");
         style.handle = handle;
@@ -839,7 +840,7 @@ mod tests {
     /// Rows read downward and start at the left edge.
     #[test]
     fn rows_stack_downward_and_left_align() {
-        let doc = codec::CadDocument::new();
+        let doc = codec::Document::new();
         let mut tol = Tolerance::new();
         tol.text = BENCH.to_string();
         let (boxes, _) = tessellate_tolerance(&tol, &doc);
@@ -895,7 +896,7 @@ mod tests {
     /// together inside correctly-sized boxes.
     #[test]
     fn cells_are_drawn_with_the_spacing_they_were_measured_with() {
-        let doc = codec::CadDocument::new();
+        let doc = codec::Document::new();
         let mut tol = Tolerance::new();
         tol.text = "ABC".into();
 
@@ -978,7 +979,7 @@ mod tests {
     fn compartments_are_measured_by_their_ink_not_the_trailing_pen_gap() {
         // Cap height, so glyph units and world units line up.
         let h = 9.0_f32;
-        let document = codec::CadDocument::new();
+        let document = codec::Document::new();
         let text_style = crate::entities::text_support::resolve_text_style("Standard", &document);
         for src in ["{\\Fgdt;r}", "{\\Fgdt;n}tol{\\Fgdt;m}", "1{\\Fgdt;m}", "A"] {
             let cell = parse_cell(src);

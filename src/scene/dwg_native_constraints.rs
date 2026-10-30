@@ -7,7 +7,7 @@ use codec::objects::{
     AssocValueDependency, AssocVariable, AssociativeData, AssociativeObject, ObjectType,
 };
 use codec::types::{Handle, Vector3};
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -51,7 +51,7 @@ struct EntityNodes {
 /// Builds one scope's `Assoc2dConstraintGroup` graph incrementally,
 /// allocating node ids and deduplicating geometry/point nodes per entity.
 struct GroupBuilder<'a> {
-    document: &'a CadDocument,
+    document: &'a Document,
     nodes: Vec<AssocConstraintNode>,
     next_node_id: i32,
     entities: FxHashMap<Handle, EntityNodes>,
@@ -61,7 +61,7 @@ struct GroupBuilder<'a> {
 }
 
 impl<'a> GroupBuilder<'a> {
-    fn new(document: &'a CadDocument) -> Self {
+    fn new(document: &'a Document) -> Self {
         Self {
             document,
             nodes: Vec::new(),
@@ -756,7 +756,7 @@ const fn dimensional_class_name(kind: ConstraintKind) -> &'static str {
 /// contract for an unbuildable constraint).
 fn constraint_node(
     builder: &mut GroupBuilder,
-    document: &CadDocument,
+    document: &Document,
     constraint: &ParametricConstraint,
     needs_value_dependency: &mut Vec<(i32, Option<DrivingValue>)>,
 ) -> Option<i32> {
@@ -1119,7 +1119,7 @@ fn constraint_node(
 /// the `AssocGeomDependency` and `AssocValueDependency`/`AssocVariable`
 /// objects it references by handle, and the network/dictionary wiring.
 struct Allocator<'a> {
-    document: &'a mut CadDocument,
+    document: &'a mut Document,
     /// One shared variable per distinct parameter in this scope.
     variables: FxHashMap<String, Handle>,
     variable_actions: Vec<Handle>,
@@ -1466,7 +1466,7 @@ const ASSOC_CLASSES: &[(&str, &str, i32)] = &[
     ),
 ];
 
-fn ensure_associative_classes_registered(document: &mut CadDocument) {
+fn ensure_associative_classes_registered(document: &mut Document) {
     for (dxf_name, cpp_class_name, maintenance_version) in ASSOC_CLASSES {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
@@ -1494,12 +1494,12 @@ fn ensure_associative_classes_registered(document: &mut CadDocument) {
     }
 }
 
-fn ensure_extension_dictionary(document: &mut CadDocument, owner: Handle) -> Handle {
+fn ensure_extension_dictionary(document: &mut Document, owner: Handle) -> Handle {
     document.ensure_extension_dictionary(owner)
 }
 
 /// Removes a dictionary entry and its owned object tree.
-fn remove_dictionary_entry(document: &mut CadDocument, dictionary_handle: Handle, key: &str) {
+fn remove_dictionary_entry(document: &mut Document, dictionary_handle: Handle, key: &str) {
     let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary_handle)
     else {
         return;
@@ -1516,7 +1516,7 @@ fn remove_dictionary_entry(document: &mut CadDocument, dictionary_handle: Handle
 }
 
 fn set_dictionary_entry(
-    document: &mut CadDocument,
+    document: &mut Document,
     dictionary_handle: Handle,
     key: &str,
     target: Handle,
@@ -1536,7 +1536,7 @@ fn set_dictionary_entry(
     }
 }
 
-fn ensure_global_network_dictionary(document: &mut CadDocument) -> Handle {
+fn ensure_global_network_dictionary(document: &mut Document) -> Handle {
     let root_handle = document.header.named_objects_dict_handle;
     if let Some(ObjectType::Dictionary(root)) = document.objects.get(&root_handle) {
         if let Some(handle) = root.get(NETWORK_DICTIONARY_KEY) {
@@ -1569,7 +1569,7 @@ fn ensure_global_network_dictionary(document: &mut CadDocument) -> Handle {
 
 /// Removes `root` and every object transitively owned by it so rebuilding the
 /// graph cannot accumulate orphaned dependency or variable objects.
-fn remove_owned_recursive(document: &mut CadDocument, root: Handle) {
+fn remove_owned_recursive(document: &mut Document, root: Handle) {
     if root.is_null() {
         return;
     }
@@ -1594,7 +1594,7 @@ fn remove_owned_recursive(document: &mut CadDocument, root: Handle) {
     }
 }
 
-fn native_group_handles(document: &CadDocument, owner: Handle) -> Vec<Handle> {
+fn native_group_handles(document: &Document, owner: Handle) -> Vec<Handle> {
     let Some(network_handle) = native_scope_network_handle(document, owner) else {
         return Vec::new();
     };
@@ -1631,7 +1631,7 @@ fn native_group_handles(document: &CadDocument, owner: Handle) -> Vec<Handle> {
     handles
 }
 
-fn native_scope_network_handle(document: &CadDocument, owner: Handle) -> Option<Handle> {
+fn native_scope_network_handle(document: &Document, owner: Handle) -> Option<Handle> {
     let dictionary = super::block_authoring::definition_dictionary(document, owner)?;
     let ObjectType::Dictionary(dictionary) = document.objects.get(&dictionary)? else {
         return None;
@@ -1689,7 +1689,7 @@ fn geometry_dependency(data: &AssocConstraintNodeData) -> Option<Handle> {
 }
 
 fn dependency_entity(
-    document: &CadDocument,
+    document: &Document,
     dependency: Handle,
     geometry: &AssocConstraintNodeData,
 ) -> Option<Handle> {
@@ -1737,7 +1737,7 @@ fn dependency_entity(
     supported.then_some(entity)
 }
 
-fn group_requires_preservation(document: &CadDocument, group: &Assoc2dConstraintGroup) -> bool {
+fn group_requires_preservation(document: &Document, group: &Assoc2dConstraintGroup) -> bool {
     // Links the rebuild does not write: a dimensional constraint driving a
     // dynamic block's constraint parameter rather than a dimension, and
     // single edges of one polyline each held by a dependency of its own.
@@ -1792,7 +1792,7 @@ fn work_plane_vector(work_plane: &[Vector3; 3], local: Vector3) -> Option<Vector
 }
 
 fn polyline_segment_reference(
-    document: &CadDocument,
+    document: &Document,
     entity: Handle,
     data: &AssocConstraintNodeData,
     work_plane: &[Vector3; 3],
@@ -1842,7 +1842,7 @@ fn polyline_segment_reference(
 }
 
 fn directional_axis_reference(
-    document: &CadDocument,
+    document: &Document,
     entity: Handle,
     data: &AssocConstraintNodeData,
     work_plane: &[Vector3; 3],
@@ -1895,7 +1895,7 @@ fn numeric_value(value: &AssocEvalVariant) -> Option<f64> {
 }
 
 fn driving_value(
-    document: &CadDocument,
+    document: &Document,
     dependency: Handle,
     parameters: &mut ParameterTable,
 ) -> Option<DrivingValue> {
@@ -1932,7 +1932,7 @@ fn driving_value(
 
 /// The dynamic dimension an `AcDbAssocDependency` ties to a dimensional
 /// constraint node.
-fn dependency_dimension(document: &CadDocument, dependency: Handle) -> Option<Handle> {
+fn dependency_dimension(document: &Document, dependency: Handle) -> Option<Handle> {
     let ObjectType::Associative(object) = document.objects.get(&dependency)? else {
         return None;
     };
@@ -2100,7 +2100,7 @@ fn constraint_kind(node: &AssocConstraintNode) -> Option<ConstraintKind> {
 }
 
 fn rigid_set_references(
-    document: &CadDocument,
+    document: &Document,
     geometry_ids: &[i32],
     refs: &FxHashMap<i32, ParametricRef>,
 ) -> (Vec<ParametricRef>, Vec<(ParametricRef, Vector3)>) {
@@ -2147,7 +2147,7 @@ fn rigid_set_references(
 }
 
 pub(super) fn native_constraint_set(
-    document: &CadDocument,
+    document: &Document,
     owner: Handle,
     parameters: &mut ParameterTable,
 ) -> Option<ParametricConstraintSet> {
@@ -2478,7 +2478,7 @@ pub(super) fn native_constraint_set(
         || !set.local_parameters.is_empty()).then_some(set)
 }
 
-fn sync_retained_group_constraints(document: &mut CadDocument, set: &ParametricConstraintSet) {
+fn sync_retained_group_constraints(document: &mut Document, set: &ParametricConstraintSet) {
     let retained: FxHashMap<(Handle, i32), bool> = set
         .constraints
         .iter()
@@ -2518,7 +2518,7 @@ fn sync_retained_group_constraints(document: &mut CadDocument, set: &ParametricC
 }
 
 fn detach_preserved_scope(
-    document: &mut CadDocument,
+    document: &mut Document,
     owner: Handle,
 ) -> (FxHashMap<String, Handle>, Vec<Handle>, Vec<Handle>) {
     let Some(network_handle) = native_scope_network_handle(document, owner) else {
@@ -2694,7 +2694,7 @@ fn detach_preserved_scope(
 }
 
 /// The surface an associative surface action writes.
-fn action_surface(document: &CadDocument, action: Handle) -> Option<Handle> {
+fn action_surface(document: &Document, action: Handle) -> Option<Handle> {
     let Some(ObjectType::Associative(AssociativeObject {
         data: AssociativeData::Action(action),
         ..
@@ -2720,7 +2720,7 @@ fn action_surface(document: &CadDocument, action: Handle) -> Option<Handle> {
 
 /// Associative swept surfaces made here that the drawing's network does
 /// not carry yet: (surface, profile, path).
-fn pending_swept_surfaces(document: &CadDocument) -> Vec<(Handle, Handle, Handle)> {
+fn pending_swept_surfaces(document: &Document) -> Vec<(Handle, Handle, Handle)> {
     use crate::scene::model::sweep_model;
     let carried: Vec<Handle> = document
         .objects
@@ -2753,7 +2753,7 @@ fn pending_swept_surfaces(document: &CadDocument) -> Vec<(Handle, Handle, Handle
 /// Associative extruded, revolved and lofted surfaces made here that the
 /// drawing's network does not carry yet, with their sources.
 fn pending_source_surfaces(
-    document: &CadDocument,
+    document: &Document,
 ) -> Vec<(Handle, crate::scene::model::surface_sources::SurfaceSources)> {
     use crate::scene::model::{surface_sources, sweep_model};
     let carried: Vec<Handle> = document
@@ -2781,7 +2781,7 @@ fn pending_source_surfaces(
 }
 
 /// Whether the drawing has associative surfaces its network has to carry.
-fn has_pending_surfaces(document: &CadDocument) -> bool {
+fn has_pending_surfaces(document: &Document) -> bool {
     !pending_swept_surfaces(document).is_empty() || !pending_source_surfaces(document).is_empty()
 }
 
@@ -2918,7 +2918,7 @@ fn region_subent_entries(loops: &[usize], step: i32, first_id: i32) -> Vec<i32> 
 /// the last id given, its edge entries and the list of every id given.
 /// Returns the edges' ids, or `None` when the drawing's manager has a form
 /// this cannot extend.
-fn register_region_subents(document: &mut CadDocument, loops: &[usize]) -> Option<Vec<i32>> {
+fn register_region_subents(document: &mut Document, loops: &[usize]) -> Option<Vec<i32>> {
     use codec::objects::AssocPersSubentManager;
     let root = document.header.named_objects_dict_handle;
     let existing = match document.objects.get(&root) {
@@ -2991,7 +2991,7 @@ fn register_region_subents(document: &mut CadDocument, loops: &[usize]) -> Optio
 /// dependencies (owned by `action`) and edge parameters to `objects` with
 /// ids from `first_id`; returns (edge parameter, dependency) pairs.
 fn source_reads(
-    document: &mut CadDocument,
+    document: &mut Document,
     action: Handle,
     parameter: Handle,
     source: Handle,
@@ -3671,11 +3671,11 @@ fn materialize_swept_surface_actions(
 /// scale or twist expression) and the values their actions cache, so the
 /// file carries the values the named parameters give.
 fn refresh_foreign_values(
-    document: &mut CadDocument,
+    document: &mut Document,
     foreign_actions: &[Handle],
     parameters: &ParameterTable,
 ) {
-    let value_of = |document: &CadDocument, handle: Handle| match document.objects.get(&handle) {
+    let value_of = |document: &Document, handle: Handle| match document.objects.get(&handle) {
         Some(ObjectType::Associative(AssociativeObject {
             data: AssociativeData::Variable(variable),
             ..
@@ -3771,7 +3771,7 @@ fn refresh_foreign_values(
 
 /// Materializes one scope into the drawing's associative object graph.
 fn materialize_scope(
-    document: &mut CadDocument,
+    document: &mut Document,
     owner: Handle,
     set: &ParametricConstraintSet,
     parameters: &ParameterTable,
@@ -4069,7 +4069,7 @@ fn materialize_scope(
     allocator.insert_associative_at(
         network_handle,
         holder_handle,
-        "ASSOCNETWORK",
+        "ACDBASSOCNETWORK",
         "AcDbAssocNetwork",
         AssociativeData::Network(network),
     );
@@ -4092,7 +4092,7 @@ impl Scene {
     /// Attach staged copied scope networks to this document's global network.
     /// Existing scopes retain their objects and action indices.
     pub(crate) fn register_copied_constraint_networks(
-        document: &mut CadDocument,
+        document: &mut Document,
         handles: &FxHashMap<Handle, Handle>,
     ) -> Result<(), String> {
         let mut scopes: Vec<_> = handles.values().copied().filter(|handle| {
@@ -4116,7 +4116,7 @@ impl Scene {
             root
         } else {
             let root = document.allocate_handle();
-            let mut object = AssociativeObject::new("ASSOCNETWORK", "AcDbAssocNetwork");
+            let mut object = AssociativeObject::new("ACDBASSOCNETWORK", "AcDbAssocNetwork");
             object.handle = root;
             object.owner = dictionary;
             object.reactors.push(dictionary);
@@ -4327,7 +4327,7 @@ impl Scene {
             handle: root_network_handle,
             owner: global_dictionary,
             reactors: vec![global_dictionary],
-            dxf_name: "ASSOCNETWORK".to_string(),
+            dxf_name: "ACDBASSOCNETWORK".to_string(),
             cpp_class_name: "AcDbAssocNetwork".to_string(),
             data: AssociativeData::Network(AssocNetwork {
                 action: AssocAction {
@@ -4485,7 +4485,7 @@ mod tests {
         )))
     }
 
-    fn native_group_handle(document: &CadDocument, owner: Handle) -> Handle {
+    fn native_group_handle(document: &Document, owner: Handle) -> Handle {
         // The scope's network sits under a dictionary of its own.
         let network_handle = native_scope_network_handle(document, owner)
             .expect("ACAD_ASSOCNETWORK entry should exist");
@@ -4513,7 +4513,7 @@ mod tests {
             .expect("network should own the constraint group")
     }
 
-    fn native_group(document: &CadDocument, owner: Handle) -> &Assoc2dConstraintGroup {
+    fn native_group(document: &Document, owner: Handle) -> &Assoc2dConstraintGroup {
         let group_handle = native_group_handle(document, owner);
         let Some(ObjectType::Associative(AssociativeObject {
             data: AssociativeData::ConstraintGroup(group),
@@ -5197,7 +5197,7 @@ mod tests {
         (scene, owner)
     }
 
-    fn has_variable_named(document: &CadDocument, name: &str) -> bool {
+    fn has_variable_named(document: &Document, name: &str) -> bool {
         document.objects.values().any(|obj| {
             matches!(
                 obj,

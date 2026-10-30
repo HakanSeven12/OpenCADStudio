@@ -479,6 +479,9 @@ fn generate_type_registry(out_dir: &Path) {
             trace_simple::<codec::entities::WipeoutClipType>,
         ),
         ("WireType", trace_simple::<codec::entities::WireType>),
+        ("ArchKind", trace_simple::<codec::classes::arch::ArchKind>),
+        ("NumberRole", trace_simple::<codec::classes::arch::NumberRole>),
+        ("PreviewRecord", trace_simple::<codec::classes::arch::PreviewRecord>),
     ];
     for (name, trace) in enums {
         trace(&mut tracer);
@@ -1265,10 +1268,10 @@ fn generate_version_info(out_dir: &Path) {
     let info = serde_json::json!({
         "ocs_version": ocs.version.to_string(),
         "ocs_plugin_api_version": env!("CARGO_PKG_VERSION"),
+        "api_version": 14,
         "acadrust_version": opencadcodec.version.to_string(),
         "acadrust_source": opencadcodec.source.as_ref().map(|s| s.to_string()),
         "rustc_version": rustc_version,
-        "api_version": 13,
         "api_version_min_supported": 3,
         "build_timestamp": build_timestamp,
     });

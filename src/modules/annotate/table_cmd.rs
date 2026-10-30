@@ -4,12 +4,12 @@
 // data rows. The command remembers its previous settings and supports either a
 // fixed insertion point or a two-corner sizing window.
 
-use codec::entities::table::{CellStyle, CellStylePropertyFlags};
+use codec::entities::table::{CellRange, CellStyle, CellStylePropertyFlags};
 use codec::entities::TableBuilder;
 use codec::types::Vector3;
 use codec::EntityType;
 use glam::DVec3;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -27,89 +27,128 @@ pub fn tool() -> ToolDef {
     }
 }
 
-const DEFAULT_COLS: usize = 3;
-const DEFAULT_DATA_ROWS: usize = 4;
-const DEFAULT_COL_WIDTH: f64 = 2.0;
-const DEFAULT_ROW_HEIGHT: f64 = 0.5;
-
-#[derive(Clone, Copy)]
-enum InsertionMode {
-    Point,
-    Window,
-}
-
-#[derive(Clone, Copy)]
-struct TableDefaults {
-    columns: usize,
-    data_rows: usize,
-    column_width: f64,
-    row_height: f64,
-    insertion_mode: InsertionMode,
+/// Table settings TABLE and -TABLE share and remember: the dialog's column
+/// and row settings, its insertion behaviour and its window choices.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct TableDefaults {
+    pub columns: usize,
+    pub data_rows: usize,
+    /// Column width; 0 until chosen, then the drawing's default (`cell_width`).
+    pub column_width: f64,
+    /// Minimum row height, in lines of the row's text.
+    pub row_lines: usize,
+    pub window: bool,
+    /// Window mode keeps the column count (else the column width).
+    pub columns_fixed: bool,
+    /// Window mode keeps the data row count (else the row height).
+    pub rows_fixed: bool,
 }
 
 impl Default for TableDefaults {
     fn default() -> Self {
         Self {
-            columns: DEFAULT_COLS,
-            data_rows: DEFAULT_DATA_ROWS,
-            column_width: DEFAULT_COL_WIDTH,
-            row_height: DEFAULT_ROW_HEIGHT,
-            insertion_mode: InsertionMode::Point,
+            columns: 5,
+            data_rows: 1,
+            column_width: 0.0,
+            row_lines: 1,
+            window: false,
+            columns_fixed: true,
+            rows_fixed: true,
         }
     }
 }
 
-fn saved_defaults() -> &'static Mutex<TableDefaults> {
-    static DEFAULTS: OnceLock<Mutex<TableDefaults>> = OnceLock::new();
-    DEFAULTS.get_or_init(|| Mutex::new(TableDefaults::default()))
+impl TableDefaults {
+    /// The column width, 2.5 units (63.5 in a metric drawing) until one is set.
+    pub fn cell_width(&self, metric: bool) -> f64 {
+        if self.column_width > 0.0 {
+            self.column_width
+        } else if metric {
+            63.5
+        } else {
+            2.5
+        }
+    }
 }
 
-#[derive(Clone, Copy)]
+static SESSION: Mutex<TableDefaults> = Mutex::new(TableDefaults {
+    columns: 5,
+    data_rows: 1,
+    column_width: 0.0,
+    row_lines: 1,
+    window: false,
+    columns_fixed: true,
+    rows_fixed: true,
+});
+
+pub fn session() -> std::sync::MutexGuard<'static, TableDefaults> {
+    SESSION.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Row heights of a table: a row is `lines` lines of its text — four thirds
+/// of the text height each — plus the style's top and bottom margins.
+pub fn row_heights(
+    style: Option<&codec::objects::TableStyle>,
+    title: bool,
+    header: bool,
+    data_rows: usize,
+    lines: usize,
+) -> Vec<f64> {
+    let (title_h, header_h, data_h, margin) = style.map_or((0.25, 0.18, 0.18, 0.06), |s| {
+        (
+            s.title_row_style.text_height,
+            s.header_row_style.text_height,
+            s.data_row_style.text_height,
+            s.vertical_margin,
+        )
+    });
+    let height = |text: f64| text * 4.0 / 3.0 * lines.max(1) as f64 + 2.0 * margin;
+    let mut rows = Vec::with_capacity(data_rows + 2);
+    if title {
+        rows.push(height(title_h));
+    }
+    if header {
+        rows.push(height(header_h));
+    }
+    rows.extend(std::iter::repeat_n(height(data_h), data_rows));
+    rows
+}
+
+/// The named table styles -TABLE's Style option may pick.
+#[derive(Clone)]
+pub struct StyleChoice {
+    pub name: String,
+    pub handle: codec::Handle,
+    pub style: codec::objects::TableStyle,
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum Step {
     Columns,
-    DataRows {
-        columns: usize,
-    },
-    ColumnWidth {
-        columns: usize,
-        data_rows: usize,
-    },
-    RowHeight {
-        columns: usize,
-        data_rows: usize,
-        column_width: f64,
-    },
-    InsertionMode {
-        columns: usize,
-        data_rows: usize,
-        column_width: f64,
-        row_height: f64,
-    },
-    Insertion {
-        columns: usize,
-        data_rows: usize,
-        column_width: f64,
-        row_height: f64,
-    },
-    WindowFirst {
-        columns: usize,
-        data_rows: usize,
-    },
-    WindowSecond {
-        columns: usize,
-        data_rows: usize,
-        first: DVec3,
-    },
+    Rows,
+    Insertion,
+    FirstCorner,
+    SecondCorner(DVec3),
+    StyleName { window: bool },
+    Width { window: bool },
+    Height { window: bool },
+    LinkName,
 }
 
 pub struct TableCommand {
     step: Step,
-    style_handle: Option<codec::Handle>,
-    suggested_column_width: f64,
-    suggested_row_height: f64,
-    preview_scale: f64,
-    title_row: bool,
-    header_row: bool,
+    /// "-TABLE" asks for everything on the command line; "TABLE" places the
+    /// table the dialog set up.
+    command: &'static str,
+    style: Option<StyleChoice>,
+    styles: Vec<StyleChoice>,
+    links: Vec<(String, codec::Handle)>,
+    /// None: Auto (window mode fills the window with it).
+    columns: Option<usize>,
+    data_rows: Option<usize>,
+    cell_width: f64,
+    row_lines: usize,
     row_style_overrides: Option<[CellStyle; 3]>,
     preview_enabled: bool,
     plane: WorkingPlane,
@@ -137,7 +176,7 @@ fn cell_style_from_row(style: &codec::objects::RowCellStyle) -> CellStyle {
     result
 }
 
-fn selected_row_style(table_style: &codec::objects::TableStyle, name: &str) -> CellStyle {
+pub(crate) fn selected_row_style(table_style: &codec::objects::TableStyle, name: &str) -> CellStyle {
     let style = if name.eq_ignore_ascii_case("Title") {
         &table_style.title_row_style
     } else if name.eq_ignore_ascii_case("Header") {
@@ -148,219 +187,271 @@ fn selected_row_style(table_style: &codec::objects::TableStyle, name: &str) -> C
     cell_style_from_row(style)
 }
 
+/// A whole number the column and row prompts accept.
+enum Count {
+    Value(usize),
+    NotPositive,
+    Invalid,
+}
+
+fn parse_count(input: &str) -> Count {
+    match input.parse::<i64>() {
+        Ok(value) if value > 0 => Count::Value(value as usize),
+        Ok(_) => Count::NotPositive,
+        Err(_) => Count::Invalid,
+    }
+}
+
+/// `input` is a non-empty prefix of the keyword `word`.
+fn keyword(input: &str, word: &str) -> bool {
+    !input.is_empty() && word.starts_with(&input.to_ascii_uppercase())
+}
+
 impl TableCommand {
-    pub fn new() -> Self {
+    fn new(
+        command: &'static str,
+        style: Option<StyleChoice>,
+        defaults: TableDefaults,
+        metric: bool,
+    ) -> Self {
         Self {
             step: Step::Columns,
-            style_handle: None,
-            suggested_column_width: DEFAULT_COL_WIDTH,
-            suggested_row_height: DEFAULT_ROW_HEIGHT,
-            preview_scale: 1.0,
-            title_row: true,
-            header_row: true,
-            row_style_overrides: None,
+            command,
+            row_style_overrides: style.as_ref().map(|choice| {
+                ["Title", "Header", "Data"].map(|name| selected_row_style(&choice.style, name))
+            }),
+            style,
+            styles: Vec::new(),
+            links: Vec::new(),
+            columns: Some(defaults.columns.max(1)),
+            data_rows: Some(defaults.data_rows.max(1)),
+            cell_width: defaults.cell_width(metric),
+            row_lines: defaults.row_lines.max(1),
             preview_enabled: true,
             plane: WorkingPlane::default(),
         }
     }
 
-    pub fn with_style(
-        style_handle: codec::Handle,
-        style: &codec::objects::TableStyle,
-        annotation_multiplier: f64,
+    /// -TABLE: every setting on the command line, starting from the ones
+    /// TABLE and -TABLE last used.
+    pub fn command_line(
+        style: Option<StyleChoice>,
+        styles: Vec<StyleChoice>,
+        links: Vec<(String, codec::Handle)>,
+        metric: bool,
     ) -> Self {
-        let text_height = style
-            .data_row_style
-            .text_height
-            .max(style.header_row_style.text_height)
-            .max(style.title_row_style.text_height)
-            .max(1.0e-6);
-        Self {
-            step: Step::Columns,
-            style_handle: Some(style_handle),
-            suggested_column_width: text_height * 8.0 + style.horizontal_margin * 2.0,
-            suggested_row_height: text_height * 1.5 + style.vertical_margin * 2.0,
-            preview_scale: if style.annotative {
-                annotation_multiplier
-            } else {
-                1.0
-            },
-            title_row: !style.title_suppressed,
-            header_row: !style.header_suppressed,
-            row_style_overrides: None,
-            preview_enabled: true,
-            plane: WorkingPlane::default(),
-        }
-    }
-
-    /// Build the insertion command from the values accepted by the Insert
-    /// Table dialog. The dialog owns validation, so the command starts at the
-    /// point/window placement step instead of asking for the same values again.
-    pub fn configured(
-        style: Option<(codec::Handle, &codec::objects::TableStyle)>,
-        annotation_multiplier: f64,
-        columns: usize,
-        data_rows: usize,
-        column_width: f64,
-        row_height: f64,
-        use_window: bool,
-        preview_enabled: bool,
-        row_style_names: [&str; 3],
-    ) -> Self {
-        let mut command = style.map_or_else(Self::new, |(handle, style)| {
-            Self::with_style(handle, style, annotation_multiplier)
-        });
-        let insertion_mode = if use_window {
-            InsertionMode::Window
-        } else {
-            InsertionMode::Point
-        };
-        if let Ok(mut saved) = saved_defaults().lock() {
-            *saved = TableDefaults {
-                columns,
-                data_rows,
-                column_width,
-                row_height,
-                insertion_mode,
-            };
-        }
-        command.step = if use_window {
-            Step::WindowFirst { columns, data_rows }
-        } else {
-            Step::Insertion {
-                columns,
-                data_rows,
-                column_width,
-                row_height,
-            }
-        };
-        command.preview_enabled = preview_enabled;
-        command.row_style_overrides = style.map(|(_, table_style)| {
-            row_style_names.map(|name| selected_row_style(table_style, name))
-        });
+        let defaults = *session();
+        let mut command = Self::new("-TABLE", style, defaults, metric);
+        command.styles = styles;
+        command.links = links;
         command
     }
 
-    fn defaults(&self) -> TableDefaults {
-        let mut defaults = saved_defaults()
-            .lock()
-            .map(|value| *value)
-            .unwrap_or_default();
-        if (defaults.column_width - DEFAULT_COL_WIDTH).abs() < 1.0e-9 {
-            defaults.column_width = self.suggested_column_width;
-        }
-        if (defaults.row_height - DEFAULT_ROW_HEIGHT).abs() < 1.0e-9 {
-            defaults.row_height = self.suggested_row_height;
-        }
-        defaults
+    /// The line -TABLE starts with.
+    pub fn status_line(&self) -> String {
+        t!(
+            "Current table style: %{style}  Cell width: %{width}  Cell height: %{lines} line(s)",
+            style = self.style.as_ref().map_or("Standard", |s| s.name.as_str()),
+            width = crate::entities::common::format_length(self.cell_width),
+            lines = self.row_lines
+        )
+        .into_owned()
     }
 
-    fn total_rows(&self, data_rows: usize) -> usize {
-        data_rows + usize::from(self.title_row) + usize::from(self.header_row)
-    }
-
-    fn build_table(
-        &self,
-        point: DVec3,
-        rows: usize,
-        columns: usize,
+    /// TABLE: place the table the Insert Table dialog set up. In window
+    /// mode a count left out (`None`) comes from the window.
+    #[allow(clippy::too_many_arguments)]
+    pub fn configured(
+        style: Option<StyleChoice>,
+        columns: Option<usize>,
+        data_rows: Option<usize>,
         column_width: f64,
-        row_height: f64,
-    ) -> EntityType {
-        let point = self.plane.to_local(point);
-        let mut table = TableBuilder::new(rows, columns)
+        row_lines: usize,
+        window: bool,
+        preview_enabled: bool,
+        row_style_names: [&str; 3],
+    ) -> Self {
+        let mut command = Self::new("TABLE", style, TableDefaults::default(), true);
+        command.columns = columns;
+        command.data_rows = data_rows;
+        command.cell_width = column_width;
+        command.row_lines = row_lines.max(1);
+        command.preview_enabled = preview_enabled;
+        command.row_style_overrides = command.style.as_ref().map(|choice| {
+            row_style_names.map(|name| selected_row_style(&choice.style, name))
+        });
+        command.step = if window {
+            Step::FirstCorner
+        } else {
+            Step::Insertion
+        };
+        command
+    }
+
+    fn dash(&self) -> bool {
+        self.command == "-TABLE"
+    }
+
+    /// A new table always starts with its title and header rows; the
+    /// style's legacy suppress flags do not take them away.
+    fn title_header(&self) -> (bool, bool) {
+        (true, true)
+    }
+
+    /// Column widths, row heights and the insertion point (plane
+    /// coordinates) of the table placed at `first`, or in the window from
+    /// `first` to `second`. The window's first corner is the insertion
+    /// point whichever way the window runs.
+    fn layout(&self, first: DVec3, second: Option<DVec3>) -> (DVec3, Vec<f64>, Vec<f64>) {
+        let first = self.plane.to_local(first);
+        let (title, header) = self.title_header();
+        let style = self.style.as_ref().map(|choice| &choice.style);
+        let Some(second) = second else {
+            let widths = vec![self.cell_width; self.columns.unwrap_or(1)];
+            let heights =
+                row_heights(style, title, header, self.data_rows.unwrap_or(1), self.row_lines);
+            return (first, widths, heights);
+        };
+        let second = self.plane.to_local(second);
+        let (width, height) = ((second.x - first.x).abs(), (second.y - first.y).abs());
+        let widths = match self.columns {
+            Some(count) if width > 1.0e-9 => vec![width / count as f64; count],
+            Some(count) => vec![self.cell_width; count],
+            None => {
+                let count = ((width / self.cell_width + 1.0e-9).floor() as usize).max(1);
+                vec![self.cell_width; count]
+            }
+        };
+        let heights = match self.data_rows {
+            // A fixed row count fills the window: one-line rows share what
+            // is left of its height.
+            Some(count) => {
+                let mut rows = row_heights(style, title, header, count, 1);
+                let spare = (height - rows.iter().sum::<f64>()) / rows.len() as f64;
+                if spare > 0.0 {
+                    rows.iter_mut().for_each(|row| *row += spare);
+                }
+                rows
+            }
+            // Else as many data rows as fit, at least one.
+            None => {
+                let one = row_heights(style, title, header, 1, self.row_lines);
+                let data = *one.last().unwrap_or(&1.0);
+                let labels: f64 = one[..one.len() - 1].iter().sum();
+                let count = ((height - labels) / data + 1.0e-9).floor().max(1.0) as usize;
+                row_heights(style, title, header, count, self.row_lines)
+            }
+        };
+        (first, widths, heights)
+    }
+
+    fn build_table(&self, first: DVec3, second: Option<DVec3>) -> EntityType {
+        let (point, widths, heights) = self.layout(first, second);
+        let mut table = TableBuilder::new(heights.len(), widths.len())
             .at(Vector3::new(point.x, point.y, point.z))
-            .row_height(row_height)
-            .column_width(column_width)
             .build();
-        table.table_style_handle = self.style_handle;
+        for (column, width) in table.columns.iter_mut().zip(&widths) {
+            column.width = *width;
+        }
+        for (row, height) in table.rows.iter_mut().zip(&heights) {
+            row.height = *height;
+        }
+        table.table_style_handle = self.style.as_ref().map(|choice| choice.handle);
         if let Some(styles) = &self.row_style_overrides {
             for (row_index, row) in table.rows.iter_mut().enumerate() {
                 row.style = Some(styles[row_index.min(2)].clone());
             }
         }
+        // The title spans the table, as the title cell style merges its row.
+        if self.title_header().0 && widths.len() > 1 {
+            table.merge_cells(CellRange::new(0, 0, 0, widths.len() - 1));
+        }
         self.plane.place_entity(EntityType::Table(Box::new(table)))
     }
 
-    fn preview_grid(
-        &self,
-        point: DVec3,
-        rows: usize,
-        columns: usize,
-        column_width: f64,
-        row_height: f64,
-        scale: f64,
-    ) -> WireModel {
-        let point = self.plane.to_local(point);
-        let width = columns as f64 * column_width * scale;
-        let height = rows as f64 * row_height * scale;
-        let mut points = Vec::with_capacity((rows + columns + 2) * 2);
-        for column in 0..=columns {
-            let x = column as f64 * column_width * scale;
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::X * x)
-                    .as_vec3()
-                    .to_array(),
-            );
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::new(x, -height, 0.0))
-                    .as_vec3()
-                    .to_array(),
-            );
+    fn remember(&self) {
+        let mut saved = session();
+        if let Some(columns) = self.columns {
+            saved.columns = columns;
         }
-        for row in 0..=rows {
-            let y = -(row as f64 * row_height * scale);
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::Y * y)
-                    .as_vec3()
-                    .to_array(),
-            );
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::new(width, y, 0.0))
-                    .as_vec3()
-                    .to_array(),
-            );
+        if let Some(rows) = self.data_rows {
+            saved.data_rows = rows;
+        }
+        saved.column_width = self.cell_width;
+        saved.row_lines = self.row_lines;
+    }
+
+    fn place(&mut self, first: DVec3, second: Option<DVec3>) -> CmdResult {
+        if self.dash() {
+            self.remember();
+        }
+        // Like the dialog's table, the new one opens its first cell.
+        CmdResult::CommitAndEditText(self.build_table(first, second))
+    }
+
+    fn preview_grid(&self, first: DVec3, second: Option<DVec3>) -> WireModel {
+        let (point, widths, heights) = self.layout(first, second);
+        let width: f64 = widths.iter().sum();
+        let height: f64 = heights.iter().sum();
+        let world = |x: f64, y: f64| {
+            self.plane
+                .to_world(point + DVec3::new(x, y, 0.0))
+                .as_vec3()
+                .to_array()
+        };
+        let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 2);
+        let mut x = 0.0;
+        for column in std::iter::once(0.0).chain(widths.iter().copied()) {
+            x += column;
+            points.push(world(x, 0.0));
+            points.push(world(x, -height));
+        }
+        let mut y = 0.0;
+        for row in std::iter::once(0.0).chain(heights.iter().copied()) {
+            y -= row;
+            points.push(world(0.0, y));
+            points.push(world(width, y));
         }
         WireModel {
-            bg_adapt: None,
-            point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
-            world_width: 0.0,
-            depth_override: None,
-            display_visible: true,
-            snap_only: false,
-            plot_visible: true,
-            fill_is_3d: false,
-            fill_is_2d_solid: false,
-            render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
             name: "table_preview".into(),
             points,
-            points_low: Vec::new(),
             color: WireModel::CYAN,
-            selected: false,
-            pattern_length: 0.0,
-            pattern: [0.0; 8],
             line_weight_px: 1.0,
-            snap_pts: Vec::new(),
-            tangent_geoms: Vec::new(),
-            aci: 0,
-            key_vertices: Vec::new(),
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            fill_tris: Vec::new(),
-            fill_tris_low: Vec::new(),
-
+            display_visible: true,
+            plot_visible: true,
             ..Default::default()
+        }
+    }
+
+    /// Back to where the Style, Width or Height option was chosen.
+    fn back(window: bool) -> Step {
+        if window {
+            Step::FirstCorner
+        } else {
+            Step::Insertion
+        }
+    }
+
+    fn after_counts(&self) -> Step {
+        if self.columns.is_some() && self.data_rows.is_some() {
+            Step::Insertion
+        } else {
+            Step::FirstCorner
+        }
+    }
+
+    /// The options the current placement prompt offers ("" for none).
+    fn placement_options(&self) -> &'static str {
+        if !self.dash() {
+            return "";
+        }
+        match (self.step, self.columns, self.data_rows) {
+            (Step::Insertion, ..) => "Style/Width/Height",
+            (_, None, Some(_)) => "Style/Width",
+            (_, Some(_), None) => "Style/Height",
+            _ => "",
         }
     }
 }
@@ -371,207 +462,220 @@ impl CadCommand for TableCommand {
     }
 
     fn name(&self) -> &'static str {
-        "TABLE"
+        self.command
     }
 
     fn prompt(&self) -> String {
-        let defaults = self.defaults();
-        match &self.step {
+        let n = self.command;
+        match self.step {
             Step::Columns => t!(
-                "TABLE  Enter number of columns [%{cols}]:",
-                cols = defaults.columns
+                "%{n}  Enter number of columns or [Auto/from Style/data Link] <%{cols}>:",
+                n = n,
+                cols = self.columns.unwrap_or(1)
             )
             .into_owned(),
-            Step::DataRows { columns } => t!(
-                "TABLE  Enter number of data rows [%{rows}]  (%{cols} cols):",
-                rows = defaults.data_rows,
-                cols = columns
+            Step::Rows => t!(
+                "%{n}  Enter number of rows or [Auto] <%{rows}>:",
+                n = n,
+                rows = session().data_rows
             )
             .into_owned(),
-            Step::ColumnWidth { .. } => t!(
-                "TABLE  Enter column width [%{width}]:",
-                width = format!("{:.4}", defaults.column_width)
-            )
-            .into_owned(),
-            Step::RowHeight { .. } => t!(
-                "TABLE  Enter row height [%{height}]:",
-                height = format!("{:.4}", defaults.row_height)
-            )
-            .into_owned(),
-            Step::InsertionMode { .. } => t!(
-                "TABLE  Insertion behavior [Point/Window] <%{mode}>:",
-                mode = match defaults.insertion_mode {
-                    InsertionMode::Point => t!("Point"),
-                    InsertionMode::Window => t!("Window"),
+            Step::Insertion | Step::FirstCorner => {
+                let options = self.placement_options();
+                match (self.step == Step::Insertion, options.is_empty()) {
+                    (true, true) => t!("%{n}  Specify insertion point:", n = n).into_owned(),
+                    (true, false) => t!(
+                        "%{n}  Specify insertion point or [%{options}]:",
+                        n = n,
+                        options = options
+                    )
+                    .into_owned(),
+                    (false, true) => t!("%{n}  Specify first corner:", n = n).into_owned(),
+                    (false, false) => t!(
+                        "%{n}  Specify first corner or [%{options}]:",
+                        n = n,
+                        options = options
+                    )
+                    .into_owned(),
                 }
+            }
+            Step::SecondCorner(_) => t!("%{n}  Specify second corner:", n = n).into_owned(),
+            Step::StyleName { .. } => t!(
+                "%{n}  Enter table style name <%{style}>:",
+                n = n,
+                style = self.style.as_ref().map_or("Standard", |s| s.name.as_str())
             )
             .into_owned(),
-            Step::Insertion {
-                columns, data_rows, ..
-            } => t!(
-                "TABLE  Specify insertion point  [%{cols}×%{rows}]:",
-                cols = columns,
-                rows = self.total_rows(*data_rows)
+            Step::Width { .. } => t!(
+                "%{n}  Enter cell width <%{width}>:",
+                n = n,
+                width = crate::entities::common::format_length(self.cell_width)
             )
             .into_owned(),
-            Step::WindowFirst { .. } => t!("%{n}  Specify first corner:", n = "TABLE").into_owned(),
-            Step::WindowSecond { .. } => {
-                t!("%{n}  Specify opposite corner:", n = "TABLE").into_owned()
+            Step::Height { .. } => t!(
+                "%{n}  Enter minimum cell height <%{lines} line>:",
+                n = n,
+                lines = self.row_lines
+            )
+            .into_owned(),
+            Step::LinkName => {
+                t!("%{n}  Enter the name of a data link or [?]:", n = n).into_owned()
             }
         }
     }
 
     fn input_kind(&self) -> InputKind {
-        if matches!(
-            self.step,
-            Step::Columns
-                | Step::DataRows { .. }
-                | Step::ColumnWidth { .. }
-                | Step::RowHeight { .. }
-                | Step::InsertionMode { .. }
-        ) {
-            InputKind::SingleToken
-        } else {
-            InputKind::Point
+        match self.step {
+            Step::Insertion | Step::FirstCorner | Step::SecondCorner(_) => InputKind::Point,
+            Step::StyleName { .. } | Step::LinkName => InputKind::FreeText,
+            _ => InputKind::SingleToken,
         }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let input = text.trim();
-        let defaults = self.defaults();
+        let error = |message: &str| Some(CmdResult::ReportError(t!(message).into_owned()));
         match self.step {
-            Step::Columns => {
-                let columns = if input.is_empty() {
-                    defaults.columns
+            Step::Columns | Step::Rows => {
+                let columns = self.step == Step::Columns;
+                let value = if input.is_empty() {
+                    Some(if columns {
+                        self.columns.unwrap_or(1)
+                    } else {
+                        session().data_rows
+                    })
+                } else if keyword(input, "AUTO") {
+                    None
+                } else if columns && keyword(input, "STYLE") {
+                    // No table style here carries a starting table.
+                    return Some(CmdResult::Measurement(
+                        t!("There are no table styles containing tables.  Add a table to a table style by using the TABLESTYLE command.").into_owned(),
+                    ));
+                } else if columns && keyword(input, "LINK") {
+                    if self.links.is_empty() {
+                        return Some(CmdResult::Measurement(format!(
+                            "{}\n{}",
+                            t!("No data links exist in the current drawing."),
+                            t!("To create a data link use the DATALINK command.")
+                        )));
+                    }
+                    self.step = Step::LinkName;
+                    return Some(CmdResult::NeedPoint);
                 } else {
-                    input.parse::<usize>().ok().filter(|value| *value > 0)?
+                    match parse_count(input) {
+                        Count::Value(value) => Some(value),
+                        Count::NotPositive => return error("Value must be positive and nonzero."),
+                        Count::Invalid => {
+                            return error("Requires a positive nonzero integer or option keyword.")
+                        }
+                    }
                 };
-                self.step = Step::DataRows { columns };
-            }
-            Step::DataRows { columns } => {
-                let data_rows = if input.is_empty() {
-                    defaults.data_rows
+                if columns {
+                    self.columns = value;
+                    self.step = Step::Rows;
                 } else {
-                    input.parse::<usize>().ok().filter(|value| *value > 0)?
-                };
-                self.step = Step::ColumnWidth { columns, data_rows };
-            }
-            Step::ColumnWidth { columns, data_rows } => {
-                let column_width = if input.is_empty() {
-                    defaults.column_width
-                } else {
-                    input.parse::<f64>().ok().filter(|value| *value > 0.0)?
-                };
-                self.step = Step::RowHeight {
-                    columns,
-                    data_rows,
-                    column_width,
-                };
-            }
-            Step::RowHeight {
-                columns,
-                data_rows,
-                column_width,
-            } => {
-                let row_height = if input.is_empty() {
-                    defaults.row_height
-                } else {
-                    input.parse::<f64>().ok().filter(|value| *value > 0.0)?
-                };
-                self.step = Step::InsertionMode {
-                    columns,
-                    data_rows,
-                    column_width,
-                    row_height,
-                };
-            }
-            Step::InsertionMode {
-                columns,
-                data_rows,
-                column_width,
-                row_height,
-            } => {
-                let mode = if input.is_empty() {
-                    defaults.insertion_mode
-                } else if "POINT".starts_with(&input.to_ascii_uppercase()) {
-                    InsertionMode::Point
-                } else if "WINDOW".starts_with(&input.to_ascii_uppercase()) {
-                    InsertionMode::Window
-                } else {
-                    return None;
-                };
-                if let Ok(mut saved) = saved_defaults().lock() {
-                    *saved = TableDefaults {
-                        columns,
-                        data_rows,
-                        column_width,
-                        row_height,
-                        insertion_mode: mode,
-                    };
+                    self.data_rows = value;
+                    self.step = self.after_counts();
                 }
-                self.step = match mode {
-                    InsertionMode::Point => Step::Insertion {
-                        columns,
-                        data_rows,
-                        column_width,
-                        row_height,
-                    },
-                    InsertionMode::Window => Step::WindowFirst { columns, data_rows },
-                };
             }
-            Step::Insertion { .. } | Step::WindowFirst { .. } | Step::WindowSecond { .. } => {
-                return None;
+            Step::Insertion | Step::FirstCorner => {
+                let window = self.step == Step::FirstCorner;
+                let options = self.placement_options();
+                let offered = |word: &str| options.split('/').any(|o| o == word);
+                if offered("Style") && keyword(input, "STYLE") {
+                    self.step = Step::StyleName { window };
+                } else if offered("Width") && keyword(input, "WIDTH") {
+                    self.step = Step::Width { window };
+                } else if offered("Height") && keyword(input, "HEIGHT") {
+                    self.step = Step::Height { window };
+                } else if options.is_empty() {
+                    return error("Invalid point.");
+                } else {
+                    return error("Point or option keyword required.");
+                }
+            }
+            Step::SecondCorner(_) => return error("Invalid point."),
+            Step::StyleName { window } => {
+                self.step = Self::back(window);
+                if !input.is_empty() {
+                    let Some(choice) = self
+                        .styles
+                        .iter()
+                        .find(|choice| choice.name.eq_ignore_ascii_case(input))
+                        .cloned()
+                    else {
+                        return error("Invalid table style name.");
+                    };
+                    self.row_style_overrides = Some(
+                        ["Title", "Header", "Data"]
+                            .map(|name| selected_row_style(&choice.style, name)),
+                    );
+                    self.style = Some(choice);
+                }
+            }
+            Step::Width { window } => {
+                if !input.is_empty() {
+                    match input.parse::<f64>() {
+                        Ok(value) if value > 0.0 && value.is_finite() => self.cell_width = value,
+                        Ok(_) => return error("Value must be positive and nonzero."),
+                        Err(_) => return error("Requires numeric distance or two points."),
+                    }
+                }
+                self.step = Self::back(window);
+            }
+            Step::Height { window } => {
+                if !input.is_empty() {
+                    match parse_count(input) {
+                        Count::Value(value) => self.row_lines = value,
+                        Count::NotPositive => return error("Value must be positive and nonzero."),
+                        Count::Invalid => return error("Requires a positive nonzero integer."),
+                    }
+                }
+                self.step = Self::back(window);
+            }
+            Step::LinkName => {
+                if input == "?" {
+                    let names: Vec<&str> =
+                        self.links.iter().map(|(name, _)| name.as_str()).collect();
+                    return Some(CmdResult::ReportMeasurement(format!(
+                        "{}\n---------------\n{}",
+                        t!("Data Link Name"),
+                        names.join("\n")
+                    )));
+                }
+                let Some((_, handle)) = self
+                    .links
+                    .iter()
+                    .find(|(name, _)| !input.is_empty() && name.eq_ignore_ascii_case(input))
+                else {
+                    return error("Data link not found.");
+                };
+                let style = self
+                    .style
+                    .as_ref()
+                    .map_or_else(|| "Standard".to_string(), |s| s.name.clone());
+                return Some(CmdResult::Dispatch(format!(
+                    "-TABLE _LINK {:X} {}",
+                    handle.value(),
+                    style
+                )));
             }
         }
         Some(CmdResult::NeedPoint)
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        self.on_text_input("")
-            .map_or(CmdResult::Cancel, |_| CmdResult::NeedPoint)
+        self.on_text_input("").unwrap_or(CmdResult::Cancel)
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         match self.step {
-            Step::Insertion {
-                columns,
-                data_rows,
-                column_width,
-                row_height,
-            } => CmdResult::CommitAndExit(self.build_table(
-                point,
-                self.total_rows(data_rows),
-                columns,
-                column_width,
-                row_height,
-            )),
-            Step::WindowFirst { columns, data_rows } => {
-                self.step = Step::WindowSecond {
-                    columns,
-                    data_rows,
-                    first: point,
-                };
+            Step::Insertion => self.place(point, None),
+            Step::FirstCorner => {
+                self.step = Step::SecondCorner(point);
                 CmdResult::NeedPoint
             }
-            Step::WindowSecond {
-                columns,
-                data_rows,
-                first,
-            } => {
-                let first = self.plane.to_local(first);
-                let second = self.plane.to_local(point);
-                let rows = self.total_rows(data_rows);
-                let width = (second.x - first.x).abs().max(1.0e-6);
-                let height = (second.y - first.y).abs().max(1.0e-6);
-                let top_left = DVec3::new(first.x.min(second.x), first.y.max(second.y), first.z);
-                CmdResult::CommitAndExit(self.build_table(
-                    self.plane.to_world(top_left),
-                    rows,
-                    columns,
-                    width / columns as f64,
-                    height / rows as f64,
-                ))
-            }
+            Step::SecondCorner(first) => self.place(first, Some(point)),
             _ => CmdResult::NeedPoint,
         }
     }
@@ -581,45 +685,14 @@ impl CadCommand for TableCommand {
             return None;
         }
         match self.step {
-            Step::Insertion {
-                columns,
-                data_rows,
-                column_width,
-                row_height,
-            } => Some(self.preview_grid(
-                point,
-                self.total_rows(data_rows),
-                columns,
-                column_width,
-                row_height,
-                self.preview_scale,
-            )),
-            Step::WindowSecond {
-                columns,
-                data_rows,
-                first,
-            } => {
-                let first = self.plane.to_local(first);
-                let second = self.plane.to_local(point);
-                let rows = self.total_rows(data_rows);
-                let width = (second.x - first.x).abs().max(1.0e-6);
-                let height = (second.y - first.y).abs().max(1.0e-6);
-                let top_left = DVec3::new(first.x.min(second.x), first.y.max(second.y), first.z);
-                Some(self.preview_grid(
-                    self.plane.to_world(top_left),
-                    rows,
-                    columns,
-                    width / columns as f64,
-                    height / rows as f64,
-                    1.0,
-                ))
-            }
+            Step::Insertion => Some(self.preview_grid(point, None)),
+            Step::SecondCorner(first) => Some(self.preview_grid(first, Some(point))),
             _ => None,
         }
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["TABLE"] });
+inventory::submit!(crate::command::CommandRegistration { names: &["TABLE", "-TABLE"] });
 
 /// A table cell resolved from a pick: grid coordinates plus whether its
 /// content is locked against editing.
@@ -844,7 +917,7 @@ impl CadCommand for TableCellEditCommand {
     // host routes an empty submit here instead of on_text_input(""), so
     // pressing Enter on an untouched cell keeps its current content.
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        CmdResult::Done
     }
 }
 

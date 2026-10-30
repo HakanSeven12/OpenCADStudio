@@ -9,6 +9,8 @@ use i18n_embed::WebLanguageRequester;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 #[path = "locale_catalog.rs"]
@@ -248,7 +250,16 @@ pub fn loader() -> &'static FluentLanguageLoader {
 /// Apply a user preference process-wide. The loader swaps resources atomically,
 /// so the next Iced view pass immediately receives the new language.
 pub fn set_language(language: Language) -> Result<(), i18n_embed::I18nEmbedError> {
-    load_language(loader(), language)
+    switch_language(loader(), language)
+}
+
+fn switch_language(
+    loader: &FluentLanguageLoader,
+    language: Language,
+) -> Result<(), i18n_embed::I18nEmbedError> {
+    let result = load_language(loader, language);
+    LANGUAGE_GENERATION.fetch_add(1, Ordering::Release);
+    result
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -293,9 +304,12 @@ fn catalog_ids(source: &str) -> Option<(&'static str, &'static str)> {
 /// translatable data.
 pub fn translate(source: impl AsRef<str>) -> Cow<'static, str> {
     let source = source.as_ref();
-    catalog_ids(source)
-        .map(|(message_id, attribute_id)| Cow::Owned(loader().get_attr(message_id, attribute_id)))
-        .unwrap_or_else(|| Cow::Owned(source.to_string()))
+    match catalog_ids(source) {
+        Some((message_id, attribute_id)) => {
+            Cow::Borrowed(cached_translation(source, message_id, attribute_id))
+        }
+        None => Cow::Owned(source.to_string()),
+    }
 }
 
 /// Translate a catalog message and replace the named values used by legacy
@@ -303,7 +317,9 @@ pub fn translate(source: impl AsRef<str>) -> Cow<'static, str> {
 pub fn translate_args(source: impl AsRef<str>, args: &[(&str, String)]) -> Cow<'static, str> {
     let source = source.as_ref();
     let mut translated = catalog_ids(source)
-        .map(|(message_id, attribute_id)| loader().get_attr(message_id, attribute_id))
+        .map(|(message_id, attribute_id)| {
+            cached_translation(source, message_id, attribute_id).to_string()
+        })
         .unwrap_or_else(|| source.to_string());
     for (name, value) in args {
         translated = translated.replace(&format!("__ocs_arg_{name}__"), value);
@@ -324,11 +340,58 @@ pub fn translate_format(template: &str, rendered: String) -> Cow<'static, str> {
     let Some(values) = format_values(template, &rendered) else {
         return Cow::Owned(rendered);
     };
-    let mut translated = loader().get_attr(message_id, attribute_id);
+    let mut translated = cached_translation(template, message_id, attribute_id).to_string();
     for (index, value) in values.iter().enumerate() {
         translated = translated.replace(&format!("__ocs_fmt_{index}__"), value);
     }
     Cow::Owned(translated)
+}
+
+/// Bumped whenever `set_language` swaps the loaded Fluent resources, so the
+/// per-thread label memo below re-renders instead of serving the old language.
+static LANGUAGE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// A label that is already rendered is the same string every time, so the
+/// translated text is memoized per thread on top of the id memo. A view pass
+/// translates hundreds of labels and the Properties panel translates dozens
+/// per selected object; without this each hit still walked the Fluent bundles
+/// and allocated a fresh `String`.
+fn cached_translation(source: &str, message_id: &str, attribute_id: &str) -> &'static str {
+    type Labels = RefCell<(u64, rustc_hash::FxHashMap<Box<str>, &'static str>)>;
+    thread_local! {
+        static LABELS: Labels = RefCell::new((0, rustc_hash::FxHashMap::default()));
+    }
+    LABELS.with(|labels| {
+        cached_translation_with(
+            loader(),
+            labels,
+            LANGUAGE_GENERATION.load(Ordering::Acquire),
+            source,
+            message_id,
+            attribute_id,
+        )
+    })
+}
+
+fn cached_translation_with(
+    loader: &FluentLanguageLoader,
+    labels: &RefCell<(u64, rustc_hash::FxHashMap<Box<str>, &'static str>)>,
+    generation: u64,
+    source: &str,
+    message_id: &str,
+    attribute_id: &str,
+) -> &'static str {
+    let mut labels = labels.borrow_mut();
+    if labels.0 != generation {
+        labels.0 = generation;
+        labels.1.clear();
+    }
+    if let Some(&label) = labels.1.get(source) {
+        return label;
+    }
+    let label: &'static str = Box::leak(loader.get_attr(message_id, attribute_id).into_boxed_str());
+    labels.1.insert(source.into(), label);
+    label
 }
 
 fn format_values(template: &str, rendered: &str) -> Option<Vec<String>> {
@@ -515,6 +578,9 @@ mod tests {
             for attribute in &expected {
                 assert!(!render(attribute).is_empty());
             }
+            for attribute in ["base-state-label", "flipped-state-label"] {
+                assert!(!loader.get_attr("block-flip", attribute).is_empty());
+            }
             assert!(render("visibility-value").contains(authored_state));
             assert!(render("table-row").contains("17"));
             assert!(render("alignment").contains(&mode));
@@ -522,6 +588,36 @@ mod tests {
                 assert_ne!(render("visibility-label"), "Visibility state");
                 assert_ne!(render("flipped"), "Flipped");
                 assert_ne!(render("not-flipped"), "Not flipped");
+            }
+        }
+    }
+
+    #[test]
+    fn lookup_help_preserves_interval_examples_in_every_locale() {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("Fluent resources must parse");
+            let args = [("closed", "[2,6]"), ("open", "(2,6]")]
+                .into_iter()
+                .collect();
+            let rendered = loader
+                .with_fluent_message_and_bundle("block-lookup", |message, bundle| {
+                    let pattern = message.get_attribute("input-help").unwrap();
+                    let mut errors = Vec::new();
+                    let text = bundle
+                        .format_pattern(pattern.value(), Some(&args), &mut errors)
+                        .into_owned();
+                    assert!(errors.is_empty(), "{language:?}: {errors:?}");
+                    text
+                })
+                .unwrap();
+            assert!(rendered.contains("[2,6]"), "{language:?}: {rendered}");
+            assert!(rendered.contains("(2,6]"), "{language:?}: {rendered}");
+            for attribute in ["invalid-table", "invalid-value", "incompatible-values"] {
+                assert!(!loader.get_attr("block-lookup", attribute).is_empty());
             }
         }
     }
@@ -665,5 +761,68 @@ mod tests {
         load_language(&loader, Language::ElGr).expect("Greek Fluent resources must parse");
         assert_eq!(loader.get_attr("language", "greek"), "Ελληνικά");
         assert_eq!(serde_json::to_string(&Language::ElGr).unwrap(), "\"el-GR\"");
+    }
+
+    #[test]
+    fn cached_labels_match_the_loader_in_every_locale() {
+        let sources = ["Import Styles", "Existing", "Ok", "Paused"];
+        for (index, language) in Language::ALL.into_iter().enumerate() {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("every embedded locale must load");
+            let generation = index as u64;
+            let cache = RefCell::new((generation, rustc_hash::FxHashMap::default()));
+            for source in sources {
+                let (message_id, attribute_id) =
+                    catalog_ids(source).unwrap_or_else(|| panic!("{source} is a catalog source"));
+                let label = cached_translation_with(
+                    &loader,
+                    &cache,
+                    generation,
+                    source,
+                    message_id,
+                    attribute_id,
+                );
+                assert_eq!(
+                    label,
+                    loader.get_attr(message_id, attribute_id),
+                    "{source} in {language:?}"
+                );
+                // A repeat call must serve the memo, not render again.
+                assert_eq!(
+                    cached_translation_with(
+                        &loader,
+                        &cache,
+                        generation,
+                        source,
+                        message_id,
+                        attribute_id,
+                    ),
+                    label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_new_language_generation_rerenders_cached_labels() {
+        let english = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        load_language(&english, Language::EnUs).expect("English Fluent resources must parse");
+        let chinese = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        load_language(&chinese, Language::ZhCn).expect("Chinese Fluent resources must parse");
+        let cache = RefCell::new((0, rustc_hash::FxHashMap::default()));
+        let source = "Draw";
+        let english_label = cached_translation_with(&english, &cache, 0, source, "ribbon-tab", "draw");
+        let chinese_label = cached_translation_with(&chinese, &cache, 1, source, "ribbon-tab", "draw");
+        assert_eq!(english_label, "Draw");
+        assert_eq!(chinese_label, chinese.get_attr("ribbon-tab", "draw"));
+        assert_ne!(english_label, chinese_label, "the memo must re-render on a language switch");
+    }
+
+    #[test]
+    fn switching_language_bumps_the_generation() {
+        let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        let before = LANGUAGE_GENERATION.load(Ordering::Acquire);
+        switch_language(&loader, Language::DeDe).expect("German Fluent resources must parse");
+        assert!(LANGUAGE_GENERATION.load(Ordering::Acquire) > before);
     }
 }

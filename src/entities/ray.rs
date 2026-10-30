@@ -14,7 +14,7 @@ const DISPLAY_EXTENT: f64 = 1_000_000.0;
 // ── Ray (semi-infinite line) ──────────────────────────────────────────────────
 
 impl RenderConvertible for Ray {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         // Normalize direction to avoid f32 overflow when DXF stores
@@ -172,7 +172,7 @@ impl Transformable for Ray {
 // ── XLine (construction line, infinite) ──────────────────────────────────────
 
 impl RenderConvertible for XLine {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         let len = (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z).sqrt();

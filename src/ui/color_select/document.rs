@@ -101,7 +101,7 @@ pub fn layer_identity(layer: &codec::tables::Layer) -> Option<String> {
 
 /// Every concrete colour in the drawing. ByLayer, ByBlock and None are
 /// states rather than colours and are skipped.
-pub fn collect(document: &codec::CadDocument) -> Vec<DocColor> {
+pub fn collect(document: &codec::Document) -> Vec<DocColor> {
     let layer_names: Vec<Option<String>> = document.layers.iter().map(layer_identity).collect();
     let objects = document.entities().map(|entity| {
         let common = entity.common();

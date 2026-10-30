@@ -13,7 +13,10 @@
 //! sidecar) are also shared with the existing `parse_document` action, which
 //! returns documents over the same boundary in the opposite direction.
 
-use codec::{CadDocument, DwgWriter, DxfWriter};
+use codec::{
+    push_read_diagnostic, Document, DwgWriter, DxfWriter, Format, ReadDiagnostic, ReadOutcome,
+    ReadStage, ReadStats,
+};
 
 /// Worker protocol version. Bumped whenever a request/response payload shape
 /// changes; the `?v=` cache-buster on the worker URL must match. v5 adds the
@@ -22,21 +25,95 @@ use codec::{CadDocument, DwgWriter, DxfWriter};
 pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Serialize a document to an in-memory byte buffer, format chosen by `ext`
-/// (`dxf` → DXF, anything else → DWG). The document is expected to be fully
-/// prepared for saving (version stamped, current styles synced, dimension
-/// blocks baked) — see the app crate's `io::prepare_document_for_save`, which
-/// owns that app-side half of the pipeline.
-pub fn serialize_document(doc: &CadDocument, ext: &str) -> Result<Vec<u8>, String> {
-    match ext.to_lowercase().as_str() {
-        "dxf" => DxfWriter::new(doc)
-            .write_to_vec()
-            .map_err(|e| e.to_string()),
-        _ => {
-            let mut buf = std::io::Cursor::new(Vec::new());
-            DwgWriter::write_to_writer(&mut buf, doc).map_err(|e| e.to_string())?;
-            Ok(buf.into_inner())
-        }
+/// (`dxf` → DXF, a listed converter's extension → that converter, anything
+/// else → DWG). The document is expected to be fully prepared for saving
+/// (version stamped, current styles synced, dimension blocks baked) — see the
+/// app crate's `io::prepare_document_for_save`, which owns that app-side half
+/// of the pipeline.
+pub fn serialize_document(doc: &Document, ext: &str) -> Result<Vec<u8>, String> {
+    let ext = ext.to_lowercase();
+    if ext == "dxf" {
+        return DxfWriter::new(doc).write_to_vec().map_err(|e| e.to_string());
     }
+    if let Some(format) = external_format(&ext) {
+        return write_external(doc, format, false);
+    }
+    let mut buf = std::io::Cursor::new(Vec::new());
+    DwgWriter::write_to_writer(&mut buf, doc).map_err(|e| e.to_string())?;
+    Ok(buf.into_inner())
+}
+
+// ── Other formats ──────────────────────────────────────────────────────────
+
+/// Converters for formats other than DWG/DXF, which keep their own richer read
+/// and write paths. A converter crate implementing [`Format`] is listed here to
+/// become available to open, save and the file dialogs.
+const EXTERNAL_FORMATS: &[&(dyn Format + Sync)] = &[&codec::Ifcx];
+
+pub fn external_formats() -> &'static [&'static (dyn Format + Sync)] {
+    EXTERNAL_FORMATS
+}
+
+/// The listed converter for files with extension `ext`, if any.
+pub fn external_format(ext: &str) -> Option<&'static (dyn Format + Sync)> {
+    EXTERNAL_FORMATS
+        .iter()
+        .copied()
+        .find(|format| format.extensions().iter().any(|e| e.eq_ignore_ascii_case(ext)))
+}
+
+/// Write `doc` with a converter. Unless the user allowed it beforehand (see
+/// [`external_losses`]), a loss refuses the save, so a drawing never drops
+/// content silently; the error names what could not be carried over.
+pub fn write_external(
+    doc: &Document,
+    format: &dyn Format,
+    allow_loss: bool,
+) -> Result<Vec<u8>, String> {
+    let (bytes, losses) = format.write(doc).map_err(|e| format!("{}: {e}", format.name()))?;
+    if losses.is_empty() || allow_loss {
+        return Ok(bytes);
+    }
+    let lost: Vec<&str> = losses.iter().map(|loss| loss.message.as_str()).collect();
+    Err(format!("{} cannot carry over: {}", format.name(), lost.join("; ")))
+}
+
+/// What writing `doc` with `format` would lose, so the user can be asked
+/// before the save.
+pub fn external_losses(doc: &Document, format: &dyn Format) -> Result<Vec<String>, String> {
+    let (_, losses) = format.write(doc).map_err(|e| format!("{}: {e}", format.name()))?;
+    Ok(losses.into_iter().map(|loss| loss.message).collect())
+}
+
+/// Diagnostic code for something a converter could not carry over on read.
+pub const CONVERSION_LOSS: &str = "conversion-loss";
+
+/// Read `bytes` with a converter. What it could not carry over travels as
+/// read diagnostics, reported when the drawing opens; it is not damage, so the
+/// read does not count as recovered.
+pub fn read_external(format: &dyn Format, bytes: &[u8]) -> Result<ReadOutcome, String> {
+    let (document, losses) = format.read(bytes).map_err(|e| format!("{}: {e}", format.name()))?;
+    let output_entities = document.entities().count();
+    let output_objects = document.objects.len();
+    // The open path refuses a read that decoded no records; an empty
+    // drawing from a converter is still a complete read.
+    let records = (output_entities + output_objects).max(1);
+    let mut stats = ReadStats {
+        record_stream_read: true,
+        stream_completed: true,
+        source_records: records,
+        decoded_source_records: records,
+        output_entities,
+        output_objects,
+        ..Default::default()
+    };
+    for loss in losses {
+        let mut diagnostic =
+            ReadDiagnostic::new(CONVERSION_LOSS, ReadStage::RecordStream, loss.message);
+        diagnostic.record_handle = loss.handle.map(|handle| handle.value());
+        push_read_diagnostic(&mut stats.diagnostics, diagnostic);
+    }
+    Ok(ReadOutcome::new(document, stats))
 }
 
 // ── Runtime-field sidecar ──────────────────────────────────────────────────
@@ -65,7 +142,7 @@ pub struct EntityRuntimeFields {
 }
 
 /// Collect the serde-skipped runtime fields of every entity in `doc`.
-pub fn extract_entity_runtime_fields(doc: &CadDocument) -> Vec<EntityRuntimeFields> {
+pub fn extract_entity_runtime_fields(doc: &Document) -> Vec<EntityRuntimeFields> {
     doc.entities()
         .map(|entity| {
             let common = entity.common();
@@ -92,7 +169,7 @@ pub fn extract_entity_runtime_fields(doc: &CadDocument) -> Vec<EntityRuntimeFiel
 /// Re-install runtime fields collected by [`extract_entity_runtime_fields`]
 /// into a document that crossed a serde boundary. Entities whose handle no
 /// longer resolves are skipped silently (mirrors the parse direction).
-pub fn restore_entity_runtime_fields(document: &mut CadDocument, fields: Vec<EntityRuntimeFields>) {
+pub fn restore_entity_runtime_fields(document: &mut Document, fields: Vec<EntityRuntimeFields>) {
     let handle = |value: Option<u64>| value.map(codec::Handle::new);
     for fields in fields {
         let Some(entity) = document.get_entity_mut(codec::Handle::new(fields.handle)) else {
@@ -116,7 +193,7 @@ pub fn restore_entity_runtime_fields(document: &mut CadDocument, fields: Vec<Ent
 
 // ── Worker wire format (`serialize` action) ────────────────────────────────
 //
-// Request  (main → worker): bincode `(PROTOCOL_VERSION, ext, &CadDocument,
+// Request  (main → worker): bincode `(PROTOCOL_VERSION, ext, &Document,
 //           Vec<EntityRuntimeFields>)` transferred as an ArrayBuffer.
 // Response (worker → main): bincode `(PROTOCOL_VERSION, Result<Vec<u8>,
 //           String>)` — the encoded DWG/DXF bytes on success, the writer's
@@ -125,7 +202,7 @@ pub fn restore_entity_runtime_fields(document: &mut CadDocument, fields: Vec<Ent
 /// Encode a prepared document for the trip main → worker. Costs one bincode
 /// pass over the document plus the runtime-field sidecar; see the crate docs
 /// for why the sidecar exists.
-pub fn encode_request(doc: &CadDocument, ext: &str) -> Result<Vec<u8>, String> {
+pub fn encode_request(doc: &Document, ext: &str) -> Result<Vec<u8>, String> {
     let runtime_fields = extract_entity_runtime_fields(doc);
     bincode::serialize(&(PROTOCOL_VERSION, ext, doc, runtime_fields))
         .map_err(|error| format!("encode save document for worker: {error}"))
@@ -133,11 +210,11 @@ pub fn encode_request(doc: &CadDocument, ext: &str) -> Result<Vec<u8>, String> {
 
 /// Decode a `serialize` request on the worker: returns the document (with
 /// runtime fields restored) and the target extension.
-pub fn decode_request(bytes: &[u8]) -> Result<(CadDocument, String), String> {
+pub fn decode_request(bytes: &[u8]) -> Result<(Document, String), String> {
     let (version, ext, mut document, runtime_fields): (
         u16,
         String,
-        CadDocument,
+        Document,
         Vec<EntityRuntimeFields>,
     ) = bincode::deserialize(bytes).map_err(|error| format!("decode save document: {error}"))?;
     if version != PROTOCOL_VERSION {
@@ -174,8 +251,8 @@ mod tests {
     use codec::entities::{EntityType, Line, Point};
     use codec::types::Vector3;
 
-    fn sample_document() -> CadDocument {
-        let mut doc = CadDocument::new();
+    fn sample_document() -> Document {
+        let mut doc = Document::new();
         let mut pt = Point::new();
         pt.common.handle = doc.allocate_handle();
         pt.common.layer = "RUNTIME-FIELDS".to_string();
@@ -255,7 +332,7 @@ mod tests {
         let stale = bincode::serialize(&(
             PROTOCOL_VERSION - 1,
             "dwg",
-            CadDocument::new(),
+            Document::new(),
             Vec::<EntityRuntimeFields>::new(),
         ))
         .unwrap();
@@ -266,7 +343,7 @@ mod tests {
     // `dxf` must produce an ASCII DXF, anything else the DWG sentinel.
     #[test]
     fn serialize_document_picks_format_by_extension() {
-        let mut doc = CadDocument::new();
+        let mut doc = Document::new();
         doc.version = codec::DxfVersion::AC1032;
         let dxf = serialize_document(&doc, "dxf").expect("dxf bytes");
         assert!(!dxf.is_empty());

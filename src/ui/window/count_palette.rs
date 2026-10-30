@@ -8,7 +8,7 @@ use crate::ui::dock::PanelId;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, field_style};
 use codec::count::{BlockInstance, CountKey};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use iced::widget::{
     button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, tooltip,
     Space,
@@ -69,7 +69,7 @@ pub struct CountResult {
 }
 
 impl CountMode {
-    pub fn instances(&self, doc: &CadDocument) -> Vec<BlockInstance> {
+    pub fn instances(&self, doc: &Document) -> Vec<BlockInstance> {
         codec::count::block_instances(doc, self.area.as_deref())
     }
 
@@ -90,7 +90,7 @@ impl CountMode {
     }
 
     /// The cached result, or one worked out from the drawing when there is none.
-    pub fn result(&self, doc: &CadDocument) -> std::borrow::Cow<'_, CountResult> {
+    pub fn result(&self, doc: &Document) -> std::borrow::Cow<'_, CountResult> {
         match &self.cache {
             Some((result, _)) => std::borrow::Cow::Borrowed(result),
             None => std::borrow::Cow::Owned(self.compute(doc).0),
@@ -98,7 +98,7 @@ impl CountMode {
     }
 
     /// What the count shows: the counted references, or the copies of a group.
-    pub fn count(&self, doc: &CadDocument) -> usize {
+    pub fn count(&self, doc: &Document) -> usize {
         match &self.cache {
             Some((_, n)) => *n,
             None => self.compute(doc).1,
@@ -106,7 +106,7 @@ impl CountMode {
     }
 
     /// The result and the count, worked out from the drawing.
-    pub fn compute(&self, doc: &CadDocument) -> (CountResult, usize) {
+    pub fn compute(&self, doc: &Document) -> (CountResult, usize) {
         if let Some(CountTarget::Group(handles)) = &self.target {
             let groups = codec::count::group_matches(doc, handles, self.area.as_deref());
             let result = CountResult {
@@ -121,7 +121,7 @@ impl CountMode {
         (result, n)
     }
 
-    fn block_result(&self, doc: &CadDocument) -> CountResult {
+    fn block_result(&self, doc: &Document) -> CountResult {
         match &self.target {
             None | Some(CountTarget::Group(_)) => CountResult::default(),
             Some(CountTarget::Block { name, .. }) => {
@@ -571,7 +571,7 @@ fn card(theme: &Theme) -> container::Style {
 fn mode_view<'a>(
     palette: &'a CountPalette,
     mode: &'a CountMode,
-    doc: &CadDocument,
+    doc: &Document,
 ) -> Element<'a, Message> {
     let back = button(
         row![
@@ -656,7 +656,7 @@ fn mode_view<'a>(
 pub fn view<'a>(
     palette: &'a CountPalette,
     mode: Option<&'a CountMode>,
-    doc: &'a CadDocument,
+    doc: &'a Document,
     doc_id: u64,
     epoch: u64,
     width: f32,
@@ -701,7 +701,7 @@ fn bar_button<'a>(
 
 /// The floating toolbar over the drawing in count mode: the count, the
 /// status, previous / next reference, area, select, field and close.
-pub fn toolbar<'a>(mode: &CountMode, doc: &CadDocument) -> Element<'a, Message> {
+pub fn toolbar<'a>(mode: &CountMode, doc: &Document) -> Element<'a, Message> {
     let has_target = mode.target.is_some();
     let result = mode.result(doc);
     let count = if has_target {

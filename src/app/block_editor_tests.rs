@@ -8,6 +8,8 @@ mod table_properties;
 mod lookup_properties;
 mod visibility_properties;
 mod grip_descriptions;
+mod flip_state_labels;
+mod properties_internal_rows;
 
 fn fixture() -> (OpenCADStudio, Handle) {
     let mut app = OpenCADStudio::new_for_test();
@@ -1192,9 +1194,15 @@ fn block_actions_rotate_flip_mouse_grips_authoring_history_and_reopen() {
         click(&mut app, flip_at);
         assert!(
             app.tabs[i].active_cmd.is_none(),
-            "Flip toggles immediately without point input"
+            "the flip chevron never asks for point input"
         );
-        check(&app, insert, -Vector3::UNIT_Y);
+        if test {
+            check(&app, insert, -Vector3::UNIT_Y);
+        } else {
+            let flipped = 1 - app.flip_popup.as_ref().expect("flip state list").current;
+            let _ = app.update(Message::FlipPick(flipped));
+            check(&app, insert, -Vector3::UNIT_Y);
+        }
         app.tabs[i].scene.selected.insert(insert);
         app.refresh_properties();
         let flip_grip = app.tabs[i]
@@ -1221,6 +1229,8 @@ fn block_actions_rotate_flip_mouse_grips_authoring_history_and_reopen() {
             app.tabs[i].scene.selected.insert(insert);
             app.refresh_properties();
             click(&mut app, flip_at);
+            let flipped = 1 - app.flip_popup.as_ref().expect("flip state list").current;
+            let _ = app.update(Message::FlipPick(flipped));
             check(&app, insert, Vector3::UNIT_Y);
             let EntityType::Line(original) =
                 app.tabs[i].scene.document.get_entity(targets[0]).unwrap()
@@ -1586,6 +1596,7 @@ fn block_parameter_leader_and_crossing_box_select_then_delete() {
         iced::Point::new(box_bounds.x, box_bounds.y),
         iced::Point::new(box_bounds.x + box_bounds.width, box_bounds.y + box_bounds.height),
         true,
+        false,
     ));
     assert_eq!(app.tabs[i].selected_authoring, Some(handle));
 
@@ -5469,14 +5480,14 @@ fn block_grip_cycling_ctrl_edges_use_saved_order_during_classic_insertion() {
     let _=app.dispatch_command("BCLOSE");
     let _=app.dispatch_command("-INSERT");
     feed(&mut app,"EDIT_ME");
-    let _=app.update(Message::SetModifiers { shift:false,ctrl:true });
+    let _=app.update(Message::SetModifiers { shift:false,ctrl:true,alt:false });
     let prompt=app.tabs[i].active_cmd.as_ref().unwrap().prompt();
     assert!(prompt.contains("(2/3)"),"{prompt}");
-    let _=app.update(Message::SetModifiers { shift:false,ctrl:true });
+    let _=app.update(Message::SetModifiers { shift:false,ctrl:true,alt:false });
     assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().prompt(),prompt);
-    let _=app.update(Message::SetModifiers { shift:false,ctrl:false });
+    let _=app.update(Message::SetModifiers { shift:false,ctrl:false,alt:false });
     assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().prompt(),prompt);
-    let _=app.update(Message::SetModifiers { shift:false,ctrl:true });
+    let _=app.update(Message::SetModifiers { shift:false,ctrl:true,alt:false });
     assert!(app.tabs[i].active_cmd.as_ref().unwrap().prompt().contains("(3/3)"));
     feed(&mut app,"100,200");
     for _ in 0..3 { let _=app.feed_command(crate::command::StepInput::Enter); }
@@ -5964,7 +5975,7 @@ fn block_polar_stretch_end_binding_command_scratch_and_reference_history() {
             insert: (!testing).then_some(insert), document, definition, parameter: parameter.handle,
             value: actions::Value::Point(DVec3::new(0., 15., 0.)),
         });
-        let geometry = |doc: &codec::CadDocument| {
+        let geometry = |doc: &codec::Document| {
             let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else { panic!() };
             let line = doc.block_records.get(&reference.block_name).unwrap().entity_handles.iter().find_map(|h| match doc.get_entity(*h) { Some(EntityType::Line(line)) => Some(line), _ => None }).unwrap();
             (line.start, line.end)
@@ -6029,7 +6040,7 @@ fn block_action_self_grip_selection_edits_keep_native_links_and_reference_histor
         let _ = app.handle_block_action_result(crate::command::CmdResult::EvaluateBlockParameter { grip: None,
             insert: (!testing).then_some(insert), document, definition, parameter: parameter.handle, value: actions::Value::Point(DVec3::new(0., 15., 0.)),
         });
-        let circle_center = |doc: &codec::CadDocument| {
+        let circle_center = |doc: &codec::Document| {
             let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else { panic!() };
             doc.block_records.get(&reference.block_name).unwrap().entity_handles.iter().find_map(|h| match doc.get_entity(*h) {
                 Some(EntityType::Circle(circle)) => Some(circle.center), _ => None,
@@ -6321,7 +6332,7 @@ fn block_alignment_type_placement_properties_history_and_native_roundtrips() {
     let _ = app.run_command_line("BPARAMETER ALIGNMENT 0,0 TYPE P 10,0");
     let parameter = orientation::parameters(&app.tabs[i].scene.document, definition).into_iter()
         .find(|p| p.kind == Kind::Alignment).unwrap().handle;
-    let perpendicular = |doc: &codec::CadDocument| match &doc.objects[&parameter] {
+    let perpendicular = |doc: &codec::Document| match &doc.objects[&parameter] {
         ObjectType::DynamicBlock(object) => match &object.data {
             DynamicBlockData::AlignmentParameter(p) => p.align_perpendicular,
             _ => panic!(),
@@ -6395,6 +6406,8 @@ fn block_alignment_runtime_grip_events_preview_history_and_native_roundtrips() {
             app.tabs[i].scene.bump_geometry();
             app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1000., 800.);
             app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(DVec3::new(-20., -30., 0.), DVec3::new(50., 30., 0.), 1.25);
+            // The destination is a point along the line, not one of its ends.
+            app.snapper.enabled.insert(crate::snap::SnapType::Nearest);
             let select = |app: &mut OpenCADStudio| {
                 app.tabs[i].scene.select_entity(insert, true);
                 app.tabs[i].selected_handle = Some(insert);
@@ -6452,6 +6465,54 @@ fn block_alignment_runtime_grip_events_preview_history_and_native_roundtrips() {
             if testing { assert_eq!(app.tabs[source].scene.document, source_before); }
         }
     }
+}
+
+#[test]
+fn block_alignment_runtime_off_target_flip_preview_and_history() {
+    use glam::DVec3;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.run_command_line("BPARAMETER ALIGNMENT 0,0 10,0");
+    let definition = app.tabs[app.active_tab].active_block_edit_session().unwrap().br_handle;
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    let i = app.active_tab;
+    app.tabs[i].scene.select_entity(reference, true);
+    app.tabs[i].selected_handle = Some(reference);
+    let alignment = app.tabs[i].scene.alignment_grips(reference).remove(0);
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    assert!(app.start_test_action_grip(reference, alignment.id));
+    let cursor = DVec3::new(100., 80., 7.);
+    let destination = DVec3::new(100., 80., 0.);
+    let command = app.tabs[i].active_cmd.as_mut().unwrap();
+    assert!(command.on_text_input("Flip").is_some());
+    let preview = command.preview_entities(&before, cursor);
+    assert_eq!(preview.len(), 1);
+    let mut preview_doc = before.clone();
+    *preview_doc.get_entity_mut(reference).unwrap() = preview[0].clone();
+    let preview_grip = crate::scene::block_alignment::grips(&preview_doc, definition, reference).remove(0);
+    assert!(preview_grip.anchor.distance(destination) < 1e-8);
+    assert!(preview_grip.direction.distance(-alignment.direction) < 1e-8, "off-target Flip must reverse preview direction by PI");
+    assert_eq!(app.tabs[i].scene.document, before);
+    let result = app.tabs[i].active_cmd.as_mut().unwrap().on_point(cursor);
+    let _ = app.handle_block_alignment(result);
+    assert!(app.tabs[i].active_cmd.is_none());
+    let committed = app.tabs[i].scene.alignment_grips(reference).remove(0);
+    assert!(committed.anchor.distance(destination) < 1e-8);
+    assert!(committed.direction.distance(preview_grip.direction) < 1e-8);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    for entity in before.entities() {
+        if entity.common().handle != reference {
+            assert_eq!(app.tabs[i].scene.document.get_entity(entity.common().handle), Some(entity));
+        }
+    }
+    assert_eq!(app.tabs[i].scene.document.objects, before.objects);
+    let changed = app.tabs[i].scene.document.get_entity(reference).unwrap().clone();
+    app.undo_steps(1);
+    assert_eq!(app.tabs[i].scene.document.get_entity(reference), before.get_entity(reference));
+    app.redo_steps(1);
+    assert_eq!(app.tabs[i].scene.document.get_entity(reference), Some(&changed));
 }
 
 #[test]
@@ -7244,3 +7305,11 @@ fn block_key_point_grip_eligibility_and_pending_result_follow_reassociation() {
         }
     }
 }
+
+mod scalar_grip_bindings;
+
+mod alignment_insertion;
+
+mod parameter_preview;
+
+mod lookup_expressions;

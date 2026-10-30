@@ -29,6 +29,8 @@ pub struct GlyphQuad {
     /// Atlas UV of the tile (top-left / bottom-right).
     pub uv_min: [f32; 2],
     pub uv_max: [f32; 2],
+    /// Pen half-width of a stroke glyph (glyph units), 0 when filled.
+    pub pen: f32,
 }
 
 /// Lay `text` out as per-glyph quads. Mirrors `tessellate_text_run`'s transform
@@ -149,6 +151,7 @@ pub fn layout_glyph_quads(
                     ],
                     uv_min: e.uv_min,
                     uv_max: e.uv_max,
+                    pen: e.pen,
                 });
                 cursor_x += e.advance + face.spacing_after(ch) * tracking;
             }
@@ -181,6 +184,7 @@ pub fn layout_glyph_quads(
             ],
             uv_min: solid,
             uv_max: solid,
+            pen: 0.0,
         });
     }
 

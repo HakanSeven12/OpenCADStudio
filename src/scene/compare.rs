@@ -4,7 +4,7 @@
 //! object that moved or changed shows as removed in one place and added in
 //! the other.
 
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 
@@ -47,7 +47,7 @@ fn point(wire: &WireModel, index: usize) -> DVec3 {
 
 /// What an object draws, as a comparable key: its type, its layer and its
 /// outline points rounded to 1e-4 drawing units.
-fn signature(document: &CadDocument, handle: Handle, wires: &[WireModel]) -> String {
+fn signature(document: &Document, handle: Handle, wires: &[WireModel]) -> String {
     let mut key = match document.get_entity(handle) {
         Some(entity) => format!(
             "{}|{}",
@@ -90,7 +90,7 @@ fn extent(wires: &[WireModel]) -> Option<(DVec3, DVec3)> {
 
 /// Compare `current` with the drawing `other`, in the space `current`
 /// shows.
-pub fn compare(current: &Scene, other: CadDocument) -> Comparison {
+pub fn compare(current: &Scene, other: Document) -> Comparison {
     let mut other_scene = Scene::new();
     other_scene.document = other;
     other_scene.bump_geometry();

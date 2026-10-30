@@ -43,7 +43,7 @@ cargo bench --bench performance_benchmarks -- --quick
 ### 4. Parametrics & DXF I/O
 - `constraint_solver_dogleg_system`: Solving coupled 2D geometric constraints (Perpendicular, Parallel, Length) via the Dogleg solver.
 - `dxf_export_write_throughput`: Serializing 5,000 entities to DXF binary stream.
-- `dxf_import_parse_throughput`: Parsing DXF stream of 5,000 entities into `CadDocument`.
+- `dxf_import_parse_throughput`: Parsing DXF stream of 5,000 entities into `Document`.
 
 ### 5. UI & Viewport Overlay Performance
 - `ui_ribbon_view_construction`: Per-frame ribbon widget tree construction.

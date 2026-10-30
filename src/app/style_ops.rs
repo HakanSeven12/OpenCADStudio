@@ -24,7 +24,7 @@ use codec::types::Handle;
 
 const MLEADERSTYLE_DICT_NAME: &str = "ACAD_MLEADERSTYLE";
 
-fn mleaderstyle_dict_handle(doc: &codec::CadDocument) -> Option<Handle> {
+fn mleaderstyle_dict_handle(doc: &codec::Document) -> Option<Handle> {
     let root_h = doc.header.named_objects_dict_handle;
 
     let root = match doc.objects.get(&root_h) {
@@ -39,7 +39,7 @@ fn mleaderstyle_dict_handle(doc: &codec::CadDocument) -> Option<Handle> {
         .filter(|handle| matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_))))
 }
 
-fn import_mleaderstyle_names_from_dictionary(doc: &mut codec::CadDocument) {
+fn import_mleaderstyle_names_from_dictionary(doc: &mut codec::Document) {
     let Some(dict_h) = mleaderstyle_dict_handle(doc) else {
         return;
     };
@@ -57,7 +57,7 @@ fn import_mleaderstyle_names_from_dictionary(doc: &mut codec::CadDocument) {
     }
 }
 
-fn sync_mleaderstyle_dictionary(doc: &mut codec::CadDocument) {
+pub(crate) fn sync_mleaderstyle_dictionary(doc: &mut codec::Document) {
     let root_h = crate::scene::annotative::root_named_dict_handle(doc);
 
     let existing = match doc.objects.get(&root_h) {
@@ -125,7 +125,7 @@ fn sync_mleaderstyle_dictionary(doc: &mut codec::CadDocument) {
 /// broken with no way to recover, and new text/dimensions have nothing to
 /// reference (#366). Missing entries are re-seeded with the app defaults.
 /// Called on every file open; a no-op for healthy documents.
-pub(crate) fn ensure_standard_styles(doc: &mut codec::CadDocument) {
+pub(crate) fn ensure_standard_styles(doc: &mut codec::Document) {
     import_mleaderstyle_names_from_dictionary(doc);
     if !doc
         .text_styles
@@ -145,7 +145,7 @@ pub(crate) fn ensure_standard_styles(doc: &mut codec::CadDocument) {
         s.handle = doc.allocate_handle();
         let _ = doc.dim_styles.add(s);
     }
-    let has = |doc: &codec::CadDocument, pred: fn(&ObjectType) -> Option<&str>| {
+    let has = |doc: &codec::Document, pred: fn(&ObjectType) -> Option<&str>| {
         doc.objects
             .values()
             .filter_map(pred)
@@ -1091,7 +1091,7 @@ pub(super) struct StyleStage {
 /// Find the object-backed style named `name` and return a clone. `pick` maps a
 /// matching variant to `(its name, a clone of the inner style)`.
 fn find_object_style<T>(
-    doc: &codec::CadDocument,
+    doc: &codec::Document,
     name: &str,
     pick: impl Fn(&ObjectType) -> Option<(&str, T)>,
 ) -> Option<T> {
@@ -1101,7 +1101,7 @@ fn find_object_style<T>(
     })
 }
 
-fn object_handle(doc: &codec::CadDocument, name: &str, kind: StyleKind) -> Option<Handle> {
+fn object_handle(doc: &codec::Document, name: &str, kind: StyleKind) -> Option<Handle> {
     doc.objects.iter().find_map(|(&h, o)| {
         let matches = match (kind, o) {
             (StyleKind::Table, ObjectType::TableStyle(s)) => s.name.eq_ignore_ascii_case(name),

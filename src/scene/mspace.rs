@@ -383,6 +383,24 @@ impl Scene {
     /// Fit model-space bounds into the active floating viewport without moving
     /// the surrounding paper-space camera.
     pub fn fit_active_viewport_to_bounds(&mut self, min: glam::Vec3, max: glam::Vec3) -> bool {
+        self.fit_active_viewport_bounds(min, max, true)
+    }
+
+    /// Zoom Window fits edge to edge, without the extents border.
+    pub(super) fn fit_active_viewport_to_window(
+        &mut self,
+        min: glam::Vec3,
+        max: glam::Vec3,
+    ) -> bool {
+        self.fit_active_viewport_bounds(min, max, false)
+    }
+
+    fn fit_active_viewport_bounds(
+        &mut self,
+        min: glam::Vec3,
+        max: glam::Vec3,
+        bordered: bool,
+    ) -> bool {
         let Some(viewport_handle) = self.active_viewport else {
             return false;
         };
@@ -402,7 +420,7 @@ impl Scene {
         // camera's world-per-pixel.
         let canvas_h = self.selection.borrow().view.vp_size.1;
         let paper_wpp = 2.0 * f64::from(self.camera.borrow().ortho_size()) / f64::from(canvas_h);
-        let pixels = (paper_wpp.is_finite() && paper_wpp > 0.0)
+        let pixels = (bordered && paper_wpp.is_finite() && paper_wpp > 0.0)
             .then(|| ((width / paper_wpp) as f32, (height / paper_wpp) as f32));
         camera.fit_to_bounds_bordered_f32(min, max, (width / height.max(1e-9)) as f32, pixels);
         if let Some(codec::EntityType::Viewport(viewport)) =
@@ -479,6 +497,10 @@ impl Scene {
     /// model point under the cursor is kept stationary (AutoCAD-style zoom).
     /// No-op when there is no active viewport.
     pub fn zoom_active_viewport(&mut self, steps: f32, cursor_paper: Option<glam::Vec2>) {
+        self.scale_active_viewport(viewport_zoom_factor(steps as f64), cursor_paper);
+    }
+
+    pub(super) fn scale_active_viewport(&mut self, factor: f64, cursor_paper: Option<glam::Vec2>) {
         let vp_handle = match self.active_viewport {
             Some(h) => h,
             None => return,
@@ -487,8 +509,6 @@ impl Scene {
             if vp.status.locked {
                 return;
             }
-            let factor = viewport_zoom_factor(steps as f64);
-
             if let Some(cp) = cursor_paper {
                 // Compute the model-space point under the cursor before zoom.
                 let scale_before =

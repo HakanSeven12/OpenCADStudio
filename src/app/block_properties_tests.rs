@@ -2,7 +2,7 @@ use super::{Message, OpenCADStudio};
 use crate::scene::model::object::{PropValue, Property};
 use codec::entities::{Insert, Line};
 use codec::types::Vector3;
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 use std::io::Cursor;
 
 fn fixture() -> OpenCADStudio {
@@ -314,7 +314,7 @@ fn block_properties_hyperlink_editor_targets_definition_without_selecting_it() {
     );
 }
 
-fn check_round_trip(doc: &CadDocument) {
+fn check_round_trip(doc: &Document) {
     let record = doc.block_records.get("PROPERTIES").unwrap();
     assert_eq!(record.units, 4);
     assert!(record.scale_uniformly);

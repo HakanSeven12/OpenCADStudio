@@ -243,42 +243,76 @@ fn append_arc_aligned_text(points: &mut Vec<[f64; 3]>, data: &ArcAlignedTextData
         return;
     }
     let (axis_x, axis_y, _) = plane_axes(data.normal);
-    let direction = if data.reverse || data.text_direction < 0 {
-        -1.0
-    } else {
-        1.0
+    let size = data.text_size.abs();
+    let x_scale = data.x_scale.abs().max(0.01);
+    // Outward text stands on the arc reading clockwise; inward text hangs
+    // from it reading counter-clockwise (text direction 2).
+    let outward = data.text_direction != 2;
+    // Convex side (1) is outside the arc, concave (2) inside; the letters
+    // keep `offset_from_arc` clear of it.
+    let radius = data.radius.abs();
+    let offset = data.offset_from_arc;
+    let baseline = match (data.text_position == 2, outward) {
+        (false, true) => radius + offset,
+        (false, false) => radius + offset + size,
+        (true, true) => radius - offset - size,
+        (true, false) => radius - offset,
+    }
+    .abs()
+    .max(1e-9);
+    let mut span = data.end_angle - data.start_angle;
+    span = span.rem_euclid(std::f64::consts::TAU);
+    if span < 1e-12 {
+        span = std::f64::consts::TAU;
+    }
+    let (first, sweep) = match outward {
+        true => (data.end_angle, -1.0),
+        false => (data.start_angle, 1.0),
     };
-    let mut angle = if direction > 0.0 {
-        data.start_angle
-    } else {
-        data.end_angle
+    let mut characters: Vec<char> = data.text.chars().collect();
+    if data.reverse {
+        characters.reverse();
+    }
+    let count = characters.len() as f64;
+    // ponytail: fixed glyph cell, not the font's own advances.
+    let width = size * x_scale * 0.72;
+    let pitch = width + data.character_spacing;
+    let usable = span * baseline - data.left_offset - data.right_offset;
+    let natural = count * width + (count - 1.0) * data.character_spacing;
+    // Arc length from the reading start to each character's left edge.
+    let (start, pitch) = match data.alignment {
+        2 => (data.left_offset, pitch),
+        3 => (data.left_offset + usable - natural, pitch),
+        4 => (data.left_offset + (usable - natural) / 2.0, pitch),
+        _ => {
+            let cell = usable / count;
+            (data.left_offset + (cell - width) / 2.0, cell)
+        }
     };
-    let advance = data.text_size.abs()
-        * data.x_scale.abs().max(0.01)
-        * data.character_spacing.abs().max(0.01)
-        * 0.72;
-    let delta = direction * advance / data.radius.abs().max(1e-9);
-    let radius = data.radius + data.offset_from_arc;
     let font = if data.font_name.trim().is_empty() {
         data.style_name.as_str()
     } else {
         data.font_name.as_str()
     };
-    for character in data.text.chars() {
+    let font = if font.trim().is_empty() {
+        "standard"
+    } else {
+        font
+    };
+    for (index, character) in characters.into_iter().enumerate() {
+        let middle = start + index as f64 * pitch + width / 2.0;
+        let angle = first + sweep * middle / baseline;
         let radial = axis_x * angle.cos() + axis_y * angle.sin();
-        let tangent = (axis_y * angle.cos() - axis_x * angle.sin()) * direction;
-        let origin = data.center + radial * radius;
+        let tangent = (axis_y * angle.cos() - axis_x * angle.sin()) * sweep;
+        let up = if outward { radial } else { radial * -1.0 };
+        let origin = data.center + radial * baseline + tangent * (-width / 2.0);
         let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
             [0.0, 0.0],
-            data.text_size.abs() as f32,
+            size as f32,
             0.0,
-            data.x_scale.abs().max(0.01) as f32,
+            x_scale as f32,
             0.0,
-            if font.trim().is_empty() {
-                "standard"
-            } else {
-                font
-            },
+            font,
             &character.to_string(),
         );
         for stroke in strokes {
@@ -286,10 +320,9 @@ fn append_arc_aligned_text(points: &mut Vec<[f64; 3]>, data: &ArcAlignedTextData
                 points,
                 stroke
                     .into_iter()
-                    .map(|[x, y]| add_scaled(origin, tangent, x as f64, radial, y as f64)),
+                    .map(|[x, y]| add_scaled(origin, tangent, x as f64, up, y as f64)),
             );
         }
-        angle += delta;
     }
 }
 
@@ -472,7 +505,7 @@ fn point_cloud_clip_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
 /// The cloud's extents box, placed in the drawing. Its points are drawn from
 /// the scan file; the box only picks the cloud, unless the file cannot be
 /// found: then the box shows, with the saved path written across it.
-fn point_cloud_ex_lines(data: &PointCloudExData, document: &codec::CadDocument) -> Vec<[f64; 3]> {
+fn point_cloud_ex_lines(data: &PointCloudExData, document: &codec::Document) -> Vec<[f64; 3]> {
     let mut points = point_cloud_ex_box(data);
     if crate::scene::model::point_cloud::resolve_source(document, data).is_none() {
         let saved = crate::scene::model::point_cloud::definition(document, data)
@@ -595,7 +628,7 @@ pub(crate) fn point_cloud_frame_lines(entity: &ExtendedEntity) -> Option<Vec<[f6
     }
 }
 
-fn camera_lines(document: &codec::CadDocument, view_handle: Handle) -> Vec<[f64; 3]> {
+fn camera_lines(document: &codec::Document, view_handle: Handle) -> Vec<[f64; 3]> {
     // CAMERADISPLAY 0 hides every camera glyph.
     if !document.header.camera_display {
         return Vec::new();
@@ -637,7 +670,7 @@ fn camera_lines(document: &codec::CadDocument, view_handle: Handle) -> Vec<[f64;
     points
 }
 
-fn to_render(entity: &ExtendedEntity, document: &codec::CadDocument) -> Option<RenderEntity> {
+fn to_render(entity: &ExtendedEntity, document: &codec::Document) -> Option<RenderEntity> {
     let (points, snaps, keys): (Vec<[f64; 3]>, Vec<(glam::DVec3, SnapHint)>, Vec<[f64; 3]>) =
         match &entity.data {
             ExtendedEntityData::Camera { view_handle } => {
@@ -1563,6 +1596,13 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
             )],
         }],
         ExtendedEntityData::SectionObject(data) => section_properties(entity, data),
+        ExtendedEntityData::Arch(data) => vec![PropSection {
+            title: t!("Class").into_owned(),
+            props: vec![
+                ro_prop(t!("Class").as_ref(), "ext_arch_class", data.dxf_name.clone()),
+                ro_prop(t!("Kind").as_ref(), "ext_arch_kind", format!("{:?}", data.kind)),
+            ],
+        }],
         ExtendedEntityData::ArcAlignedText(data) => arc_text_properties(data),
         ExtendedEntityData::RemoteText(data) => remote_text_properties(data),
         ExtendedEntityData::GeoPositionMarker(data) => geo_marker_properties(data),
@@ -2451,7 +2491,7 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
 }
 
 impl RenderConvertible for ExtendedEntity {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         to_render(self, document)
     }
 }

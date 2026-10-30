@@ -103,7 +103,7 @@ pub struct SheetSetManager {
 pub struct DrawingCache(
     pub  std::collections::HashMap<
         String,
-        (std::time::SystemTime, std::sync::Arc<codec::CadDocument>),
+        (std::time::SystemTime, std::sync::Arc<codec::Document>),
     >,
 );
 
@@ -115,7 +115,7 @@ impl std::fmt::Debug for DrawingCache {
 
 impl DrawingCache {
     /// The drawing at `path` when it was read and is unchanged since.
-    pub fn get(&self, path: &str) -> Option<std::sync::Arc<codec::CadDocument>> {
+    pub fn get(&self, path: &str) -> Option<std::sync::Arc<codec::Document>> {
         let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
         let (t, doc) = self.0.get(&ss::path_key(path))?;
         (*t == modified).then(|| doc.clone())
@@ -125,7 +125,7 @@ impl DrawingCache {
         &mut self,
         path: &str,
         modified: std::time::SystemTime,
-        doc: std::sync::Arc<codec::CadDocument>,
+        doc: std::sync::Arc<codec::Document>,
     ) {
         self.0.insert(ss::path_key(path), (modified, doc));
     }
@@ -135,7 +135,7 @@ impl DrawingCache {
     pub fn take(
         &mut self,
         path: &str,
-    ) -> Option<(std::time::SystemTime, std::sync::Arc<codec::CadDocument>)> {
+    ) -> Option<(std::time::SystemTime, std::sync::Arc<codec::Document>)> {
         self.0.remove(&ss::path_key(path))
     }
 }
@@ -143,7 +143,7 @@ impl DrawingCache {
 /// A drawing read for the cache (its modification time and document).
 #[derive(Clone)]
 pub struct ReadDrawing(
-    pub Result<(std::time::SystemTime, std::sync::Arc<codec::CadDocument>), String>,
+    pub Result<(std::time::SystemTime, std::sync::Arc<codec::Document>), String>,
 );
 
 impl std::fmt::Debug for ReadDrawing {

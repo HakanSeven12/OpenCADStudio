@@ -36,7 +36,7 @@ fn parse_xy(s: &str) -> Option<[f64; 2]> {
 }
 
 /// A field referring to `boundary` keeps the count area's polyline.
-fn boundary_in_use(doc: &codec::CadDocument, boundary: Handle) -> bool {
+fn boundary_in_use(doc: &codec::Document, boundary: Handle) -> bool {
     let needle = format!("\"boundaryObjectHandle\":\"{}\"", hex(boundary));
     doc.fields.values().any(|f| f.code.contains(&needle))
 }

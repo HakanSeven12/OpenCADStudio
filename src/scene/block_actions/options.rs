@@ -1,7 +1,7 @@
 //! Native displacement overrides and Polar Stretch rotation selections.
 use super::*;
 
-pub(crate) fn offsets(doc: &CadDocument, action: Handle) -> Option<BlockActionOffsets> {
+pub(crate) fn offsets(doc: &Document, action: Handle) -> Option<BlockActionOffsets> {
     let ObjectType::DynamicBlock(object) = doc.objects.get(&action)? else {
         return None;
     };
@@ -45,7 +45,7 @@ pub(crate) fn displacement(
 }
 
 pub(crate) fn set(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     action: Handle,
     multiplier: f64,
@@ -83,7 +83,7 @@ pub(crate) fn set(
 }
 
 pub(crate) fn set_rotate_only(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     action: Handle,
     targets: &[Handle],
@@ -139,7 +139,7 @@ pub(crate) fn set_rotate_only(
 }
 
 /// Native Rotate/Scale pivot configuration; display location is independent.
-pub(crate) fn base(doc: &CadDocument, handle: Handle) -> Option<&BlockActionWithBasePoint> {
+pub(crate) fn base(doc: &Document, handle: Handle) -> Option<&BlockActionWithBasePoint> {
     let ObjectType::DynamicBlock(object) = doc.objects.get(&handle)? else {
         return None;
     };
@@ -171,7 +171,7 @@ pub(crate) fn pivot(
 }
 
 pub(crate) fn set_base(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     handle: Handle,
     dependent: bool,
@@ -216,7 +216,7 @@ pub(crate) fn set_base(
 }
 
 pub(crate) fn set_base_offset(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     definition: Handle,
     handle: Handle,
     offset: DVec3,

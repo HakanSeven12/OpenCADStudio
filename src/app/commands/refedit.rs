@@ -796,7 +796,7 @@ impl OpenCADStudio {
                 && name[..prefix.len()].eq_ignore_ascii_case(prefix))
             .then(|| name[prefix.len()..].to_string())
         };
-        let exists = |document: &codec::CadDocument, kind: SymbolKind, name: &str| match kind {
+        let exists = |document: &codec::Document, kind: SymbolKind, name: &str| match kind {
             SymbolKind::Layer => document.layers.contains(name),
             SymbolKind::Linetype => document.line_types.contains(name),
             SymbolKind::TextStyle => document.text_styles.contains(name),
@@ -923,7 +923,12 @@ impl OpenCADStudio {
         use crate::app::command_driver::clipboard::{eed_app_map, merge_app_ids, remap_eed_apps};
         merge_app_ids(document, &deps);
         let apps = eed_app_map(document, &deps);
-        crate::app::command_driver::clipboard::merge_block_defs(document, &blocks, &apps);
+        crate::app::command_driver::clipboard::merge_block_defs(
+            document,
+            &blocks,
+            &apps,
+            &Default::default(),
+        );
         for entity in &mut copies {
             rename_symbols(entity, &rename);
             remap_eed_apps(entity, &apps);

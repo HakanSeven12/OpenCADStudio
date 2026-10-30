@@ -120,7 +120,7 @@ fn validate_polygon(points: &[Vector3]) -> Result<(), &'static str> {
 }
 
 pub(crate) fn bind_frame(
-    doc: &CadDocument,
+    doc: &Document,
     targets: &[Handle],
     frame: &[DVec3],
     plane: f64,
@@ -131,7 +131,7 @@ pub(crate) fn bind_frame(
 }
 
 pub(crate) fn bind_existing(
-    doc: &CadDocument,
+    doc: &Document,
     targets: &[Handle],
     frame: &[Vector2],
     plane: f64,
@@ -210,7 +210,7 @@ pub(crate) fn validate_options(a: &BlockStretchAction) -> Result<(), &'static st
     Ok(())
 }
 
-pub(crate) fn validate(doc: &CadDocument, definition: Handle, a: &BlockStretchAction) -> Result<(), &'static str> {
+pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchAction) -> Result<(), &'static str> {
     validate_options(a)?;
     if a.points.len() < 2
         || a.points
@@ -268,7 +268,7 @@ pub(crate) fn polar_key_point(a: &BlockPolarStretchAction) -> Result<XyKeyPoint,
 }
 
 pub(crate) fn validate_polar(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     a: &BlockPolarStretchAction,
 ) -> Result<(), &'static str> {

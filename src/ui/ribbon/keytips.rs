@@ -84,6 +84,12 @@ pub(super) struct State {
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Alt is down and nothing else was pressed since.
 static ALT_ALONE: AtomicBool = AtomicBool::new(false);
+/// Timestamp (ms) when a lone Alt was pressed down.
+static ALT_PRESSED_AT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Timestamp (ms) of the last window focus gain or loss.
+static LAST_FOCUS_CHANGE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Timestamp (ms) of the last command, pick, or automation operation completion.
+static LAST_COMMAND_FINISH_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 thread_local! {
     /// Anchors that carried a code in the last drawn frame.
@@ -99,6 +105,16 @@ const RIBBON_AREA: &str = "KEYTIP_RIBBON_AREA";
 pub(super) const XREF_LAUNCHER: &str = "XREF_LAUNCHER";
 /// The xref fading switch in the Reference slide-out.
 pub(super) const XREF_FADE: &str = "XREF_FADE";
+/// The Text panel's corner arrow (Text Style).
+pub(super) const TEXT_LAUNCHER: &str = "TEXT_LAUNCHER";
+/// The Text panel's text height box.
+pub(super) const TEXT_HEIGHT: &str = "TEXT_HEIGHT";
+/// The Dimensions panel's corner arrow (Dimension Style).
+pub(super) const DIMENSION_LAUNCHER: &str = "DIMENSION_LAUNCHER";
+/// The Leaders panel's corner arrow (Multileader Style).
+pub(super) const LEADER_LAUNCHER: &str = "LEADER_LAUNCHER";
+/// Annotate > Tables: the corner arrow to the table styles.
+pub(super) const TABLE_LAUNCHER: &str = "TABLE_LAUNCHER";
 const COLLAPSED_PREFIX: &str = "panel:";
 
 pub fn active() -> bool {
@@ -178,10 +194,14 @@ pub fn key_pressed(
 ) -> Option<Option<Message>> {
     let alt = matches!(key, Key::Named(Named::Alt));
     if !repeat {
-        ALT_ALONE.store(
-            alt && !modifiers.control() && !modifiers.shift() && !modifiers.logo(),
-            Ordering::Relaxed,
-        );
+        let is_lone_alt = alt && !modifiers.control() && !modifiers.shift() && !modifiers.logo();
+        ALT_ALONE.store(is_lone_alt, Ordering::Relaxed);
+        if is_lone_alt {
+            let now_ms = now_ms();
+            ALT_PRESSED_AT_MS.store(now_ms, Ordering::Relaxed);
+        } else {
+            ALT_PRESSED_AT_MS.store(0, Ordering::Relaxed);
+        }
     }
     if !active() {
         return None;
@@ -202,13 +222,55 @@ pub fn key_pressed(
 
 /// Keyboard listener hook for a key release: a lone Alt toggles the tips.
 pub fn key_released(key: &Key) -> Option<Message> {
-    (matches!(key, Key::Named(Named::Alt)) && ALT_ALONE.swap(false, Ordering::Relaxed))
-        .then_some(Message::KeyTip(KeyTipInput::AltTap))
+    if matches!(key, Key::Named(Named::Alt)) && ALT_ALONE.swap(false, Ordering::Relaxed) {
+        let pressed_at = ALT_PRESSED_AT_MS.swap(0, Ordering::Relaxed);
+        let now_ms = now_ms();
+        let last_focus = LAST_FOCUS_CHANGE_MS.load(Ordering::Relaxed);
+        let last_cmd = LAST_COMMAND_FINISH_MS.load(Ordering::Relaxed);
+        // Suppress Alt if focus changed or a command/debugging step finished within the last 1.2s.
+        // Synthetic events, Alt-Tab window switching, and completion tails must never trigger keytips.
+        if now_ms.saturating_sub(last_focus) < 1200 || now_ms.saturating_sub(last_cmd) < 1200 {
+            return None;
+        }
+        // Key tips only open on an intentional, quick tap of lone Alt (<= 500ms).
+        if pressed_at > 0 && now_ms.saturating_sub(pressed_at) <= 500 {
+            return Some(Message::KeyTip(KeyTipInput::AltTap));
+        }
+    }
+    None
+}
+
+/// Milliseconds since the first call. `iced::time::Instant` also runs in the
+/// browser, where `std::time::SystemTime::now` panics.
+fn now_ms() -> u64 {
+    static START: std::sync::OnceLock<iced::time::Instant> = std::sync::OnceLock::new();
+    // Starts at 1 so that 0 keeps meaning "not set" for the timestamps.
+    START.get_or_init(iced::time::Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+/// Clear any pending lone-Alt state.
+pub fn clear_alt_alone() {
+    ALT_ALONE.store(false, Ordering::Relaxed);
+    ALT_PRESSED_AT_MS.store(0, Ordering::Relaxed);
+}
+
+/// Note that window focus changed (gained or lost), suppressing any Alt release artifacts.
+pub fn note_focus_changed() {
+    clear_alt_alone();
+    let now_ms = now_ms();
+    LAST_FOCUS_CHANGE_MS.store(now_ms, Ordering::Relaxed);
+}
+
+/// Note that a command, pick session, or automation operation finished.
+pub fn note_command_finished() {
+    clear_alt_alone();
+    let now_ms = now_ms();
+    LAST_COMMAND_FINISH_MS.store(now_ms, Ordering::Relaxed);
 }
 
 /// A pointer press ends a lone Alt.
 pub fn pointer_pressed() {
-    ALT_ALONE.store(false, Ordering::Relaxed);
+    clear_alt_alone();
 }
 
 /// Codes of the ribbon tabs, by module id.
@@ -307,6 +369,7 @@ const CODES: &[(&str, &str, &str)] = &[
     ("draw", "LAYLCK", "LK"),
     ("draw", "LAYMCUR", "LC"),
     ("draw", "LAYISO", "LS"),
+    ("draw", "LAYWALK", "LX"),
     ("draw", "LAYON", "LN"),
     ("draw", "LAYTHW", "LW"),
     ("draw", "LAYULK", "UL"),
@@ -424,28 +487,51 @@ const CODES: &[(&str, &str, &str)] = &[
     ("annotate", "Text", "TE"),
     ("annotate", "ANNOTATE_TEXT", "MT"),
     ("annotate", "TEXT_STYLE_COMBO", "TY"),
+    ("annotate", TEXT_LAUNCHER, "TS"),
+    ("annotate", "SPELL", "CS"),
+    ("annotate", "TEXTALIGN", "TA"),
+    ("annotate", "JUSTIFYTEXT", "JT"),
+    ("annotate", TEXT_HEIGHT, "TH"),
+    ("text_extension", "SCALETEXT", "ST"),
     ("annotate", "Dimensions", "DM"),
-    ("annotate", "ANNOTATE_DIM", "DN"),
+    ("annotate", "DIM", "DI"),
     ("annotate", "DIM_STYLE_COMBO", "DY"),
-    ("annotate", "QDIM", "QD"),
-    ("annotate", "DIMCONTINUE", "CO"),
-    ("annotate", "TOLERANCE", "TO"),
-    ("annotate", "DIMEDIT", "DE"),
     ("annotate", "DIMBREAK", "BR"),
     ("annotate", "DIMSPACE", "SP"),
     ("annotate", "DIMJOGLINE", "DJ"),
+    ("annotate", super::widgets::DIM_LAYER_COMBO, "DA"),
+    ("annotate", "DIMINSPECT", "DP"),
+    ("annotate", "DIMSTYLE_APPLY", "DU"),
+    ("annotate", "DIMREASSOCIATE", "DR"),
+    ("annotate", "ANNOTATE_DIM", "DN"),
+    ("annotate", "QDIM", "QD"),
+    ("annotate", "ANNOTATE_DIM_CONTINUE", "CO"),
+    ("annotate", DIMENSION_LAUNCHER, "DS"),
+    ("dimensions_extension", "TOLERANCE", "TO"),
+    ("dimensions_extension", "DIMEDIT;O", "DE"),
+    ("dimensions_extension", "DIMTEDIT_ANGLE", "DTA"),
+    ("dimensions_extension", "DIMTEDIT_LEFT", "DTL"),
+    ("dimensions_extension", "DIMTEDIT_CENTER", "DTC"),
+    ("dimensions_extension", "DIMTEDIT_RIGHT", "DTR"),
+    ("dimensions_extension", "DIMOVERRIDE", "DO"),
     ("annotate", "Centerlines", "CE"),
     ("annotate", "CENTERMARK", "CM"),
     ("annotate", "CENTERLINE", "CL"),
-    ("annotate", "ANNOTATE_LEADER", "ML"),
+    ("centerlines_extension", super::widgets::CENTER_LAYER_COMBO, "CA"),
+    ("annotate", "MLEADER", "ML"),
     ("annotate", "MLEADER_STYLE_COMBO", "MY"),
-    ("annotate", "MLEADERADD", "MAD"),
-    ("annotate", "MLEADERREMOVE", "MV"),
+    ("annotate", super::widgets::MLEADER_LAYER_COMBO, "MU"),
+    ("annotate", LEADER_LAUNCHER, "MS"),
+    ("annotate", "AIMLEADEREDITADD", "MAD"),
+    ("annotate", "AIMLEADEREDITREMOVE", "MV"),
     ("annotate", "MLEADERALIGN", "MAL"),
     ("annotate", "MLEADERCOLLECT", "MC"),
     ("annotate", "TABLE", "TB"),
     ("annotate", "TABLE_STYLE_COMBO", "TL"),
     ("annotate", "DATALINK", "DL"),
+    ("annotate", "DATALINKUPDATE", "UD"),
+    ("annotate", "DATALINKUPDATE_WRITE", "WD"),
+    ("annotate", TABLE_LAUNCHER, "TT"),
     ("annotate", "WIPEOUT", "WI"),
     ("annotate", "REVCLOUD", "AC"),
     // The reference shows AC here too; typing it runs Revision Cloud.
@@ -744,6 +830,9 @@ impl Ribbon {
                     }
                     RibbonItem::StyleComboGroup { combo_id, rows, .. } => {
                         tips.push(dropdown_tip(scope, combo_id));
+                        if *combo_id == "MLEADER_STYLE_COMBO" {
+                            tips.push(dropdown_tip(scope, super::widgets::MLEADER_LAYER_COMBO));
+                        }
                         tips.extend(rows.iter().flatten().map(|tool| tool_tip(scope, tool)));
                     }
                 }
@@ -761,6 +850,25 @@ impl Ribbon {
                 action: Action::Open(Message::ToggleRibbonPanel(group.title.to_string())),
             };
             let key = extras::panel_key(scope, group.title);
+            // The panel's dialog launcher, with or without a slide-out.
+            if let Some(panel) = extras::for_panel(&key) {
+                if let Some(dialog) = panel.dialog {
+                    tips.push(Tip {
+                        anchor: panel.launcher.to_string(),
+                        target: panel.launcher,
+                        code: code(scope, panel.launcher).map(str::to_string),
+                        action: Action::Run(draw_panel::launcher_message(dialog)),
+                    });
+                }
+            }
+            if key == extras::panel_key("annotate", "Text") {
+                tips.push(Tip {
+                    anchor: TEXT_HEIGHT.to_string(),
+                    target: TEXT_HEIGHT,
+                    code: code(scope, TEXT_HEIGHT).map(str::to_string),
+                    action: Action::Run(Message::RibbonTextHeightFocus),
+                });
+            }
             let Some(id) = draw_panel::slide_out_id(&key) else {
                 tips.push(flyout);
                 continue;
@@ -776,15 +884,6 @@ impl Ribbon {
                 tips.extend([flyout, slide_out]);
             } else {
                 tips.extend([slide_out, flyout]);
-            }
-            // Reference's is the only dialog launcher so far.
-            if let Some(dialog) = extras::for_panel(&key).and_then(|panel| panel.dialog) {
-                tips.push(Tip {
-                    anchor: XREF_LAUNCHER.to_string(),
-                    target: XREF_LAUNCHER,
-                    code: code(scope, XREF_LAUNCHER).map(str::to_string),
-                    action: Action::Run(draw_panel::launcher_message(dialog)),
-                });
             }
         }
         tips
@@ -833,6 +932,9 @@ impl Ribbon {
                 },
             })
             .collect();
+        if open == extras::CENTERLINES_ID {
+            tips.push(dropdown_tip(open, super::widgets::CENTER_LAYER_COMBO));
+        }
         if open == extras::REFERENCE_ID {
             tips.push(Tip {
                 anchor: item_anchor(open, XREF_FADE),
@@ -1321,7 +1423,7 @@ fn pill_candidates(
             Point::new(b.x + 14.0, b.center_y()),
         ];
     }
-    if anchor == XREF_LAUNCHER {
+    if anchor.ends_with("_LAUNCHER") {
         return vec![
             b.center(),
             Point::new(b.x + b.width + 2.0 + width / 2.0, b.center_y()),

@@ -1481,6 +1481,36 @@ mod printer_properties_tests {
         );
     }
 
+    /// The two end-to-end print tests share "Microsoft Print to PDF": run
+    /// them one at a time so their jobs don't queue behind each other.
+    #[cfg(target_os = "windows")]
+    static SPOOLER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The page the spooler wrote to `printed`, once it is complete. The
+    /// print-to-PDF driver writes the file after the job is handed over, and
+    /// a busy CI runner can take a while, so wait for a file that rasterises.
+    #[cfg(target_os = "windows")]
+    fn spooled_page(
+        printed: &std::path::Path,
+    ) -> std::sync::Arc<crate::scene::model::pdf_raster::PdfPage> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            // Uncached: the page memo would keep a first, unfinished read.
+            let raster = crate::scene::model::pdf_raster::rasterize_page_at_dpi_uncached(
+                &printed.to_string_lossy(),
+                "1",
+                crate::scene::model::pdf_raster::DISPLAY_DPI,
+            );
+            match raster {
+                Some(page) => return page,
+                None if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+                None => panic!("spooled output should rasterise"),
+            }
+        }
+    }
+
     /// End to end through the real spooler: plot a page with black ink, run
     /// the GDI fallback against "Microsoft Print to PDF" redirected to a file
     /// (no dialog, no paper), then rasterise the result and require that ink
@@ -1553,28 +1583,13 @@ mod printer_properties_tests {
         let printed = std::env::temp_dir().join("ocs_gdi_ink_output.pdf");
         let _ = std::fs::remove_file(&printed);
 
+        let _spooler = SPOOLER.lock().unwrap_or_else(|e| e.into_inner());
         let result = super::gdi_raster_print(&plot, "Microsoft Print to PDF", 1, Some(&printed));
         assert!(result.is_ok(), "GDI print failed: {result:?}");
 
         // The spooled PDF must contain the black block: rasterise it and
-        // count clearly-dark pixels. The print-to-PDF driver writes the file
-        // through the spooler after the job is handed over, so give it time.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        let page = loop {
-            // Uncached: the page memo would keep a first, unfinished read.
-            let raster = crate::scene::model::pdf_raster::rasterize_page_at_dpi_uncached(
-                &printed.to_string_lossy(),
-                "1",
-                crate::scene::model::pdf_raster::DISPLAY_DPI,
-            );
-            match raster {
-                Some(page) => break page,
-                None if std::time::Instant::now() < deadline => {
-                    std::thread::sleep(std::time::Duration::from_millis(250));
-                }
-                None => panic!("spooled output should rasterise"),
-            }
-        };
+        // count clearly-dark pixels.
+        let page = spooled_page(&printed);
         let dark = page
             .pixels
             .chunks_exact(4)
@@ -1655,11 +1670,11 @@ mod printer_properties_tests {
         let printed = std::env::temp_dir().join("ocs_gdi_orientation_output.pdf");
         let _ = std::fs::remove_file(&printed);
 
+        let _spooler = SPOOLER.lock().unwrap_or_else(|e| e.into_inner());
         let result = super::gdi_raster_print(&plot, "Microsoft Print to PDF", 1, Some(&printed));
         assert!(result.is_ok(), "GDI print failed: {result:?}");
 
-        let page = crate::scene::model::pdf_raster::rasterize_page(&printed.to_string_lossy(), "1")
-            .expect("spooled output should rasterise");
+        let page = spooled_page(&printed);
         std::fs::remove_file(&plot).ok();
         std::fs::remove_file(&printed).ok();
 

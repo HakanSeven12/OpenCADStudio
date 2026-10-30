@@ -316,7 +316,7 @@ fn apply_transform(arc: &mut Arc, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Arc {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }

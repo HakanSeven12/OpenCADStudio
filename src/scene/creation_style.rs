@@ -1,6 +1,6 @@
 use codec::objects::ObjectType;
 use codec::tables::{DimStyle, TextStyle};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 
 #[derive(Debug, Clone)]
 pub struct TextCreationDefaults {
@@ -23,7 +23,7 @@ pub struct DimensionCreationDefaults {
     pub annotative: bool,
 }
 
-fn named_text_style(doc: &CadDocument, name: &str) -> Option<TextStyle> {
+fn named_text_style(doc: &Document, name: &str) -> Option<TextStyle> {
     doc.text_styles
         .iter()
         .find(|style| style.name.eq_ignore_ascii_case(name))
@@ -39,7 +39,7 @@ fn named_text_style(doc: &CadDocument, name: &str) -> Option<TextStyle> {
 /// metric template) when the drawing has none of that name, and hands back its
 /// handle: the header records the current dimension style by handle as well as
 /// by name, and a DWG carries only the handle.
-pub fn ensure_iso_dim_style(doc: &mut CadDocument) -> Handle {
+pub fn ensure_iso_dim_style(doc: &mut Document) -> Handle {
     if let Some(style) = doc
         .dim_styles
         .iter()
@@ -49,6 +49,9 @@ pub fn ensure_iso_dim_style(doc: &mut CadDocument) -> Handle {
     }
     let mut style = DimStyle::new("ISO-25");
     style.handle = doc.allocate_handle();
+    // Separate arrowheads off, as in the reference's ISO-25: DIMBLK draws
+    // both ends.
+    style.dimsah = false;
     style.dimtxt = 2.5;
     style.dimasz = 2.5;
     style.dimcen = 2.5;
@@ -89,7 +92,7 @@ pub fn ensure_iso_dim_style(doc: &mut CadDocument) -> Handle {
     handle
 }
 
-fn named_dim_style(doc: &CadDocument, name: &str) -> Option<DimStyle> {
+fn named_dim_style(doc: &Document, name: &str) -> Option<DimStyle> {
     doc.dim_styles
         .iter()
         .find(|style| style.name.eq_ignore_ascii_case(name))
@@ -101,7 +104,7 @@ fn named_dim_style(doc: &CadDocument, name: &str) -> Option<DimStyle> {
         .cloned()
 }
 
-pub fn current_text_defaults(doc: &CadDocument) -> TextCreationDefaults {
+pub fn current_text_defaults(doc: &Document) -> TextCreationDefaults {
     let requested = doc.header.current_text_style_name.trim();
     let style = named_text_style(doc, requested);
     let variable_height = if doc.header.text_height > 1.0e-9 {
@@ -129,7 +132,7 @@ pub fn current_text_defaults(doc: &CadDocument) -> TextCreationDefaults {
     }
 }
 
-pub fn current_dimension_defaults(doc: &CadDocument) -> DimensionCreationDefaults {
+pub fn current_dimension_defaults(doc: &Document) -> DimensionCreationDefaults {
     let requested = doc.header.current_dimstyle_name.trim();
     let style = named_dim_style(doc, requested);
     DimensionCreationDefaults {
@@ -167,7 +170,7 @@ fn entity_uses_default_style(name: &str) -> bool {
     name.trim().is_empty() || name.eq_ignore_ascii_case("Standard")
 }
 
-fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
+fn apply_text_defaults(doc: &Document, entity: &mut EntityType) {
     let active = current_text_defaults(doc);
     let style_name = match entity {
         EntityType::Text(text) => &mut text.style,
@@ -179,8 +182,13 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
     if style_name.trim().is_empty() {
         style_name.clone_from(&active.style_name);
     }
-    let resolved =
+    let mut resolved =
         named_text_style(doc, style_name).unwrap_or_else(|| TextStyle::new(style_name.clone()));
+    // An annotative style's height is on paper; the creating command already
+    // gave the entity its model height at the current annotation scale.
+    if resolved.annotative {
+        resolved.height = 0.0;
+    }
     match entity {
         EntityType::Text(text) => {
             if resolved.height > 1.0e-9 {
@@ -232,7 +240,7 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
     }
 }
 
-fn apply_dimension_defaults(doc: &CadDocument, entity: &mut EntityType) {
+fn apply_dimension_defaults(doc: &Document, entity: &mut EntityType) {
     let active = current_dimension_defaults(doc);
     match entity {
         EntityType::Dimension(dimension) => {
@@ -266,7 +274,7 @@ fn apply_dimension_defaults(doc: &CadDocument, entity: &mut EntityType) {
     }
 }
 
-fn apply_object_defaults(doc: &CadDocument, entity: &mut EntityType) {
+fn apply_object_defaults(doc: &Document, entity: &mut EntityType) {
     match entity {
         EntityType::MultiLeader(leader) if leader.style_handle.is_none() => {
             let name = doc.header.current_mleader_style_name.trim();
@@ -319,11 +327,76 @@ fn apply_object_defaults(doc: &CadDocument, entity: &mut EntityType) {
     }
 }
 
-pub fn apply_current_creation_styles(doc: &CadDocument, entity: &mut EntityType) {
+/// The drawing's DIMDLI takes the current dimension style's value, as
+/// making a style current does; DIM's Offset changes it afterwards.
+pub fn sync_header_dim_vars(doc: &mut Document) {
+    let current = doc.header.current_dimstyle_name.clone();
+    let value = doc
+        .dim_styles
+        .iter()
+        .find(|style| style.name.eq_ignore_ascii_case(&current))
+        .map(|style| (style.dimdli, style.dimzin));
+    if let Some((dimdli, dimzin)) = value {
+        doc.header.dim_line_increment = dimdli;
+        // The header's DIMZIN follows the current style too; numbers the
+        // drawing writes (Properties, prompts) drop zeros by it.
+        doc.header.dim_zero_suppression = dimzin;
+    }
+}
+
+/// The drawing's DIMDLI (the header's; the current style's when the header
+/// has none).
+pub fn drawing_dimdli(doc: &Document) -> f64 {
+    let header = doc.header.dim_line_increment;
+    if header > 0.0 {
+        return header;
+    }
+    let current = &doc.header.current_dimstyle_name;
+    doc.dim_styles
+        .iter()
+        .find(|style| style.name.eq_ignore_ascii_case(current))
+        .map_or(header, |style| style.dimdli)
+}
+
+/// A DIMDLI set for the drawing that differs from the current dimension
+/// style goes on a new dimension as an override. Written before the
+/// dimension is committed, so the override is part of the added object and
+/// its undo step.
+pub fn apply_drawing_dimdli(doc: &Document, entity: &mut EntityType) {
+    if !matches!(entity, EntityType::Dimension(_)) {
+        return;
+    }
+    let current = &doc.header.current_dimstyle_name;
+    let Some(style_value) = doc
+        .dim_styles
+        .iter()
+        .find(|style| style.name.eq_ignore_ascii_case(current))
+        .map(|style| style.dimdli)
+    else {
+        return;
+    };
+    let drawing = drawing_dimdli(doc);
+    if (drawing - style_value).abs() > 1.0e-9 {
+        crate::entities::dim_override::set_on_entity(
+            entity,
+            crate::entities::dim_override::DIMDLI,
+            Some(codec::xdata::XDataValue::Real(drawing)),
+        );
+    }
+}
+
+pub fn apply_current_creation_styles(doc: &Document, entity: &mut EntityType) {
     entity.common_mut().transparency = doc.current_entity_transparency();
     apply_text_defaults(doc, entity);
     apply_dimension_defaults(doc, entity);
     apply_object_defaults(doc, entity);
+}
+
+pub(crate) fn transparency_options() -> Vec<String> {
+    ["ByLayer".to_string(), "ByBlock".to_string()]
+        .into_iter()
+        .chain((0..=90).step_by(10).map(|value| value.to_string()))
+        .collect()
 }
 
 pub(crate) fn parse_current_transparency(value: &str) -> Option<codec::types::Transparency> {

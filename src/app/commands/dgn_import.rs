@@ -943,7 +943,7 @@ fn place_converted(
 /// A dimension whose text the user has not placed gets the place its style
 /// lays the text out at in this drawing.
 fn placed_dimension_text(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     mut entity: codec::EntityType,
 ) -> codec::EntityType {
     if let codec::EntityType::Dimension(d) = &mut entity {

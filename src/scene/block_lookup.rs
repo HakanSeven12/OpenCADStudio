@@ -8,14 +8,16 @@ use codec::objects::{
 };
 use codec::{
     types::{Transform, Vector3},
-    CadDocument, Handle,
+    Document, Handle,
 };
 mod reference;
+mod expressions;
+pub(crate) use expressions::validate_with_properties;
 #[cfg(test)]
 mod tests;
 pub(crate) use reference::{evaluate_property, reference_properties};
 
-fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
+fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     let ObjectType::Dictionary(d) =
         document
             .objects
@@ -28,7 +30,7 @@ fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
     d.get("ACAD_ENHANCEDBLOCK")
 }
 pub(crate) fn parameters(
-    document: &CadDocument,
+    document: &Document,
     definition: Handle,
 ) -> Vec<(Handle, &BlockLookupParameter)> {
     let Some(graph) = graph_handle(document, definition) else {
@@ -51,11 +53,11 @@ pub(crate) fn parameters(
         })
         .collect()
 }
-pub(crate) fn placement_error(document: &CadDocument, definition: Handle) -> Option<&'static str> {
+pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option<&'static str> {
     authoring::graph(document, definition).err()
 }
 pub(crate) fn create(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     location: Vector3,
 ) -> Result<Handle, &'static str> {
@@ -160,7 +162,7 @@ pub(crate) struct Property {
     pub value: String,
 }
 /// These distance and angle bindings match the native Lookup connection names.
-pub(crate) fn properties(document: &CadDocument, definition: Handle) -> Vec<Property> {
+pub(crate) fn properties(document: &Document, definition: Handle) -> Vec<Property> {
     super::block_distance_parameter::parameters(document, definition)
         .iter()
         .flat_map(|p| {
@@ -201,7 +203,7 @@ pub(crate) fn properties(document: &CadDocument, definition: Handle) -> Vec<Prop
         .collect()
 }
 
-pub(crate) fn authoring_properties(document: &CadDocument, definition: Handle) -> Vec<Property> {
+pub(crate) fn authoring_properties(document: &Document, definition: Handle) -> Vec<Property> {
     let mut result = properties(document, definition);
     result.extend(
         parameters(document, definition)
@@ -215,7 +217,7 @@ pub(crate) fn authoring_properties(document: &CadDocument, definition: Handle) -
     result
 }
 pub(crate) fn table(
-    document: &CadDocument,
+    document: &Document,
     definition: Handle,
     parameter: Handle,
 ) -> Result<Option<(Handle, BlockLookupAction)>, &'static str> {
@@ -246,74 +248,44 @@ pub(crate) fn table(
 
 /// Resolve the active row for a saved reference from its numeric input values.
 fn reference_row_context(
-    document: &CadDocument,
-    baseline: Option<&CadDocument>,
+    document: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
     definition: Handle,
     table: &BlockLookupAction,
 ) -> Option<usize> {
-    let params = super::block_actions::all_parameters(baseline.unwrap_or(document), definition);
-    let rows = usize::try_from(table.row_count).ok()?;
-    let columns = table.columns.len();
-    (0..rows).find(|row| {
-        table.columns.iter().enumerate().all(|(column, property)| {
-            if property.lookup_property {
+    let actual = expressions::actual_inputs(document, baseline, definition, insert, table).ok()?;
+    let source = baseline.unwrap_or(document);
+    let mut matching = (0..usize::try_from(table.row_count).ok()?).filter(|row| {
+        let Ok(cells) = expressions::row(source, definition, table, *row, &actual, false) else {
+            return false;
+        };
+        cells.iter().enumerate().all(|(column, resolved)| {
+            let Some((cell, expected)) = resolved else {
                 return true;
-            }
-            if property.value_type != 40 {
-                return false;
-            }
-            let Some(parameter) = params.iter().find(|p| p.id == property.node_id) else {
-                return false;
             };
-            let is_distance = property
+            if matches!(cell, expressions::Cell::Interval { .. }) {
+                return cell.contains(actual[column]);
+            }
+            let difference = if table.columns[column]
                 .connection_name
-                .eq_ignore_ascii_case("UpdatedDistance");
-            let is_angle = property
-                .connection_name
-                .eq_ignore_ascii_case("UpdatedAngle");
-            if !(is_distance && (parameter.linear || parameter.polar)
-                || is_angle && parameter.polar)
+                .eq_ignore_ascii_case("UpdatedAngle")
             {
-                return false;
-            }
-            let Ok(frame) = (if baseline.is_some() {
-                super::block_actions::instance::test_frame(document, insert, parameter)
-            } else {
-                super::block_actions::instance::frame(document, insert, parameter)
-            }) else {
-                return false;
-            };
-            let Some(expected) = table
-                .expressions
-                .get(row * columns + column)
-                .and_then(|value| value.trim().parse::<f64>().ok())
-            else {
-                return false;
-            };
-            let actual = if is_angle {
-                (frame.end.y - frame.base.y)
-                    .atan2(frame.end.x - frame.base.x)
-                    .rem_euclid(std::f64::consts::TAU)
-            } else {
-                frame.end.distance(frame.base)
-            };
-            let difference = if is_angle {
-                (actual - expected + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+                (actual[column] - expected + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
                     - std::f64::consts::PI
             } else {
-                actual - expected
+                actual[column] - expected
             };
-            actual.is_finite()
-                && expected.is_finite()
-                && difference.abs() <= 1e-8 * actual.abs().max(expected.abs()).max(1.0)
+            difference.abs() <= 1e-8 * actual[column].abs().max(expected.abs()).max(1.)
         })
-    })
+    });
+    let row = matching.next()?;
+    matching.next().is_none().then_some(row)
 }
 
 /// A writable Lookup output as a per-reference property choice.
 pub(crate) fn reference_property(
-    document: &CadDocument,
+    document: &Document,
     insert: Handle,
 ) -> Option<crate::scene::model::object::Property> {
     reference_properties(document, None, 0, insert)
@@ -335,21 +307,21 @@ pub(crate) fn reference_property(
 
 /// Apply a writable Lookup row to a saved reference and materialize its geometry.
 pub(crate) fn evaluate_reference_value(
-    document: &CadDocument,
+    document: &Document,
     insert: Handle,
     lookup_parameter: Handle,
     selected: &str,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     evaluate_value_context(document, None, insert, lookup_parameter, selected)
 }
 
 fn evaluate_value_context(
-    document: &CadDocument,
-    baseline: Option<&CadDocument>,
+    document: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
     lookup_parameter: Handle,
     selected: &str,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let definition = super::block_actions::instance::definition(document, insert)
         .ok_or("Select a uniformly scaled dynamic block reference.")?;
     let lookup = parameters(baseline.unwrap_or(document), definition)
@@ -383,12 +355,12 @@ fn evaluate_value_context(
 }
 
 fn evaluate_row_context(
-    document: &CadDocument,
-    baseline: Option<&CadDocument>,
+    document: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
     lookup_parameter: Handle,
     row: usize,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let definition = super::block_actions::instance::definition(document, insert)
         .ok_or("Select a uniformly scaled dynamic block reference.")?;
     let (_, table) =
@@ -406,11 +378,9 @@ fn evaluate_row_context(
             return Err("Test actions with one reference in Test Block. Remove the extra references or reopen Test Block.");
         }
     }
-    if reference_row_context(document, baseline, insert, definition, &table) == Some(row) {
-        return Ok(None);
-    }
+    let mut changed =
+        reference_row_context(document, baseline, insert, definition, &table) != Some(row);
 
-    let columns = table.columns.len();
     let parameters = super::block_actions::all_parameters(baseline.unwrap_or(document), definition);
     let mut evaluated = document.clone();
     let frames = if baseline.is_some() {
@@ -423,6 +393,8 @@ fn evaluate_row_context(
     } else {
         super::block_actions::instance::load_frames(document, &mut evaluated, insert, &parameters)?
     };
+    let actual = expressions::actual_inputs(document, baseline, definition, insert, &table)?;
+    let resolved = expressions::row(baseline.unwrap_or(document), definition, &table, row, &actual, true)?;
     let mut endpoints = std::collections::BTreeMap::new();
     for (column, property) in table.columns.iter().enumerate() {
         if property.lookup_property {
@@ -444,13 +416,7 @@ fn evaluate_row_context(
         if !(is_distance && (parameter.linear || parameter.polar) || is_angle && parameter.polar) {
             return Err("This Lookup input property is unsupported.");
         }
-        let value = table
-            .expressions
-            .get(row * columns + column)
-            .ok_or("The selected Lookup row is incomplete.")?
-            .trim()
-            .parse::<f64>()
-            .ok()
+        let value = resolved[column].as_ref().map(|(_, value)| *value)
             .filter(|value| value.is_finite() && (!is_distance || *value > 1e-9))
             .ok_or("The selected Lookup row has an invalid parameter value.")?;
         let endpoint = if let Some(endpoint) = endpoints.get_mut(&parameter.id) {
@@ -485,12 +451,17 @@ fn evaluate_row_context(
             if constrained.distance(*endpoint) > 1e-8 * endpoint.distance(framed.base).max(1.0) {
                 return Err("The Lookup row values do not satisfy the parameter value sets.");
             }
+            changed |= endpoint.distance(frames[&parameter.handle].end)
+                > 1e-8 * endpoint.distance(framed.base).max(1.0);
             super::block_actions::set_value(
                 &mut evaluated,
                 parameter,
                 super::block_actions::Value::Point(*endpoint),
             )?;
         }
+    }
+    if !changed {
+        return Ok(None);
     }
     super::block_actions::rebuild_framed(
         &mut evaluated,
@@ -514,28 +485,28 @@ fn evaluate_row_context(
 }
 
 pub(crate) fn evaluate_reference_choice(
-    document: &CadDocument,
+    document: &Document,
     insert: Handle,
     selected: &str,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     evaluate_choice_context(document, None, insert, selected)
 }
 
 pub(crate) fn evaluate_test_choice(
-    document: &CadDocument,
-    baseline: &CadDocument,
+    document: &Document,
+    baseline: &Document,
     insert: Handle,
     selected: &str,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     evaluate_choice_context(document, Some(baseline), insert, selected)
 }
 
 fn evaluate_choice_context(
-    document: &CadDocument,
-    baseline: Option<&CadDocument>,
+    document: &Document,
+    baseline: Option<&Document>,
     insert: Handle,
     selected: &str,
-) -> Result<Option<CadDocument>, &'static str> {
+) -> Result<Option<Document>, &'static str> {
     let definition = super::block_actions::instance::definition(document, insert)
         .ok_or("Select a uniformly scaled dynamic block reference.")?;
     let mut seen = std::collections::HashSet::new();
@@ -637,9 +608,9 @@ pub(crate) fn validate(
                     return Err("Reverse lookup requires unique lookup values.".into());
                 }
             } else {
-                let numeric = cell.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+                let numeric = expressions::constant_value(cell);
                 if property.value_type == 40
-                    && numeric.is_none()
+                    && expressions::valid_cell(cell).is_err()
                     && !original.is_some_and(|old| {
                         old.columns.iter().enumerate().any(|(index, column)| {
                             column == property
@@ -652,7 +623,7 @@ pub(crate) fn validate(
                         })
                     })
                 {
-                    return Err("Enter finite decimal input values. Existing expressions can be retained unchanged.".into());
+                    return Err("The Lookup table is invalid.".into());
                 }
                 key.push(
                     numeric
@@ -668,7 +639,7 @@ pub(crate) fn validate(
     Ok(())
 }
 pub(crate) fn apply_table(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     parameter: Handle,
     edited: BlockLookupAction,
@@ -679,13 +650,14 @@ pub(crate) fn apply_table(
     Ok(handle)
 }
 fn apply_table_inner(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     parameter: Handle,
     mut edited: BlockLookupAction,
 ) -> Result<Handle, String> {
     let previous = table(document, definition, parameter).map_err(str::to_string)?;
     validate(&edited, previous.as_ref().map(|(_, t)| t))?;
+    expressions::validate_context(document, definition, &edited, previous.as_ref().map(|(_, t)| t))?;
     let lookups = parameters(document, definition);
     let primary = lookups
         .iter()
@@ -776,7 +748,7 @@ fn apply_table_inner(
     Ok(handle)
 }
 pub(crate) fn reframe(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     transform: &Transform,
 ) -> usize {
@@ -817,4 +789,96 @@ pub(crate) fn reframe(
         }
     }
     changed
+}
+
+/// Stage formula rewrites only in owned tables that bind the renamed input.
+/// Every failure occurs before metadata or native table objects are changed.
+pub(crate) fn renamed_input_tables(
+    document: &Document,
+    definition: Handle,
+    parameter: Handle,
+    field: crate::scene::block_authoring::metadata::Field,
+    old: &str,
+    new: &str,
+) -> Result<Vec<(Handle, BlockLookupAction)>, &'static str> {
+    use crate::scene::block_authoring::metadata::Field;
+    let Some(ObjectType::DynamicBlock(object)) = document.objects.get(&parameter) else {
+        return Ok(vec![]);
+    };
+    let connection = match (&object.data, field) {
+        (
+            DynamicBlockData::LinearParameter(_) | DynamicBlockData::PolarParameter(_),
+            Field::Name,
+        ) => "UpdatedDistance",
+        (DynamicBlockData::PolarParameter(_), Field::SecondaryName) => "UpdatedAngle",
+        _ => return Ok(vec![]),
+    };
+    let Some(p) = crate::scene::block_actions::all_parameters(document, definition)
+        .into_iter()
+        .find(|p| p.handle == parameter)
+    else {
+        return Ok(vec![]);
+    };
+    let graph = graph_handle(document, definition).ok_or("The authoring graph is unavailable.")?;
+    let original_properties = properties(document, definition);
+    let mut properties = original_properties.clone();
+    for property in &mut properties {
+        if property.column.node_id == p.id
+            && property
+                .column
+                .connection_name
+                .eq_ignore_ascii_case(connection)
+        {
+            property.label = new.into();
+        }
+    }
+    let mut edits = Vec::new();
+    for object in document.objects.values() {
+        let ObjectType::DynamicBlock(object) = object else {
+            continue;
+        };
+        let DynamicBlockData::LookupAction(original) = &object.data else {
+            continue;
+        };
+        if object.owner != graph
+            || !original.columns.iter().any(|c| {
+                !c.lookup_property
+                    && c.node_id == p.id
+                    && c.connection_name.eq_ignore_ascii_case(connection)
+            })
+        {
+            continue;
+        }
+        if original.columns.len() < 2
+            || original.columns.len() > 64
+            || original.row_count > 1000
+            || original.column_count != original.columns.len() as i32
+            || original.row_count < 0
+            || original.expressions.len() != original.row_count as usize * original.columns.len()
+        {
+            return Err("The Lookup table is invalid.");
+        }
+        let rows = (0..original.row_count as usize)
+            .map(|row| expressions::rewritable_row(&original_properties, original, row))
+            .collect::<Vec<_>>();
+        let mut edited = original.clone();
+        for (index, source) in edited.expressions.iter_mut().enumerate() {
+            if !rows[index / original.columns.len()] {
+                continue;
+            }
+            let column = &original.columns[index % original.columns.len()];
+            if !column.lookup_property && column.value_type == 40 {
+                *source = expressions::rename_cell(source, old, new)?;
+            }
+        }
+        if edited.expressions != original.expressions {
+            if rows.iter().enumerate().any(|(row, known)| {
+                *known && !expressions::rewritable_row(&properties, &edited, row)
+            }) {
+                return Err("The Lookup table is invalid.");
+            }
+            edits.push((object.handle, edited));
+        }
+    }
+    Ok(edits)
 }

@@ -5,7 +5,7 @@
 //! to DWF.
 
 use codec::xdata::XDataValue;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 
 pub(crate) const APP: &str = "PE_URL";
 /// Flag of the inner group: links to drawings point at their DWF.
@@ -105,13 +105,13 @@ impl Link {
 }
 
 /// Writes `link` onto the object, or removes its hyperlink for `None`.
-pub(crate) fn set(document: &mut CadDocument, handle: Handle, link: Option<&Link>) {
+pub(crate) fn set(document: &mut Document, handle: Handle, link: Option<&Link>) {
     crate::scene::view::dispatch::set_entity_xdata(document, handle, APP, link.map(Link::values));
 }
 
 /// Replaces only the address of an object's hyperlink; its text, named
 /// location and flags stay.
-pub(crate) fn set_url(document: &mut CadDocument, handle: Handle, url: &str) {
+pub(crate) fn set_url(document: &mut Document, handle: Handle, url: &str) {
     let mut link = document
         .get_entity(handle)
         .and_then(Link::of)

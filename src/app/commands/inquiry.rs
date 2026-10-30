@@ -100,8 +100,25 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
 
+            "SELECTSIMILAR SETTINGS" | "SELECTSIMILAR SE" => {
+                self.select_similar_settings = Some(self.select_similar_mode);
+                self.active_modal = Some(crate::app::ModalKind::SelectSimilarSettings);
+                self.reset_modal_geometry();
+            }
+            "SELECTSIMILAR" | "SELSIM" if self.tabs[i].scene.selected.is_empty() => {
+                use crate::modules::draw::select::SelectObjectsCommand;
+                let command = SelectObjectsCommand::with_settings(
+                    "SELECTSIMILAR",
+                    "SELECTSIMILAR",
+                    "Select objects or [SEttings]:",
+                    || crate::command::CmdResult::Dispatch("SELECTSIMILAR SETTINGS".to_string()),
+                );
+                self.command_line.push_info(&command.prompt());
+                self.command_line.set_step_options(command.options());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
             "SELECTSIMILAR" | "SELSIM" => {
-                let added = self.tabs[i].scene.select_similar();
+                let added = self.tabs[i].scene.select_similar(self.select_similar_mode);
                 self.command_line
                     .push_output(crate::tf!("Select Similar: {} added.", added).as_ref());
                 self.refresh_properties();
@@ -164,9 +181,12 @@ impl OpenCADStudio {
             "LIST" => {
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities();
                 if selected.is_empty() {
-                    self.command_line.push_error(
-                        crate::t!("LIST: no entities selected. Select entities first.").as_ref(),
-                    );
+                    // Without a selection, ask for the objects first.
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("LIST");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    return Some(Task::none());
                 } else {
                     for (handle, _) in &selected {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
@@ -904,6 +924,23 @@ impl OpenCADStudio {
                 self.open_data_extraction();
             }
 
+            // -DATAEXTRACTION: run a saved extraction from the command line.
+            "-DATAEXTRACTION" => {
+                let command = crate::modules::annotate::data_extract::TemplateCommand {
+                    drawing_dir: self.tabs[i]
+                        .current_path
+                        .as_deref()
+                        .and_then(std::path::Path::parent)
+                        .map(std::path::Path::to_path_buf),
+                };
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            cmd if cmd.starts_with("-DATAEXTRACTION _RUN ") => {
+                let path = cmd.trim_start_matches("-DATAEXTRACTION _RUN ").trim().to_string();
+                self.run_extraction_template(&path);
+            }
+
             // ── Find / Replace ────────────────────────────────────────────────
             // FIND <search>              — list all Text/MText/Dimension containing <search>
             // FIND <search> REPLACE <rep> — replace first occurrence (case-insensitive)
@@ -1026,7 +1063,7 @@ impl OpenCADStudio {
         i: usize,
         block_name: String,
         br_handle: codec::Handle,
-        unpersisted_pre_document: Option<codec::CadDocument>,
+        unpersisted_pre_document: Option<codec::Document>,
     ) {
         if self.block_editor_preferences.locked {
             self.command_line.push_error(
@@ -1091,6 +1128,7 @@ impl OpenCADStudio {
         self.grip_popup = None;
         self.visibility_popup = None;
         self.table_popup = None;
+        self.flip_popup = None;
         // Entering BEDIT changes which block is assembled, not the
         // cached geometry of that block's entities.
         self.tabs[i].scene.bump_geometry_no_blocks();
@@ -1126,6 +1164,7 @@ impl OpenCADStudio {
         self.grip_popup = None;
         self.visibility_popup = None;
         self.table_popup = None;
+        self.flip_popup = None;
 
         let parent_index = return_block.and_then(|parent_name| {
             self.tabs[i]
@@ -1463,13 +1502,19 @@ fn entity_list_details(entity: &codec::EntityType) -> String {
             a.end_angle.to_degrees()
         )
         .into_owned(),
-        codec::EntityType::LwPolyline(p) => crate::tf!(
-            "{} vertices  closed={}  elevation={:.4}",
-            p.vertices.len(),
-            p.is_closed,
-            p.elevation
-        )
-        .into_owned(),
+        codec::EntityType::LwPolyline(p) => {
+            let mut details = crate::tf!(
+                "{} vertices  closed={}  elevation={:.4}",
+                p.vertices.len(),
+                p.is_closed,
+                p.elevation
+            )
+            .into_owned();
+            for v in &p.vertices {
+                details.push_str(&format!("\n    ({:.4},{:.4})", v.location.x, v.location.y));
+            }
+            details
+        }
         codec::EntityType::Text(t) => crate::tf!(
             "\"{}\"  h={:.4}  at ({:.4},{:.4})",
             t.value,

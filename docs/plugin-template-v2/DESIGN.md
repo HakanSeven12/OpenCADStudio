@@ -84,8 +84,8 @@ cargo build -p plugin-template-v2
 
 The resulting cdylib plus `plugin.toml` (checked in alongside this file) can
 be installed into the host's plugins folder (see `docs/plugin-architecture.md`).
-Replace `plugin.toml`'s `rustc_version` and `acadrust_source` placeholders in
-your packaging step. The release workflow in `docs/plugin-template` shows how.
+From API v14 the plugin runs its own runner loop, so it does not have to be
+built with the host's compiler or codec commit.
 
 ---
 

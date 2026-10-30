@@ -35,9 +35,11 @@ const PORT_HIT: f32 = 10.0;
 const ZOOM_STEP: f32 = 1.1;
 const ZOOM_STEPS: std::ops::RangeInclusive<i32> = -15..=12;
 
-/// Drawing objects a node can create.
+/// Drawing objects a node can create, and `Object`, which creates nothing
+/// and stands for whatever object is linked into it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjectKind {
+    Object,
     Line,
     Circle,
     Arc,
@@ -48,9 +50,17 @@ pub enum ObjectKind {
     XLine,
     Text,
     MText,
+    Spline,
+    Polyline3D,
+    Solid,
+    Face3D,
+    Leader,
+    Tolerance,
+    Wipeout,
 }
 
 const OBJECTS: &[ObjectKind] = &[
+    ObjectKind::Object,
     ObjectKind::Line,
     ObjectKind::Circle,
     ObjectKind::Arc,
@@ -61,12 +71,25 @@ const OBJECTS: &[ObjectKind] = &[
     ObjectKind::XLine,
     ObjectKind::Text,
     ObjectKind::MText,
+    ObjectKind::Spline,
+    ObjectKind::Polyline3D,
+    ObjectKind::Solid,
+    ObjectKind::Face3D,
+    ObjectKind::Leader,
+    ObjectKind::Tolerance,
+    ObjectKind::Wipeout,
 ];
+
+/// Every object node type, in palette order.
+pub fn object_kinds() -> &'static [ObjectKind] {
+    OBJECTS
+}
 
 impl ObjectKind {
     /// Display name, also the graph's object type name.
     pub fn name(self) -> &'static str {
         match self {
+            ObjectKind::Object => "Object",
             ObjectKind::Line => "Line",
             ObjectKind::Circle => "Circle",
             ObjectKind::Arc => "Arc",
@@ -77,6 +100,13 @@ impl ObjectKind {
             ObjectKind::XLine => "Construction Line",
             ObjectKind::Text => "Text",
             ObjectKind::MText => "Multiline Text",
+            ObjectKind::Spline => "Spline",
+            ObjectKind::Polyline3D => "3D Polyline",
+            ObjectKind::Solid => "2D Solid",
+            ObjectKind::Face3D => "3D Face",
+            ObjectKind::Leader => "Leader",
+            ObjectKind::Tolerance => "Tolerance",
+            ObjectKind::Wipeout => "Wipeout",
         }
     }
 
@@ -88,7 +118,8 @@ impl ObjectKind {
     pub fn matches(self, entity: &EntityType) -> bool {
         matches!(
             (self, entity),
-            (ObjectKind::Line, EntityType::Line(_))
+            (ObjectKind::Object, _)
+                | (ObjectKind::Line, EntityType::Line(_))
                 | (ObjectKind::Circle, EntityType::Circle(_))
                 | (ObjectKind::Arc, EntityType::Arc(_))
                 | (ObjectKind::Ellipse, EntityType::Ellipse(_))
@@ -98,11 +129,19 @@ impl ObjectKind {
                 | (ObjectKind::XLine, EntityType::XLine(_))
                 | (ObjectKind::Text, EntityType::Text(_))
                 | (ObjectKind::MText, EntityType::MText(_))
+                | (ObjectKind::Spline, EntityType::Spline(_))
+                | (ObjectKind::Polyline3D, EntityType::Polyline3D(_))
+                | (ObjectKind::Solid, EntityType::Solid(_))
+                | (ObjectKind::Face3D, EntityType::Face3D(_))
+                | (ObjectKind::Leader, EntityType::Leader(_))
+                | (ObjectKind::Tolerance, EntityType::Tolerance(_))
+                | (ObjectKind::Wipeout, EntityType::Wipeout(_))
         )
     }
 
     fn command(self) -> &'static str {
         match self {
+            ObjectKind::Object => "SELECT",
             ObjectKind::Line => "LINE",
             ObjectKind::Circle => "CIRCLE",
             ObjectKind::Arc => "ARC",
@@ -113,16 +152,30 @@ impl ObjectKind {
             ObjectKind::XLine => "XLINE",
             ObjectKind::Text => "TEXT",
             ObjectKind::MText => "MTEXT",
+            ObjectKind::Spline => "SPLINE",
+            ObjectKind::Polyline3D => "3DPOLY",
+            ObjectKind::Solid => "SOLID",
+            ObjectKind::Face3D => "3DFACE",
+            ObjectKind::Leader => "LEADER",
+            ObjectKind::Tolerance => "TOLERANCE",
+            ObjectKind::Wipeout => "WIPEOUT",
         }
     }
 
-    /// The entity a new node starts from.
-    pub fn entity(self) -> EntityType {
+    /// Whether the node owns its entities: everything but `Object`.
+    pub fn owns(self) -> bool {
+        self != ObjectKind::Object
+    }
+
+    /// The entity a new node starts from; `None` for `Object`.
+    pub fn entity(self) -> Option<EntityType> {
         use codec::entities as e;
         use codec::types::{Vector2, Vector3};
         let origin = Vector3::new(0.0, 0.0, 0.0);
         let x_axis = Vector3::new(1.0, 0.0, 0.0);
-        match self {
+        let point = |x: f64, y: f64| Vector3::new(x, y, 0.0);
+        Some(match self {
+            ObjectKind::Object => return None,
             ObjectKind::Line => {
                 EntityType::Line(e::Line::from_coords(0.0, 0.0, 0.0, 10.0, 0.0, 0.0))
             }
@@ -154,7 +207,34 @@ impl ObjectKind {
             ObjectKind::MText => {
                 EntityType::MText(Box::new(e::MText::with_value("MText", origin).with_height(2.5)))
             }
-        }
+            ObjectKind::Spline => EntityType::Spline(e::Spline::from_fit_points(vec![
+                origin,
+                point(5.0, 5.0),
+                point(10.0, 0.0),
+            ])),
+            ObjectKind::Polyline3D => EntityType::Polyline3D(e::Polyline3D::from_points(vec![
+                origin,
+                point(10.0, 0.0),
+                Vector3::new(10.0, 10.0, 5.0),
+            ])),
+            ObjectKind::Solid => EntityType::Solid(e::Solid::new(
+                origin,
+                point(10.0, 0.0),
+                point(0.0, 10.0),
+                point(10.0, 10.0),
+            )),
+            ObjectKind::Face3D => EntityType::Face3D(e::Face3D::new(
+                origin,
+                point(10.0, 0.0),
+                point(10.0, 10.0),
+                point(0.0, 10.0),
+            )),
+            ObjectKind::Leader => EntityType::Leader(e::Leader::two_point(origin, point(10.0, 5.0))),
+            ObjectKind::Tolerance => {
+                EntityType::Tolerance(e::Tolerance::with_text(origin, "{\\Fgdt;j}%%v0.1"))
+            }
+            ObjectKind::Wipeout => EntityType::Wipeout(e::Wipeout::rectangular(origin, 10.0, 5.0)),
+        })
     }
 }
 
@@ -177,7 +257,8 @@ impl PaletteItem {
 /// Canvas state of one node.
 pub struct NodeUi {
     pub pos: Point,
-    /// Expanded section titles; a new object node opens only Geometry.
+    /// Expanded section titles and coordinate groups; a new object node opens
+    /// only Geometry.
     pub open: HashSet<String>,
     /// Entities an object node owns, one per list element.
     pub handles: Vec<Handle>,
@@ -185,6 +266,8 @@ pub struct NodeUi {
 
 pub enum RowWidget {
     Field,
+    /// A coordinate group's summary row; its label folds the components.
+    Group,
     Slider { min: f64, max: f64, step: f64 },
     Toggle,
 }
@@ -192,6 +275,8 @@ pub enum RowWidget {
 /// A group of rows; an empty title has no header and is always open.
 pub struct NodeSection {
     pub title: String,
+    /// The header's own ports, carrying every row of the section at once.
+    pub header: Option<NodeRow>,
     pub rows: Vec<NodeRow>,
 }
 
@@ -202,6 +287,8 @@ pub struct NodeRow {
     pub input: bool,
     pub output: bool,
     pub widget: RowWidget,
+    /// The coordinate group (its summary row's field) this row folds into.
+    pub group: Option<String>,
 }
 
 pub enum Drag {
@@ -226,6 +313,12 @@ pub struct Graph {
     toggled_categories: HashSet<&'static str>,
     /// Filter typed into the panel's search box.
     search: String,
+    /// Objects the last evaluation edited in place, with their prior state,
+    /// in edit order. The next evaluation restores them first.
+    pub applied: Vec<(Handle, EntityType)>,
+    /// Objects the last evaluation's operations created; the next one
+    /// erases them first.
+    pub created: Vec<Handle>,
 }
 
 #[derive(Debug, Clone)]
@@ -319,27 +412,56 @@ impl Graph {
                 )
             })
             .collect();
+        let applied: Vec<Value> = self
+            .applied
+            .iter()
+            .filter_map(|(handle, entity)| {
+                Some(json!([handle.value(), serde_json::to_value(entity).ok()?]))
+            })
+            .collect();
+        let created: Vec<u64> = self.created.iter().map(|handle| handle.value()).collect();
         let file = json!({
             "format": "ocg",
             "version": 1,
             "drawing": drawing,
             "graph": self.engine.to_json(),
             "canvas": { "pan": [self.pan.x, self.pan.y], "zoom": self.zoom_steps, "nodes": nodes },
+            "applied": applied,
+            "created": created,
         });
         serde_json::to_vec_pretty(&file).unwrap_or_default()
     }
 
     /// Reads an `.ocg` file, returning the graph and the drawing fingerprint
-    /// it was saved against. Handles come back unchecked.
+    /// it was saved against. Handles come back unchecked, and the edits of
+    /// the last evaluation come back whatever drawing is open.
     pub fn from_file(bytes: &[u8]) -> Result<(Self, String), String> {
         let file: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
         if file["format"] != "ocg" {
             return Err(t!("Not a node graph file").into_owned());
         }
         let mut graph = Graph {
-            engine: graph::Graph::from_json(&file["graph"])?,
+            engine: graph::Graph::from_json(&file["graph"], &crate::app::node_graph::ops::resolve)?,
             ..Graph::default()
         };
+        graph.applied = file["applied"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|pair| {
+                let entity = serde_json::from_value(pair[1].clone()).ok()?;
+                Some((Handle::new(pair[0].as_u64()?), entity))
+            })
+            .collect();
+        graph.created = file["created"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_u64)
+            .map(Handle::new)
+            .collect();
         let canvas = &file["canvas"];
         let pair = |value: &Value| {
             Some(Vector::new(
@@ -446,6 +568,7 @@ impl Graph {
                     input: true,
                     output,
                     widget,
+                    group: None,
                 }
             })
             .collect();
@@ -460,10 +583,12 @@ impl Graph {
                     input: false,
                     output: true,
                     widget: RowWidget::Field,
+                    group: None,
                 }),
         );
         vec![NodeSection {
             title: String::new(),
+            header: None,
             rows,
         }]
     }
@@ -492,8 +617,18 @@ impl Graph {
                 .is_some_and(|ui| ui.open.contains(&section.title))
     }
 
+    /// Whether `row` shows: not folded into a closed coordinate group.
+    fn is_shown(&self, id: NodeId, row: &NodeRow) -> bool {
+        row.group.as_ref().is_none_or(|group| {
+            self.ui
+                .get(&id)
+                .is_some_and(|ui| ui.open.contains(group))
+        })
+    }
+
     /// Row centre of `field`, relative to the node's top. Rows of a collapsed
-    /// section keep their ports on its header.
+    /// section keep their ports on its header, folded components on their
+    /// group's row.
     fn port_offset(
         &self,
         id: NodeId,
@@ -502,9 +637,12 @@ impl Graph {
         input: bool,
     ) -> Option<f32> {
         let mut y = HEADER_H;
+        let matches =
+            |row: &NodeRow| row.field == field && if input { row.input } else { row.output };
         for section in sections {
-            let matches =
-                |row: &NodeRow| row.field == field && if input { row.input } else { row.output };
+            if section.header.as_ref().is_some_and(matches) {
+                return Some(y + SECTION_H * 0.5);
+            }
             let header = if section.title.is_empty() {
                 0.0
             } else {
@@ -518,7 +656,17 @@ impl Graph {
                 continue;
             }
             y += header;
+            let mut group_y = None;
             for row in &section.rows {
+                if !self.is_shown(id, row) {
+                    if matches(row) {
+                        return group_y.map(|group_y: f32| group_y + ROW_H * 0.5);
+                    }
+                    continue;
+                }
+                if matches!(row.widget, RowWidget::Group) {
+                    group_y = Some(y);
+                }
                 if matches(row) {
                     return Some(y + ROW_H * 0.5);
                 }
@@ -553,9 +701,15 @@ impl Graph {
             .find_map(|(node, node_sections)| {
                 node_sections
                     .iter()
-                    .filter(|section| self.is_open(node.id, section))
-                    .flat_map(|section| &section.rows)
-                    .filter(|row| row.input)
+                    .flat_map(|section| {
+                        let rows = if self.is_open(node.id, section) {
+                            section.rows.as_slice()
+                        } else {
+                            &[]
+                        };
+                        section.header.iter().chain(rows)
+                    })
+                    .filter(|row| row.input && self.is_shown(node.id, row))
                     .map(|row| Port {
                         node: node.id,
                         field: row.field.clone(),
@@ -684,7 +838,10 @@ impl Graph {
             query.is_empty() || t!(item.label()).to_lowercase().contains(&query)
         };
         let mut tree = column![].spacing(1);
-        let categories = std::iter::once("Objects").chain(graph::CATEGORIES.iter().copied());
+        use crate::app::node_graph::ops;
+        let categories = std::iter::once("Objects")
+            .chain(ops::CATEGORIES.iter().copied())
+            .chain(graph::CATEGORIES.iter().copied());
         for category in categories {
             let items: Vec<PaletteItem> = if category == "Objects" {
                 OBJECTS
@@ -692,8 +849,9 @@ impl Graph {
                     .map(|kind| PaletteItem::Object(*kind))
                     .collect()
             } else {
-                graph::LIBRARY
+                ops::LIBRARY
                     .iter()
+                    .chain(graph::LIBRARY)
                     .filter(|spec| spec.category == category)
                     .map(PaletteItem::Op)
                     .collect()
@@ -791,25 +949,38 @@ impl Graph {
         for section in sections {
             let open = self.is_open(id, &section);
             if !section.title.is_empty() {
+                let (in_port, out_port) = match &section.header {
+                    Some(header) => self.port_views(id, header),
+                    None => (
+                        Space::new().width(PORT_W).into(),
+                        Space::new().width(PORT_W).into(),
+                    ),
+                };
+                let toggle = button(
+                    row![
+                        crate::ui::icons::themed_arrow_toggle(open, 9.0),
+                        text(section.title.clone()).size(11)
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Center),
+                )
+                .on_press(msg(GraphMsg::Section(id, section.title.clone())))
+                .style(button::secondary)
+                .width(Length::Fill)
+                .height(SECTION_H)
+                .padding([0, 6]);
                 col = col.push(
-                    button(
-                        row![
-                            crate::ui::icons::themed_arrow_toggle(open, 9.0),
-                            text(section.title.clone()).size(11)
-                        ]
-                        .spacing(4)
+                    row![in_port, toggle, out_port]
+                        .spacing(2)
+                        .height(SECTION_H)
                         .align_y(iced::Center),
-                    )
-                    .on_press(msg(GraphMsg::Section(id, section.title)))
-                    .style(button::secondary)
-                    .width(Length::Fill)
-                    .height(SECTION_H)
-                    .padding([0, 6]),
                 );
             }
             if open {
                 for node_row in section.rows {
-                    col = col.push(self.row_view(id, node_row));
+                    if self.is_shown(id, &node_row) {
+                        col = col.push(self.row_view(id, node_row));
+                    }
                 }
             }
         }
@@ -828,28 +999,60 @@ impl Graph {
         )
     }
 
-    fn row_view(&self, id: NodeId, node_row: NodeRow) -> Element<'_, Message> {
+    /// The input and output port dots of `node_row`, or gaps.
+    fn port_views(&self, id: NodeId, node_row: &NodeRow) -> (Element<'_, Message>, Element<'_, Message>) {
         let port = Port {
             node: id,
-            field: node_row.field,
+            field: node_row.field.clone(),
         };
-        let linked_in = self.engine.is_linked(&port);
-        let linked_out = self.engine.links.iter().any(|link| link.from == port);
-        let shown = display(&node_row.value);
         let in_port: Element<'_, Message> = if node_row.input {
-            mouse_area(port_dot(linked_in))
+            mouse_area(port_dot(self.engine.is_linked(&port)))
                 .on_press(msg(GraphMsg::InPress(port.clone())))
                 .into()
         } else {
             Space::new().width(PORT_W).into()
         };
         let out_port: Element<'_, Message> = if node_row.output {
-            mouse_area(port_dot(linked_out))
-                .on_press(msg(GraphMsg::OutPress(port.clone())))
+            let linked = self.engine.links.iter().any(|link| link.from == port);
+            mouse_area(port_dot(linked))
+                .on_press(msg(GraphMsg::OutPress(port)))
                 .into()
         } else {
             Space::new().width(PORT_W).into()
         };
+        (in_port, out_port)
+    }
+
+    fn row_view(&self, id: NodeId, node_row: NodeRow) -> Element<'_, Message> {
+        let (in_port, out_port) = self.port_views(id, &node_row);
+        let label: Element<'_, Message> = match node_row.widget {
+            RowWidget::Group => {
+                let open = self
+                    .ui
+                    .get(&id)
+                    .is_some_and(|ui| ui.open.contains(&node_row.field));
+                button(
+                    row![
+                        crate::ui::icons::themed_arrow_toggle(open, 9.0),
+                        text(node_row.label).size(11)
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Center),
+                )
+                .on_press(msg(GraphMsg::Section(id, node_row.field.clone())))
+                .style(button::text)
+                .padding(0)
+                .width(LABEL_W)
+                .into()
+            }
+            _ => text(node_row.label).size(11).width(LABEL_W).into(),
+        };
+        let port = Port {
+            node: id,
+            field: node_row.field,
+        };
+        let linked_in = self.engine.is_linked(&port);
+        let shown = display(&node_row.value);
         let value: Element<'_, Message> = if node_row.input && !linked_in {
             match node_row.widget {
                 RowWidget::Slider { min, max, step } => {
@@ -875,7 +1078,7 @@ impl Graph {
                         .width(Length::Fill)
                         .into()
                 }
-                RowWidget::Field => {
+                RowWidget::Field | RowWidget::Group => {
                     let draft = self.drafts.get(&port).cloned().unwrap_or(shown);
                     let edit = port.clone();
                     text_input("", &draft)
@@ -890,12 +1093,7 @@ impl Graph {
         } else {
             text(shown).size(11).width(Length::Fill).into()
         };
-        row![
-            in_port,
-            text(node_row.label).size(11).width(LABEL_W),
-            value,
-            out_port
-        ]
+        row![in_port, label, value, out_port]
         .spacing(2)
         .height(ROW_H)
         .align_y(iced::Center)

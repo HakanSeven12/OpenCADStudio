@@ -3,7 +3,7 @@
 //! Imported DGN linetypes store their real pattern as DGN
 //! line-style objects (`AcDbLS*`), not standard `LTYPE` dashes — the standard
 //! table entry is empty, so opencadcodec exposes the structure in
-//! [`CadDocument::dgn_ls_definitions`] / `dgn_ls_components` instead. See
+//! [`Document::dgn_ls_definitions`] / `dgn_ls_components` instead. See
 //! `objects/dgn_linestyle.rs` in opencadcodec and `~/Documents/OCS/DGN_LINESTYLE_PLAN.md`.
 //!
 //! The visible content combines **symbol components**, each of which references
@@ -13,7 +13,7 @@
 
 use codec::objects::DgnLsComponentType;
 use codec::types::{Handle, Vector3};
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 use std::collections::HashSet;
 
 use crate::scene::model::wire_model::WireModel;
@@ -27,7 +27,7 @@ pub struct DgnSymbol {
 
 /// Symbol placements referenced by a linetype's DGN line-style tree, in tree
 /// order. Empty when the linetype is not a DGN line style.
-pub fn symbol_blocks(doc: &CadDocument, lt_name: &str) -> Vec<DgnSymbol> {
+pub fn symbol_blocks(doc: &Document, lt_name: &str) -> Vec<DgnSymbol> {
     let Some(def) = doc
         .dgn_ls_definitions
         .values()
@@ -41,7 +41,7 @@ pub fn symbol_blocks(doc: &CadDocument, lt_name: &str) -> Vec<DgnSymbol> {
     out
 }
 
-fn walk(doc: &CadDocument, h: Handle, out: &mut Vec<DgnSymbol>, seen: &mut HashSet<Handle>) {
+fn walk(doc: &Document, h: Handle, out: &mut Vec<DgnSymbol>, seen: &mut HashSet<Handle>) {
     if !seen.insert(h) {
         return;
     }
@@ -74,7 +74,7 @@ fn walk(doc: &CadDocument, h: Handle, out: &mut Vec<DgnSymbol>, seen: &mut HashS
 
 /// Signed native dash lengths in a typed stroke component: dashes are positive
 /// and gaps negative. Empty when the component has no usable stroke lengths.
-fn stroke_dashes(doc: &CadDocument, h: Handle) -> Vec<f64> {
+fn stroke_dashes(doc: &Document, h: Handle) -> Vec<f64> {
     use codec::objects::{DgnLineStyleData, DgnLsComponentData, ObjectType};
     let Some(ObjectType::DgnLineStyle(style)) = doc.objects.get(&h) else {
         return Vec::new();
@@ -105,7 +105,7 @@ fn stroke_dashes(doc: &CadDocument, h: Handle) -> Vec<f64> {
 /// least two values (a dash + a gap). The base stroke a point component sits on
 /// (a single long length) is intentionally skipped — it is the solid placement
 /// guide, not the visible dash. Empty for a solid style.
-pub fn wall_dashes(doc: &CadDocument, lt_name: &str) -> Vec<f64> {
+pub fn wall_dashes(doc: &Document, lt_name: &str) -> Vec<f64> {
     let Some(def) = doc
         .dgn_ls_definitions
         .values()
@@ -134,7 +134,7 @@ pub fn wall_dashes(doc: &CadDocument, lt_name: &str) -> Vec<f64> {
 /// [`place_block_wires`] draws it at). For a pipe end-circle this is the circle
 /// radius, which is also the offset of the two pipe walls (they sit tangent to
 /// the end circles) — so it doubles as the rail offset for the double line.
-pub fn symbol_radius(doc: &CadDocument, block: Handle, scale: f64) -> f64 {
+pub fn symbol_radius(doc: &Document, block: Handle, scale: f64) -> f64 {
     let mut r = 0.0_f64;
     let depths = rustc_hash::FxHashMap::default();
     let graph = crate::scene::render_graph::RenderSceneGraph::new(doc, None, None, true, &depths);
@@ -302,7 +302,7 @@ pub fn polyline_points(e: &EntityType) -> Vec<[f64; 3]> {
 /// as it would anywhere else.
 #[allow(clippy::too_many_arguments)]
 pub fn place_block_wires(
-    doc: &CadDocument,
+    doc: &Document,
     block: Handle,
     scale_divisor: f64,
     at: [f64; 3],

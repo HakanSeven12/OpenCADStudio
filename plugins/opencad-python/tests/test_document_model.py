@@ -128,7 +128,9 @@ class DocumentModelTests(unittest.TestCase):
         self.assertEqual([c[2]["text"] for c in self.calls if c[0] == "step" and c[1] == "text"], ["2", "2", "2", "10", "20", "30"])
         self.calls.clear()
         self.doc.modify.array_path([1], 2, 5, at=(0, 0, 0))
-        self.assertEqual([c[1] for c in self.calls if c[0] == "step"], ["start", "entity", "text"])
+        self.assertEqual(
+            [c[1] for c in self.calls if c[0] == "step"], ["start", "entity", "token", "text"]
+        )
 
     def test_batch_edit_and_rollback(self):
         line = self.doc.entities[1]

@@ -13,7 +13,7 @@ use codec::entities::{
     AttachmentPoint, DrawingDirection, LineSpacingStyle, MText, TextHorizontalAlignment as HA,
 };
 use codec::types::Vector3;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 
 use crate::app::settings::Txt2MtxtSettings;
 use crate::entities::text_support::{resolve_dxf_special_chars, text_local_bounds};
@@ -121,7 +121,7 @@ fn text_content(value: &str) -> String {
     out
 }
 
-fn piece<'a>(handle: Handle, entity: &'a EntityType, doc: &CadDocument) -> Option<Piece<'a>> {
+fn piece<'a>(handle: Handle, entity: &'a EntityType, doc: &Document) -> Option<Piece<'a>> {
     match entity {
         EntityType::Text(t) => {
             let p = crate::entities::text::text_run_placement_at_scale(t, doc, 1.0);
@@ -214,7 +214,7 @@ fn mtext_from(source: &EntityType, value: String, at: [f64; 2], height: f64, rot
 
 /// Each TEXT and each line of an MTEXT as an MTEXT of its own. A TEXT keeps
 /// its horizontal justification as a top attachment.
-fn separate(p: &Piece, doc: &CadDocument) -> Vec<EntityType> {
+fn separate(p: &Piece, doc: &Document) -> Vec<EntityType> {
     match p.entity {
         EntityType::Text(t) => {
             let (x, attachment) = match t.horizontal_alignment {
@@ -277,7 +277,7 @@ fn separate(p: &Piece, doc: &CadDocument) -> Vec<EntityType> {
 /// text.
 pub fn plan(
     selected: &[(Handle, &EntityType)],
-    doc: &CadDocument,
+    doc: &Document,
     settings: Txt2MtxtSettings,
 ) -> Option<Txt2MtxtPlan> {
     let mut pieces: Vec<Piece> = selected

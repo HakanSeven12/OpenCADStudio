@@ -400,16 +400,24 @@ pub fn stretch(
 }
 
 /// Rebuild center and size from two opposite corners while preserving viewport
-/// scale as its paper-space height changes.
+/// scale as its paper-space height changes. The model stays where it is on the
+/// sheet: as the viewport's centre moves, its view centre moves with it.
 fn resize_from_corners(vp: &mut Viewport, a: (f64, f64), b: (f64, f64)) -> bool {
     let new_width = (b.0 - a.0).abs();
     let new_height = (b.1 - a.1).abs();
     let mut changed = false;
+    // Model units per sheet unit; the view centre is in display coordinates,
+    // whose axes are the sheet's.
+    let model_per_sheet = match vp.height > 1e-9 {
+        true => vp.view_height / vp.height,
+        false => 0.0,
+    };
 
     if new_width > 0.01 {
         let new_center_x = (a.0 + b.0) * 0.5;
         changed |=
             (vp.center.x - new_center_x).abs() > 1e-12 || (vp.width - new_width).abs() > 1e-12;
+        vp.view_center.x += (new_center_x - vp.center.x) * model_per_sheet;
         vp.center.x = new_center_x;
         vp.width = new_width;
     }
@@ -418,6 +426,7 @@ fn resize_from_corners(vp: &mut Viewport, a: (f64, f64), b: (f64, f64)) -> bool 
         let new_center_y = (a.1 + b.1) * 0.5;
         changed |=
             (vp.center.y - new_center_y).abs() > 1e-12 || (old_height - new_height).abs() > 1e-12;
+        vp.view_center.y += (new_center_y - vp.center.y) * model_per_sheet;
         vp.center.y = new_center_y;
         if old_height > 1e-9 && vp.view_height.abs() > 1e-9 {
             vp.view_height *= new_height / old_height;

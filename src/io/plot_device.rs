@@ -72,9 +72,11 @@ impl PlotDevice {
             return (PlotDevice::Pdf, false);
         }
         let lower = name.to_ascii_lowercase();
-        if lower.ends_with(".pc3") {
+        if lower.ends_with(".pc3") || lower.ends_with(".pc5") {
             // Any the source application plotter configuration: PDF ones are ours to drive,
             // the rest plot to PDF here but keep their name for the source application.
+            // `.pc5` is the same kind of file from another program ("DWG to PDF.pc5"):
+            // read as a printer name, the plot went to a queue that does not exist.
             return (PlotDevice::Pdf, true);
         }
         (PlotDevice::Printer(name.to_string()), true)

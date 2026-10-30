@@ -220,10 +220,9 @@ fn ui_font_changes() -> Subscription<Message> {
 }
 
 /// Background used by drafting overlays in model or paper space.
+/// The background the viewport actually draws behind the cursor and grid. The
+/// block editor draws on the model background too (#2216).
 fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
-    if tab.active_block_edit_session().is_some() {
-        return [0.62, 0.62, 0.62, 1.0];
-    }
     if !is_paper {
         return tab.scene.bg_color;
     }
@@ -435,6 +434,10 @@ impl OpenCADStudio {
         crate::entities::common::set_unit_context(
             crate::entities::common::UnitContext::from_header(&tab.scene.document.header),
         );
+        crate::ui::properties::set_light_canvas(crate::ui::style::common::canvas_is_light(
+            tab.scene.current_bg(),
+        ));
+        crate::ui::color_select::set_recent_colors(&tab.recent_colors);
         let thumbnail_capture_clean = self.thumbnail_capture_clean;
         let theme_text = self.active_theme.palette().background.base.text;
         let viewcube_text_color = [theme_text.r, theme_text.g, theme_text.b, theme_text.a];
@@ -491,12 +494,7 @@ impl OpenCADStudio {
         mark("viewport_3d");
         let viewport_3d: Element<'_, Message> = if self.layout_settling && !tab.is_start {
             // Omit the shader and drafting overlays for the notice frame.
-            let in_block_editor = tab.active_block_edit_session().is_some();
-            let bg = if in_block_editor {
-                [0.62, 0.62, 0.62, 1.0]
-            } else {
-                crosshair_background(tab, is_paper)
-            };
+            let bg = crosshair_background(tab, is_paper);
             let lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
             let ink = if lum > 0.5 {
                 Color::from_rgba(0.0, 0.0, 0.0, 0.55)
@@ -532,6 +530,7 @@ impl OpenCADStudio {
                 self.recent_view,
                 self.start_action_w.clone(),
                 self.start_section,
+                self.start_templates.as_deref(),
             )
         } else if is_paper {
             shader(ViewportPane::model(
@@ -697,11 +696,7 @@ impl OpenCADStudio {
             let params_ms = crate::perf::elapsed_ms(t_params);
             let t_bg = crate::perf::enabled().then(iced::time::Instant::now);
             let in_block_editor = tab.active_block_edit_session().is_some();
-            let bg = if in_block_editor {
-                [0.62, 0.62, 0.62, 1.0]
-            } else {
-                crosshair_background(tab, is_paper)
-            };
+            let bg = crosshair_background(tab, is_paper);
             let bg_ms = crate::perf::elapsed_ms(t_bg);
             if views_ms + params_ms + bg_ms >= 1.0 {
                 crate::perf_record!(
@@ -2179,6 +2174,67 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // Dynamic-block flip-state list.
+            if let Some(popup) = self.flip_popup.as_ref() {
+                if !tab.is_start {
+                    let max_len = popup
+                        .labels
+                        .iter()
+                        .map(|s| s.chars().count())
+                        .max()
+                        .unwrap_or(4) as f32;
+                    // +2 chars for the leading "✓ " / "  " marker column.
+                    let row_w = (max_len + 2.0) * 7.0 + 24.0;
+                    let mut col = column![].spacing(0).width(iced::Length::Fixed(row_w));
+                    for (idx, name) in popup.labels.iter().enumerate() {
+                        let is_cur = popup.current == idx;
+                        let mark: Element<'_, Message> = if is_cur {
+                            crate::ui::icons::themed_check_cell(true)
+                        } else {
+                            Space::new().width(11).into()
+                        };
+                        let btn = button(
+                            row![container(mark).width(16), text(name).size(12),]
+                                .spacing(2)
+                                .align_y(iced::Center),
+                        )
+                        .on_press(Message::FlipPick(idx))
+                        .padding([3, 10])
+                        .width(Fill)
+                        .style(move |theme: &Theme, status| {
+                            let palette = theme.palette();
+                            iced::widget::button::Style {
+                                background: matches!(status, iced::widget::button::Status::Hovered)
+                                    .then_some(Background::Color(palette.primary.weak.color)),
+                                border: Border {
+                                    color: Color::TRANSPARENT,
+                                    width: 0.0,
+                                    radius: 0.0.into(),
+                                },
+                                text_color: palette.background.base.text,
+                                ..Default::default()
+                            }
+                        });
+                        col = col.push(btn);
+                    }
+                    let panel = container(col).padding(2).style(|theme: &Theme| {
+                        let palette = theme.palette();
+                        container::Style {
+                            background: Some(Background::Color(palette.background.weak.color)),
+                            border: Border {
+                                color: palette.background.neutral.color,
+                                width: 1.0,
+                                radius: 3.0.into(),
+                            },
+                            ..Default::default()
+                        }
+                    });
+                    let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
+                    viewport_stack =
+                        viewport_stack.push(position_canvas_overlay(anchor, panel.into()));
+                }
+            }
+
             // Dynamic-block visibility-state dropdown.
             if let Some(popup) = self.visibility_popup.as_ref() {
                 if !tab.is_start {
@@ -2373,13 +2429,23 @@ bg={bg_ms:.1}ms n={view_count}"
             }
             // Quick Properties: stay near the selection cursor, flipping around
             // it as needed to remain inside the visible drawing area.
+            // Floating (QPLOCATION 1): where it was last dragged.
             if self.quick_properties && !tab.is_start {
                 if let Some(panel) = tab.properties.quick_view() {
-                    viewport_stack = viewport_stack.push(position_canvas_overlay_near_cursor(
-                        self.quick_properties_anchor,
-                        command_line_inset,
-                        panel,
-                    ));
+                    viewport_stack = viewport_stack.push(if self.quick_properties_float {
+                        overlay::position_canvas_overlay_clamped(
+                            self.quick_properties_pos,
+                            command_line_inset,
+                            iced::Vector::ZERO,
+                            panel,
+                        )
+                    } else {
+                        position_canvas_overlay_near_cursor(
+                            self.quick_properties_anchor,
+                            command_line_inset,
+                            panel,
+                        )
+                    });
                 }
             }
 
@@ -2811,7 +2877,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             iso_plane: self.iso_plane,
                             clean_screen: self.clean_screen,
                             linear_format: tab.scene.document.header.linear_unit_format,
-                            isolation_active: tab.scene.is_isolation_active(),
+                            isolation_active: tab.scene.has_hidden_objects(),
                             transparency_display: tab.scene.transparency_display,
                             quick_properties: self.quick_properties,
                             selection_filter_active: tab.scene.selection_filter_active(),
@@ -2874,9 +2940,7 @@ bg={bg_ms:.1}ms n={view_count}"
         } else {
             Vec::new()
         };
-        let gallery_open = open_dropdown == Some(crate::modules::insert::insert_block::GALLERY_ID)
-            && !self.tabs[self.active_tab].is_start;
-        let dropdown_layer: Element<'_, Message> = if gallery_open {
+        let dropdown_layer: Element<'_, Message> = if self.block_gallery_open() {
             self.ribbon.place_dropdown(
                 crate::modules::insert::insert_block::GALLERY_ID,
                 crate::ui::window::block_palette::gallery(&self.block_palette),
@@ -3291,6 +3355,14 @@ impl OpenCADStudio {
                         crate::ui::ribbon::keytip_pointer_pressed();
                         Some(Message::PropPointerPressed)
                     }
+                    iced::Event::Mouse(
+                        iced::mouse::Event::ButtonPressed(_)
+                        | iced::mouse::Event::ButtonReleased(_)
+                        | iced::mouse::Event::WheelScrolled { .. },
+                    ) => {
+                        crate::ui::ribbon::keytip_pointer_pressed();
+                        None
+                    }
                     iced::Event::Window(window::Event::CloseRequested) => {
                         Some(Message::WindowCloseRequested(win_id))
                     }
@@ -3321,6 +3393,7 @@ impl OpenCADStudio {
                         Some(Message::SetModifiers {
                             shift: m.shift(),
                             ctrl: m.command() || m.control(),
+                            alt: m.alt(),
                         })
                     }
                     iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -3896,6 +3969,7 @@ pub(super) fn start_page_view<'a>(
     recent_view: super::RecentView,
     action_width_out: std::sync::Arc<std::sync::atomic::AtomicU32>,
     active: super::StartSection,
+    templates: Option<&'a [std::path::PathBuf]>,
 ) -> Element<'a, Message> {
     responsive(move |size| {
         start_page_content(
@@ -3913,6 +3987,7 @@ pub(super) fn start_page_view<'a>(
             size.width,
             action_width_out.clone(),
             active,
+            templates,
         )
     })
     .into()
@@ -3933,6 +4008,7 @@ fn start_page_content<'a>(
     avail_w: f32,
     action_width_out: std::sync::Arc<std::sync::atomic::AtomicU32>,
     active: super::StartSection,
+    templates: Option<&'a [std::path::PathBuf]>,
 ) -> Element<'a, Message> {
     let headline = text("Open CAD Studio").size(40).style(start_primary_style);
 
@@ -3980,15 +4056,54 @@ fn start_page_content<'a>(
 
     let primary_row = WrapFlow::new(vec![
         outline_btn(crate::tr!("start", "new-drawing"), Message::TabNew).into(),
-        // NEW asks which template to start from (.dwt, .dwg or .dxf).
-        outline_btn(
-            crate::tr!("start", "new-from-template"),
-            Message::RibbonToolClick {
-                tool_id: "NEW".to_string(),
-                event: crate::modules::ModuleEvent::Command("NEW".to_string()),
-            },
-        )
-        .into(),
+        // The templates beside the default one, then Browse (NEW asks for a
+        // .dwt, .dwg or .dxf); straight to NEW when there is no such folder.
+        {
+            let head = outline_btn(
+                crate::tr!("start", "new-from-template"),
+                Message::StartTemplates(templates.is_none()),
+            );
+            match templates {
+                Some(templates) => {
+                    let mut list = column![].spacing(1);
+                    for path in templates {
+                        let name = path
+                            .file_stem()
+                            .map(|stem| stem.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        list = list.push(
+                            button(text(name).size(13))
+                                .on_press(Message::NewFromTemplate(Some(path.clone())))
+                                .style(crate::ui::color_select::list_row_style)
+                                .padding([4, 10])
+                                .width(Fill),
+                        );
+                    }
+                    list = list.push(
+                        button(text(crate::t!("Browse...")).size(13))
+                            .on_press(Message::RibbonToolClick {
+                                tool_id: "NEW".to_string(),
+                                event: crate::modules::ModuleEvent::Command("NEW".to_string()),
+                            })
+                            .style(crate::ui::color_select::list_row_style)
+                            .padding([4, 10])
+                            .width(Fill),
+                    );
+                    let height = ((templates.len() + 1) as f32 * 26.0).min(360.0);
+                    let popup = container(scrollable(list).height(height))
+                        .style(crate::ui::color_select::popup_panel_style)
+                        .padding(2);
+                    crate::ui::drop_down_fit::drop_down_fit(
+                        iced_aw::DropDown::new(head, popup, true)
+                            .width(iced::Length::Fixed(260.0))
+                            .alignment(iced_aw::drop_down::Alignment::Bottom)
+                            .offset(2.0)
+                            .on_dismiss(Message::StartTemplates(false)),
+                    )
+                }
+                None => head.into(),
+            }
+        },
         outline_btn(crate::tr!("start", "open-file"), Message::OpenFile).into(),
         donate_btn.into(),
     ])
@@ -4946,6 +5061,52 @@ pub(super) fn recent_files_panel<'a>(
 mod tests {
     use super::*;
 
+    /// The visibility dropdown draws its entries in one left-aligned column,
+    /// with a fixed leading slot for the tick of the state in use.
+    #[test]
+    fn visibility_popup_left_aligns_its_state_entries() {
+        use iced_test::core::widget;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::Selector;
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.visibility_popup = Some(crate::app::visibility::VisibilityPopup {
+            insert_handle: codec::Handle::new(1),
+            anchor: iced::Point::new(400.0, 300.0),
+            items: vec!["VisibilityState0".into(), "WindowHidden".into()],
+            current: Some(1),
+        });
+
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                None,
+            ),
+        )
+        .expect("headless renderer");
+        let mut ui = UserInterface::build(
+            app.view_main(),
+            iced::Size::new(1600.0, 900.0),
+            Cache::default(),
+            &mut renderer,
+        );
+        let mut left = Vec::new();
+        for label in ["VisibilityState0", "WindowHidden"] {
+            let mut find = Selector::find(label);
+            ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+            let widget::operation::Outcome::Some(Some(target)) = widget::Operation::finish(&find)
+            else {
+                panic!("{label} is not drawn");
+            };
+            left.push(target.visible_bounds().expect("the entry is visible").x);
+        }
+        assert!(
+            (left[0] - left[1]).abs() < 0.5,
+            "entries of different lengths start on one column, not centred: {left:?}"
+        );
+    }
+
     #[test]
     fn rapid_drawing_batched_pointer_events_keep_the_position_before_each_press() {
         use iced::mouse::{Button, Cursor, Event as Mouse};
@@ -5036,6 +5197,7 @@ mod tests {
             800.0,
             std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             super::super::StartSection::default(),
+            None,
         );
     }
 }

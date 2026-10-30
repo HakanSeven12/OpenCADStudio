@@ -210,7 +210,7 @@ pub(crate) fn directional_axis_endpoints(
 /// axis end that moves, and for a polyline the vertex to move instead of
 /// turning the whole entity.
 pub(crate) fn axis_alignment_target(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     refs: &[ParametricRef],
 ) -> Option<(Handle, Vector3, Vector3, Option<usize>)> {
     let (handle, start_marker, end_marker) = match refs {
@@ -281,7 +281,7 @@ pub(crate) enum EqualSize {
 }
 
 pub(crate) fn equal_size(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     reference: ParametricRef,
 ) -> Option<EqualSize> {
     let entity = document.get_entity(reference.entity)?;
@@ -310,7 +310,7 @@ pub(crate) fn equal_size(
 /// a circle or arc keeps its center and takes the radius. `None` when the
 /// two do not share a size kind.
 pub(crate) fn equal_size_follower(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     first: ParametricRef,
     follower: ParametricRef,
 ) -> Option<codec::EntityType> {
@@ -398,7 +398,7 @@ pub(crate) fn normalize_angle_display(degrees: f64) -> f64 {
 
 /// The angular precision (DIMADEC, or DIMDEC when unset) of a dimension
 /// style, by name or the drawing's current one.
-pub(crate) fn angle_decimals(document: &codec::CadDocument, style_name: Option<&str>) -> usize {
+pub(crate) fn angle_decimals(document: &codec::Document, style_name: Option<&str>) -> usize {
     let requested = style_name
         .map(str::trim)
         .filter(|name| !name.is_empty())
@@ -624,7 +624,7 @@ pub(crate) fn two_lines_placement(
 /// every click, and an `EntityType` held there is paid for on each of them.
 #[inline(never)]
 pub(crate) fn two_lines_placed_entity(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     first_ends: [ParametricRef; 2],
     first_pick: glam::DVec3,
     second_line: ParametricRef,
@@ -717,7 +717,7 @@ fn line_ends(entity: &codec::EntityType, reference: ParametricRef) -> Option<(Ve
 /// Where an angular constraint's sides are now: both lines' ends for a
 /// two-line angle, `[vertex, first, second]` for a three-point one.
 fn angular_follow_points(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     constraint: &ParametricConstraint,
 ) -> Option<Vec<Vector3>> {
     match (constraint.kind, constraint.refs.as_slice()) {
@@ -738,7 +738,7 @@ fn angular_follow_points(
 
 /// A radial constraint's circle or arc: its centre and radius now.
 fn radial_geometry(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     constraint: &ParametricConstraint,
 ) -> Option<(glam::DVec3, f64)> {
     let reference = constraint.refs.first()?;
@@ -891,7 +891,7 @@ fn dynamic_dimension_follow_angle(
 /// other object moves, as in the reference. An angle keeps its first side
 /// (a two-line angle) or its vertex and first point (a three-point one).
 pub(crate) fn dimensional_anchor_refs(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     refs: &[ParametricRef],
 ) -> Vec<ParametricRef> {
     let Some(&first) = refs.first() else {
@@ -1187,7 +1187,7 @@ pub enum ParametricScope {
 
 impl ParametricScope {
     /// The owner handle under which this scope is persisted.
-    pub fn owner_handle(&self, document: &codec::CadDocument) -> Handle {
+    pub fn owner_handle(&self, document: &codec::Document) -> Handle {
         match self {
             ParametricScope::ModelSpace => document.header.model_space_block_handle,
             ParametricScope::Block(handle) => *handle,
@@ -1696,7 +1696,7 @@ pub(crate) fn is_parametric_point_near(entity: &codec::EntityType, point: Vector
 /// Returns `None` when no point in the scope is within the coincidence
 /// tolerance.
 pub(crate) fn nearest_parametric_point(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     scope: ParametricScope,
     world_point: Vector3,
     exclude: Option<Handle>,
@@ -1727,7 +1727,7 @@ pub(crate) fn nearest_parametric_point(
 /// Resolve a point pick within one explicitly selected entity.  This keeps two
 /// different endpoints at the same world coordinate distinguishable.
 pub(crate) fn nearest_parametric_point_on_entity(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     scope: ParametricScope,
     handle: Handle,
     world_point: Vector3,
@@ -1750,7 +1750,7 @@ pub(crate) fn nearest_parametric_point_on_entity(
 /// Resolve the whole curve or the picked polyline segment used by a
 /// point-to-curve Coincident relation.
 pub(crate) fn parametric_curve_ref_for_pick(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     scope: ParametricScope,
     handle: Handle,
     world_point: Vector3,
@@ -1919,14 +1919,14 @@ pub(crate) fn glyph_label(constraint: &ParametricConstraint) -> String {
 
 /// World-space anchor and outward direction for a constraint glyph.
 pub(crate) fn glyph_placement(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     constraint: &ParametricConstraint,
 ) -> Option<(Vector3, Vector3)> {
     glyph_placements(document, constraint).into_iter().next()
 }
 
 fn glyph_placement_for_reference(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     r: ParametricRef,
 ) -> Option<(Vector3, Vector3)> {
     let entity = document.get_entity(r.entity)?;
@@ -2014,7 +2014,7 @@ fn glyph_placement_for_reference(
 }
 
 fn glyph_placements(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     constraint: &ParametricConstraint,
 ) -> Vec<(Vector3, Vector3)> {
     // Relations the reference marks on every object they join.
@@ -2067,7 +2067,7 @@ fn glyph_placements(
 /// Point constraints expose their referenced point directly; curve relations
 /// expose the contact or intersection that makes the relation visible.
 fn constraint_segment_endpoints(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     reference: ParametricRef,
 ) -> Option<[Vector3; 2]> {
     let segment = reference.segment_index()?;
@@ -2090,7 +2090,7 @@ fn constraint_segment_endpoints(
 }
 
 fn constraint_reference_curve_xy(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     reference: ParametricRef,
 ) -> Option<kernel::geom2d::Curve> {
     let entity = document.get_entity(reference.entity)?;
@@ -2109,7 +2109,7 @@ fn constraint_reference_curve_xy(
 }
 
 pub(crate) fn constraint_hover_points(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     constraint: &ParametricConstraint,
 ) -> Vec<Vector3> {
     let mut points = Vec::new();
@@ -2660,7 +2660,7 @@ impl super::Scene {
     /// overrides are a display matter and stay out of the file, and so does
     /// what resolving an external reference merged in (its geometry, nested
     /// blocks and styles), which the file never stores.
-    pub(crate) fn document_for_save(&self) -> codec::CadDocument {
+    pub(crate) fn document_for_save(&self) -> codec::Document {
         use crate::entities::dim_override as ov;
         let mut document = self.document.clone();
         for set in &self.parametric_constraints {
@@ -2683,6 +2683,8 @@ impl super::Scene {
             }
         }
         crate::io::xref::strip_resolved_xref_content(&mut document);
+        // Centre marks and centre lines go out in their stored form.
+        crate::scene::center_native::export(&mut document);
         crate::entities::field::stamp_save_dates(&mut document);
         for name in &self.unopened_layouts {
             crate::scene::write_layout_unopened(&mut document, name);
@@ -3710,7 +3712,7 @@ mod tests {
 
     #[test]
     fn glyph_placement_points_away_from_its_geometry() {
-        let mut document = codec::CadDocument::new();
+        let mut document = codec::Document::new();
         let mut line = codec::entities::Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
@@ -4171,7 +4173,7 @@ mod tests {
     fn scope_owner_handle_resolves_block_directly() {
         let block_handle = h(42);
         let scope = ParametricScope::Block(block_handle);
-        let doc = codec::CadDocument::new();
+        let doc = codec::Document::new();
         assert_eq!(scope.owner_handle(&doc), block_handle);
     }
 
@@ -4473,7 +4475,7 @@ mod tests {
 
     #[test]
     fn hover_geometry_keeps_a_bulged_polyline_segment_curved() {
-        let mut document = codec::CadDocument::new();
+        let mut document = codec::Document::new();
         let mut polyline = codec::entities::LwPolyline::new();
         polyline.common.handle = h(1);
         polyline.vertices = vec![

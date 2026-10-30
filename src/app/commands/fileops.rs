@@ -3,12 +3,32 @@ use super::*;
 use crate::io::plot_style::PlotStyleTableExt as _;
 
 impl OpenCADStudio {
+    /// The drawing templates (.dwt) in the default template's folder.
+    pub(in crate::app) fn template_folder_files(&self) -> Vec<std::path::PathBuf> {
+        let Some(dir) = std::path::Path::new(self.qnew_template.trim()).parent() else {
+            return Vec::new();
+        };
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("dwt"))
+            })
+            .collect();
+        files.sort_by_key(|path| path.to_string_lossy().to_lowercase());
+        files
+    }
+
     pub(super) fn dispatch_fileops(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
             // QNEW starts from the default template (Options > Files); NEW
             // asks which template to start from (#1635).
             "QNEW" => return Some(Task::done(Message::TabNew)),
             "NEW" => {
+                self.start_templates = None;
                 // Open where the default template lives, so its neighbours in
                 // a template folder are one click away (#1836).
                 let template_dir = std::path::Path::new(self.qnew_template.trim())
@@ -189,7 +209,8 @@ impl OpenCADStudio {
                     "VSCURRENT",
                     visual_style::keyword_prompt(),
                     visual_style::keyword_choices(),
-                );
+                )
+                .with_aliases(visual_style::SHORT_KEYS);
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
@@ -659,6 +680,7 @@ impl OpenCADStudio {
                     self.command_line.push_error(&error);
                 }
             }
+            self.pump_plugin_requests();
             for entry in &self.command_line.history {
                 if entry.kind == crate::ui::command_line::EntryKind::Error {
                     eprintln!("{}", entry.text);
@@ -1153,7 +1175,7 @@ impl OpenCADStudio {
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         let cmd = cmd.to_string();
         Task::perform(
-            async move { crate::io::serialize_prepared_document(&prepared, &ext).await },
+            async move { crate::io::serialize_prepared_document(&prepared, &ext, false).await },
             move |result| Message::WebArchiveSerialized {
                 cmd,
                 zip_name,
@@ -1287,7 +1309,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ocs-batch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = dir.join("a 1.dxf");
-        let doc = codec::CadDocument::new();
+        let doc = codec::Document::new();
         std::fs::write(&a, crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap()).unwrap();
         let out = dir.join("out file.dwg");
         let _ = std::fs::remove_file(&out);
@@ -1316,7 +1338,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ocs-batch-exit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = dir.join("a.dxf");
-        let doc = codec::CadDocument::new();
+        let doc = codec::Document::new();
         std::fs::write(&a, crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap()).unwrap();
         let mut app = OpenCADStudio::new_for_test();
         let text = format!("OPEN \"{}\"\nCIRCLE 0,0 5\nEXIT\nY\nCIRCLE 1,1 2\n", a.display());

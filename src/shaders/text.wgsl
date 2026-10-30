@@ -26,6 +26,11 @@ struct Uniforms {
 @group(1) @binding(0) var atlas_tex: texture_2d<f32>;
 @group(1) @binding(1) var atlas_samp: sampler;
 
+// Atlas texels per glyph unit and the field's half range in glyph units
+// (scene::text::sdf_atlas PX_PER_UNIT / SPREAD_UNITS).
+const PX_PER_UNIT: f32 = 6.0;
+const SPREAD_UNITS: f32 = 1.5;
+
 // ── Vertex stage ──────────────────────────────────────────────────────────────
 struct VertIn {
     @location(0) pos:        vec3<f32>,
@@ -33,12 +38,14 @@ struct VertIn {
     @location(2) uv:         vec2<f32>,
     @location(3) color:      vec4<f32>,
     @location(4) draw_depth: f32,
+    @location(8) pen:        f32,
 };
 
 struct VertOut {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0)       uv:       vec2<f32>,
     @location(1)       color:    vec4<f32>,
+    @location(2) @interpolate(flat) pen: f32,
 };
 
 @vertex
@@ -50,6 +57,7 @@ fn vs_main(in: VertIn) -> VertOut {
     out.clip_pos = apply_draw_order(out.clip_pos, in.draw_depth);
     out.uv = in.uv;
     out.color = in.color;
+    out.pen = in.pen;
     return out;
 }
 
@@ -78,6 +86,16 @@ fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
             }
         }
         alpha = sum / f32(samples * samples);
+    }
+    if in.pen > 0.0 {
+        // Stroke fonts have no width of their own: once the baked pen band
+        // is wider than a pixel, draw the centreline one pixel wide (the
+        // field holds pen - distance, SPREAD_UNITS per half range).
+        let units_per_px = max(footprint, 1e-4) / PX_PER_UNIT;
+        if in.pen > 0.5 * units_per_px {
+            let from_centre = in.pen - (sd_center - 0.5) * 2.0 * SPREAD_UNITS;
+            alpha = clamp(1.0 - abs(from_centre) / units_per_px, 0.0, 1.0);
+        }
     }
     if alpha <= 0.0 {
         discard;

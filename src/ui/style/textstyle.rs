@@ -458,10 +458,12 @@ pub fn view_window<'a>(
         on_new: Message::TextStyleDialogNew,
         on_copy: Message::TextStyleDialogCopy,
         on_delete: Message::TextStyleDialogDelete,
+        on_import: Some(Message::StyleImportPick(StyleKind::Text)),
         on_select: Message::TextStyleDialogSelect,
         on_set_current: Message::TextStyleDialogSetCurrent,
         on_apply: Message::TextStyleApply,
         read_only: v.read_only,
+        in_use_filter: None,
         editor,
     })
 }

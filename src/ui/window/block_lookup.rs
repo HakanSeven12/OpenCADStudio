@@ -169,7 +169,15 @@ impl State {
                 table.columns[index].writable = value;
             }
             Action::Audit => {
-                match block_lookup::validate(table, draft.original.as_ref().map(|(_, t)| t)) {
+                match block_lookup::validate(table, draft.original.as_ref().map(|(_, t)| t))
+                    .and_then(|_| {
+                        block_lookup::validate_with_properties(
+                            table,
+                            draft.original.as_ref().map(|(_, t)| t),
+                            &self.properties,
+                        )
+                    })
+                {
                     Ok(()) => self.notice = Some(crate::t!("Table audit passed.").into_owned()),
                     Err(error) => self.error = Some(crate::t!(error.as_str()).into_owned()),
                 }
@@ -304,6 +312,8 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
                 .into_owned()
             )
             .size(12),
+            text(crate::tr!("block-lookup", "input-help", closed = "[2,6]", open = "(2,6]")).size(12),
+            text(crate::tr!("block-lookup", "quoted-help", name = "`a b`")).size(12),
             scrollable(grid)
                 .direction(scrollable::Direction::Both {
                     vertical: Default::default(),

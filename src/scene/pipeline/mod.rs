@@ -288,6 +288,10 @@ pub struct Pipeline {
     pub(crate) wire_arena_fallback_handles: rustc_hash::FxHashSet<codec::Handle>,
     /// The Model content id both arenas currently mirror (`u64::MAX` = none).
     pub(crate) wire_arena_id: u64,
+    /// The draw-depth generation the arenas' slabs baked. A patch rewrites
+    /// only the changed entities, so after a full depth rebuild the arenas
+    /// have to be rebuilt instead of patched.
+    pub(crate) wire_arena_depth_generation: u64,
     /// Handles that contributed to this slot's retained analytical uploads.
     pub(crate) partition_contributors: rustc_hash::FxHashSet<codec::Handle>,
     /// The draw-depth generation those uploads baked. A full depth rebuild
@@ -2485,6 +2489,7 @@ impl Pipeline {
             wire_arena_fallback_kind: None,
             wire_arena_fallback_handles: rustc_hash::FxHashSet::default(),
             wire_arena_id: u64::MAX,
+            wire_arena_depth_generation: u64::MAX,
             partition_contributors: rustc_hash::FxHashSet::default(),
             partition_depth_generation: u64::MAX,
             wire_cull_key: (u64::MAX, u64::MAX, 0, 0),
@@ -3973,8 +3978,13 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.gpu_point_clouds.upload(device, queue, set);
     }
 
-    pub fn set_point_cloud_view(&mut self, queue: &wgpu::Queue, light: [f32; 12]) {
-        self.gpu_point_clouds.set_view(queue, light);
+    pub fn set_point_cloud_view(
+        &mut self,
+        queue: &wgpu::Queue,
+        light: [f32; 12],
+        clip: &[[f32; 4]],
+    ) {
+        self.gpu_point_clouds.set_view(queue, light, clip);
     }
 
     /// Upload the frame's SDF text-quad vertices, and (re)build the GPU glyph
@@ -5624,17 +5634,27 @@ fn aabb_offscreen(
     }
     let w = clip_w as f32;
     let h = clip_h as f32;
+    // A corner behind the perspective eye mirrors across the screen, so the
+    // projected union bounds nothing: never cull in that case (#64).
     let corners = [
-        view_rot.project_point3((glam::DVec3::new(x0 as f64, y0 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x1 as f64, y0 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x0 as f64, y1 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x1 as f64, y1 as f64, 0.0) - eye).as_vec3()),
-    ];
+        (x0 as f64, y0 as f64),
+        (x1 as f64, y0 as f64),
+        (x0 as f64, y1 as f64),
+        (x1 as f64, y1 as f64),
+    ]
+    .map(|(x, y)| {
+        crate::scene::view::projection::project_ndc(
+            view_rot,
+            eye,
+            glam::DVec3::new(x, y, 0.0),
+        )
+    });
     let mut min_px = f32::INFINITY;
     let mut max_px = f32::NEG_INFINITY;
     let mut min_py = f32::INFINITY;
     let mut max_py = f32::NEG_INFINITY;
     for c in &corners {
+        let Some(c) = c else { return false };
         let px = (c.x + 1.0) * 0.5 * w;
         let py = (1.0 - c.y) * 0.5 * h;
         if px < min_px {
@@ -5676,17 +5696,27 @@ fn aabb_below_pixel(
     }
     let w = clip_w as f32;
     let h = clip_h as f32;
+    // Mirrored corners from behind the eye would fake a tiny or shifted box:
+    // keep the draw call when any corner has no real projection (#64).
     let corners = [
-        view_rot.project_point3((glam::DVec3::new(x0 as f64, y0 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x1 as f64, y0 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x0 as f64, y1 as f64, 0.0) - eye).as_vec3()),
-        view_rot.project_point3((glam::DVec3::new(x1 as f64, y1 as f64, 0.0) - eye).as_vec3()),
-    ];
+        (x0 as f64, y0 as f64),
+        (x1 as f64, y0 as f64),
+        (x0 as f64, y1 as f64),
+        (x1 as f64, y1 as f64),
+    ]
+    .map(|(x, y)| {
+        crate::scene::view::projection::project_ndc(
+            view_rot,
+            eye,
+            glam::DVec3::new(x, y, 0.0),
+        )
+    });
     let mut min_px = f32::INFINITY;
     let mut max_px = f32::NEG_INFINITY;
     let mut min_py = f32::INFINITY;
     let mut max_py = f32::NEG_INFINITY;
     for c in &corners {
+        let Some(c) = c else { return false };
         let px = (c.x + 1.0) * 0.5 * w;
         let py = (1.0 - c.y) * 0.5 * h;
         if px < min_px {

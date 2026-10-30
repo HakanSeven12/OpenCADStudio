@@ -32,7 +32,7 @@ fn add_slice(scene: &mut Scene) -> Handle {
     })))
 }
 
-fn assert_section_graph(document: &codec::CadDocument, extension: &str) {
+fn assert_section_graph(document: &codec::Document, extension: &str) {
     let (handle, section) = document
         .entities()
         .find_map(|entity| match entity {

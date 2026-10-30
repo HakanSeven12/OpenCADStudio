@@ -9,21 +9,32 @@
 //     3 × 3 × f32 vertices
 //     2-byte attribute (0)
 
-use std::io::Write;
-
 use crate::scene::model::mesh_model::MeshModel;
 
 /// Build a binary STL byte buffer from a slice of mesh models.
 /// Returns `None` if there are no triangles to export.
 pub fn build_stl(meshes: &[&MeshModel]) -> Option<Vec<u8>> {
-    // Collect all triangles.
-    struct Tri {
-        normal: [f32; 3],
-        v: [[f32; 3]; 3],
+    let total: usize = meshes.iter().map(|mesh| mesh.indices.len() / 3).sum();
+    if total == 0 {
+        return None;
     }
 
-    let mut tris: Vec<Tri> = Vec::new();
+    // Triangles stream straight into the facet buffer: an intermediate
+    // per-triangle struct would cost another full-size allocation and pass
+    // over a mesh that is already the largest object in the export.
+    let mut buf: Vec<u8> = Vec::with_capacity(84 + total * 50);
 
+    // 80-byte header.
+    let mut header = [0u8; 80];
+    let title = b"Open CAD Studio STL export";
+    header[..title.len()].copy_from_slice(title);
+    buf.extend_from_slice(&header);
+
+    // Triangle count, patched after the loop: indices out of the vertex
+    // range skip their triangle.
+    buf.extend_from_slice(&(total as u32).to_le_bytes());
+
+    let mut written = 0usize;
     for mesh in meshes {
         let verts = &mesh.verts;
         let idx = &mesh.indices;
@@ -56,43 +67,23 @@ pub fn build_stl(meshes: &[&MeshModel]) -> Option<Vec<u8>> {
                 [nx / len, ny / len, nz / len]
             };
 
-            tris.push(Tri {
-                normal,
-                v: [a, b, c],
-            });
+            let mut facet = [0u8; 50];
+            let mut at = 0;
+            for &f in normal.iter().chain([a, b, c].iter().flatten()) {
+                facet[at..at + 4].copy_from_slice(&f.to_le_bytes());
+                at += 4;
+            }
+            debug_assert_eq!(at, 48, "3 normals and 9 vertex components");
+            // Attribute byte count stays 0.
+            buf.extend_from_slice(&facet);
+            written += 1;
         }
     }
 
-    if tris.is_empty() {
+    if written == 0 {
         return None;
     }
-
-    let mut buf: Vec<u8> = Vec::with_capacity(84 + tris.len() * 50);
-
-    // 80-byte header.
-    let mut header = [0u8; 80];
-    let title = b"Open CAD Studio STL export";
-    header[..title.len()].copy_from_slice(title);
-    buf.extend_from_slice(&header);
-
-    // Triangle count.
-    buf.extend_from_slice(&(tris.len() as u32).to_le_bytes());
-
-    for tri in &tris {
-        // Normal.
-        for &f in &tri.normal {
-            buf.write_all(&f.to_le_bytes()).ok()?;
-        }
-        // Vertices.
-        for v in &tri.v {
-            for &f in v {
-                buf.write_all(&f.to_le_bytes()).ok()?;
-            }
-        }
-        // Attribute byte count = 0.
-        buf.extend_from_slice(&0u16.to_le_bytes());
-    }
-
+    buf[80..84].copy_from_slice(&(written as u32).to_le_bytes());
     Some(buf)
 }
 

@@ -1,7 +1,7 @@
 //! Configure native grip counts using the command host's parameter picking.
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickContext};
 use crate::scene::{block_authoring::edit, block_grips::config};
-use codec::{objects::ObjectType, CadDocument, Handle};
+use codec::{objects::ObjectType, Document, Handle};
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {
@@ -20,7 +20,7 @@ impl GripSetCommand {
     pub(crate) fn new(
         document: u64,
         definition: Handle,
-        doc: &CadDocument,
+        doc: &Document,
         selected: Option<Handle>,
     ) -> Result<Self, &'static str> {
         let candidates = edit::items(doc, definition)

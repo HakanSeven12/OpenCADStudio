@@ -27,7 +27,7 @@ pub(super) fn setvar_listing() -> String {
 }
 
 /// EXPLMODE of the drawing (default 1).
-pub(crate) fn explmode(document: &codec::CadDocument) -> i16 {
+pub(crate) fn explmode(document: &codec::Document) -> i16 {
     crate::io::drawing_variable(document, "EXPLMODE")
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(1)

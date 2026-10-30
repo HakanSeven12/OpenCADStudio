@@ -6,7 +6,7 @@ use crate::scene::{
 use codec::entities::{Insert, Line};
 use codec::types::Vector3;
 
-fn fixture(kind: usize, action: bool) -> (CadDocument, Handle, Handle, Parameter) {
+fn fixture(kind: usize, action: bool) -> (Document, Handle, Handle, Parameter) {
     let mut scene = Scene::new();
     scene.define_block_raw(
         "VALUES",
@@ -80,7 +80,7 @@ fn fixture(kind: usize, action: bool) -> (CadDocument, Handle, Handle, Parameter
         .unwrap();
     (scene.document, def, insert, p)
 }
-fn key(doc: &CadDocument, insert: Handle, component: Component) -> Key {
+fn key(doc: &Document, insert: Handle, component: Component) -> Key {
     properties(doc, None, 42, insert)
         .into_iter()
         .find_map(|row| match row.value {
@@ -93,7 +93,7 @@ fn key(doc: &CadDocument, insert: Handle, component: Component) -> Key {
         })
         .unwrap()
 }
-fn numeric(doc: &CadDocument, insert: Handle, component: Component) -> f64 {
+fn numeric(doc: &Document, insert: Handle, component: Component) -> f64 {
     properties(doc, None, 42, insert)
         .into_iter()
         .find_map(|row| match row.value {
@@ -318,4 +318,36 @@ fn block_reference_properties_duplicate_flip_labels_keep_distinct_states() {
         Value::Flip(false)
     );
     assert!(evaluate(&doc, None, field, Input::Choice(2)).is_err());
+}
+
+#[test]
+fn block_reference_property_values_print_at_the_drawing_precision() {
+    // The rows format from the drawing they belong to, so a headless caller or
+    // a non-active tab never prints with another drawing's settings.
+    use crate::entities::common::{set_unit_context, UnitContext};
+    set_unit_context(UnitContext {
+        lunits: 2,
+        luprec: 4,
+        aunits: 0,
+        auprec: 0,
+        ..Default::default()
+    });
+    let (mut doc, _def, insert, _p) = fixture(2, false);
+    doc.header.linear_unit_format = 2;
+    doc.header.linear_unit_precision = 2;
+    doc.header.angular_unit_precision = 1;
+    let rows = properties(&doc, None, 42, insert);
+    let text = |component| {
+        rows.iter()
+            .find_map(|row| match &row.value {
+                PropValue::BlockNumber { key, value, .. } if key.component == component => {
+                    Some(value.clone())
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    // Polar distance is 10² + 10² squared; the angle is exactly 45°.
+    assert_eq!(text(Component::Distance), "14.14");
+    assert_eq!(text(Component::Angle), "45.0");
 }

@@ -39,9 +39,23 @@ struct Uniforms {
     eye_high:         vec3<f32>,
     highlight_widen:          f32,
     eye_low:          vec3<f32>,
-    _pad_el:          f32,
+    edge_rgb:         f32,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
+
+// Edge colour of the filled-with-edges modes: 0x01RRGGBB in the bits of
+// `edge_rgb` picks that colour, anything else black.
+fn edge_color() -> vec3<f32> {
+    let bits = bitcast<u32>(u.edge_rgb);
+    if (bits >> 24u) != 1u {
+        return vec3<f32>(0.0);
+    }
+    return vec3<f32>(
+        f32((bits >> 16u) & 255u),
+        f32((bits >> 8u) & 255u),
+        f32(bits & 255u),
+    ) / 255.0;
+}
 
 // Scalars are packed into vec4 attributes: WebGL2 / WebGPU cap vertex
 // attributes at 16, and the unpacked layout had grown to 17 — the wire
@@ -298,13 +312,17 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32
         if dist <= align_end || dist >= align_total - align_end {
             return true;
         }
-        var first_dash = 0.0;
-        for (var i = 0u; i < count; i++) {
-            if elems[i] > 0.0 { first_dash = elems[i]; break; }
-        }
+        // The aligned pattern leads with its dash (or dot): the interior
+        // resumes right after that element.
+        let first_dash = max(elems[0], 0.0);
         d = ((dist - align_end + first_dash) % pat_len + pat_len) % pat_len;
     } else {
-        d = ((dist % pat_len) + pat_len) % pat_len;
+        // The round cap reaches a few pixels before the line's start; read it
+        // as the start, or a dash-first run shorter than its pattern (drawn as
+        // one dash) lost the half of its length where the cap's negative
+        // distance blends in and wrapped into the trailing gap.
+        let from_start = max(dist, 0.0);
+        d = ((from_start % pat_len) + pat_len) % pat_len;
     }
 
     var pos = 0.0f;
@@ -370,7 +388,7 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
 
 // Black variant: used for 3D mesh outline edges in filled render modes so the
 // mesh reads as a shaded surface framed by black edges. Keeps the dash/LOD
-// logic identical to `fs_main`; only the RGB is forced to black.
+// logic identical to `fs_main`; only the RGB is forced to the edge colour.
 @fragment fn fs_black(in: VertexOut) -> @location(0) vec4<f32> {
     if in.pattern_length < 0.0 {
         discard;
@@ -386,5 +404,5 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
         }
     }
     let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5);
-    return vec4<f32>(0.0, 0.0, 0.0, alpha);
+    return vec4<f32>(edge_color(), alpha);
 }

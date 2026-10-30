@@ -3,7 +3,7 @@
 use crate::t;
 use codec::entities::{Wipeout, WipeoutClipType};
 use codec::types::{Vector2, Vector3};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{polygon_frame, Tolerance};
 use kernel::space::Plane;
@@ -402,7 +402,7 @@ impl WipeoutCommand {
     }
 }
 
-pub(crate) fn wipeout_frame_mode(document: &CadDocument) -> i16 {
+pub(crate) fn wipeout_frame_mode(document: &Document) -> i16 {
     crate::scene::frame::mode(document, crate::scene::frame::FrameKind::Wipeout)
 }
 

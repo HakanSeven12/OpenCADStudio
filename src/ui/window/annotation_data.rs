@@ -4,6 +4,7 @@
 //! Finish.  That keeps Cancel lossless and lets the wizard validate one page
 //! before advancing to the next.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -58,6 +59,8 @@ pub struct DataLinkChoice {
     pub handle: Handle,
     pub name: String,
     pub path: String,
+    /// What the link takes from its source (sheet, range…).
+    pub details: String,
     pub valid: bool,
 }
 
@@ -82,7 +85,12 @@ pub struct TableInsertState {
     pub columns: String,
     pub data_rows: String,
     pub column_width: String,
+    /// Row height, in lines of the row's text.
     pub row_height: String,
+    /// Window insertion keeps the column count (else the column width).
+    pub columns_fixed: bool,
+    /// Window insertion keeps the data row count (else the row height).
+    pub rows_fixed: bool,
     pub preview: bool,
     pub first_row_style: String,
     pub second_row_style: String,
@@ -99,10 +107,12 @@ impl Default for TableInsertState {
             links: Vec::new(),
             link: None,
             insertion: TableInsertion::Point,
-            columns: "3".into(),
-            data_rows: "4".into(),
-            column_width: "2.0".into(),
-            row_height: "0.5".into(),
+            columns: "5".into(),
+            data_rows: "1".into(),
+            column_width: "63.5".into(),
+            row_height: "1".into(),
+            columns_fixed: true,
+            rows_fixed: true,
             preview: true,
             first_row_style: "Title".into(),
             second_row_style: "Header".into(),
@@ -122,6 +132,8 @@ pub enum TableInsertField {
     DataRows(String),
     ColumnWidth(String),
     RowHeight(String),
+    ColumnsFixed(bool),
+    RowsFixed(bool),
     Preview(bool),
     FirstRowStyle(String),
     SecondRowStyle(String),
@@ -301,6 +313,10 @@ pub struct ExtractionObject {
     pub name: String,
     pub checked: bool,
     pub count: usize,
+    /// A block reference, listed by its block name.
+    pub block: bool,
+    /// What the object offers: `(key, display name, category)`.
+    pub properties: Vec<(String, String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -322,8 +338,15 @@ pub struct DataExtractionState {
     pub source_files: Vec<String>,
     pub selection_handles: Vec<Handle>,
     pub objects: Vec<ExtractionObject>,
+    /// Object list filters: every type, or blocks / non-blocks only.
+    pub display_all_types: bool,
+    pub blocks_only: bool,
+    pub attributed_blocks_only: bool,
+    pub in_use_only: bool,
     pub properties: Vec<ExtractionProperty>,
     pub categories: BTreeSet<String>,
+    /// Categories the user filtered out of the property list.
+    pub hidden_categories: BTreeSet<String>,
     pub combine_identical: bool,
     pub show_count: bool,
     pub show_name: bool,
@@ -334,6 +357,14 @@ pub struct DataExtractionState {
     pub table_styles: Vec<String>,
     pub table_style: String,
     pub table_title: String,
+    pub title_cell_style: String,
+    pub header_cell_style: String,
+    pub data_cell_style: String,
+    pub property_headers: bool,
+    /// Object names and property keys a loaded settings file chose; they
+    /// decide what starts checked once the objects are listed.
+    pub saved_objects: Option<BTreeSet<String>>,
+    pub saved_properties: Option<BTreeSet<String>>,
     pub error: String,
 }
 
@@ -343,89 +374,47 @@ impl Default for DataExtractionState {
             page: ExtractionPage::Begin,
             begin: ExtractionBegin::New,
             settings_path: String::new(),
-            source: ExtractionSource::CurrentDrawing,
+            source: ExtractionSource::DrawingsAndFolders,
             include_current: true,
             include_subfolders: true,
             source_files: Vec::new(),
             selection_handles: Vec::new(),
             objects: Vec::new(),
-            properties: vec![
-                ExtractionProperty {
-                    key: "type".into(),
-                    name: "Type".into(),
-                    category: "General".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "handle".into(),
-                    name: "Handle".into(),
-                    category: "General".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "layer".into(),
-                    name: "Layer".into(),
-                    category: "General".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "color".into(),
-                    name: "Color".into(),
-                    category: "General".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "linetype".into(),
-                    name: "Linetype".into(),
-                    category: "General".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "details".into(),
-                    name: "Details".into(),
-                    category: "Geometry".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "position_x".into(),
-                    name: "Position X".into(),
-                    category: "Geometry".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "position_y".into(),
-                    name: "Position Y".into(),
-                    category: "Geometry".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "position_z".into(),
-                    name: "Position Z".into(),
-                    category: "Geometry".into(),
-                    checked: true,
-                },
-                ExtractionProperty {
-                    key: "rotation".into(),
-                    name: "Rotation".into(),
-                    category: "Geometry".into(),
-                    checked: false,
-                },
-            ],
-            categories: ["General".to_string(), "Geometry".to_string()]
-                .into_iter()
-                .collect(),
-            combine_identical: false,
+            display_all_types: true,
+            blocks_only: false,
+            attributed_blocks_only: false,
+            in_use_only: true,
+            properties: Vec::new(),
+            categories: BTreeSet::new(),
+            hidden_categories: BTreeSet::new(),
+            combine_identical: true,
             show_count: true,
             show_name: true,
             preview: Vec::new(),
-            output_table: true,
+            output_table: false,
             output_file: false,
             output_path: String::new(),
             table_styles: vec!["Standard".into()],
             table_style: "Standard".into(),
-            table_title: "Data Extraction".into(),
+            table_title: String::new(),
+            title_cell_style: "Title".into(),
+            header_cell_style: "Header".into(),
+            data_cell_style: "Data".into(),
+            property_headers: true,
+            saved_objects: None,
+            saved_properties: None,
             error: String::new(),
         }
+    }
+}
+
+impl DataExtractionState {
+    /// Whether an object passes the object page's display options.
+    pub fn shows_object(&self, object: &ExtractionObject) -> bool {
+        if self.display_all_types {
+            return !self.attributed_blocks_only || object.block;
+        }
+        object.block == self.blocks_only && (!self.attributed_blocks_only || object.block)
     }
 }
 
@@ -447,6 +436,14 @@ pub enum DataExtractionField {
     OutputPath(String),
     TableStyle(String),
     TableTitle(String),
+    DisplayAllTypes(bool),
+    BlocksOnly(bool),
+    AttributedBlocksOnly(bool),
+    InUseOnly(bool),
+    TitleCellStyle(String),
+    HeaderCellStyle(String),
+    DataCellStyle(String),
+    PropertyHeaders(bool),
 }
 
 fn muted(theme: &Theme) -> iced::widget::text::Style {
@@ -541,10 +538,78 @@ fn preview_grid<'a>(rows: &'a [Vec<String>]) -> Element<'a, Message> {
         .into()
 }
 
-pub fn table_insert_view(
-    state: &TableInsertState,
+/// The Insert Table dialog's sample: a title, a header and data rows.
+struct InsertTablePreview;
+
+impl iced::widget::canvas::Program<Message> for InsertTablePreview {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use iced::widget::canvas::{Frame, Path, Stroke, Text};
+        use iced::Point;
+        let mut frame = Frame::new(renderer, bounds.size());
+        let ink = theme.palette().background.base.text;
+        frame.fill(
+            &Path::rectangle(Point::ORIGIN, bounds.size()),
+            theme.palette().background.weak.color,
+        );
+        let (left, top) = (12.0, 8.0);
+        let (width, height) = (bounds.width - 24.0, bounds.height - 16.0);
+        let rows = 6usize;
+        let row_h = height / rows as f32;
+        let col_w = width / 3.0;
+        let stroke = Stroke::default()
+            .with_color(ink.scale_alpha(0.8))
+            .with_width(1.0);
+        for k in 0..=rows {
+            let y = top + k as f32 * row_h;
+            frame.stroke(&Path::line(Point::new(left, y), Point::new(left + width, y)), stroke);
+        }
+        for k in 0..=3 {
+            let x = left + k as f32 * col_w;
+            // The title row spans the table.
+            let y0 = if k == 0 || k == 3 { top } else { top + row_h };
+            frame.stroke(&Path::line(Point::new(x, y0), Point::new(x, top + height)), stroke);
+        }
+        let label = |frame: &mut Frame, content: String, x: f32, y: f32, size: f32| {
+            frame.fill_text(Text {
+                content,
+                position: Point::new(x, y),
+                color: ink,
+                size: iced::Pixels(size),
+                align_x: iced::advanced::text::Alignment::Center,
+                align_y: iced::alignment::Vertical::Center,
+                ..Default::default()
+            });
+        };
+        label(&mut frame, t!("Title").into_owned(), left + width / 2.0, top + row_h / 2.0, 13.0);
+        for row in 1..rows {
+            let content = if row == 1 { t!("Header") } else { t!("Data") }.into_owned();
+            for column in 0..3 {
+                label(
+                    &mut frame,
+                    content.clone(),
+                    left + (column as f32 + 0.5) * col_w,
+                    top + (row as f32 + 0.5) * row_h,
+                    11.0,
+                );
+            }
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+pub fn table_insert_view<'a>(
+    state: &'a TableInsertState,
     sizing: crate::ui::modal::ModalSizing,
-) -> Element<'_, Message> {
+) -> Element<'a, Message> {
     let style = pick_list(Some(state.style.clone()), state.styles.clone(), |value| {
         value.clone()
     })
@@ -601,21 +666,73 @@ pub fn table_insert_view(
             Message::TableInsertField(TableInsertField::Insertion(TableInsertion::Window))
         ),
     ];
+    // In window mode one value of each pair comes from the window ("Auto");
+    // the dot marks the one kept.
+    let window = state.insertion == TableInsertion::Window;
+    let setting = |label: Cow<'static, str>,
+                   value: &'a str,
+                   kept: bool,
+                   keep: Message,
+                   suffix: Option<Cow<'static, str>>,
+                   msg: fn(String) -> Message|
+     -> Element<'a, Message> {
+        let input: Element<'a, Message> = if window && !kept {
+            text_input("", &t!("Auto"))
+                .padding([4, 7])
+                .size(12)
+                .width(Fill)
+                .into()
+        } else {
+            text_input("", value)
+                .on_input(msg)
+                .padding([4, 7])
+                .size(12)
+                .width(Fill)
+                .into()
+        };
+        let mut line = row![].spacing(6).align_y(iced::Center);
+        if window {
+            line = line.push(form_radio("", true, kept.then_some(true), move |_| keep.clone()));
+        }
+        line = line.push(text(label).size(11).style(muted).width(92)).push(input);
+        if let Some(suffix) = suffix {
+            line = line.push(text(suffix).size(11).style(muted));
+        }
+        line.into()
+    };
     let settings = column![
-        labeled_input(
+        setting(
             t!("Columns"),
             &state.columns,
+            state.columns_fixed,
+            Message::TableInsertField(TableInsertField::ColumnsFixed(true)),
+            None,
             |v| Message::TableInsertField(TableInsertField::Columns(v))
         ),
-        labeled_input(t!("Column width"), &state.column_width, |v| {
-            Message::TableInsertField(TableInsertField::ColumnWidth(v))
-        }),
-        labeled_input(t!("Data rows"), &state.data_rows, |v| {
-            Message::TableInsertField(TableInsertField::DataRows(v))
-        }),
-        labeled_input(t!("Row height"), &state.row_height, |v| {
-            Message::TableInsertField(TableInsertField::RowHeight(v))
-        }),
+        setting(
+            t!("Column width"),
+            &state.column_width,
+            !state.columns_fixed,
+            Message::TableInsertField(TableInsertField::ColumnsFixed(false)),
+            None,
+            |v| Message::TableInsertField(TableInsertField::ColumnWidth(v))
+        ),
+        setting(
+            t!("Data rows"),
+            &state.data_rows,
+            state.rows_fixed,
+            Message::TableInsertField(TableInsertField::RowsFixed(true)),
+            None,
+            |v| Message::TableInsertField(TableInsertField::DataRows(v))
+        ),
+        setting(
+            t!("Row height"),
+            &state.row_height,
+            !state.rows_fixed,
+            Message::TableInsertField(TableInsertField::RowsFixed(false)),
+            Some(t!("Line(s)")),
+            |v| Message::TableInsertField(TableInsertField::RowHeight(v))
+        ),
     ]
     .spacing(5);
     let cell_styles = column![
@@ -630,22 +747,50 @@ pub fn table_insert_view(
         }),
     ]
     .spacing(5);
-    column![
-        group(t!("Table style"), row![style].into()),
+    // Left: what the table starts from and its sample; right: how it is
+    // placed and sized, and the row styles.
+    let preview: Element<'a, Message> = if state.preview {
+        iced::widget::canvas(InsertTablePreview)
+            .width(Fill)
+            .height(Fill)
+            .into()
+    } else {
+        Space::new().height(Fill).into()
+    };
+    let left = column![
+        group(
+            t!("Table style"),
+            row![
+                style,
+                button(text(t!("Table Style…")).size(11))
+                    .on_press(Message::TableInsertManageStyles)
+                    .padding([4, 8]),
+            ]
+            .spacing(8)
+            .align_y(iced::Center)
+            .into()
+        ),
         group(
             t!("Insert options"),
             column![source, link_picker].spacing(4).into()
         ),
-        row![
-            group(t!("Insertion behavior"), insertion.into()),
-            group(t!("Column & row settings"), settings.into())
-        ]
-        .spacing(8),
-        group(t!("Set cell styles"), cell_styles.into()),
         checkbox(state.preview)
             .label(t!("Preview"))
             .on_toggle(|v| Message::TableInsertField(TableInsertField::Preview(v)))
             .size(14),
+        preview,
+    ]
+    .spacing(8)
+    .width(Fill);
+    let right = column![
+        group(t!("Insertion behavior"), insertion.into()),
+        group(t!("Column & row settings"), settings.into()),
+        group(t!("Set cell styles"), cell_styles.into()),
+    ]
+    .spacing(8)
+    .width(Fill);
+    column![
+        row![left, right].spacing(10).height(Fill),
         text(&state.error).size(11),
         row![
             Space::new().width(Fill),
@@ -665,9 +810,9 @@ pub fn data_link_view(
     state: &DataLinkManagerState,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'_, Message> {
-    let mut links = column![text(t!("Spreadsheet Links")).size(11).style(muted)].spacing(2);
+    let mut links = column![text(t!("Excel Links")).size(11).style(muted)].spacing(2);
     links = links.push(
-        button(text(t!("Create a New Data Link")).size(12))
+        button(text(t!("Create a new Excel Data Link")).size(12))
             .on_press(Message::DataLinkNew)
             .padding([5, 7])
             .style(button::text)
@@ -824,8 +969,9 @@ pub fn data_link_view(
             group(
                 t!("Details"),
                 column![
-                    text(format!("{}: {}", t!("Name"), link.name)).size(11),
-                    text(format!("{}: {}", t!("File"), link.path)).size(11),
+                    text(format!("{} {}", t!("Link name:"), link.name)).size(11),
+                    text(format!("{} {}", t!("File name:"), link.path)).size(11),
+                    text(format!("{} {}", t!("Link details:"), link.details)).size(11),
                     text(if link.valid {
                         t!("Status: Linked")
                     } else {
@@ -951,7 +1097,7 @@ pub fn data_extraction_view(
                 ),
                 radio_button(
                     state.begin == ExtractionBegin::Template,
-                    t!("Use a previous extraction as a template"),
+                    t!("Use a previous extraction as a template (.dxex)"),
                     Message::DataExtractionField(DataExtractionField::Begin(
                         ExtractionBegin::Template
                     ))
@@ -987,12 +1133,21 @@ pub fn data_extraction_view(
             t!("Define data source"),
             column![
                 radio_button(
-                    state.source == ExtractionSource::CurrentDrawing,
-                    t!("Current drawing"),
+                    state.source != ExtractionSource::CurrentSelection,
+                    t!("Drawings/Sheet set"),
                     Message::DataExtractionField(DataExtractionField::Source(
-                        ExtractionSource::CurrentDrawing
+                        ExtractionSource::DrawingsAndFolders
                     ))
                 ),
+                row![
+                    Space::new().width(22),
+                    checkbox(state.include_current)
+                        .label(t!("Include current drawing"))
+                        .on_toggle(|v| Message::DataExtractionField(
+                            DataExtractionField::IncludeCurrent(v)
+                        ))
+                        .size(14),
+                ],
                 radio_button(
                     state.source == ExtractionSource::CurrentSelection,
                     t!("Select objects in the current drawing"),
@@ -1000,61 +1155,180 @@ pub fn data_extraction_view(
                         ExtractionSource::CurrentSelection
                     ))
                 ),
-                radio_button(
-                    state.source == ExtractionSource::DrawingsAndFolders,
-                    t!("Drawings / folders"),
-                    Message::DataExtractionField(DataExtractionField::Source(
-                        ExtractionSource::DrawingsAndFolders
-                    ))
-                ),
-                checkbox(state.include_current)
-                    .label(t!("Include current drawing"))
-                    .on_toggle(|v| Message::DataExtractionField(
-                        DataExtractionField::IncludeCurrent(v)
-                    ))
-                    .size(14),
-                checkbox(state.include_subfolders)
-                    .label(t!("Include subfolders"))
-                    .on_toggle(|v| Message::DataExtractionField(
-                        DataExtractionField::IncludeSubfolders(v)
-                    ))
-                    .size(14),
+                text(t!("Drawing files and folders:")).size(11).style(muted),
+                container(scrollable(
+                    text(if state.source_files.is_empty() {
+                        t!("Only the current drawing.").into_owned()
+                    } else {
+                        state.source_files.join("\n")
+                    })
+                    .size(11)
+                ))
+                .padding(6)
+                .height(Length::Fixed(110.0))
+                .width(Fill)
+                .style(|theme: &Theme| container::Style {
+                    border: Border {
+                        width: 1.0,
+                        radius: 4.0.into(),
+                        color: theme.palette().background.strong.color,
+                    },
+                    ..Default::default()
+                }),
                 row![
                     button(text(t!("Add drawings…")).size(12))
                         .on_press(Message::DataExtractionAddDrawings)
                         .padding([5, 10]),
                     add_folder,
-                    button(text(t!("Clear")).size(12))
+                    button(text(t!("Remove all")).size(12))
                         .on_press(Message::DataExtractionClearSources)
                         .padding([5, 10]),
+                    checkbox(state.include_subfolders)
+                        .label(t!("Include subfolders"))
+                        .on_toggle(|v| Message::DataExtractionField(
+                            DataExtractionField::IncludeSubfolders(v)
+                        ))
+                        .size(14),
                 ]
-                .spacing(6),
-                text(state.source_files.join("\n")).size(10),
+                .spacing(6)
+                .align_y(iced::Center),
             ]
             .spacing(6)
             .into(),
         ),
         ExtractionPage::Objects => {
+            let header = row![
+                Space::new().width(22),
+                text(t!("Object")).size(11).style(muted).width(Fill),
+                text(t!("Display Name")).size(11).style(muted).width(Fill),
+                text(t!("Type")).size(11).style(muted).width(110),
+            ]
+            .spacing(6);
             let mut list = column![].spacing(3);
             for (i, item) in state.objects.iter().enumerate() {
+                if !state.shows_object(item) {
+                    continue;
+                }
                 list = list.push(
-                    checkbox(item.checked)
-                        .label(format!("{}  ({})", item.name, item.count))
-                        .on_toggle(move |v| {
-                            Message::DataExtractionField(DataExtractionField::Object(i, v))
+                    row![
+                        checkbox(item.checked)
+                            .on_toggle(move |v| {
+                                Message::DataExtractionField(DataExtractionField::Object(i, v))
+                            })
+                            .size(14),
+                        text(format!("{}  ({})", item.name, item.count))
+                            .size(12)
+                            .width(Fill),
+                        text(item.name.as_str()).size(12).width(Fill),
+                        text(if item.block {
+                            t!("Block")
+                        } else {
+                            t!("Non-block")
                         })
-                        .size(14),
+                        .size(12)
+                        .width(110),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Center),
                 );
             }
-            group(t!("Select objects"), scrollable(list).height(Fill).into())
+            let options = row![
+                column![
+                    checkbox(state.display_all_types)
+                        .label(t!("Display all object types"))
+                        .on_toggle(|v| Message::DataExtractionField(
+                            DataExtractionField::DisplayAllTypes(v)
+                        ))
+                        .size(14),
+                    row![
+                        Space::new().width(22),
+                        form_radio(
+                            t!("Display blocks only"),
+                            true,
+                            Some(state.blocks_only),
+                            |value| Message::DataExtractionField(DataExtractionField::BlocksOnly(value)),
+                        ),
+                    ],
+                    row![
+                        Space::new().width(22),
+                        form_radio(
+                            t!("Display non-blocks only"),
+                            false,
+                            Some(state.blocks_only),
+                            |value| Message::DataExtractionField(DataExtractionField::BlocksOnly(value)),
+                        ),
+                    ],
+                ]
+                .spacing(3)
+                .width(Fill),
+                column![
+                    checkbox(state.attributed_blocks_only)
+                        .label(t!("Display blocks with attributes only"))
+                        .on_toggle(|v| Message::DataExtractionField(
+                            DataExtractionField::AttributedBlocksOnly(v)
+                        ))
+                        .size(14),
+                    checkbox(state.in_use_only)
+                        .label(t!("Display objects currently in-use only"))
+                        .on_toggle(|v| Message::DataExtractionField(
+                            DataExtractionField::InUseOnly(v)
+                        ))
+                        .size(14),
+                ]
+                .spacing(3)
+                .width(Fill),
+            ]
+            .spacing(10);
+            column![
+                group(
+                    t!("Select the objects to extract data from"),
+                    column![header, scrollable(list).height(Fill)].spacing(4).into()
+                ),
+                group(t!("Display options"), options.into()),
+            ]
+            .spacing(8)
+            .into()
         }
         ExtractionPage::Properties => {
-            let mut categories = row![].spacing(10);
-            for category in ["General", "Geometry"] {
-                let checked = state.categories.contains(category);
+            let header = row![
+                Space::new().width(22),
+                text(t!("Property")).size(11).style(muted).width(Fill),
+                text(t!("Display Name")).size(11).style(muted).width(Fill),
+                text(t!("Category")).size(11).style(muted).width(130),
+            ]
+            .spacing(6);
+            let mut order: Vec<usize> = (0..state.properties.len())
+                .filter(|&i| state.categories.contains(&state.properties[i].category))
+                .collect();
+            order.sort_by_key(|&i| state.properties[i].name.to_ascii_lowercase());
+            let mut list = column![].spacing(3);
+            for i in order {
+                let item = &state.properties[i];
+                list = list.push(
+                    row![
+                        checkbox(item.checked)
+                            .on_toggle(move |v| {
+                                Message::DataExtractionField(DataExtractionField::Property(i, v))
+                            })
+                            .size(14),
+                        text(item.name.as_str()).size(12).width(Fill),
+                        text(item.name.as_str()).size(12).width(Fill),
+                        text(item.category.as_str()).size(12).width(130),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Center),
+                );
+            }
+            let all_categories: BTreeSet<&str> = state
+                .properties
+                .iter()
+                .map(|value| value.category.as_str())
+                .collect();
+            let mut filter = column![].spacing(3);
+            for category in all_categories {
                 let key = category.to_string();
-                categories = categories.push(
-                    checkbox(checked)
+                filter = filter.push(
+                    checkbox(state.categories.contains(category))
                         .label(category)
                         .on_toggle(move |v| {
                             Message::DataExtractionField(DataExtractionField::Category(
@@ -1065,26 +1339,16 @@ pub fn data_extraction_view(
                         .size(14),
                 );
             }
-            let mut list = column![categories].spacing(4);
-            for (i, item) in state
-                .properties
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| state.categories.contains(&p.category))
-            {
-                list = list.push(
-                    checkbox(item.checked)
-                        .label(format!("{}  ·  {}", item.name, item.category))
-                        .on_toggle(move |v| {
-                            Message::DataExtractionField(DataExtractionField::Property(i, v))
-                        })
-                        .size(14),
-                );
-            }
-            group(
-                t!("Select properties"),
-                scrollable(list).height(Fill).into(),
-            )
+            row![
+                group(
+                    t!("Properties"),
+                    column![header, scrollable(list).height(Fill)].spacing(4).into()
+                ),
+                container(group(t!("Category filter"), scrollable(filter).into()))
+                    .width(Length::Fixed(190.0)),
+            ]
+            .spacing(8)
+            .into()
         }
         ExtractionPage::Refine => group(
             t!("Refine data"),
@@ -1125,7 +1389,7 @@ pub fn data_extraction_view(
                     )
                     .size(14),
                 checkbox(state.output_file)
-                    .label(t!("Output data to external file"))
+                    .label(t!("Output data to external file (.xlsx .csv .txt)"))
                     .on_toggle(|v| Message::DataExtractionField(DataExtractionField::OutputFile(v)))
                     .size(14),
                 row![
@@ -1151,7 +1415,7 @@ pub fn data_extraction_view(
             t!("Table style"),
             column![
                 row![
-                    text(t!("Style")).size(11).style(muted).width(118),
+                    text(t!("Table style")).size(11).style(muted).width(118),
                     pick_list(
                         Some(state.table_style.clone()),
                         state.table_styles.clone(),
@@ -1164,9 +1428,33 @@ pub fn data_extraction_view(
                     .width(Fill)
                 ]
                 .spacing(8),
-                labeled_input(t!("Title"), &state.table_title, |v| {
-                    Message::DataExtractionField(DataExtractionField::TableTitle(v))
+                row![
+                    text(t!("Title")).size(11).style(muted).width(118),
+                    text_input(t!("<Title>").as_ref(), &state.table_title)
+                        .on_input(|v| Message::DataExtractionField(
+                            DataExtractionField::TableTitle(v)
+                        ))
+                        .padding([4, 7])
+                        .size(12)
+                        .width(Fill)
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+                cell_style_picker(t!("Title cell style"), &state.title_cell_style, |v| {
+                    Message::DataExtractionField(DataExtractionField::TitleCellStyle(v))
                 }),
+                cell_style_picker(t!("Header cell style"), &state.header_cell_style, |v| {
+                    Message::DataExtractionField(DataExtractionField::HeaderCellStyle(v))
+                }),
+                cell_style_picker(t!("Data cell style"), &state.data_cell_style, |v| {
+                    Message::DataExtractionField(DataExtractionField::DataCellStyle(v))
+                }),
+                checkbox(state.property_headers)
+                    .label(t!("Use property names as additional column headers"))
+                    .on_toggle(|v| Message::DataExtractionField(
+                        DataExtractionField::PropertyHeaders(v)
+                    ))
+                    .size(14),
                 preview_grid(&state.preview),
             ]
             .spacing(7)
@@ -1175,7 +1463,12 @@ pub fn data_extraction_view(
         ExtractionPage::Finish => group(
             t!("Finish"),
             column![
-                text(t!("The selected drawing data is ready to be extracted.")).size(12),
+                text(t!("Any external files to create will be created when clicking Finish."))
+                    .size(12),
+                text(t!(
+                    "If you chose to insert a table, you will be prompted for an insertion point after you click Finish."
+                ))
+                .size(12),
                 text(format!(
                     "{}: {}",
                     t!("Rows"),
@@ -1217,5 +1510,57 @@ pub fn data_extraction_view(
     .padding(10)
     .width(sizing.width)
     .height(sizing.height)
+    .into()
+}
+
+/// The notice DATAEXTRACTION shows on a drawing that was never saved.
+pub fn data_extraction_unsaved_view(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Message> {
+    let amber = iced::Color::from_rgb8(0xE0, 0x9A, 0x2B);
+    let badge = container(
+        iced::widget::svg(crate::ui::icons::themed_handle(crate::ui::icons::WARNING))
+            .width(18.0)
+            .height(18.0)
+            .style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(amber) }),
+    )
+    .width(34)
+    .height(34)
+    .center_x(34)
+    .center_y(34)
+    .style(move |_: &Theme| container::Style {
+        background: Some(iced::Background::Color(amber.scale_alpha(0.15))),
+        border: Border {
+            radius: 17.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    column![
+        row![
+            badge,
+            column![
+                text(t!("Save the drawing first")).size(13).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                }),
+                text(t!(
+                    "You must save the drawing before continuing with data extraction."
+                ))
+                .size(11)
+                .style(muted),
+            ]
+            .spacing(6),
+        ]
+        .spacing(12),
+        iced::widget::rule::horizontal(1),
+        row![
+            Space::new().width(Fill),
+            dialog_button(t!("Cancel"), Message::CloseModal, false),
+            dialog_button(t!("Save"), Message::DataExtractionSaveDrawing, true),
+        ]
+        .spacing(8),
+    ]
+    .spacing(12)
+    .padding([12, 14])
+    .width(sizing.width)
     .into()
 }

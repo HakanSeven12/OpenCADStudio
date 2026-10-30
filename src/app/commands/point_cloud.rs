@@ -19,7 +19,7 @@ fn vector(v: glam::DVec3) -> Vector3 {
 
 /// The point cloud definitions dictionary under the named-objects root,
 /// created when the drawing has none.
-fn definitions_dictionary(document: &mut codec::CadDocument) -> Option<Handle> {
+fn definitions_dictionary(document: &mut codec::Document) -> Option<Handle> {
     let root = document.header.named_objects_dict_handle;
     let Some(ObjectType::Dictionary(root_dictionary)) = document.objects.get(&root) else {
         return None;
@@ -49,7 +49,7 @@ fn definitions_dictionary(document: &mut codec::CadDocument) -> Option<Handle> {
 /// under the file's name ("Chair", "Chair(2)" …). Its point count and
 /// extents come from the file.
 fn ensure_definition(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     path: &str,
     name: &str,
     points: &crate::scene::model::point_cloud::CloudPoints,

@@ -231,6 +231,7 @@ const MENUS: &[(&str, &[Entry])] = &[
         &[
             Cmd("Layer...", "LAYER", ""),
             Cmd("Layer States Manager...", "LAYERSTATE", ""),
+            Cmd("Layer Walk...", "LAYWALK", ""),
             Sub(
                 "Layer Tools",
                 &[

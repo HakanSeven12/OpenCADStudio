@@ -830,6 +830,8 @@ impl OpenCADStudio {
             show_ucs_icon: self.show_ucs_icon,
             ucs_icon_at_origin: self.ucs_icon_at_origin,
             selection_cycling: self.selection_cycling,
+            osnap_z: self.osnap_z,
+            select_similar_mode: self.select_similar_mode,
             double_click_block_refedit: self.double_click_block_refedit,
             double_click_block_attedit: self.double_click_block_attedit,
             right_click_mode: self.right_click_mode,
@@ -837,6 +839,7 @@ impl OpenCADStudio {
             grip_object_limit: self.grip_object_limit,
             image_frame: crate::scene::frame::profile_image_mode(),
             attdef_on_screen: crate::modules::draw::draw::attdef::session().on_screen,
+            table_insert: *crate::modules::annotate::table_cmd::session(),
             block_base_on_screen: block_defaults.base_on_screen,
             block_objects_on_screen: block_defaults.objects_on_screen,
             block_object_mode: crate::modules::insert::block_cmdline::mode_code(
@@ -858,6 +861,8 @@ impl OpenCADStudio {
             fonts_folder: crate::io::font_repo::fonts_folder().map(|p| p.display().to_string()),
             #[cfg(not(target_arch = "wasm32"))]
             plot_styles_folder: crate::io::plot_style::plot_styles_folder()
+                .map(|p| p.display().to_string()),
+            support_folder: crate::io::font_repo::support_folder()
                 .map(|p| p.display().to_string()),
             #[cfg(target_arch = "wasm32")]
             fonts_folder: None,
@@ -908,6 +913,8 @@ impl OpenCADStudio {
             show_constraint_values: self.show_constraint_values,
             auto_constrain: self.auto_constrain_settings.clone(),
             txt2mtxt: self.txt2mtxt_settings,
+            spell: self.spell_prefs.clone(),
+            dim_inspect: self.dim_inspect_settings.clone(),
             constraint_solve_mode: self.constraint_solve_mode,
             constraint_infer: self.constraint_infer,
             constraint_bar_display: self.constraint_bar_display,
@@ -918,6 +925,8 @@ impl OpenCADStudio {
             pick_add: self.pick_add,
             pick_drag_rect: self.pick_drag_rect,
             quick_properties: self.quick_properties,
+            quick_properties_float: self.quick_properties_float,
+            quick_properties_pos: [self.quick_properties_pos.x, self.quick_properties_pos.y],
             language: self.language,
             cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
             command_line_opacity: self.command_line.opacity_percent(),
@@ -995,6 +1004,8 @@ impl OpenCADStudio {
         self.show_ucs_icon = s.show_ucs_icon;
         self.ucs_icon_at_origin = s.ucs_icon_at_origin;
         self.selection_cycling = s.selection_cycling;
+        self.osnap_z = s.osnap_z;
+        self.select_similar_mode = s.select_similar_mode & 255;
         self.double_click_block_refedit = s.double_click_block_refedit;
         self.double_click_block_attedit = s.double_click_block_attedit;
         self.right_click_mode = s.right_click_mode;
@@ -1003,6 +1014,7 @@ impl OpenCADStudio {
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
         crate::scene::frame::set_profile_image_mode(s.image_frame);
         crate::modules::draw::draw::attdef::session().on_screen = s.attdef_on_screen;
+        *crate::modules::annotate::table_cmd::session() = s.table_insert;
         {
             use crate::modules::insert::block_cmdline as bc;
             let mut remembered = bc::defaults();
@@ -1027,6 +1039,7 @@ impl OpenCADStudio {
             crate::io::plot_style::set_plot_styles_folder(
                 s.plot_styles_folder.as_ref().map(Into::into),
             );
+            crate::io::font_repo::set_support_folder(s.support_folder.as_ref().map(Into::into));
         }
         crate::sys::set_attach_filter(s.attach_filter);
         crate::scene::model::sweep_model::set_surface_associativity(s.surface_associativity);
@@ -1098,6 +1111,8 @@ impl OpenCADStudio {
         self.show_constraint_values = s.show_constraint_values;
         self.auto_constrain_settings = s.auto_constrain.clone();
         self.txt2mtxt_settings = s.txt2mtxt;
+        self.spell_prefs = s.spell.clone();
+        self.dim_inspect_settings = s.dim_inspect.clone();
         self.auto_constrain_settings.sanitize();
         self.auto_constrain_distance_input =
             format!("{}", self.auto_constrain_settings.distance_tolerance);
@@ -1114,6 +1129,11 @@ impl OpenCADStudio {
         self.pick_add = s.pick_add;
         self.pick_drag_rect = s.pick_drag_rect;
         self.quick_properties = s.quick_properties;
+        self.quick_properties_float = s.quick_properties_float;
+        self.quick_properties_pos = iced::Point::new(
+            s.quick_properties_pos[0].max(0.0),
+            s.quick_properties_pos[1].max(0.0),
+        );
         if crate::i18n::set_language(s.language).is_ok() {
             self.language = s.language;
         }
@@ -1350,8 +1370,20 @@ impl OpenCADStudio {
         // Refresh the command-line autocomplete pool so a newly enabled plugin's
         // commands become typeable (and a disabled one's drop out). This runs on
         // startup load, settings reload, and every enable/disable toggle (#272).
-        self.command_line.dynamic_commands =
-            crate::plugin::plugin_command_names(&self.disabled_plugins);
+        let mut cmds = crate::plugin::plugin_command_names(&self.disabled_plugins);
+        for state in self.plugin_panels.values() {
+            if let Some(ref c) = state.def.command {
+                let cu = c.to_uppercase();
+                if !cmds.contains(&cu) {
+                    cmds.push(cu);
+                }
+            }
+            let id_u = state.def.id.to_uppercase();
+            if !cmds.contains(&id_u) {
+                cmds.push(id_u);
+            }
+        }
+        self.command_line.dynamic_commands = cmds;
     }
 
     /// Snapshot of disabled plugin ids — lets the registry skip them while it
@@ -1550,6 +1582,14 @@ impl OpenCADStudio {
         self.shortcut_bindings
             .entry("SHIFT+TAB".to_string())
             .or_insert_with(|| "DYNTABPREV".to_string());
+        self.shortcut_bindings
+            .entry(if cfg!(target_os = "macos") { "CMD+R" } else { "CTRL+R" }.to_string())
+            .or_insert_with(|| "NEXTVIEWPORT".to_string());
+        for (key, action) in crate::app::shortcuts::PLATFORM_BINDINGS {
+            self.shortcut_bindings
+                .entry(key.to_string())
+                .or_insert_with(|| action.to_string());
+        }
         crate::app::shortcuts::sync_space_dispatch_flag(&self.shortcut_bindings);
     }
 
@@ -1595,6 +1635,7 @@ impl OpenCADStudio {
             tab.scene.selection_color = sel_color;
             tab.scene.selection_effect = sel_effect;
             let old_sel_widen = std::mem::replace(&mut tab.scene.selection_widen, sel_widen);
+            tab.scene.edge_color = self.model_space.edge_color;
             tab.bg_color = Some(model_bg);
             tab.paper_bg_color = Some(paper_bg);
 
@@ -1951,6 +1992,7 @@ impl OpenCADStudio {
             self.backup_on_save,
             expected_fingerprint,
             verify_reader,
+            false,
         )?;
 
         if set_current_path {
@@ -2036,7 +2078,7 @@ impl OpenCADStudio {
         &mut self,
         name: String,
         path: std::path::PathBuf,
-        doc: codec::CadDocument,
+        doc: codec::Document,
         mut caches: crate::scene::DerivedCaches,
     ) -> Task<Message> {
         // If the user clicked Cancel while the parser was running, the
@@ -2089,6 +2131,13 @@ impl OpenCADStudio {
             .unwrap_or(0);
         self.command_line
             .push_output(crate::tf!("Opened \"{name}\" — {entity_count} entities").as_ref());
+        // What a converter could not carry over is a warning: the drawing
+        // opened and is usable.
+        for diagnostic in caches.read_stats.iter().flat_map(|stats| &stats.diagnostics) {
+            if diagnostic.code == ocs_save::CONVERSION_LOSS {
+                self.command_line.push_warning(&diagnostic.message);
+            }
+        }
         // Reference problems are warnings, not errors: the host drawing
         // opened and is usable, and automation reads an error as a failed
         // open (#1971). The full list goes to `state.xrefs`.
@@ -2218,6 +2267,10 @@ impl OpenCADStudio {
         self.install_native_edit_guard(i, &path, opened_fingerprint);
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
+        // A walk belongs to the drawing it was opened on. Loading a document
+        // into this tab ends any walk it still held, so the new drawing can
+        // never render under the previous one's hide.
+        self.reset_layer_walk_for(i);
         self.tabs[i].scene.bump_layout_epoch();
         self.tabs[i].scene.bump_scale_epoch();
         self.tabs[i].scene.bump_ucs_epoch();
@@ -2619,7 +2672,7 @@ impl OpenCADStudio {
             let version = document.version;
             let prepared = crate::io::prepare_document_for_save(document, version);
             Task::perform(
-                async move { crate::io::serialize_prepared_document(&prepared, &ext).await },
+                async move { crate::io::serialize_prepared_document(&prepared, &ext, false).await },
                 move |result| Message::WebWblockSerialized {
                     block_name,
                     path,
@@ -2645,7 +2698,7 @@ impl OpenCADStudio {
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn saveall_web(&mut self) -> Task<Message> {
         let mut skipped = 0usize;
-        let mut pending: Vec<(crate::app::WebSaveallEntry, codec::CadDocument)> = Vec::new();
+        let mut pending: Vec<(crate::app::WebSaveallEntry, codec::Document)> = Vec::new();
         for t in 0..self.tabs.len() {
             if self.tabs[t].is_start || self.tabs[t].block_test.is_some() {
                 continue;
@@ -2704,7 +2757,7 @@ impl OpenCADStudio {
                 let mut results = Vec::with_capacity(pending.len());
                 for (mut entry, prepared) in pending {
                     entry.result =
-                        crate::io::serialize_prepared_document(&prepared, &entry.ext).await;
+                        crate::io::serialize_prepared_document(&prepared, &entry.ext, false).await;
                     results.push(entry);
                 }
                 results
@@ -2889,7 +2942,6 @@ impl OpenCADStudio {
         self.sync_view_state_for_save(i);
         sync_annotation_scale_header(&mut self.tabs[i].scene);
         self.stamp_header_sysvars(i);
-        self.tabs[i].scene.document.header.user_real1 = self.tabs[i].scene.annotation_scale as f64;
         self.sync_solid_models_for_save(i);
         self.tabs[i].scene.sync_native_parametric_graph();
         self.stamp_sheet_set_data(i);
@@ -2970,6 +3022,7 @@ impl OpenCADStudio {
             self.thumbnail_capture_clean = false;
             return Task::none();
         };
+        self.conversion_loss_allowed = pending.allow_conversion_loss;
         self.queue_native_save(
             i,
             pending.path,
@@ -2996,6 +3049,7 @@ impl OpenCADStudio {
             // The tab closed while its capture was queued: the save is over
             // (no serialization follows), so release the in-flight slot.
             crate::io::fs_access::end_web_save(tab_id);
+            self.conversion_loss_allowed = false;
             return Task::none();
         };
         let preview = screenshot.as_ref().and_then(|screenshot| {
@@ -3027,8 +3081,11 @@ impl OpenCADStudio {
         // `on_web_save_serialized`.
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
+        let allow_loss = std::mem::take(&mut self.conversion_loss_allowed);
         Task::perform(
-            async move { crate::io::serialize_prepared_document(&prepared, &ext).await },
+            async move {
+                crate::io::serialize_prepared_document(&prepared, &ext, allow_loss).await
+            },
             move |result| Message::WebSaveSerialized {
                 tab_id,
                 filename,
@@ -3308,6 +3365,27 @@ impl OpenCADStudio {
         if self.refuse_block_test_save(i) {
             return Task::none();
         }
+        let allow_conversion_loss = std::mem::take(&mut self.conversion_loss_allowed);
+        if !allow_conversion_loss && purpose != crate::app::SavePurpose::Autosave {
+            let ext = path
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if let Some(losses) = self.conversion_losses_to_confirm(i, &ext, version) {
+                let save = crate::app::PendingNativeThumbnailSave {
+                    tab_id: self.tabs[i].id,
+                    path,
+                    version,
+                    purpose,
+                    continuation,
+                    set_current_path,
+                    check_external_change,
+                    allow_conversion_loss: false,
+                };
+                let pending = crate::app::PendingConversionSave::Native(save);
+                return self.ask_conversion_loss(losses, pending);
+            }
+        }
         let tab_id = self.tabs[i].id;
         if self
             .pending_native_thumbnail_save
@@ -3396,6 +3474,7 @@ impl OpenCADStudio {
                 continuation,
                 set_current_path,
                 check_external_change,
+                allow_conversion_loss,
             });
             self.thumbnail_capture_clean = true;
             return Task::none();
@@ -3591,6 +3670,7 @@ impl OpenCADStudio {
                             backup,
                             expected_fingerprint,
                             verify_reader,
+                            allow_conversion_loss,
                         );
                         (result, refreshed_preview)
                     })
@@ -4015,6 +4095,15 @@ impl OpenCADStudio {
             return Task::none();
         }
         let i = self.active_tab;
+        // DXEVAL: a save may first offer (or make) outdated extraction
+        // table updates.
+        if let Some(task) = self.evaluate_extraction_tables(
+            i,
+            crate::app::commands::extraction_eval::EVENT_SAVE,
+            Some(Message::SaveFile),
+        ) {
+            return task;
+        }
         // Web serializes immediately below. Native preparation happens
         // once after the destination/version is known.
         #[cfg(target_arch = "wasm32")]
@@ -4086,6 +4175,10 @@ impl OpenCADStudio {
                 document.dwg_source_version.unwrap_or(document.version)
             };
             crate::io::format_for_version(version, is_dxf)
+        } else if let Some(format) = self.current_file_format(tab_idx) {
+            // A drawing that already has a file keeps that file's format;
+            // the configured default is for new drawings (#2215).
+            format
         } else {
             self.default_save_format.clone()
         };
@@ -4108,13 +4201,28 @@ impl OpenCADStudio {
         self.on_save_dialog_confirm()
     }
 
+    /// The save format of the tab's current file, by its extension: the
+    /// converter for a converter format, else DWG or DXF in the document's
+    /// version. `None` for an unsaved drawing or another extension.
+    pub(in crate::app) fn current_file_format(&self, tab_idx: usize) -> Option<String> {
+        let path = self.tabs[tab_idx].current_path.as_deref()?;
+        let ext = path.extension()?.to_str()?;
+        if let Some(converter) = ocs_save::external_format(ext) {
+            return Some(converter.name().to_string());
+        }
+        let is_dxf = ext.eq_ignore_ascii_case("dxf");
+        (is_dxf || ext.eq_ignore_ascii_case("dwg")).then(|| {
+            crate::io::format_for_version(self.tabs[tab_idx].scene.document.version, is_dxf)
+        })
+    }
+
     pub(super) fn on_save_dialog_confirm(&mut self) -> Task<Message> {
         let (ext, version) = crate::io::parse_save_format(&self.save_dialog_format);
         // Warn before a lossy Save-As that would drop unsupported
         // (AEC / application) objects kept only as verbatim
         // source-version bytes — let the user keep them by saving in the
         // source version, or proceed and drop them.
-        if !self.aec_drop_acknowledged {
+        if !self.aec_drop_acknowledged && ocs_save::external_format(ext).is_none() {
             let is_dxf = ext.eq_ignore_ascii_case("dxf");
             let n = crate::io::dropped_on_save_count(
                 &self.tabs[self.active_tab].scene.document,
@@ -4151,7 +4259,11 @@ impl OpenCADStudio {
                 .as_ref()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()));
             let default_name = filename;
-            let (filter_label, filter_ext): (&str, &str) = if ext.eq_ignore_ascii_case("dxf") {
+            let (filter_label, filter_ext): (&str, &str) = if let Some(converter) =
+                ocs_save::external_format(ext)
+            {
+                (converter.name(), ext)
+            } else if ext.eq_ignore_ascii_case("dxf") {
                 ("DXF Files", "dxf")
             } else if ext.eq_ignore_ascii_case("dwt") {
                 ("Drawing Template (*.dwt)", "dwt")
@@ -4260,6 +4372,20 @@ impl OpenCADStudio {
         ext: String,
         version: codec::DxfVersion,
     ) -> Task<Message> {
+        if !self.conversion_loss_allowed {
+            let tab = self.tabs.iter().position(|tab| tab.id == tab_id);
+            if let Some(losses) =
+                tab.and_then(|i| self.conversion_losses_to_confirm(i, &ext, version))
+            {
+                let save = crate::app::PendingConversionSave::Web {
+                    tab_id,
+                    filename,
+                    ext,
+                    version,
+                };
+                return self.ask_conversion_loss(losses, save);
+            }
+        }
         // The save is now committed to this tab and this format: mark it
         // in flight (the web counterpart of native's active_save_jobs —
         // on_save_file refuses a second save while the slot is held) and
@@ -4375,6 +4501,101 @@ impl OpenCADStudio {
             true,
             true,
         )
+    }
+
+    /// What a converter would lose saving tab `i` as `ext`, when the user has to
+    /// confirm it first; `None` lets the save go ahead.
+    fn conversion_losses_to_confirm(
+        &self,
+        i: usize,
+        ext: &str,
+        version: codec::DxfVersion,
+    ) -> Option<Vec<String>> {
+        let Some(format) = ocs_save::external_format(ext) else {
+            return self.drawing_properties_loss(i, ext, version);
+        };
+        let prepared =
+            crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
+        // A write that fails outright is reported by the save itself.
+        let losses = ocs_save::external_losses(&prepared, format).ok()?;
+        (!losses.is_empty()).then_some(losses)
+    }
+
+    /// The drawing-properties warning when a DWG/DXF `version` cannot store the
+    /// properties tab `i` has filled in; `None` when there is nothing to lose.
+    fn drawing_properties_loss(
+        &self,
+        i: usize,
+        ext: &str,
+        version: codec::DxfVersion,
+    ) -> Option<Vec<String>> {
+        let (format, is_dxf) = match ext {
+            "dxf" => ("DXF", true),
+            "dwg" | "dwt" => ("DWG", false),
+            _ => return None,
+        };
+        let lost = crate::io::drawing_properties_lost_on_save(
+            &self.tabs[i].scene.document.summary_info,
+            &self.tabs[i].scene.document.header.hyperlink_base,
+            version,
+            is_dxf,
+        );
+        (lost > 0).then(|| {
+            vec![crate::tr!(
+                "dwgprops-dialog",
+                "save-loss",
+                format = format,
+                count = lost.to_string()
+            )]
+        })
+    }
+
+    /// Hold `pending` back and ask whether to save despite `losses`.
+    fn ask_conversion_loss(
+        &mut self,
+        losses: Vec<String>,
+        pending: crate::app::PendingConversionSave,
+    ) -> Task<Message> {
+        self.conversion_losses = losses;
+        self.pending_conversion_save = Some(pending);
+        self.active_modal = Some(crate::app::ModalKind::ConversionLoss);
+        Task::none()
+    }
+
+    /// Conversion-loss warning → "Save anyway": replay the held-back save,
+    /// allowed to lose what the warning listed.
+    pub(super) fn on_conversion_loss_proceed(&mut self) -> Task<Message> {
+        self.active_modal = None;
+        self.conversion_losses.clear();
+        let Some(pending) = self.pending_conversion_save.take() else {
+            return Task::none();
+        };
+        self.conversion_loss_allowed = true;
+        match pending {
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::app::PendingConversionSave::Native(save) => {
+                let Some(i) = self.tabs.iter().position(|tab| tab.id == save.tab_id) else {
+                    self.conversion_loss_allowed = false;
+                    return Task::none();
+                };
+                self.queue_native_save(
+                    i,
+                    save.path,
+                    save.version,
+                    save.purpose,
+                    save.continuation,
+                    save.set_current_path,
+                    save.check_external_change,
+                )
+            }
+            #[cfg(target_arch = "wasm32")]
+            crate::app::PendingConversionSave::Web {
+                tab_id,
+                filename,
+                ext,
+                version,
+            } => self.web_save_capture(tab_id, filename, ext, version),
+        }
     }
 
     /// AEC-drop warning → "Save anyway": accept the loss and proceed with the
@@ -4524,7 +4745,7 @@ impl OpenCADStudio {
                 for (name, ext, prepared) in pending {
                     // Autosave exists to recover geometry, not pretty recents:
                     // no thumbnail capture, just bytes into OPFS.
-                    match crate::io::serialize_prepared_document(&prepared, &ext).await {
+                    match crate::io::serialize_prepared_document(&prepared, &ext, false).await {
                         Ok(bytes) => {
                             if let Err(error) =
                                 crate::io::web_autosave::snapshot(&name, &bytes, None).await
@@ -5243,6 +5464,7 @@ impl OpenCADStudio {
             return Task::none();
         };
         let worker_path = path.clone();
+        let open_when_done = self.plot_dialog.open_when_done;
         let work = move || {
             // SVG shares the plot page with PDF: pick the writer from the
             // chosen extension.
@@ -5254,6 +5476,10 @@ impl OpenCADStudio {
             } else {
                 crate::io::pdf_export::export_pdf(&page, &worker_path)
             };
+            if result.is_ok() && open_when_done {
+                // A viewer that cannot start leaves the file written all the same.
+                let _ = crate::io::print_to_printer::open_in_viewer(&worker_path);
+            }
             result
                 .map(|_| crate::tf!("Exported: {}", worker_path.display()).into_owned())
                 .map_err(|e| crate::tf!("Export failed: {e}").into_owned())
@@ -5279,6 +5505,7 @@ impl OpenCADStudio {
         };
         let worker_path = path.clone();
         self.close_active_modal();
+        let open_when_done = self.plot_dialog.open_when_done;
         let work = move || {
             let result = if worker_path
                 .extension()
@@ -5288,6 +5515,10 @@ impl OpenCADStudio {
             } else {
                 crate::io::pdf_export::export_pdf(&page, &worker_path)
             };
+            if result.is_ok() && open_when_done {
+                // A viewer that cannot start leaves the file written all the same.
+                let _ = crate::io::print_to_printer::open_in_viewer(&worker_path);
+            }
             result
                 .map(|_| {
                     crate::tf!(
@@ -6599,6 +6830,7 @@ impl OpenCADStudio {
                     PlotFlag::Stamp => d.stamp = !d.stamp,
                     PlotFlag::HidePaperspace => d.hide_paperspace = !d.hide_paperspace,
                     PlotFlag::SaveToLayout => d.save_to_layout = !d.save_to_layout,
+                    PlotFlag::OpenWhenDone => d.open_when_done = !d.open_when_done,
                     _ => {}
                 }
                 Task::none()
@@ -7040,7 +7272,11 @@ impl OpenCADStudio {
         };
         // The file's factor is per the layout's paper unit; the picker's are
         // per the drawing's scale-family unit (see `plot_settings_from_dialog`).
-        let target_factor = if stored_factor.is_finite() && stored_factor > 0.0 {
+        // A Layout plot is always 1:1 paper, whatever the family unit: a
+        // metre drawing showed it as 1:1000 (#2219).
+        let target_factor = if d.area == "Layout" {
+            1.0
+        } else if stored_factor.is_finite() && stored_factor > 0.0 {
             stored_factor * plot_paper_unit_mm(ps.paper_units) / family_unit_mm
         } else {
             1.0
@@ -9394,5 +9630,21 @@ impl OpenCADStudio {
             )
             .as_ref(),
         );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod save_header_tests {
+    use crate::app::OpenCADStudio;
+
+    /// USERR1 is a user variable: a save stores the annotation scale in
+    /// CANNOSCALE, not in USERR1, and keeps the value the user gave it.
+    #[test]
+    fn save_keeps_userr1() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].scene.document.header.user_real1 = 7.5;
+        app.tabs[0].scene.annotation_scale = 0.02;
+        app.prepare_snapshot_save(0);
+        assert_eq!(app.tabs[0].scene.document.header.user_real1, 7.5);
     }
 }

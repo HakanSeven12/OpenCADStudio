@@ -5,7 +5,7 @@ use codec::objects::{
     BlockParameter, BlockPropertiesTable, BlockPropertiesTableField, BlockPropertiesTableValue,
     DynamicBlockData, ObjectType,
 };
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Column {
@@ -30,7 +30,7 @@ pub(crate) struct TableView {
 
 pub(crate) type Grid = (Handle, Vec<Column>, Vec<Vec<String>>);
 
-pub(crate) fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
+pub(crate) fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     let xdict = super::block_authoring::definition_dictionary(document, definition)?;
     let ObjectType::Dictionary(dictionary) = document.objects.get(&xdict)? else {
         return None;
@@ -39,7 +39,7 @@ pub(crate) fn graph_handle(document: &CadDocument, definition: Handle) -> Option
 }
 
 pub(crate) fn table(
-    document: &CadDocument,
+    document: &Document,
     definition: Handle,
 ) -> Result<Option<TableView>, &'static str> {
     let graph = graph_handle(document, definition).ok_or("The authoring graph is unavailable.")?;
@@ -252,7 +252,7 @@ fn parse(table_handle: Handle, table: BlockPropertiesTable) -> Result<TableView,
     })
 }
 
-pub(crate) fn columns(document: &CadDocument, definition: Handle) -> Vec<Column> {
+pub(crate) fn columns(document: &Document, definition: Handle) -> Vec<Column> {
     let parameters = super::block_actions::all_parameters(document, definition);
     super::block_lookup::properties(document, definition)
         .into_iter()
@@ -283,7 +283,7 @@ pub(crate) fn columns(document: &CadDocument, definition: Handle) -> Vec<Column>
 }
 
 pub(crate) fn grid_table(
-    document: &CadDocument,
+    document: &Document,
     definition: Handle,
 ) -> Result<Option<Grid>, &'static str> {
     let Some(view) = table(document, definition)? else {
@@ -298,7 +298,7 @@ pub(crate) fn grid_table(
 }
 
 pub(crate) fn apply(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     columns: &[Column],
     rows: &[Vec<f64>],
@@ -383,7 +383,7 @@ pub(crate) fn apply(
 }
 
 fn ensure_grip(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     graph: Handle,
     table_handle: Handle,
@@ -489,7 +489,7 @@ fn ensure_grip(
 }
 
 /// Repair the former three-object append layout, preserving all unrelated nodes.
-pub(crate) fn repair_grip_graph(doc: &mut CadDocument, definition: Handle, table: Handle) -> Result<bool, &'static str> {
+pub(crate) fn repair_grip_graph(doc: &mut Document, definition: Handle, table: Handle) -> Result<bool, &'static str> {
     let graph_handle = authoring::graph(doc, definition)?.ok_or("The authoring graph is unavailable.")?;
     let Some(ObjectType::DynamicBlock(table_object)) = doc.objects.get(&table) else { return Ok(false) };
     let DynamicBlockData::PropertiesTable(table_data) = &table_object.data else { return Ok(false) };
@@ -560,7 +560,7 @@ fn encode_fields(
         vec![int(90, 2), text(300, "Block Table1"), text(301, "")]
     };
     fields.push(int(91, columns.len() as i64));
-    for (index, column) in columns.iter().enumerate() {
+    for column in columns {
         let mut metadata = previous
             .as_ref()
             .and_then(|previous| {
@@ -600,14 +600,11 @@ fn encode_fields(
                 column.connection_name.eq_ignore_ascii_case("UpdatedAngle"),
             );
         }
-        // The first binding precedes its metadata; subsequent bindings follow it.
-        if index == 0 {
-            fields.push(handle_field(340, column.handle));
-        }
+        // Every column stores its binding before its metadata and a null
+        // handle after it.
+        fields.push(handle_field(340, column.handle));
         fields.extend(metadata);
-        if index != 0 {
-            fields.push(handle_field(340, column.handle));
-        }
+        fields.push(handle_field(340, Handle::NULL));
     }
     fields.push(int(92, rows.len() as i64));
     for (index, row) in rows.iter().enumerate() {
@@ -617,20 +614,25 @@ fn encode_fields(
             fields.push(real_field(140, *value));
         }
     }
-    let mut trailer = previous
-        .as_ref()
-        .map(|previous| previous.table.fields[previous.trailer_start + 1..].to_vec())
-        .unwrap_or_else(|| {
-            vec![
-                boolean(290, must_match),
-                boolean(291, true),
-                boolean(292, false),
-            ]
-        });
-    if let Some(field) = trailer.iter_mut().find(|field| field.code == 290) {
-        field.value = BlockPropertiesTableValue::Boolean(must_match);
+    // Group 93 is the next row ID, followed by exactly three flags (must
+    // match, runtime parameters only, disabled in the drawing editor).
+    let mut trailer = vec![
+        boolean(290, must_match),
+        boolean(291, true),
+        boolean(292, false),
+    ];
+    if let Some(previous) = previous.as_ref() {
+        for (flag, old) in trailer
+            .iter_mut()
+            .zip(&previous.table.fields[previous.trailer_start + 1..])
+            .skip(1)
+        {
+            if let BlockPropertiesTableValue::Boolean(value) = old.value {
+                flag.value = BlockPropertiesTableValue::Boolean(value);
+            }
+        }
     }
-    fields.push(int(93, trailer.len() as i64));
+    fields.push(int(93, rows.len() as i64));
     fields.extend(trailer);
     Ok(fields)
 }
@@ -676,7 +678,7 @@ mod tests {
     use codec::{types::Vector3, DwgReader, DwgWriter, DxfReader, DxfWriter};
     use std::io::Cursor;
 
-    fn fixture() -> (CadDocument, Handle, Vec<Column>) {
+    fn fixture() -> (Document, Handle, Vec<Column>) {
         let mut scene = Scene::new();
         scene.define_block_raw("TABLE", Vector3::ZERO, vec![]);
         let definition = scene.document.block_records.get("TABLE").unwrap().handle;

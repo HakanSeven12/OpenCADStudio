@@ -20,6 +20,7 @@ use std::sync::Arc;
 /// Original crosshair geometry retained at the default setting values.
 pub const CROSSHAIR_SQ: f32 = 7.5;
 pub const CROSSHAIR_ARM: f32 = 60.0;
+pub(crate) const TRACKING_DASH_PX: [f32; 2] = [6.0, 4.0];
 const DEFAULT_CURSOR_SIZE: i32 = 5;
 const DEFAULT_PICK_BOX: i32 = 3;
 const DEFAULT_PICK_APERTURE: f32 = 8.0;
@@ -642,7 +643,7 @@ pub struct GridParams {
 /// the axis extent (in world units along the active UCS axes) that the wrapper
 /// uses to size the coloured UCS axes overlay. Returned from `grid_segments` so
 /// the renderer-free geometry construction can be unit-tested and benchmarked
-/// without an iced `Renderer` (Mission #1, 2026-08-26 bench-first plan).
+/// without an iced `Renderer`.
 #[doc(hidden)]
 pub struct GridGeometry {
     pub segments: Vec<(Point, Point)>,
@@ -666,16 +667,13 @@ impl GridGeometry {
     }
 }
 
-/// Cache key for the grid overlay. Identical `GridParams` for every pane plus
-/// identical overlay `bounds` ⇒ byte-identical grid geometry; that is the
-/// invariant the key encodes.
+/// Cache key for one pane's grid overlay. Identical `GridParams` plus the
+/// identical pane clip rectangle and `GridStyle` ⇒ byte-identical pane
+/// geometry; that is the invariant the key encodes.
 ///
-/// Bounds are part of the key, not the only key: a tile layout can pan/zoom
-/// inside a single bounds rect, so bounds-only reuse (iced's
-/// `geometry::Cache`) would serve a stale grid. The full per-pane
-/// `GridParams` set is required for correctness.
-///
-/// Added 2026-08-26 by Mission #1 (grid overlay cache, Tier 1 #1).
+/// Bounds are part of the key, not the only key: a pane can pan/zoom inside a
+/// single clip rect, so a bounds-only reuse (iced's `geometry::Cache`) would
+/// serve a stale grid. The full `GridParams` is required for correctness.
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct GridKey {
@@ -685,7 +683,8 @@ pub struct GridKey {
 }
 
 impl GridKey {
-    /// Build a key from the per-pane `GridParams`, overlay bounds, and grid style.
+    /// Build a key from the pane's `GridParams`, its clip rectangle, and the
+    /// grid style.
     #[doc(hidden)]
     pub fn from_grids(grids: &[GridParams], bounds: iced::Rectangle, style: GridStyle) -> Self {
         Self {
@@ -698,8 +697,7 @@ impl GridKey {
 
 /// Cache hit decision: `true` iff `cached` is `Some` and structurally equal to
 /// `new`. Reference-based to avoid moving the (potentially large) `Vec` of
-/// per-pane params; the caller borrows from `RefCell<Option<GridKey>>` on
-/// both sides.
+/// per-pane params; the caller borrows from the pane entry on both sides.
 #[doc(hidden)]
 pub fn should_reuse(cached: Option<&GridKey>, new: &GridKey) -> bool {
     match cached {
@@ -708,21 +706,108 @@ pub fn should_reuse(cached: Option<&GridKey>, new: &GridKey) -> bool {
     }
 }
 
-/// `Program::State` for `GridCanvas`. Stores the `GridKey` of the geometry
-/// currently in the cache and the `canvas::Cache` itself.
+/// One pane's cached grid geometry plus the key that produced it.
+struct PaneCache {
+    key: GridKey,
+    cache: canvas::Cache<iced::Renderer>,
+}
+
+impl PaneCache {
+    fn new(key: GridKey) -> Self {
+        Self {
+            key,
+            cache: canvas::Cache::default(),
+        }
+    }
+}
+
+/// `Program::State` for `GridCanvas`: one cache entry per pane so a navigation
+/// in one tile only rebuilds that tile's geometry.
 ///
-/// `RefCell<Option<GridKey>>` because `Program::draw` takes `&self`; the key
-/// is updated on every frame regardless of hit/miss. The `canvas::Cache`
-/// provides an Arc-clone hit path when the iced-level bounds match, and we
-/// use `clear()` on a params-key miss to force a real rebuild even if the
-/// bounds happen to be unchanged (e.g. a pan within the same canvas size).
-///
-/// Added 2026-08-26 by Mission #1 (grid overlay cache, Tier 1 #1).
+/// `RefCell<Vec<...>>` because `Program::draw` takes `&self`; the vec is
+/// resized to the current pane count on every frame. Pane identity is the vec
+/// index — a layout change that moves a pane to another slot changes that
+/// slot's key and forces a rebuild rather than replaying stale geometry.
 #[doc(hidden)]
 #[derive(Default)]
 pub struct GridCanvasState {
-    pub key: RefCell<Option<GridKey>>,
-    pub cache: canvas::Cache<iced::Renderer>,
+    panes: RefCell<Vec<Option<PaneCache>>>,
+}
+
+impl GridCanvasState {
+    /// Match the per-pane storage to the current pane count: drop caches for
+    /// panes that no longer exist and leave new panes empty (first draw misses).
+    fn resize_panes(&self, count: usize) {
+        self.panes.borrow_mut().resize_with(count, || None);
+    }
+
+    /// `true` when this pane's stored key still describes the request.
+    #[doc(hidden)]
+    pub fn pane_reuses(&self, index: usize, key: &GridKey) -> bool {
+        self.panes
+            .borrow()
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_some_and(|pane| should_reuse(Some(&pane.key), key))
+    }
+
+    /// Bench/test seam: install `key` for pane `index` without a renderer.
+    /// Decision-only — the pane's cache stays empty, so this exercises
+    /// `pane_reuses` but a later `draw_cached` on such a pane would replay
+    /// empty geometry.
+    #[doc(hidden)]
+    pub fn store_pane_key(&self, index: usize, key: GridKey) {
+        self.resize_panes(index + 1);
+        self.panes.borrow_mut()[index] = Some(PaneCache::new(key));
+    }
+
+    /// Arc-clone the cached pane geometry; the fork short-circuits on a bounds
+    /// match and never invokes the closure.
+    fn draw_cached(
+        &self,
+        index: usize,
+        renderer: &iced::Renderer,
+        clip: iced::Rectangle,
+    ) -> canvas::Geometry {
+        let panes = self.panes.borrow();
+        let pane = panes[index]
+            .as_ref()
+            .expect("pane cache present after pane_reuses");
+        pane.cache.draw_with_bounds(renderer, clip, |_frame| {})
+    }
+
+    /// Rebuild one pane: store its new key, clear its cache (so the closure
+    /// runs even when the clip rect is unchanged) and draw only that pane.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_pane(
+        &self,
+        index: usize,
+        renderer: &iced::Renderer,
+        clip: iced::Rectangle,
+        params: &GridParams,
+        style: GridStyle,
+        key: GridKey,
+    ) -> canvas::Geometry {
+        let mut panes = self.panes.borrow_mut();
+        let pane = panes[index].get_or_insert_with(|| PaneCache::new(key.clone()));
+        pane.key = key;
+        pane.cache.clear();
+        pane.cache.draw_with_bounds(renderer, clip, |frame| {
+            draw_grid(
+                frame,
+                params.view_rot,
+                params.eye,
+                params.bounds,
+                params.step_x,
+                params.step_y,
+                params.major_every,
+                params.origin,
+                params.axes,
+                params.limits,
+                style,
+            )
+        })
+    }
 }
 
 /// Compute the adaptive grid step size (world units) from camera zoom.
@@ -735,24 +820,15 @@ pub struct GridCanvasState {
 /// first so points near the camera stay precise at UTM-scale coords.
 /// Rejects points on/behind the perspective eye plane before dividing by W —
 /// without this a behind-camera point wraps to a finite mirrored coordinate
-/// (screen centre for on-axis points) and strokes garbage (#46).
+/// (screen centre for on-axis points) and strokes garbage (#46). The guard is
+/// shared with picking and snapping through `scene::view::projection`.
 fn project_point(
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: iced::Rectangle,
     world: glam::DVec3,
 ) -> Option<Point> {
-    let rel = (world - eye).as_vec3();
-    let clip = view_rot * rel.extend(1.0);
-    if !clip.is_finite() || clip.w <= 1e-7 {
-        return None;
-    }
-    let ndc = clip.truncate() / clip.w;
-    let screen = Point::new(
-        (ndc.x + 1.0) * 0.5 * bounds.width,
-        (1.0 - ndc.y) * 0.5 * bounds.height,
-    );
-    (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
+    crate::scene::view::projection::project_screen(view_rot, eye, bounds, world)
 }
 
 /// Clip the screen segment `p0`→`p1` to `bounds` (Liang–Barsky), returning the
@@ -967,61 +1043,37 @@ impl canvas::Program<Message> for GridCanvas {
         bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let key = GridKey::from_grids(&self.grid, bounds, self.style);
+        state.resize_panes(self.grid.len());
 
-        // Hit check: same params, same bounds, same style ⇒ the cached geometry is still
-        // valid. The key includes bounds and style, so a `should_reuse` match implies
-        // both are equal, and the fork's `draw_with_bounds` will return the
-        // cached `Arc` clone (essentially free).
-        let hit = should_reuse(state.key.borrow().as_ref(), &key);
+        let mut layers = Vec::with_capacity(self.grid.len());
+        for (index, g) in self.grid.iter().enumerate() {
+            let gb = g.bounds;
+            let cx0 = gb.x.max(0.0);
+            let cy0 = gb.y.max(0.0);
+            let cx1 = (gb.x + gb.width).min(bounds.width);
+            let cy1 = (gb.y + gb.height).min(bounds.height);
+            if cx1 <= cx0 || cy1 <= cy0 {
+                continue;
+            }
+            let clip = iced::Rectangle {
+                x: cx0,
+                y: cy0,
+                width: cx1 - cx0,
+                height: cy1 - cy0,
+            };
 
-        let geometry = if hit {
-            // No-op closure: the fork short-circuits on bounds match and
-            // returns the cached geometry without invoking the closure.
-            state.cache.draw_with_bounds(renderer, bounds, |_frame| {})
-        } else {
-            // Params, style, or bounds changed. Clear so the closure runs even when
-            // bounds happen to match the previously-cached frame.
-            state.cache.clear();
-            state.cache.draw_with_bounds(renderer, bounds, |frame| {
-                for g in &self.grid {
-                    let gb = g.bounds;
-                    let cx0 = gb.x.max(0.0);
-                    let cy0 = gb.y.max(0.0);
-                    let cx1 = (gb.x + gb.width).min(bounds.width);
-                    let cy1 = (gb.y + gb.height).min(bounds.height);
-                    if cx1 <= cx0 || cy1 <= cy0 {
-                        continue;
-                    }
-                    let clip = iced::Rectangle {
-                        x: cx0,
-                        y: cy0,
-                        width: cx1 - cx0,
-                        height: cy1 - cy0,
-                    };
-                    frame.with_clip(clip, |f| {
-                        draw_grid(
-                            f,
-                            g.view_rot,
-                            g.eye,
-                            gb,
-                            g.step_x,
-                            g.step_y,
-                            g.major_every,
-                            g.origin,
-                            g.axes,
-                            g.limits,
-                            self.style,
-                        )
-                    });
-                }
-            })
-        };
-
-        // Update the stored key.
-        *state.key.borrow_mut() = Some(key);
-
-        vec![geometry]
+            // Hit: this pane's params, clip and the style are unchanged, so its
+            // cached geometry is still valid. Other panes are unaffected by a
+            // change here — that is the per-pane win.
+            let key = GridKey::from_grids(std::slice::from_ref(g), clip, self.style);
+            let geometry = if state.pane_reuses(index, &key) {
+                state.draw_cached(index, renderer, clip)
+            } else {
+                state.draw_pane(index, renderer, clip, g, self.style, key)
+            };
+            layers.push(geometry);
+        }
+        layers
     }
 }
 
@@ -2867,7 +2919,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                 let p1 = Point::new(tip.x + ux * L, tip.y + uy * L);
                 let dash = canvas::Stroke {
                     line_dash: canvas::LineDash {
-                        segments: &[6.0, 4.0],
+                        segments: &TRACKING_DASH_PX,
                         offset: 0,
                     },
                     ..canvas::Stroke::default()
@@ -3322,87 +3374,142 @@ fn draw_grid(
     }
 }
 
-/// Pure, renderer-free projection of the grid for one pane. Returns canvas-local
-/// `(Point, Point)` segments plus the axis extent (in world units along the
-/// active UCS axes) used by `draw_grid` to size the coloured UCS axes overlay.
+/// Captured inputs and derived clip-space constants for one grid projection.
 ///
-/// Extracted from `draw_grid` (2026-08-26, Mission #1 step 1) so the geometry
-/// construction can be unit-tested and benchmarked without an iced
-/// `Renderer`. Behaviour is identical to the inlined version that preceded it.
-#[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
-pub fn grid_segments(
+/// Pure data: every method below is one phase of the former monolithic
+/// `grid_segments` body, moved verbatim so each can be tested in isolation.
+struct GridProjection {
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: iced::Rectangle,
+    grid_origin: glam::DVec3,
+    axis1: Vec3,
+    axis2: Vec3,
+    inv: Mat4,
+    plane_normal: Vec3,
+    plane_rel: Vec3,
     step_x: f32,
     step_y: f32,
+    derivative_x: f32,
+    derivative_y: f32,
     major_every: u32,
-    grid_origin: glam::DVec3,
-    grid_axes: (Vec3, Vec3, Vec3),
-    limits: Option<(glam::DVec2, glam::DVec2)>,
-) -> GridGeometry {
-    if bounds.width <= 0.0 || bounds.height <= 0.0 {
-        return GridGeometry::empty();
+    row_x_norm: f32,
+    row_y_norm: f32,
+    row_w_norm: f32,
+    grid_clip_origin: glam::Vec4,
+    grid_clip_axis1: glam::Vec4,
+    grid_clip_axis2: glam::Vec4,
+}
+
+impl GridProjection {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        view_rot: Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        step_x: f32,
+        step_y: f32,
+        major_every: u32,
+        grid_origin: glam::DVec3,
+        grid_axes: (Vec3, Vec3, Vec3),
+    ) -> Self {
+        // Row norms of the view-projection: for a step vector `v` (w = 0),
+        // |(view_rot · v).row| ≤ |v| · row_norm. Hoisted once per rebuild; used
+        // by the cross-family finiteness bound below.
+        let view_rows = view_rot.transpose();
+        let row_x_norm = view_rows.x_axis.truncate().length();
+        let row_y_norm = view_rows.y_axis.truncate().length();
+        let row_w_norm = view_rows.w_axis.truncate().length();
+
+        // Grid is intentionally restricted to the active UCS XY plane.
+        let (gx, gy, _gz) = grid_axes;
+        let axis1 = gx.normalize_or(Vec3::X);
+        let axis2 = gy.normalize_or(Vec3::Y);
+        let inv = view_rot.inverse();
+        let plane_normal = axis1.cross(axis2).normalize_or(Vec3::Z);
+        let plane_rel = (grid_origin - eye).as_vec3();
+
+        // A full grid step is needed to measure adjacent-line distance, but it
+        // is too large for the line's local tangent near the eye. A small
+        // derivative keeps the tangent measurable without crossing the eye.
+        let derivative_x = (step_x * 0.01).max(1e-4);
+        let derivative_y = (step_y * 0.01).max(1e-4);
+
+        // Project an infinite world-grid line to its exact screen-space line and
+        // intersect it with the viewport rectangle. This remains valid across the
+        // perspective horizon; projecting a finite world-space bounding rectangle
+        // is only correct for the perpendicular/top view.
+        let grid_clip_origin = view_rot * (grid_origin - eye).as_vec3().extend(1.0);
+        let grid_clip_axis1 = view_rot * axis1.extend(0.0);
+        let grid_clip_axis2 = view_rot * axis2.extend(0.0);
+
+        Self {
+            view_rot,
+            eye,
+            bounds,
+            grid_origin,
+            axis1,
+            axis2,
+            inv,
+            plane_normal,
+            plane_rel,
+            step_x,
+            step_y,
+            derivative_x,
+            derivative_y,
+            major_every,
+            row_x_norm,
+            row_y_norm,
+            row_w_norm,
+            grid_clip_origin,
+            grid_clip_axis1,
+            grid_clip_axis2,
+        }
     }
 
-    // World → viewport-local screen via relative-to-eye: subtract the f64 eye
-    // first so grid points near the camera stay precise at UTM-scale coords.
-    // Shared eye-plane guard — see project_point (#46).
-    let project =
-        |world: glam::DVec3| -> Option<Point> { project_point(view_rot, eye, bounds, world) };
+    /// World → viewport-local screen via relative-to-eye: subtract the f64 eye
+    /// first so grid points near the camera stay precise at UTM-scale coords.
+    /// Shared eye-plane guard — see `project_point` (#46).
+    fn project(&self, world: glam::DVec3) -> Option<Point> {
+        project_point(self.view_rot, self.eye, self.bounds, world)
+    }
 
-    // Same world→screen projection as `project` (bit-identical arithmetic),
-    // additionally returning the homogeneous clip position. The clip
-    // coordinates feed the cross-family finiteness bound in `grid_gap`.
-    let project_clip = |world: glam::DVec3| -> Option<(Point, glam::Vec4)> {
-        let rel = (world - eye).as_vec3();
-        let clip = view_rot * rel.extend(1.0);
+    /// Same world→screen projection as `project` (bit-identical arithmetic),
+    /// additionally returning the homogeneous clip position. The clip
+    /// coordinates feed the cross-family finiteness bound in `grid_gap`.
+    fn project_clip(&self, world: glam::DVec3) -> Option<(Point, glam::Vec4)> {
+        let rel = (world - self.eye).as_vec3();
+        let clip = self.view_rot * rel.extend(1.0);
         if !clip.is_finite() || clip.w <= 1e-7 {
             return None;
         }
         let ndc = clip.truncate() / clip.w;
         let screen = Point::new(
-            (ndc.x + 1.0) * 0.5 * bounds.width,
-            (1.0 - ndc.y) * 0.5 * bounds.height,
+            (ndc.x + 1.0) * 0.5 * self.bounds.width,
+            (1.0 - ndc.y) * 0.5 * self.bounds.height,
         );
         (screen.x.is_finite() && screen.y.is_finite()).then_some((screen, clip))
-    };
-    // Row norms of the view-projection: for a step vector `v` (w = 0),
-    // |(view_rot · v).row| ≤ |v| · row_norm. Hoisted once per rebuild; used by
-    // the cross-family finiteness bound below.
-    let view_rows = view_rot.transpose();
-    let row_x_norm = view_rows.x_axis.truncate().length();
-    let row_y_norm = view_rows.y_axis.truncate().length();
-    let row_w_norm = view_rows.w_axis.truncate().length();
+    }
 
-    // Grid is intentionally restricted to the active UCS XY plane.
-    let (gx, gy, gz) = grid_axes;
-    let axis1 = gx.normalize_or(Vec3::X);
-    let axis2 = gy.normalize_or(Vec3::Y);
-    let inv = view_rot.inverse();
-    let plane_normal = axis1.cross(axis2).normalize_or(Vec3::Z);
-    let plane_rel = (grid_origin - eye).as_vec3();
-
-    // Intersect a viewport-local screen ray with the real XY plane. Unlike the
-    // old mid-depth approximation, this covers the complete viewport after an
-    // orbit and also tells us when a ray crosses the perspective horizon.
-    // Returns the world hit together with its validated world→screen
-    // projection (and clip position): every consumer of the hit point needs
-    // `project(world)` as well (gap measurement base), and computing it once
-    // here instead of once per consumer removes a whole projection per
-    // evaluated sample.
-    let unproject = |sx: f32, sy: f32| -> Option<(glam::DVec3, Point, glam::Vec4)> {
-        let ndc_x = (sx / bounds.width) * 2.0 - 1.0;
-        let ndc_y = 1.0 - (sy / bounds.height) * 2.0;
-        let near = inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
-        let far = inv.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
+    /// Intersect a viewport-local screen ray with the real XY plane. Unlike the
+    /// old mid-depth approximation, this covers the complete viewport after an
+    /// orbit and also tells us when a ray crosses the perspective horizon.
+    /// Returns the world hit together with its validated world→screen
+    /// projection (and clip position): every consumer of the hit point needs
+    /// `project(world)` as well (gap measurement base), and computing it once
+    /// here instead of once per consumer removes a whole projection per
+    /// evaluated sample.
+    fn unproject(&self, sx: f32, sy: f32) -> Option<(glam::DVec3, Point, glam::Vec4)> {
+        let ndc_x = (sx / self.bounds.width) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (sy / self.bounds.height) * 2.0;
+        let near = self.inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
+        let far = self.inv.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
         let ray = far - near;
-        let denom = ray.dot(plane_normal);
+        let denom = ray.dot(self.plane_normal);
         if !near.is_finite() || !far.is_finite() || !denom.is_finite() || denom.abs() < 1e-7 {
             return None;
         }
-        let t = (plane_rel - near).dot(plane_normal) / denom;
+        let t = (self.plane_rel - near).dot(self.plane_normal) / denom;
         // `far` defines only the unprojection line direction. Its parameter
         // sign is not a reliable front/behind test after the WGPU depth
         // conversion and was cutting the near side during zoom/orbit. The
@@ -3415,69 +3522,59 @@ pub fn grid_segments(
         if !hit.is_finite() {
             return None;
         }
-        let world = eye + hit.as_dvec3();
-        project_clip(world).map(|(p, clip)| (world, p, clip))
-    };
+        let world = self.eye + hit.as_dvec3();
+        self.project_clip(world).map(|(p, clip)| (world, p, clip))
+    }
 
-    // Use several interior points because the UCS origin may be off-screen or
-    // arbitrarily close to the perspective horizon. `p` is the hit point's
-    // already-computed screen position (see `unproject`).
-    const SAMPLE_FRACTIONS: [f32; 5] = [0.02, 0.25, 0.5, 0.75, 0.98];
-    let mut samples = Vec::with_capacity(SAMPLE_FRACTIONS.len().pow(2));
-    for fy in SAMPLE_FRACTIONS {
-        for fx in SAMPLE_FRACTIONS {
-            let screen = glam::Vec2::new(bounds.width * fx, bounds.height * fy);
-            if let Some((world, p, _)) = unproject(screen.x, screen.y) {
-                samples.push((screen, world, p));
+    /// Use several interior points because the UCS origin may be off-screen or
+    /// arbitrarily close to the perspective horizon. `p` is the hit point's
+    /// already-computed screen position (see `unproject`).
+    fn sample_grid_plane(&self) -> Vec<(glam::Vec2, glam::DVec3, Point)> {
+        const SAMPLE_FRACTIONS: [f32; 5] = [0.02, 0.25, 0.5, 0.75, 0.98];
+        let mut samples = Vec::with_capacity(SAMPLE_FRACTIONS.len().pow(2));
+        for fy in SAMPLE_FRACTIONS {
+            for fx in SAMPLE_FRACTIONS {
+                let screen = glam::Vec2::new(self.bounds.width * fx, self.bounds.height * fy);
+                if let Some((world, p, _)) = self.unproject(screen.x, screen.y) {
+                    samples.push((screen, world, p));
+                }
             }
         }
+        samples
     }
-    if samples.is_empty() {
-        return GridGeometry::empty();
-    };
 
-    // Step follows camera zoom only. The previous visible-sample calculation
-    // changed depth while orbiting and made the grid jump 1 → 5 → 25.
-    // BUG FIX: a single shared step forced square grids; X and Y are now
-    // validated independently so GRIDUNIT X/Y resize each family.
-    if !step_x.is_finite() || step_x <= 0.0 || !step_y.is_finite() || step_y <= 0.0 {
-        return GridGeometry::empty();
-    }
-    let (sx, sy) = (step_x, step_y);
-    let is_major = |index: i32| major_every >= 2 && (index.rem_euclid(major_every as i32) == 0);
-
-    // Perpendicular screen gap between the two neighbouring lines of ONE
-    // family at a point on the grid. Measuring the perpendicular component,
-    // rather than point-to-point distance, remains correct for a skewed
-    // perspective grid. Family 0 (lines at a fixed axis1 coordinate) measures
-    // with the axis1 step neighbours against the axis2 tangent; family 1 is
-    // the mirror image — every consumer only reads one family, so computing
-    // both doubled the projections per evaluated sample for nothing.
-    //
-    // A full grid step is needed to measure adjacent-line distance, but it
-    // is too large for the line's local tangent near the eye. A small
-    // derivative keeps the tangent measurable without crossing the eye.
-    // BUG FIX: the tangent used a single shared step for both families, so
-    // a non-square GRIDUNIT (sx != sy) measured the wrong local direction.
-    // Each family now uses its own derivative.
-    let derivative1 = (sx * 0.01).max(1e-4);
-    let derivative2 = (sy * 0.01).max(1e-4);
-    let projected_deltas = |world: glam::DVec3, p: Point, axis: Vec3, amount: f32| {
+    fn projected_deltas(
+        &self,
+        world: glam::DVec3,
+        p: Point,
+        axis: Vec3,
+        amount: f32,
+    ) -> [Option<glam::Vec2>; 2] {
         [amount, -amount].map(|signed_step| {
-            project(world + (axis * signed_step).as_dvec3())
+            self.project(world + (axis * signed_step).as_dvec3())
                 .map(|next| glam::Vec2::new(next.x - p.x, next.y - p.y))
         })
-    };
-    // `p` is the point's own screen position, shared from `unproject` — the
-    // old two-family helper re-projected the same world point a second time.
-    let family_gap = |p: Point, world: glam::DVec3, family: usize| -> f32 {
+    }
+
+    /// Perpendicular screen gap between the two neighbouring lines of ONE
+    /// family at a point on the grid. Measuring the perpendicular component,
+    /// rather than point-to-point distance, remains correct for a skewed
+    /// perspective grid. Family 0 (lines at a fixed axis1 coordinate) measures
+    /// with the axis1 step neighbours against the axis2 tangent; family 1 is
+    /// the mirror image — every consumer only reads one family, so computing
+    /// both doubled the projections per evaluated sample for nothing.
+    ///
+    /// BUG FIX: the tangent used a single shared step for both families, so
+    /// a non-square GRIDUNIT (step_x != step_y) measured the wrong local
+    /// direction. Each family now uses its own derivative.
+    fn family_gap(&self, p: Point, world: glam::DVec3, family: usize) -> f32 {
         let (neighbour_axis, tangent_axis, step, derivative) = if family == 0 {
-            (axis1, axis2, sx, derivative2)
+            (self.axis1, self.axis2, self.step_x, self.derivative_y)
         } else {
-            (axis2, axis1, sy, derivative1)
+            (self.axis2, self.axis1, self.step_y, self.derivative_x)
         };
-        let neighbours = projected_deltas(world, p, neighbour_axis, step);
-        let tangents = projected_deltas(world, p, tangent_axis, derivative);
+        let neighbours = self.projected_deltas(world, p, neighbour_axis, step);
+        let tangents = self.projected_deltas(world, p, tangent_axis, derivative);
 
         // At the near side of a perspective plane a large +step neighbour may
         // cross behind the eye while the -step neighbour remains perfectly
@@ -3495,123 +3592,143 @@ pub fn grid_segments(
             }
         }
         gap
-    };
-    // Both families in one pass (shared projections), used where both are
-    // read — the anchors for the two line families. The old code ran the
-    // full two-family gap math once per family over the same samples.
-    let grid_gaps = |p: Point, world: glam::DVec3| -> Option<(f32, f32)> {
-        let gap1 = family_gap(p, world, 0);
-        let gap2 = family_gap(p, world, 1);
+    }
+
+    /// Both families in one pass (shared projections), used where both are
+    /// read — the anchors for the two line families. The old code ran the
+    /// full two-family gap math once per family over the same samples.
+    fn grid_gaps(&self, p: Point, world: glam::DVec3) -> Option<(f32, f32)> {
+        let gap1 = self.family_gap(p, world, 0);
+        let gap2 = self.family_gap(p, world, 1);
         (gap1.is_finite() && gap2.is_finite()).then_some((gap1, gap2))
-    };
-    // Conservative bound proving that the OTHER family's gap must be finite
-    // at this world point, so its projections can be skipped.
-    //
-    // The other family's gap is `max(|cross product| / tangent_len)` over
-    // projections of `world ± step·axis`; it is non-finite only when one of
-    // those cross products overflows f32 (~3.4e38), which needs screen-space
-    // neighbour/tangent deltas of ~1e19 px. Bound every projection of
-    // `world ± v` (|v| = `step`, a unit axis): its clip position is the
-    // point's own clip plus `view_rot · v`, and any projection that survives
-    // the eye-plane guard has |ndc| ≤ |clip_xy| · 1e7 (clip.w > 1e-7) — or
-    // the tighter |clip_xy| / w_min when the step cannot push the neighbour
-    // near the eye plane. Screen deltas are then ≤ 2·bound, the cross product
-    // ≤ 8·bound², and the gap ≤ 8e6·bound² (tangent_len > 1e-6), so
-    // bound² < 4e31 guarantees finiteness. When the bound does not apply
-    // (absurd steps ~1e9 world units, degenerate view matrices), the cross
-    // gap is computed exactly as before — correct, just not faster.
-    let cross_gap_bounded = |clip: glam::Vec4, step: f32| -> bool {
+    }
+
+    /// Conservative bound proving that the OTHER family's gap must be finite
+    /// at this world point, so its projections can be skipped.
+    ///
+    /// The other family's gap is `max(|cross product| / tangent_len)` over
+    /// projections of `world ± step·axis`; it is non-finite only when one of
+    /// those cross products overflows f32 (~3.4e38), which needs screen-space
+    /// neighbour/tangent deltas of ~1e19 px. Bound every projection of
+    /// `world ± v` (|v| = `step`, a unit axis): its clip position is the
+    /// point's own clip plus `view_rot · v`, and any projection that survives
+    /// the eye-plane guard has |ndc| ≤ |clip_xy| · 1e7 (clip.w > 1e-7) — or
+    /// the tighter |clip_xy| / w_min when the step cannot push the neighbour
+    /// near the eye plane. Screen deltas are then ≤ 2·bound, the cross product
+    /// ≤ 8·bound², and the gap ≤ 8e6·bound² (tangent_len > 1e-6), so
+    /// bound² < 4e31 guarantees finiteness. When the bound does not apply
+    /// (absurd steps ~1e9 world units, degenerate view matrices), the cross
+    /// gap is computed exactly as before — correct, just not faster.
+    fn cross_gap_bounded(&self, clip: glam::Vec4, step: f32) -> bool {
         // The tangent derivative is max(0.01·step, 1e-4), never longer than
         // max(step, 1e-4) — bound both the neighbour and the tangent steps.
         // 1.01 headroom for f32 rounding in the neighbour's mat-vec product.
         let step = step.max(1e-4) * 1.01;
-        let w_min = clip.w - step * row_w_norm;
+        let w_min = clip.w - step * self.row_w_norm;
         let inv_w = if w_min > 1e-7 { 1.0 / w_min } else { 1e7_f32 };
-        let ndc_bound_x = (clip.x.abs() + step * row_x_norm) * inv_w;
-        let ndc_bound_y = (clip.y.abs() + step * row_y_norm) * inv_w;
-        let bound_x = (ndc_bound_x + 1.0) * 0.5 * bounds.width;
-        let bound_y = (ndc_bound_y + 1.0) * 0.5 * bounds.height;
+        let ndc_bound_x = (clip.x.abs() + step * self.row_x_norm) * inv_w;
+        let ndc_bound_y = (clip.y.abs() + step * self.row_y_norm) * inv_w;
+        let bound_x = (ndc_bound_x + 1.0) * 0.5 * self.bounds.width;
+        let bound_y = (ndc_bound_y + 1.0) * 0.5 * self.bounds.height;
         let bound = bound_x.max(bound_y);
         bound.is_finite() && bound * bound < 4.0e31
-    };
-    // One family, for the visibility predicates (`trim_line`, `collect_extent`).
-    //
-    // EXACT-semantics note: the old two-family helper returned `None` when
-    // EITHER family's gap was non-finite, but every caller immediately
-    // compared only its own family against `MIN_HORIZON_GRID_PX`. A non-finite
-    // gap is `>= MIN_HORIZON_GRID_PX` too, so the own-family gate is kept
-    // verbatim, and the cross-family finiteness gate is only evaluated when
-    // it is observable — i.e. when this family's gap actually passes the
-    // threshold (otherwise both the old `None` and the new `Some(gap)` read
-    // as "not visible"). Where the gate is observable, it is answered with
-    // the provable `cross_gap_bounded` bound (no-op cost) or, failing that,
-    // by computing the cross gap with the same math as before — the
-    // visibility predicate stays bit-identical to the old code.
-    let grid_gap = |p: Point, clip: glam::Vec4, world: glam::DVec3, family: usize| -> Option<f32> {
-        let gap = family_gap(p, world, family);
+    }
+
+    /// One family, for the visibility predicates (`trim_line`, `collect_extent`).
+    ///
+    /// EXACT-semantics note: the old two-family helper returned `None` when
+    /// EITHER family's gap was non-finite, but every caller immediately
+    /// compared only its own family against `MIN_HORIZON_GRID_PX`. A non-finite
+    /// gap is `>= MIN_HORIZON_GRID_PX` too, so the own-family gate is kept
+    /// verbatim, and the cross-family finiteness gate is only evaluated when
+    /// it is observable — i.e. when this family's gap actually passes the
+    /// threshold (otherwise both the old `None` and the new `Some(gap)` read
+    /// as "not visible"). Where the gate is observable, it is answered with
+    /// the provable `cross_gap_bounded` bound (no-op cost) or, failing that,
+    /// by computing the cross gap with the same math as before — the
+    /// visibility predicate stays bit-identical to the old code.
+    fn grid_gap(
+        &self,
+        p: Point,
+        clip: glam::Vec4,
+        world: glam::DVec3,
+        family: usize,
+    ) -> Option<f32> {
+        let gap = self.family_gap(p, world, family);
         if !gap.is_finite() {
             return None;
         }
         if gap >= MIN_HORIZON_GRID_PX {
-            let cross_step = if family == 0 { sy } else { sx };
-            if !cross_gap_bounded(clip, cross_step)
-                && !family_gap(p, world, 1 - family).is_finite()
+            let cross_step = if family == 0 {
+                self.step_y
+            } else {
+                self.step_x
+            };
+            if !self.cross_gap_bounded(clip, cross_step)
+                && !self.family_gap(p, world, 1 - family).is_finite()
             {
                 return None;
             }
         }
         Some(gap)
-    };
+    }
 
-    // Trace a family-specific visible region around the viewport perimeter.
-    // When a boundary ray points through the horizon, binary-search back toward
-    // a readable anchor and stop where neighbouring lines reach the minimum gap.
-    let collect_extent =
-        |family: usize, anchor_screen: glam::Vec2, anchor_world: glam::DVec3| -> Vec<glam::DVec3> {
-            let visible_at = |screen: glam::Vec2| -> Option<glam::DVec3> {
-                let (world, p, clip) = unproject(screen.x, screen.y)?;
-                let gap = grid_gap(p, clip, world, family)?;
-                (gap >= MIN_HORIZON_GRID_PX).then_some(world)
-            };
-
-            const EDGE_STEPS: usize = 12;
-            const SEARCH_STEPS: usize = 16;
-            let mut hits = vec![anchor_world];
-            for i in 0..=EDGE_STEPS {
-                let f = i as f32 / EDGE_STEPS as f32;
-                let targets = [
-                    glam::Vec2::new(bounds.width * f, 0.0),
-                    glam::Vec2::new(bounds.width * f, bounds.height),
-                    glam::Vec2::new(0.0, bounds.height * f),
-                    glam::Vec2::new(bounds.width, bounds.height * f),
-                ];
-                for target in targets {
-                    if let Some(world) = visible_at(target) {
-                        hits.push(world);
-                        continue;
-                    }
-                    let mut near_screen = anchor_screen;
-                    let mut far_screen = target;
-                    let mut near_world = anchor_world;
-                    for _ in 0..SEARCH_STEPS {
-                        let middle = (near_screen + far_screen) * 0.5;
-                        if let Some(world) = visible_at(middle) {
-                            near_screen = middle;
-                            near_world = world;
-                        } else {
-                            far_screen = middle;
-                        }
-                    }
-                    hits.push(near_world);
-                }
-            }
-            hits
+    /// Trace a family-specific visible region around the viewport perimeter.
+    /// When a boundary ray points through the horizon, binary-search back toward
+    /// a readable anchor and stop where neighbouring lines reach the minimum gap.
+    fn collect_extent(
+        &self,
+        family: usize,
+        anchor_screen: glam::Vec2,
+        anchor_world: glam::DVec3,
+    ) -> Vec<glam::DVec3> {
+        let visible_at = |screen: glam::Vec2| -> Option<glam::DVec3> {
+            let (world, p, clip) = self.unproject(screen.x, screen.y)?;
+            let gap = self.grid_gap(p, clip, world, family)?;
+            (gap >= MIN_HORIZON_GRID_PX).then_some(world)
         };
 
-    let best_anchors = |samples: &[(glam::Vec2, glam::DVec3, Point)]| -> [Option<(glam::Vec2, glam::DVec3, f32)>; 2] {
+        const EDGE_STEPS: usize = 12;
+        const SEARCH_STEPS: usize = 16;
+        let mut hits = vec![anchor_world];
+        for i in 0..=EDGE_STEPS {
+            let f = i as f32 / EDGE_STEPS as f32;
+            let targets = [
+                glam::Vec2::new(self.bounds.width * f, 0.0),
+                glam::Vec2::new(self.bounds.width * f, self.bounds.height),
+                glam::Vec2::new(0.0, self.bounds.height * f),
+                glam::Vec2::new(self.bounds.width, self.bounds.height * f),
+            ];
+            for target in targets {
+                if let Some(world) = visible_at(target) {
+                    hits.push(world);
+                    continue;
+                }
+                let mut near_screen = anchor_screen;
+                let mut far_screen = target;
+                let mut near_world = anchor_world;
+                for _ in 0..SEARCH_STEPS {
+                    let middle = (near_screen + far_screen) * 0.5;
+                    if let Some(world) = visible_at(middle) {
+                        near_screen = middle;
+                        near_world = world;
+                    } else {
+                        far_screen = middle;
+                    }
+                }
+                hits.push(near_world);
+            }
+        }
+        hits
+    }
+
+    fn best_anchors(
+        &self,
+        samples: &[(glam::Vec2, glam::DVec3, Point)],
+    ) -> [Option<(glam::Vec2, glam::DVec3, f32)>; 2] {
         let mut best: [Option<(glam::Vec2, glam::DVec3, f32)>; 2] = [None, None];
         for (screen, world, p) in samples {
-            let Some((gap1, gap2)) = grid_gaps(*p, *world) else {
+            let Some((gap1, gap2)) = self.grid_gaps(*p, *world) else {
                 continue;
             };
             for (slot, gap) in best.iter_mut().zip([gap1, gap2]) {
@@ -3621,47 +3738,49 @@ pub fn grid_segments(
             }
         }
         best
-    };
-    let axis_range = |hits: &[glam::DVec3], axis: Vec3| -> Option<(f32, f32)> {
+    }
+
+    fn axis_range(&self, hits: &[glam::DVec3], axis: Vec3) -> Option<(f32, f32)> {
         let mut min = f32::INFINITY;
         let mut max = f32::NEG_INFINITY;
         for world in hits {
-            let value = (*world - grid_origin).as_vec3().dot(axis);
+            let value = (*world - self.grid_origin).as_vec3().dot(axis);
             if value.is_finite() {
                 min = min.min(value);
                 max = max.max(value);
             }
         }
         (min <= max).then_some((min, max))
-    };
-    let line_range = |min: f32, max: f32, anchor: f32, step: f32| -> (i32, i32) {
+    }
+
+    fn line_range(&self, min: f32, max: f32, anchor: f32, step: f32) -> (i32, i32) {
         let mut start = (min / step).floor() as i32;
         let mut end = (max / step).ceil() as i32;
         // The pixel-gap cut-off naturally bounds this by viewport resolution. Keep
         // malformed projection data from creating an unbounded CPU loop.
-        let limit = ((bounds.width + bounds.height).ceil() as i32 + 64).max(128);
+        let limit = ((self.bounds.width + self.bounds.height).ceil() as i32 + 64).max(128);
         let center = (anchor / step).round() as i32;
         start = start.max(center.saturating_sub(limit));
         end = end.min(center.saturating_add(limit));
         (start, end)
-    };
-    // Project an infinite world-grid line to its exact screen-space line and
-    // intersect it with the viewport rectangle. This remains valid across the
-    // perspective horizon; projecting a finite world-space bounding rectangle
-    // is only correct for the perpendicular/top view.
-    let grid_clip_origin = view_rot * (grid_origin - eye).as_vec3().extend(1.0);
-    let grid_clip_axis1 = view_rot * axis1.extend(0.0);
-    let grid_clip_axis2 = view_rot * axis2.extend(0.0);
-    let project_line = |family: usize, value: f32| -> Option<(glam::Vec2, glam::Vec2)> {
+    }
+
+    fn project_line(&self, family: usize, value: f32) -> Option<(glam::Vec2, glam::Vec2)> {
         let (base, direction) = if family == 0 {
-            (grid_clip_origin + grid_clip_axis1 * value, grid_clip_axis2)
+            (
+                self.grid_clip_origin + self.grid_clip_axis1 * value,
+                self.grid_clip_axis2,
+            )
         } else {
-            (grid_clip_origin + grid_clip_axis2 * value, grid_clip_axis1)
+            (
+                self.grid_clip_origin + self.grid_clip_axis2 * value,
+                self.grid_clip_axis1,
+            )
         };
         let screen_h = |clip: glam::Vec4| {
             glam::Vec3::new(
-                (clip.x + clip.w) * 0.5 * bounds.width,
-                (-clip.y + clip.w) * 0.5 * bounds.height,
+                (clip.x + clip.w) * 0.5 * self.bounds.width,
+                (-clip.y + clip.w) * 0.5 * self.bounds.height,
                 clip.w,
             )
         };
@@ -3679,15 +3798,15 @@ pub fn grid_segments(
         let mut add_point = |point: glam::Vec2| {
             if !point.is_finite()
                 || point.x < -EDGE_EPS
-                || point.x > bounds.width + EDGE_EPS
+                || point.x > self.bounds.width + EDGE_EPS
                 || point.y < -EDGE_EPS
-                || point.y > bounds.height + EDGE_EPS
+                || point.y > self.bounds.height + EDGE_EPS
             {
                 return;
             }
             let point = glam::Vec2::new(
-                point.x.clamp(0.0, bounds.width),
-                point.y.clamp(0.0, bounds.height),
+                point.x.clamp(0.0, self.bounds.width),
+                point.y.clamp(0.0, self.bounds.height),
             );
             if points[..point_count]
                 .iter()
@@ -3700,15 +3819,15 @@ pub fn grid_segments(
         if line.y.abs() > 1e-8 {
             add_point(glam::Vec2::new(0.0, -line.z / line.y));
             add_point(glam::Vec2::new(
-                bounds.width,
-                -(line.x * bounds.width + line.z) / line.y,
+                self.bounds.width,
+                -(line.x * self.bounds.width + line.z) / line.y,
             ));
         }
         if line.x.abs() > 1e-8 {
             add_point(glam::Vec2::new(-line.z / line.x, 0.0));
             add_point(glam::Vec2::new(
-                -(line.y * bounds.height + line.z) / line.x,
-                bounds.height,
+                -(line.y * self.bounds.height + line.z) / line.x,
+                self.bounds.height,
             ));
         }
         if point_count < 2 {
@@ -3727,23 +3846,27 @@ pub fn grid_segments(
             }
         }
         Some(best)
-    };
+    }
 
-    // Keep only the parts of one projected line where its neighbouring line is
-    // at least the configured physical-pixel gap away. The visible interval is found in screen
-    // space, so oblique/trapezoidal views no longer inherit rectangular world
-    // bounds from the top view. Segments are pushed into `out` so a fully
-    // hidden line no longer allocates (and drops) an empty `Vec` per line.
-    let trim_line = |family: usize,
-                     p0: glam::Vec2,
-                     p1: glam::Vec2,
-                     out: &mut Vec<(Point, Point)>| {
+    /// Keep only the parts of one projected line where its neighbouring line is
+    /// at least the configured physical-pixel gap away. The visible interval is
+    /// found in screen space, so oblique/trapezoidal views no longer inherit
+    /// rectangular world bounds from the top view. Segments are pushed into
+    /// `out` so a fully hidden line no longer allocates (and drops) an empty
+    /// `Vec` per line.
+    fn trim_line(
+        &self,
+        family: usize,
+        p0: glam::Vec2,
+        p1: glam::Vec2,
+        out: &mut Vec<(Point, Point)>,
+    ) {
         let visible = |t: f32| {
             let screen = p0.lerp(p1, t);
-            let Some((world, p, clip)) = unproject(screen.x, screen.y) else {
+            let Some((world, p, clip)) = self.unproject(screen.x, screen.y) else {
                 return false;
             };
-            let Some(gap) = grid_gap(p, clip, world, family) else {
+            let Some(gap) = self.grid_gap(p, clip, world, family) else {
                 return false;
             };
             gap >= MIN_HORIZON_GRID_PX
@@ -3775,8 +3898,8 @@ pub fn grid_segments(
                     let a = p0.lerp(p1, start);
                     let b = p0.lerp(p1, boundary);
                     out.push((
-                        Point::new(a.x + bounds.x, a.y + bounds.y),
-                        Point::new(b.x + bounds.x, b.y + bounds.y),
+                        Point::new(a.x + self.bounds.x, a.y + self.bounds.y),
+                        Point::new(b.x + self.bounds.x, b.y + self.bounds.y),
                     ));
                 }
             }
@@ -3786,86 +3909,121 @@ pub fn grid_segments(
         if let Some(start) = run_start {
             let a = p0.lerp(p1, start);
             out.push((
-                Point::new(a.x + bounds.x, a.y + bounds.y),
-                Point::new(p1.x + bounds.x, p1.y + bounds.y),
+                Point::new(a.x + self.bounds.x, a.y + self.bounds.y),
+                Point::new(p1.x + self.bounds.x, p1.y + self.bounds.y),
             ));
         }
-    };
+    }
 
-    let mut all_segments: Vec<(Point, Point)> = Vec::new();
-    let mut axis_extent = 0.0_f32;
+    fn is_major(&self, index: i32) -> bool {
+        self.major_every >= 2 && (index.rem_euclid(self.major_every as i32) == 0)
+    }
 
-    // A finite LIMITS rectangle replaces the usual viewport/horizon extent.
-    // Clip each UCS grid line analytically against the WCS XY rectangle, then
-    // project only that finite segment. This keeps the grid bounded even when
-    // the active UCS is rotated.
-    if let Some((limit_min, limit_max)) = limits {
-        let corners = [
-            glam::DVec3::new(limit_min.x, limit_min.y, grid_origin.z),
-            glam::DVec3::new(limit_max.x, limit_min.y, grid_origin.z),
-            glam::DVec3::new(limit_max.x, limit_max.y, grid_origin.z),
-            glam::DVec3::new(limit_min.x, limit_max.y, grid_origin.z),
-        ];
-        let coordinate_range = |axis: Vec3| {
-            corners
-                .iter()
-                .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), corner| {
-                    let value = (*corner - grid_origin).as_vec3().dot(axis);
-                    (min.min(value), max.max(value))
-                })
-        };
-        let clip_world_line = |family: usize, value: f32| -> Option<(Point, Point)> {
-            let (base, direction) = if family == 0 {
-                (grid_origin + (axis1 * value).as_dvec3(), axis2.as_dvec3())
-            } else {
-                (grid_origin + (axis2 * value).as_dvec3(), axis1.as_dvec3())
-            };
-            let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
-            let mut clip_axis = |origin: f64, delta: f64, low: f64, high: f64| {
-                if delta.abs() < 1e-12 {
-                    return origin >= low && origin <= high;
-                }
-                let a = (low - origin) / delta;
-                let b = (high - origin) / delta;
-                t0 = t0.max(a.min(b));
-                t1 = t1.min(a.max(b));
-                t0 <= t1
-            };
-            if !clip_axis(base.x, direction.x, limit_min.x, limit_max.x)
-                || !clip_axis(base.y, direction.y, limit_min.y, limit_max.y)
-                || !t0.is_finite()
-                || !t1.is_finite()
-            {
-                return None;
-            }
-            let p0 = project(base + direction * t0)?;
-            let p1 = project(base + direction * t1)?;
-            let local_bounds = iced::Rectangle {
-                x: 0.0,
-                y: 0.0,
-                width: bounds.width,
-                height: bounds.height,
-            };
-            clip_seg(p0, p1, local_bounds).map(|(p0, p1)| {
-                (
-                    Point::new(p0.x + bounds.x, p0.y + bounds.y),
-                    Point::new(p1.x + bounds.x, p1.y + bounds.y),
-                )
+    fn coordinate_range(&self, corners: &[glam::DVec3; 4], axis: Vec3) -> (f32, f32) {
+        corners
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), corner| {
+                let value = (*corner - self.grid_origin).as_vec3().dot(axis);
+                (min.min(value), max.max(value))
             })
-        };
+    }
 
-        let (min1, max1) = coordinate_range(axis1);
-        let (min2, max2) = coordinate_range(axis2);
+    fn clip_world_line(
+        &self,
+        family: usize,
+        value: f32,
+        limit_min: glam::DVec2,
+        limit_max: glam::DVec2,
+    ) -> Option<(Point, Point)> {
+        let (base, direction) = if family == 0 {
+            (
+                self.grid_origin + (self.axis1 * value).as_dvec3(),
+                self.axis2.as_dvec3(),
+            )
+        } else {
+            (
+                self.grid_origin + (self.axis2 * value).as_dvec3(),
+                self.axis1.as_dvec3(),
+            )
+        };
+        let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+        let mut clip_axis = |origin: f64, delta: f64, low: f64, high: f64| {
+            if delta.abs() < 1e-12 {
+                return origin >= low && origin <= high;
+            }
+            let a = (low - origin) / delta;
+            let b = (high - origin) / delta;
+            t0 = t0.max(a.min(b));
+            t1 = t1.min(a.max(b));
+            t0 <= t1
+        };
+        if !clip_axis(base.x, direction.x, limit_min.x, limit_max.x)
+            || !clip_axis(base.y, direction.y, limit_min.y, limit_max.y)
+            || !t0.is_finite()
+            || !t1.is_finite()
+        {
+            return None;
+        }
+        let p0 = self.project(base + direction * t0)?;
+        let p1 = self.project(base + direction * t1)?;
+        let local_bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: self.bounds.width,
+            height: self.bounds.height,
+        };
+        clip_seg(p0, p1, local_bounds).map(|(p0, p1)| {
+            (
+                Point::new(p0.x + self.bounds.x, p0.y + self.bounds.y),
+                Point::new(p1.x + self.bounds.x, p1.y + self.bounds.y),
+            )
+        })
+    }
+
+    /// LIMITS bounds the grid, not the UCS axes. Size the axes from the
+    /// visible grid plane so X/Y/Z still span the viewport even when the
+    /// finite grid rectangle is small or currently off-screen.
+    fn limits_extent(&self, samples: &[(glam::Vec2, glam::DVec3, Point)]) -> f32 {
+        samples
+            .iter()
+            .fold(0.0_f32, |extent, (_, world, _)| {
+                let delta = (*world - self.grid_origin).as_vec3();
+                extent
+                    .max(delta.dot(self.axis1).abs())
+                    .max(delta.dot(self.axis2).abs())
+            })
+    }
+
+    /// A finite LIMITS rectangle replaces the usual viewport/horizon extent.
+    /// Clip each UCS grid line analytically against the WCS XY rectangle, then
+    /// project only that finite segment. This keeps the grid bounded even when
+    /// the active UCS is rotated.
+    fn segments_within_limits(
+        &self,
+        samples: &[(glam::Vec2, glam::DVec3, Point)],
+        limit_min: glam::DVec2,
+        limit_max: glam::DVec2,
+    ) -> GridGeometry {
+        let corners = [
+            glam::DVec3::new(limit_min.x, limit_min.y, self.grid_origin.z),
+            glam::DVec3::new(limit_max.x, limit_min.y, self.grid_origin.z),
+            glam::DVec3::new(limit_max.x, limit_max.y, self.grid_origin.z),
+            glam::DVec3::new(limit_min.x, limit_max.y, self.grid_origin.z),
+        ];
+        let (min1, max1) = self.coordinate_range(&corners, self.axis1);
+        let (min2, max2) = self.coordinate_range(&corners, self.axis2);
         let mut minor = Vec::new();
         let mut major = Vec::new();
-        let [anchor1, anchor2] = best_anchors(&samples);
+        let [anchor1, anchor2] = self.best_anchors(samples);
         if let Some((_, anchor_world, gap)) = anchor1 {
             if gap >= MIN_HORIZON_GRID_PX {
-                let anchor = (anchor_world - grid_origin).as_vec3().dot(axis1);
-                let (start, end) = line_range(min1, max1, anchor, sx);
+                let anchor = (anchor_world - self.grid_origin).as_vec3().dot(self.axis1);
+                let (start, end) = self.line_range(min1, max1, anchor, self.step_x);
                 for index in start..=end {
-                    if let Some(segment) = clip_world_line(0, index as f32 * sx) {
-                        if is_major(index) {
+                    if let Some(segment) =
+                        self.clip_world_line(0, index as f32 * self.step_x, limit_min, limit_max)
+                    {
+                        if self.is_major(index) {
                             major.push(segment);
                         } else {
                             minor.push(segment);
@@ -3876,11 +4034,13 @@ pub fn grid_segments(
         }
         if let Some((_, anchor_world, gap)) = anchor2 {
             if gap >= MIN_HORIZON_GRID_PX {
-                let anchor = (anchor_world - grid_origin).as_vec3().dot(axis2);
-                let (start, end) = line_range(min2, max2, anchor, sy);
+                let anchor = (anchor_world - self.grid_origin).as_vec3().dot(self.axis2);
+                let (start, end) = self.line_range(min2, max2, anchor, self.step_y);
                 for index in start..=end {
-                    if let Some(segment) = clip_world_line(1, index as f32 * sy) {
-                        if is_major(index) {
+                    if let Some(segment) =
+                        self.clip_world_line(1, index as f32 * self.step_y, limit_min, limit_max)
+                    {
+                        if self.is_major(index) {
                             major.push(segment);
                         } else {
                             minor.push(segment);
@@ -3889,85 +4049,140 @@ pub fn grid_segments(
                 }
             }
         }
-        all_segments.extend(minor);
-        let all_major: Vec<(Point, Point)> = major;
-
-        // LIMITS bounds the grid, not the UCS axes. Size the axes from the
-        // visible grid plane so X/Y/Z still span the viewport even when the
-        // finite grid rectangle is small or currently off-screen.
-        let limits_extent = samples.iter().fold(0.0_f32, |extent, (_, world, _)| {
-            let delta = (*world - grid_origin).as_vec3();
-            extent
-                .max(delta.dot(axis1).abs())
-                .max(delta.dot(axis2).abs())
-        });
+        let mut axis_extent = 0.0_f32;
+        let limits_extent = self.limits_extent(samples);
         if limits_extent > 0.0 {
             axis_extent = limits_extent;
         }
-        return GridGeometry {
+        GridGeometry {
+            segments: minor,
+            major_segments: major,
+            axis_extent,
+        }
+    }
+
+    fn segments_without_limits(
+        &self,
+        samples: &[(glam::Vec2, glam::DVec3, Point)],
+    ) -> GridGeometry {
+        let mut all_segments: Vec<(Point, Point)> = Vec::new();
+        let mut all_major: Vec<(Point, Point)> = Vec::new();
+        let mut axis_extent = 0.0_f32;
+        let [anchor1, anchor2] = self.best_anchors(samples);
+        // Lines parallel to axis2 (varying axis1 position).
+        if let Some((anchor_screen, anchor_world, gap)) = anchor1 {
+            if gap >= MIN_HORIZON_GRID_PX {
+                let hits = self.collect_extent(0, anchor_screen, anchor_world);
+                if let (Some((min1, max1)), Some((min2, max2))) = (
+                    self.axis_range(&hits, self.axis1),
+                    self.axis_range(&hits, self.axis2),
+                ) {
+                    let anchor1 = (anchor_world - self.grid_origin).as_vec3().dot(self.axis1);
+                    let (start, end) = self.line_range(min1, max1, anchor1, self.step_x);
+                    for i in start..=end {
+                        let value = i as f32 * self.step_x;
+                        if let Some((p0, p1)) = self.project_line(0, value) {
+                            if self.is_major(i) {
+                                self.trim_line(0, p0, p1, &mut all_major);
+                            } else {
+                                self.trim_line(0, p0, p1, &mut all_segments);
+                            }
+                        }
+                    }
+                    axis_extent = axis_extent
+                        .max(min1.abs().max(max1.abs()).max(min2.abs()).max(max2.abs()));
+                }
+            }
+        }
+
+        // Lines parallel to axis1 (varying axis2 position).
+        if let Some((anchor_screen, anchor_world, gap)) = anchor2 {
+            if gap >= MIN_HORIZON_GRID_PX {
+                let hits = self.collect_extent(1, anchor_screen, anchor_world);
+                if let (Some((min1, max1)), Some((min2, max2))) = (
+                    self.axis_range(&hits, self.axis1),
+                    self.axis_range(&hits, self.axis2),
+                ) {
+                    let anchor2 = (anchor_world - self.grid_origin).as_vec3().dot(self.axis2);
+                    let (start, end) = self.line_range(min2, max2, anchor2, self.step_y);
+                    for i in start..=end {
+                        let value = i as f32 * self.step_y;
+                        if let Some((p0, p1)) = self.project_line(1, value) {
+                            if self.is_major(i) {
+                                self.trim_line(1, p0, p1, &mut all_major);
+                            } else {
+                                self.trim_line(1, p0, p1, &mut all_segments);
+                            }
+                        }
+                    }
+                    axis_extent = axis_extent
+                        .max(min1.abs().max(max1.abs()).max(min2.abs()).max(max2.abs()));
+                }
+            }
+        }
+
+        GridGeometry {
             segments: all_segments,
             major_segments: all_major,
             axis_extent,
-        };
-    }
-
-    let mut all_major: Vec<(Point, Point)> = Vec::new();
-    let [anchor1, anchor2] = best_anchors(&samples);
-    // Lines parallel to axis2 (varying axis1 position).
-    if let Some((anchor_screen, anchor_world, gap)) = anchor1 {
-        if gap >= MIN_HORIZON_GRID_PX {
-            let hits = collect_extent(0, anchor_screen, anchor_world);
-            if let (Some((min1, max1)), Some((min2, max2))) =
-                (axis_range(&hits, axis1), axis_range(&hits, axis2))
-            {
-                let anchor1 = (anchor_world - grid_origin).as_vec3().dot(axis1);
-                let (start, end) = line_range(min1, max1, anchor1, sx);
-                for i in start..=end {
-                    let value = i as f32 * sx;
-                    if let Some((p0, p1)) = project_line(0, value) {
-                        if is_major(i) {
-                            trim_line(0, p0, p1, &mut all_major);
-                        } else {
-                            trim_line(0, p0, p1, &mut all_segments);
-                        }
-                    }
-                }
-                axis_extent =
-                    axis_extent.max(min1.abs().max(max1.abs()).max(min2.abs()).max(max2.abs()));
-            }
         }
     }
+}
 
-    // Lines parallel to axis1 (varying axis2 position).
-    if let Some((anchor_screen, anchor_world, gap)) = anchor2 {
-        if gap >= MIN_HORIZON_GRID_PX {
-            let hits = collect_extent(1, anchor_screen, anchor_world);
-            if let (Some((min1, max1)), Some((min2, max2))) =
-                (axis_range(&hits, axis1), axis_range(&hits, axis2))
-            {
-                let anchor2 = (anchor_world - grid_origin).as_vec3().dot(axis2);
-                let (start, end) = line_range(min2, max2, anchor2, sy);
-                for i in start..=end {
-                    let value = i as f32 * sy;
-                    if let Some((p0, p1)) = project_line(1, value) {
-                        if is_major(i) {
-                            trim_line(1, p0, p1, &mut all_major);
-                        } else {
-                            trim_line(1, p0, p1, &mut all_segments);
-                        }
-                    }
-                }
-                axis_extent =
-                    axis_extent.max(min1.abs().max(max1.abs()).max(min2.abs()).max(max2.abs()));
-            }
-        }
+/// Pure, renderer-free projection of the grid for one pane. Returns canvas-local
+/// `(Point, Point)` segments plus the axis extent (in world units along the
+/// active UCS axes) used by `draw_grid` to size the coloured UCS axes overlay.
+///
+/// Extracted from `draw_grid` so the geometry construction can be unit-tested
+/// and benchmarked without an iced `Renderer`. Behaviour is identical to the
+/// inlined version that preceded it.
+/// The phases live on `GridProjection`; this orchestrator only
+/// validates the inputs, samples the plane and picks the LIMITS or infinite
+/// branch.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn grid_segments(
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: iced::Rectangle,
+    step_x: f32,
+    step_y: f32,
+    major_every: u32,
+    grid_origin: glam::DVec3,
+    grid_axes: (Vec3, Vec3, Vec3),
+    limits: Option<(glam::DVec2, glam::DVec2)>,
+) -> GridGeometry {
+    if bounds.width <= 0.0 || bounds.height <= 0.0 {
+        return GridGeometry::empty();
     }
 
-    let _ = gz; // gz unused after move; retained for symmetry with `draw_axes` call sites.
-    GridGeometry {
-        segments: all_segments,
-        major_segments: all_major,
-        axis_extent,
+    let projection = GridProjection::new(
+        view_rot,
+        eye,
+        bounds,
+        step_x,
+        step_y,
+        major_every,
+        grid_origin,
+        grid_axes,
+    );
+    let samples = projection.sample_grid_plane();
+    if samples.is_empty() {
+        return GridGeometry::empty();
+    }
+
+    // Step follows camera zoom only. The previous visible-sample calculation
+    // changed depth while orbiting and made the grid jump 1 → 5 → 25.
+    // BUG FIX: a single shared step forced square grids; X and Y are now
+    // validated independently so GRIDUNIT X/Y resize each family.
+    if !step_x.is_finite() || step_x <= 0.0 || !step_y.is_finite() || step_y <= 0.0 {
+        return GridGeometry::empty();
+    }
+
+    if let Some((limit_min, limit_max)) = limits {
+        projection.segments_within_limits(&samples, limit_min, limit_max)
+    } else {
+        projection.segments_without_limits(&samples)
     }
 }
 
@@ -5644,64 +5859,372 @@ mod grid_key_tests {
 }
 
 #[cfg(test)]
-mod grid_canvas_state_tests {
+mod grid_segments_tests {
     use super::*;
 
-    /// A freshly-defaulted `GridCanvasState` must have no cached key — the
-    /// first draw of a session always misses. This pins the `Default` impl
-    /// to a usable empty state (no need for the wrapper to special-case it).
-    #[test]
-    fn default_state_has_no_cached_key() {
-        let state = GridCanvasState::default();
-        assert!(state.key.borrow().is_none());
-    }
-
-    /// After manually storing a key in the state (the same way `draw` will
-    /// on a miss), `should_reuse` must return `true` for the stored key and
-    /// `false` for a key built from different inputs. This exercises the
-    /// state → decision wiring end-to-end without a real iced `Renderer`.
-    #[test]
-    fn stored_key_is_recognized_by_should_reuse() {
-        let view_rot = Mat4::from_rotation_x(0.15) * Mat4::from_rotation_y(0.05);
-        let eye = glam::DVec3::new(4.0, 3.5, 9.0);
+    /// Top view: X maps 1:1 to pixels (800 px over 800 world units) and Y
+    /// likewise (600 px over 600 units), so screen = (x + 400, 300 - y).
+    fn top_view() -> (Mat4, glam::DVec3, iced::Rectangle) {
         let bounds = iced::Rectangle {
             x: 0.0,
             y: 0.0,
-            width: 1280.0,
-            height: 720.0,
+            width: 800.0,
+            height: 600.0,
         };
-        let grid_origin = glam::DVec3::new(0.0, 0.0, 0.0);
-        let grid_axes = (Vec3::X, Vec3::Y, Vec3::Z);
-        let limits: Option<(glam::DVec2, glam::DVec2)> = None;
+        let view = glam::camera::rh::proj::directx::orthographic(
+            -400.0, 400.0, -300.0, 300.0, 0.1, 2000.0,
+        ) * glam::camera::rh::view::look_at_mat4(
+            Vec3::new(0.0, 0.0, 500.0),
+            Vec3::ZERO,
+            Vec3::Y,
+        );
+        (view, glam::DVec3::new(0.0, 0.0, 500.0), bounds)
+    }
 
-        let params = GridParams {
-            view_rot,
+    fn projection(step_x: f32, step_y: f32, major_every: u32) -> GridProjection {
+        let (view, eye, bounds) = top_view();
+        GridProjection::new(
+            view,
             eye,
             bounds,
-            step_x: 80.0,
-            step_y: 80.0,
-            major_every: 5,
-            origin: grid_origin,
-            axes: grid_axes,
-            limits,
-        };
-        let key = GridKey::from_grids(&[params], bounds, GridStyle::default());
+            step_x,
+            step_y,
+            major_every,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        )
+    }
 
-        let state = GridCanvasState::default();
-        *state.key.borrow_mut() = Some(key.clone());
+    #[test]
+    fn projection_and_unprojection_round_trip_on_the_grid_plane() {
+        let grid = projection(10.0, 10.0, 5);
+        let world = glam::DVec3::new(10.0, -20.0, 0.0);
+        let screen = grid.project(world).expect("front point");
+        assert!((screen.x - 410.0).abs() < 1e-3, "{screen:?}");
+        assert!((screen.y - 320.0).abs() < 1e-3, "{screen:?}");
+        let (back, pixel, clip) = grid.unproject(screen.x, screen.y).expect("plane hit");
+        assert!((back - world).length() < 1e-3, "{back:?}");
+        assert!((pixel.x - screen.x).abs() < 1e-3 && (pixel.y - screen.y).abs() < 1e-3);
+        assert!(clip.w > 0.0);
+    }
 
-        // Same key in the cache and in the request ⇒ reuse.
-        assert!(should_reuse(state.key.borrow().as_ref(), &key));
+    #[test]
+    fn project_rejects_points_behind_a_perspective_eye() {
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        let view = glam::camera::rh::proj::directx::perspective(
+            45.0_f32.to_radians(),
+            4.0 / 3.0,
+            0.1,
+            2000.0,
+        );
+        let grid = GridProjection::new(
+            view,
+            glam::DVec3::ZERO,
+            bounds,
+            10.0,
+            10.0,
+            5,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        assert!(grid.project(glam::DVec3::new(0.0, 0.0, -100.0)).is_some());
+        assert!(grid.project(glam::DVec3::new(0.0, 0.0, 100.0)).is_none());
+    }
 
-        // Different bounds on the same params ⇒ different key, do not reuse.
-        let other_bounds = iced::Rectangle {
+    #[test]
+    fn samples_cover_the_viewport_from_the_grid_plane() {
+        let grid = projection(10.0, 10.0, 5);
+        let samples = grid.sample_grid_plane();
+        assert_eq!(samples.len(), 25, "5x5 interior samples");
+        for (screen, world, pixel) in &samples {
+            assert_eq!(world.z, 0.0);
+            assert!(
+                (pixel.x - screen.x).abs() < 1e-2 && (pixel.y - screen.y).abs() < 1e-2,
+                "{pixel:?} vs {screen:?}"
+            );
+            let reprojected = grid.project(*world).expect("sample world point projects");
+            assert!((reprojected.x - pixel.x).abs() < 1e-2);
+        }
+    }
+
+    #[test]
+    fn grid_gaps_measure_the_step_of_each_family() {
+        let grid = projection(10.0, 2.0, 5);
+        let world = glam::DVec3::new(5.0, 5.0, 0.0);
+        let pixel = grid.project(world).expect("front point");
+        let (gap1, gap2) = grid.grid_gaps(pixel, world).expect("finite gaps");
+        assert!((gap1 - 10.0).abs() < 1e-3, "family 0 gap {gap1}");
+        assert!((gap2 - 2.0).abs() < 1e-3, "family 1 gap {gap2}");
+    }
+
+    #[test]
+    fn axis_and_line_ranges_follow_the_extent_and_anchor() {
+        let grid = projection(10.0, 10.0, 5);
+        let hits = [
+            glam::DVec3::new(10.0, -20.0, 0.0),
+            glam::DVec3::new(-5.0, 30.0, 0.0),
+        ];
+        assert_eq!(grid.axis_range(&hits, Vec3::X), Some((-5.0, 10.0)));
+        assert_eq!(grid.axis_range(&hits, Vec3::Y), Some((-20.0, 30.0)));
+        assert_eq!(grid.line_range(-5.0, 35.0, 1.0, 10.0), (-1, 4));
+    }
+
+    #[test]
+    fn project_line_spans_the_viewport_for_both_families() {
+        let grid = projection(10.0, 10.0, 5);
+        // Family 0 at value 0 is the world Y axis: screen x = 400, y = 0..600.
+        let (a, b) = grid.project_line(0, 0.0).expect("line crosses viewport");
+        assert!((a.x - 400.0).abs() < 1e-2 && (b.x - 400.0).abs() < 1e-2);
+        assert!(a.y.min(b.y) <= 1e-2 && a.y.max(b.y) >= 600.0 - 1e-2);
+        // Family 1 at value 0 is the world X axis: screen y = 300, x = 0..800.
+        let (a, b) = grid.project_line(1, 0.0).expect("line crosses viewport");
+        assert!((a.y - 300.0).abs() < 1e-2 && (b.y - 300.0).abs() < 1e-2);
+        assert!(a.x.min(b.x) <= 1e-2 && a.x.max(b.x) >= 800.0 - 1e-2);
+    }
+
+    #[test]
+    fn trim_line_keeps_a_fully_visible_line() {
+        let grid = projection(10.0, 10.0, 5);
+        let mut out = Vec::new();
+        grid.trim_line(
+            0,
+            glam::Vec2::new(400.0, 0.0),
+            glam::Vec2::new(400.0, 600.0),
+            &mut out,
+        );
+        assert_eq!(out.len(), 1, "a visible line stays one segment");
+        let (a, b) = out[0];
+        assert!((a.x - 400.0).abs() < 1e-2 && (b.x - 400.0).abs() < 1e-2);
+        assert!(a.y.min(b.y) <= 1e-2 && a.y.max(b.y) >= 600.0 - 1e-2);
+    }
+
+    #[test]
+    fn clip_world_line_stops_at_the_limits_rectangle() {
+        let grid = projection(10.0, 10.0, 5);
+        let min = glam::DVec2::new(-20.0, -15.0);
+        let max = glam::DVec2::new(20.0, 15.0);
+        let (a, b) = grid
+            .clip_world_line(0, 0.0, min, max)
+            .expect("line inside limits");
+        // World x = 0 -> screen x = 400; world y = -15..15 -> screen y = 315..285.
+        assert!((a.x - 400.0).abs() < 1e-2 && (b.x - 400.0).abs() < 1e-2);
+        assert!((a.y.min(b.y) - 285.0).abs() < 1e-2);
+        assert!((a.y.max(b.y) - 315.0).abs() < 1e-2);
+        assert!(
+            grid.clip_world_line(0, 100.0, min, max).is_none(),
+            "a line outside the rectangle is clipped away"
+        );
+    }
+
+    #[test]
+    fn is_major_follows_major_every() {
+        let grid = projection(10.0, 10.0, 5);
+        assert!(grid.is_major(0) && grid.is_major(5) && grid.is_major(-5));
+        assert!(!grid.is_major(1) && !grid.is_major(4));
+        let flat = projection(10.0, 10.0, 1);
+        assert!(!flat.is_major(0), "major_every < 2 disables majors");
+    }
+
+    #[test]
+    fn grid_segments_is_empty_for_degenerate_input() {
+        let (view, eye, _) = top_view();
+        let zero = iced::Rectangle {
             x: 0.0,
             y: 0.0,
-            width: 640.0,
-            height: 480.0,
+            width: 0.0,
+            height: 600.0,
         };
-        let other_key = GridKey::from_grids(&[params], other_bounds, GridStyle::default());
-        assert!(!should_reuse(state.key.borrow().as_ref(), &other_key));
+        let axes = (Vec3::X, Vec3::Y, Vec3::Z);
+        let empty = grid_segments(
+            view,
+            eye,
+            zero,
+            10.0,
+            10.0,
+            5,
+            glam::DVec3::ZERO,
+            axes,
+            None,
+        );
+        assert!(empty.segments.is_empty() && empty.major_segments.is_empty());
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        let nan = grid_segments(
+            view,
+            eye,
+            bounds,
+            f32::NAN,
+            10.0,
+            5,
+            glam::DVec3::ZERO,
+            axes,
+            None,
+        );
+        assert!(nan.segments.is_empty());
+    }
+
+    #[test]
+    fn grid_segments_limits_branch_stays_inside_the_rectangle() {
+        let (view, eye, bounds) = top_view();
+        let limits = Some((
+            glam::DVec2::new(-20.0, -15.0),
+            glam::DVec2::new(20.0, 15.0),
+        ));
+        let g = grid_segments(
+            view,
+            eye,
+            bounds,
+            10.0,
+            10.0,
+            5,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            limits,
+        );
+        assert!(!g.segments.is_empty() || !g.major_segments.is_empty());
+        for (a, b) in g.segments.iter().chain(g.major_segments.iter()) {
+            for p in [a, b] {
+                assert!(p.x >= 380.0 - 1e-2 && p.x <= 420.0 + 1e-2, "{p:?}");
+                assert!(p.y >= 285.0 - 1e-2 && p.y <= 315.0 + 1e-2, "{p:?}");
+            }
+        }
+        assert!(g.axis_extent > 0.0);
+    }
+
+    #[test]
+    fn grid_segments_is_deterministic() {
+        let (view, eye, bounds) = top_view();
+        let run = || {
+            grid_segments(
+                view,
+                eye,
+                bounds,
+                10.0,
+                5.0,
+                5,
+                glam::DVec3::ZERO,
+                (Vec3::X, Vec3::Y, Vec3::Z),
+                None,
+            )
+        };
+        let first = run();
+        let second = run();
+        assert_eq!(first.segments, second.segments);
+        assert_eq!(first.major_segments, second.major_segments);
+        assert_eq!(first.axis_extent, second.axis_extent);
+    }
+}
+
+#[cfg(test)]
+mod grid_canvas_state_tests {
+    use super::*;
+
+    fn params(step_x: f32) -> GridParams {
+        GridParams {
+            view_rot: Mat4::IDENTITY,
+            eye: glam::DVec3::ZERO,
+            bounds: iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: 640.0,
+                height: 360.0,
+            },
+            step_x,
+            step_y: 10.0,
+            major_every: 5,
+            origin: glam::DVec3::ZERO,
+            axes: (Vec3::X, Vec3::Y, Vec3::Z),
+            limits: None,
+        }
+    }
+
+    fn clip(x: f32) -> iced::Rectangle {
+        iced::Rectangle {
+            x,
+            y: 0.0,
+            width: 320.0,
+            height: 360.0,
+        }
+    }
+
+    fn pane_key(params: &GridParams, clip: iced::Rectangle) -> GridKey {
+        GridKey::from_grids(std::slice::from_ref(params), clip, GridStyle::default())
+    }
+
+    fn store(state: &GridCanvasState, index: usize, key: GridKey) {
+        state.resize_panes(index + 1);
+        state.panes.borrow_mut()[index] = Some(PaneCache::new(key));
+    }
+
+    /// A fresh state has no per-pane entries, so the first draw of a session
+    /// misses on every pane instead of replaying geometry it never built.
+    #[test]
+    fn default_state_has_no_pane_caches() {
+        let state = GridCanvasState::default();
+        assert!(state.panes.borrow().is_empty());
+    }
+
+    /// Resizing follows the pane count: growing appends empty slots, shrinking
+    /// drops the tail, and surviving entries stay cached under their index.
+    #[test]
+    fn resizing_tracks_the_pane_count_and_keeps_existing_entries() {
+        let state = GridCanvasState::default();
+        let first = pane_key(&params(10.0), clip(0.0));
+        store(&state, 0, first.clone());
+        state.resize_panes(3);
+        assert_eq!(state.panes.borrow().len(), 3);
+        assert!(state.panes.borrow()[0].is_some());
+        assert!(state.panes.borrow()[1].is_none());
+        state.resize_panes(1);
+        assert_eq!(state.panes.borrow().len(), 1);
+        assert!(state.pane_reuses(0, &first));
+    }
+
+    /// The point of the per-pane cache: a change in one tile must not
+    /// invalidate the other tile's cached geometry.
+    #[test]
+    fn a_changed_pane_misses_while_the_other_pane_hits() {
+        let state = GridCanvasState::default();
+        let other = pane_key(&params(20.0), clip(320.0));
+        store(&state, 0, pane_key(&params(10.0), clip(0.0)));
+        store(&state, 1, other.clone());
+        let changed = pane_key(&params(11.0), clip(0.0));
+        assert!(!state.pane_reuses(0, &changed), "pane 0 changed");
+        assert!(state.pane_reuses(1, &other), "pane 1 unchanged");
+    }
+
+    /// Style is part of every pane's key: a colour/opacity change repaints all.
+    #[test]
+    fn a_style_change_misses_the_pane() {
+        let state = GridCanvasState::default();
+        let p = params(10.0);
+        store(&state, 0, pane_key(&p, clip(0.0)));
+        let mut style = GridStyle::default();
+        style.opacity = 50;
+        let styled = GridKey::from_grids(std::slice::from_ref(&p), clip(0.0), style);
+        assert!(!state.pane_reuses(0, &styled));
+    }
+
+    /// The clip rect is part of the key, so a resize or tile-layout change
+    /// cannot replay geometry that was clipped for a different rectangle.
+    #[test]
+    fn a_clip_change_misses_the_pane() {
+        let state = GridCanvasState::default();
+        let p = params(10.0);
+        store(&state, 0, pane_key(&p, clip(0.0)));
+        assert!(!state.pane_reuses(0, &pane_key(&p, clip(320.0))));
+    }
+
+    /// Pane identity is the vec index; after a layout change moves a pane to a
+    /// different index, that slot must miss rather than replay stale geometry.
+    #[test]
+    fn reordered_panes_miss_instead_of_replaying_stale_geometry() {
+        let state = GridCanvasState::default();
+        let a = params(10.0);
+        let b = params(20.0);
+        store(&state, 0, pane_key(&a, clip(0.0)));
+        store(&state, 1, pane_key(&b, clip(320.0)));
+        assert!(!state.pane_reuses(0, &pane_key(&b, clip(0.0))));
+        assert!(!state.pane_reuses(1, &pane_key(&a, clip(320.0))));
     }
 }
 

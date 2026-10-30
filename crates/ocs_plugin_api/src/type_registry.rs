@@ -131,7 +131,7 @@ mod tests {
             .get(&TypeId::new("ObjectType"))
             .expect("ObjectType in complete registry");
         assert_eq!(entities.variants.len(), 48);
-        assert_eq!(objects.variants.len(), 36);
+        assert_eq!(objects.variants.len(), 37);
         for root in [
             "HeaderVariables",
             "SummaryInfo",

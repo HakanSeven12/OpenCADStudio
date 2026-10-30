@@ -7,7 +7,7 @@ pub(super) fn reconcile(
     scene: &mut Scene,
     def: Handle,
     name: &str,
-    evaluated: &CadDocument,
+    evaluated: &Document,
 ) -> Result<(), &'static str> {
     authoring::tag_members(&mut scene.document, def);
     let rep = scene
@@ -222,7 +222,7 @@ pub(super) fn reconcile(
     Ok(())
 }
 
-fn state_name(doc: &CadDocument, def: Handle, insert: Handle) -> Option<(String, usize)> {
+fn state_name(doc: &Document, def: Handle, insert: Handle) -> Option<(String, usize)> {
     let parameter = crate::scene::block_visibility::parameter(doc, def)?;
     let EntityType::Insert(reference) = doc.get_entity(insert)? else {
         return None;
@@ -248,8 +248,8 @@ fn state_name(doc: &CadDocument, def: Handle, insert: Handle) -> Option<(String,
 }
 
 pub(super) fn visibility_state(
-    doc: &CadDocument,
-    before: &CadDocument,
+    doc: &Document,
+    before: &Document,
     def: Handle,
     insert: Handle,
 ) -> Option<usize> {
@@ -265,7 +265,7 @@ pub(super) fn visibility_state(
 }
 
 pub(super) fn apply_visibility(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     def: Handle,
     insert: Handle,
     state: usize,

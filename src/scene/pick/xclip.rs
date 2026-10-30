@@ -13,7 +13,7 @@
 use codec::entities::Insert;
 use codec::objects::{ObjectType, SpatialFilter};
 use codec::types::{Handle, Transform, Vector3};
-use codec::CadDocument;
+use codec::Document;
 use kernel::geom2d::{contains, Curve, Line, Tolerance};
 
 use crate::scene::model::wire_model::{
@@ -24,7 +24,7 @@ const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
 
 /// Resolve the extension dictionary handle for an object or entity, checking the entity's
 /// field, document lookup tables, and owned Dictionary / DictionaryWithDefault objects.
-fn resolve_extension_dictionary(doc: &CadDocument, owner: Handle) -> Option<Handle> {
+fn resolve_extension_dictionary(doc: &Document, owner: Handle) -> Option<Handle> {
     if let Some(entity) = doc.get_entity(owner) {
         if let Some(h) = entity.common().xdictionary_handle {
             if !h.is_null() {
@@ -51,10 +51,10 @@ fn resolve_extension_dictionary(doc: &CadDocument, owner: Handle) -> Option<Hand
 /// The INSERT's extension dictionary through its own link, or the stored
 /// INSERT's when `ins` is a copy taken before the link was made. Render walks
 /// ask this for every INSERT, so it must not fall back to a scan of every
-/// object: [`CadDocument::extension_dictionary_handle`] scans for an entity
+/// object: [`Document::extension_dictionary_handle`] scans for an entity
 /// without a linked dictionary. Readers and `ensure_extension_dictionary`
 /// set the link.
-fn linked_extension_dictionary(doc: &CadDocument, ins: &Insert) -> Option<Handle> {
+fn linked_extension_dictionary(doc: &Document, ins: &Insert) -> Option<Handle> {
     ins.common
         .xdictionary_handle
         .or_else(|| {
@@ -70,7 +70,7 @@ fn linked_extension_dictionary(doc: &CadDocument, ins: &Insert) -> Option<Handle
 /// (dictionary) → SPATIAL (SpatialFilter)`. Returns `None` when there is no
 /// filter, it is disabled (code 71 = 0), or it has fewer than two boundary
 /// points.
-pub fn insert_spatial_filter<'a>(doc: &'a CadDocument, ins: &Insert) -> Option<&'a SpatialFilter> {
+pub fn insert_spatial_filter<'a>(doc: &'a Document, ins: &Insert) -> Option<&'a SpatialFilter> {
     let xdict = linked_extension_dictionary(doc, ins)?;
     let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
@@ -85,7 +85,7 @@ pub fn insert_spatial_filter<'a>(doc: &'a CadDocument, ins: &Insert) -> Option<&
 // ── Editing (XCLIP) ─────────────────────────────────────────────────────────
 
 /// The filter's handle, when the insert has one (enabled or not).
-pub fn filter_handle(doc: &CadDocument, insert: Handle) -> Option<Handle> {
+pub fn filter_handle(doc: &Document, insert: Handle) -> Option<Handle> {
     let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
         return None;
     };
@@ -105,7 +105,7 @@ const INVERTED_COMPARE: &str = "ACAD_INVERTEDCLIP_ROUNDTRIP_COMPARE";
 
 /// The boundary an inverted clip was drawn with (WCS), kept beside the
 /// filter's ring in an ACAD_XREC_ROUNDTRIP record as the reference keeps it.
-pub fn inverted_boundary(doc: &CadDocument, filter: &SpatialFilter) -> Option<Vec<[f64; 2]>> {
+pub fn inverted_boundary(doc: &Document, filter: &SpatialFilter) -> Option<Vec<[f64; 2]>> {
     let x = doc.xrecord(filter.handle, ROUNDTRIP)?;
     let mut points = Vec::new();
     let mut inside = false;
@@ -127,7 +127,7 @@ pub fn inverted_boundary(doc: &CadDocument, filter: &SpatialFilter) -> Option<Ve
 /// else the stored one; rectangles as four corners (WCS through the stored
 /// transforms).
 pub fn clip_outline_world(
-    doc: &CadDocument,
+    doc: &Document,
     filter: &SpatialFilter,
     xform: &Transform,
 ) -> Vec<[f64; 2]> {
@@ -180,7 +180,7 @@ pub fn rectangle_corners(a: [f64; 2], b: [f64; 2]) -> Vec<[f64; 2]> {
 }
 
 /// Remove an insert's clip (the filter and what it owns).
-pub fn remove_insert_clip(doc: &mut CadDocument, insert: Handle) -> bool {
+pub fn remove_insert_clip(doc: &mut Document, insert: Handle) -> bool {
     let Some(spatial) = filter_handle(doc, insert) else {
         return false;
     };
@@ -209,7 +209,7 @@ pub fn remove_insert_clip(doc: &mut CadDocument, insert: Handle) -> bool {
 }
 
 /// Turn an insert's clip display on or off; false when it has none.
-pub fn set_insert_clip_enabled(doc: &mut CadDocument, insert: Handle, on: bool) -> bool {
+pub fn set_insert_clip_enabled(doc: &mut Document, insert: Handle, on: bool) -> bool {
     let Some(spatial) = filter_handle(doc, insert) else {
         return false;
     };
@@ -221,7 +221,7 @@ pub fn set_insert_clip_enabled(doc: &mut CadDocument, insert: Handle, on: bool) 
 
 /// Front and back clipping planes (None = off) of an insert's clip.
 pub fn set_insert_clip_depth(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     insert: Handle,
     front: Option<Option<f64>>,
     back: Option<Option<f64>>,
@@ -244,7 +244,7 @@ pub fn set_insert_clip_depth(
 /// WCS (two points = rectangle corners); `inverted` hides what is inside,
 /// stored as the reference stores it (the ring plus the drawn boundary).
 pub fn set_insert_clip(
-    doc: &mut CadDocument,
+    doc: &mut Document,
     insert: Handle,
     boundary: &[[f64; 2]],
     inverted: bool,
@@ -364,7 +364,7 @@ pub fn set_insert_clip(
     true
 }
 
-fn dict_entry(doc: &CadDocument, dict: Handle, key: &str) -> Option<Handle> {
+fn dict_entry(doc: &Document, dict: Handle, key: &str) -> Option<Handle> {
     let entries = match doc.objects.get(&dict)? {
         ObjectType::Dictionary(d) => &d.entries,
         ObjectType::DictionaryWithDefault(d) => &d.entries,
@@ -379,9 +379,13 @@ fn dict_entry(doc: &CadDocument, dict: Handle, key: &str) -> Option<Handle> {
 /// Build the clip boundary as a closed world-space ring in the same f32 XY
 /// space as the emitted wires (i.e. with `world_offset` already subtracted).
 ///
-/// Boundary points are stored in the clip-definition coordinate system. The
-/// `inverse_block_transform` maps them into the block's coordinate system, then
-/// the INSERT transform maps that to world — `world = T_insert · (M⁻¹ · vert)`.
+/// Boundary points are stored in the clip boundary's coordinate system. The
+/// clip boundary transform maps block-reference points into that system, so
+/// its inverse brings the vertices back; the `inverse_block_transform` maps
+/// them into the block's coordinate system, then the INSERT transform maps
+/// that to world — `world = T_insert · M⁻¹ · B⁻¹ · vert`. Clips made here or
+/// by the reference product store `B` as the identity; other writers keep the
+/// insert's rotation there.
 /// (For a clip made against the current insert, `M⁻¹` is the insert's own
 /// inverse and the two transforms cancel, leaving the vertices in WCS; when the
 /// insert was later rescaled the stored `M⁻¹` still places the clip correctly.)
@@ -402,6 +406,9 @@ fn world_clip_polygon_f64(sf: &SpatialFilter, ins: &Insert) -> Vec<[f64; 2]> {
 /// the on-disk column-major 4x3 layout into row-major `Matrix4`.
 pub fn world_clip_polygon_for_transform(sf: &SpatialFilter, xform: &Transform) -> Vec<[f64; 2]> {
     let inv_block = &sf.inverse_block_transform;
+    let from_boundary =
+        crate::scene::inverse_affine(&Transform::from_matrix(sf.clip_bound_transform))
+            .unwrap_or_else(Transform::identity);
     let local: Vec<[f64; 2]> = if sf.boundary_points.len() == 2 {
         let a = sf.boundary_points[0];
         let b = sf.boundary_points[1];
@@ -412,7 +419,8 @@ pub fn world_clip_polygon_for_transform(sf: &SpatialFilter, xform: &Transform) -
     local
         .into_iter()
         .map(|[x, y]| {
-            let block = inv_block.transform_point(Vector3::new(x, y, 0.0));
+            let reference = from_boundary.apply(Vector3::new(x, y, 0.0));
+            let block = inv_block.transform_point(reference);
             let w = xform.apply(block);
             [w.x, w.y]
         })
@@ -1090,7 +1098,7 @@ mod tests {
             Handle::new(0x13),
         );
 
-        let mut doc = CadDocument::new();
+        let mut doc = Document::new();
 
         // xdictionary → ACAD_FILTER → SPATIAL chain.
         let mut xdict = Dictionary::new();

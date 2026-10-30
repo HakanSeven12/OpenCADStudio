@@ -20,8 +20,14 @@ pub fn tool() -> ToolDef {
 
 enum Step {
     PickDimension,
+    /// Multiple: the dimensions are gathered like any selection.
     PickDimensions(Vec<Handle>),
-    PickCrossing(Vec<Handle>),
+    /// The objects that break the dimensions, picked one by one until Enter.
+    PickCrossing {
+        dimensions: Vec<Handle>,
+        multiple: bool,
+        objects: Vec<Handle>,
+    },
     ManualFirst(Vec<Handle>),
     ManualSecond(Vec<Handle>, DVec3),
 }
@@ -29,6 +35,10 @@ enum Step {
 pub struct DimBreakCommand {
     step: Step,
     picked_entity: Option<EntityType>,
+}
+
+fn is_dimension(entity: &EntityType) -> bool {
+    matches!(entity, EntityType::Dimension(_))
 }
 
 impl DimBreakCommand {
@@ -64,14 +74,28 @@ impl CadCommand for DimBreakCommand {
             Step::PickDimension => {
                 t!("DIMBREAK  Select dimension to add/remove break or [Multiple]:").into_owned()
             }
-            Step::PickDimensions(handles) => crate::tf!(
-                "DIMBREAK  Select dimensions ({} selected, press Enter when done):",
-                handles.len()
-            )
-            .into_owned(),
-            Step::PickCrossing(_) => {
+            Step::PickDimensions(_) => t!("DIMBREAK  Select dimensions:").into_owned(),
+            Step::PickCrossing {
+                multiple: false,
+                objects,
+                ..
+            } if objects.is_empty() => {
                 t!("DIMBREAK  Select object to break dimension or [Auto/Manual/Remove] <Auto>:")
                     .into_owned()
+            }
+            Step::PickCrossing {
+                multiple: true,
+                objects,
+                ..
+            } if objects.is_empty() => {
+                t!("DIMBREAK  Select object to break dimensions or [Auto/Remove] <Auto>:")
+                    .into_owned()
+            }
+            Step::PickCrossing {
+                multiple: false, ..
+            } => t!("DIMBREAK  Select object to break dimension:").into_owned(),
+            Step::PickCrossing { .. } => {
+                t!("DIMBREAK  Select object to break dimensions:").into_owned()
             }
             Step::ManualFirst(_) => t!("DIMBREAK  Specify first break point:").into_owned(),
             Step::ManualSecond(_, _) => t!("DIMBREAK  Specify second break point:").into_owned(),
@@ -79,13 +103,18 @@ impl CadCommand for DimBreakCommand {
     }
 
     fn options(&self) -> Vec<CmdOption> {
-        match self.step {
+        match &self.step {
             Step::PickDimension => vec![CmdOption::new("Multiple", "MULTIPLE")],
-            Step::PickCrossing(_) => vec![
-                CmdOption::new("Auto", "AUTO"),
-                CmdOption::new("Manual", "MANUAL"),
-                CmdOption::new("Remove", "REMOVE"),
-            ],
+            Step::PickCrossing {
+                multiple, objects, ..
+            } if objects.is_empty() => {
+                let mut options = vec![CmdOption::new("Auto", "AUTO")];
+                if !multiple {
+                    options.push(CmdOption::new("Manual", "MANUAL"));
+                }
+                options.push(CmdOption::new("Remove", "REMOVE"));
+                options
+            }
             _ => Vec::new(),
         }
     }
@@ -95,22 +124,45 @@ impl CadCommand for DimBreakCommand {
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        matches!(self.step, Step::PickDimension | Step::PickCrossing(_))
+        matches!(self.step, Step::PickDimension | Step::PickCrossing { .. })
     }
 
     fn needs_entity_pick(&self) -> bool {
-        matches!(
-            self.step,
-            Step::PickDimension | Step::PickDimensions(_) | Step::PickCrossing(_)
-        )
+        matches!(self.step, Step::PickDimension | Step::PickCrossing { .. })
     }
 
     fn inject_before_entity_pick(&self) -> bool {
-        matches!(self.step, Step::PickDimension | Step::PickDimensions(_))
+        matches!(self.step, Step::PickDimension)
     }
 
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.picked_entity = Some(entity);
+    }
+
+    fn is_selection_gathering(&self) -> bool {
+        matches!(self.step, Step::PickDimensions(_))
+    }
+
+    fn selection_entity_filter(&self) -> Option<fn(&EntityType) -> bool> {
+        Some(is_dimension)
+    }
+
+    fn selection_entities_exclude_locked(&self) -> bool {
+        true
+    }
+
+    fn inject_selection_entities(&mut self, entities: Vec<crate::command::SelectionEntity>) {
+        if let Step::PickDimensions(handles) = &mut self.step {
+            *handles = entities
+                .into_iter()
+                .filter(|selected| is_dimension(&selected.entity))
+                .map(|selected| selected.handle)
+                .collect();
+        }
+    }
+
+    fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
+        CmdResult::NeedPoint
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _point: DVec3) -> CmdResult {
@@ -124,45 +176,47 @@ impl CadCommand for DimBreakCommand {
                         t!("DIMBREAK: select a dimension.").into_owned(),
                     );
                 }
-                self.step = Step::PickCrossing(vec![handle]);
+                self.step = Step::PickCrossing {
+                    dimensions: vec![handle],
+                    multiple: false,
+                    objects: Vec::new(),
+                };
                 CmdResult::NeedPoint
             }
-            Step::PickDimensions(handles) => {
-                if !matches!(self.picked_entity.take(), Some(EntityType::Dimension(_))) {
-                    return CmdResult::ReportError(
-                        t!("DIMBREAK: select a dimension.").into_owned(),
-                    );
-                }
-                if !handles.contains(&handle) {
-                    handles.push(handle);
+            Step::PickCrossing {
+                dimensions,
+                objects,
+                ..
+            } => {
+                if !dimensions.contains(&handle) && !objects.contains(&handle) {
+                    objects.push(handle);
                 }
                 CmdResult::NeedPoint
             }
-            Step::PickCrossing(handles) => CmdResult::EditDimensionBreak {
-                dimensions: handles.clone(),
-                operation: crate::command::DimensionBreakOperation::Object(handle),
-            },
-            Step::ManualFirst(_) | Step::ManualSecond(_, _) => CmdResult::NeedPoint,
+            _ => CmdResult::NeedPoint,
         }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let keyword = text.trim().to_ascii_uppercase();
+        let keyword = text.trim().trim_start_matches('_').to_ascii_uppercase();
         match &mut self.step {
             Step::PickDimension if matches!(keyword.as_str(), "M" | "MULTIPLE") => {
                 self.step = Step::PickDimensions(Vec::new());
                 Some(CmdResult::NeedPoint)
             }
-            Step::PickCrossing(handles) if matches!(keyword.as_str(), "A" | "AUTO") => {
-                Some(Self::automatic(handles))
-            }
-            Step::PickCrossing(handles) if matches!(keyword.as_str(), "M" | "MANUAL") => {
-                self.step = Step::ManualFirst(handles.clone());
-                Some(CmdResult::NeedPoint)
-            }
-            Step::PickCrossing(handles) if matches!(keyword.as_str(), "R" | "REMOVE") => {
-                Some(Self::remove(handles))
-            }
+            Step::PickCrossing {
+                dimensions,
+                multiple,
+                objects,
+            } if objects.is_empty() => match keyword.as_str() {
+                "A" | "AUTO" => Some(Self::automatic(dimensions)),
+                "M" | "MANUAL" if !*multiple => {
+                    self.step = Step::ManualFirst(dimensions.clone());
+                    Some(CmdResult::NeedPoint)
+                }
+                "R" | "REMOVE" => Some(Self::remove(dimensions)),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -183,11 +237,29 @@ impl CadCommand for DimBreakCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match &self.step {
-            Step::PickDimensions(handles) if !handles.is_empty() => {
-                self.step = Step::PickCrossing(handles.clone());
+            // Multiple with nothing selected ends quietly.
+            Step::PickDimensions(handles) if handles.is_empty() => CmdResult::Cancel,
+            Step::PickDimensions(handles) => {
+                self.step = Step::PickCrossing {
+                    dimensions: handles.clone(),
+                    multiple: true,
+                    objects: Vec::new(),
+                };
                 CmdResult::NeedPoint
             }
-            Step::PickCrossing(handles) => Self::automatic(handles),
+            Step::PickCrossing {
+                dimensions,
+                objects,
+                ..
+            } if objects.is_empty() => Self::automatic(dimensions),
+            Step::PickCrossing {
+                dimensions,
+                objects,
+                ..
+            } => CmdResult::EditDimensionBreak {
+                dimensions: dimensions.clone(),
+                operation: crate::command::DimensionBreakOperation::Objects(objects.clone()),
+            },
             _ => CmdResult::Cancel,
         }
     }

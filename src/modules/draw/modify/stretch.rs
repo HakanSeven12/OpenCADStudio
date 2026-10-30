@@ -689,7 +689,7 @@ impl CadCommand for StretchCommand {
         }
     }
 
-    fn preview_entities(&mut self, document: &codec::CadDocument, pt: DVec3) -> Vec<codec::EntityType> {
+    fn preview_entities(&mut self, document: &codec::Document, pt: DVec3) -> Vec<codec::EntityType> {
         // The base-point step already has the final windows: resolve what
         // moves there, so the drag starts with only those objects hidden.
         if matches!(self.step, Step::Base | Step::Target { .. }) && self.moving.is_none() {
@@ -870,7 +870,7 @@ mod shift_stretch_tests {
 
     #[test]
     fn only_objects_the_drag_moves_are_hidden() {
-        let mut document = codec::CadDocument::new();
+        let mut document = codec::Document::new();
         let mut add = |a: Vector3, b: Vector3| {
             let line = codec::EntityType::Line(Line::from_points(a, b));
             document.add_entity(line).unwrap()

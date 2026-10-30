@@ -7,7 +7,7 @@ use crate::app::Message;
 use crate::scene::model::point_cloud::{self, UNASSIGNED_OFF};
 use crate::ui::dock::PanelId;
 use codec::entities::ExtendedEntityData;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use iced::widget::{
     button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, tooltip,
     Space,
@@ -82,7 +82,7 @@ pub struct Cloud {
 }
 
 /// The drawing's point clouds; only the selected ones when any is selected.
-pub fn clouds(document: &CadDocument, selected: &[Handle]) -> Vec<Cloud> {
+pub fn clouds(document: &Document, selected: &[Handle]) -> Vec<Cloud> {
     let all: Vec<Cloud> = document
         .entities()
         .filter_map(|entity| {
@@ -274,7 +274,7 @@ fn fold_button<'a>(
 
 pub fn view<'a>(
     state: &'a PcManager,
-    document: &'a CadDocument,
+    document: &'a Document,
     selected: &[Handle],
     width: f32,
     chrome: crate::ui::dock::Chrome,

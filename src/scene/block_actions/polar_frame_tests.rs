@@ -7,7 +7,7 @@ use codec::{
 use instance::ParameterFrame;
 use std::io::Cursor;
 
-fn polar(doc: &CadDocument, action: Handle) -> &BlockPolarStretchAction {
+fn polar(doc: &Document, action: Handle) -> &BlockPolarStretchAction {
     let ObjectType::DynamicBlock(object) = &doc.objects[&action] else {
         panic!()
     };
@@ -17,7 +17,7 @@ fn polar(doc: &CadDocument, action: Handle) -> &BlockPolarStretchAction {
     action
 }
 
-fn geometry(doc: &CadDocument, insert: Handle) -> Vec<(DVec3, DVec3)> {
+fn geometry(doc: &Document, insert: Handle) -> Vec<(DVec3, DVec3)> {
     let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
         panic!()
     };
@@ -36,7 +36,7 @@ fn geometry(doc: &CadDocument, insert: Handle) -> Vec<(DVec3, DVec3)> {
 fn fixture(
     key: XyKeyPoint,
 ) -> (
-    CadDocument,
+    Document,
     Handle,
     Handle,
     Handle,
@@ -136,7 +136,7 @@ fn block_polar_stretch_base_and_end_bindings_evaluate_complete_reference_frames(
         } else {
             (DVec3::new(4., 5., 0.), DVec3::new(3., 6., 0.))
         };
-        let check = |doc: &CadDocument| {
+        let check = |doc: &Document| {
             let result = geometry(doc, a);
             assert!(
                 result[0].0.distance(requested.base) < 1e-8,

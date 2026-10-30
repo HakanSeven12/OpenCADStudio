@@ -20,7 +20,7 @@ const MAP_ENTRY: &str = "ACAD_POINTCLOUD_COLORMAP";
 /// The classification scheme the colour map names by default.
 const CLASSIFICATION_SCHEME: &str = "8AF59545-D22F-46B7-923C-912F71ED57DE";
 
-fn cloud_data(document: &codec::CadDocument, handle: Handle) -> Option<&PointCloudExData> {
+fn cloud_data(document: &codec::Document, handle: Handle) -> Option<&PointCloudExData> {
     match document.get_entity(handle)? {
         codec::EntityType::Extended(extended) => match &extended.data {
             ExtendedEntityData::PointCloudEx(data) => Some(data),
@@ -32,7 +32,7 @@ fn cloud_data(document: &codec::CadDocument, handle: Handle) -> Option<&PointClo
 
 /// The drawing's colour map object, created (with the built-in schemes)
 /// under its dictionary when the drawing has none.
-fn ensure_color_map(document: &mut codec::CadDocument) -> Option<Handle> {
+fn ensure_color_map(document: &mut codec::Document) -> Option<Handle> {
     let existing = document
         .objects
         .iter()

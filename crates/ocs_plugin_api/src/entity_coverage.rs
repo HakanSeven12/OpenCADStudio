@@ -1,6 +1,6 @@
 //! Host-owned coverage generated from the traced entity registry and an
 //! explicit policy. `unmapped` fields remain accessible through the typed
-//! `CadDocument` snapshot but are not promised by the Python document model.
+//! `Document` snapshot but are not promised by the Python document model.
 
 pub use crate::entity_coverage_types::*;
 
@@ -2273,7 +2273,7 @@ pub fn validate_entity_mutation(
 /// in the host API gives every scripting adapter the same reference rules.
 #[cfg(feature = "host")]
 pub fn validate_canvas_entity_references(
-    document: &crate::host::CadDocument,
+    document: &crate::host::Document,
     entity: &crate::host::EntityType,
 ) -> Result<(), String> {
     use crate::host::EntityType;
@@ -2728,7 +2728,7 @@ pub fn validate_canvas_entity_references(
 /// Stable handle wins; the name is the fallback for legacy entities.
 #[cfg(feature = "host")]
 fn resolve_mline_style<'a>(
-    document: &'a crate::host::CadDocument,
+    document: &'a crate::host::Document,
     mline: &crate::host::codec::entities::MLine,
 ) -> Option<&'a crate::host::codec::objects::MLineStyle> {
     use crate::host::codec::objects::ObjectType;
@@ -2756,7 +2756,7 @@ fn resolve_mline_style<'a>(
 /// for legacy DWG entities whose fallback name can be stale.
 #[cfg(feature = "host")]
 pub fn bind_canvas_entity_references(
-    document: &crate::host::CadDocument,
+    document: &crate::host::Document,
     entity: &mut crate::host::EntityType,
 ) -> Result<(), String> {
     use crate::host::EntityType;
@@ -3343,7 +3343,7 @@ mod tests {
     #[test]
     fn tolerance_geometry_and_style_references_are_validated() {
         use crate::host::codec::{self, types::Vector3};
-        let document = codec::CadDocument::new();
+        let document = codec::Document::new();
         let mut tolerance =
             codec::entities::Tolerance::with_text(Vector3::new(1.0, 2.0, 0.0), "{\\Fgdt;p}%%v0.1");
         let entity = codec::EntityType::Tolerance(tolerance.clone());
@@ -3369,7 +3369,7 @@ mod tests {
     #[test]
     fn leader_geometry_and_annotation_references_are_validated() {
         use crate::host::codec::{self, entities::LeaderCreationType, types::Vector3};
-        let mut document = codec::CadDocument::new();
+        let mut document = codec::Document::new();
         let mut text = codec::entities::Text::new();
         text.common.handle = document.allocate_handle();
         let text_handle = text.common.handle;
@@ -3435,7 +3435,7 @@ mod tests {
     #[test]
     fn mline_geometry_and_style_references_are_validated_and_bound() {
         use crate::host::codec::{self, entities::MLineVertex, types::Vector3};
-        let document = codec::CadDocument::new();
+        let document = codec::Document::new();
         let mut mline = codec::entities::MLine::new();
         for x in [0.0, 5.0] {
             mline
@@ -3485,7 +3485,7 @@ mod tests {
     #[test]
     fn shape_geometry_and_shape_file_style_are_validated_and_bound() {
         use crate::host::codec::{self, tables::TableEntry, types::Vector3};
-        let mut document = codec::CadDocument::new();
+        let mut document = codec::Document::new();
         let mut style = codec::tables::TextStyle::new("Symbols");
         style.set_handle(document.allocate_handle());
         style.is_shape_file = true;
@@ -3731,7 +3731,7 @@ mod tests {
             entities::{Block, BlockEnd},
             types::{Handle, Vector3},
         };
-        let mut document = codec::CadDocument::new();
+        let mut document = codec::Document::new();
         let next = document.next_handle();
         let record_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
@@ -3829,7 +3829,7 @@ mod tests {
                 .contains("greater than zero")
         );
 
-        let mut document = codec::CadDocument::new();
+        let mut document = codec::Document::new();
         let boundary = document
             .add_entity(codec::EntityType::Line(codec::entities::Line::from_points(
                 codec::types::Vector3::ZERO,

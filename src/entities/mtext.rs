@@ -84,7 +84,7 @@ fn drawing_dir_str(d: &DrawingDirection) -> &'static str {
 /// a field's value and a right-to-left word right after it read with that
 /// word — the reference draws `שלום 0 עולם` with no gap after the field
 /// (the spaces end up after the word), while plain text keeps the gap.
-fn display_text(t: &MText, document: &codec::CadDocument) -> String {
+fn display_text(t: &MText, document: &codec::Document) -> String {
     use crate::entities::text_support::is_rtl_char;
     let value = &t.value;
     if !value.chars().any(is_rtl_char) {
@@ -113,7 +113,7 @@ fn display_text(t: &MText, document: &codec::CadDocument) -> String {
 /// Per-visible-character world-space boxes for the MText editor's
 /// click-to-select preview. Uses the exact same layout opts as `to_render`
 /// so the boxes line up with the rendered glyphs.
-pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
+pub fn glyph_boxes(t: &MText, document: &codec::Document) -> Vec<GlyphBox> {
     layout_of(t, document, true).glyph_boxes
 }
 
@@ -121,7 +121,7 @@ pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
 /// first baseline, in the entity's own (pre-rotation) frame.
 pub fn layout_of(
     t: &MText,
-    document: &codec::CadDocument,
+    document: &codec::Document,
     want_glyph_boxes: bool,
 ) -> crate::entities::text_support::MTextLayout {
     let resolved_style = resolve_text_style(&t.style, document);
@@ -180,7 +180,7 @@ pub fn layout_of(
     })
 }
 
-fn to_render(t: &MText, document: &codec::CadDocument) -> RenderEntity {
+fn to_render(t: &MText, document: &codec::Document) -> RenderEntity {
     let resolved_style = resolve_text_style(&t.style, document);
     let attach_h_anchor: f32 = match t.attachment_point {
         AttachmentPoint::TopCenter
@@ -252,9 +252,9 @@ fn to_render(t: &MText, document: &codec::CadDocument) -> RenderEntity {
 
 /// EXPLODE: one single-line TEXT per laid-out run, at the run's own baseline
 /// origin, height, rotation and width, so the result sits where the MTEXT was
-/// drawn. Inline colours carry over as true colours. (#760)
+/// drawn. Inline colours carry over, index colours as indices. (#760)
 // ponytail: one TEXT per run (word), not merged per line; merge same-format runs if users ask.
-pub(crate) fn explode_mtext(t: &MText, document: &codec::CadDocument) -> Vec<codec::EntityType> {
+pub(crate) fn explode_mtext(t: &MText, document: &codec::Document) -> Vec<codec::EntityType> {
     let RenderObject::Text(strokes) = to_render(t, document).object else {
         return Vec::new();
     };
@@ -271,7 +271,9 @@ pub(crate) fn explode_mtext(t: &MText, document: &codec::CadDocument) -> Vec<cod
             );
             text.common = t.common.clone();
             text.common.handle = codec::Handle::NULL;
-            if let Some([r, g, b]) = stroke.color {
+            if let Some(index) = run.aci {
+                text.common.color = codec::types::Color::Index(index);
+            } else if let Some([r, g, b]) = stroke.color {
                 let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
                 text.common.color = codec::types::Color::Rgb {
                     r: byte(r),
@@ -747,7 +749,7 @@ fn apply_transform(t: &mut MText, tr: &EntityTransform) {
 }
 
 impl RenderConvertible for MText {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         Some(to_render(self, document))
     }
 }
@@ -849,3 +851,4 @@ impl crate::entities::traits::TextContent for codec::entities::MText {
         }
     }
 }
+

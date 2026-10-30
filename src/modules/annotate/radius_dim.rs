@@ -9,7 +9,7 @@ use crate::command::{
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
-use glam::{DVec3, Vec3};
+use glam::DVec3;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_radius.svg"));
 
@@ -137,7 +137,7 @@ impl CadCommand for RadiusDimensionCommand {
         }
         match self.step {
             Step::SelectObject => {
-                t!("DIMRADIUS  Select arc, circle, polyline arc, or circular region edge:")
+                t!("DIMRADIUS  Select arc or circle:")
                     .into_owned()
             }
             Step::DimLine(_) => {
@@ -310,14 +310,14 @@ impl CadCommand for RadiusDimensionCommand {
         match self.step {
             Step::SelectObject => None,
             Step::DimLine(source) => {
-                let center = dvec(source.center_world()).as_vec3();
-                let point = dvec(source.chord_at(pt.to_array())).as_vec3();
+                let center = dvec(source.center_world());
+                let point = dvec(source.chord_at(pt.to_array()));
                 Some(preview_wire(vec![
                     center,
                     point,
-                    Vec3::new(f32::NAN, f32::NAN, f32::NAN),
+                    DVec3::splat(f64::NAN),
                     point,
-                    pt.as_vec3(),
+                    pt,
                 ]))
             }
         }
@@ -341,44 +341,13 @@ fn dvec(point: Vector3) -> DVec3 {
     DVec3::new(point.x, point.y, point.z)
 }
 
-fn preview_wire(points: Vec<Vec3>) -> WireModel {
-    WireModel {
-        bg_adapt: None,
-        point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
-        world_width: 0.0,
-        depth_override: None,
-        display_visible: true,
-        snap_only: false,
-        plot_visible: true,
-        fill_is_3d: false,
-        fill_is_2d_solid: false,
-        render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
-        dash_from_start: false,
-        dash_align_end: None,
-        text_verts: Vec::new(),
-        name: "dimradius_preview".to_string(),
-        points: points.into_iter().map(|p| [p.x, p.y, p.z]).collect(),
-        points_low: Vec::new(),
-        color: WireModel::CYAN,
-        selected: false,
-        pattern_length: 0.0,
-        pattern: [0.0; 8],
-        line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        aci: 0,
-        key_vertices: vec![],
-        aabb: WireModel::UNBOUNDED_AABB,
-        plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-
-        ..Default::default()
-    }
+fn preview_wire(points: Vec<DVec3>) -> WireModel {
+    WireModel::solid_f64(
+        "dimradius_preview".to_string(),
+        points.into_iter().map(|point| point.to_array()).collect(),
+        WireModel::CYAN,
+        false,
+    )
 }
 
 inventory::submit!(crate::command::CommandRegistration {

@@ -13,7 +13,7 @@ use codec::entities::{
 };
 use codec::tables::BlockRecord;
 use codec::types::{Vector2, Vector3};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 
 use harness::BenchmarkRunner;
 use OpenCADStudio::modules::draw::modify::explode::{apply_explode_replacements, explode_batch};
@@ -41,7 +41,7 @@ fn fixture_entities(quick: bool) -> usize {
 /// Shared 20-member block (10 lines + 10 three-vertex polylines) registered
 /// in `block_records` with `entity_handles` set — what explode_from_document
 /// needs to materialize inserts.
-fn add_bench_block(doc: &mut CadDocument) {
+fn add_bench_block(doc: &mut Document) {
     let mut member_handles = Vec::with_capacity(MEMBERS_PER_BLOCK);
     for k in 0..MEMBERS_PER_BLOCK {
         if k % 2 == 0 {
@@ -68,7 +68,7 @@ fn add_bench_block(doc: &mut CadDocument) {
 
 /// Populate the document with the compound fixture; returns the handles of
 /// the fixture entities (block members are NOT included).
-fn push_fixture_entities(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
+fn push_fixture_entities(doc: &mut Document, quick: bool) -> Vec<Handle> {
     let (n_pl, n_ins, n_dim, n_ml) = counts(quick);
     let mut handles = Vec::with_capacity(fixture_entities(quick));
 
@@ -151,7 +151,7 @@ fn bench_explode_geometry(runner: &mut BenchmarkRunner) {
     let mut times = Vec::with_capacity(sample_count);
 
     for _ in 0..sample_count {
-        let mut doc = CadDocument::new();
+        let mut doc = Document::new();
         add_bench_block(&mut doc);
         let handles = push_fixture_entities(&mut doc, quick);
         let items: Vec<(Handle, &EntityType)> = handles
@@ -259,7 +259,7 @@ fn flatten_moved_expected(quick: bool) -> usize {
 
 /// Mixed-Z fixture: everything non-flat except the trailing ray + flat-line
 /// groups, which FLATTEN must leave untouched (None).
-fn push_flatten_fixture(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
+fn push_flatten_fixture(doc: &mut Document, quick: bool) -> Vec<Handle> {
     let [n_line, n_circle, n_pl3d, n_pl2d, n_text, n_point, n_solid, n_ray, n_flat] =
         flatten_counts(quick);
     let mut handles = Vec::with_capacity(flatten_fixture_entities(quick));

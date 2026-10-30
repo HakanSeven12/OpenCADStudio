@@ -1,4 +1,7 @@
-//! Check DIMTMOVE through the scene's actual dimension tessellation.
+//! Check DIMTMOVE through the scene's actual dimension tessellation: text
+//! moved off a linear or aligned dimension never drags the dimension line
+//! out to it. DIMTMOVE 1 text near its line keeps to it; further away it
+//! hangs on a leader from the line's middle.
 
 use codec::entities::{Dimension, DimensionAligned, DimensionLinear};
 use codec::types::Vector3;
@@ -8,7 +11,7 @@ use OpenCADStudio::entities::dim_override as ov;
 use OpenCADStudio::scene::Scene;
 
 #[test]
-fn dim_leader_extends_only_when_requested() {
+fn dim_line_never_runs_out_to_moved_text() {
     for aligned in [false, true] {
         for movement in [0, 1, 2] {
             for (text_x, text_y) in [
@@ -67,9 +70,8 @@ fn dim_leader_extends_only_when_requested() {
                             }
                     })
                 });
-                assert_eq!(
-                    extension,
-                    movement == 1 && text_y == 89.0,
+                assert!(
+                    !extension,
                     "aligned={aligned}, DIMTMOVE={movement}, text=({text_x},{text_y})"
                 );
             }

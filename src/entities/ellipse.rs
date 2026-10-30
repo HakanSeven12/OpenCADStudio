@@ -413,7 +413,7 @@ fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Ellipse {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }

@@ -6,7 +6,7 @@
 // defined once — so a circle drawn here and a circle extruded by the Model
 // tab come from the same definition and cannot disagree.
 
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 
 use crate::entities::traits::EntityTypeOps;
 use crate::scene::model::wire_model::{SnapHint, TangentGeom};
@@ -80,6 +80,9 @@ pub struct GlyphRun {
     pub tracking: f32,
     /// Bold run — the SDF glyph bakes with a wider pen (thicker strokes).
     pub bold: bool,
+    /// The run's inline colour when given as an index (`\C`), which the
+    /// stroke colour alone cannot tell from a true colour.
+    pub aci: Option<u8>,
 }
 
 #[allow(dead_code)]
@@ -104,6 +107,11 @@ pub enum RenderObject {
         station_pieces: Vec<crate::scene::model::wire_model::PatternStationPiece>,
         source_length: f32,
         plinegen: bool,
+        /// Each NaN-separated run of `points` is a line of its own: it takes
+        /// the linetype's end alignment by itself, as a single line does.
+        separate_runs: bool,
+        /// NaN-separated lines drawn Continuous beside the patterned ones.
+        solid: Vec<[f64; 3]>,
     },
     /// A wide polyline whose band width VARIES (a taper): a continuous WCS point
     /// list paired index-for-index with a per-point full band width. The wire
@@ -131,7 +139,7 @@ pub struct RenderEntity {
     pub pick_tris: Vec<[f64; 3]>,
 }
 
-pub fn convert(entity: &EntityType, document: &CadDocument) -> Option<RenderEntity> {
+pub fn convert(entity: &EntityType, document: &Document) -> Option<RenderEntity> {
     entity.to_render_entity(document)
 }
 

@@ -19,35 +19,7 @@ use crate::scene::model::wire_model::SnapHint;
 
 /// The area enclosed by the hatch boundary paths.
 pub(crate) fn boundary_area(h: &Hatch) -> f64 {
-    let mut path_areas = Vec::new();
-    let mut rings = Vec::new();
-    for path in &h.paths {
-        let mut path_area = 0.0;
-        let directions = crate::scene::hatch_path_directions(path);
-        let curves = path.edges.iter().filter_map(edge_curve);
-        for (curve, direction) in curves.zip(directions) {
-            path_area += direction * curve.enclosed_area();
-        }
-        path_areas.push(path_area.abs());
-        rings.push(crate::scene::hatch_path_ring(path).unwrap_or_default());
-    }
-    let depths = kernel::geom2d::ring_nesting_depths(&rings);
-    path_areas
-        .into_iter()
-        .zip(depths)
-        .filter_map(|(area, depth)| match h.style {
-            codec::entities::HatchStyleType::Normal => {
-                Some(if depth % 2 == 0 { area } else { -area })
-            }
-            codec::entities::HatchStyleType::Outer if depth <= 1 => {
-                Some(if depth == 0 { area } else { -area })
-            }
-            codec::entities::HatchStyleType::Outer => None,
-            codec::entities::HatchStyleType::Ignore if depth == 0 => Some(area),
-            codec::entities::HatchStyleType::Ignore => None,
-        })
-        .sum::<f64>()
-        .abs()
+    h.area().unwrap_or(0.0)
 }
 
 /// A hatch boundary edge as a kernel curve in the hatch OCS.
@@ -1347,3 +1319,4 @@ fn edit_boundary_vertex(
         _ => {}
     }
 }
+

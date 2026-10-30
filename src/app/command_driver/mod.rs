@@ -89,6 +89,7 @@ mod parameters;
 mod property_match;
 mod solid3d;
 mod tests;
+mod autolisp_tests;
 mod text_edit;
 mod transform;
 mod utilities;
@@ -112,6 +113,16 @@ impl OpenCADStudio {
     /// command, so `was_active` is false and their selection is preserved.
     pub(super) fn apply_cmd_result(&mut self, mut result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        let panel_updates = self.tabs[i]
+            .active_cmd
+            .as_mut()
+            .map(|c| c.take_pending_panel_updates())
+            .unwrap_or_default();
+        for (panel_id, values) in panel_updates {
+            if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
+                panel.update_values(values);
+            }
+        }
         if let CmdResult::ReturnPoint(pt) = result {
             self.tabs[i].scene.clear_preview_wire();
             if let Some(mut suspended) = self.tabs[i].suspended_cmd.take() {
@@ -153,6 +164,17 @@ impl OpenCADStudio {
             if gap_tolerance != self.hatch_gap_tolerance {
                 self.hatch_gap_tolerance = gap_tolerance;
                 self.persist_settings_if_changed();
+            }
+        }
+        let variable = self.tabs[self.active_tab]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.drawing_variable_update());
+        if let Some((name, value)) = variable {
+            let tab = &mut self.tabs[self.active_tab];
+            if crate::io::drawing_variable(&tab.scene.document, name).as_deref() != Some(value.as_str()) {
+                crate::io::set_drawing_variable(&mut tab.scene.document, name, &value);
+                tab.dirty = true;
             }
         }
         let mline_settings = self.tabs[self.active_tab]
@@ -360,6 +382,9 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn start_mtp_modifier(&mut self, i: usize) {
+        if self.tabs[i].suspended_cmd.is_some() {
+            return;
+        }
         let parent = self.tabs[i].active_cmd.take();
         self.tabs[i].suspended_cmd = parent;
         self.tabs[i].scene.clear_preview_wire();
@@ -369,6 +394,32 @@ impl OpenCADStudio {
         self.command_line.push_info(&prompt);
         self.command_line.set_step_options(Vec::new());
         self.refresh_active_cmd_preview(i);
+    }
+
+    pub(in crate::app) fn start_from_modifier(&mut self, i: usize) {
+        // There is only one parking slot; never overwrite an existing parent.
+        if self.tabs[i].suspended_cmd.is_some() {
+            return;
+        }
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::FromPointCommand::new(self.last_point);
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.sync_dyn_fields();
+        self.refresh_active_cmd_preview(i);
+    }
+
+    pub(in crate::app) fn relative_input_base(&self, i: usize) -> Option<glam::DVec3> {
+        self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .filter(|c| c.name() == "FROM")
+            .and_then(|c| c.resolved_anchor())
+            .or(self.last_point)
     }
 
     /// Apply a command replacement without deleting a one-to-one entity edit.
@@ -565,11 +616,22 @@ impl OpenCADStudio {
             CmdResult::SetQuickDimensionSnapPriority(priority) => {
                 self.handle_set_quick_dimension_snap_priority(priority);
             }
-            CmdResult::AlignMLeaders { handles, from, to } => {
-                self.handle_align_mleaders(handles, from, to);
+            CmdResult::AlignMLeaders {
+                handles,
+                reference,
+                mode,
+                spacing,
+                from,
+                to,
+            } => {
+                self.handle_align_mleaders(handles, reference, mode, spacing, from, to);
             }
-            CmdResult::CollectMLeaders { handles, point } => {
-                self.handle_collect_mleaders(handles, point);
+            CmdResult::CollectMLeaders {
+                handles,
+                point,
+                layout,
+            } => {
+                self.handle_collect_mleaders(handles, point, layout);
             }
             result @ CmdResult::CommitSolid { .. } => {
                 self.handle_commit_solid(result);
@@ -747,6 +809,17 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::UpdateEntityAndReport {
+                handle,
+                entity,
+                message,
+            } => {
+                let task = self.handle_update_entity_and_finish(handle, entity);
+                self.command_line.push_output(&message);
+                if let Some(task) = task {
+                    return task;
+                }
+            }
             result @ CmdResult::AddParametricConstraint { .. } => {
                 if let Some(task) = self.handle_add_parametric_constraint(result) {
                     return task;
@@ -847,6 +920,15 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::ReassociateCenterLine {
+                target,
+                first,
+                second,
+            } => {
+                if let Some(task) = self.handle_reassociate_center_line(target, first, second) {
+                    return task;
+                }
+            }
             CmdResult::EditDimensionBreak {
                 dimensions,
                 operation,
@@ -856,12 +938,26 @@ impl OpenCADStudio {
             CmdResult::EditDimensionJog { dimension, point } => {
                 self.handle_edit_dimension_jog(dimension, point);
             }
+            CmdResult::ReassociateDimension {
+                dimension,
+                target,
+                last,
+            } => {
+                self.handle_reassociate_dimension(dimension, target, last);
+            }
             CmdResult::SpaceDimensions {
                 base,
                 others,
                 spacing,
             } => {
                 self.handle_space_dimensions(base, others, spacing);
+            }
+            CmdResult::DistributeDimensions {
+                base,
+                dimensions,
+                offset,
+            } => {
+                self.handle_distribute_dimensions(base, dimensions, offset);
             }
             CmdResult::ReplaceEntity(handle, new_entities) => {
                 if let Some(task) = self.handle_replace_entity(handle, new_entities) {
@@ -1193,6 +1289,7 @@ impl OpenCADStudio {
         } else {
             self.focus_cmd_input()
         };
+        crate::ui::ribbon::keytip_note_command_finished();
         Task::batch([dispatched, focus])
     }
 
@@ -1259,6 +1356,7 @@ impl OpenCADStudio {
     }
 
     fn handle_done(&mut self) {
+        crate::ui::ribbon::keytip_note_command_finished();
         let i = self.active_tab;
         self.tabs[i].scene.clear_preview_wire();
         if self.tabs[i].suspended_cmd.is_some() {
@@ -1283,6 +1381,7 @@ impl OpenCADStudio {
     }
 
     fn handle_cancel(&mut self, cancel: CmdResult) {
+        crate::ui::ribbon::keytip_note_command_finished();
         let i = self.active_tab;
         self.tabs[i].pending_parameter_set_follow_up = None;
         self.tabs[i].pending_xy_box_set = None;
@@ -1291,7 +1390,16 @@ impl OpenCADStudio {
         let space_changed = matches!(cancel, CmdResult::CancelForSpaceChange);
         self.tabs[i].scene.clear_preview_wire();
         if !space_changed && self.tabs[i].suspended_cmd.is_some() {
+            if let Some(point) = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|c| c.modifier_restore_point())
+            {
+                self.last_point = point;
+                self.reset_tracking_after_point();
+            }
             self.tabs[i].active_cmd = self.tabs[i].suspended_cmd.take();
+            self.sync_dyn_fields();
             let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
             if let Some(p) = prompt {
                 self.command_line.push_info(&p);
@@ -1324,6 +1432,64 @@ impl OpenCADStudio {
             self.command_line.push_error(line);
         }
         self.apply_cmd_result(CmdResult::Cancel)
+    }
+
+    /// A window between two typed corners, run through the same box test
+    /// as a dragged one: a box upright on the screen (so in a twisted or 3D
+    /// view its sides follow the screen), window or crossing by the drag's
+    /// rule, and the same filters.
+    pub(super) fn select_typed_window(
+        &mut self,
+        first: glam::DVec3,
+        second: glam::DVec3,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let canvas = self.tabs[i].scene.selection.borrow().view.vp_size;
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: canvas.0,
+            height: canvas.1,
+        };
+        let edit_cam = self.tabs[i]
+            .scene
+            .viewport_edit_frame(canvas)
+            .map(|(cam, _)| cam);
+        let (view_rot, eye, _) = self.pick_view(i, &edit_cam, bounds);
+        let a = crate::scene::pick::hit_test::world_to_screen(first, view_rot, eye, bounds);
+        let p = crate::scene::pick::hit_test::world_to_screen(second, view_rot, eye, bounds);
+        let crossing = {
+            // A Window / Crossing keyword holds for this one box, as for a
+            // dragged one.
+            let mut selection = self.tabs[i].scene.selection.borrow_mut();
+            let gesture = &mut selection.gesture;
+            let crossing = if gesture.box_crossing_locked {
+                gesture.box_crossing
+            } else {
+                crate::scene::selection_box_crossing(a, p)
+            };
+            gesture.box_crossing = false;
+            gesture.box_crossing_locked = false;
+            crossing
+        };
+        let (mut handles, _) = self.box_selection_handles(i, &edit_cam, bounds, a, p, crossing);
+        handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
+        self.filter_handles_reject_locked(i, &mut handles);
+        self.last_pick = Some((handles.clone(), self.select_remove_mode));
+        if self.select_remove_mode {
+            self.tabs[i].scene.deselect_entities(&handles);
+        } else {
+            self.tabs[i].scene.select_entities(&handles);
+            self.tabs[i].scene.expand_selection_for_groups(&handles);
+        }
+        self.refresh_properties();
+        let selected: Vec<Handle> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
+        self.feed_command(StepInput::SelectionComplete(selected))
     }
 
     fn handle_select_by_path(
@@ -1423,6 +1589,51 @@ impl OpenCADStudio {
         // through the normal dispatcher. Selection is left untouched.
         // The option picked in DIMCONSTRAINT becomes its next default;
         // the same command run on its own leaves the default alone.
+        // DIM's Offset sets the drawing's DIMDLI; the series goes on.
+        if let Some(value) = cmd
+            .strip_prefix("_DIM_SET_DIMDLI ")
+            .and_then(|value| value.trim().parse::<f64>().ok())
+        {
+            self.tabs[i].scene.document.header.dim_line_increment = value;
+            self.tabs[i].dirty = true;
+            if let Some(command) = self.tabs[i].active_cmd.as_ref() {
+                let (prompt, options) = (command.prompt(), command.options());
+                self.command_line.push_info(&prompt);
+                self.command_line.set_step_options(options);
+            }
+            return Task::none();
+        }
+        // DIM's answer about the dimensions it placed one over; DIM (or its
+        // continued series) goes on.
+        if let Some(rest) = cmd.strip_prefix("_DIM_OVERLAP ") {
+            let mut parts = rest.split_whitespace();
+            let choice = parts.next().and_then(|v| v.chars().next()).unwrap_or('N');
+            let new = parts
+                .next()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(codec::Handle::new);
+            let others: Vec<codec::Handle> = parts
+                .next()
+                .unwrap_or("")
+                .split(',')
+                .filter_map(|v| v.parse::<u64>().ok())
+                .map(codec::Handle::new)
+                .collect();
+            if let (Some(new), false) = (new, others.is_empty() || choice == 'N') {
+                let dimdli = crate::scene::creation_style::drawing_dimdli(
+                    &self.tabs[i].scene.document,
+                );
+                self.push_undo_snapshot(i, "DIM");
+                dim_edit::apply_dim_overlap(&mut self.tabs[i].scene, choice, new, &others, dimdli);
+                self.tabs[i].dirty = true;
+            }
+            if let Some(command) = self.tabs[i].active_cmd.as_ref() {
+                let (prompt, options) = (command.prompt(), command.options());
+                self.command_line.push_info(&prompt);
+                self.command_line.set_step_options(options);
+            }
+            return Task::none();
+        }
         let from_menu = self.tabs[i]
             .active_cmd
             .as_ref()
@@ -1439,7 +1650,15 @@ impl OpenCADStudio {
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
-        self.dispatch_command(&cmd)
+        // The command handing off is already in the Repeat menu and ↑/↓
+        // recall; the internal line it hands to (`BLOCK_POINT_PICKED x y z`)
+        // must not land there too (#2170).
+        let recent = self.command_line.recent_commands.clone();
+        let recall = self.command_line.cmd_recall.clone();
+        let task = self.dispatch_command(&cmd);
+        self.command_line.recent_commands = recent;
+        self.command_line.cmd_recall = recall;
+        task
     }
 
     fn handle_script(&mut self, script: String) -> Task<Message> {
@@ -1685,6 +1904,9 @@ impl OpenCADStudio {
     fn handle_align_mleaders(
         &mut self,
         mut handles: Vec<Handle>,
+        reference: Option<Handle>,
+        mode: crate::modules::annotate::mleader_edit::MLeaderAlignMode,
+        spacing: f64,
         from: glam::DVec3,
         to: glam::DVec3,
     ) {
@@ -1698,10 +1920,15 @@ impl OpenCADStudio {
         });
         if !handles.is_empty() {
             self.push_undo_snapshot(i, "MLEADERALIGN");
-            if apply_mleader_align(&mut self.tabs[i].scene, &handles, from, to) {
+            let request = MLeaderAlign {
+                reference,
+                mode,
+                spacing,
+                from,
+                to,
+            };
+            if apply_mleader_align(&mut self.tabs[i].scene, &handles, &request) {
                 self.tabs[i].dirty = true;
-                self.command_line
-                    .push_output(crate::t!("MLEADERALIGN  Leaders aligned.").as_ref());
             }
         }
         self.tabs[i].scene.clear_preview_wire();
@@ -1710,15 +1937,28 @@ impl OpenCADStudio {
         self.restore_pre_cmd_tangent();
     }
 
-    fn handle_collect_mleaders(&mut self, handles: Vec<Handle>, point: glam::DVec3) {
+    fn handle_collect_mleaders(
+        &mut self,
+        handles: Vec<Handle>,
+        point: glam::DVec3,
+        layout: crate::modules::annotate::mleader_edit::MLeaderCollectLayout,
+    ) {
         let i = self.active_tab;
-        let compatible = compatible_mleader_collect_handles(&self.tabs[i].scene, &handles);
-        if compatible.len() >= 2 {
+        let collected: Vec<Handle> = handles
+            .into_iter()
+            .filter(|handle| {
+                !self.tabs[i].scene.is_layer_locked(*handle)
+                    && matches!(
+                        self.tabs[i].scene.document.get_entity(*handle),
+                        Some(codec::EntityType::MultiLeader(leader))
+                            if leader.content_type == codec::entities::LeaderContentType::Block
+                    )
+            })
+            .collect();
+        if !collected.is_empty() {
             self.push_undo_snapshot(i, "MLEADERCOLLECT");
-            if apply_mleader_collect(&mut self.tabs[i].scene, &compatible, point) {
+            if apply_mleader_collect(&mut self.tabs[i].scene, &collected, point, layout) {
                 self.tabs[i].dirty = true;
-                self.command_line
-                    .push_output(crate::t!("MLEADERCOLLECT  Leaders collected.").as_ref());
             }
         }
         self.tabs[i].scene.clear_preview_wire();
@@ -1777,7 +2017,7 @@ impl OpenCADStudio {
 /// the nearest planar curve of the edited space within a small share of
 /// that space's extent, the way a pick box takes the object under a click.
 fn entity_at_typed_point(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     owner: Handle,
     point: glam::DVec3,
 ) -> Option<Handle> {
@@ -1795,6 +2035,16 @@ fn entity_at_typed_point(
         let distance =
             match crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point) {
                 Some(distance) => distance,
+                // A multileader answers by its leader lines and landings.
+                None if matches!(entity, codec::EntityType::MultiLeader(_)) => match entity {
+                    codec::EntityType::MultiLeader(ml) => {
+                        crate::modules::annotate::mleader_edit::mleader_pick_distance(
+                            ml,
+                            codec::types::Vector3::new(point.x, point.y, point.z),
+                        )
+                    }
+                    _ => continue,
+                },
                 // A text or an ellipse answers by its extent, the way a click
                 // inside it picks it.
                 None if matches!(
@@ -1826,43 +2076,184 @@ fn entity_at_typed_point(
 
 // ── DIMSPACE helper ───────────────────────────────────────────────────────────
 
+/// One MLEADERALIGN run, as the command gathered it.
+struct MLeaderAlign {
+    reference: Option<codec::Handle>,
+    mode: crate::modules::annotate::mleader_edit::MLeaderAlignMode,
+    spacing: f64,
+    from: glam::DVec3,
+    to: glam::DVec3,
+}
+
+/// Where a multileader's content meets its leader: the end of its first
+/// landing, else the stored content base point.
+fn mleader_base(ml: &codec::entities::MultiLeader) -> glam::DVec2 {
+    let ctx = &ml.context;
+    if let Some(root) = ctx.leader_roots.first() {
+        let d = &root.direction;
+        let len = (d.x * d.x + d.y * d.y).sqrt();
+        if len > 1.0e-12 && ml.enable_landing && ml.enable_dogleg {
+            let reach = root.landing_distance.max(0.0) / len;
+            return glam::DVec2::new(
+                root.connection_point.x + d.x * reach,
+                root.connection_point.y + d.y * reach,
+            );
+        }
+        if ctx.content_base_point == codec::types::Vector3::ZERO {
+            return glam::DVec2::new(root.connection_point.x, root.connection_point.y);
+        }
+    }
+    glam::DVec2::new(ctx.content_base_point.x, ctx.content_base_point.y)
+}
+
+/// Move a multileader's content (and the landings that hold it) by `shift`;
+/// the arrowheads stay where they point.
+fn shift_mleader_content(ml: &mut codec::entities::MultiLeader, shift: glam::DVec2) {
+    let ctx = &mut ml.context;
+    for point in [
+        &mut ctx.content_base_point,
+        &mut ctx.text_location,
+        &mut ctx.block_content_location,
+    ] {
+        point.x += shift.x;
+        point.y += shift.y;
+    }
+    for root in &mut ctx.leader_roots {
+        root.connection_point.x += shift.x;
+        root.connection_point.y += shift.y;
+    }
+}
+
+/// Size of a multileader's content measured along `dir`.
+fn mleader_extent_along(ml: &codec::entities::MultiLeader, dir: glam::DVec2) -> f64 {
+    let ctx = &ml.context;
+    let height = match ml.content_type {
+        codec::entities::LeaderContentType::MText => {
+            let lines = ctx.text_string.split("\\P").count().max(1) as f64;
+            let h = if ctx.text_height > 0.0 { ctx.text_height } else { ml.text_height };
+            h * (1.0 + (lines - 1.0) * 5.0 / 3.0 * ctx.line_spacing_factor.max(0.0))
+        }
+        _ => ctx.block_content_scale.y.abs().max(1.0e-9),
+    };
+    let width = ctx.text_width.max(0.0);
+    let td = &ctx.text_direction;
+    let (ux, uy) = {
+        let l = (td.x * td.x + td.y * td.y).sqrt();
+        if l > 1.0e-9 { (td.x / l, td.y / l) } else { (1.0, 0.0) }
+    };
+    width * (dir.x * ux + dir.y * uy).abs() + height * (-dir.x * uy + dir.y * ux).abs()
+}
+
 fn apply_mleader_align(
     scene: &mut crate::scene::Scene,
     handles: &[codec::Handle],
-    from: glam::DVec3,
-    to: glam::DVec3,
+    request: &MLeaderAlign,
 ) -> bool {
-    use kernel::geom2d::{closest_point, Curve, Vec2, XLine};
-
-    let Some(direction) = Vec2::new(to.x - from.x, to.y - from.y).normalize() else {
-        return false;
+    use crate::modules::annotate::mleader_edit::MLeaderAlignMode as Mode;
+    let leader = |scene: &crate::scene::Scene, h: codec::Handle| match scene.document.get_entity(h) {
+        Some(codec::EntityType::MultiLeader(ml)) => Some((**ml).clone()),
+        _ => None,
     };
-    let line = Curve::XLine(XLine {
-        base: [from.x, from.y],
-        direction: direction.into(),
-    });
+    let mut moves: Vec<(codec::Handle, glam::DVec2)> = Vec::new();
+    match request.mode {
+        Mode::Distribute => {
+            let a = glam::DVec2::new(request.from.x, request.from.y);
+            let b = glam::DVec2::new(request.to.x, request.to.y);
+            let span = b - a;
+            if span.length_squared() <= 1.0e-18 {
+                return false;
+            }
+            let mut order: Vec<(f64, codec::Handle, glam::DVec2)> = handles
+                .iter()
+                .filter_map(|&h| leader(scene, h).map(|ml| (h, mleader_base(&ml))))
+                .map(|(h, base)| ((base - a).dot(span), h, base))
+                .collect();
+            order.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            let last = order.len().saturating_sub(1).max(1) as f64;
+            for (k, (_, h, base)) in order.into_iter().enumerate() {
+                let target = a + span * (k as f64 / last);
+                moves.push((h, target - base));
+            }
+        }
+        Mode::Parallel => {
+            let Some(reference) = request.reference.and_then(|h| leader(scene, h)) else {
+                return false;
+            };
+            let segment = |ml: &codec::entities::MultiLeader| {
+                let root = ml.context.leader_roots.first()?;
+                let line = root.lines.first()?;
+                let start = *line.points.last()?;
+                let end = root.connection_point;
+                Some((
+                    glam::DVec2::new(start.x, start.y),
+                    glam::DVec2::new(end.x, end.y),
+                ))
+            };
+            let Some((ra, rb)) = segment(&reference) else {
+                return false;
+            };
+            let Some(dir) = (rb - ra).try_normalize() else {
+                return false;
+            };
+            for &h in handles {
+                if Some(h) == request.reference {
+                    continue;
+                }
+                let Some(ml) = leader(scene, h) else { continue };
+                let Some((a, b)) = segment(&ml) else { continue };
+                let target = a + dir * (b - a).length();
+                moves.push((h, target - b));
+            }
+        }
+        Mode::UseCurrent | Mode::Spacing => {
+            let Some(reference) = request.reference.and_then(|h| leader(scene, h)) else {
+                return false;
+            };
+            let origin = mleader_base(&reference);
+            let Some(dir) = (glam::DVec2::new(request.to.x, request.to.y) - origin).try_normalize()
+            else {
+                return false;
+            };
+            let mut along: Vec<(f64, codec::Handle, glam::DVec2, f64)> = handles
+                .iter()
+                .filter(|&&h| Some(h) != request.reference)
+                .filter_map(|&h| leader(scene, h).map(|ml| (h, ml)))
+                .map(|(h, ml)| {
+                    let base = mleader_base(&ml);
+                    ((base - origin).dot(dir), h, base, mleader_extent_along(&ml, dir))
+                })
+                .collect();
+            if request.mode == Mode::UseCurrent {
+                for (t, h, base, _) in along {
+                    moves.push((h, origin + dir * t - base));
+                }
+            } else {
+                along.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+                let reference_extent = mleader_extent_along(&reference, dir);
+                // Ahead of the reference, then behind it, each content one
+                // spacing clear of the one before.
+                let mut position = 0.0;
+                let mut previous = reference_extent;
+                for (_, h, base, extent) in along.iter().filter(|e| e.0 >= 0.0) {
+                    position += previous + request.spacing;
+                    previous = *extent;
+                    moves.push((*h, origin + dir * position - *base));
+                }
+                let mut position = 0.0;
+                for (_, h, base, extent) in along.iter().rev().filter(|e| e.0 < 0.0) {
+                    position -= extent + request.spacing;
+                    moves.push((*h, origin + dir * position - *base));
+                }
+            }
+        }
+    }
     let mut changed = Vec::new();
-    for &handle in handles {
+    for (handle, shift) in moves {
+        if shift.length_squared() <= 1.0e-24 {
+            continue;
+        }
         if let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handle) {
-            let old = ml.context.content_base_point;
-            let projected = closest_point(&line, [old.x, old.y]).point;
-            let new_x = projected[0];
-            let new_y = projected[1];
-            let shift_x = new_x - old.x;
-            let shift_y = new_y - old.y;
-            if shift_x.abs() <= 1.0e-12 && shift_y.abs() <= 1.0e-12 {
-                continue;
-            }
-            ml.context.content_base_point.x = new_x;
-            ml.context.content_base_point.y = new_y;
-            ml.context.text_location.x += shift_x;
-            ml.context.text_location.y += shift_y;
-            ml.context.block_content_location.x += shift_x;
-            ml.context.block_content_location.y += shift_y;
-            for root in &mut ml.context.leader_roots {
-                root.connection_point.x += shift_x;
-                root.connection_point.y += shift_y;
-            }
+            shift_mleader_content(ml, shift);
             changed.push((handle, crate::scene::ChangeKind::Modified));
         }
     }
@@ -1872,100 +2263,115 @@ fn apply_mleader_align(
     !changed.is_empty()
 }
 
-fn compatible_mleader_collect_handles(
-    scene: &crate::scene::Scene,
-    handles: &[codec::Handle],
-) -> Vec<codec::Handle> {
-    let Some((base_block, base_style)) = handles.iter().find_map(|handle| {
-        if scene.is_layer_locked(*handle) {
-            return None;
-        }
-        let codec::EntityType::MultiLeader(leader) = scene.document.get_entity(*handle)? else {
-            return None;
-        };
-        (leader.content_type == codec::entities::LeaderContentType::Block)
-            .then_some((leader.block_content_handle, leader.style_handle))
-    }) else {
-        return Vec::new();
-    };
-    let mut compatible = Vec::new();
-    for handle in handles.iter().copied() {
-        if compatible.contains(&handle) {
-            continue;
-        }
-        if !scene.is_layer_locked(handle)
-            && matches!(
-                scene.document.get_entity(handle),
-                Some(codec::EntityType::MultiLeader(leader))
-                    if leader.content_type == codec::entities::LeaderContentType::Block
-                        && leader.block_content_handle == base_block
-                        && leader.style_handle == base_style
-            )
-        {
-            compatible.push(handle);
-        }
-    }
-    compatible
-}
-
+/// Lay block multileaders out from `point` in a row, a column or wrapped
+/// rows; the last one selected lends its leader to the collection, the rest
+/// lose theirs.
 fn apply_mleader_collect(
     scene: &mut crate::scene::Scene,
     handles: &[codec::Handle],
     point: glam::DVec3,
+    layout: crate::modules::annotate::mleader_edit::MLeaderCollectLayout,
 ) -> bool {
-    if handles.len() < 2 {
+    use crate::modules::annotate::mleader_edit::MLeaderCollectLayout as Layout;
+    let sizes: Vec<(codec::Handle, glam::DVec2)> = handles
+        .iter()
+        .filter_map(|&h| {
+            let codec::EntityType::MultiLeader(ml) = scene.document.get_entity(h)? else {
+                return None;
+            };
+            let name = ml
+                .block_content_handle
+                .and_then(|bh| scene.document.block_records.iter().find(|b| b.handle == bh))
+                .map(|b| b.name.clone())?;
+            let bounds = crate::app::helpers::block_definition_bounds(&scene.document, &name)?;
+            let scale = ml.context.block_content_scale;
+            Some((
+                h,
+                glam::DVec2::new(
+                    (bounds.max.x - bounds.min.x) * scale.x.abs(),
+                    (bounds.max.y - bounds.min.y) * scale.y.abs(),
+                ),
+            ))
+        })
+        .collect();
+    if sizes.is_empty() {
         return false;
     }
-    let px = point.x;
-    let py = point.y;
-    let Some(codec::EntityType::MultiLeader(base)) = scene.document.get_entity(handles[0]) else {
-        return false;
+    let leader_source = *handles.last().unwrap_or(&sizes[0].0);
+    let arrow_lines = match scene.document.get_entity(leader_source) {
+        Some(codec::EntityType::MultiLeader(ml)) => ml
+            .context
+            .leader_roots
+            .first()
+            .map(|root| (root.lines.clone(), root.direction, root.landing_distance)),
+        _ => None,
     };
-    let base_block = base.block_content_handle;
-    let base_style = base.style_handle;
-
-    let mut extra_roots: Vec<codec::entities::LeaderRoot> = Vec::new();
-    let mut merged_handles = Vec::new();
-    for &h in &handles[1..] {
-        if let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity(h) {
-            if ml.content_type == codec::entities::LeaderContentType::Block
-                && ml.block_content_handle == base_block
-                && ml.style_handle == base_style
-            {
-                let shift_x = px - ml.context.content_base_point.x;
-                let shift_y = py - ml.context.content_base_point.y;
-                extra_roots.extend(ml.context.leader_roots.iter().cloned().map(|mut root| {
-                    root.connection_point.x += shift_x;
-                    root.connection_point.y += shift_y;
-                    root
-                }));
-                merged_handles.push(h);
+    // Content centres, from the picked point.
+    let mut centres = Vec::new();
+    let (mut x, mut y, mut row_height) = (point.x, point.y, 0.0f64);
+    for (index, (_, size)) in sizes.iter().enumerate() {
+        match layout {
+            Layout::Vertical => {
+                if index > 0 {
+                    y += sizes[index - 1].1.y * 0.5 + size.y * 0.5;
+                }
+                centres.push(glam::DVec2::new(point.x, y));
+            }
+            Layout::Horizontal | Layout::Wrap(_) | Layout::WrapNumber(_) => {
+                if index > 0 {
+                    x += sizes[index - 1].1.x * 0.5 + size.x * 0.5;
+                }
+                let wrap = match layout {
+                    Layout::Wrap(width) => width > 0.0 && x + size.x * 0.5 - point.x > width,
+                    Layout::WrapNumber(count) => index % count.max(1) as usize == 0,
+                    _ => false,
+                };
+                if wrap && index > 0 {
+                    x = point.x;
+                    y -= row_height;
+                    row_height = 0.0;
+                }
+                row_height = row_height.max(size.y);
+                centres.push(glam::DVec2::new(x, y));
             }
         }
     }
-    if merged_handles.is_empty() {
-        return false;
-    }
-
-    if let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handles[0]) {
-        let shift_x = px - ml.context.content_base_point.x;
-        let shift_y = py - ml.context.content_base_point.y;
-        for root in &mut ml.context.leader_roots {
-            root.connection_point.x += shift_x;
-            root.connection_point.y += shift_y;
+    // The leader joins the first content in a row and the top one in a column.
+    let carrier = match layout {
+        Layout::Vertical => sizes.len() - 1,
+        _ => 0,
+    };
+    let mut changed = Vec::new();
+    for (index, ((handle, _), centre)) in sizes.iter().zip(&centres).enumerate() {
+        let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(*handle)
+        else {
+            continue;
+        };
+        let old = ml.context.block_content_location;
+        let shift = glam::DVec2::new(centre.x - old.x, centre.y - old.y);
+        shift_mleader_content(ml, shift);
+        if index == carrier {
+            if let Some((lines, direction, landing)) = arrow_lines.clone() {
+                let d = glam::DVec2::new(direction.x, direction.y)
+                    .try_normalize()
+                    .unwrap_or(glam::DVec2::X);
+                let base = glam::DVec2::new(
+                    ml.context.content_base_point.x,
+                    ml.context.content_base_point.y,
+                );
+                let connection = base - d * landing;
+                ml.context.leader_roots.truncate(1);
+                if let Some(root) = ml.context.leader_roots.first_mut() {
+                    root.lines = lines;
+                    root.connection_point.x = connection.x;
+                    root.connection_point.y = connection.y;
+                }
+            }
+        } else {
+            ml.context.leader_roots.clear();
         }
-        ml.context.content_base_point.x = px;
-        ml.context.content_base_point.y = py;
-        ml.context.block_content_location.x = px;
-        ml.context.block_content_location.y = py;
-        ml.context.text_location.x = px;
-        ml.context.text_location.y = py;
-        for root in extra_roots {
-            ml.context.leader_roots.push(root);
-        }
+        changed.push((*handle, crate::scene::ChangeKind::Modified));
     }
-
-    scene.erase_entities(&merged_handles);
-    scene.bump_entities(&[(handles[0], crate::scene::ChangeKind::Modified)]);
+    scene.bump_entities(&changed);
     true
 }

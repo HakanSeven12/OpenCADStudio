@@ -357,6 +357,9 @@ pub struct ModelSpaceThemeConfig {
     pub selection_crossing_color: u8,
     /// SELECTIONEFFECTCOLOR: ACI index for selected entities highlight (0 = Theme Primary, 1..=255 = ACI).
     pub selection_highlight_color: u8,
+    /// VSEDGECOLOR: the edge colour of the shaded-with-edges modes
+    /// (`None`: black).
+    pub edge_color: Option<[u8; 3]>,
     /// Selection highlight opacity in percent (10–100); below 100 the
     /// object's own colour shows through.
     pub selection_highlight_opacity: u8,
@@ -391,6 +394,7 @@ impl Default for ModelSpaceThemeConfig {
             selection_window_color: 0,
             selection_crossing_color: 0,
             selection_highlight_color: 0,
+            edge_color: None,
             selection_highlight_opacity: 100,
             selection_highlight_widen: 0,
             selection_effect: true,

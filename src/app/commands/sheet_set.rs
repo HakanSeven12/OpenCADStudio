@@ -29,7 +29,7 @@ pub(super) const SHEET_SET_SYSVARS: &[&str] = &[
 ];
 
 /// Paper-space layouts of a drawing in tab order: name and handle (hex).
-fn paper_layouts(doc: &codec::CadDocument) -> Vec<(String, String)> {
+fn paper_layouts(doc: &codec::Document) -> Vec<(String, String)> {
     let mut layouts: Vec<(i16, String, String)> = doc
         .objects
         .values()
@@ -84,7 +84,7 @@ fn folder_of(path: &str) -> String {
 /// `.dst` access: native only (a browser has no file paths to read or write).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn read_set(path: &str) -> Result<SheetSetDatabase, String> {
-    SheetSetDatabase::read(path)
+    SheetSetDatabase::read(path).map_err(|e| e.to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -94,7 +94,7 @@ pub(crate) fn read_set(_path: &str) -> Result<SheetSetDatabase, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_set(db: &mut SheetSetDatabase, path: &str) -> Result<(), String> {
-    db.write(path)
+    db.write(path).map_err(|e| e.to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -286,7 +286,7 @@ struct ModelView {
 }
 
 /// Named view `view` of a model drawing, or its extents.
-fn model_view(doc: &codec::CadDocument, view: Option<&str>) -> Option<ModelView> {
+fn model_view(doc: &codec::Document, view: Option<&str>) -> Option<ModelView> {
     use codec::types::Vector3;
     if let Some(name) = view {
         let v = doc
@@ -1949,7 +1949,7 @@ impl OpenCADStudio {
         &mut self,
         path: &str,
         then: SheetSetMsg,
-    ) -> Result<std::sync::Arc<codec::CadDocument>, Task<Message>> {
+    ) -> Result<std::sync::Arc<codec::Document>, Task<Message>> {
         if let Some(doc) = self.sheet_set.drawings.get(path) {
             return Ok(doc);
         }

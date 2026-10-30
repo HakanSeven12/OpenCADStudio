@@ -314,6 +314,7 @@ fn with_context(state: &State, body: impl FnOnce() -> String) -> String {
             .unwrap_or(0.0)
             .to_radians(),
         angdir_cw: state.clockwise,
+        dimzin: 0,
     });
     let out = body();
     set_unit_context(previous);

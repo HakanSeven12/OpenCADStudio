@@ -1311,6 +1311,90 @@ fn locked_purge_keeps_unresolved_xref_dependent_symbols() {
 }
 
 #[test]
+fn purge_keeps_symbols_used_only_by_an_inserted_attribute() {
+    use codec::entities::AttributeEntity;
+    use codec::tables::{Layer, LineType, TextStyle};
+    let mut app = app();
+    let i = tab(&app);
+    {
+        let doc = &mut app.tabs[i].scene.document;
+        doc.layers.add(Layer::new("TITLE")).unwrap();
+        doc.line_types.add(LineType::new("TITLE_DASH")).unwrap();
+        doc.text_styles.add(TextStyle::new("TITLE_TEXT")).unwrap();
+    }
+    define_block(&mut app, "BO_TITLE");
+    let mut attribute = AttributeEntity::new("CLIENT".to_string(), "ACME".to_string());
+    attribute.common.layer = "TITLE".to_string();
+    attribute.common.linetype = "TITLE_DASH".to_string();
+    attribute.text_style = "TITLE_TEXT".to_string();
+    let mut insert = Insert::new("BO_TITLE".to_string(), Vector3::ZERO);
+    insert.attributes.push(attribute);
+    app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+    let _ = app.dispatch_command("PURGE ALL");
+    let doc = &app.tabs[i].scene.document;
+    assert!(doc.layers.get("TITLE").is_some(), "purged the attribute's layer");
+    assert!(doc.line_types.get("TITLE_DASH").is_some(), "purged the attribute's linetype");
+    assert!(doc.text_styles.get("TITLE_TEXT").is_some(), "purged the attribute's text style");
+}
+
+#[test]
+fn purge_keeps_the_current_layer_and_dimstyle_linetypes() {
+    use codec::tables::{Layer, LineType};
+    let mut app = app();
+    let i = tab(&app);
+    {
+        let doc = &mut app.tabs[i].scene.document;
+        doc.layers.add(Layer::new("WORK")).unwrap();
+        doc.header.current_layer_name = "WORK".to_string();
+        let mut dash_type = LineType::new("DIM_DASH");
+        dash_type.handle = doc.allocate_handle();
+        let dash = dash_type.handle;
+        doc.line_types.add(dash_type).unwrap();
+        let mut style = DimStyle::new("BO_DASHED");
+        style.dimltex1_handle = dash;
+        doc.dim_styles.add(style).unwrap();
+        doc.layers.add(Layer::new("Unused")).unwrap();
+    }
+    let _ = app.dispatch_command("PURGE ALL");
+    let doc = &app.tabs[i].scene.document;
+    assert!(doc.layers.get("WORK").is_some(), "purged the current layer");
+    assert!(doc.line_types.get("DIM_DASH").is_some(), "purged a dimstyle's linetype");
+    assert!(doc.layers.get("Unused").is_none(), "a plain unused layer still purges");
+}
+
+#[test]
+fn purge_keeps_text_styles_used_only_by_leader_and_table_styles() {
+    use codec::objects::{MultiLeaderStyle, ObjectType, TableStyle};
+    use codec::tables::TextStyle;
+    let mut app = app();
+    let i = tab(&app);
+    {
+        let doc = &mut app.tabs[i].scene.document;
+        let mut leader_text = TextStyle::new("LEADER_TEXT");
+        leader_text.handle = doc.allocate_handle();
+        let leader_text_handle = leader_text.handle;
+        doc.text_styles.add(leader_text).unwrap();
+        doc.text_styles.add(TextStyle::new("TABLE_TEXT")).unwrap();
+        doc.text_styles.add(TextStyle::new("UNUSED_TEXT")).unwrap();
+        let mut leader_style = MultiLeaderStyle::new("BO_LEADER");
+        leader_style.handle = doc.allocate_handle();
+        leader_style.text_style_handle = Some(leader_text_handle);
+        doc.objects
+            .insert(leader_style.handle, ObjectType::MultiLeaderStyle(leader_style));
+        let mut table_style = TableStyle::new("BO_TABLE");
+        table_style.handle = doc.allocate_handle();
+        table_style.data_row_style.text_style_name = "TABLE_TEXT".to_string();
+        doc.objects
+            .insert(table_style.handle, ObjectType::TableStyle(table_style));
+    }
+    let _ = app.dispatch_command("PURGE ALL");
+    let doc = &app.tabs[i].scene.document;
+    assert!(doc.text_styles.get("LEADER_TEXT").is_some(), "purged a multileader style's text style");
+    assert!(doc.text_styles.get("TABLE_TEXT").is_some(), "purged a table style's text style");
+    assert!(doc.text_styles.get("UNUSED_TEXT").is_none(), "a plain unused text style still purges");
+}
+
+#[test]
 fn locked_purge_keeps_a_model_space_referenced_block() {
     let mut app = app();
     let model_space = fixture_model_space_reference(&mut app);
@@ -1467,8 +1551,8 @@ fn locked_attedit_attribute_flags_cases() {
     preset_row.value = "edited_preset".to_string();
     preset_row.is_constant = false;
 
-    // Verify metadata mapping from CadDocument
-    let mut doc = codec::CadDocument::new();
+    // Verify metadata mapping from Document
+    let mut doc = codec::Document::new();
     let next = doc.next_handle();
     let br_h = Handle::new(next);
     let mut br = BlockRecord::new("FLAG_BLOCK");

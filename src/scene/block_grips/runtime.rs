@@ -31,7 +31,7 @@ pub struct Grip {
     pub direction: Option<DVec3>,
 }
 
-pub fn grips(doc: &CadDocument, definition: Handle, p: &Parameter, value: Value) -> Vec<Grip> {
+pub fn grips(doc: &Document, definition: Handle, p: &Parameter, value: Value) -> Vec<Grip> {
     let frame = match value {
         Value::Point(end) => ParameterFrame { base: p.base, end },
         Value::Frame { base, end } => ParameterFrame { base, end },
@@ -72,7 +72,7 @@ pub fn grips(doc: &CadDocument, definition: Handle, p: &Parameter, value: Value)
 
 /// Configured grip locations filtered by native action key-point association.
 pub fn action_grips(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     parameter: &Parameter,
     value: Value,
@@ -85,7 +85,7 @@ pub fn action_grips(
 }
 
 pub(crate) fn action_grip_available(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     parameter: Handle,
     id: usize,
@@ -126,7 +126,7 @@ pub struct Limits {
 }
 
 impl Limits {
-    pub fn read(doc: &CadDocument, definition: Handle, p: &Parameter) -> Self {
+    pub fn read(doc: &Document, definition: Handle, p: &Parameter) -> Self {
         let mut limits = Self::default();
         if let Some(ObjectType::DynamicBlock(object)) = doc.objects.get(&p.handle) {
             match &object.data {
@@ -191,7 +191,7 @@ impl Limits {
 }
 
 pub fn markers(
-    doc: &CadDocument,
+    doc: &Document,
     definition: Handle,
     p: &Parameter,
     value: Value,

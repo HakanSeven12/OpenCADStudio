@@ -7,7 +7,7 @@ use codec::objects::{
     DynamicBlockData, ObjectType,
 };
 use codec::types::{Transform, Vector3};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -49,7 +49,7 @@ pub(crate) struct Parameter<'a> {
     pub offsets: [f64; 2],
 }
 
-fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
+fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     match document
         .objects
         .get(&super::block_authoring::definition_dictionary(document, definition)?)?
@@ -59,7 +59,7 @@ fn graph_handle(document: &CadDocument, definition: Handle) -> Option<Handle> {
     }
 }
 
-pub(crate) fn parameters(document: &CadDocument, definition: Handle) -> Vec<Parameter<'_>> {
+pub(crate) fn parameters(document: &Document, definition: Handle) -> Vec<Parameter<'_>> {
     let Some(graph) = graph_handle(document, definition) else {
         return Vec::new();
     };
@@ -110,7 +110,7 @@ pub(crate) fn parameters(document: &CadDocument, definition: Handle) -> Vec<Para
         .collect()
 }
 
-pub(crate) fn placement_error(document: &CadDocument, definition: Handle) -> Option<&'static str> {
+pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option<&'static str> {
     authoring::graph(document, definition).err()
 }
 
@@ -166,7 +166,7 @@ fn dimension_normal(base: Vector3, end: Vector3) -> Vector3 {
 }
 
 pub(crate) fn create(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     kind: Kind,
     base: Vector3,
@@ -402,7 +402,7 @@ pub(crate) fn graphic(parameter: &Parameter<'_>) -> Graphic {
 }
 
 pub(crate) fn reframe(
-    document: &mut CadDocument,
+    document: &mut Document,
     definition: Handle,
     transform: &Transform,
 ) -> usize {
@@ -515,7 +515,7 @@ mod tests {
         (scene, definition)
     }
 
-    fn append_batch(document: &mut CadDocument, definition: Handle) -> Vec<Handle> {
+    fn append_batch(document: &mut Document, definition: Handle) -> Vec<Handle> {
         [Kind::Linear, Kind::Polar, Kind::XY]
             .map(|kind| {
                 create(
@@ -531,7 +531,7 @@ mod tests {
             .to_vec()
     }
 
-    fn assert_native(document: &CadDocument, handles: &[Handle]) {
+    fn assert_native(document: &Document, handles: &[Handle]) {
         for handle in handles {
             let ObjectType::DynamicBlock(object) = &document.objects[handle] else {
                 panic!()

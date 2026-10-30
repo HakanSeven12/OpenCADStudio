@@ -105,7 +105,7 @@ impl CadCommand for DimJogLineCommand {
     fn prompt(&self) -> String {
         match self.step {
             Step::PickDim if self.remove => {
-                t!("DIMJOGLINE  Select dimension to remove jog:").into_owned()
+                t!("DIMJOGLINE  Select jog to remove:").into_owned()
             }
             Step::PickDim => {
                 t!("DIMJOGLINE  Select dimension to add jog or [Remove]:").into_owned()

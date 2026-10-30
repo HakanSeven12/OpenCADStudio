@@ -73,7 +73,7 @@ pub struct BlockEditSession {
     /// Snapshot of the document prior to creating an empty new block for editing.
     /// If the session is closed without saving, this snapshot is restored so
     /// no block record remains in the block table.
-    pub unpersisted_pre_document: Option<codec::CadDocument>,
+    pub unpersisted_pre_document: Option<codec::Document>,
 }
 
 // ── BEDIT pick command ─────────────────────────────────────────────────────

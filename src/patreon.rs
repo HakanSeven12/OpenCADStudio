@@ -205,8 +205,7 @@ fn utc_date_days_ago(days_ago: u64) -> String {
 }
 
 // Convert days since 1970-01-01 to a Gregorian calendar date.
-#[cfg(not(target_arch = "wasm32"))]
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let day_of_era = z - era * 146_097;

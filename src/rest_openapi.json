@@ -77,7 +77,8 @@
         "summary": "Query entities (type, layer, detail, offset, limit, fields, handles, bounds, near, contains_point, intersections)",
         "parameters": [
           {"name": "type", "in": "query", "schema": {"type": "string"}},
-          {"name": "layer", "in": "query", "schema": {"type": "string"}},
+          {"name": "layer", "in": "query", "description": "* and ? are wildcards", "schema": {"type": "string"}},
+          {"name": "xdata_app", "in": "query", "description": "Only entities carrying XDATA of this application", "schema": {"type": "string"}},
           {"name": "detail", "in": "query", "schema": {"type": "string", "enum": ["summary", "geometry", "full"]}},
           {"name": "offset", "in": "query", "schema": {"type": "integer"}},
           {"name": "limit", "in": "query", "schema": {"type": "integer"}},
@@ -242,9 +243,9 @@
         "responses": {"200": {"description": "Command status"}, "400": {"description": "Command failed"}}
       }
     },
-    "/api/v1/undo": {"post": {"summary": "Undo one step", "responses": {"200": {"description": "Undone"}}}},
-    "/api/v1/redo": {"post": {"summary": "Redo one step", "responses": {"200": {"description": "Redone"}}}},
-    "/api/v1/save": {"post": {"summary": "Save the active document ({path} optional once opened); a *.dwt path writes DWG bytes through a scratch file renamed into place", "responses": {"200": {"description": "Saved"}, "400": {"description": "Save failed"}}}},
+    "/api/v1/undo": {"post": {"summary": "Undo one step in the active document, or the one named by {document_id}", "responses": {"200": {"description": "Undone"}}}},
+    "/api/v1/redo": {"post": {"summary": "Redo one step in the active document, or the one named by {document_id}", "responses": {"200": {"description": "Redone"}}}},
+    "/api/v1/save": {"post": {"summary": "Save the active document, or the one named by {document_id} ({path} optional once opened); a *.dwt path writes DWG bytes through a scratch file renamed into place", "responses": {"200": {"description": "Saved"}, "400": {"description": "Save failed"}}}},
     "/api/v1/layers": {"get": {"summary": "Layer table", "responses": {"200": {"description": "Layers"}}}},
     "/api/v1/header": {"get": {"summary": "Drawing header summary", "responses": {"200": {"description": "Header"}}}},
     "/api/v1/records": {"get": {"summary": "Database records (collection, type, offset, limit)", "responses": {"200": {"description": "Records"}, "400": {"description": "Invalid query"}}}},

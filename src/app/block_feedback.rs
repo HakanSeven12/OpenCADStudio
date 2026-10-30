@@ -62,11 +62,18 @@ impl OpenCADStudio {
         };
         let value = match value {
             actions::Value::Flip(state) => {
-                if state {
-                    crate::tr!("block-grip", "flipped")
-                } else {
-                    crate::tr!("block-grip", "not-flipped")
-                }
+                let source = self.tabs[self.active_tab]
+                    .block_test
+                    .as_ref()
+                    .filter(|test| test.insert == handle)
+                    .map_or(&self.tabs[self.active_tab].scene.document, |test| {
+                        test.baseline.as_ref()
+                    });
+                crate::scene::block_parameter_properties::flip_state_label(
+                    source,
+                    parameter.handle,
+                    state,
+                )?
             }
             actions::Value::Point(at) | actions::Value::Frame { end: at, .. }
                 if parameter.point || parameter.xy =>
@@ -217,7 +224,7 @@ impl OpenCADStudio {
                 .and_then(|(insert, parameter)| {
                     let handle =
                         insert.or_else(|| tab.block_test.as_ref().map(|test| test.insert))?;
-                    let (source, definition): (&codec::CadDocument, _) =
+                    let (source, definition): (&codec::Document, _) =
                         if let Some(test) = tab.block_test.as_ref() {
                             (&test.baseline, test.definition)
                         } else {

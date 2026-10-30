@@ -40,6 +40,7 @@ impl DraftingSettingsState {
             snap3d_modes: app.snapper.enabled3d.clone(),
             dyn_input_on: app.dyn_input,
             quick_props_on: app.quick_properties,
+            quick_props_float: app.quick_properties_float,
             selection_cycling_on: app.selection_cycling,
         }
     }
@@ -131,6 +132,7 @@ impl OpenCADStudio {
         self.snapper.enabled3d = state.snap3d_modes.clone();
         self.set_dyn_input(state.dyn_input_on);
         self.quick_properties = state.quick_props_on;
+        self.quick_properties_float = state.quick_props_float;
         self.selection_cycling = state.selection_cycling_on;
         self.sync_vport_display(self.active_tab);
         true
@@ -170,6 +172,7 @@ mod tests {
             snap3d_modes: rustc_hash::FxHashSet::default(),
             dyn_input_on: false,
             quick_props_on: false,
+            quick_props_float: false,
             selection_cycling_on: false,
         };
         let mut state2 = state1.clone();
@@ -213,6 +216,7 @@ mod tests {
             snap3d_modes: rustc_hash::FxHashSet::default(),
             dyn_input_on: false,
             quick_props_on: false,
+            quick_props_float: false,
             selection_cycling_on: false,
         };
 

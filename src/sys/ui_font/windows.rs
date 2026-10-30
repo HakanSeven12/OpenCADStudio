@@ -53,12 +53,59 @@ fn from_logfont(font: &LOGFONTW) -> Option<SystemUiFont> {
     };
     Some(SystemUiFont {
         family: Some(family.to_string()),
-        alternates: Vec::new(),
+        alternates: without_style_words(family),
         weight,
         italic: font.lfItalic != 0,
         size_px: logfont_height_to_px(font.lfHeight, REFERENCE_DPI),
         source: Source::WindowsNonClientMetrics,
     })
+}
+
+/// GDI names a font by its legacy family, which carries the style of a face
+/// outside the regular/bold/italic four ("Artifakt Element Semi Bold"), while
+/// font databases list the typographic family ("Artifakt Element"). The
+/// shorter names, dropping trailing style words one at a time, are the
+/// alternates (#2160).
+fn without_style_words(family: &str) -> Vec<String> {
+    const STYLE_WORDS: &[&str] = &[
+        "thin",
+        "hairline",
+        "extralight",
+        "ultralight",
+        "light",
+        "semilight",
+        "demilight",
+        "regular",
+        "normal",
+        "book",
+        "medium",
+        "semibold",
+        "demibold",
+        "semi",
+        "demi",
+        "bold",
+        "extrabold",
+        "ultrabold",
+        "extra",
+        "ultra",
+        "black",
+        "heavy",
+        "italic",
+        "oblique",
+        "condensed",
+        "cond",
+    ];
+    let mut words: Vec<&str> = family.split_whitespace().collect();
+    let mut alternates = Vec::new();
+    while words.len() > 1
+        && words
+            .last()
+            .is_some_and(|w| STYLE_WORDS.iter().any(|s| w.eq_ignore_ascii_case(s)))
+    {
+        words.pop();
+        alternates.push(words.join(" "));
+    }
+    alternates
 }
 
 #[cfg(test)]
@@ -74,5 +121,16 @@ mod tests {
         // well inside this range whatever the display scaling.
         assert!((6.0..=48.0).contains(&px), "{px}");
         assert_eq!(font.source, Source::WindowsNonClientMetrics);
+    }
+
+    #[test]
+    fn a_styled_legacy_family_falls_back_to_the_typographic_one() {
+        assert_eq!(
+            without_style_words("Artifakt Element Semi Bold"),
+            ["Artifakt Element Semi", "Artifakt Element"]
+        );
+        assert_eq!(without_style_words("Segoe UI Semibold"), ["Segoe UI"]);
+        assert!(without_style_words("Segoe UI").is_empty());
+        assert!(without_style_words("Black").is_empty());
     }
 }

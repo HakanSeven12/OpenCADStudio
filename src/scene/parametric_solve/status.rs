@@ -295,7 +295,7 @@ fn geometry_parameters(geometry: &EntityGeom) -> Vec<ParamId> {
 /// Analyze persistent equations in an isolated store, without edit-time pins,
 /// write-back, or mutation of the document and constraint set.
 pub(crate) fn analyze(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     drawing_parameters: &ParameterTable,
     set: &super::super::parametric_constraints::ParametricConstraintSet,
 ) -> HashMap<Handle, Status> {

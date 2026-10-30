@@ -598,7 +598,23 @@ pub(crate) struct TestParameterCommand {
     pub definition: Handle,
     pub parameter: Handle,
 }
+impl TestParameterCommand {
+    fn parameter_result(&self, position: DVec3) -> CmdResult {
+        CmdResult::EvaluateBlockParameter {
+            grip: self.grip_input.as_ref().map(|input| input.id),
+            insert: self.insert,
+            document: self.document,
+            definition: self.definition,
+            parameter: self.parameter,
+            value: self.grip_input.as_ref().map(|input| input.value(position))
+                .unwrap_or(actions::Value::Point(position - self.display_offset)),
+        }
+    }
+}
 impl CadCommand for TestParameterCommand {
+    fn block_parameter_preview(&self, cursor: DVec3) -> Option<CmdResult> {
+        Some(self.parameter_result(cursor))
+    }
     fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
         let input = self.grip_input.as_ref()?;
         let normal = actions::v(input.to_world.apply_rotation(actions::native(DVec3::Z))).try_normalize()?;
@@ -621,15 +637,7 @@ impl CadCommand for TestParameterCommand {
         crate::t!("Specify the new block parameter grip position (Escape cancels):").into_owned()
     }
     fn on_point(&mut self, position: DVec3) -> CmdResult {
-        CmdResult::EvaluateBlockParameter {
-            grip: self.grip_input.as_ref().map(|input| input.id),
-            insert: self.insert,
-            document: self.document,
-            definition: self.definition,
-            parameter: self.parameter,
-            value: self.grip_input.as_ref().map(|input| input.value(position))
-                .unwrap_or(actions::Value::Point(position - self.display_offset)),
-        }
+        self.parameter_result(position)
     }
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel

@@ -769,7 +769,7 @@ mod tests {
     fn roundtrip_probe(ext: &str) {
         use codec::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
         use codec::tables::BlockRecord;
-        use codec::CadDocument;
+        use codec::Document;
 
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_probe_{}_{}",
@@ -781,7 +781,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).expect("probe dir");
 
-        let mut doc = CadDocument::new();
+        let mut doc = Document::new();
 
         // Cell 1: xref block record — is_xref flag + absolute path.
         let xref_abs = dir.join("PROBE_REF.dwg").to_string_lossy().into_owned();

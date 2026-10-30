@@ -417,7 +417,7 @@ fn restore_shifted_mline_segment(
 pub(crate) fn normalize_scripted_mline(
     old: Option<&MLine>,
     new: &mut MLine,
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> Result<(), String> {
     let style = resolved_mline_style(new, document)
         .ok_or_else(|| format!("MLine style {:?} does not exist", new.style_name))?;
@@ -462,7 +462,7 @@ pub(crate) fn normalize_scripted_mline(
 /// Resolve a multiline into styled parallel lines in WCS.
 pub fn resolved_mline_style<'a>(
     m: &MLine,
-    document: &'a codec::CadDocument,
+    document: &'a codec::Document,
 ) -> Option<&'a codec::objects::MLineStyle> {
     use codec::objects::ObjectType;
 
@@ -481,7 +481,7 @@ pub fn resolved_mline_style<'a>(
         })
 }
 
-pub fn mline_lines(m: &MLine, document: &codec::CadDocument) -> Vec<MLineLine> {
+pub fn mline_lines(m: &MLine, document: &codec::Document) -> Vec<MLineLine> {
     mline_lines_resolved(m, resolved_mline_style(m, document))
 }
 
@@ -853,7 +853,7 @@ pub fn mline_fill_triangles_with_style(
 }
 
 impl RenderConvertible for MLine {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }

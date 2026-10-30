@@ -1,7 +1,7 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use codec::io::dwg::DwgReader;
+use codec::DwgReader;
 use codec::{DwgReadOptions, DxfReader, DxfReaderConfiguration};
 use js_sys::{Function, Uint8Array};
 use sha2::{Digest, Sha256};
@@ -14,9 +14,10 @@ const HASH_MARKER: &str = "\nreport-source-sha256:";
 /// against it.
 const PROTOCOL_VERSION: u16 = ocs_save::PROTOCOL_VERSION;
 
-/// Parse DWG/DXF on a dedicated browser worker and return a compact serialized
-/// document. The main wasm instance only deserializes and installs it, so the
-/// expensive bit/handle/object decode never occupies the browser UI thread.
+/// Parse DWG/DXF (or a listed converter's format) on a dedicated browser
+/// worker and return a compact serialized document. The main wasm instance
+/// only deserializes and installs it, so the expensive bit/handle/object
+/// decode never occupies the browser UI thread.
 #[wasm_bindgen]
 pub fn parse_document(
     name: String,
@@ -30,7 +31,8 @@ pub fn parse_document(
     let bytes: Arc<[u8]> = Arc::from(bytes.to_vec());
     report_stage.call1(&JsValue::NULL, &JsValue::from_str("parse document"))?;
     let ext = name.rsplit('.').next().unwrap_or_default().to_lowercase();
-    if !matches!(ext.as_str(), "dwg" | "dxf") {
+    let external = ocs_save::external_format(&ext);
+    if !matches!(ext.as_str(), "dwg" | "dxf") && external.is_none() {
         return encode_result(
             Err((format!("Unsupported file format: .{ext}"), None)),
             None,
@@ -65,7 +67,12 @@ pub fn parse_document(
                     .and_then(|reader| reader.read_with_stats())
             }
         }
-        _ => unreachable!(),
+        _ => match external {
+            Some(format) => {
+                ocs_save::read_external(format, &bytes).map_err(codec::DxfError::Custom)
+            }
+            None => unreachable!(),
+        },
     };
     let mut outcome = match outcome_result {
         Ok(outcome) => outcome,

@@ -6,7 +6,7 @@
 
 use super::Scene;
 use codec::objects::{Dictionary, Layout, ObjectType, PlotSettings};
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 
 /// Give a freshly created paper layout the page setup a new drawing starts
 /// with — ISO A4 landscape on no plotter, plotted 1:1 as a layout — stored the
@@ -68,7 +68,7 @@ pub fn rotated_margins(
 /// back to the dictionary that owns the drawing's `PlotSettings` objects,
 /// mirroring [`Scene::scalelist_dict_handle`]. Returns `None` when the
 /// drawing genuinely has no named page setups.
-fn plotsettings_dict_handle_in(document: &CadDocument) -> Option<Handle> {
+fn plotsettings_dict_handle_in(document: &Document) -> Option<Handle> {
     let dh = document.header.acad_plotsettings_dict_handle;
     if matches!(document.objects.get(&dh), Some(ObjectType::Dictionary(_))) {
         return Some(dh);
@@ -87,7 +87,7 @@ fn plotsettings_dict_handle_in(document: &CadDocument) -> Option<Handle> {
 /// The named page setups of any document — `(name, settings)` in dictionary
 /// order. Reads a drawing that is not open in the editor (the source of a
 /// `PSETUPIN` import) the same way the editor reads its own.
-pub fn document_page_setups(document: &CadDocument) -> Vec<(String, PlotSettings)> {
+pub fn document_page_setups(document: &Document) -> Vec<(String, PlotSettings)> {
     let Some(dh) = plotsettings_dict_handle_in(document) else {
         return Vec::new();
     };

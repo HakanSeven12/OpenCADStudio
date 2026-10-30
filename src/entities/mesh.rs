@@ -102,7 +102,7 @@ fn face3d_fill(corners: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
 }
 
 impl RenderConvertible for Face3D {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         let p0 = v3(&self.first_corner);
         let p1 = v3(&self.second_corner);
         let p2 = v3(&self.third_corner);
@@ -369,7 +369,7 @@ fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
 }
 
 impl RenderConvertible for PolygonMesh {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         let (vertices, m, n) = polygon_mesh_display(self);
         if m == 0 || n == 0 || vertices.len() < m * n {
             return None;
@@ -651,7 +651,7 @@ impl Transformable for PolygonMesh {
 // ── PolyfaceMesh (arbitrary faces with 1-based vertex indices) ────────────────
 
 impl RenderConvertible for PolyfaceMesh {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         if self.vertices.is_empty() || self.faces.is_empty() {
             return None;
         }
@@ -1419,7 +1419,7 @@ pub(crate) fn tessellate_shaded_mesh(
 }
 
 impl RenderConvertible for Mesh {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }

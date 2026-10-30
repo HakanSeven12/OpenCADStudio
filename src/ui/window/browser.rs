@@ -18,7 +18,7 @@
 use crate::app::Message;
 use crate::ui::dock::PanelId;
 use codec::objects::SolidHistoryOperation;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use iced::widget::{button, column, container, scrollable, text};
 use iced::{Background, Element, Fill, Theme};
 
@@ -48,7 +48,7 @@ fn operation_label(operation: &SolidHistoryOperation) -> &'static str {
 }
 
 /// Every `Solid3D` in model space, with the label to show for it.
-fn bodies(document: &CadDocument) -> Vec<(Handle, String)> {
+fn bodies(document: &Document) -> Vec<(Handle, String)> {
     document
         .entities()
         .filter(|entity| matches!(entity, EntityType::Solid3D(_)))
@@ -97,7 +97,7 @@ fn note_row(label: String) -> Element<'static, Message> {
 }
 
 pub fn view<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     open_sketch: Option<&'a str>,
     width: f32,
     chrome: crate::ui::dock::Chrome,

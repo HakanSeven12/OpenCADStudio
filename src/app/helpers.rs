@@ -389,15 +389,15 @@ pub(super) fn polar_constrain_if_near(
 ) -> Option<glam::DVec3> {
     let snapped = polar_constrain(pt, base, step_deg, xf);
     let to_screen = |w: glam::DVec3| {
-        let ndc = view_rot.project_point3((w - eye).as_vec3());
-        (
-            (ndc.x + 1.0) * 0.5 * bounds.width,
-            (1.0 - ndc.y) * 0.5 * bounds.height,
-        )
+        crate::scene::view::projection::project_screen(view_rot, eye, bounds, w)
     };
-    let (cx, cy) = to_screen(pt);
-    let (sx, sy) = to_screen(snapped);
-    (((cx - sx).powi(2) + (cy - sy).powi(2)).sqrt() <= tol_px).then_some(snapped)
+    // Behind the eye, screen distance says nothing about how close the
+    // constrained point is to the cursor: leave the constraint disengaged.
+    let (Some(cursor), Some(candidate)) = (to_screen(pt), to_screen(snapped)) else {
+        return None;
+    };
+    (((cursor.x - candidate.x).powi(2) + (cursor.y - candidate.y).powi(2)).sqrt() <= tol_px)
+        .then_some(snapped)
 }
 
 /// Hard axis lock (#312): the locked ray's direction — the nearest polar
@@ -464,15 +464,25 @@ pub(super) fn axis_lock_apply(pt: glam::DVec3, base: glam::DVec3, dir: glam::DVe
 /// every tessellated wire vertex, which cost O(total geometry) and stalled a
 /// whole-drawing copy. The per-entity `min` corners give the exact enclosing
 /// box's lower-left.
+///
+/// A block reference's own `bounding_box()` is only its insertion point, which
+/// can lie far from what it draws (a block drawn in survey coordinates and
+/// inserted at their negative), so references are measured through their block
+/// definition instead.
 pub(super) fn entities_lower_left_by_bbox(
-    doc: &codec::CadDocument,
+    doc: &codec::Document,
     handles: &[codec::Handle],
 ) -> glam::DVec3 {
+    let mut blocks = rustc_hash::FxHashMap::default();
     let mut min = glam::DVec3::splat(f64::INFINITY);
     let mut any = false;
     for &h in handles {
         let Some(e) = doc.get_entity(h) else { continue };
-        let bb = e.as_entity().bounding_box();
+        let bb = match e {
+            codec::EntityType::Insert(insert) => insert_bounds(doc, insert, &mut blocks, 0)
+                .unwrap_or_else(|| e.as_entity().bounding_box()),
+            _ => e.as_entity().bounding_box(),
+        };
         let lo = glam::DVec3::new(bb.min.x, bb.min.y, bb.min.z);
         if lo.x.is_finite() && lo.y.is_finite() && lo.z.is_finite() {
             min = min.min(lo);
@@ -484,6 +494,140 @@ pub(super) fn entities_lower_left_by_bbox(
     } else {
         glam::DVec3::ZERO
     }
+}
+
+type BlockBounds = rustc_hash::FxHashMap<String, Option<codec::types::BoundingBox3D>>;
+
+/// Nesting deeper than this is treated as a cycle.
+const MAX_BLOCK_NESTING: usize = 32;
+
+/// World box of a block reference: its block's box (relative to the block's
+/// base point) carried through the reference's transform for every MINSERT
+/// cell, plus its attributes. `None` when nothing in it can be measured.
+fn insert_bounds(
+    doc: &codec::Document,
+    insert: &codec::entities::Insert,
+    blocks: &mut BlockBounds,
+    depth: usize,
+) -> Option<codec::types::BoundingBox3D> {
+    let mut out = None;
+    if let Some(local) = block_bounds(doc, &insert.block_name, blocks, depth) {
+        // MINSERT cells differ only in their insertion point and the grid is
+        // affine, so the four corner cells span the whole array.
+        let cells = if insert.is_minsert() {
+            let points = insert.array_points();
+            let columns = (insert.column_count as usize).max(1);
+            [
+                0,
+                columns - 1,
+                points.len().saturating_sub(columns),
+                points.len().saturating_sub(1),
+            ]
+            .iter()
+            .filter_map(|&k| points.get(k).copied())
+            .collect::<Vec<_>>()
+        } else {
+            vec![insert.insert_point]
+        };
+        let mut placed = insert.clone();
+        for cell in cells {
+            placed.insert_point = cell;
+            let transform = placed.get_transform();
+            for corner in box_corners(&local) {
+                include(&mut out, transform.apply(corner));
+            }
+        }
+    }
+    for attribute in &insert.attributes {
+        let bb = codec::Entity::bounding_box(attribute);
+        if !is_default_box(&bb) {
+            include(&mut out, bb.min);
+            include(&mut out, bb.max);
+        }
+    }
+    out
+}
+
+/// Box of the named block definition's contents, relative to its base point.
+pub(crate) fn block_definition_bounds(
+    doc: &codec::Document,
+    name: &str,
+) -> Option<codec::types::BoundingBox3D> {
+    block_bounds(doc, name, &mut BlockBounds::default(), 0)
+}
+
+/// Box of a block definition's contents, relative to its base point. Attribute
+/// definitions are left out: a reference draws its attributes instead.
+fn block_bounds(
+    doc: &codec::Document,
+    name: &str,
+    blocks: &mut BlockBounds,
+    depth: usize,
+) -> Option<codec::types::BoundingBox3D> {
+    if let Some(known) = blocks.get(name) {
+        return *known;
+    }
+    if depth >= MAX_BLOCK_NESTING {
+        return None;
+    }
+    // Placeholder while measuring, so a block that contains itself ends.
+    blocks.insert(name.to_string(), None);
+    let record = doc.block_records.get(name)?;
+    // The one place the base-point convention lives (dynamic blocks' BASEPOINT
+    // parameter included).
+    let base = crate::scene::render_graph::block_base_point(doc, name);
+    let mut out = None;
+    for &h in &record.entity_handles {
+        let Some(e) = doc.get_entity(h) else { continue };
+        let bb = match e {
+            codec::EntityType::AttributeDefinition(_) => continue,
+            codec::EntityType::Insert(nested) => {
+                match insert_bounds(doc, nested, blocks, depth + 1) {
+                    Some(bb) => bb,
+                    None => continue,
+                }
+            }
+            _ => e.as_entity().bounding_box(),
+        };
+        if is_default_box(&bb) {
+            continue;
+        }
+        include(&mut out, bb.min - base);
+        include(&mut out, bb.max - base);
+    }
+    blocks.insert(name.to_string(), out);
+    out
+}
+
+/// The all-zero box is `bounding_box()`'s default for entities that do not
+/// measure themselves: it says nothing about where they are.
+fn is_default_box(bb: &codec::types::BoundingBox3D) -> bool {
+    bb.min == codec::types::Vector3::ZERO && bb.max == codec::types::Vector3::ZERO
+}
+
+fn include(out: &mut Option<codec::types::BoundingBox3D>, point: codec::types::Vector3) {
+    if !(point.x.is_finite() && point.y.is_finite() && point.z.is_finite()) {
+        return;
+    }
+    match out {
+        Some(bb) => bb.expand_to_include(point),
+        None => *out = Some(codec::types::BoundingBox3D::from_point(point)),
+    }
+}
+
+fn box_corners(bb: &codec::types::BoundingBox3D) -> [codec::types::Vector3; 8] {
+    let (a, b) = (bb.min, bb.max);
+    let v = codec::types::Vector3::new;
+    [
+        v(a.x, a.y, a.z),
+        v(b.x, a.y, a.z),
+        v(a.x, b.y, a.z),
+        v(b.x, b.y, a.z),
+        v(a.x, a.y, b.z),
+        v(b.x, a.y, b.z),
+        v(a.x, b.y, b.z),
+        v(b.x, b.y, b.z),
+    ]
 }
 
 /// Generate the next available auto group name ("*A1", "*A2", …).
@@ -675,5 +819,78 @@ mod ucs_from_normal_tests {
     #[test]
     fn a_degenerate_normal_is_rejected() {
         assert!(ucs_from_normal(DVec3::ZERO, DVec3::ZERO).is_none());
+    }
+}
+
+#[cfg(test)]
+mod clipboard_base_tests {
+    use super::entities_lower_left_by_bbox;
+
+    /// DXF of the given BLOCKS and ENTITIES section bodies.
+    fn doc(blocks: &str, entities: &str) -> codec::Document {
+        let text = format!(
+            "0\nSECTION\n2\nBLOCKS\n{blocks}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n"
+        );
+        codec::DxfReader::from_reader(std::io::Cursor::new(text.into_bytes()))
+            .unwrap()
+            .read()
+            .unwrap()
+    }
+
+    fn block(name: &str, body: &str) -> String {
+        format!("0\nBLOCK\n8\n0\n2\n{name}\n70\n0\n10\n0.0\n20\n0.0\n30\n0.0\n3\n{name}\n{body}0\nENDBLK\n8\n0\n")
+    }
+
+    fn line(a: (f64, f64), b: (f64, f64)) -> String {
+        format!(
+            "0\nLINE\n8\n0\n10\n{}\n20\n{}\n30\n0.0\n11\n{}\n21\n{}\n31\n0.0\n",
+            a.0, a.1, b.0, b.1
+        )
+    }
+
+    fn insert(name: &str, at: (f64, f64), rotation: f64, scale: f64) -> String {
+        format!(
+            "0\nINSERT\n8\n0\n2\n{name}\n10\n{}\n20\n{}\n30\n0.0\n41\n{scale}\n42\n{scale}\n43\n{scale}\n50\n{rotation}\n",
+            at.0, at.1
+        )
+    }
+
+    fn base_of_all(doc: &codec::Document) -> glam::DVec3 {
+        let handles = doc
+            .block_records
+            .get("*Model_Space")
+            .unwrap()
+            .entity_handles
+            .clone();
+        assert!(!handles.is_empty());
+        entities_lower_left_by_bbox(doc, &handles)
+    }
+
+    /// A block drawn in survey coordinates and inserted at their negative
+    /// draws near the origin; its insertion point is far away and must not
+    /// become the clipboard base.
+    #[test]
+    fn far_insertion_point_is_not_the_base() {
+        let doc = doc(
+            &block("GEO", &line((100000.0, 200000.0), (100010.0, 200000.0))),
+            &(line((0.0, 0.0), (10.0, 0.0)) + &insert("GEO", (-100000.0, -200000.0), 0.0, 1.0)),
+        );
+        let base = base_of_all(&doc);
+        assert!(base.distance(glam::DVec3::ZERO) < 1e-6, "base {base:?}");
+    }
+
+    /// Rotation, scale and a nested reference are carried through.
+    #[test]
+    fn nested_rotated_scaled_reference_is_measured_by_its_geometry() {
+        let blocks = block("INNER", &line((10.0, 0.0), (20.0, 0.0)))
+            + &block("OUTER", &insert("INNER", (0.0, 0.0), 0.0, 1.0));
+        let doc = doc(&blocks, &insert("OUTER", (100.0, 100.0), 90.0, 2.0));
+        // INNER's line runs 10..20 along X; turned 90 degrees and doubled it
+        // runs from (100,120) to (100,140).
+        let base = base_of_all(&doc);
+        assert!(
+            base.distance(glam::DVec3::new(100.0, 120.0, 0.0)) < 1e-6,
+            "base {base:?}"
+        );
     }
 }

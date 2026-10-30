@@ -108,6 +108,17 @@ impl AutoConstrainSettings {
     }
 }
 
+/// Check Spelling preferences kept with the profile.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SpellPrefs {
+    /// BCP-47 tag of the main dictionary; empty: the system language.
+    pub language: String,
+    pub options: crate::ui::window::spell_dialog::SpellOptions,
+    /// Words added to the user's dictionary.
+    pub custom: Vec<String>,
+}
+
 /// TXT2MTXT (Combine Text) settings, the profile values
 /// TXT2MTXTCOMBINEMTEXT, TXT2MTXTTEXTORDER, TXT2MTXTWORDWRAP and
 /// TXT2MTXTLINESPACING.
@@ -123,6 +134,30 @@ pub struct Txt2MtxtSettings {
     pub word_wrap: bool,
     /// Force uniform line spacing (always on while word-wrap is).
     pub uniform_spacing: bool,
+}
+
+/// The Inspection Dimension window's last values, offered the next time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DimInspectSettings {
+    /// 0 round, 1 angular, 2 no frame.
+    pub shape: u8,
+    pub label_on: bool,
+    pub label: String,
+    pub rate_on: bool,
+    pub rate: String,
+}
+
+impl Default for DimInspectSettings {
+    fn default() -> Self {
+        Self {
+            shape: 0,
+            label_on: false,
+            label: String::new(),
+            rate_on: true,
+            rate: "100%".to_string(),
+        }
+    }
 }
 
 impl Default for Txt2MtxtSettings {
@@ -232,21 +267,154 @@ pub fn zoom_notch_percent(factor: i32) -> f32 {
     (1.0 - ratio) * 100.0
 }
 
-/// Which mouse gestures pan and orbit the model view.
+/// Which mouse gestures pan and orbit the model view. Besides the own CAD
+/// default, the styles follow the programs they are named after, as FreeCAD
+/// offers them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NavigationStyle {
     /// Middle button pans; Shift + middle button orbits.
     #[default]
     Cad,
-    /// Middle button orbits; Shift + middle button pans.
+    /// Middle button orbits; Shift + middle button, or left + right, pans.
     Blender,
-    /// Middle button pans; middle and left buttons together orbit.
+    /// Middle button pans; middle with the right (or left) button orbits
+    /// about the screen centre; a right click during a middle drag zooms.
     Catia,
+    /// Middle button pans; middle with the left or right button orbits.
+    FreeCad,
+    /// Left button orbits, right button pans, both together tilt.
+    Gesture,
+    /// Alt + left orbits, Alt + middle pans, Alt + right zooms.
+    MayaGesture,
+    /// Middle pans; middle + right or Ctrl + right orbits; Ctrl + left zooms.
+    OpenCascade,
+    /// Left button orbits, middle pans, middle + left zooms.
+    OpenInventor,
+    /// Left button orbits, right pans, middle (or Shift + right) zooms.
+    OpenScad,
+    /// Middle pans; Shift + middle or middle + right orbits; left + right pans.
+    Revit,
+    /// Middle orbits; Shift + middle or middle + right pans; middle + left zooms.
+    SiemensNx,
+    /// Middle orbits; Ctrl + middle pans; Shift + middle zooms.
+    SolidWorks,
+    /// Right button orbits, middle pans.
+    TinkerCad,
+    /// No button needed: Shift pans, Alt orbits, Ctrl + Shift zooms.
+    Touchpad,
+}
+
+/// What a navigation drag does to the view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavAction {
+    Pan,
+    Orbit,
+    Zoom,
+    /// Turn about the view axis.
+    Roll,
+}
+
+/// The mouse buttons held down.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NavButtons {
+    pub left: bool,
+    pub middle: bool,
+    pub right: bool,
 }
 
 impl NavigationStyle {
-    pub const ALL: [NavigationStyle; 3] = [Self::Cad, Self::Blender, Self::Catia];
+    pub const ALL: [NavigationStyle; 14] = [
+        Self::Cad,
+        Self::Blender,
+        Self::Catia,
+        Self::FreeCad,
+        Self::Gesture,
+        Self::MayaGesture,
+        Self::OpenCascade,
+        Self::OpenInventor,
+        Self::OpenScad,
+        Self::Revit,
+        Self::SiemensNx,
+        Self::SolidWorks,
+        Self::TinkerCad,
+        Self::Touchpad,
+    ];
+
+    /// What dragging with `held` and the modifiers does, `None` when the
+    /// buttons do not navigate (a left drag selects, a right click opens the
+    /// menu). `dragging` is true while a navigation drag is under way, for
+    /// the styles where a button keeps one going that would not start it.
+    pub fn action(
+        self,
+        held: NavButtons,
+        shift: bool,
+        ctrl: bool,
+        alt: bool,
+        dragging: bool,
+    ) -> Option<NavAction> {
+        use NavAction::*;
+        let NavButtons {
+            left,
+            middle,
+            right,
+        } = held;
+        match (self, left, middle, right) {
+            (Self::Cad, false, true, false) => Some(if shift { Orbit } else { Pan }),
+            (Self::Blender, false, true, false) => Some(if shift { Pan } else { Orbit }),
+            (Self::Blender, true, false, true) => Some(Pan),
+            (Self::Catia, false, true, false) => Some(Pan),
+            (Self::Catia, _, true, _) => Some(Orbit),
+            (Self::FreeCad, false, true, false) => Some(Pan),
+            (Self::FreeCad, _, true, _) => Some(Orbit),
+            // The middle button may be let go once the right one is down.
+            (Self::FreeCad, false, false, true) if dragging => Some(Orbit),
+            (Self::Gesture, true, false, false) => Some(Orbit),
+            (Self::Gesture, false, false, true) => Some(Pan),
+            (Self::Gesture, true, false, true) => Some(Roll),
+            (Self::MayaGesture, true, false, false) if alt => Some(Orbit),
+            (Self::MayaGesture, false, true, false) if alt => Some(Pan),
+            (Self::MayaGesture, false, false, true) if alt => Some(Zoom),
+            (Self::MayaGesture, true, false, true) if alt => Some(Roll),
+            (Self::OpenCascade, true, false, false) if ctrl => Some(Zoom),
+            (Self::OpenCascade, false, false, true) if ctrl => Some(Orbit),
+            (Self::OpenCascade, false, true, true) => Some(Orbit),
+            (Self::OpenCascade, false, true, false) => Some(Pan),
+            (Self::OpenInventor, true, false, false) if !shift && !ctrl => Some(Orbit),
+            (Self::OpenInventor, false, true, false) => Some(Pan),
+            (Self::OpenInventor, true, true, false) => Some(Zoom),
+            (Self::OpenScad, true, false, false) => Some(Orbit),
+            (Self::OpenScad, false, false, true) => Some(if shift { Zoom } else { Pan }),
+            (Self::OpenScad, false, true, false) => Some(Zoom),
+            (Self::OpenScad, false, true, true) => Some(Orbit),
+            (Self::Revit, false, true, false) => Some(if shift { Orbit } else { Pan }),
+            (Self::Revit, false, true, true) => Some(Orbit),
+            (Self::Revit, true, false, true) => Some(Pan),
+            (Self::SiemensNx, false, true, false) => Some(if shift { Pan } else { Orbit }),
+            (Self::SiemensNx, false, true, true) => Some(Pan),
+            (Self::SiemensNx, true, true, false) => Some(Zoom),
+            (Self::SolidWorks, false, true, false) => Some(if ctrl {
+                Pan
+            } else if shift {
+                Zoom
+            } else {
+                Orbit
+            }),
+            (Self::TinkerCad, false, false, true) => Some(Orbit),
+            (Self::TinkerCad, false, true, false) => Some(Pan),
+            (Self::Touchpad, false, false, false) if ctrl && shift => Some(Zoom),
+            (Self::Touchpad, false, false, false) if shift => Some(Pan),
+            (Self::Touchpad, false, false, false) if alt => Some(Orbit),
+            (Self::Touchpad, true, false, false) if shift => Some(Orbit),
+            _ => None,
+        }
+    }
+
+    /// A middle click (no drag) brings the point under the pointer to the
+    /// centre of the view.
+    pub fn middle_click_recenters(self) -> bool {
+        !matches!(self, Self::Cad | Self::OpenCascade | Self::Touchpad)
+    }
 }
 
 impl std::fmt::Display for NavigationStyle {
@@ -255,6 +423,17 @@ impl std::fmt::Display for NavigationStyle {
             Self::Cad => crate::t!("CAD: Shift + middle button orbits"),
             Self::Blender => crate::t!("Blender: middle button orbits, Shift pans"),
             Self::Catia => crate::t!("CATIA: middle + left button orbits"),
+            Self::FreeCad => crate::t!("FreeCAD CAD: middle + left button orbits"),
+            Self::Gesture => crate::t!("Gesture: left button orbits, right button pans"),
+            Self::MayaGesture => crate::t!("Maya-Gesture: Alt + mouse buttons"),
+            Self::OpenCascade => crate::t!("OpenCascade: Ctrl + right button orbits"),
+            Self::OpenInventor => crate::t!("OpenInventor: left button orbits"),
+            Self::OpenScad => crate::t!("OpenSCAD: left button orbits, right button pans"),
+            Self::Revit => crate::t!("Revit: Shift + middle button orbits"),
+            Self::SiemensNx => crate::t!("Siemens NX: middle button orbits, Shift pans"),
+            Self::SolidWorks => crate::t!("SolidWorks: middle button orbits, Ctrl pans"),
+            Self::TinkerCad => crate::t!("TinkerCAD: right button orbits"),
+            Self::Touchpad => crate::t!("Touchpad: Shift pans, Alt orbits"),
         })
     }
 }
@@ -619,6 +798,8 @@ pub struct UserSettings {
     pub image_frame: i16,
     /// The Attribute Definition dialog's "Specify on-screen" choice.
     pub attdef_on_screen: bool,
+    /// Insert Table / -TABLE column and row settings and insertion behaviour.
+    pub table_insert: crate::modules::annotate::table_cmd::TableDefaults,
     /// Block Definition dialog: base point "Specify On-screen".
     pub block_base_on_screen: bool,
     /// Block Definition dialog: objects "Specify On-screen".
@@ -650,6 +831,8 @@ pub struct UserSettings {
     /// Fonts and plot styles kept in a chosen folder (`None`: the default).
     pub fonts_folder: Option<String>,
     pub plot_styles_folder: Option<String>,
+    /// The user's support files folder (patterns, linetypes, fonts).
+    pub support_folder: Option<String>,
     /// The file type ATTACH's picker was last left on (1-based).
     pub attach_filter: u32,
     /// SURFACEASSOCIATIVITY: new surfaces stay associative to their sources.
@@ -680,6 +863,13 @@ pub struct UserSettings {
     pub ucs_icon_at_origin: bool,
     /// Selection cycling: a click where objects overlap opens a picker.
     pub selection_cycling: bool,
+    /// OSNAPZ: object snaps take the current elevation instead of the
+    /// snapped object's Z.
+    pub osnap_z: bool,
+    /// SELECTSIMILARMODE: the properties besides the type that Select
+    /// Similar matches (1 colour, 2 layer, 4 linetype, 8 linetype scale,
+    /// 16 lineweight, 32 plot style, 64 object style, 128 name).
+    pub select_similar_mode: u16,
     /// CURSORTYPE: crosshair or the platform pointer over the drawing.
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
@@ -780,6 +970,12 @@ pub struct UserSettings {
     /// TXT2MTXT settings (Text to MText Settings dialog).
     #[serde(default)]
     pub txt2mtxt: Txt2MtxtSettings,
+    /// Check Spelling: main dictionary, options and the user's words.
+    #[serde(default)]
+    pub spell: SpellPrefs,
+    /// Inspection Dimension window values.
+    #[serde(default)]
+    pub dim_inspect: DimInspectSettings,
     /// Keep existing geometry size while solving after a constraint edit.
     #[serde(default = "default_constraint_solve_mode")]
     pub constraint_solve_mode: bool,
@@ -811,6 +1007,11 @@ pub struct UserSettings {
     pub pick_drag_rect: bool,
     /// Show the floating Quick Properties panel when objects are selected.
     pub quick_properties: bool,
+    /// QPLOCATION 1: the Quick Properties panel floats where it was last
+    /// dragged instead of following the cursor.
+    pub quick_properties_float: bool,
+    /// Where the floating Quick Properties panel sits (top-left).
+    pub quick_properties_pos: [f32; 2],
     /// Interface language preference. `System` negotiates against the
     /// platform locale on every launch.
     pub language: crate::i18n::Language,
@@ -1112,7 +1313,8 @@ impl Default for UserSettings {
             zoom_wheel_reversed: false,
             navigation_style: NavigationStyle::Cad,
             dynamic_ucs: true,
-            touchpad_pan: false,
+            // A Mac's built-in trackpad is the common case there.
+            touchpad_pan: cfg!(target_os = "macos"),
             ui_scale_percent: 100,
             zoom_factor: 60,
             cursor_size: 5,
@@ -1127,6 +1329,8 @@ impl Default for UserSettings {
             show_ucs_icon: true,
             ucs_icon_at_origin: true,
             selection_cycling: false,
+            osnap_z: false,
+            select_similar_mode: crate::scene::SELECT_SIMILAR_DEFAULT,
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             right_click_mode: RightClickMode::ShortcutMenu,
@@ -1134,6 +1338,7 @@ impl Default for UserSettings {
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
             image_frame: 1,
             attdef_on_screen: true,
+            table_insert: Default::default(),
             block_base_on_screen: false,
             block_objects_on_screen: false,
             block_object_mode: 1,
@@ -1149,6 +1354,7 @@ impl Default for UserSettings {
             trim_extend_quick: true,
             fonts_folder: None,
             plot_styles_folder: None,
+            support_folder: None,
             attach_filter: 7,
             surface_associativity: true,
             ucs_ortho: true,
@@ -1176,11 +1382,12 @@ impl Default for UserSettings {
             plugin_repos: Vec::new(),
             literal_spaces: false,
             command_history_height: crate::ui::command_line::HISTORY_HEIGHT_DEFAULT,
-            // Snapper::default(): END|MID|CEN|NODE|QUAD|INT|NEA (575), master
-            // on. Object snap is a drafting aid users expect to be live from
-            // the first click; the suppress bit (16384) is left for the user
-            // to set via the status-bar pill or OSNAP.
-            osmode: 575,
+            // Snapper::default(): END|MID|CEN|NODE|QUAD|INT (63), master on.
+            // Object snap is a drafting aid users expect to be live from the
+            // first click; the suppress bit (16384) is left for the user to
+            // set via the status-bar pill or OSNAP. Nearest is off: on, it is
+            // nearer than any point the object under the cursor offers (#1914).
+            osmode: 63,
             texteditmode: false,
             quick_dimension_snap_priority: 0,
             dimension_continue_mode: 1,
@@ -1191,6 +1398,8 @@ impl Default for UserSettings {
             show_constraint_values: true,
             auto_constrain: AutoConstrainSettings::default(),
             txt2mtxt: Txt2MtxtSettings::default(),
+            spell: SpellPrefs::default(),
+            dim_inspect: DimInspectSettings::default(),
             constraint_solve_mode: true,
             constraint_infer: false,
             constraint_bar_display: 3,
@@ -1201,6 +1410,8 @@ impl Default for UserSettings {
             pick_add: true,
             pick_drag_rect: false,
             quick_properties: false,
+            quick_properties_float: false,
+            quick_properties_pos: [40.0, 40.0],
             language: crate::i18n::Language::default(),
             cliprompt_lines: 3,
             commandline_fade_ms: 3000,

@@ -672,6 +672,98 @@ pub struct MeshMaterialResources {
     params_buffer: wgpu::Buffer,
 }
 
+/// The uniform a material's maps are sampled with; with no images, the only
+/// thing its GPU resources depend on.
+fn material_map_params(
+    material: Option<&crate::scene::model::material_model::MeshMaterial>,
+) -> MaterialMapParams {
+    let channel_flags = material.map_or(0x7f, |material| material.channel_flags as u32);
+    let channel_present = |channel: usize, bit: u32| {
+        material.is_some_and(|material| {
+            let maps = [
+                &material.diffuse_map,
+                &material.specular_map,
+                &material.reflection_map,
+                &material.opacity_map,
+                &material.bump_map,
+                &material.refraction_map,
+                &material.normal_map,
+            ];
+            channel_flags & bit != 0 && maps[channel].image.is_some()
+        }) as u32
+    };
+    MaterialMapParams {
+        blends0: material.map_or([0.0; 4], |material| {
+            [
+                material.diffuse_map.blend_factor,
+                material.specular_map.blend_factor,
+                material.reflection_map.blend_factor,
+                material.opacity_map.blend_factor,
+            ]
+        }),
+        present0: material.map_or([0; 4], |_material| {
+            [
+                channel_present(0, 0x01),
+                channel_present(1, 0x02),
+                channel_present(2, 0x04),
+                channel_present(3, 0x08),
+            ]
+        }),
+        blends1: material.map_or([0.0; 4], |material| {
+            [
+                material.bump_map.blend_factor,
+                material.refraction_map.blend_factor,
+                material.normal_map.blend_factor,
+                0.0,
+            ]
+        }),
+        present1: material.map_or([0; 4], |material| {
+            [
+                channel_present(4, 0x10),
+                channel_present(5, 0x20),
+                material.normal_map.image.is_some() as u32
+                    * (material.normal_map_method == 0) as u32,
+                0,
+            ]
+        }),
+        tiling0: material.map_or([1; 4], |material| {
+            [
+                material.diffuse_map.tiling as u32,
+                material.specular_map.tiling as u32,
+                material.reflection_map.tiling as u32,
+                material.opacity_map.tiling as u32,
+            ]
+        }),
+        tiling1: material.map_or([1; 4], |material| {
+            [
+                material.bump_map.tiling as u32,
+                material.refraction_map.tiling as u32,
+                material.normal_map.tiling as u32,
+                1,
+            ]
+        }),
+        render_modes: material.map_or([1, 0, 0, 0], |material| {
+            [
+                material.two_sided as u32,
+                material.normal_map_method as u32,
+                material.global_illumination as u32,
+                material.final_gather as u32,
+            ]
+        }),
+        source_state: material.map_or([0; 4], |material| {
+            [
+                material.advanced_data_present as u32,
+                material.is_anonymous as u32,
+                material.handle.is_some() as u32,
+                0,
+            ]
+        }),
+        indirect: material.map_or([1.0, 0.0, 0.0, 0.0], |material| {
+            [material.color_bleed_scale, 0.0, 0.0, 0.0]
+        }),
+    }
+}
+
 pub fn create_material_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -777,91 +869,7 @@ pub fn create_material_resources(
     let bump_sampler = sampler("mesh.material.bump_sampler", tiling(4));
     let refraction_sampler = sampler("mesh.material.refraction_sampler", tiling(5));
     let normal_sampler = sampler("mesh.material.normal_sampler", tiling(6));
-    let channel_flags = material.map_or(0x7f, |material| material.channel_flags as u32);
-    let channel_present = |channel: usize, bit: u32| {
-        material.is_some_and(|material| {
-            let maps = [
-                &material.diffuse_map,
-                &material.specular_map,
-                &material.reflection_map,
-                &material.opacity_map,
-                &material.bump_map,
-                &material.refraction_map,
-                &material.normal_map,
-            ];
-            channel_flags & bit != 0 && maps[channel].image.is_some()
-        }) as u32
-    };
-    let params = MaterialMapParams {
-        blends0: material.map_or([0.0; 4], |material| {
-            [
-                material.diffuse_map.blend_factor,
-                material.specular_map.blend_factor,
-                material.reflection_map.blend_factor,
-                material.opacity_map.blend_factor,
-            ]
-        }),
-        present0: material.map_or([0; 4], |_material| {
-            [
-                channel_present(0, 0x01),
-                channel_present(1, 0x02),
-                channel_present(2, 0x04),
-                channel_present(3, 0x08),
-            ]
-        }),
-        blends1: material.map_or([0.0; 4], |material| {
-            [
-                material.bump_map.blend_factor,
-                material.refraction_map.blend_factor,
-                material.normal_map.blend_factor,
-                0.0,
-            ]
-        }),
-        present1: material.map_or([0; 4], |material| {
-            [
-                channel_present(4, 0x10),
-                channel_present(5, 0x20),
-                material.normal_map.image.is_some() as u32
-                    * (material.normal_map_method == 0) as u32,
-                0,
-            ]
-        }),
-        tiling0: material.map_or([1; 4], |material| {
-            [
-                material.diffuse_map.tiling as u32,
-                material.specular_map.tiling as u32,
-                material.reflection_map.tiling as u32,
-                material.opacity_map.tiling as u32,
-            ]
-        }),
-        tiling1: material.map_or([1; 4], |material| {
-            [
-                material.bump_map.tiling as u32,
-                material.refraction_map.tiling as u32,
-                material.normal_map.tiling as u32,
-                1,
-            ]
-        }),
-        render_modes: material.map_or([1, 0, 0, 0], |material| {
-            [
-                material.two_sided as u32,
-                material.normal_map_method as u32,
-                material.global_illumination as u32,
-                material.final_gather as u32,
-            ]
-        }),
-        source_state: material.map_or([0; 4], |material| {
-            [
-                material.advanced_data_present as u32,
-                material.is_anonymous as u32,
-                material.handle.is_some() as u32,
-                0,
-            ]
-        }),
-        indirect: material.map_or([1.0, 0.0, 0.0, 0.0], |material| {
-            [material.color_bleed_scale, 0.0, 0.0, 0.0]
-        }),
-    };
+    let params = material_map_params(material);
     let params_buffer = super::gpu_upload::upload_buffer(
         device,
         queue,
@@ -1013,18 +1021,26 @@ pub fn upload_chunk_material_bind_groups(
     layout: &wgpu::BindGroupLayout,
     chunks: &mut [MeshBatchChunk],
 ) {
-    let mut fallback = None;
-    let mut materials = rustc_hash::FxHashMap::default();
-    // Key: material handle (`None` = no material) + the exact surface uniform.
-    let mut bind_groups: rustc_hash::FxHashMap<(Option<u64>, [u32; 24]), wgpu::BindGroup> =
+    // Resources by material handle; a material without one, and without
+    // images, by its map parameters. Thousands of coloured meshes carry such
+    // a material, and one set each ran D3D12 out of memory (#2343).
+    let mut materials: rustc_hash::FxHashMap<(Option<u64>, Vec<u32>), MeshMaterialResources> =
         rustc_hash::FxHashMap::default();
+    let mut bind_groups: rustc_hash::FxHashMap<
+        ((Option<u64>, Vec<u32>), [u32; 24]),
+        wgpu::BindGroup,
+    > = rustc_hash::FxHashMap::default();
     for chunk in chunks {
         let material = chunk.material.as_ref();
-        let handle = match material {
-            None => None,
+        let key = match material {
+            None => (None, Vec::new()),
             Some(material) => match material.handle {
-                Some(handle) => Some(handle.value()),
-                // No handle to identify the material's maps by: keep it private.
+                Some(handle) => (Some(handle.value()), Vec::new()),
+                None if !material_has_images(material) => {
+                    let params = material_map_params(Some(material));
+                    (None, bytemuck::cast_slice(std::slice::from_ref(&params)).to_vec())
+                }
+                // Images but no handle to identify them by: keep it private.
                 None => {
                     let resources = create_material_resources(device, queue, Some(material));
                     chunk.material_bind_group = Some(create_material_bind_group_from_resources(
@@ -1040,26 +1056,37 @@ pub fn upload_chunk_material_bind_groups(
             },
         };
         let surface = bytemuck::cast(surface_params(material, chunk.face_color));
-        let bind_group = bind_groups.entry((handle, surface)).or_insert_with(|| {
-            let resources = match material {
-                None => {
-                    fallback.get_or_insert_with(|| create_material_resources(device, queue, None))
-                }
-                Some(material) => materials
-                    .entry(handle)
-                    .or_insert_with(|| create_material_resources(device, queue, Some(material))),
-            };
-            create_material_bind_group_from_resources(
-                device,
-                queue,
-                layout,
-                resources,
-                material,
-                chunk.face_color,
-            )
-        });
+        let bind_group = bind_groups
+            .entry((key.clone(), surface))
+            .or_insert_with(|| {
+                let resources = materials
+                    .entry(key)
+                    .or_insert_with(|| create_material_resources(device, queue, material));
+                create_material_bind_group_from_resources(
+                    device,
+                    queue,
+                    layout,
+                    resources,
+                    material,
+                    chunk.face_color,
+                )
+            });
         chunk.material_bind_group = Some(bind_group.clone());
     }
+}
+
+fn material_has_images(material: &crate::scene::model::material_model::MeshMaterial) -> bool {
+    [
+        &material.diffuse_map,
+        &material.specular_map,
+        &material.reflection_map,
+        &material.opacity_map,
+        &material.bump_map,
+        &material.refraction_map,
+        &material.normal_map,
+    ]
+    .iter()
+    .any(|map| map.image.is_some())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

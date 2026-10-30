@@ -1076,7 +1076,7 @@ fn remap_plane_offset(
 /// its first handle, so "some handle in `xrefs` exists" was true even for a
 /// reference whose actual source had been erased. Walking the chain asks the
 /// question that was meant — is the geometry still there.
-pub(crate) fn dimension_is_associative(document: &codec::CadDocument, dimension: Handle) -> bool {
+pub(crate) fn dimension_is_associative(document: &codec::Document, dimension: Handle) -> bool {
     document.objects.values().any(|object| {
         let ObjectType::Associative(object) = object else {
             return false;
@@ -1095,7 +1095,7 @@ pub(crate) fn dimension_is_associative(document: &codec::CadDocument, dimension:
 }
 
 pub(crate) fn constraint_from_associative_dimension(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     handle: Handle,
 ) -> Option<(
     super::parametric_constraints::ConstraintKind,
@@ -1182,7 +1182,7 @@ pub(crate) fn constraint_from_associative_dimension(
 }
 
 pub(crate) fn radial_extension_points(
-    document: &codec::CadDocument,
+    document: &codec::Document,
     dimension: Handle,
     gap: f64,
     extension: f64,
@@ -1433,6 +1433,7 @@ impl Scene {
         let association_handle = self.document.allocate_handle();
         let mut object = AssociativeObject::new("DIMASSOC", "AcDbDimAssoc");
         object.handle = association_handle;
+        self.has_dimension_associations.set(Some(true));
         object.reactors.push(dimension);
         object.data = AssociativeData::DimensionAssociation(AssocDimensionAssociation {
             associativity,
@@ -1825,6 +1826,52 @@ impl Scene {
         })
     }
 
+    /// Remove the DIMASSOC object of `dimension`: the object itself, the
+    /// reactor it left on every entity and its entry in the owning dictionary.
+    /// Returns whether the dimension was associative.
+    pub(crate) fn detach_dimension_association(&mut self, dimension: Handle) -> bool {
+        let found = self.document.objects.iter().find_map(|(handle, object)| {
+            let ObjectType::Associative(object) = object else {
+                return None;
+            };
+            matches!(
+                &object.data,
+                AssociativeData::DimensionAssociation(data) if data.dimension == dimension
+            )
+            .then_some((*handle, object.owner))
+        });
+        let Some((association, owner)) = found else {
+            return false;
+        };
+        let before = self.document.objects.get(&association).cloned();
+        self.record_undo_object_before(association, before);
+        if let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get(&owner) {
+            let before = ObjectType::Dictionary(dictionary.clone());
+            self.record_undo_object_before(owner, Some(before));
+        }
+        if let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get_mut(&owner) {
+            dictionary.entries.retain(|(_, handle)| *handle != association);
+        }
+        self.document.objects.remove(&association);
+        let holders: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|entity| entity.common().reactors.contains(&association))
+            .map(|entity| entity.common().handle)
+            .collect();
+        for handle in holders {
+            if self.is_recording_undo() {
+                let before = self.document.get_entity_arc(handle);
+                self.record_undo_before(handle, before);
+            }
+            if let Some(entity) = self.document.get_entity_mut(handle) {
+                entity.common_mut().reactors.retain(|reactor| *reactor != association);
+            }
+        }
+        self.invalidate_dependency_index();
+        true
+    }
+
     /// Preserve an association only when the dimension and every source-chain
     /// handle were copied. Remap the complete chain to the new entities.
     pub(crate) fn copy_dimension_associations(
@@ -1915,6 +1962,159 @@ impl Scene {
         }
     }
 
+    /// DIMREASSOCIATE: move the definition point(s) `target` names onto
+    /// their object and associate the dimension with what now lies under
+    /// its points. False when no object lies there.
+    pub(crate) fn reassociate_dimension(
+        &mut self,
+        dimension: Handle,
+        target: &crate::command::ReassociateTarget,
+    ) -> bool {
+        use crate::command::ReassociateTarget as T;
+        let Some(owner) = self
+            .document
+            .get_entity(dimension)
+            .map(|entity| entity.common().owner_handle)
+        else {
+            return false;
+        };
+        let object = |handle: Handle| {
+            self.document
+                .get_entity(handle)
+                .filter(|entity| entity.common().owner_handle == owner && handle != dimension)
+                .cloned()
+        };
+        let ends = |entity: &EntityType| match entity {
+            EntityType::Line(line) => Some((line.start, line.end)),
+            EntityType::Arc(arc) => Some((arc.start_point_wcs(), arc.end_point_wcs())),
+            _ => None,
+        };
+        let point = |value: glam::DVec3| Vector3::new(value.x, value.y, value.z);
+        // Each change: (index into the inference points, new location).
+        let mut moves: Vec<(usize, Vector3)> = Vec::new();
+        let mut radial: Option<(Vector3, f64)> = None;
+        match target {
+            T::Point { index, point: at } => {
+                let at = point(*at);
+                let tolerance = (at.x.abs() + at.y.abs() + at.z.abs()).max(1.0) * 1e-9;
+                let found = self.document.entities().any(|entity| {
+                    entity.common().owner_handle == owner
+                        && entity.common().handle != dimension
+                        && !matches!(entity, EntityType::Dimension(_))
+                        && source_distance_squared(entity, at)
+                            .is_some_and(|distance| distance <= tolerance * tolerance)
+                });
+                if !found {
+                    return false;
+                }
+                moves.push((*index, at));
+            }
+            T::Ends(handle) => {
+                let Some((start, end)) = object(*handle).as_ref().and_then(ends) else {
+                    return false;
+                };
+                moves.extend([(0, start), (1, end)]);
+            }
+            T::Arc(handle) => {
+                let Some(EntityType::Arc(arc)) = object(*handle) else {
+                    return false;
+                };
+                moves.extend([
+                    (0, arc.center),
+                    (1, arc.start_point_wcs()),
+                    (2, arc.end_point_wcs()),
+                ]);
+            }
+            T::Line { index, object: handle } => {
+                let Some(EntityType::Line(line)) = object(*handle) else {
+                    return false;
+                };
+                let first = index * 2;
+                moves.extend([(first, line.start), (first + 1, line.end)]);
+            }
+            T::Radial(handle) => match object(*handle) {
+                Some(EntityType::Circle(circle)) => radial = Some((circle.center, circle.radius)),
+                Some(EntityType::Arc(arc)) => radial = Some((arc.center, arc.radius)),
+                _ => return false,
+            },
+        }
+        let Some(EntityType::Dimension(entity)) = self.document.get_entity_mut(dimension) else {
+            return false;
+        };
+        let along = |from: Vector3, to: Vector3| {
+            let (dx, dy, dz) = (to.x - from.x, to.y - from.y, to.z - from.z);
+            let length = (dx * dx + dy * dy + dz * dz).sqrt();
+            if length > 1e-12 {
+                (dx / length, dy / length, dz / length)
+            } else {
+                (1.0, 0.0, 0.0)
+            }
+        };
+        let offset = |center: Vector3, direction: (f64, f64, f64), distance: f64| {
+            Vector3::new(
+                center.x + direction.0 * distance,
+                center.y + direction.1 * distance,
+                center.z + direction.2 * distance,
+            )
+        };
+        match &mut **entity {
+            Dimension::Radius(radius) => {
+                let Some((center, size)) = radial else {
+                    return false;
+                };
+                let direction = along(radius.angle_vertex, radius.definition_point);
+                radius.angle_vertex = center;
+                radius.definition_point = offset(center, direction, size);
+            }
+            Dimension::Diameter(diameter) => {
+                let Some((center, size)) = radial else {
+                    return false;
+                };
+                let direction = along(diameter.definition_point, diameter.angle_vertex);
+                diameter.angle_vertex = offset(center, direction, size);
+                diameter.definition_point = offset(center, direction, -size);
+            }
+            other => {
+                for (index, at) in moves {
+                    let slot = match (&mut *other, index) {
+                        (Dimension::Linear(d), 0) => &mut d.first_point,
+                        (Dimension::Linear(d), 1) => &mut d.second_point,
+                        (Dimension::Aligned(d), 0) => &mut d.first_point,
+                        (Dimension::Aligned(d), 1) => &mut d.second_point,
+                        (Dimension::Angular3Pt(d), 0) => &mut d.angle_vertex,
+                        (Dimension::Angular3Pt(d), 1) => &mut d.first_point,
+                        (Dimension::Angular3Pt(d), 2) => &mut d.second_point,
+                        (Dimension::Angular2Ln(d), 0) => &mut d.first_point,
+                        (Dimension::Angular2Ln(d), 1) => &mut d.second_point,
+                        (Dimension::Angular2Ln(d), 2) => &mut d.angle_vertex,
+                        (Dimension::Angular2Ln(d), 3) => &mut d.definition_point,
+                        (Dimension::Ordinate(d), 0) => &mut d.feature_location,
+                        _ => return false,
+                    };
+                    *slot = at;
+                }
+            }
+        }
+        self.invalidate_dim_block_recorded(dimension);
+        let sources: Vec<Option<Handle>> = self
+            .infer_dimension_sources(dimension)
+            .into_iter()
+            .map(|source| {
+                source.filter(|source| {
+                    self.document
+                        .get_entity(*source)
+                        .is_some_and(|entity| entity.common().owner_handle == owner)
+                })
+            })
+            .collect();
+        self.detach_dimension_association(dimension);
+        if sources.iter().any(Option::is_some) {
+            self.attach_dimension_association(dimension, sources);
+        }
+        self.bump_entities(&[(dimension, ChangeKind::Modified)]);
+        true
+    }
+
     pub(crate) fn infer_dimension_sources(&self, dimension: Handle) -> Vec<Option<Handle>> {
         let Some(EntityType::Dimension(entity)) = self.document.get_entity(dimension) else {
             return Vec::new();
@@ -1973,14 +2173,38 @@ impl Scene {
             .collect()
     }
 
-    pub(crate) fn refresh_associative_dimensions(
+    /// Whether the drawing holds any DIMASSOC dimension association.
+    ///
+    /// Settled with one pass over `document.objects` and cached: creating an
+    /// association sets it to `true`, and a coarse structural change
+    /// (`Scene::bump_geometry`) re-opens the question. Most drawings have
+    /// none, so their per-edit refreshes stop scanning the object graph.
+    fn dimension_associations_possible(&self) -> bool {
+        if let Some(known) = self.has_dimension_associations.get() {
+            return known;
+        }
+        let any = self.document.objects.values().any(|object| {
+            matches!(
+                object,
+                ObjectType::Associative(associative)
+                    if matches!(associative.data, AssociativeData::DimensionAssociation(_))
+            )
+        });
+        self.has_dimension_associations.set(Some(any));
+        any
+    }
+
+    /// `doc(hidden)` public only so `benches/dimension_association_refresh.rs`
+    /// can time the real per-edit production entry point.
+    #[doc(hidden)]
+    pub fn refresh_associative_dimensions(
         &mut self,
         changes: &[(Handle, ChangeKind)],
     ) -> Vec<(Handle, ChangeKind)> {
-        let changed: rustc_hash::FxHashSet<_> = changes.iter().map(|(handle, _)| *handle).collect();
-        if changed.is_empty() {
+        if changes.is_empty() || !self.dimension_associations_possible() {
             return Vec::new();
         }
+        let changed: rustc_hash::FxHashSet<_> = changes.iter().map(|(handle, _)| *handle).collect();
         let associations: Vec<_> = self
             .document
             .objects
@@ -2557,6 +2781,37 @@ mod tests {
             .iter()
             .any(|(handle, before)| *handle == association && before.is_some()));
     }
+
+    #[test]
+    fn dimension_association_gate_tracks_creation_and_reset() {
+        let mut scene = Scene::new();
+        assert!(
+            !scene.dimension_associations_possible(),
+            "a fresh drawing holds no DIMASSOC association"
+        );
+
+        let circle = scene.add_entity(EntityType::Circle(Circle::from_center_radius(
+            Vector3::ZERO,
+            5.0,
+        )));
+        let dimension = scene.add_entity(EntityType::Dimension(Box::new(Dimension::Diameter(
+            DimensionDiameter::new(Vector3::new(5.0, 0.0, 0.0), Vector3::new(-5.0, 0.0, 0.0)),
+        ))));
+        scene.attach_dimension_association(dimension, vec![Some(circle)]);
+        assert!(
+            scene.dimension_associations_possible(),
+            "creating an association must open the refresh path in this session"
+        );
+
+        // A coarse structural bump re-opens the question; the association is
+        // still there, so the answer stays true.
+        scene.bump_geometry();
+        assert!(scene.dimension_associations_possible());
+
+        // Detaching the association settles the answer back to false.
+        assert!(scene.detach_dimension_association(dimension));
+        assert!(!scene.dimension_associations_possible());
+    }
 }
 
 /// Average displacement of the dimension's resolved definition points.
@@ -2672,7 +2927,7 @@ fn feature_reference(
 }
 
 fn persisted_measurement_scale(
-    doc: &codec::CadDocument,
+    doc: &codec::Document,
     entity: &EntityType,
 ) -> Option<MeasurementScale> {
     use crate::entities::dim_override;
@@ -2720,7 +2975,7 @@ fn persisted_measurement_scale(
 /// made by earlier releases kept their source's association this way, which
 /// the reference application reports as a damaged drawing. Returns how many
 /// reactors were dropped.
-pub(crate) fn drop_stray_dimension_reactors(document: &mut codec::CadDocument) -> usize {
+pub(crate) fn drop_stray_dimension_reactors(document: &mut codec::Document) -> usize {
     let associations: rustc_hash::FxHashMap<Handle, (Handle, Vec<Handle>)> = document
         .objects
         .iter()

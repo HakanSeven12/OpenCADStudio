@@ -4,7 +4,7 @@
 use crate::io::plot_style::PlotStyleTableExt as _;
 use codec::tables::LineType;
 use codec::types::{Color as AcadColor, LineWeight};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use glam::Mat4;
 use iced::mouse;
 use iced::widget::shader::{self, Viewport};
@@ -168,6 +168,8 @@ pub struct ViewportData {
     /// Point cloud lighting and density for this view: `[mode, source,
     /// drawn fraction, _, light direction x, y, z, _]`.
     pub(in crate::scene) point_cloud_light: [f32; 12],
+    /// Live-section planes clipping the point clouds (`n·p + d >= 0` kept).
+    pub(in crate::scene) point_cloud_clip: Vec<[f64; 4]>,
     pub(in crate::scene) meshes: Arc<Vec<MeshLodSet>>,
     pub(in crate::scene) background_image: Option<crate::scene::model::image_model::DecodedImage>,
     pub(in crate::scene) environment_image: Option<crate::scene::model::image_model::DecodedImage>,
@@ -618,7 +620,21 @@ impl shader::Primitive for Primitive {
                 inner.upload_point_clouds(device, queue, &vp.point_clouds);
                 inner.cached_point_cloud_source = Some(Arc::clone(&vp.point_clouds));
             }
-            inner.set_point_cloud_view(queue, vp.point_cloud_light);
+            // Relative to the eye, as the sprites are positioned.
+            let eye = glam::DVec3::new(
+                vp.uniforms.eye_high[0] as f64 + vp.uniforms.eye_low[0] as f64,
+                vp.uniforms.eye_high[1] as f64 + vp.uniforms.eye_low[1] as f64,
+                vp.uniforms.eye_high[2] as f64 + vp.uniforms.eye_low[2] as f64,
+            );
+            let clip: Vec<[f32; 4]> = vp
+                .point_cloud_clip
+                .iter()
+                .map(|&[x, y, z, d]| {
+                    let offset = glam::DVec3::new(x, y, z).dot(eye) + d;
+                    [x as f32, y as f32, z as f32, offset as f32]
+                })
+                .collect();
+            inner.set_point_cloud_view(queue, vp.point_cloud_light, &clip);
             let text_source_changed = inner
                 .cached_text_source
                 .as_ref()
@@ -741,9 +757,12 @@ impl shader::Primitive for Primitive {
                         self, PersistentWireArena as WireArena,
                     };
                     let const_bgl = inner.wire_const_bgl.as_ref();
-                    let base_ok = vp.wire_patch.as_ref().map_or(false, |(base, patch)| {
-                        inner.wire_arena_id == *base && !patch.changes.is_empty()
-                    });
+                    // A full draw-depth rebuild moves every label, which a patch
+                    // of the changed entities alone would leave stale.
+                    let base_ok = inner.wire_arena_depth_generation == vp.draw_depth_generation
+                        && vp.wire_patch.as_ref().map_or(false, |(base, patch)| {
+                            inner.wire_arena_id == *base && !patch.changes.is_empty()
+                        });
                     let patch = vp.wire_patch.as_ref().map(|(_, patch)| patch);
                     if _perf {
                         crate::perf_record!(
@@ -1004,6 +1023,7 @@ retained_contributors={}",
                             } else {
                                 u64::MAX
                             };
+                        inner.wire_arena_depth_generation = vp.draw_depth_generation;
                         arena_served = true;
                     } else {
                         inner.wire_arena = None;
@@ -1504,6 +1524,9 @@ fn render_signature(
     }
     .hash(&mut h);
     vp.point_cloud_light.map(f32::to_bits).hash(&mut h);
+    for plane in &vp.point_cloud_clip {
+        plane.map(f64::to_bits).hash(&mut h);
+    }
     vp.geometry_epoch.hash(&mut h);
     vp.selection_generation.hash(&mut h);
     vp.selected_sig.hash(&mut h);
@@ -1607,6 +1630,25 @@ fn render_signature(
         v.pos_low[1].to_bits().hash(&mut h);
     }
     h.finish()
+}
+
+/// FROM uses the overlay tracking cadence in pixels, independent of zoom and
+/// annotation / paper-space linetype scaling. GPU wire patterns are world units.
+fn scale_from_guide_dashes(wires: &mut [WireModel], world_per_pixel: f32, linetype_scale: f32) {
+    let raw_scale = world_per_pixel / linetype_scale;
+    let scale = raw_scale.max(1e-6);
+    for wire in wires.iter_mut().filter(|wire| wire.name == "from_guide") {
+        if scale > raw_scale {
+            // Keep GPU dash activation above its epsilon, with equivalent stations.
+            let length = wire.point_world(0, 1.0).distance(wire.point_world(1, 1.0));
+            let station = (length * (scale / raw_scale) as f64) as f32;
+            wire.pattern_stations = vec![0.0, station, station];
+        }
+        wire.pattern_length *= scale;
+        for element in &mut wire.pattern {
+            *element *= scale;
+        }
+    }
 }
 
 /// The overlay Vec is rebuilt by build_primitive even on unrelated UI events.
@@ -1771,6 +1813,27 @@ fn physical_viewport(rect: Rectangle, window: Size<u32>) -> PhysicalViewport {
 mod preview_signature_tests {
     use super::*;
     use std::hash::Hasher;
+
+    #[test]
+    fn from_guide_uses_tracking_pixel_dashes_at_each_viewport_scale() {
+        use crate::command::CadCommand;
+        let mut command = crate::command::FromPointCommand::new(None);
+        command.on_point(glam::DVec3::ZERO);
+        for world_per_pixel in [1e-8_f32, 0.001, 1.0, 10000.0] {
+            for linetype_scale in [0.25_f32, 1.0, 16.0] {
+                let mut wires = command.on_preview_wires(glam::DVec3::new(100.0, 0.0, 0.0));
+                scale_from_guide_dashes(&mut wires, world_per_pixel, linetype_scale);
+                let guide = &wires[0];
+                let station_scale = guide.pattern_stations.get(1).copied().unwrap_or(100.0) / 100.0;
+                let pixels = |world: f32| world * linetype_scale / world_per_pixel / station_scale;
+                assert!((pixels(guide.pattern_length) - 10.0).abs() < 1e-4);
+                assert!((pixels(guide.pattern[0]) - 6.0).abs() < 1e-4);
+                assert!((pixels(guide.pattern[1]) + 4.0).abs() < 1e-4);
+                assert!(guide.pattern[1].abs() * linetype_scale >= world_per_pixel);
+                assert!(guide.dash_from_start);
+            }
+        }
+    }
 
     fn signature(wires: &[WireModel]) -> u64 {
         let mut h = rustc_hash::FxHasher::default();
@@ -3372,6 +3435,15 @@ impl Scene {
         (final_color, pl, pat, lw, aci)
     }
 
+    /// Whether lines are drawn at their lineweights on screen. `$LWDISPLAY`
+    /// decides it in model space and in every layout alike: a layout that
+    /// displays plot styles takes its lineweights from the style table, but
+    /// AutoCAD and DWG TrueView still draw them hairline while LWDISPLAY is
+    /// off.
+    pub(crate) fn lineweights_on_screen(&self) -> bool {
+        self.document.header.lineweight_display
+    }
+
     fn display_plot_style(&self) -> Option<Arc<crate::io::plot_style::PlotStyleTable>> {
         if self.current_layout == "Model" {
             return None;
@@ -3612,7 +3684,7 @@ impl Scene {
 
 /// Whether an entity sits on a locked layer (via the document's layer table).
 /// Document-only so it is safe from the parallel tessellation path.
-pub(in crate::scene) fn layer_locked(document: &CadDocument, e: &EntityType) -> bool {
+pub(in crate::scene) fn layer_locked(document: &Document, e: &EntityType) -> bool {
     document
         .layers
         .get(&e.common().layer)
@@ -3625,14 +3697,14 @@ pub(in crate::scene) fn layer_locked(document: &CadDocument, e: &EntityType) -> 
 /// Resolves the effective linetype name for an entity, falling back to the
 /// layer's linetype when the entity's own linetype is "ByLayer".
 pub(in crate::scene) fn linetype_name_for<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     e: &'a EntityType,
 ) -> &'a str {
     linetype_name_for_viewport(document, e, None)
 }
 
 pub(crate) fn linetype_name_for_common_viewport<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     common: &'a codec::entities::EntityCommon,
     viewport: Option<Handle>,
 ) -> &'a str {
@@ -3667,7 +3739,7 @@ pub(crate) fn linetype_name_for_common_viewport<'a>(
 }
 
 pub(in crate::scene) fn linetype_name_for_viewport<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     e: &'a EntityType,
     viewport: Option<Handle>,
 ) -> &'a str {
@@ -3677,7 +3749,7 @@ pub(in crate::scene) fn linetype_name_for_viewport<'a>(
 /// Returns `(entity_color, pattern_length, pattern, line_weight_px, aci)` for
 /// an entity, resolving ByLayer color and linetype from the document.
 pub(in crate::scene) fn render_style_for(
-    document: &CadDocument,
+    document: &Document,
     e: &EntityType,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
     render_style_for_viewport(document, e, None)
@@ -3710,7 +3782,7 @@ pub(crate) fn pack_layer_override_color(color: &AcadColor) -> Option<i32> {
 }
 
 fn viewport_override(
-    document: &CadDocument,
+    document: &Document,
     layer_name: &str,
     viewport: Option<Handle>,
     kind: codec::objects::KnownXRecordKind,
@@ -3724,7 +3796,7 @@ fn viewport_override(
 }
 
 pub(crate) fn render_style_for_common_viewport(
-    document: &CadDocument,
+    document: &Document,
     common: &codec::entities::EntityCommon,
     viewport: Option<Handle>,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
@@ -3833,7 +3905,7 @@ pub(crate) fn render_style_for_common_viewport(
 }
 
 pub(crate) fn render_style_for_viewport(
-    document: &CadDocument,
+    document: &Document,
     e: &EntityType,
     viewport: Option<Handle>,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
@@ -3841,7 +3913,7 @@ pub(crate) fn render_style_for_viewport(
 }
 
 pub(crate) fn has_resolved_book_color_common(
-    document: &CadDocument,
+    document: &Document,
     common: &codec::entities::EntityCommon,
 ) -> bool {
     common
@@ -3851,7 +3923,7 @@ pub(crate) fn has_resolved_book_color_common(
         .is_some_and(|object| matches!(object, codec::objects::ObjectType::BookColor(_)))
 }
 
-pub(crate) fn has_resolved_book_color(document: &CadDocument, e: &EntityType) -> bool {
+pub(crate) fn has_resolved_book_color(document: &Document, e: &EntityType) -> bool {
     has_resolved_book_color_common(document, e.common())
 }
 
@@ -3882,12 +3954,12 @@ pub(crate) fn lineweight_to_px(lw: &LineWeight) -> f32 {
 /// reference's layer through this. Color is returned RAW (background adaptation
 /// happens at emit time). Falls back to white / Continuous / 1 px when the
 /// layer is missing.
-pub(crate) fn layer_render_style(document: &CadDocument, layer_name: &str) -> InheritStyle {
+pub(crate) fn layer_render_style(document: &Document, layer_name: &str) -> InheritStyle {
     layer_render_style_viewport(document, layer_name, None)
 }
 
 pub(crate) fn layer_render_style_viewport(
-    document: &CadDocument,
+    document: &Document,
     layer_name: &str,
     viewport: Option<Handle>,
 ) -> InheritStyle {
@@ -3994,7 +4066,7 @@ pub(crate) fn is_effective_layer_zero(layer_name: &str) -> bool {
 /// *layer* style (`l0`). Explicit properties always win. Call this for
 /// exploded block sub-entities so color/linetype/lineweight propagate right.
 pub(crate) fn render_style_for_block_sub(
-    document: &CadDocument,
+    document: &Document,
     e: &EntityType,
     insert_color: [f32; 4],
     insert_pat_len: f32,
@@ -4015,7 +4087,7 @@ pub(crate) fn render_style_for_block_sub(
 }
 
 pub(crate) fn render_style_for_block_sub_viewport(
-    document: &CadDocument,
+    document: &Document,
     e: &EntityType,
     insert_color: [f32; 4],
     insert_pat_len: f32,
@@ -4231,6 +4303,7 @@ impl Scene {
         if self.selected.is_empty()
             && self.hover_highlight.is_none()
             && self.constraint_hover_highlights.is_empty()
+            && self.box_hover_highlights.is_empty()
         {
             return Arc::new(Vec::new());
         }
@@ -4831,7 +4904,7 @@ impl Scene {
         } else {
             Vec::new()
         };
-        let preview_wires = if !show_live_overlay
+        let mut preview_wires = if !show_live_overlay
             || (self.interim_wire.is_none()
                 && self.preview_wires.is_empty()
                 && self.constraint_hover_wires.is_empty()
@@ -4889,15 +4962,7 @@ impl Scene {
             width: full.width.max(1.0),
             height: full.height.max(1.0),
         };
-        let display_plot_lineweights = self.current_layout != "Model"
-            && self.effective_plot_settings().is_some_and(|settings| {
-                settings.flags.show_plot_styles && settings.flags.print_lineweights
-            });
-        let mut uniforms = Uniforms::new(
-            &inst.camera,
-            full_bounds,
-            self.document.header.lineweight_display || display_plot_lineweights,
-        );
+        let mut uniforms = Uniforms::new(&inst.camera, full_bounds, self.lineweights_on_screen());
         if self.current_layout == "Model" {
             uniforms.lineweight_scale = -self.model_lineweight_scale;
         } else {
@@ -4906,11 +4971,16 @@ impl Scene {
             uniforms.lineweight_scale = paper_units_per_mm / paper_per_pixel / MM_TO_PX;
         }
 
-        // Model space: scale linetypes using the current annotation scale so their
-        // appearance can match a paper-space viewport at the same drawing scale.
+        // Model space: scale linetypes by the current annotation scale's ratio
+        // (1:100 draws them 100 times longer) so they match a paper-space
+        // viewport at that scale. The ratio alone: a linetype is defined in
+        // drawing units, so the paper-millimetre conversion that
+        // `annotation_scale` carries shrank a metre drawing's dashes 1000
+        // times, below a pixel, and they drew solid (#2036).
         if self.current_layout == "Model" {
-            if self.annotation_scale.is_finite() && self.annotation_scale > 1e-9 {
-                uniforms.linetype_scale = self.annotation_scale;
+            let ratio = 1.0 / self.document.header.annotation_scale_value;
+            if ratio.is_finite() && ratio > 1e-9 {
+                uniforms.linetype_scale = ratio as f32;
             }
         } else if self.document.header.paper_space_linetype_scaling
             && !inst.paper_sheet
@@ -4924,12 +4994,20 @@ impl Scene {
                 }
             }
         }
+        if preview_wires.iter().any(|wire| wire.name == "from_guide") {
+            scale_from_guide_dashes(
+                Arc::make_mut(&mut preview_wires).as_mut_slice(),
+                uniforms.world_per_pixel,
+                uniforms.linetype_scale,
+            );
+        }
         // Crop the rotation-only RTE view-projection to the visible sub-rect.
         uniforms.view_rot = crop_view_proj(uniforms.view_rot, uo, vo, us, vs);
         uniforms.viewport_size = [visible_w, visible_h];
         uniforms.flat_shade = if flags.flat_shade { 1.0 } else { 0.0 };
         uniforms.transparency_enable = if self.transparency_display { 1.0 } else { 0.0 };
         uniforms.highlight_widen = self.selection_widen;
+        uniforms.edge_rgb = crate::scene::pipeline::uniforms::edge_rgb_bits(self.edge_color);
         uniforms.viewport_background = display.background.base;
         uniforms.view_tone = [display.brightness, display.contrast, 0.0, 0.0];
         uniforms.background_top = display.background.colors[0];
@@ -5044,7 +5122,7 @@ impl Scene {
             self.meshes_for_viewport(inst.handle, &vp_frozen)
         };
         let point_clouds =
-            self.point_clouds_for_viewport(&vp_frozen, inst.paper_sheet || wireframe_2d);
+            self.point_clouds_for_viewport(inst.handle, &vp_frozen, inst.paper_sheet || wireframe_2d);
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each
         // entity's own wire (produced by the tessellator, transformed for
@@ -5174,6 +5252,11 @@ impl Scene {
             hatches,
             wipeout_hatches,
             images,
+            point_cloud_clip: if point_clouds.clouds.is_empty() {
+                Vec::new()
+            } else {
+                self.live_section_clip_planes()
+            },
             point_clouds,
             point_cloud_light,
             meshes,
@@ -5333,7 +5416,7 @@ pub(crate) fn resolve_pattern(
 /// Whether a wire belongs to a Face3D entity, by document handle lookup —
 /// so no changes to WireModel are needed.
 #[allow(dead_code)]
-fn is_face3d_wire(w: &WireModel, document: &codec::CadDocument) -> bool {
+fn is_face3d_wire(w: &WireModel, document: &codec::Document) -> bool {
     w.name
         .parse::<u64>()
         .ok()
@@ -5348,7 +5431,7 @@ fn is_face3d_wire(w: &WireModel, document: &codec::CadDocument) -> bool {
 #[allow(dead_code)]
 fn split_face3d_wires(
     wires: &[WireModel],
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> (Vec<WireModel>, Vec<WireModel>) {
     let face3d_handles: rustc_hash::FxHashSet<u64> = document
         .entities()
@@ -5398,8 +5481,8 @@ mod layer0_inherit_tests {
 
     // ACI: 1 = red, 3 = green, 7 = white. Distinct, so the assertions below
     // can tell "inherited the insert layer" from "kept layer 0".
-    fn doc() -> CadDocument {
-        let mut d = CadDocument::new();
+    fn doc() -> Document {
+        let mut d = Document::new();
         let mut walls = Layer::new("Walls");
         walls.color = Color::Index(1); // red
         d.layers.add_or_replace(walls);
@@ -5419,7 +5502,7 @@ mod layer0_inherit_tests {
         EntityType::Line(l)
     }
 
-    fn resolve(d: &CadDocument, e: &EntityType, ins: [f32; 4]) -> [f32; 4] {
+    fn resolve(d: &Document, e: &EntityType, ins: [f32; 4]) -> [f32; 4] {
         // Insert sits on "Walls"; its layer style is the layer-0 target.
         let l0 = layer_render_style(d, "Walls");
         render_style_for_block_sub(d, e, ins, l0.pat_len, l0.pat, l0.lw_px, l0).0
@@ -5537,6 +5620,25 @@ mod layer0_inherit_tests {
         assert_eq!(color[3], 1.0);
     }
 
+    /// A layout that displays plot styles and plots lineweights still draws
+    /// hairlines while LWDISPLAY is off, as AutoCAD 2025 does on such a
+    /// drawing; turning LWDISPLAY on shows the lineweights.
+    #[test]
+    fn displayed_plot_styles_do_not_turn_lineweights_on() {
+        let mut scene = Scene::new();
+        scene.set_current_layout("Layout1".into());
+        let mut settings = scene.effective_plot_settings().expect("layout settings");
+        settings.current_style_sheet = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        settings.flags.show_plot_styles = true;
+        settings.flags.print_lineweights = true;
+        assert!(scene.set_layout_plot_settings("Layout1", &settings));
+
+        scene.document.header.lineweight_display = false;
+        assert!(!scene.lineweights_on_screen());
+        scene.document.header.lineweight_display = true;
+        assert!(scene.lineweights_on_screen());
+    }
+
     /// Displayed plot styles recolour a repeated block's stubbed copies too,
     /// not only its first copy. (#2030)
     #[test]
@@ -5639,7 +5741,7 @@ mod layer0_inherit_tests {
 
     #[test]
     fn split_face3d_wires_correctness_and_parity() {
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let face = codec::entities::Face3D::new(
             codec::types::Vector3::new(0.0, 0.0, 0.0),
             codec::types::Vector3::new(10.0, 0.0, 0.0),

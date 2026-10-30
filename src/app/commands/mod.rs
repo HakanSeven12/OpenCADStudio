@@ -8,12 +8,21 @@ mod attman;
 mod block_cmdline;
 mod blocks;
 mod blockvars;
+mod center_vars;
+mod purge;
+pub(crate) use purge::purge_pass;
 mod block_editor_vars;
 mod bvisibility;
 mod count;
 mod dash;
 mod dgn_import;
 mod dim;
+mod dim_cmd;
+mod dim_inspect;
+mod dim_layer;
+mod layer_variable;
+pub(crate) mod extraction_eval;
+mod mleader_layer;
 pub(crate) mod display;
 mod draw;
 mod field;
@@ -37,7 +46,11 @@ mod plotvars;
 mod point_cloud;
 mod refedit;
 pub(crate) mod sheet_set;
+mod spell;
 mod styleprops;
+mod text_edit;
+mod table_style_var;
+mod text_layer;
 mod ucsfollow;
 mod view;
 mod view_presets;
@@ -376,6 +389,12 @@ impl OpenCADStudio {
             self.resume_transparent_parent(i);
             return Some(task);
         }
+        // A walk is only a temporary hide, and these commands take ownership of
+        // layer visibility from here on: starting one puts the drawing back
+        // first, so the override never swallows the result it is hiding.
+        if self.tabs[i].layer_walk.is_some() && Self::layer_walk_conflicts_with(cmd) {
+            self.abandon_layer_walk_on(i);
+        }
         // A new command abandons any grip edit and its numeric input.
         let had_pending_grip_input = self.grip_pending.take().is_some();
         let had_active_grip = self.cancel_active_grip_edit();
@@ -450,6 +469,47 @@ impl OpenCADStudio {
             return Some(self.finish_dispatch(cmd));
         }
 
+        // Direct plugin panel toggle command matching
+        let cmd_upper = cmd.trim().to_uppercase();
+        let stripped_cmd = cmd_upper.replace([' ', '_', '-'], "");
+        let panel_match = self.plugin_panels.iter().find_map(|(id, state)| {
+            let matches_cmd = state.def.command.as_deref().map(|c| {
+                let cu = c.to_uppercase();
+                cu == cmd_upper || cu.replace([' ', '_', '-'], "") == stripped_cmd
+            }).unwrap_or(false);
+            let matches_id = {
+                let id_u = id.to_uppercase();
+                id_u == cmd_upper || id_u.replace([' ', '_', '-'], "") == stripped_cmd
+            };
+            let matches_title = {
+                let tu = state.def.title.to_uppercase();
+                tu == cmd_upper || tu.replace([' ', '_', '-'], "") == stripped_cmd
+            };
+            if matches_cmd || matches_id || matches_title {
+                Some((id.clone(), state.def.title.clone()))
+            } else {
+                None
+            }
+        });
+        if let Some((panel_id, title)) = panel_match {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                use ocs_plugin_api::host::HostApi;
+                let mut host = crate::app::plugin_host::HostSession::new(self, i);
+                let toggled = host.toggle_panel(&panel_id, None);
+                if toggled {
+                    self.command_line.push_info(&format!("{title} palette toggled."));
+                    self.tabs[i].last_cmd = Some(cmd.to_string());
+                    self.command_line.record_recent(cmd);
+                    return Some(self.finish_dispatch(cmd));
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = (panel_id, title);
+            }
+        }
+
         // Command families are dispatched in source order (see
         // `dispatch_families`); the first whose `match` arm matches handles it.
         if let Some(t) = self.dispatch_families(cmd, i) {
@@ -498,6 +558,30 @@ impl OpenCADStudio {
     /// `finish_dispatch`), or `None` to defer to the next — equivalent to one
     /// sequential `match` over all arms.
     fn dispatch_families(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+        if let Some(t) = self.dispatch_text_layer(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_dxeval(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_dim_layer(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_table_style_var(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_layer_variable(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_dim_cmd(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_dim_inspect(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_mleader_layer(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_dash(cmd, i) {
             return Some(t);
         }
@@ -552,6 +636,12 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_hyperlink(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_text_edit(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_spell(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_count(cmd, i) {
             return Some(t);
         }
@@ -591,7 +681,8 @@ impl OpenCADStudio {
     /// Shared tail run after a `dispatch_*` family handler whose matched arm
     /// did not early-return. Focuses the command line whenever a command just
     /// became active.
-    fn finish_dispatch(&mut self, cmd: &str) -> Task<Message> {
+    pub(crate) fn finish_dispatch(&mut self, cmd: &str) -> Task<Message> {
+        crate::ui::ribbon::keytip_note_command_finished();
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_some() {
             self.tabs[i].last_cmd = Some(cmd.to_string());
@@ -907,6 +998,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "PERSPECTIVE",
         "GRIDMODE",
         "GRIDUNIT",
+        "QPMODE",
+        "QPLOCATION",
         "ZOOMWHEEL",
         "ZOOMFACTOR",
         "SHORTCUTMENU",
@@ -985,6 +1078,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "TRIMEXTENDMODE",
         "PELLIPSE",
         "SELECTIONCYCLING",
+        "OSNAPZ",
+        "SELECTSIMILARMODE",
         "UCSDETECT",
         "SURFACEASSOCIATIVITY",
         "DGNIMPORTMODE",
@@ -994,6 +1089,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "TXT2MTXTWORDWRAP",
         "TXT2MTXTLINESPACING",
         "FIELDEVAL",
+        "DXEVAL",
         "PDFIMPORTMODE",
         "PDFIMPORTFILTER",
         "PDFIMPORTLAYERS",
@@ -1045,6 +1141,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SELECTIONAREAOPACITY",
         "SELECTIONEFFECT",
         "SELECTIONEFFECTCOLOR",
+        "VSEDGECOLOR",
         "WINDOWSAREACOLOR",
         "WINDOWAREACOLOR",
         "CROSSINGAREACOLOR",
@@ -1087,6 +1184,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "COLORSCHEME",
         "COUNT",
         "DATAEXTRACTION",
+        "-DATAEXTRACTION",
         "DE",
         "DESELALL",
         "DESELECT",
@@ -1132,6 +1230,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "LAYOUTTAB",
         "LAYTHW",
         "LAYUNISO",
+        "LAYWALK",
         "LI",
         "LINETYPE",
         "LIST",
@@ -1410,6 +1509,75 @@ mod marquee_cancel_tests {
         assert_eq!(
             app.tabs[i].active_cmd.as_deref().map(|cmd| cmd.name()),
             Some("LINE")
+        );
+    }
+
+    #[test]
+    fn plugin_panel_toggle_by_command_and_title() {
+        use ocs_plugin_api::dialog::PanelDef;
+        use ocs_plugin_api::host::HostApi;
+
+        let mut app = fresh();
+        let i = app.active_tab;
+
+        // Register a panel
+        let panel_def = PanelDef::new("sample_palette", "Sample Palette")
+            .with_width(360.0)
+            .with_command("SAMPLEPALETTE");
+
+        {
+            let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+            assert!(host.register_panel(panel_def));
+        }
+
+        // Initially panel is registered and not visible
+        assert!(!app.plugin_panels.get("sample_palette").unwrap().visible);
+        assert!(app.command_line.dynamic_commands.contains(&"SAMPLEPALETTE".to_string()));
+
+        // Dispatch SAMPLEPALETTE command to toggle on
+        let _ = app.dispatch_command("SAMPLEPALETTE");
+        assert!(app.plugin_panels.get("sample_palette").unwrap().visible);
+
+        // Dispatch SAMPLEPALETTE command to toggle off
+        let _ = app.dispatch_command("SAMPLEPALETTE");
+        assert!(!app.plugin_panels.get("sample_palette").unwrap().visible);
+
+        // Dispatch with spaces or lowercase "sample palette"
+        let _ = app.dispatch_command("sample palette");
+        assert!(app.plugin_panels.get("sample_palette").unwrap().visible);
+
+        let _ = app.dispatch_command("samplepalette");
+        assert!(!app.plugin_panels.get("sample_palette").unwrap().visible);
+    }
+
+    #[test]
+    fn plugin_show_dialog_opens_modal() {
+        use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogResponse, DialogRow};
+        use ocs_plugin_api::host::HostApi;
+
+        let mut app = fresh();
+        let i = app.active_tab;
+
+        let dialog = DialogDef::new("Test Modal").with_row(DialogRow::single(DialogControl::Text {
+            id: "name".to_string(),
+            label: "Name".to_string(),
+            default: "DefaultVal".to_string(),
+        }));
+
+        {
+            let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+            let resp = host.show_dialog(dialog);
+            assert!(matches!(resp, DialogResponse::Cancelled));
+        }
+
+        assert!(app.plugin_dialog_state.is_some());
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::PluginDialog)
+        );
+        assert_eq!(
+            app.plugin_dialog_state.as_ref().unwrap().title(),
+            "Test Modal"
         );
     }
 }

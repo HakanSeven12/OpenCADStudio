@@ -22,6 +22,8 @@ use crate::command::{CadCommand, CmdResult, DynField, InputKind, WorkingPlane};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
 
+mod alignment;
+
 /// The ribbon's Insert button: its face opens the Blocks palette, its arrow
 /// the gallery of the drawing's blocks.
 pub const GALLERY_ID: &str = "INSERT_GALLERY";
@@ -138,6 +140,8 @@ pub struct InsertBlockCommand {
     preview_origin: DVec3,
     cycle_points: Vec<DVec3>,
     cycle_index: usize,
+    alignment: Option<alignment::InsertionAlignment>,
+    pick_context: Option<crate::command::PointPickContext>,
 }
 
 impl InsertBlockCommand {
@@ -168,6 +172,8 @@ impl InsertBlockCommand {
             preview_origin: DVec3::ZERO,
             cycle_points: vec![DVec3::ZERO],
             cycle_index: 0,
+            alignment: None,
+            pick_context: None,
         }
     }
 
@@ -309,6 +315,8 @@ impl InsertBlockCommand {
         let Some(point) = self.point.take() else {
             return CmdResult::NeedPoint;
         };
+        let (point, rotation) = self.aligned_pose(point, self.scale, self.rotation);
+        self.rotation = rotation;
         let local = self.plane.to_local(point);
         let offset = self.local_offset(self.base);
         let mut ins = Insert::new(
@@ -440,6 +448,18 @@ impl InsertBlockCommand {
 }
 
 impl CadCommand for InsertBlockCommand {
+    fn wants_point_pick_context(&self) -> bool {
+        self.mode != Mode::Paste && (matches!(self.step, Step::Point) || self.point.is_some())
+    }
+    fn set_point_pick_context(&mut self, context: Option<crate::command::PointPickContext>) {
+        self.pick_context = context;
+    }
+    fn refresh_point_pick_scene(&mut self, scene: &crate::scene::Scene) {
+        if self.mode == Mode::Classic {
+            self.preview = scene.block_preview_wires(&self.name);
+        }
+        self.alignment = alignment::InsertionAlignment::from_scene(scene, &self.name, self.plane);
+    }
     fn cycle_insertion_point(&mut self) -> bool {
         if !matches!(self.step, Step::Point)
             || self.mode == Mode::Paste
@@ -868,7 +888,8 @@ impl CadCommand for InsertBlockCommand {
             self.preset_scale[1].unwrap_or(1.0),
             self.preset_scale[2].unwrap_or(1.0),
         ];
-        let (sin, cos) = self.preset_rotation.unwrap_or(0.0).sin_cos();
+        let (pt, rotation) = self.aligned_pose(pt, scale, self.preset_rotation.unwrap_or(0.0));
+        let (sin, cos) = rotation.sin_cos();
         let base = self.preview_origin + self.base;
         let origin = self.plane.to_local(pt);
         let plane = self.plane;

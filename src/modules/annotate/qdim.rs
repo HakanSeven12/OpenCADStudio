@@ -456,15 +456,15 @@ impl CadCommand for QdimCommand {
     fn prompt(&self) -> String {
         match self.step {
             Step::Gathering => {
-                t!("QDIM  Select geometry to dimension (Enter when done):").into_owned()
+                t!("QDIM  Select geometry to dimension:").into_owned()
             }
             Step::Place => {
-                t!("QDIM  Specify dimension line position or choose an option:").into_owned()
+                t!("QDIM  Specify dimension line position, or [Continuous/Staggered/Baseline/Ordinate/Radius/Diameter/datumPoint/Edit/seTtings] <Continuous>:").into_owned()
             }
-            Step::Datum => t!("QDIM  Specify datum point:").into_owned(),
-            Step::Edit => t!("QDIM  Select a point to remove (Enter when done):").into_owned(),
+            Step::Datum => t!("QDIM  Select new datum point:").into_owned(),
+            Step::Edit => t!("QDIM  Indicate dimension point to remove, or [eXit] <eXit>:").into_owned(),
             Step::Settings => {
-                t!("QDIM  Choose extension origin priority [Endpoints/Intersections]:").into_owned()
+                t!("QDIM  Associative dimension priority [Endpoint/Intersection] <Endpoint>:").into_owned()
             }
         }
     }
@@ -478,13 +478,14 @@ impl CadCommand for QdimCommand {
                 CmdOption::new("Ordinate", "ORDINATE"),
                 CmdOption::new("Radius", "RADIUS"),
                 CmdOption::new("Diameter", "DIAMETER"),
-                CmdOption::new("Datum point", "DATUM"),
+                CmdOption::new("datumPoint", "DATUMPOINT"),
                 CmdOption::new("Edit", "EDIT"),
-                CmdOption::new("Settings", "SETTINGS"),
+                CmdOption::new("seTtings", "SETTINGS"),
             ],
+            Step::Edit => vec![CmdOption::new("eXit", "EXIT")],
             Step::Settings => vec![
-                CmdOption::new("Endpoints", "ENDPOINTS"),
-                CmdOption::new("Intersections", "INTERSECTIONS"),
+                CmdOption::new("Endpoint", "ENDPOINT"),
+                CmdOption::new("Intersection", "INTERSECTION"),
             ],
             _ => Vec::new(),
         }
@@ -526,14 +527,18 @@ impl CadCommand for QdimCommand {
                 _ => return Some(CmdResult::NeedPoint),
             }
         }
+        if self.step == Step::Edit && matches!(keyword.as_str(), "X" | "EXIT") {
+            self.step = Step::Place;
+            return Some(CmdResult::NeedPoint);
+        }
         match keyword.as_str() {
             "C" | "CONTINUOUS" => self.mode = Mode::Continuous,
             "S" | "STAGGERED" => self.mode = Mode::Staggered,
             "B" | "BASELINE" => self.mode = Mode::Baseline,
             "O" | "ORDINATE" => self.mode = Mode::Ordinate,
             "R" | "RADIUS" => self.mode = Mode::Radius,
-            "DI" | "DIAMETER" => self.mode = Mode::Diameter,
-            "DA" | "DATUM" | "DATUMPOINT" => {
+            "D" | "DI" | "DIAMETER" => self.mode = Mode::Diameter,
+            "P" | "DA" | "DATUM" | "DATUMPOINT" => {
                 self.step = Step::Datum;
                 return Some(CmdResult::NeedPoint);
             }
@@ -541,7 +546,7 @@ impl CadCommand for QdimCommand {
                 self.step = Step::Edit;
                 return Some(CmdResult::NeedPoint);
             }
-            "SE" | "SETTINGS" => {
+            "T" | "SE" | "SETTINGS" => {
                 self.step = Step::Settings;
                 return Some(CmdResult::NeedPoint);
             }
@@ -579,9 +584,16 @@ impl CadCommand for QdimCommand {
                 self.step = Step::Place;
                 CmdResult::NeedPoint
             }
-            Step::Edit | Step::Datum | Step::Settings => {
+            Step::Edit | Step::Datum => {
                 self.step = Step::Place;
                 CmdResult::NeedPoint
+            }
+            // Settings: Enter keeps the default, Endpoint.
+            Step::Settings => self
+                .on_text_input("ENDPOINT")
+                .unwrap_or(CmdResult::NeedPoint),
+            Step::Gathering => {
+                CmdResult::CancelWithMessage(t!("No objects found to dimension.").into_owned())
             }
             _ => CmdResult::Cancel,
         }

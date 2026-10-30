@@ -431,7 +431,7 @@ pub const SWEEP_EXPRESSION_APP: &str = "OCS_SWEEP_EXPRESSION";
 /// surface's own data, under a registered application, so they are saved
 /// with the drawing).
 pub fn link_sweep_expressions(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     handle: codec::Handle,
     expressions: &[Option<String>; 2],
 ) {
@@ -475,7 +475,7 @@ pub const SWEEP_SOURCES_APP: &str = "OCS_SWEEP_SOURCES";
 /// from, with the options it is swept again with when they change; the
 /// drawing's associative network for it is written on save.
 pub fn link_sweep_sources(
-    document: &mut codec::CadDocument,
+    document: &mut codec::Document,
     surface: codec::Handle,
     profile: codec::Handle,
     path: codec::Handle,

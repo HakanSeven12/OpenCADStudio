@@ -6,8 +6,9 @@
 //   → Returns BatchCopy with a grid of Translate transforms.
 //
 // ARRAYPATH:
-//   Path array: copies placed at equal intervals along a curve/line.
-//   (pending geometry engine support — stub)
+//   Path array: copies placed along a curve/line, aligned to it. Measure
+//   (the default) takes the distance between items, then how many of those
+//   fit; Divide takes a count and spreads it over the whole path.
 //
 // ARRAYPOLAR:
 //   Polar array: copies rotated around a center point by a total angle.
@@ -532,7 +533,16 @@ use std::f64::consts::TAU as FTAU;
 
 enum PathStep {
     SelectPath,
+    /// Divide: the item count, spread over the whole path.
     Count { path_entity: EntityType },
+    /// Measure: the distance between items.
+    Spacing { path_entity: EntityType },
+    /// Measure: how many items, at most as many as the path holds.
+    MeasuredCount {
+        path_entity: EntityType,
+        spacing: f64,
+        maximum: u32,
+    },
 }
 
 pub struct ArrayPathCommand {
@@ -546,6 +556,19 @@ pub struct ArrayPathCommand {
     /// travel direction (a stored arc is always CCW regardless of how it was
     /// drawn, so without this the array could run opposite to expectation).
     pick_pt: DVec3,
+    /// Measure (items a fixed distance apart) rather than Divide.
+    measure: bool,
+    default_spacing: f64,
+    associative: bool,
+    plane: WorkingPlane,
+}
+
+/// The Method option button, labelled with the current method.
+fn method_option(measure: bool) -> crate::command::CmdOption {
+    crate::command::CmdOption {
+        label: crate::t!(if measure { "Method: Measure" } else { "Method: Divide" }).into_owned(),
+        keyword: "M".to_string(),
+    }
 }
 
 impl ArrayPathCommand {
@@ -562,6 +585,137 @@ impl ArrayPathCommand {
             default_count: (defaults::get_array_path_count() as u32)
                 .clamp(2, MAX_ARRAY_ITEMS as u32),
             pick_pt: DVec3::ZERO,
+            measure: defaults::get_array_path_measure() != 0.0,
+            default_spacing: defaults::get_array_path_spacing(),
+            associative: defaults::get_array_assoc() != 0.0,
+            plane: WorkingPlane::default(),
+        }
+    }
+
+    /// Whether the pick chose the path's far end as the start.
+    fn picked_end(&self, entity: &EntityType) -> bool {
+        let Some(curve) = entity_curve(entity) else {
+            return false;
+        };
+        let start = DVec3::from_array(curve.point_at_distance(0.0));
+        let end = DVec3::from_array(curve.point_at_distance(curve.length()));
+        self.pick_pt.distance_squared(end) < self.pick_pt.distance_squared(start)
+    }
+
+    /// The array as an associative path array, when that is on and the
+    /// working plane is the world's.
+    fn associative_result(
+        &self,
+        path_entity: &EntityType,
+        items: u32,
+        spacing: f64,
+    ) -> Option<CmdResult> {
+        (self.associative && world_plane(self.plane)).then(|| CmdResult::AssocArray {
+            handles: self.handles.clone(),
+            spec: crate::scene::assoc_array::AssocArraySpec::Path {
+                path: path_entity.common().handle,
+                items,
+                spacing,
+                divide: !self.measure,
+                reversed: self.picked_end(path_entity),
+            },
+        })
+    }
+
+    /// The step after the path is known, by the current method.
+    fn first_step(&self, path_entity: EntityType) -> PathStep {
+        if self.measure {
+            PathStep::Spacing { path_entity }
+        } else {
+            PathStep::Count { path_entity }
+        }
+    }
+
+    /// The spacing offered at the Measure prompt: the last one used, else
+    /// one and a half times the selection's width, else a fifth of the path.
+    fn offered_spacing(&self, path_entity: &EntityType) -> f64 {
+        if self.default_spacing > 0.0 {
+            return self.default_spacing;
+        }
+        let xs = self
+            .wire_models
+            .iter()
+            .flat_map(|w| w.points.iter())
+            .map(|p| p[0])
+            .filter(|x| x.is_finite());
+        let (lo, hi) = xs.fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), x| {
+            (lo.min(x), hi.max(x))
+        });
+        let width = f64::from(hi - lo);
+        if width.is_finite() && width > 1e-9 {
+            return width * 1.5;
+        }
+        entity_curve(path_entity).map_or(1.0, |curve| curve.length() / 5.0)
+    }
+
+    /// Items `spacing` apart that fit on the path, counting the first.
+    fn measured_maximum(path_entity: &EntityType, spacing: f64) -> u32 {
+        let Some(curve) = entity_curve(path_entity) else {
+            return 1;
+        };
+        let length = curve.length();
+        if !(spacing > 0.0) || !length.is_finite() {
+            return 1;
+        }
+        let along = (length / spacing + 1e-9).floor();
+        // A closed path ends where it starts: the last place is the first.
+        let items = if curve.is_closed() { along } else { along + 1.0 };
+        items.clamp(1.0, MAX_ARRAY_ITEMS as f64) as u32
+    }
+
+    /// `count` points `spacing` apart from the path's start.
+    fn spaced_samples(&self, entity: &EntityType, spacing: f64, count: usize) -> Vec<DVec3> {
+        let Some(curve) = entity_curve(entity) else {
+            return vec![];
+        };
+        let length = curve.length();
+        // Walk from the end nearest the pick, as Divide does.
+        let start_point = curve.point_at_distance(0.0);
+        let end_point = curve.point_at_distance(length);
+        let from_end = self
+            .pick_pt
+            .distance_squared(DVec3::from_array(end_point))
+            < self.pick_pt.distance_squared(DVec3::from_array(start_point));
+        (0..count)
+            .map(|i| {
+                let along = (spacing * i as f64).min(length);
+                let p = curve.point_at_distance(if from_end { length - along } else { along });
+                DVec3::new(p[0], p[1], p[2])
+            })
+            .collect()
+    }
+
+    /// The copies at `pts`, or `Cancel` when there are none.
+    fn result(&self, pts: &[DVec3]) -> CmdResult {
+        let transforms = Self::build_transforms(pts);
+        if transforms.is_empty() {
+            return CmdResult::Cancel;
+        }
+        CmdResult::BatchCopy(self.handles.clone(), transforms)
+    }
+
+    /// The preview points of the current step.
+    fn preview_samples(&self) -> Vec<DVec3> {
+        match &self.step {
+            PathStep::SelectPath => vec![],
+            PathStep::Count { path_entity } => {
+                self.oriented_samples(path_entity, self.default_count as usize)
+            }
+            PathStep::Spacing { path_entity } => {
+                let spacing = self.offered_spacing(path_entity);
+                let count = Self::measured_maximum(path_entity, spacing);
+                self.spaced_samples(path_entity, spacing, count as usize)
+            }
+            PathStep::MeasuredCount {
+                path_entity,
+                spacing,
+                maximum,
+            } => self.spaced_samples(path_entity, *spacing, *maximum as usize),
         }
     }
 
@@ -712,7 +866,31 @@ impl CadCommand for ArrayPathCommand {
             PathStep::Count { .. } => {
                 crate::tf!("ARRAYPATH  Enter item count <{}>:", self.default_count).into_owned()
             }
+            PathStep::Spacing { path_entity } => crate::tf!(
+                "ARRAYPATH  Enter distance between items along path <{}>:",
+                crate::entities::common::format_length(self.offered_spacing(path_entity))
+            )
+            .into_owned(),
+            PathStep::MeasuredCount { maximum, .. } => crate::tf!(
+                "ARRAYPATH  Enter number of items <{}>  [maximum {}]:",
+                maximum,
+                maximum
+            )
+            .into_owned(),
         }
+    }
+
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        match self.step {
+            PathStep::Count { .. } | PathStep::Spacing { .. } => {
+                vec![method_option(self.measure), associative_option(self.associative)]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.plane = plane;
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -720,14 +898,14 @@ impl CadCommand for ArrayPathCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, PathStep::Count { .. })
+        !matches!(self.step, PathStep::SelectPath)
     }
 
     fn dyn_field(&self) -> crate::command::DynField {
-        if matches!(self.step, PathStep::Count { .. }) {
-            crate::command::DynField::Scalar
-        } else {
+        if matches!(self.step, PathStep::SelectPath) {
             crate::command::DynField::Point
+        } else {
+            crate::command::DynField::Scalar
         }
     }
 
@@ -742,9 +920,7 @@ impl CadCommand for ArrayPathCommand {
             .cloned()
         {
             self.pick_pt = pt;
-            self.step = PathStep::Count {
-                path_entity: entity,
-            };
+            self.step = self.first_step(entity);
         }
         CmdResult::NeedPoint
     }
@@ -777,10 +953,79 @@ impl CadCommand for ArrayPathCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if is_associative_keyword(text) && !matches!(self.step, PathStep::SelectPath) {
+            self.associative = !self.associative;
+            defaults::set_array_assoc(f64::from(u8::from(self.associative)));
+            return None;
+        }
+        // M switches the method; DIVIDE / MEASURE name it, for scripts that
+        // cannot know which one was used last.
+        let method = match text.trim().to_ascii_uppercase().as_str() {
+            "M" | "METHOD" | "_M" => Some(!self.measure),
+            "DIVIDE" | "_DIVIDE" => Some(false),
+            "MEASURE" | "_MEASURE" => Some(true),
+            _ => None,
+        };
+        if let Some(measure) = method.filter(|_| {
+            matches!(self.step, PathStep::Count { .. } | PathStep::Spacing { .. })
+        }) {
+            self.measure = measure;
+            defaults::set_array_path_measure(f64::from(u8::from(self.measure)));
+            let path_entity = match std::mem::replace(&mut self.step, PathStep::SelectPath) {
+                PathStep::Count { path_entity } | PathStep::Spacing { path_entity } => path_entity,
+                other => {
+                    self.step = other;
+                    return None;
+                }
+            };
+            self.step = self.first_step(path_entity);
+            return None;
+        }
+        let t = text.trim().replace(',', ".");
+        match &self.step {
+            PathStep::Spacing { path_entity } => {
+                let spacing = if t.is_empty() {
+                    self.offered_spacing(path_entity)
+                } else {
+                    match crate::entities::common::parse_typed_length(&t) {
+                        Some(v) if v.is_finite() && v > 0.0 => v,
+                        _ => return None,
+                    }
+                };
+                self.default_spacing = spacing;
+                defaults::set_array_path_spacing(spacing);
+                let maximum = Self::measured_maximum(path_entity, spacing);
+                self.step = PathStep::MeasuredCount {
+                    path_entity: path_entity.clone(),
+                    spacing,
+                    maximum,
+                };
+                return None;
+            }
+            PathStep::MeasuredCount {
+                path_entity,
+                spacing,
+                maximum,
+            } => {
+                let count = if t.is_empty() {
+                    *maximum
+                } else {
+                    match t.parse::<u32>() {
+                        Ok(v) if v >= 1 => v.min(*maximum),
+                        _ => return None,
+                    }
+                };
+                if let Some(result) = self.associative_result(path_entity, count, *spacing) {
+                    return Some(result);
+                }
+                let pts = self.spaced_samples(path_entity, *spacing, count as usize);
+                return Some(self.result(&pts));
+            }
+            _ => {}
+        }
         let PathStep::Count { path_entity } = &self.step else {
             return None;
         };
-        let t = text.trim().replace(',', ".");
         let count = if t.is_empty() {
             self.default_count
         } else {
@@ -792,19 +1037,15 @@ impl CadCommand for ArrayPathCommand {
             self.default_count = v;
             v
         };
-        let pts = self.oriented_samples(path_entity, count as usize);
-        let transforms = Self::build_transforms(&pts);
-        if transforms.is_empty() {
-            return Some(CmdResult::Cancel);
+        if let Some(result) = self.associative_result(path_entity, count, 0.0) {
+            return Some(result);
         }
-        Some(CmdResult::BatchCopy(self.handles.clone(), transforms))
+        let pts = self.oriented_samples(path_entity, count as usize);
+        Some(self.result(&pts))
     }
 
     fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
-        let PathStep::Count { path_entity } = &self.step else {
-            return vec![];
-        };
-        let pts = self.oriented_samples(path_entity, self.default_count as usize);
+        let pts = self.preview_samples();
         let transforms = Self::build_transforms(&pts);
         transforms
             .iter()
@@ -1153,3 +1394,4 @@ mod item_limit_tests {
         ));
     }
 }
+

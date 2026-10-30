@@ -19,6 +19,10 @@ pub(super) enum Layout {
     Grid,
     /// The icon buttons, then the xref fading switch and amount.
     Reference,
+    /// The icon buttons, then the list of layers new text goes on.
+    TextLayer,
+    /// No buttons: the list of the layer new centre marks and lines go on.
+    CenterLayer,
 }
 
 /// A slide-out tool, with the submenu its arrow opens (empty for a plain
@@ -57,6 +61,8 @@ pub(crate) struct PanelExtras {
     pub dialog: Option<&'static str>,
     /// What the launcher's tooltip calls the dialog.
     pub(super) dialog_label: &'static str,
+    /// The key tip anchor of the dialog launcher.
+    pub(super) launcher: &'static str,
     /// The panel key.
     pub(super) key: &'static str,
     /// The slide-out's dropdown id, which key tips and anchors are keyed on.
@@ -76,11 +82,19 @@ impl PanelExtras {
     pub fn tools(&self) -> impl Iterator<Item = &MoreTool> {
         self.more.iter().flat_map(|group| &group.tools)
     }
+
+    /// Whether the panel has a slide-out: tools, or a list of its own.
+    pub fn has_slide_out(&self) -> bool {
+        self.tools().next().is_some() || self.layout == Layout::CenterLayer
+    }
 }
 
 pub(super) const DRAW_ID: &str = "draw_extension";
 pub(super) const MODIFY_ID: &str = "modify_extension";
 pub(super) const REFERENCE_ID: &str = "reference_extension";
+pub(super) const TEXT_ID: &str = "text_extension";
+pub(super) const DIMENSIONS_ID: &str = "dimensions_extension";
+pub(super) const CENTERLINES_ID: &str = "centerlines_extension";
 
 fn split(
     command: &'static str,
@@ -103,22 +117,32 @@ fn tool(command: &'static str, label: &'static str, icon: &'static [u8]) -> More
     split(command, label, icon, &[])
 }
 
+/// A panel's dialog launcher: the command it runs, what its tooltip calls
+/// the dialog, and its key tip anchor.
+type Dialog = (&'static str, &'static str, &'static str);
+
 /// One slide-out with a single tool group named after the panel.
 fn extras(
     title: &'static str,
     id: &'static str,
     layout: Layout,
-    dialog: Option<(&'static str, &'static str)>,
+    dialog: Option<Dialog>,
     tools: Vec<MoreTool>,
 ) -> PanelExtras {
     PanelExtras {
         more: vec![MoreGroup { title, tools }],
-        dialog: dialog.map(|(command, _)| command),
-        dialog_label: dialog.map_or("", |(_, label)| label),
+        dialog: dialog.map(|(command, _, _)| command),
+        dialog_label: dialog.map_or("", |(_, label, _)| label),
+        launcher: dialog.map_or("", |(_, _, anchor)| anchor),
         key: "",
         id,
         layout,
     }
+}
+
+/// A panel with only a dialog launcher.
+fn launcher_only(id: &'static str, dialog: Dialog) -> PanelExtras {
+    extras("", id, Layout::Grid, Some(dialog), Vec::new())
 }
 
 fn draw_tools() -> Vec<MoreTool> {
@@ -358,7 +382,11 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
                 "Reference",
                 REFERENCE_ID,
                 Layout::Reference,
-                Some(("EXTERNALREFERENCES", "External References")),
+                Some((
+                    "EXTERNALREFERENCES",
+                    "External References",
+                    super::keytips::XREF_LAUNCHER,
+                )),
                 vec![tool(
                     "REFEDIT",
                     "Edit Reference",
@@ -379,6 +407,104 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
                     include_bytes!("../../../assets/icons/landxml.svg"),
                 )],
             ),
+        ),
+        // Scale, then the layer new text goes on (TEXTLAYER).
+        (
+            "annotate/Text",
+            extras(
+                "Text",
+                TEXT_ID,
+                Layout::TextLayer,
+                Some(("STYLE", "Text Style", super::keytips::TEXT_LAUNCHER)),
+                vec![tool(
+                    "SCALETEXT",
+                    "Scale",
+                    include_bytes!("../../../assets/icons/scale.svg"),
+                )],
+            ),
+        ),
+        (
+            "annotate/Dimensions",
+            extras(
+                "Dimensions",
+                DIMENSIONS_ID,
+                Layout::Grid,
+                Some((
+                    "DIMSTYLE",
+                    "Dimension Style",
+                    super::keytips::DIMENSION_LAUNCHER,
+                )),
+                dimension_tools(),
+            ),
+        ),
+        // The layer new centre marks and lines go on (CENTERLAYER).
+        (
+            "annotate/Centerlines",
+            extras(
+                "Centerlines",
+                CENTERLINES_ID,
+                Layout::CenterLayer,
+                None,
+                Vec::new(),
+            ),
+        ),
+        (
+            "annotate/Leaders",
+            launcher_only(
+                "leaders_extension",
+                (
+                    "MLEADERSTYLE",
+                    "Multileader Style",
+                    super::keytips::LEADER_LAUNCHER,
+                ),
+            ),
+        ),
+        (
+            "annotate/Tables",
+            launcher_only(
+                "tables_extension",
+                ("TABLESTYLE", "Table Style", super::keytips::TABLE_LAUNCHER),
+            ),
+        ),
+    ]
+}
+
+fn dimension_tools() -> Vec<MoreTool> {
+    vec![
+        tool(
+            "TOLERANCE",
+            "Tolerance",
+            include_bytes!("../../../assets/icons/tolerance.svg"),
+        ),
+        tool(
+            "DIMEDIT;O",
+            "Oblique",
+            include_bytes!("../../../assets/icons/dim_edit.svg"),
+        ),
+        tool(
+            "DIMTEDIT_ANGLE",
+            "Text Angle",
+            include_bytes!("../../../assets/icons/dim_tedit.svg"),
+        ),
+        tool(
+            "DIMTEDIT_LEFT",
+            "Left Justify",
+            include_bytes!("../../../assets/icons/align_left.svg"),
+        ),
+        tool(
+            "DIMTEDIT_CENTER",
+            "Center Justify",
+            include_bytes!("../../../assets/icons/align_hcenter.svg"),
+        ),
+        tool(
+            "DIMTEDIT_RIGHT",
+            "Right Justify",
+            include_bytes!("../../../assets/icons/align_right.svg"),
+        ),
+        tool(
+            "DIMOVERRIDE",
+            "Override",
+            include_bytes!("../../../assets/icons/dim_style.svg"),
         ),
     ]
 }
@@ -469,7 +595,14 @@ mod tests {
         for command in all().flat_map(|extras| extras.tools()).flat_map(|tool| {
             std::iter::once(tool.command()).chain(tool.options.iter().map(|o| o.0))
         }) {
-            assert!(registered.contains(&command), "{command} is not registered");
+            // A command line answers prompts after `;`; DIMTEDIT_LEFT and
+            // the like are DIMTEDIT with an answer.
+            let verb = command.split(';').next().unwrap_or(command);
+            let base = verb.split('_').next().unwrap_or(verb);
+            assert!(
+                registered.contains(&verb) || registered.contains(&base),
+                "{command} is not registered"
+            );
         }
     }
 

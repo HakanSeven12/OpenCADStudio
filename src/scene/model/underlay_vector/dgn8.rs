@@ -1208,14 +1208,18 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
             105 if u32_at(e, 108) == Some(1) => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
                 let parts = &run[index + 1..(index + 1 + n).min(run.len())];
+                // A large matrix does not fit one element: its values run on
+                // through every data element up to the next header.
                 let data = |family: u32, data_kind: u8, size: usize| {
-                    let d = parts.windows(2).find(|w| {
-                        kind(w[0]) == 101
-                            && u32_at(w[0], 116) == Some(family)
-                            && kind(w[1]) == data_kind
-                    })?[1];
-                    let count = u32_at(d, 104)? as usize;
-                    Some(d.get(120..)?.chunks_exact(size).take(count).collect::<Vec<_>>())
+                    let header = parts
+                        .iter()
+                        .position(|&p| kind(p) == 101 && u32_at(p, 116) == Some(family))?;
+                    let mut values = Vec::new();
+                    for &d in parts[header + 1..].iter().take_while(|&&p| kind(p) == data_kind) {
+                        let count = u32_at(d, 104)? as usize;
+                        values.extend(d.get(120..)?.chunks_exact(size).take(count));
+                    }
+                    (!values.is_empty()).then_some(values)
                 };
                 let (Some(numbers), Some(coords)) = (data(1, 102, 4), data(2, 103, 8)) else {
                     continue;

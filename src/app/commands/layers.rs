@@ -1,5 +1,24 @@
 use super::*;
 
+fn restore_layiso_layer(
+    current: &mut codec::tables::Layer,
+    saved: &crate::app::document::LayisoLayerSnapshot,
+    mode: crate::app::document::LayisoMode,
+) -> bool {
+    let mut changed = false;
+    if current.flags.off == saved.after.flags.off {
+        current.flags.off = saved.before.flags.off;
+        changed = true;
+    }
+    if mode == crate::app::document::LayisoMode::LockAndFade
+        && current.flags.locked == saved.after.flags.locked
+    {
+        current.flags.locked = saved.before.flags.locked;
+        changed = true;
+    }
+    changed
+}
+
 impl OpenCADStudio {
     pub(super) fn dispatch_layers(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
@@ -82,6 +101,16 @@ impl OpenCADStudio {
                     self.command_line
                         .push_info(crate::t!("Layer(s) frozen.").as_ref());
                 }
+            }
+
+            // LAYWALK — the non-modal layer walk. The pallet is the whole
+            // command: a second LAYWALK closes the one it just opened, the way
+            // the ribbon button toggles it.
+            "LAYWALK" => return Some(self.toggle_layer_walk()),
+            // The follow-up to the pallet's *Select Objects* button: the pick
+            // relaunches this name once the objects are in hand.
+            "LAYWALK_SELECT" => {
+                self.walk_picked_objects();
             }
 
             // DWGUNITS — change what one drawing unit measures, and convert the
@@ -402,7 +431,9 @@ impl OpenCADStudio {
                             dl.lock();
                         }
                     }
-                    // Layer locking changes editability only.
+                    // Layer locking changes the Model-view display colour as
+                    // well as editability, including block dependencies.
+                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -515,7 +546,9 @@ impl OpenCADStudio {
                             dl.unlock();
                         }
                     }
-                    // Layer unlocking changes editability only.
+                    // Layer unlocking restores the Model-view display colour
+                    // as well as editability, including block dependencies.
+                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -525,43 +558,38 @@ impl OpenCADStudio {
                 }
             }
 
-            // LAYISO — turn off all layers except those used by selected entities
-            "LAYISO" => {
-                let sel_layers: rustc_hash::FxHashSet<String> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .map(|(_, e)| e.common().layer.clone())
-                    .collect();
-                if sel_layers.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let cmd = SelectObjectsCommand::new("LAYISO");
-                    self.command_line.push_info(&cmd.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(cmd));
-                } else {
-                    let names: Vec<String> = self.tabs[i]
-                        .scene
-                        .document
-                        .layers
-                        .iter()
-                        .filter(|l| !sel_layers.contains(&l.name) && !l.is_off())
-                        .map(|l| l.name.clone())
-                        .collect();
-                    let undo = self.begin_layer_undo(i, "LAYISO", &names);
-                    for name in &names {
-                        if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
-                            dl.turn_off();
-                        }
-                    }
-                    self.tabs[i].layiso_turned_off = Some(names.clone());
-                    self.tabs[i].scene.invalidate_layer_visibility(&names);
-                    self.tabs[i].dirty = true;
-                    self.commit_layer_undo(i, undo);
-                    self.refresh_layer_panel();
-                    self.command_line.push_info(
-                        crate::tf!("LAYISO: isolated {} layer(s).", sel_layers.len()).as_ref(),
-                    );
-                }
+            // LAYISO — isolate the layers used by the selected entities.
+            "LAYISO" => self.start_layiso(i),
+
+            // LAYISO Settings is kept as a command-line subcommand so it is
+            // available both from the selection prompt and from scripts.
+            "LAYISO SETTINGS" => {
+                use crate::command::KeywordCommand;
+                let command = KeywordCommand::new(
+                    "LAYISO SETTINGS",
+                    "LAYISO  Settings [Off / Lock and Fade]:",
+                    vec![
+                        ("Off", "OFF", None),
+                        ("Lock and Fade", "LOCKANDFADE", None),
+                    ],
+                );
+                self.command_line.push_info(&command.prompt());
+                self.command_line.set_step_options(command.options());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            "LAYISO SETTINGS OFF" => {
+                self.tabs[i].layiso_mode = crate::app::document::LayisoMode::Off;
+                self.command_line
+                    .push_info(crate::t!("LAYISO Settings: Off.").as_ref());
+                self.start_layiso(i);
+            }
+
+            "LAYISO SETTINGS LOCKANDFADE" => {
+                self.tabs[i].layiso_mode = crate::app::document::LayisoMode::LockAndFade;
+                self.command_line
+                    .push_info(crate::t!("LAYISO Settings: Lock and Fade.").as_ref());
+                self.start_layiso(i);
             }
 
             // ISOLATEOBJECTS — hide every object except the current selection
@@ -606,9 +634,12 @@ impl OpenCADStudio {
                 }
             }
 
-            // UNISOLATEOBJECTS — bring back everything hidden by Isolate / Hide
+            // UNISOLATEOBJECTS — bring back everything hidden by Isolate / Hide,
+            // including objects the drawing was saved with as invisible (e.g.
+            // hidden by another CAD program's HIDEOBJECTS).
             "UNISOLATEOBJECTS" => {
-                if self.tabs[i].scene.is_isolation_active() {
+                let session = self.tabs[i].scene.is_isolation_active();
+                if session {
                     let before = self.tabs[i].scene.object_isolation.clone();
                     let selected_before = self.tabs[i].scene.selected.iter().copied().collect();
                     self.tabs[i].scene.end_isolation();
@@ -618,6 +649,21 @@ impl OpenCADStudio {
                         before,
                         selected_before,
                     );
+                }
+                let dirty_before = self.tabs[i].dirty;
+                let originals = self.tabs[i].scene.show_persisted_hidden_objects();
+                let shown = !originals.is_empty();
+                if shown {
+                    self.push_entity_group_history(
+                        i,
+                        "UNISOLATEOBJECTS",
+                        originals,
+                        Vec::new(),
+                        dirty_before,
+                    );
+                    self.tabs[i].dirty = true;
+                }
+                if session || shown {
                     self.command_line
                         .push_info(crate::t!("Isolation ended — all objects shown.").as_ref());
                 } else {
@@ -626,23 +672,48 @@ impl OpenCADStudio {
                 }
             }
 
-            // LAYUNISO — turn back on the layers the last LAYISO turned off
+            // LAYUNISO — restore the last LAYISO state for this drawing.
             "LAYUNISO" => {
-                let Some(names) = self.tabs[i].layiso_turned_off.take() else {
+                let Some(state) = self.tabs[i].layiso_state.clone() else {
                     self.command_line.push_info(
                         crate::t!("LAYUNISO: no layers were isolated by LAYISO.").as_ref(),
                     );
                     return Some(Task::none());
                 };
+                let names: Vec<String> = state
+                    .layers
+                    .iter()
+                    .map(|layer| layer.name.clone())
+                    .collect();
+                let layiso_history_before = self.tabs[i].layiso_state.clone();
+                let history_len = self.tabs[i].history.undo_stack.len();
                 let undo = self.begin_layer_undo(i, "LAYUNISO", &names);
-                for name in &names {
-                    if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
-                        dl.turn_on();
+                let mut changed = Vec::new();
+                for saved in &state.layers {
+                    let Some(current) = self.tabs[i].scene.document.layers.get_mut(&saved.name)
+                    else {
+                        continue;
+                    };
+                    // Restore only fields that still have the value LAYISO
+                    // wrote. This preserves independent edits made after
+                    // LAYISO where the current and saved values differ.
+                    if restore_layiso_layer(current, saved, state.mode) {
+                        changed.push(saved.name.clone());
                     }
                 }
-                self.tabs[i].scene.invalidate_layer_visibility(&names);
-                self.tabs[i].dirty = true;
+                if !changed.is_empty() {
+                    self.tabs[i].scene.invalidate_layer_visibility(&changed);
+                    self.tabs[i].scene.invalidate_layer_dependencies(&changed);
+                    self.tabs[i].dirty = true;
+                }
+                self.tabs[i].layiso_state = None;
                 self.commit_layer_undo(i, undo);
+                self.record_layiso_history(
+                    i,
+                    history_len,
+                    layiso_history_before,
+                    None,
+                );
                 self.refresh_layer_panel();
                 self.command_line
                     .push_info(crate::t!("LAYUNISO: all layers restored.").as_ref());
@@ -801,10 +872,18 @@ impl OpenCADStudio {
 
             "MATCHPROP" => {
                 use crate::modules::draw::properties::match_prop::MatchPropCommand;
+                // One preselected object is the source. Multiple objects are
+                // ambiguous, so keep the explicit source-pick prompt for them.
+                let src = match self.tabs[i].scene.selected_entities().as_slice() {
+                    [(handle, _)] => *handle,
+                    _ => codec::Handle::NULL,
+                };
+                // Consume the preselection so it cannot become a destination.
                 self.tabs[i].scene.deselect_all();
-                let cmd = MatchPropCommand::new();
+                let cmd = MatchPropCommand::new(src);
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
+                self.refresh_active_cmd_preview(i);
             }
 
             "GROUP" => {
@@ -860,6 +939,65 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+}
+
+#[cfg(test)]
+mod layiso_tests {
+    use super::*;
+    use crate::app::document::{LayisoLayerSnapshot, LayisoMode};
+    use codec::tables::Layer;
+    use codec::types::Transparency;
+
+    fn snapshot(before: Layer, after: Layer) -> LayisoLayerSnapshot {
+        LayisoLayerSnapshot {
+            name: before.name.clone(),
+            before,
+            after,
+        }
+    }
+
+    #[test]
+    fn off_mode_restores_an_originally_on_layer() {
+        let before = Layer::new("A");
+        let mut after = before.clone();
+        after.turn_off();
+        let saved = snapshot(before, after.clone());
+
+        assert!(restore_layiso_layer(&mut after, &saved, LayisoMode::Off));
+        assert!(!after.is_off());
+    }
+
+    #[test]
+    fn off_mode_preserves_an_originally_off_layer() {
+        let mut before = Layer::new("A");
+        before.turn_off();
+        let after = before.clone();
+        let mut current = after.clone();
+        let saved = snapshot(before, after);
+
+        assert!(restore_layiso_layer(&mut current, &saved, LayisoMode::Off));
+        assert!(current.is_off());
+    }
+
+    #[test]
+    fn lock_and_fade_restores_only_its_own_fields() {
+        let before = Layer::new("A");
+        let mut after = before.clone();
+        after.lock();
+        after.transparency = Transparency::from_percent(0.5);
+        let saved = snapshot(before, after.clone());
+
+        // An unrelated transparency edit after LAYISO must survive, while
+        // the lock still returns to its original state.
+        after.transparency = Transparency::from_percent(0.2);
+        assert!(restore_layiso_layer(
+            &mut after,
+            &saved,
+            LayisoMode::LockAndFade
+        ));
+        assert!(!after.is_locked());
+        assert_eq!(after.transparency, Transparency::from_percent(0.2));
     }
 }
 
@@ -1184,6 +1322,137 @@ impl OpenCADStudio {
 }
 
 impl OpenCADStudio {
+    fn record_layiso_history(
+        &mut self,
+        i: usize,
+        history_len: usize,
+        before: Option<crate::app::document::LayisoState>,
+        after: Option<crate::app::document::LayisoState>,
+    ) {
+        if self.tabs[i].history.undo_stack.len() == history_len {
+            return;
+        }
+        if let Some(crate::app::document::HistorySnapshot::Delta(delta)) =
+            self.tabs[i].history.undo_stack.last_mut()
+        {
+            delta.layiso_state = Some((before, after));
+        }
+    }
+
+    fn start_layiso(&mut self, i: usize) {
+        let selected_layers: rustc_hash::FxHashSet<String> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(_, entity)| entity.common().layer.clone())
+            .collect();
+
+        if selected_layers.is_empty() {
+            use crate::modules::draw::select::SelectObjectsCommand;
+            let command = SelectObjectsCommand::with_settings(
+                "LAYISO",
+                "LAYISO",
+                "Select objects or [Settings]:",
+                || crate::command::CmdResult::Dispatch("LAYISO SETTINGS".to_string()),
+            );
+            self.command_line.push_info(&command.prompt());
+            self.command_line.set_step_options(command.options());
+            self.tabs[i].active_cmd = Some(Box::new(command));
+            return;
+        }
+
+        self.apply_layiso(i, selected_layers);
+    }
+
+    fn apply_layiso(
+        &mut self,
+        i: usize,
+        selected_layers: rustc_hash::FxHashSet<String>,
+    ) {
+        let mode = self.tabs[i].layiso_mode;
+        let layiso_history_before = self.tabs[i].layiso_state.clone();
+        let current_layer = self.tabs[i].active_layer.clone();
+        let before: Vec<(String, codec::tables::Layer)> = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .map(|layer| (layer.name.clone(), layer.clone()))
+            .collect();
+
+        let names: Vec<String> = before
+            .iter()
+            .filter(|(name, layer)| {
+                !selected_layers.contains(name)
+                    // AutoCAD does not hide the current layer, and layer 0
+                    // is treated as a special protected layer by layer tools.
+                    && name != &current_layer
+                    && name != "0"
+                    && match mode {
+                        crate::app::document::LayisoMode::Off => !layer.is_off(),
+                        crate::app::document::LayisoMode::LockAndFade => !layer.is_locked(),
+                    }
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        let undo = self.begin_layer_undo(i, "LAYISO", &names);
+        for name in &names {
+            if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(name) {
+                match mode {
+                    crate::app::document::LayisoMode::Off => layer.turn_off(),
+                    // A locked layer already draws faded; its saved
+                    // transparency is left alone.
+                    crate::app::document::LayisoMode::LockAndFade => layer.lock(),
+                }
+            }
+        }
+
+        let after_by_name: std::collections::HashMap<_, _> = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .map(|layer| (layer.name.clone(), layer.clone()))
+            .collect();
+        let snapshots = before
+            .into_iter()
+            .filter_map(|(name, before)| {
+                after_by_name
+                    .get(&name)
+                    .cloned()
+                    .map(|after| crate::app::document::LayisoLayerSnapshot {
+                        name,
+                        before,
+                        after,
+                    })
+            })
+            .collect();
+        let layiso_history_after = Some(crate::app::document::LayisoState {
+            mode,
+            layers: snapshots,
+        });
+        self.tabs[i].layiso_state = layiso_history_after.clone();
+
+        if !names.is_empty() {
+            self.tabs[i].scene.invalidate_layer_visibility(&names);
+            self.tabs[i].scene.invalidate_layer_dependencies(&names);
+            self.tabs[i].dirty = true;
+        }
+        let history_len = self.tabs[i].history.undo_stack.len();
+        self.commit_layer_undo(i, undo);
+        self.record_layiso_history(
+            i,
+            history_len,
+            layiso_history_before,
+            layiso_history_after,
+        );
+        self.refresh_layer_panel();
+        self.command_line.push_info(
+            crate::tf!("LAYISO: isolated {} layer(s).", selected_layers.len()).as_ref(),
+        );
+    }
+
     /// Restore the saved layer state `name`, returning how many layers it
     /// touched. Inside a layout viewport the state applies to that viewport
     /// alone: its frozen layers become the viewport's freezes, and colour,
@@ -1191,6 +1460,36 @@ impl OpenCADStudio {
     /// they differ from the layer. Layers the state turns off are frozen in
     /// the viewport; lock and plot have no per-viewport form and apply to the
     /// drawing.
+    /// Give `layer` its own `color` in the layout viewport `viewport`.
+    pub(in crate::app) fn set_layer_viewport_color(
+        &mut self,
+        i: usize,
+        layer: &str,
+        viewport: codec::Handle,
+        color: codec::types::Color,
+    ) {
+        use codec::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
+        let Some(layer) = self.tabs[i].scene.document.layers.get(layer).map(|l| l.handle) else {
+            return;
+        };
+        let Some(packed) = crate::scene::view::render::pack_layer_override_color(&color) else {
+            return;
+        };
+        self.push_undo_snapshot(i, "VP Color".to_string());
+        let scene = &mut self.tabs[i].scene;
+        scene.document.set_layer_viewport_override(
+            layer,
+            Kind::LayerViewportColorOverride,
+            viewport,
+            Value::Int32(packed),
+        );
+        scene.bump_geometry();
+        self.tabs[i].dirty = true;
+        let doc_layers = self.tabs[i].scene.document.layers.clone();
+        let vp_info = self.tabs[i].scene.viewport_list();
+        self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
+    }
+
     pub(in crate::app) fn restore_layer_state_here(&mut self, i: usize, name: &str) -> usize {
         use codec::layer_state::LayerStateMask as Mask;
         use codec::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
@@ -1321,3 +1620,4 @@ impl OpenCADStudio {
         restored
     }
 }
+

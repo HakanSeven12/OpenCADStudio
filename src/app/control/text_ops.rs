@@ -7,7 +7,7 @@
 
 use super::{failure, OpenCADStudio};
 use crate::app::Message;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use iced::Task;
 use serde_json::{json, Value};
 
@@ -608,7 +608,7 @@ fn skip_mtext_paragraph_break(raw: &str, from: usize) -> Option<usize> {
 /// Extracts the plain display text and position for an entity.
 pub fn entity_text_info(
     entity: &EntityType,
-    document: &CadDocument,
+    document: &Document,
 ) -> Option<(String, String, [f64; 3])> {
     // Returns (raw_value, plain_text, [x, y, z])
     match entity {
@@ -734,7 +734,7 @@ fn parse_types_filter(req: &Value) -> Option<Vec<String>> {
     }
 }
 
-fn entity_block_name(doc: &CadDocument, entity_handle: Handle, owner: Handle) -> Option<String> {
+fn entity_block_name(doc: &Document, entity_handle: Handle, owner: Handle) -> Option<String> {
     if let Some(record) = doc.block_records.iter().find(|r| r.handle == owner) {
         return Some(record.name.clone());
     }

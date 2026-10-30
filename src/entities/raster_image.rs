@@ -15,37 +15,11 @@ use crate::scene::text::lff;
 
 // ── Shared geometry helpers ───────────────────────────────────────────────────
 
-/// Compute the four world-space corners of an image/wipeout from its
-/// insertion_point, u_vector, v_vector and pixel size.
-///
-/// Returns (p0, p1, p2, p3) in counter-clockwise order:
-///   p0 = origin
-///   p1 = origin + U*W
-///   p2 = origin + U*W + V*H
-///   p3 = origin + V*H
-fn image_corners(
-    origin: &codec::types::Vector3,
-    u: &codec::types::Vector3,
-    v: &codec::types::Vector3,
-    w: f64,
-    h: f64,
-) -> [[f64; 3]; 4] {
-    let ox = origin.x;
-    let oy = origin.y;
-    let oz = origin.z;
-    let ux = u.x * w;
-    let uy = u.y * w;
-    let uz = u.z * w;
-    let vx = v.x * h;
-    let vy = v.y * h;
-    let vz = v.z * h;
-
-    [
-        [ox, oy, oz],
-        [ox + ux, oy + uy, oz + uz],
-        [ox + ux + vx, oy + uy + vy, oz + uz + vz],
-        [ox + vx, oy + vy, oz + vz],
-    ]
+/// The four world-space corners of an image/wipeout (the codec's
+/// `corners()`) as plain arrays, counter-clockwise from the origin:
+/// origin, +U·W, +U·W+V·H, +V·H.
+fn world_corners(corners: [codec::types::Vector3; 4]) -> [[f64; 3]; 4] {
+    corners.map(|c| [c.x, c.y, c.z])
 }
 
 /// Rectangle border + X diagonals — used as a placeholder for images.
@@ -122,14 +96,8 @@ fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
 // ── RasterImage ───────────────────────────────────────────────────────────────
 
 impl RenderConvertible for RasterImage {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
-        let corners = image_corners(
-            &self.insertion_point,
-            &self.u_vector,
-            &self.v_vector,
-            self.size.x,
-            self.size.y,
-        );
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+        let corners = world_corners(self.corners());
 
         // Helper: pixel-space → world-space point.
         let ox = self.insertion_point.x;
@@ -269,6 +237,7 @@ impl RenderConvertible for RasterImage {
                     oblique: 0.0,
                     tracking: 1.0,
                     bold: false,
+                    aci: None,
                 }),
             });
         }
@@ -286,13 +255,7 @@ impl RenderConvertible for RasterImage {
 
 impl Grippable for RasterImage {
     fn grips(&self) -> Vec<GripDef> {
-        let corners = image_corners(
-            &self.insertion_point,
-            &self.u_vector,
-            &self.v_vector,
-            self.size.x,
-            self.size.y,
-        );
+        let corners = world_corners(self.corners());
         vec![
             square_grip(0, glam::DVec3::from(corners[0])),
             center_grip(1, glam::DVec3::from(corners[1])),
@@ -499,12 +462,6 @@ fn wipeout_is_polygonal(wipeout: &Wipeout) -> bool {
         )
 }
 
-fn wipeout_clip_to_world(wipeout: &Wipeout, point: &codec::types::Vector2) -> [f64; 3] {
-    let x = point.x + wipeout.size.x * 0.5;
-    let y = wipeout.size.y * 0.5 - point.y;
-    wipeout_plane(wipeout).point_at([x, y])
-}
-
 fn wipeout_plane(wipeout: &Wipeout) -> kernel::space::Plane {
     kernel::space::Plane::from_axes(
         [
@@ -520,24 +477,13 @@ fn wipeout_plane(wipeout: &Wipeout) -> kernel::space::Plane {
 fn wipeout_boundary(wipeout: &Wipeout) -> Vec<[f64; 3]> {
     if wipeout_is_polygonal(wipeout) {
         wipeout
-            .clip_boundary_vertices
-            .iter()
-            .map(|point| wipeout_clip_to_world(wipeout, point))
+            .world_boundary_vertices()
+            .into_iter()
+            .map(|point| [point.x, point.y, point.z])
             .collect()
     } else {
-        image_corners(
-            &wipeout.insertion_point,
-            &wipeout.u_vector,
-            &wipeout.v_vector,
-            wipeout.size.x,
-            wipeout.size.y,
-        )
-        .to_vec()
+        world_corners(wipeout.corners()).to_vec()
     }
-}
-
-fn wipeout_axis_length(axis: &codec::types::Vector3, size: f64) -> f64 {
-    (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt() * size.abs()
 }
 
 fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<codec::types::Vector2> {
@@ -549,7 +495,7 @@ fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<codec::ty
 }
 
 impl RenderConvertible for Wipeout {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         let boundary = wipeout_boundary(self);
         let mut pts = boundary.clone();
         if let Some(&first) = pts.first() {
@@ -586,13 +532,7 @@ impl Grippable for Wipeout {
                 })
                 .collect()
         } else {
-            let corners = image_corners(
-                &self.insertion_point,
-                &self.u_vector,
-                &self.v_vector,
-                self.size.x,
-                self.size.y,
-            );
+            let corners = world_corners(self.corners());
             vec![
                 square_grip(0, glam::DVec3::from(corners[0])),
                 center_grip(1, glam::DVec3::from(corners[1])),
@@ -604,8 +544,8 @@ impl Grippable for Wipeout {
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         if wipeout_is_polygonal(self) {
-            if let Some(current) = self.clip_boundary_vertices.get(grip_id).cloned() {
-                let current_world = wipeout_clip_to_world(self, &current);
+            if let Some(current) = self.world_boundary_vertices().get(grip_id) {
+                let current_world = [current.x, current.y, current.z];
                 let new_w = match apply {
                     GripApply::Translate(d) => [
                         current_world[0] + d.x as f64,
@@ -709,8 +649,8 @@ impl PropertyEditable for Wipeout {
         let bg_transparency = self
             .flags
             .contains(codec::entities::WipeoutDisplayFlags::TRANSPARENCY_ON);
-        let width = wipeout_axis_length(&self.u_vector, self.size.x);
-        let height = wipeout_axis_length(&self.v_vector, self.size.y);
+        let width = self.width();
+        let height = self.height();
         let rotation = self.u_vector.y.atan2(self.u_vector.x).to_degrees();
         vec![
             PropSection {
@@ -804,7 +744,7 @@ impl PropertyEditable for Wipeout {
             "wo_oy" => self.insertion_point.y = v,
             "wo_oz" => self.insertion_point.z = v,
             "wo_width" if v > 0.0 => {
-                let current = wipeout_axis_length(&self.u_vector, self.size.x);
+                let current = self.width();
                 if current > 1e-9 {
                     let scale = v / current;
                     self.u_vector.x *= scale;
@@ -813,7 +753,7 @@ impl PropertyEditable for Wipeout {
                 }
             }
             "wo_height" if v > 0.0 => {
-                let current = wipeout_axis_length(&self.v_vector, self.size.y);
+                let current = self.height();
                 if current > 1e-9 {
                     let scale = v / current;
                     self.v_vector.x *= scale;

@@ -163,7 +163,7 @@ Notifications are best-effort: per-process errors are logged, not propagated. Un
 
 ## Shared-memory document views
 
-V3 and V4 avoid cloning the full `CadDocument` over IPC for large reads. The host owns a memory-mapped file; the plugin maps it read-only.
+V3 and V4 avoid cloning the full `Document` over IPC for large reads. The host owns a memory-mapped file; the plugin maps it read-only.
 
 ```mermaid
 sequenceDiagram

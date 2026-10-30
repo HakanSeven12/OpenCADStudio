@@ -37,7 +37,7 @@ impl Scene {
     /// it does not get the first viewport a new layout gets. The paper-space
     /// objects are copied by the caller.
     pub fn copy_layout_page(&mut self, source: &str, name: &str) {
-        let find = |document: &codec::CadDocument, wanted: &str| {
+        let find = |document: &codec::Document, wanted: &str| {
             document.objects.values().find_map(|object| match object {
                 ObjectType::Layout(layout) if layout.name == wanted => Some(layout.clone()),
                 _ => None,
@@ -60,6 +60,26 @@ impl Scene {
                 xdictionary_handle: to.xdictionary_handle,
                 ..from.clone()
             };
+        }
+        // The copy gets its own clone of the source's extension dictionary
+        // (records other tools keep on the layout), as AutoCAD's copy does.
+        if let (Some(root), None) = (from.xdictionary_handle, to.xdictionary_handle) {
+            let none = rustc_hash::FxHashMap::default();
+            let mut created = Vec::new();
+            if let Some(xdict) = Self::clone_xdict_tree(
+                &mut self.document,
+                from.handle,
+                root,
+                to.handle,
+                &none,
+                &none,
+                &mut created,
+            ) {
+                if let Some(ObjectType::Layout(layout)) = self.document.objects.get_mut(&to.handle)
+                {
+                    layout.xdictionary_handle = Some(xdict);
+                }
+            }
         }
         if let Some(EntityType::Viewport(sheet)) = self.document.get_entity(from.viewport).cloned()
         {
@@ -684,5 +704,78 @@ fn config_from_rects(
         ratio: 0.5,
         a: Box::new(C::Pane(first.0)),
         b: Box::new(config_from_rects(rest, region)),
+    }
+}
+
+#[cfg(test)]
+mod copy_layout_page_tests {
+    use super::*;
+    use codec::objects::{Dictionary, XRecord};
+
+    fn layout_xdict(scene: &Scene, name: &str) -> (Handle, Option<Handle>) {
+        scene
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::Layout(layout) if layout.name == name => {
+                    Some((layout.handle, layout.xdictionary_handle))
+                }
+                _ => None,
+            })
+            .expect("layout")
+    }
+
+    #[test]
+    fn copy_gets_its_own_extension_dictionary() {
+        let mut scene = Scene::new();
+        scene.add_layout("Sheet").expect("add source");
+        let (source, _) = layout_xdict(&scene, "Sheet");
+        let root_h = scene.document.allocate_handle();
+        let rec_h = scene.document.allocate_handle();
+        let mut rec = XRecord::named("NOTE");
+        rec.handle = rec_h;
+        rec.owner = root_h;
+        rec.add_string(1, "KEEP_ME");
+        let mut root = Dictionary::new();
+        root.handle = root_h;
+        root.owner = source;
+        root.add_entry("NOTE", rec_h);
+        scene
+            .document
+            .objects
+            .insert(root_h, ObjectType::Dictionary(root));
+        scene
+            .document
+            .objects
+            .insert(rec_h, ObjectType::XRecord(rec));
+        if let Some(ObjectType::Layout(layout)) = scene.document.objects.get_mut(&source) {
+            layout.xdictionary_handle = Some(root_h);
+        }
+
+        scene.add_layout("Copy").expect("add copy");
+        scene.copy_layout_page("Sheet", "Copy");
+
+        let (copy, xdict) = layout_xdict(&scene, "Copy");
+        let xdict = xdict.expect("copy has an extension dictionary");
+        assert_ne!(
+            xdict, root_h,
+            "the copy must not share the source's dictionary"
+        );
+        let Some(ObjectType::Dictionary(dict)) = scene.document.objects.get(&xdict) else {
+            panic!("copied dictionary");
+        };
+        assert_eq!(dict.owner, copy);
+        let (_, rec_copy) = dict
+            .entries
+            .iter()
+            .find(|(k, _)| k == "NOTE")
+            .expect("NOTE");
+        assert_ne!(*rec_copy, rec_h);
+        let Some(ObjectType::XRecord(rec)) = scene.document.objects.get(rec_copy) else {
+            panic!("copied record");
+        };
+        assert_eq!(rec.owner, xdict);
+        assert_eq!(layout_xdict(&scene, "Sheet").1, Some(root_h));
     }
 }

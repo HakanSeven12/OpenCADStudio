@@ -821,7 +821,10 @@ impl CommandLine {
                     let shown = strip_option_listing(&entry.text, &self.step_options);
                     let mut r = row![entry_text(shown)].spacing(6).align_y(iced::Center);
                     for opt in &self.step_options {
-                        let btn = button(text(opt.label.to_uppercase()).size(11))
+                        let label = text(opt.label.to_uppercase())
+                            .size(11)
+                            .wrapping(iced::widget::text::Wrapping::None);
+                        let btn = button(label)
                             .on_press(Message::CommandOptionPick(opt.keyword.clone()))
                             .padding([1, 6])
                             .style(|theme: &Theme, status| {
@@ -847,7 +850,11 @@ impl CommandLine {
                             });
                         r = r.push(btn);
                     }
-                    col.push(container(r).padding([1, 8]))
+                    // Labels stay on one line and the row wraps instead, so a
+                    // long option ("Select Multiple Text") moves to the next
+                    // line rather than being squeezed until its text spills
+                    // out of its border.
+                    col.push(container(r.wrap().vertical_spacing(2.0)).padding([1, 8]))
                 } else {
                     col.push(container(entry_text(entry.text.clone())).padding([1, 8]))
                 }

@@ -16,7 +16,7 @@ const GOLDEN: &str = "/home/hakanseven/Downloads/0718-mbmdmc.dwg";
 
 /// Raw bytes of every annotation-context leaf, sorted so the comparison is
 /// independent of handle ordering/renumbering across the round-trip.
-fn leaf_blobs(doc: &codec::CadDocument) -> Vec<Vec<u8>> {
+fn leaf_blobs(doc: &codec::Document) -> Vec<Vec<u8>> {
     let mut blobs: Vec<Vec<u8>> = doc
         .context_scales
         .keys()

@@ -184,7 +184,7 @@ pub(crate) fn wcs_bounds(solid: &Solid) -> Option<kernel::brep::Aabb> {
 }
 
 impl RenderConvertible for Solid {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         let geometry = solid_geometry(self)?;
         let mut lines = Vec::new();
         for &(start, end) in &geometry.edges {

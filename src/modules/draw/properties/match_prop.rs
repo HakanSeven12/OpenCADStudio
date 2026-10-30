@@ -26,8 +26,9 @@ pub struct MatchPropCommand {
 }
 
 impl MatchPropCommand {
-    pub fn new() -> Self {
-        Self { src: Handle::NULL }
+    /// A single preselected object can supply the source; NULL asks for a pick.
+    pub fn new(src: Handle) -> Self {
+        Self { src }
     }
 
     fn phase1_done(&self) -> bool {

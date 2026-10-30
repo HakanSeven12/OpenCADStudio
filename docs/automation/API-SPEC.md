@@ -151,11 +151,22 @@ connection is closed.
 
 ### 3.5 AI-tool session (`--mcp`)
 
-Exposes four tools — `ocs_sessions`, `ocs_read`, `ocs_execute`, `ocs_capture`
-— with JSON-Schema validated arguments (`ocs_execute` alone accepts all 36
-mutation operations, §6). Session discovery and capability advertisement
-follow the same protocol-1 semantics. Set-up instructions: see the MCP section
-of [`README.md`](README.md).
+Exposes 20 tools with JSON-Schema described arguments. Four are general-purpose
+facades: `ocs_sessions`, `ocs_read`, `ocs_execute` (all 36 mutation operations,
+§6), and `ocs_capture`. Sixteen are intent tools over the same operation paths:
+`ocs_inspect`, `ocs_query`, `ocs_find_text`, `ocs_audit`, `ocs_commands`,
+`ocs_measure`, `ocs_render`, `ocs_run`, `ocs_new`, `ocs_open`, `ocs_save`,
+`ocs_save_verified`, `ocs_select`, `ocs_cancel`, `ocs_undo`, and `ocs_redo`.
+
+Intent tools expose operation arguments directly. `ocs_session_id` is optional
+when exactly one session is available and required to disambiguate several.
+Execute intents make `request_id` optional but pass through a caller-supplied
+value; reuse that value with the identical request for a safe retry. Generated
+IDs do not make autonomous retries safe. `ocs_run` maps `command` to the
+operation's `cmd`. `ocs_render` reuses capture behavior with `view: "extents"`
+as its default. Session discovery, idempotency, validation, task behavior, and
+capability advertisement remain identical to the facade path. Set-up
+instructions: see the MCP section of [`README.md`](README.md).
 
 ---
 
@@ -276,6 +287,31 @@ Result: `{"handles":[…],"created":N,"layers_created":[…]}` → HTTP 201.
 | `entities_delete` | `handles` | Every handle must exist; nothing is erased otherwise (`entity_absent` names them) |
 | `entities_transform` | `handles`, `action`, per-action params | `move`/`copy`: `vector:[dx,dy(,dz)]` (copy returns new handles in `result.created`); `rotate`: `center`, `angle_deg`; `scale`: `center`, `factor` (≠ 0); `mirror`: `axis:[[x1,y1],[x2,y2]]`, optional `copy:true`; `array`: `rows`, `columns`, `row_spacing`, `column_spacing` |
 | `entities_copy_to` | `handles`, `document_id` (target) | Cross-document clone; referenced layer definitions travel along; result `created[]` + `count` |
+
+### 6.3a Node graph — `node_graph`
+
+`{"op":"node_graph","action":…}` drives the active drawing's node graph; every
+action answers with the graph state (`nodes` with their `sections`, ports,
+values, `params`, `outputs` and owned `handles`; `links`; `visible`).
+
+| Action | Fields | Notes |
+|---|---|---|
+| `library` | — | Node types: `objects` (drawing object nodes; `creates:false` for `Object`, which takes any linked object) and `operations` (`type`, `category`, `inputs`, `outputs`) |
+| `state` | — | Default action |
+| `show` / `hide` | — | Panel visibility |
+| `add` | `type`, optional `kind` (`object`/`operation`, needed when a name is both, e.g. `Point`), optional `position:[x,y]` | `result.node` is the new id |
+| `remove` | `node` | Erases the entities an object node made |
+| `connect` | `from:{node,field}`, `to:{node,field}` | `graph_cycle` when it would close a loop; `unknown_port` when a side has no such port |
+| `disconnect` | `to:{node,field}` | |
+| `set` | `node`, `field`, `value` | An input's own value. On object nodes it is written to the entity on every evaluation |
+| `toggle` | `node`, `field` | Folds a section (title or its `section:` port) or a coordinate group |
+| `clear` / `run` | — | Clear starts an empty graph; run re-evaluates |
+| `save` / `load` | `path` | `.ocg` file |
+
+Object node ports: each Properties row by its field, each coordinate group
+(`start_x|start_y|start_z`, a point `{x,y,z}`) and each section header
+(`section:<first field>`, an object of field values). Linking two groups or two
+section ports copies every value across.
 
 ### 6.4 Query and spatial filters — `query`
 

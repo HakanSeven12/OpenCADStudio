@@ -64,7 +64,7 @@ fn shape_marker(
 /// absolute paths are the norm in traded files).
 fn shx_polylines(
     shape: &Shape,
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> Option<crate::scene::text::shx::ShapePolylines> {
     let base = document
         .source_path
@@ -132,7 +132,7 @@ fn shx_polylines(
 }
 
 impl RenderConvertible for Shape {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         // SHAPE insertion point is OCS (planar entity) — map through the
         // arbitrary axis so a mirrored shape's marker lands where it renders.
         let (ox, oy, oz) = crate::scene::view::transform::ocs_point_to_wcs(

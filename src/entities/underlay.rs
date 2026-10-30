@@ -39,7 +39,7 @@ fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
 /// The underlay's definition, when the handle resolves to one.
 pub(crate) fn definition<'a>(
     u: &Underlay,
-    document: &'a codec::CadDocument,
+    document: &'a codec::Document,
 ) -> Option<&'a codec::entities::UnderlayDefinition> {
     match document.objects.get(&u.definition_handle) {
         Some(codec::objects::ObjectType::UnderlayDefinition(d)) => Some(d),
@@ -74,7 +74,7 @@ pub(crate) fn definition_rect(def: &codec::entities::UnderlayDefinition) -> Opti
 }
 
 /// The underlay's page rectangle (see [`definition_rect`]).
-pub(crate) fn page_rect(u: &Underlay, document: &codec::CadDocument) -> Option<[f64; 4]> {
+pub(crate) fn page_rect(u: &Underlay, document: &codec::Document) -> Option<[f64; 4]> {
     definition_rect(definition(u, document)?)
 }
 
@@ -126,7 +126,7 @@ pub(crate) fn is_clipped(u: &Underlay) -> bool {
 }
 
 /// Page frame in world space (CCW from the insertion).
-fn page_quad(u: &Underlay, document: &codec::CadDocument) -> Option<[[f64; 3]; 4]> {
+fn page_quad(u: &Underlay, document: &codec::Document) -> Option<[[f64; 3]; 4]> {
     let [x0, y0, x1, y1] = page_rect(u, document)?;
     Some([
         local_to_world(u, [x0, y0]),
@@ -138,7 +138,7 @@ fn page_quad(u: &Underlay, document: &codec::CadDocument) -> Option<[[f64; 3]; 4
 
 /// Local-space extent of what is shown: the clip polygon's box when clipped
 /// to its inside, else the page.
-fn shown_local_extent(u: &Underlay, document: &codec::CadDocument) -> Option<(f64, f64)> {
+fn shown_local_extent(u: &Underlay, document: &codec::Document) -> Option<(f64, f64)> {
     if is_clipped(u) && !u.clip_inverted {
         let clip = clip_polygon_local(u);
         let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
@@ -153,7 +153,7 @@ fn shown_local_extent(u: &Underlay, document: &codec::CadDocument) -> Option<(f6
 
 /// Width and height the Properties panel shows: the shown extent times the
 /// scale (the clip's size once clipped, as the reference reports it).
-pub(crate) fn shown_size(u: &Underlay, document: &codec::CadDocument) -> Option<(f64, f64)> {
+pub(crate) fn shown_size(u: &Underlay, document: &codec::Document) -> Option<(f64, f64)> {
     shown_local_extent(u, document).map(|(w, h)| (w * u.x_scale.abs(), h * u.y_scale.abs()))
 }
 
@@ -161,7 +161,7 @@ pub(crate) fn shown_size(u: &Underlay, document: &codec::CadDocument) -> Option<
 /// inside, else the page frame. `None` when the page is unknown.
 pub(crate) fn world_bounds(
     u: &Underlay,
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> Option<([f64; 3], [f64; 3])> {
     let outline: Vec<[f64; 3]> = if is_clipped(u) && !u.clip_inverted {
         clip_polygon_local(u)
@@ -244,7 +244,7 @@ pub(crate) fn validate_property(field: &str, value: &str) -> Result<(), &'static
 /// size itself is the page (or clip) size times the scale.
 pub(crate) fn size_to_scale(
     u: &Underlay,
-    document: &codec::CadDocument,
+    document: &codec::Document,
     field: &str,
     value: &str,
 ) -> Option<String> {
@@ -261,7 +261,7 @@ pub(crate) fn size_to_scale(
 // ── RenderConvertible ──────────────────────────────────────────────────────────
 
 impl RenderConvertible for Underlay {
-    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
         let origin = v3(&self.insertion_point);
         let insertion_snap = (
             DVec3::new(

@@ -7,7 +7,7 @@ use crate::scene::block_authoring::{definition_dictionary, DictionaryOwners};
 use crate::scene::model::object::PropValue;
 use codec::objects::{DynamicBlockData, ObjectType};
 use codec::xdata::XDataValue;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::{json, Map, Value};
 
@@ -29,7 +29,7 @@ fn entity_element_id(entity: &EntityType) -> Option<i32> {
 }
 
 fn resolve_visibility_state(
-    doc: &CadDocument,
+    doc: &Document,
     block_members: &FxHashMap<Handle, Vec<Handle>>,
     insert_handle: Handle,
     effective_def: Option<Handle>,
@@ -106,7 +106,7 @@ fn resolve_visibility_state(
 }
 
 /// Precomputed block definition membership map (`BlockRecord` handle -> member entity handles).
-pub(crate) fn build_block_members_map(doc: &CadDocument) -> FxHashMap<Handle, Vec<Handle>> {
+pub(crate) fn build_block_members_map(doc: &Document) -> FxHashMap<Handle, Vec<Handle>> {
     let mut layouts: FxHashSet<Handle> = doc
         .objects
         .values()
@@ -162,7 +162,7 @@ pub(crate) fn build_block_members_map(doc: &CadDocument) -> FxHashMap<Handle, Ve
 /// Resolve an `Insert` entity's effective block name, effective definition `BlockRecord` handle,
 /// and evaluated representation `BlockRecord` handle (e.g. `*U12`).
 pub(crate) fn resolve_effective_block(
-    doc: &CadDocument,
+    doc: &Document,
     insert: &codec::entities::Insert,
 ) -> (String, Option<Handle>, Option<Handle>) {
     let insert_handle = insert.common.handle;
@@ -170,7 +170,7 @@ pub(crate) fn resolve_effective_block(
     let evaluated_record = crate::scene::render_graph::block_record_by_name(doc, raw_name);
     let evaluated_handle = evaluated_record.map(|r| r.handle);
 
-    // 1. Standard dynamic block resolution via CadDocument
+    // 1. Standard dynamic block resolution via Document
     let mut def_handle = doc.dynamic_definition_for_insert(insert_handle);
 
     // 2. Fallback: check AcDbBlockRepBTag on the Insert's XData
@@ -419,7 +419,7 @@ fn is_valid_key_value_pair(line: &str) -> Option<(String, String)> {
 }
 
 fn collect_definition_texts_and_nested_attrs(
-    doc: &CadDocument,
+    doc: &Document,
     block_members: &FxHashMap<Handle, Vec<Handle>>,
     def_handle: Handle,
     depth: u8,
@@ -489,7 +489,7 @@ fn collect_definition_texts_and_nested_attrs(
 /// Extract attributes (`ATTRIB` on insert, `ATTDEF` defaults, and static `TEXT`/`MTEXT` schedule tags)
 /// for a block reference.
 pub(crate) fn extract_block_attributes(
-    doc: &CadDocument,
+    doc: &Document,
     block_members: &FxHashMap<Handle, Vec<Handle>>,
     insert: &codec::entities::Insert,
     effective_def: Option<Handle>,
@@ -629,7 +629,7 @@ fn clean_float(v: f64) -> f64 {
 
 /// Compute world XY bounds for an `Insert` by transforming its visible block definition members.
 fn insert_world_xy_bounds(
-    doc: &CadDocument,
+    doc: &Document,
     block_members: &FxHashMap<Handle, Vec<Handle>>,
     insert: &codec::entities::Insert,
     active_def: Option<Handle>,
@@ -707,7 +707,7 @@ impl OpenCADStudio {
     /// Extract dynamic block properties (parameters, visibility state, lookup choice) for an `Insert`.
     pub(crate) fn extract_dynamic_properties(
         &self,
-        doc: &CadDocument,
+        doc: &Document,
         block_members: &FxHashMap<Handle, Vec<Handle>>,
         tab_id: u64,
         insert_handle: Handle,
@@ -725,7 +725,8 @@ impl OpenCADStudio {
         {
             match prop.value {
                 PropValue::BlockNumber { value, .. } => {
-                    if let Ok(num) = value.parse::<f64>() {
+                    if let Some(num) = crate::app::block_parameter_properties::parse_value(&value)
+                    {
                         dyn_props.insert(prop.label, json!(clean_float(num)));
                     } else {
                         dyn_props.insert(prop.label, json!(value));

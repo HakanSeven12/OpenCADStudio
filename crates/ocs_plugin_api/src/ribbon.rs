@@ -126,6 +126,10 @@ pub enum RibbonItem {
     },
 }
 
+/// A [`RibbonItem::LargeDropdown`] label that shows the icon and name of the
+/// item last chosen, which the face then runs.
+pub const FOLLOW_CHOSEN: &str = "\u{1}";
+
 /// Identifies which style list a `StyleComboGroup` refers to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]

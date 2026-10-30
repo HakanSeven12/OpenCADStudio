@@ -196,6 +196,7 @@ fn call_builtin(name: &str, args: &[f64]) -> Result<f64, ParamError> {
 enum Token {
     Number(f64),
     Ident(String),
+    QuotedIdent(String),
     Plus,
     Minus,
     Star,
@@ -207,8 +208,21 @@ enum Token {
 }
 
 fn tokenize(src: &str) -> Result<Vec<Token>, ParamError> {
+    Ok(tokenize_spanned(src)?
+        .into_iter()
+        .map(|(token, _)| token)
+        .collect())
+}
+
+fn tokenize_spanned(src: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, ParamError> {
     let chars: Vec<char> = src.chars().collect();
     let mut tokens = Vec::new();
+    let mut spans = Vec::new();
+    let offsets: Vec<_> = src
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(src.len()))
+        .collect();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -216,7 +230,32 @@ fn tokenize(src: &str) -> Result<Vec<Token>, ParamError> {
             i += 1;
             continue;
         }
+        let start = i;
         match c {
+            '`' => {
+                i += 1;
+                let mut name = String::new();
+                let mut closed = false;
+                while i < chars.len() {
+                    let ch = chars[i];
+                    i += 1;
+                    if ch == '`' {
+                        if chars.get(i) == Some(&'`') {
+                            name.push('`');
+                            i += 1;
+                        } else {
+                            closed = true;
+                            break;
+                        }
+                    } else {
+                        name.push(ch);
+                    }
+                }
+                if !closed || name.is_empty() || name.chars().any(char::is_control) {
+                    return Err(ParamError::Parse("invalid quoted parameter name".into()));
+                }
+                tokens.push(Token::QuotedIdent(name));
+            }
             '+' => {
                 tokens.push(Token::Plus);
                 i += 1;
@@ -298,8 +337,9 @@ fn tokenize(src: &str) -> Result<Vec<Token>, ParamError> {
             }
             other => return Err(ParamError::Parse(format!("unexpected character '{other}'"))),
         }
+        spans.push(offsets[start]..offsets[i]);
     }
-    Ok(tokens)
+    Ok(tokens.into_iter().zip(spans).collect())
 }
 
 struct Parser<'a> {
@@ -399,6 +439,7 @@ impl<'a> Parser<'a> {
 
     fn parse_primary(&mut self) -> Result<Expr, ParamError> {
         match self.bump() {
+            Some(Token::QuotedIdent(name)) => Ok(Expr::Ref(name)),
             Some(Token::Number(n)) => Ok(Expr::Number(n)),
             Some(Token::Ident(name)) => {
                 if matches!(self.peek(), Some(Token::LParen)) {
@@ -543,6 +584,15 @@ impl ParameterTable {
         if !is_valid_name(name) || is_reserved_name(name) {
             return Err(ParamError::InvalidName(name.to_string()));
         }
+        self.bind_expression(name, source)
+    }
+
+    /// Bind a drawing-owned display name; quoted references can address names
+    /// that are unsuitable as ordinary user-parameter identifiers.
+    pub(crate) fn bind_expression(&mut self, name: &str, source: &str) -> Result<(), ParamError> {
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(ParamError::InvalidName(name.into()));
+        }
         let expr = parse(source)?;
         self.check_no_cycle(name, &expr)?;
         match self.index_of(name) {
@@ -641,6 +691,12 @@ impl ParameterTable {
         let mut cache = HashMap::new();
         let mut stack = Vec::new();
         self.resolve_inner(name, &mut cache, &mut stack)
+    }
+
+    /// Evaluate an expression in this table's existing, cycle-checked namespace.
+    pub(crate) fn evaluate_expression(&self, source: &str) -> Result<f64, ParamError> {
+        let expr = parse(source)?;
+        self.eval(&expr, &mut HashMap::new(), &mut Vec::new())
     }
 
     /// Resolves every parameter, isolating a failure to just the parameters
@@ -960,5 +1016,62 @@ mod tests {
         table.set("z", "3").unwrap(); // redefine, should not move to the end
         let names: Vec<&str> = table.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["z", "a"]);
+    }
+}
+
+/// Rewrite only reference tokens, retaining whitespace, numeric spelling and
+/// function calls. Uses the same lexer/parser as evaluation.
+pub(crate) fn rename_reference(source: &str, old: &str, new: &str) -> Result<String, ParamError> {
+    parse(source)?;
+    let tokens = tokenize_spanned(source)?;
+    let quoted = format!("`{}`", new.replace('`', "``"));
+    let mut result = String::new();
+    let mut cursor = 0;
+    for (index, (token, span)) in tokens.iter().enumerate() {
+        let replacement = match token {
+            Token::QuotedIdent(name) if name == old => Some(quoted.as_str()),
+            Token::Ident(name)
+                if name == old && !matches!(tokens.get(index + 1), Some((Token::LParen, _))) =>
+            {
+                Some(if is_valid_name(new) && !is_reserved_name(new) {
+                    new
+                } else {
+                    &quoted
+                })
+            }
+            _ => None,
+        };
+        if let Some(replacement) = replacement {
+            result.push_str(&source[cursor..span.start]);
+            result.push_str(replacement);
+            cursor = span.end;
+        }
+    }
+    result.push_str(&source[cursor..]);
+    parse(&result)?;
+    Ok(result)
+}
+
+#[cfg(test)]
+mod quoted_reference_tests {
+    use super::*;
+    #[test]
+    fn quoted_formula_references_use_existing_cycle_and_domain_checks() {
+        let mut table = ParameterTable::new();
+        table.bind_expression("A`B", "3").unwrap();
+        assert_eq!(table.evaluate_expression("`A``B`*2").unwrap(), 6.);
+        assert!(table.bind_expression("A`B", "`A``B`+1").is_err());
+        assert!(table.set("Bad name", "1").is_err());
+        assert_eq!(
+            rename_reference("max(e3,1e3) + e30", "e3", "max").unwrap(),
+            "max(`max`,1e3) + e30"
+        );
+        assert_eq!(
+            rename_reference("max(`max`, 2)", "max", "New name").unwrap(),
+            "max(`New name`, 2)"
+        );
+        for bad in ["`", "``", "`a`b", "`a\n`"] {
+            assert!(parse(bad).is_err());
+        }
     }
 }

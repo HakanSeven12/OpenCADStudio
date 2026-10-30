@@ -190,7 +190,7 @@ fn build(l: &Light, r: f64) -> RenderEntity {
 /// available (the caller then falls back to the fixed-world [`to_render`]).
 pub fn relative_render(
     entity: &EntityType,
-    _document: &codec::CadDocument,
+    _document: &codec::Document,
     wpp: Option<f32>,
 ) -> Option<RenderEntity> {
     let EntityType::Light(l) = entity else {
@@ -201,7 +201,7 @@ pub fn relative_render(
 }
 
 impl RenderConvertible for Light {
-    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
         Some(build(self, FIXED_WORLD))
     }
 }

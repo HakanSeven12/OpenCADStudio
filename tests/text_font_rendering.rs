@@ -1,7 +1,7 @@
 use codec::entities::{Insert, MText};
 use codec::tables::{BlockRecord, TextStyle};
 use codec::types::Vector3;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use OpenCADStudio::scene::cache::block_cache::{expand_insert, BlockCache};
 use OpenCADStudio::scene::view::render::InheritStyle;
 use OpenCADStudio::scene::WireModel;
@@ -28,7 +28,7 @@ fn expand_block_mtext(
     mtext_at: Vector3,
     insert_at: Vector3,
 ) -> Vec<WireModel> {
-    let mut doc = CadDocument::new();
+    let mut doc = Document::new();
 
     let mut style = TextStyle::new("SHOP");
     style.font_file = font_file.to_string();

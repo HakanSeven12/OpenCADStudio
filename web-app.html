@@ -7,6 +7,7 @@
     <meta name="robots" content="noindex, follow" />
     <meta name="theme-color" content="#1e1e1e" />
     <title>Open CAD Studio Web App</title>
+    <script id="openaec-analytics-loader" src="https://open-aec.com/shared/analytics.js?v=20261026" defer></script>
     <link data-trunk rel="icon" href="assets/logo.svg" />
     <style>
       html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #1e1e1e; }
@@ -65,11 +66,17 @@
       // worker starts capturing this visit's asset requests as early as
       // possible. sw.js never reloads the page on update: a new worker
       // waits until every tab on the old version has closed.
+      // A sandboxed iframe without allow-same-origin has an opaque origin:
+      // there even reading navigator.serviceWorker throws (#2257).
       (() => {
-        if (!("serviceWorker" in navigator)) return;
-        navigator.serviceWorker.register("sw.js").catch(error => {
-          console.warn("service worker registration failed; offline support disabled:", error);
-        });
+        if (self.origin === "null" || !("serviceWorker" in navigator)) return;
+        try {
+          navigator.serviceWorker.register("sw.js").catch(error => {
+            console.warn("service worker registration failed; offline support disabled:", error);
+          });
+        } catch (error) {
+          console.warn("service worker unavailable; offline support disabled:", error);
+        }
       })();
     </script>
     <script>

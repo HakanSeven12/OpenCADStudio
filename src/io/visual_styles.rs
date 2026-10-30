@@ -102,7 +102,7 @@ fn property(token: &str) -> Option<VisualStyleProperty> {
 
 /// Adds the reference's visual styles to the drawing's ACAD_VISUALSTYLE
 /// dictionary, keeping a style of the same name that is there already.
-pub fn populate_document(document: &mut codec::CadDocument) {
+pub fn populate_document(document: &mut codec::Document) {
     let dictionary = document.header.acad_visualstyle_dict_handle;
     if dictionary.is_null() {
         return;
@@ -145,7 +145,7 @@ pub fn populate_document(document: &mut codec::CadDocument) {
 
 /// The visual styles offered by name (not the internal ones), as the
 /// reference lists them: the 2D wireframe style shows as "2D Wireframe".
-pub fn offered(document: &codec::CadDocument) -> Vec<(String, codec::types::Handle)> {
+pub fn offered(document: &codec::Document) -> Vec<(String, codec::types::Handle)> {
     let Some(ObjectType::Dictionary(entries)) = document
         .objects
         .get(&document.header.acad_visualstyle_dict_handle)

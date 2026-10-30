@@ -418,7 +418,7 @@ impl CadCommand for AreaCommand {
         if self.objects_gathering || self.points.is_empty() {
             return None;
         }
-        let to_render = |p: DVec3| [p.x as f32, p.y as f32, p.z as f32];
+        let to_render = |p: DVec3| p.to_array();
         let mut points = self
             .points
             .iter()
@@ -426,43 +426,14 @@ impl CadCommand for AreaCommand {
             .collect::<Vec<_>>();
         points.push(to_render(point));
         points.push(to_render(self.points[0]));
-        Some(WireModel {
-            bg_adapt: None,
-            point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
-            world_width: 0.0,
-            depth_override: None,
-            display_visible: true,
-            snap_only: false,
-            plot_visible: true,
-            fill_is_3d: false,
-            fill_is_2d_solid: false,
-            render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
-            name: "area_preview".into(),
+        // Preview geometry is f64; `solid_f64` keeps the residual so the
+        // boundary stays on the picked points at UTM-scale coordinates.
+        Some(WireModel::solid_f64(
+            "area_preview".into(),
             points,
-            points_low: Vec::new(),
-            color: WireModel::CYAN,
-            selected: false,
-            pattern_length: 0.0,
-            pattern: [0.0; 8],
-            line_weight_px: 1.0,
-            snap_pts: Vec::new(),
-            tangent_geoms: Vec::new(),
-            aci: 0,
-            key_vertices: Vec::new(),
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            fill_tris: Vec::new(),
-            fill_tris_low: Vec::new(),
-
-            ..Default::default()
-        })
+            WireModel::CYAN,
+            false,
+        ))
     }
 
     fn area_preview_regions(&self) -> Option<Vec<AreaPreviewRegion>> {

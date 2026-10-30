@@ -7,7 +7,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use codec::xdata::ExtendedDataRecord;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 
@@ -83,7 +83,7 @@ impl IpcClient {
 pub struct PluginHostApi {
     client: IpcClient,
     tab_index: usize,
-    document_cache: OnceCell<CadDocument>,
+    document_cache: OnceCell<Document>,
     interactive: InteractiveRegistry,
     next_command_id: Cell<u64>,
     /// Cache XDATA records so repeated reads for the same (handle, app) return
@@ -108,16 +108,16 @@ impl PluginHostApi {
         }
     }
 
-    fn fetch_document(&self) -> CadDocument {
+    fn fetch_document(&self) -> Document {
         match self.client.request(PluginRequest::DocumentSnapshot) {
             Ok(PluginResponse::Document(doc)) => *doc,
             Ok(other) => {
                 eprintln!("[plugin] unexpected DocumentSnapshot response: {other:?}");
-                CadDocument::default()
+                Document::default()
             }
             Err(e) => {
                 eprintln!("[plugin] failed to fetch document snapshot: {e}");
-                CadDocument::default()
+                Document::default()
             }
         }
     }
@@ -128,11 +128,11 @@ impl HostApi for PluginHostApi {
         self.tab_index
     }
 
-    fn document(&self) -> &CadDocument {
+    fn document(&self) -> &Document {
         self.document_cache.get_or_init(|| self.fetch_document())
     }
 
-    fn document_mut(&mut self) -> &mut CadDocument {
+    fn document_mut(&mut self) -> &mut Document {
         if self.document_cache.get().is_none() {
             let doc = self.fetch_document();
             let _ = self.document_cache.set(doc);
@@ -304,6 +304,30 @@ impl HostApi for PluginHostApi {
             label: label.to_string(),
         }) {
             eprintln!("[plugin] push_undo failed: {e}");
+        }
+    }
+
+    fn begin_undo_group(&mut self, label: &str) {
+        if let Err(e) = self.client.request(PluginRequest::BeginUndoGroup {
+            label: label.to_string(),
+        }) {
+            eprintln!("[plugin] begin_undo_group failed: {e}");
+        }
+    }
+
+    fn end_undo_group(&mut self) {
+        if let Err(e) = self.client.request(PluginRequest::EndUndoGroup) {
+            eprintln!("[plugin] end_undo_group failed: {e}");
+        }
+    }
+
+    fn query_entities(&mut self, query: &str) -> Result<crate::host::EntityPage, String> {
+        match self.client.request(PluginRequest::QueryEntities {
+            query: query.to_string(),
+        }) {
+            Ok(PluginResponse::EntityPage(page)) => page,
+            Ok(other) => Err(format!("unexpected QueryEntities response: {other:?}")),
+            Err(e) => Err(format!("QueryEntities failed: {e}")),
         }
     }
 
@@ -707,6 +731,174 @@ impl HostApi for PluginHostApi {
             Ok(PluginResponse::Error(error)) => Err(error),
             Ok(other) => Err(format!("unexpected reference-only response: {other:?}")),
             Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn stage_parametric_chain(
+        &mut self,
+        reference_name: &str,
+        chain: &crate::host::ParametricChain,
+        tolerance: f64,
+    ) -> Result<Vec<Handle>, String> {
+        // API v14: declared chain in, reference-only display handles out.
+        // A staged write mutates the document: the cached snapshot invalidates
+        // like every write path.
+        match self.client.request(PluginRequest::StageParametricChain {
+            reference_name: reference_name.to_string(),
+            chain: chain.clone(),
+            tolerance,
+        }) {
+            Ok(PluginResponse::StageParametricChainResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected parametric staging response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn sample_parametric(
+        &self,
+        chain: &crate::host::ParametricChain,
+        s: f64,
+    ) -> Result<Option<crate::host::ParametricSample>, String> {
+        // API v14: pure evaluation, no write, no cache effect.
+        match self.client.request(PluginRequest::SampleParametric {
+            chain: chain.clone(),
+            s,
+        }) {
+            Ok(PluginResponse::SampleParametricResult(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected parametric sample response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn register_plugin_class(
+        &mut self,
+        _plugin_id: &str,
+        class: &crate::host::PluginClassDeclaration,
+    ) -> Result<(), String> {
+        // API v14: declared class in; session registry state (no document
+        // mutation, no cache effect).
+        match self.client.request(PluginRequest::RegisterPluginClass {
+            class: class.clone(),
+        }) {
+            Ok(PluginResponse::RegisterPluginClassResult(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected class registration response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn stage_plugin_class_instance(
+        &mut self,
+        _plugin_id: &str,
+        instance: &crate::host::PluginClassInstance,
+    ) -> Result<Vec<Handle>, String> {
+        // API v14: identity + design descriptor in, reference-only display
+        // handles out. A staged write mutates the document: the cached
+        // snapshot invalidates like every write path.
+        match self.client.request(PluginRequest::StagePluginClassInstance {
+            instance: instance.clone(),
+        }) {
+            Ok(PluginResponse::StagePluginClassInstanceResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected instance staging response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn plugin_class_instance_properties(
+        &self,
+        handle: Handle,
+    ) -> Result<Vec<crate::host::PluginClassParameterRow>, String> {
+        // API v14: a pure read (the record row stays the values' truth):
+        // no document mutation, no cache effect.
+        match self
+            .client
+            .request(PluginRequest::PluginClassInstanceProperties { handle })
+        {
+            Ok(PluginResponse::PluginClassInstancePropertiesResult(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!(
+                "unexpected class instance properties response: {other:?}"
+            )),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn show_dialog(&mut self, dialog: crate::dialog::DialogDef) -> crate::dialog::DialogResponse {
+        match self.client.request(PluginRequest::ShowDialog(dialog)) {
+            Ok(PluginResponse::DialogResult(res)) => res,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected ShowDialog response: {other:?}");
+                crate::dialog::DialogResponse::Cancelled
+            }
+            Err(e) => {
+                eprintln!("[plugin] ShowDialog request failed: {e}");
+                crate::dialog::DialogResponse::Cancelled
+            }
+        }
+    }
+
+    fn register_panel(&mut self, panel: crate::dialog::PanelDef) -> bool {
+        match self.client.request(PluginRequest::RegisterPanel(panel)) {
+            Ok(PluginResponse::PanelRegistered(b)) => b,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected RegisterPanel response: {other:?}");
+                false
+            }
+            Err(e) => {
+                eprintln!("[plugin] RegisterPanel request failed: {e}");
+                false
+            }
+        }
+    }
+
+    fn update_panel(
+        &mut self,
+        panel_id: &str,
+        values: std::collections::HashMap<String, crate::dialog::DialogValue>,
+    ) -> bool {
+        match self.client.request(PluginRequest::UpdatePanel {
+            panel_id: panel_id.to_string(),
+            values,
+        }) {
+            Ok(PluginResponse::PanelUpdated(b)) => b,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected UpdatePanel response: {other:?}");
+                false
+            }
+            Err(e) => {
+                eprintln!("[plugin] UpdatePanel request failed: {e}");
+                false
+            }
+        }
+    }
+
+    fn toggle_panel(&mut self, panel_id: &str, show: Option<bool>) -> bool {
+        match self.client.request(PluginRequest::TogglePanel {
+            panel_id: panel_id.to_string(),
+            show,
+        }) {
+            Ok(PluginResponse::PanelToggled(b)) => b,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected TogglePanel response: {other:?}");
+                false
+            }
+            Err(e) => {
+                eprintln!("[plugin] TogglePanel request failed: {e}");
+                false
+            }
         }
     }
 }

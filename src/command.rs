@@ -693,12 +693,21 @@ pub struct KeywordCommand {
     /// Keyword a bare Enter dispatches at the verb step (`<Default>` prompts,
     /// e.g. PLAN's `<Current>`). `None` = Enter cancels, as before.
     default: Option<&'static str>,
+    /// Short keys standing for a keyword (`2` → `WIREFRAME2D`), matched
+    /// before the keywords themselves.
+    aliases: &'static [(&'static str, &'static str)],
 }
 
 impl KeywordCommand {
     /// Set the verb a bare Enter dispatches (shown as `<Default>` in prompts).
     pub fn with_default(mut self, kw: &'static str) -> Self {
         self.default = Some(kw);
+        self
+    }
+
+    /// Accept short keys for keywords, as `(key, keyword)` pairs.
+    pub fn with_aliases(mut self, aliases: &'static [(&'static str, &'static str)]) -> Self {
+        self.aliases = aliases;
         self
     }
 
@@ -713,6 +722,7 @@ impl KeywordCommand {
             options,
             pending: None,
             default: None,
+            aliases: &[],
         }
     }
 }
@@ -787,6 +797,11 @@ impl CadCommand for KeywordCommand {
             None => {
                 // A leading underscore marks the English keyword, as in scripts.
                 let t = t.strip_prefix('_').unwrap_or(t);
+                let t = self
+                    .aliases
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(t))
+                    .map_or(t, |(_, keyword)| keyword);
                 let Some((_, keyword, value_prompt)) = match_cmd_option(&self.options, t) else {
                     // Unknown verb — keep prompting rather than dispatch garbage.
                     return Some(CmdResult::NeedPoint);
@@ -1149,6 +1164,83 @@ impl CadCommand for Mid2PointCommand {
 inventory::submit!(CommandRegistration {
     names: &["MTP", "M2P"],
 });
+
+/// Point-entry modifier that returns an offset point to the parked command.
+#[derive(Debug)]
+pub struct FromPointCommand {
+    base: Option<DVec3>,
+    previous_point: Option<DVec3>,
+}
+
+impl FromPointCommand {
+    pub fn new(previous_point: Option<DVec3>) -> Self {
+        Self {
+            base: None,
+            previous_point,
+        }
+    }
+}
+
+impl CadCommand for FromPointCommand {
+    fn name(&self) -> &'static str {
+        "FROM"
+    }
+
+    fn prompt(&self) -> String {
+        crate::t!(if self.base.is_none() {
+            "Base point:"
+        } else {
+            "<Offset>:"
+        })
+        .into_owned()
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if self.base.is_some() {
+            CmdResult::ReturnPoint(pt)
+        } else {
+            self.base = Some(pt);
+            CmdResult::NeedPoint
+        }
+    }
+
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        self.base
+    }
+
+    fn modifier_restore_point(&self) -> Option<Option<DVec3>> {
+        Some(self.previous_point)
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        let Some(base) = self.base else {
+            return Vec::new();
+        };
+        let mut guide = WireModel::solid_f64(
+            "from_guide".to_string(),
+            vec![base.to_array(), pt.to_array()],
+            [0.2, 0.9, 0.5, 1.0],
+            false,
+        );
+        let [dash, gap] = crate::ui::overlay::TRACKING_DASH_PX;
+        guide.pattern_length = dash + gap;
+        guide.pattern = [dash, -gap, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        // The renderer converts the tracking cadence to world units per viewport.
+        guide.dash_from_start = true;
+        guide.set_fixed_screen_width(1.5);
+        vec![guide]
+    }
+}
+
+inventory::submit!(CommandRegistration { names: &["FROM"] });
 
 /// Generic interactive front-end for a keyword command that operates on the
 /// current selection (CHPROP, ADJUST, XDATA, UNDERLAY, DRAWORDER…). If nothing
@@ -1673,9 +1765,27 @@ pub enum DimensionEditOperation {
     Oblique(f64),
 }
 
-#[derive(Clone, Copy)]
+/// What DIMREASSOCIATE moves a dimension's definition points onto.
+#[derive(Clone, Debug)]
+pub enum ReassociateTarget {
+    /// The definition point `index` goes to `point`, on the object there.
+    Point { index: usize, point: DVec3 },
+    /// Both extension line origins go to the ends of a line or arc.
+    Ends(Handle),
+    /// A three-point angle takes an arc's centre and ends.
+    Arc(Handle),
+    /// One of a two-line angle's lines.
+    Line { index: usize, object: Handle },
+    /// A radius or diameter dimension measures this arc or circle.
+    Radial(Handle),
+}
+
+#[derive(Clone)]
 pub enum DimensionBreakOperation {
     Auto,
+    /// Break where the picked objects cross.
+    Objects(Vec<Handle>),
+    /// Break where this one object crosses.
     Object(Handle),
     Manual(DVec3, DVec3),
     Remove,
@@ -1851,16 +1961,23 @@ pub enum CmdResult {
     /// Persist the quick-dimension extension-origin priority while keeping the
     /// active command at its current prompt (0 = endpoints, 1 = intersections).
     SetQuickDimensionSnapPriority(u8),
-    /// Align multileader content points along a picked infinite line.
+    /// MLEADERALIGN: line the multileaders up with `reference` the way
+    /// `mode` says. `from` / `to` are the direction point (twice) or the
+    /// Distribute span's two points.
     AlignMLeaders {
         handles: Vec<Handle>,
+        reference: Option<Handle>,
+        mode: crate::modules::annotate::mleader_edit::MLeaderAlignMode,
+        spacing: f64,
         from: DVec3,
         to: DVec3,
     },
-    /// Merge compatible block multileaders at a picked content point.
+    /// MLEADERCOLLECT: lay the block multileaders out at `point`, one leader
+    /// left for the collection.
     CollectMLeaders {
         handles: Vec<Handle>,
         point: DVec3,
+        layout: crate::modules::annotate::mleader_edit::MLeaderCollectLayout,
     },
     /// Commit a Model-tab 3D solid: the opencadcodec entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded
@@ -1974,6 +2091,12 @@ pub enum CmdResult {
     UpdateEntityAndFinish {
         handle: Handle,
         entity: EntityType,
+    },
+    /// `UpdateEntityAndFinish`, then print `message`.
+    UpdateEntityAndReport {
+        handle: Handle,
+        entity: EntityType,
+        message: String,
     },
     /// Replace / delete multiple entities and add new ones; command ends.
     /// Each pair: (handle_to_erase, replacement_entities) — empty vec = delete only.
@@ -2185,6 +2308,13 @@ pub enum CmdResult {
         source: Handle,
         point: DVec3,
     },
+    /// Attach one smart centre line to two newly selected lines, each given
+    /// with the point it was picked at.
+    ReassociateCenterLine {
+        target: Handle,
+        first: (Handle, DVec3),
+        second: (Handle, DVec3),
+    },
     EditDimensionBreak {
         dimensions: Vec<Handle>,
         operation: DimensionBreakOperation,
@@ -2193,10 +2323,23 @@ pub enum CmdResult {
         dimension: Handle,
         point: Option<DVec3>,
     },
+    /// DIMREASSOCIATE answered one prompt of `dimension`; `last` ends it.
+    ReassociateDimension {
+        dimension: Handle,
+        target: ReassociateTarget,
+        last: bool,
+    },
     SpaceDimensions {
         base: Handle,
         others: Vec<Handle>,
         spacing: Option<f64>,
+    },
+    /// DIM's Distribute: `offset` steps the dimensions away from `base`;
+    /// `None` spaces them evenly between the outermost two.
+    DistributeDimensions {
+        base: Option<Handle>,
+        dimensions: Vec<Handle>,
+        offset: Option<f64>,
     },
     /// Cancel: discard any preview and end the command.
     Cancel,
@@ -2978,6 +3121,9 @@ pub trait CadCommand: Send {
     /// Refreshed for each point input so zoom and viewport changes are reflected.
     fn set_point_pick_context(&mut self, _context: Option<PointPickContext>) {}
 
+    /// Refresh geometry used by scene-aware point placement before input/preview.
+    fn refresh_point_pick_scene(&mut self, _scene: &Scene) {}
+
     /// Called when the user presses Enter (finalize / next option).
     fn on_enter(&mut self) -> CmdResult;
 
@@ -3114,6 +3260,16 @@ pub trait CadCommand: Send {
     }
 
     fn on_editor_display_height(&mut self, _height: f64) {}
+
+    /// Return modal dialog definition if this command requires a GUI dialog.
+    fn modal_dialog(&self) -> Option<ocs_plugin_api::dialog::DialogDef> {
+        None
+    }
+
+    /// Called when a modal dialog is submitted or cancelled.
+    fn on_dialog_response(&mut self, _response: ocs_plugin_api::dialog::DialogResponse) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     /// Called when the user clicks and `needs_entity_pick()` is true.
     /// `handle` is the nearest wire's entity handle (Handle::NULL if nothing found).
@@ -3266,6 +3422,19 @@ pub trait CadCommand: Send {
         vec![]
     }
 
+    /// Every change the command makes while it runs is one undo step: the
+    /// message boundary leaves its history transaction open.
+    fn groups_undo(&self) -> bool {
+        false
+    }
+
+    /// DIM asks how to handle the dimensions `new` was placed over; false
+    /// when the command is at no step that asks (DIM asks at its own prompt
+    /// and in its continued series, not in a baseline series).
+    fn ask_dim_overlap(&mut self, _new: Handle, _others: Vec<Handle>) -> bool {
+        false
+    }
+
     /// Opt in to transient measurement text; unrelated Measurement users keep
     /// their existing command-line-only behavior.
     fn has_measurement_readout(&self) -> bool {
@@ -3282,6 +3451,10 @@ pub trait CadCommand: Send {
     fn on_mouse_move(&mut self, _pt: DVec3) -> Option<WireModel> {
         None
     }
+
+    /// The view's world units per screen pixel, given before the preview
+    /// wires are asked for, for markers drawn at a fixed screen size.
+    fn set_world_per_pixel(&mut self, _world_per_pixel: f64) {}
 
     /// Called on every mouse-move; return all preview wires to show (object ghosts + rubber-band).
     /// Default: forwards to `on_mouse_move` for backwards compatibility.
@@ -3302,7 +3475,7 @@ pub trait CadCommand: Send {
     /// Entities the host draws as the live preview, tessellated like the
     /// drawing's own (arcs, text, linetypes and all). Commands whose preview
     /// changes an entity's shape return edited copies of it here.
-    fn preview_entities(&mut self, _document: &codec::CadDocument, _pt: DVec3) -> Vec<EntityType> {
+    fn preview_entities(&mut self, _document: &codec::Document, _pt: DVec3) -> Vec<EntityType> {
         Vec::new()
     }
 
@@ -3359,6 +3532,13 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// A drawing variable the command sets while it runs (MLEADER's laYer
+    /// option writes MLEADERLAYER): `(name, value)`, written to the drawing
+    /// as soon as it differs from what the drawing holds.
+    fn drawing_variable_update(&self) -> Option<(&'static str, String)> {
+        None
+    }
+
     /// Returns `true` when the active text prompt expects free-form prose
     /// that can legitimately contain whitespace (the body of a TEXT /
     /// MTEXT / DDEDIT entity, a table cell, an attribute default value).
@@ -3395,6 +3575,11 @@ pub trait CadCommand: Send {
         None
     }
     fn block_parameter_grip_id(&self) -> Option<usize> {
+        None
+    }
+
+    /// Non-mutating parameter input for the host's staged geometry preview.
+    fn block_parameter_preview(&self, _cursor: DVec3) -> Option<CmdResult> {
         None
     }
 
@@ -3437,6 +3622,12 @@ pub trait CadCommand: Send {
     /// rest of each completed selection without a word.
     fn selection_entity_filter(&self) -> Option<fn(&EntityType) -> bool> {
         None
+    }
+
+    /// Whether the host says how many objects the entity filter dropped
+    /// (`N were filtered out.`) instead of dropping them silently.
+    fn selection_entity_filter_reports(&self) -> bool {
+        false
     }
 
     /// The command takes block references only (XCLIP): the host drops the
@@ -3595,6 +3786,12 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// Last point to restore when a point modifier is cancelled; outer None
+    /// leaves it unchanged, while Some(None) restores an unset last point.
+    fn modifier_restore_point(&self) -> Option<Option<DVec3>> {
+        None
+    }
+
     /// When true, `update.rs` injects the picked entity before calling
     /// `on_entity_pick` (required when the pick handler reads injected state).
     fn inject_before_entity_pick(&self) -> bool {
@@ -3602,7 +3799,7 @@ pub trait CadCommand: Send {
     }
 
     /// Called by update.rs to inject the cloned entity into commands
-    /// that need to read/modify it (e.g. DIMTEDIT, MLEADERADD, MLEADERREMOVE).
+    /// that need to read/modify it (e.g. DIMTEDIT, MLEADEREDIT).
     /// Default: no-op.
     fn inject_picked_entity(&mut self, _entity: codec::EntityType) {}
 
@@ -3610,7 +3807,7 @@ pub trait CadCommand: Send {
     /// (`CmdResult::UndoDocument`) and the command stays active. Commands
     /// that cache document entities (FILLET, CHAMFER) refresh them here so
     /// the next pick sees the restored geometry. Default: no-op.
-    fn on_document_undone(&mut self, _document: &codec::CadDocument) {}
+    fn on_document_undone(&mut self, _document: &codec::Document) {}
 
     /// Supply the tessellated surface area associated with the picked entity.
     /// Commands that measure mesh-backed objects can opt in without owning the
@@ -3663,6 +3860,11 @@ pub trait CadCommand: Send {
     /// centred. The view projects it with the active camera.
     fn dyn_label_point(&self, _cursor: DVec3) -> Option<DVec3> {
         None
+    }
+
+    /// Pending panel updates buffered during interactive command execution.
+    fn take_pending_panel_updates(&mut self) -> Vec<(String, std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>)> {
+        Vec::new()
     }
 }
 

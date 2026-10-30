@@ -4,6 +4,19 @@ use crate::scene::model::object::BlockParameterKey;
 use crate::ui::properties::FieldKey;
 use iced::Task;
 
+/// Read a value the palette printed, or an expression the user typed.
+///
+/// LUNITS can print a length as a fraction, as feet-and-inches or in
+/// scientific notation, none of which reads as arithmetic, so the display
+/// forms are tried after the expression grammar.
+pub(crate) fn parse_value(raw: &str) -> Option<f64> {
+    let text = raw.trim();
+    super::expr_eval::eval_number(text)
+        .or_else(|| text.parse::<f64>().ok())
+        .or_else(|| crate::entities::common::parse_length(text))
+        .filter(|value| value.is_finite())
+}
+
 impl OpenCADStudio {
     pub(super) fn block_property_target_is_current(&self, key: BlockParameterKey) -> bool {
         let tab = &self.tabs[self.active_tab];
@@ -33,8 +46,7 @@ impl OpenCADStudio {
             let Some(raw) = self.tabs[i].properties.edit_buf.get(&field) else {
                 return Task::none();
             };
-            let Some(value) = super::expr_eval::eval_number(raw).filter(|value| value.is_finite())
-            else {
+            let Some(value) = parse_value(raw) else {
                 self.command_line
                     .push_error(crate::t!("Specify a finite numeric parameter value.").as_ref());
                 return Task::none();

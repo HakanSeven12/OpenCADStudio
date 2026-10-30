@@ -9,7 +9,7 @@ mod rcs;
 use codec::entities::{PointCloudExCrop, PointCloudExData};
 use codec::objects::{ClassObjectData, ObjectType, PointCloudDefinition};
 use codec::types::{Transform, Vector3};
-use codec::CadDocument;
+use codec::Document;
 use rustc_hash::FxHashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -180,7 +180,7 @@ fn euler([x, y, z]: [f64; 3]) -> [[f64; 3]; 3] {
 
 /// The point cloud definition a PointCloudEx names.
 pub(crate) fn definition<'a>(
-    document: &'a CadDocument,
+    document: &'a Document,
     data: &PointCloudExData,
 ) -> Option<&'a PointCloudDefinition> {
     match document.objects.get(&data.definition_handle)? {
@@ -213,7 +213,7 @@ pub(crate) fn register_source(stored: &str, resolved: PathBuf) {
 /// The scan file a PointCloudEx shows, when it exists: the stored path as
 /// is, else where it was found next to the drawing, else relative to the
 /// working folder.
-pub(crate) fn resolve_source(document: &CadDocument, data: &PointCloudExData) -> Option<PathBuf> {
+pub(crate) fn resolve_source(document: &Document, data: &PointCloudExData) -> Option<PathBuf> {
     // An unloaded cloud draws as a missing one: its box and saved path.
     if definition(document, data).is_some_and(|def| !def.is_loaded) {
         return None;
@@ -267,7 +267,7 @@ pub struct PointCloudSet {
 }
 
 /// POINTCLOUDPOINTSIZE in pixels (1–10, default 2).
-pub(crate) fn point_size(document: &CadDocument) -> f32 {
+pub(crate) fn point_size(document: &Document) -> f32 {
     crate::io::drawing_variable(document, "POINTCLOUDPOINTSIZE")
         .and_then(|v| v.trim().parse::<i16>().ok())
         .unwrap_or(2)
@@ -276,7 +276,7 @@ pub(crate) fn point_size(document: &CadDocument) -> f32 {
 
 /// Whether the drawing defines any point cloud, so drawings without one
 /// skip the render walk.
-pub(crate) fn any_definition(document: &CadDocument) -> bool {
+pub(crate) fn any_definition(document: &Document) -> bool {
     document.objects.values().any(|object| {
         matches!(
             object,
@@ -312,7 +312,7 @@ pub(crate) fn hidden(data: &PointCloudExData) -> Vec<String> {
 
 /// Whether a cloud draws none of its points: its file is not found, or its
 /// unassigned points or every scan are turned off.
-pub(crate) fn shows_no_points(document: &CadDocument, data: &PointCloudExData) -> bool {
+pub(crate) fn shows_no_points(document: &Document, data: &PointCloudExData) -> bool {
     let Some(cloud) = resolve_source(document, data).and_then(|path| load(&path)) else {
         return true;
     };
@@ -328,7 +328,7 @@ pub(crate) fn shows_no_points(document: &CadDocument, data: &PointCloudExData) -
 /// `transform` (a block instance), with its crops applied and the `hidden`
 /// scans left out. `None` when the scan file is missing or unreadable.
 pub(crate) fn placed(
-    document: &CadDocument,
+    document: &Document,
     data: &PointCloudExData,
     object_color: [u8; 3],
     transform: Option<&Transform>,
@@ -605,7 +605,7 @@ enum Stylization {
 }
 
 impl Stylization {
-    fn of(document: &CadDocument, data: &PointCloudExData, object_color: [u8; 3]) -> Self {
+    fn of(document: &Document, data: &PointCloudExData, object_color: [u8; 3]) -> Self {
         let (scheme, intensity, gradient) = match data.stylization_type {
             2 => return Self::Object(object_color),
             3 => return Self::Normal,
@@ -678,7 +678,7 @@ fn rgb(color: u32) -> [u8; 3] {
 
 /// The colour schemes the drawing offers (identifier, name, colours high end
 /// first): its colour map's, or the built-in ones.
-pub(crate) fn schemes(document: &CadDocument) -> Vec<(String, String, Vec<[u8; 3]>)> {
+pub(crate) fn schemes(document: &Document) -> Vec<(String, String, Vec<[u8; 3]>)> {
     for object in document.objects.values() {
         let ObjectType::ClassObject(object) = object else {
             continue;
@@ -717,7 +717,7 @@ pub(crate) fn schemes(document: &CadDocument) -> Vec<(String, String, Vec<[u8; 3
 
 /// The schemes new intensity and elevation colouring starts from: the
 /// colour map's defaults, else Spectrum and Earth.
-pub(crate) fn default_schemes(document: &CadDocument) -> (String, String) {
+pub(crate) fn default_schemes(document: &Document) -> (String, String) {
     let map = document.objects.values().find_map(|object| match object {
         ObjectType::ClassObject(object) => match &object.data {
             ClassObjectData::PointCloudColorMap(map) => Some(map),
@@ -739,7 +739,7 @@ pub(crate) fn default_schemes(document: &CadDocument) -> (String, String) {
 
 /// A scheme's colours: from the drawing's colour map when it has the scheme,
 /// else the built-in one of that name (or `fallback` for an unset scheme).
-fn ramp_colors(document: &CadDocument, id: &str, fallback: &str) -> Vec<[u8; 3]> {
+fn ramp_colors(document: &Document, id: &str, fallback: &str) -> Vec<[u8; 3]> {
     for object in document.objects.values() {
         let ObjectType::ClassObject(object) = object else {
             continue;
@@ -953,7 +953,7 @@ pub(crate) fn setting(name: &str) -> Option<Setting> {
 }
 
 /// A setting's value in the drawing, or its default.
-pub(crate) fn setting_value(document: &CadDocument, setting: Setting) -> i64 {
+pub(crate) fn setting_value(document: &Document, setting: Setting) -> i64 {
     crate::io::drawing_variable(document, setting.name)
         .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(setting.default)

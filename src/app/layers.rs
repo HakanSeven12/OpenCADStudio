@@ -72,6 +72,10 @@ impl OpenCADStudio {
             .layers
             .sync_with_viewports(&doc_layers, vp_info);
         self.sync_ribbon_layers();
+        // A walk in flight reads the same table: a layer added, renamed or
+        // erased by any other command has to reach its rows, or the override
+        // would go on hiding (or showing) what no longer exists.
+        self.walk_rebuild();
         // The Properties palette lists layer names it read when it was built;
         // a layer added, removed or renamed must reach that list too (#1664).
         // Only then: the rebuild is costly for a large selection.
@@ -143,6 +147,15 @@ impl OpenCADStudio {
         self.tabs[i].active_layer = active.clone();
         self.tabs[i].layers.current_layer = active.clone();
         self.ribbon.set_layers(infos, &active);
+        let mut states: Vec<String> = self.tabs[i]
+            .scene
+            .document
+            .layer_states()
+            .into_iter()
+            .map(|state| state.name)
+            .collect();
+        states.sort_by_key(|name| name.to_lowercase());
+        self.ribbon.layer_states = states;
         let lt_items: Vec<ui::properties::LinetypeItem> = self.tabs[i]
             .scene
             .document
@@ -252,7 +265,7 @@ impl OpenCADStudio {
 /// The catalog linetypes the drawing lacks, offered after its own; a pick
 /// loads the one chosen (`ensure_catalog_linetype`).
 pub(super) fn catalog_linetype_items(
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> impl Iterator<Item = ui::properties::LinetypeItem> {
     crate::io::linetypes::catalog_missing_from(document)
         .into_iter()

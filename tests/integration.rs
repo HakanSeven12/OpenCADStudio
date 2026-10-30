@@ -12,6 +12,9 @@ mod annotative_context_roundtrip;
 #[path = "annotative_context_synthesis.rs"]
 mod annotative_context_synthesis;
 
+#[path = "annotative_dim_picture.rs"]
+mod annotative_dim_picture;
+
 #[path = "block_hatch_export.rs"]
 mod block_hatch_export;
 

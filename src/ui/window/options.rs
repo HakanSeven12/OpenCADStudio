@@ -102,6 +102,7 @@ pub struct AppPrefs {
 pub enum MovableFolder {
     Fonts,
     PlotStyles,
+    Support,
 }
 
 /// The locations the Files page lists.
@@ -122,6 +123,8 @@ pub struct Folders {
     /// The fonts / plot styles folder was chosen in Options.
     pub fonts_moved: bool,
     pub plot_styles_moved: bool,
+    /// The user's support files folder, when one is chosen.
+    pub support: Option<String>,
 }
 
 /// Values read from the current drawing's header rather than from preferences.
@@ -349,6 +352,11 @@ pub fn view_window<'a>(
         },
     );
     let close = dialog_button(crate::tr!("action", "close"), Message::OptionsClose, false);
+    let restore = dialog_button(
+        crate::t!("Restore Defaults"),
+        Message::OptionsRestoreDefaults,
+        false,
+    );
 
     let general = column![
         text(crate::tr!("options", "language-section")).size(15),
@@ -1897,6 +1905,13 @@ pub fn view_window<'a>(
         ),
         Space::new().height(12),
         folder_row(
+            crate::tr!("support-folder", "label").into(),
+            folders.support.clone(),
+            movable(MovableFolder::Support, folders.support.is_some()),
+        ),
+        text(crate::tr!("support-folder", "hint")).size(11),
+        Space::new().height(12),
+        folder_row(
             crate::t!("Color book locations"),
             folders.color_books.clone(),
             None,
@@ -1967,7 +1982,7 @@ pub fn view_window<'a>(
         // controls at the trailing edge of the Options content.
         scrollable(content).spacing(8).height(Fill),
         Space::new().height(12),
-        row![Space::new().width(Fill), ok, apply, close].spacing(8),
+        row![restore, Space::new().width(Fill), ok, apply, close].spacing(8),
     ]
     .width(Fill)
     .height(sizing.height);

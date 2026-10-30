@@ -40,6 +40,8 @@ pub struct TableStyleView<'a> {
     pub compare_opts: Vec<String>,
     pub comparison_sections: Vec<String>,
     pub in_use: bool,
+    /// The list shows only the styles in use.
+    pub in_use_only: bool,
     pub hmargin: &'a str,
     pub vmargin: &'a str,
     pub description: &'a str,
@@ -737,10 +739,12 @@ pub fn view_window<'a>(
         on_new: Message::TableStyleDialogNew,
         on_copy: Message::TableStyleDialogCopy,
         on_delete: Message::TableStyleDialogDelete,
+        on_import: None,
         on_select: Message::TableStyleDialogSelect,
         on_set_current: Message::TableStyleDialogSetCurrent,
         on_apply: Message::TableStyleApply,
         read_only: false,
+        in_use_filter: Some((v.in_use_only, Message::TableStyleListInUse)),
         editor,
     })
 }

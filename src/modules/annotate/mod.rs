@@ -10,10 +10,15 @@ pub mod data_link;
 pub mod ddedit;
 pub mod diameter_dim;
 pub mod dim_baseline;
+pub mod dim_cmd;
 pub mod dim_continue;
+pub mod dim_inspect;
 pub mod dimbreak;
 pub mod dimedit;
+pub mod dimoverride;
 pub mod dimjogline;
+pub mod dimreassociate;
+pub mod dim_distribute;
 pub mod dimspace;
 pub mod dimtedit;
 pub mod field_cmd;
@@ -28,6 +33,7 @@ pub mod qdim;
 pub mod radius_dim;
 pub mod table_cmd;
 pub mod text;
+pub mod text_edit;
 pub mod textedit;
 pub mod txt2mtxt;
 pub mod tolerance_cmd;
@@ -54,6 +60,45 @@ pub fn dimension_menu_items() -> Vec<(&'static str, &'static str, IconKind)> {
     ]
 }
 
+/// The Dimensions panel's Linear split button, in the reference order.
+fn annotate_dimension_items() -> Vec<(&'static str, &'static str, IconKind)> {
+    vec![
+        (linear_dim::tool().id, "Linear", linear_dim::tool().icon),
+        (aligned_dim::tool().id, "Aligned", aligned_dim::tool().icon),
+        (angular_dim::tool().id, "Angular", angular_dim::tool().icon),
+        (arc_length_dim::tool().id, "Arc Length", arc_length_dim::tool().icon),
+        (radius_dim::tool().id, "Radius", radius_dim::tool().icon),
+        (diameter_dim::tool().id, "Diameter", diameter_dim::tool().icon),
+        (jogged_radius_dim::tool().id, "Jogged", jogged_radius_dim::tool().icon),
+        (ordinate_dim::tool().id, "Ordinate", ordinate_dim::tool().icon),
+    ]
+}
+
+/// A small Dimensions-panel button running `command`.
+fn dim_tool(id: &'static str, label: &'static str, icon: &'static [u8], command: &str) -> crate::modules::ToolDef {
+    crate::modules::ToolDef {
+        id,
+        label,
+        icon: IconKind::Svg(icon),
+        event: crate::modules::ModuleEvent::Command(command.to_string()),
+    }
+}
+
+/// A text height the way the Text panel shows it (no trailing zeros).
+pub fn text_height_label(height: f64) -> String {
+    let text = format!("{height:.6}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn text_tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> crate::modules::ToolDef {
+    crate::modules::ToolDef {
+        id,
+        label,
+        icon: IconKind::Svg(icon),
+        event: crate::modules::ModuleEvent::Command(id.to_string()),
+    }
+}
+
 pub struct AnnotateModule;
 
 impl CadModule for AnnotateModule {
@@ -74,129 +119,136 @@ impl CadModule for AnnotateModule {
                 RibbonGroup {
                     title: "Text",
                     tools: vec![
+                        // The face runs and shows the one chosen last.
                         RibbonItem::LargeDropdown {
                             id: "ANNOTATE_TEXT",
-                            label: "Multiline\nText",
+                            label: ocs_plugin_api::ribbon::FOLLOW_CHOSEN,
                             icon: mtext::ICON,
                             items: vec![
-                                (mtext::tool().id, mtext::tool().label, mtext::tool().icon),
-                                (text::tool().id, text::tool().label, text::tool().icon),
-                                (ddedit::tool().id, ddedit::tool().label, ddedit::tool().icon),
+                                (mtext::tool().id, "Multiline Text", mtext::tool().icon),
+                                (text::tool().id, "Single Line", text::tool().icon),
                             ],
                             default: "MTEXT",
                         },
+                        RibbonItem::ToolGrid {
+                            columns: vec![vec![
+                                text_tool(
+                                    "SPELL",
+                                    "Check Spelling",
+                                    include_bytes!("../../../assets/icons/ui/check.svg"),
+                                ),
+                                text_tool(
+                                    "TEXTALIGN",
+                                    "Text Align",
+                                    include_bytes!("../../../assets/icons/align_left.svg"),
+                                ),
+                                text_tool(
+                                    "JUSTIFYTEXT",
+                                    "Justify",
+                                    include_bytes!("../../../assets/icons/mt_align_justify.svg"),
+                                ),
+                            ]],
+                        },
+                        // Text style, then the find box and the text height
+                        // (drawn by the ribbon for the text style group).
                         RibbonItem::StyleComboGroup {
                             style_key: StyleKey::TextStyle,
                             combo_id: "TEXT_STYLE_COMBO",
                             manager_cmd: Some("STYLE"),
-                            rows: vec![vec![crate::modules::ToolDef {
-                                id: "FIND",
-                                label: "Find",
-                                icon: crate::modules::IconKind::Svg(include_bytes!(
-                                    "../../../assets/icons/find.svg"
-                                )),
-                                event: crate::modules::ModuleEvent::Command("FIND".to_string()),
-                            }]],
+                            rows: Vec::new(),
                         },
                     ],
                 },
                 // ── Dimensions ───────────────────────────────────────────────
+                // Dimension (DIM), the style list with Break / Adjust Space /
+                // Jog Line, the dimension layer list with Inspect / Update /
+                // Reassociate, then the Linear and Continue split buttons
+                // and Quick. Tolerance and the text edits are in the
+                // slide-out; the corner arrow opens Dimension Style.
                 RibbonGroup {
                     title: "Dimensions",
                     tools: vec![
-                        RibbonItem::LargeDropdown {
-                            id: "ANNOTATE_DIM",
+                        RibbonItem::LargeTool(crate::modules::ToolDef {
+                            id: "DIM",
                             label: "Dimension",
                             icon: linear_dim::ICON,
-                            items: dimension_menu_items(),
-                            default: "DIMLINEAR",
-                        },
+                            event: crate::modules::ModuleEvent::Command("DIM".to_string()),
+                        }),
                         RibbonItem::StyleComboGroup {
                             style_key: StyleKey::DimStyle,
                             combo_id: "DIM_STYLE_COMBO",
                             manager_cmd: Some("DIMSTYLE"),
                             rows: vec![
-                                vec![qdim::tool(), dim_continue::tool(), dim_baseline::tool()],
                                 vec![
-                                    tolerance_cmd::tool(),
-                                    dimedit::tool(),
-                                    dimtedit::tool(),
-                                    dimbreak::tool(),
-                                    dimspace::tool(),
-                                    dimjogline::tool(),
+                                    dim_tool("DIMBREAK", "Break", include_bytes!("../../../assets/icons/dim_break.svg"), "DIMBREAK"),
+                                    dim_tool("DIMSPACE", "Adjust Space", include_bytes!("../../../assets/icons/dim_space.svg"), "DIMSPACE"),
+                                    dim_tool("DIMJOGLINE", "Jog Line", include_bytes!("../../../assets/icons/dim_jog.svg"), "DIMJOGLINE"),
+                                ],
+                                vec![
+                                    dim_tool("DIMINSPECT", "Inspect", include_bytes!("../../../assets/icons/find.svg"), "DIMINSPECT"),
+                                    dim_tool("DIMSTYLE_APPLY", "Update", include_bytes!("../../../assets/icons/ui/refresh.svg"), r#"-DIMSTYLE ["APPLY"]"#),
+                                    dim_tool("DIMREASSOCIATE", "Reassociate", include_bytes!("../../../assets/icons/sync.svg"), "DIMREASSOCIATE"),
                                 ],
                             ],
+                        },
+                        RibbonItem::LabeledDropdown {
+                            id: "ANNOTATE_DIM",
+                            label: "",
+                            icon: linear_dim::ICON,
+                            items: annotate_dimension_items(),
+                            default: "DIMLINEAR",
+                        },
+                        RibbonItem::LabeledTool(crate::modules::ToolDef {
+                            id: "QDIM",
+                            label: "Quick",
+                            icon: qdim::tool().icon,
+                            event: crate::modules::ModuleEvent::Command("QDIM".to_string()),
+                        }),
+                        RibbonItem::LabeledDropdown {
+                            id: "ANNOTATE_DIM_CONTINUE",
+                            label: "",
+                            icon: dim_continue::tool().icon,
+                            items: vec![
+                                (dim_continue::tool().id, "Continue", dim_continue::tool().icon),
+                                (dim_baseline::tool().id, "Baseline", dim_baseline::tool().icon),
+                            ],
+                            default: "DIMCONTINUE",
                         },
                     ],
                 },
                 // ── Centerlines ───────────────────────────────────────────────
+                // Center Mark and Centerline; the slide-out holds the layer
+                // new centre objects go on (CENTERLAYER).
                 RibbonGroup {
                     title: "Centerlines",
                     tools: vec![
                         RibbonItem::LargeTool(dimcenter::tool()),
                         RibbonItem::LargeTool(centerline::tool()),
-                        RibbonItem::Dropdown {
-                            id: "ANNOTATE_CENTER_ASSOCIATIVITY",
-                            icon: crate::modules::IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/line.svg"
-                            )),
-                            items: vec![
-                                (
-                                    "CENTERREASSOCIATE",
-                                    "Reassociate Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                                (
-                                    "CENTERDISASSOCIATE",
-                                    "Disassociate Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                                (
-                                    "CENTERRESET",
-                                    "Reset Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                            ],
-                            default: "CENTERREASSOCIATE",
-                        },
                     ],
                 },
                 // ── Leaders ──────────────────────────────────────────────────
+                // Multileader, the style list, the multileader layer list,
+                // then Align / Collect / Add Leader / Remove Leader; the
+                // corner arrow opens Multileader Style.
                 RibbonGroup {
                     title: "Leaders",
                     tools: vec![
-                        RibbonItem::LargeDropdown {
-                            id: "ANNOTATE_LEADER",
+                        RibbonItem::LargeTool(crate::modules::ToolDef {
+                            id: "MLEADER",
                             label: "Multileader",
                             icon: mleader_cmd::ICON,
-                            items: vec![
-                                (
-                                    mleader_cmd::tool().id,
-                                    mleader_cmd::tool().label,
-                                    mleader_cmd::tool().icon,
-                                ),
-                                (
-                                    leader_cmd::tool().id,
-                                    leader_cmd::tool().label,
-                                    leader_cmd::tool().icon,
-                                ),
-                            ],
-                            default: "MLEADER",
-                        },
+                            event: crate::modules::ModuleEvent::Command("MLEADER".to_string()),
+                        }),
                         RibbonItem::StyleComboGroup {
                             style_key: StyleKey::MLeaderStyle,
                             combo_id: "MLEADER_STYLE_COMBO",
                             manager_cmd: Some("MLEADERSTYLE"),
-                            rows: vec![
-                                vec![mleader_edit::tool_add(), mleader_edit::tool_remove()],
-                                vec![mleader_edit::tool_align(), mleader_edit::tool_collect()],
-                            ],
+                            rows: vec![vec![
+                                mleader_edit::tool_align(),
+                                mleader_edit::tool_collect(),
+                                mleader_edit::tool_add(),
+                                mleader_edit::tool_remove(),
+                            ]],
                         },
                     ],
                 },
@@ -209,7 +261,24 @@ impl CadModule for AnnotateModule {
                             style_key: StyleKey::TableStyle,
                             combo_id: "TABLE_STYLE_COMBO",
                             manager_cmd: Some("TABLESTYLE"),
-                            rows: vec![vec![data_extract::tool(), data_link::tool()]],
+                            // Each row leads with an icon-only update button,
+                            // then the tool named beside its icon.
+                            rows: vec![
+                                vec![
+                                    data_link::download_tool(),
+                                    crate::modules::ToolDef {
+                                        label: "Extract Data",
+                                        ..data_extract::tool()
+                                    },
+                                ],
+                                vec![
+                                    data_link::upload_tool(),
+                                    crate::modules::ToolDef {
+                                        label: "Link Data",
+                                        ..data_link::tool()
+                                    },
+                                ],
+                            ],
                         },
                     ],
                 },

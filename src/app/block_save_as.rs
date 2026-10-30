@@ -1,7 +1,7 @@
 use codec::entities::{Block, BlockEnd, EntityCommon};
 use codec::objects::ObjectType;
 use codec::tables::BlockRecord;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
@@ -10,7 +10,7 @@ mod constraints;
 /// The copy is built in the last saved document, so the source definition and
 /// its references remain at their checkpoint even when the editor is dirty.
 pub(super) struct DefinitionCopy {
-    pub document: CadDocument,
+    pub document: Document,
     pub handles: FxHashMap<Handle, Handle>,
     pub record: Handle,
 }
@@ -66,8 +66,8 @@ fn cloneable_object(object: &ObjectType) -> bool {
 }
 
 pub(super) fn copy_definition(
-    source: &CadDocument,
-    mut target: CadDocument,
+    source: &Document,
+    mut target: Document,
     source_name: &str,
     name: &str,
 ) -> Result<DefinitionCopy, String> {

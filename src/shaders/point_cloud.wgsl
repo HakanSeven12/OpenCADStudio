@@ -26,11 +26,14 @@ struct PointParams {
     // POINTCLOUDLIGHTSOURCE (0 key + fill light; 1 one light from above).
     lighting: f32,
     source: f32,
-    _pad0: f32,
+    // How many of `clip` a live section uses.
+    clip_count: f32,
     light_dir: vec3<f32>,
     _pad1: f32,
     fill_dir: vec3<f32>,
     _pad2: f32,
+    // Eye-relative planes: a point with dot(xyz, rel) + w < 0 is cut away.
+    clip: array<vec4<f32>, 6>,
 };
 @group(1) @binding(0) var<uniform> params: PointParams;
 
@@ -50,6 +53,13 @@ struct VertOut {
 fn vs_main(@builtin(vertex_index) corner: u32, in: PointIn) -> VertOut {
     var out: VertOut;
     let rel = (in.pos - u.eye_high) + (in.pos_low - u.eye_low);
+    for (var i = 0u; i < u32(params.clip_count); i++) {
+        if dot(params.clip[i].xyz, rel) + params.clip[i].w < 0.0 {
+            // Outside the clip volume: the sprite is culled.
+            out.clip_pos = vec4<f32>(0.0, 0.0, 2.0, 1.0);
+            return out;
+        }
+    }
     let clip = u.view_rot * vec4<f32>(rel, 1.0);
     // Two triangles covering the square: corners in -1..1.
     var corners = array<vec2<f32>, 6>(

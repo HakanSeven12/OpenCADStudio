@@ -17,6 +17,13 @@
 //! and then crash the runner on compound types. For API v4 and later the host
 //! can compare the plugin's declared rustc with its own via
 //! [`rustc_versions_compatible`].
+//!
+//! From API v14 ([`SELF_HOSTED_API_VERSION`]) neither applies. Such a plugin
+//! runs the runner loop in its own code (`ocs_plugin_run`), so no Rust type
+//! crosses the library boundary and its compiler does not matter. What the two
+//! sides still share is the shape of the codec types they exchange, which
+//! [`wire_schema`] fingerprints: codec commits that leave those shapes alone
+//! leave a plugin compatible.
 
 use std::sync::OnceLock;
 
@@ -37,9 +44,31 @@ struct VersionInfo {
 
 pub const ACADRUST_GATE_API_VERSION: u32 = 4;
 
-/// Returns whether this API version uses the dependency gate.
+/// First API version whose plugins run their own runner loop and are matched
+/// by [`wire_schema`] instead of codec commit and compiler.
+pub const SELF_HOSTED_API_VERSION: u32 = 14;
+
+/// Set by the host on a runner: the host's [`wire_schema`].
+pub const WIRE_SCHEMA_ENV: &str = "OCS_WIRE_SCHEMA";
+
+/// Returns whether this API version is matched on codec commit and compiler.
 pub fn uses_acadrust_gate(api_version: u32) -> bool {
-    api_version >= ACADRUST_GATE_API_VERSION
+    (ACADRUST_GATE_API_VERSION..SELF_HOSTED_API_VERSION).contains(&api_version)
+}
+
+/// Fingerprint of the codec types as the wire carries them: the embedded type
+/// registry (their serde shapes), hashed with FNV-1a so it is the same on every
+/// compiler. Equal on both sides means a plugin reads what the host writes.
+pub fn wire_schema() -> &'static str {
+    static SCHEMA: OnceLock<String> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        let hash = crate::type_registry::EMBEDDED_TYPE_REGISTRY_JSON
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        format!("{hash:016x}")
+    })
 }
 
 /// Extracts a string from the generated compact JSON.

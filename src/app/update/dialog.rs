@@ -39,7 +39,14 @@ impl OpenCADStudio {
         // document) — so Save-As round-trips the format instead of silently
         // re-targeting it. A new/unsaved drawing has no source format, so it
         // uses the application-wide default chosen in Options (#529).
-        self.save_dialog_format = if let Some(path) = &self.tabs[tab_idx].current_path {
+        let converter = self.tabs[tab_idx]
+            .current_path
+            .as_ref()
+            .and_then(|path| path.extension())
+            .and_then(|ext| ocs_save::external_format(&ext.to_string_lossy()));
+        self.save_dialog_format = if let Some(converter) = converter {
+            converter.name().to_string()
+        } else if let Some(path) = &self.tabs[tab_idx].current_path {
             let document = &self.tabs[tab_idx].scene.document;
             let is_dxf = crate::io::source_is_dxf(Some(path), document);
             let version = if is_dxf {
@@ -243,6 +250,8 @@ impl OpenCADStudio {
                 // last selection. #21.
                 self.sync_ribbon_layers();
                 self.sync_ribbon_from_selection();
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin::v4_support::on_tab_closed(tab_id);
                 // The tab list just shrank: refresh the remembered
                 // session list (web session memory).
                 #[cfg(target_arch = "wasm32")]
@@ -422,12 +431,12 @@ impl OpenCADStudio {
         self.import_document_block(doc, stem, redefine)
     }
 
-    /// Define one block in the active drawing from a loaded `CadDocument`'s
+    /// Define one block in the active drawing from a loaded `Document`'s
     /// model-space entities (base = the file's model-space insertion base).
     #[cfg(test)]
     fn import_document_as_block(
         &mut self,
-        doc: codec::CadDocument,
+        doc: codec::Document,
         stem: String,
     ) -> Result<String, String> {
         self.import_document_block(doc, stem, false)
@@ -435,7 +444,7 @@ impl OpenCADStudio {
 
     pub(super) fn import_document_block(
         &mut self,
-        doc: codec::CadDocument,
+        doc: codec::Document,
         stem: String,
         redefine: bool,
     ) -> Result<String, String> {
@@ -1158,7 +1167,7 @@ mod tests {
     }
 
     /// A foreign document: the fresh scene's document plus one model-space LINE.
-    fn foreign_doc(app: &OpenCADStudio) -> codec::CadDocument {
+    fn foreign_doc(app: &OpenCADStudio) -> codec::Document {
         let mut doc = app.tabs[app.active_tab].scene.document.clone();
         let model_br = doc
             .objects
@@ -1232,7 +1241,7 @@ mod tests {
     /// definition itself INSERTs a `Door` block — so the imported `Door` is a
     /// *nested dependency*, not a top-level entity. The `Door` in this file is
     /// unrelated to any `Door` in the destination drawing.
-    fn nested_foreign_doc(app: &OpenCADStudio) -> codec::CadDocument {
+    fn nested_foreign_doc(app: &OpenCADStudio) -> codec::Document {
         use codec::entities::Insert;
         use codec::tables::BlockRecord;
         use codec::Handle;
@@ -1279,7 +1288,7 @@ mod tests {
     }
 
     /// The nested-INSERT's block name inside a defined block record.
-    fn nested_insert_target(doc: &codec::CadDocument, block: &str) -> Option<String> {
+    fn nested_insert_target(doc: &codec::Document, block: &str) -> Option<String> {
         let br = doc.block_records.get(block)?;
         br.entity_handles
             .iter()
@@ -1292,7 +1301,7 @@ mod tests {
     /// A foreign document whose model space INSERTs a `Fixture` block whose
     /// definition INSERTs `Door (2)`, whose definition in turn INSERTs `Door`.
     /// The file therefore carries *both* `Door` and `Door (2)` as nested deps.
-    fn doubly_nested_foreign_doc(app: &OpenCADStudio) -> codec::CadDocument {
+    fn doubly_nested_foreign_doc(app: &OpenCADStudio) -> codec::Document {
         use codec::entities::Insert;
         use codec::tables::BlockRecord;
         use codec::Handle;
@@ -1638,7 +1647,7 @@ mod tests {
         use crate::ui::window::xref_manager::{XrefPaletteOp, XrefRowId};
         use codec::tables::BlockRecord;
         let dir = palette_tmpdir("nestedmatrix");
-        let mut host_doc = codec::CadDocument::new();
+        let mut host_doc = codec::Document::new();
         let mut inner = BlockRecord::new("INNER");
         inner.flags.is_xref = true;
         inner.xref_path = "inner.dwg".to_string();
@@ -1821,7 +1830,7 @@ mod tests {
         // resolve, per-ref report, entry back to Loaded.
         use codec::tables::BlockRecord;
         let dir = palette_tmpdir("reloadall");
-        let ref_doc = codec::CadDocument::new();
+        let ref_doc = codec::Document::new();
         let bytes = crate::io::save_to_bytes(&ref_doc, "dwg", ref_doc.version).unwrap();
         std::fs::write(dir.join("plan.dwg"), &bytes).unwrap();
         let mut app = fresh();
@@ -1870,7 +1879,7 @@ mod tests {
         use crate::ui::window::xref_manager::XrefPaletteOp;
         use codec::tables::BlockRecord;
         let dir = palette_tmpdir("nested");
-        let mut host_doc = codec::CadDocument::new();
+        let mut host_doc = codec::Document::new();
         let mut inner = BlockRecord::new("INNER");
         inner.flags.is_xref = true;
         inner.xref_path = "inner.dwg".to_string();

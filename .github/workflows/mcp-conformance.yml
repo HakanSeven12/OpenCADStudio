@@ -63,13 +63,13 @@ jobs:
             and ((.result.serverInfo | keys_unsorted | sort) == ["name","title","version"])
             and (.result.capabilities.experimental["opencadstudio.build"].build_rev | type == "string")'
 
-      - name: tools/list (four tools with titles)
+      - name: tools/list (core tools present, every tool titled)
         run: |
           npx -y @modelcontextprotocol/inspector --cli \
             --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
             --method tools/list --format json 2>/dev/null | jq -e '
-            ([.result.tools[].name] | sort) == ["ocs_capture","ocs_execute","ocs_read","ocs_sessions"]
-            and ([.result.tools[].title] | length == 4)'
+            ([.result.tools[].name] | contains(["ocs_capture","ocs_execute","ocs_read","ocs_sessions"]))
+            and all(.result.tools[]; (.title | type == "string") and (.title | length > 0))'
 
       - name: resources/list (reachable headless)
         run: |

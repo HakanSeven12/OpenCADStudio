@@ -39,6 +39,66 @@ fn circle_geom(scene: &Scene, handle: Handle) -> (Vector3, f64) {
     }
 }
 
+/// A 90-degree left-turn corner chain bonded exactly the way the civil
+/// plugin's BOND bonds it: per joint a Coincident between the two element
+/// endpoints plus a whole-curve Tangent (no tangent-point pick), and the PI
+/// marker circles pinned with Coincident (marker center <-> element
+/// endpoint). No radius driver, no Fixed on the implied corner PI: it stays
+/// refresh-positioned.
+///
+/// Geometry: line 1 runs in +X from (-45, 0) to the tangency point
+/// (-15, 0); the arc (R = 15, center (-15, 15)) sweeps from (-15, 0) to
+/// (0, 15); line 2 runs in +Y from (0, 15) to (0, 45). Tangent length
+/// T = R*tan(d/2) = 15 on both legs of the PI at the origin. Returns
+/// `(line1, arc, line2, start_marker, end_marker)`.
+#[allow(clippy::type_complexity)]
+fn add_bonded_chain_graph(scene: &mut Scene) -> (Handle, Handle, Handle, Handle, Handle) {
+    let line1 = add_line(scene, -45.0, 0.0, -15.0, 0.0);
+    let arc = add_arc(scene, -15.0, 15.0, 15.0, -std::f64::consts::FRAC_PI_2, 0.0);
+    let line2 = add_line(scene, 0.0, 15.0, 0.0, 45.0);
+    let start_marker = add_circle(scene, -45.0, 0.0, 2.0);
+    let end_marker = add_circle(scene, 0.0, 45.0, 2.0);
+
+    let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::Coincident,
+        vec![
+            ParametricRef::center(start_marker),
+            ParametricRef::point(line1, 0),
+        ],
+        None,
+    );
+    set.add(
+        ConstraintKind::Coincident,
+        vec![ParametricRef::point(line1, 1), ParametricRef::point(arc, 0)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Tangent,
+        vec![ParametricRef::whole(line1), ParametricRef::whole(arc)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Coincident,
+        vec![ParametricRef::point(arc, 1), ParametricRef::point(line2, 0)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Tangent,
+        vec![ParametricRef::whole(arc), ParametricRef::whole(line2)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Coincident,
+        vec![
+            ParametricRef::center(end_marker),
+            ParametricRef::point(line2, 1),
+        ],
+        None,
+    );
+    (line1, arc, line2, start_marker, end_marker)
+}
+
 fn add_arc(
     scene: &mut Scene,
     cx: f64,
@@ -1625,5 +1685,629 @@ fn distance_y_constraint_pins_only_the_y_component() {
         (end.y - start.y - -3.0).abs() < 1e-6,
         "y component should equal the (signed) target: dy={}",
         end.y - start.y
+    );
+}
+
+// The bonded-chain side flip: a line-arc-line chain bonded the way the
+// civil plugin's BOND does is two-valued - the same constraint graph is
+// satisfied identically by the arc bulging on either side of the legs (the
+// corner's deflection read on the near side or the far side through the
+// complement sweep). When a transaction writes the OTHER valid
+// configuration - a fully consistent, zero-residual state - the solve the
+// write triggers must recognize it as already converged and keep the
+// written values exactly: it must never re-project the written state back
+// onto the previous side, and neither may a following interactive frame's
+// solve carrying the stale pre-write retention images.
+#[test]
+fn a_zero_residual_write_to_the_other_tangency_side_is_not_displaced() {
+    let mut scene = Scene::new();
+    // LINE, CIRCULARARC, LINE bonded exactly the way the civil plugin's
+    // BOND bonds a chain (see add_bonded_chain_graph for the graph).
+    let (line1, arc, line2, start_marker, end_marker) = add_bonded_chain_graph(&mut scene);
+
+    // The written short configuration already satisfies every constraint
+    // of the scope, so the first bump must hold it exactly as written.
+    scene.bump_entities(&[
+        (line1, ChangeKind::Modified),
+        (arc, ChangeKind::Modified),
+        (line2, ChangeKind::Modified),
+        (start_marker, ChangeKind::Modified),
+        (end_marker, ChangeKind::Modified),
+    ]);
+    let (arc_center, _) = arc_geom(&scene, arc);
+    assert!(
+        (arc_center.y - 15.0).abs() < 1e-6,
+        "baseline: the short-arc write should hold exactly: {arc_center:?}"
+    );
+
+    // The far-side write: the same constraint graph with the arc re-seated
+    // on the OTHER valid tangency configuration (the turn-band duality the
+    // records model keeps with corner_long). The joint points on line 1
+    // and both markers are untouched; the arc bulges to the other side
+    // (center (-15, -15), start (-15, 0) at angle pi/2, end (0, -15) at
+    // angle 2*pi through the complement sweep) and line 2's start follows
+    // the joint. Every constraint above is satisfied EXACTLY by this state
+    // too: zero residual across the whole scope.
+    let mut far_arc = match scene.document.get_entity(arc) {
+        Some(EntityType::Arc(a)) => a.clone(),
+        other => panic!("expected an Arc, got {other:?}"),
+    };
+    far_arc.center = Vector3::new(-15.0, -15.0, 0.0);
+    far_arc.start_angle = std::f64::consts::FRAC_PI_2;
+    far_arc.end_angle = std::f64::consts::TAU;
+    let mut far_line2 = match scene.document.get_entity(line2) {
+        Some(EntityType::Line(l)) => l.clone(),
+        other => panic!("expected a Line, got {other:?}"),
+    };
+    far_line2.start = Vector3::new(0.0, -15.0, 0.0);
+    // The plugin's write route: one batched scene write whose single bump
+    // solves once over the final state (update_entities_transaction's
+    // batching comment: the solver must see every entity at once). The
+    // retained pre-write images are captured first: the interactive drag
+    // frames that keep firing around a plugin write carry the chain's
+    // pre-write state as their retained originals (an open drag's undo
+    // recording does exactly that).
+    let frame_images: Vec<(Handle, EntityType)> = [line1, arc, line2, start_marker, end_marker]
+        .into_iter()
+        .filter_map(|handle| {
+            scene
+                .document
+                .get_entity(handle)
+                .cloned()
+                .map(|entity| (handle, entity))
+        })
+        .collect();
+    let moved =
+        scene.update_entities_plugin(vec![EntityType::Arc(far_arc), EntityType::Line(far_line2)]);
+    assert_eq!(moved, 2);
+
+    // The interactive leg that surfaced the flip in the wild-grip QA: a
+    // drag frame whose bump runs under the transform policy (retain_size =
+    // true) while the dragged PI marker itself rewrites where it already
+    // sits (its whole-entity pin follows the frame; the marker did not
+    // move between the two configurations: it is pinned to line2's end,
+    // which stays (0, 45) on both sides). The written far-side state
+    // satisfies every constraint of the scope, so this frame is also a
+    // fixpoint: the stale retention images (line2's pre-write length 30
+    // against the written 60) must never re-project the chain onto the
+    // other tangency side - that re-projection is the R = 15 flip the QA
+    // measured.
+    scene.bump_entities_with_parametric_transform_policy(
+        &[(end_marker, ChangeKind::Modified)],
+        &[],
+        &[ParametricRef::whole(end_marker)],
+        &frame_images,
+    );
+
+    // R1: a write whose result satisfies every constraint in the scope
+    // must keep the written values exactly - the solve it triggers is a
+    // no-op, never a re-projection onto the other tangency side.
+    let (arc_center, arc_radius) = arc_geom(&scene, arc);
+    let (line2_start, line2_end) = line_endpoints(&scene, line2);
+    assert!(
+        (arc_center.x - -15.0).abs() < 1e-6 && (arc_center.y - -15.0).abs() < 1e-6,
+        "the solver must not displace a constraint-consistent write: the arc re-projected to {arc_center:?}"
+    );
+    assert!(
+        (arc_radius - 15.0).abs() < 1e-6,
+        "written radius must hold: {arc_radius}"
+    );
+    assert!(
+        (line2_start.x - 0.0).abs() < 1e-6 && (line2_start.y - -15.0).abs() < 1e-6,
+        "line2's start must keep the written joint: {line2_start:?}"
+    );
+    assert!(
+        (line2_end.y - 45.0).abs() < 1e-6,
+        "line2's untouched end must hold: {line2_end:?}"
+    );
+    let (_, start_marker_radius) = circle_geom(&scene, start_marker);
+    let (_, end_marker_radius) = circle_geom(&scene, end_marker);
+    assert!((start_marker_radius - 2.0).abs() < 1e-9);
+    assert!((end_marker_radius - 2.0).abs() < 1e-9);
+    // Nothing else drifted either: line 1 and both marker centers are the
+    // same on both configurations, and the arc's end point (0, -15) is the
+    // sharp flip detector - the short configuration ends the arc at (0, 15).
+    let (line1_start, line1_end) = line_endpoints(&scene, line1);
+    assert!((line1_start.x - -45.0).abs() < 1e-6 && (line1_start.y - 0.0).abs() < 1e-6);
+    assert!((line1_end.x - -15.0).abs() < 1e-6 && (line1_end.y - 0.0).abs() < 1e-6);
+    let (start_marker_center, _) = circle_geom(&scene, start_marker);
+    let (end_marker_center, _) = circle_geom(&scene, end_marker);
+    assert!(
+        (start_marker_center.x - -45.0).abs() < 1e-6 && (start_marker_center.y - 0.0).abs() < 1e-6
+    );
+    assert!((end_marker_center.x - 0.0).abs() < 1e-6 && (end_marker_center.y - 45.0).abs() < 1e-6);
+    let arc_end = match scene.document.get_entity(arc) {
+        Some(EntityType::Arc(a)) => a.end_point(),
+        other => panic!("expected an Arc, got {other:?}"),
+    };
+    assert!(
+        (arc_end.x - 0.0).abs() < 1e-6 && (arc_end.y - -15.0).abs() < 1e-6,
+        "the arc must still end at the written far-side joint: {arc_end:?}"
+    );
+}
+
+// The fixpoint guarantee is not a veto on solving: a write whose state is
+// genuinely violated (residual above the solver's own convergence
+// tolerance) is still reconciled by the solve it triggers - the
+// nearest-configuration doctrine for unsatisfied writes stays intact.
+#[test]
+fn a_constraint_violating_write_still_solves_back_to_tangency() {
+    let mut scene = Scene::new();
+    let (line1, arc, line2, start_marker, end_marker) = add_bonded_chain_graph(&mut scene);
+
+    scene.bump_entities(&[
+        (line1, ChangeKind::Modified),
+        (arc, ChangeKind::Modified),
+        (line2, ChangeKind::Modified),
+        (start_marker, ChangeKind::Modified),
+        (end_marker, ChangeKind::Modified),
+    ]);
+
+    // The plugin's write route, with the arc written 3 units off: its start
+    // point (center + R at angle -pi/2) lands at (-15, 3), off line 1's end
+    // (-15, 0) - the joint's Coincident row carries a real residual now.
+    let mut bumped_arc = match scene.document.get_entity(arc) {
+        Some(EntityType::Arc(a)) => a.clone(),
+        other => panic!("expected an Arc, got {other:?}"),
+    };
+    bumped_arc.center = Vector3::new(-15.0, 18.0, 0.0);
+    let moved = scene.update_entities_plugin(vec![EntityType::Arc(bumped_arc)]);
+    assert_eq!(moved, 1);
+
+    // Not a fixpoint: the solve ran and reconciled the violating write.
+    let (arc_center, arc_radius) = arc_geom(&scene, arc);
+    assert!(
+        (arc_center.y - 18.0).abs() > 0.1,
+        "a violated write must actually be solved, not held: {arc_center:?}"
+    );
+
+    // And the reconciliation leaves the graph satisfied again.
+    let line1_end = line_endpoints(&scene, line1).1;
+    let arc_start = {
+        match scene.document.get_entity(arc).expect("entity exists") {
+            EntityType::Arc(a) => a.start_point(),
+            other => panic!("expected an Arc, got {other:?}"),
+        }
+    };
+    assert!(
+        (arc_start.x - line1_end.x).abs() < 1e-6 && (arc_start.y - line1_end.y).abs() < 1e-6,
+        "the joint must be re-made: line1_end={line1_end:?} arc_start={arc_start:?}"
+    );
+    let line2_start = line_endpoints(&scene, line2).0;
+    let arc_end = {
+        match scene.document.get_entity(arc).expect("entity exists") {
+            EntityType::Arc(a) => a.end_point(),
+            other => panic!("expected an Arc, got {other:?}"),
+        }
+    };
+    assert!(
+        (arc_end.x - line2_start.x).abs() < 1e-6 && (arc_end.y - line2_start.y).abs() < 1e-6,
+        "the second joint must hold: line2_start={line2_start:?} arc_end={arc_end:?}"
+    );
+    // Perpendicular radius to each leg at the shared joint means the
+    // infinite line's distance from the center equals the radius again.
+    for (leg, (p1, p2)) in [
+        ("line1", line_endpoints(&scene, line1)),
+        ("line2", line_endpoints(&scene, line2)),
+    ] {
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        let length = (dx * dx + dy * dy).sqrt();
+        let signed = (dx * (arc_center.y - p1.y) - dy * (arc_center.x - p1.x)) / length;
+        assert!(
+            (signed.abs() - arc_radius).abs() < 1e-6,
+            "{leg} must be tangent to the arc's radius again: dist={signed} radius={arc_radius}"
+        );
+    }
+    // The marker pins re-hold too.
+    let (start_marker_center, _) = circle_geom(&scene, start_marker);
+    let (end_marker_center, _) = circle_geom(&scene, end_marker);
+    let line1_start = line_endpoints(&scene, line1).0;
+    let line2_end = line_endpoints(&scene, line2).1;
+    assert!(
+        (start_marker_center.x - line1_start.x).abs() < 1e-6
+            && (start_marker_center.y - line1_start.y).abs() < 1e-6,
+        "the start marker pin re-holds: marker={start_marker_center:?} line1_start={line1_start:?}"
+    );
+    assert!(
+        (end_marker_center.x - line2_end.x).abs() < 1e-6
+            && (end_marker_center.y - line2_end.y).abs() < 1e-6,
+        "the end marker pin re-holds: marker={end_marker_center:?} line2_end={line2_end:?}"
+    );
+}
+
+/// The fully consistent bonded-chain layout for a corner at `b` (the outer
+/// PIs `a`/`c` stay the chain's endpoints, `radius` the curve R) on one of
+/// the two tangency branches: the wedge-inside (near) reading, or the far
+/// side. Both readings satisfy the same constraints - the flip above wrote
+/// one branch of a 90-degree corner (mirrored across leg 1, whose legs are
+/// perpendicular, so the mirror keeps both leg lines); a CORNER TURNED
+/// through a general move (the plugin's crossing write: the PI dragged
+/// across the turn-sense line, every element re-derived from the moved
+/// corner) needs the far branch derived from the new legs instead. The far
+/// branch = the excenter across the wedge bisector: both tangent points
+/// land beyond the corner and the arc sweeps the complement 2*pi - |delta|,
+/// the same corner_long reading the records model carries.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ChainLayout {
+    line1: [(f64, f64); 2],
+    arc_center: (f64, f64),
+    arc_start_angle: f64,
+    arc_end_angle: f64,
+    line2: [(f64, f64); 2],
+}
+
+fn chain_layout(
+    a: (f64, f64),
+    c: (f64, f64),
+    b: (f64, f64),
+    radius: f64,
+    far: bool,
+) -> ChainLayout {
+    let (dx1, dy1) = (a.0 - b.0, a.1 - b.1);
+    let l1 = (dx1 * dx1 + dy1 * dy1).sqrt();
+    let u1 = (dx1 / l1, dy1 / l1);
+    let (dx2, dy2) = (c.0 - b.0, c.1 - b.1);
+    let l2 = (dx2 * dx2 + dy2 * dy2).sqrt();
+    let u2 = (dx2 / l2, dy2 / l2);
+    let wedge_cos = u1.0 * u2.0 + u1.1 * u2.1;
+    let cos_half = ((1.0 + wedge_cos) / 2.0).sqrt();
+    let sin_half = ((1.0 - wedge_cos) / 2.0).sqrt();
+    // T = R*tan(half-wedge) is the same R*tan(|delta|/2) the consumer's
+    // derivation uses (half-wedge = (pi - |delta|)/2).
+    let t = radius * cos_half / sin_half;
+    let d = radius / sin_half;
+    let (wx, wy) = (u1.0 + u2.0, u1.1 + u2.1);
+    let wl = (wx * wx + wy * wy).sqrt();
+    let w = (wx / wl, wy / wl);
+    let sign = if far { -1.0 } else { 1.0 };
+    let p1 = (b.0 + sign * t * u1.0, b.1 + sign * t * u1.1);
+    let p2 = (b.0 + sign * t * u2.0, b.1 + sign * t * u2.1);
+    let center = (b.0 + sign * d * w.0, b.1 + sign * d * w.1);
+    // Signed deflection from the incoming (b - a) direction to the outgoing
+    // (c - b) one.
+    let u_in = (-u1.0, -u1.1);
+    let mut deflection =
+        (u2.1.atan2(u2.0)) - (u_in.1.atan2(u_in.0));
+    while deflection > std::f64::consts::PI {
+        deflection -= std::f64::consts::TAU;
+    }
+    while deflection < -std::f64::consts::PI {
+        deflection += std::f64::consts::TAU;
+    }
+    let start_angle = (p1.1 - center.1).atan2(p1.0 - center.0);
+    // The arc body must sit on the branch's side: the wedge-inside short
+    // sweep reading signed, or the complement sweep through the far bulge.
+    let sweep = if far {
+        std::f64::consts::TAU - deflection.abs()
+    } else {
+        deflection
+    };
+    ChainLayout {
+        line1: [(a.0, a.1), (p1.0, p1.1)],
+        arc_center: center,
+        arc_start_angle: start_angle,
+        arc_end_angle: start_angle + sweep,
+        line2: [(p2.0, p2.1), (c.0, c.1)],
+    }
+}
+
+// The transaction-route crossing write: the civil plugin moves a bonded PI
+// ACROSS the corner's turn-sense line and rewrites the WHOLE chain in ONE
+// batch through update_entities_plugin - legs, arc body, markers - all
+// derived from the moved corner (ZIG: PIs (0,0)/(60,0)/(60,40), R=15 at the
+// middle corner; the live crossing case, with the corner at (-11.63, 69.84),
+// R=15). The written state satisfies every constraint of the chain in its
+// own far-side reading, so the bump it triggers must hold it exactly. The
+// corner PI marker is unwritten-pinned (refresh-positioned) exactly as in
+// add_bonded_chain_graph; its written position is asserted to hold.
+#[test]
+fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
+    let mut scene = Scene::new();
+    let a = (0.0f64, 0.0f64);
+    let c = (60.0f64, 40.0f64);
+    let b0 = (60.0f64, 0.0f64);
+    let b1 = (-11.63f64, 69.84f64);
+    let radius = 15.0f64;
+    const HOLD: f64 = 1.0e-6; // the flip pin's own no-op scale; a re-projection lands at 2*R ~ 30
+
+    // Baseline: the near-side graph, held by its own first bump like the
+    // flip pin's first leg.
+    let near = chain_layout(a, c, b0, radius, false);
+    let line1 = add_line(&mut scene, near.line1[0].0, near.line1[0].1, near.line1[1].0, near.line1[1].1);
+    let arc = add_arc(
+        &mut scene,
+        near.arc_center.0,
+        near.arc_center.1,
+        radius,
+        near.arc_start_angle,
+        near.arc_end_angle,
+    );
+    let line2 = add_line(&mut scene, near.line2[0].0, near.line2[0].1, near.line2[1].0, near.line2[1].1);
+    let start_marker = add_circle(&mut scene, a.0, a.1, 2.0);
+    let middle_marker = add_circle(&mut scene, b0.0, b0.1, 2.0);
+    let end_marker = add_circle(&mut scene, c.0, c.1, 2.0);
+    // The exact constraint set add_bonded_chain_graph builds.
+    let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::Coincident,
+        vec![ParametricRef::center(start_marker), ParametricRef::point(line1, 0)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Coincident,
+        vec![ParametricRef::point(line1, 1), ParametricRef::point(arc, 0)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Tangent,
+        vec![ParametricRef::whole(line1), ParametricRef::whole(arc)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Coincident,
+        vec![ParametricRef::point(arc, 1), ParametricRef::point(line2, 0)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Tangent,
+        vec![ParametricRef::whole(arc), ParametricRef::whole(line2)],
+        None,
+    );
+    set.add(
+        ConstraintKind::Coincident,
+        vec![ParametricRef::center(end_marker), ParametricRef::point(line2, 1)],
+        None,
+    );
+    let _ = set;
+    scene.bump_entities(&[
+        (line1, ChangeKind::Modified),
+        (arc, ChangeKind::Modified),
+        (line2, ChangeKind::Modified),
+        (start_marker, ChangeKind::Modified),
+        (middle_marker, ChangeKind::Modified),
+        (end_marker, ChangeKind::Modified),
+    ]);
+    let (arc_center, _) = arc_geom(&scene, arc);
+    assert!(
+        (arc_center.x - near.arc_center.0).abs() < HOLD
+            && (arc_center.y - near.arc_center.1).abs() < HOLD,
+        "baseline: the near-side graph should hold exactly: {arc_center:?} vs {:?}",
+        near.arc_center
+    );
+
+    // The crossing write: the same graph re-derived for the corner at b1 on
+    // the FAR branch, all two joints consistent, both tangencies exact in
+    // their own (far-side) reading. Construction residuals are verified
+    // BEFORE any solver behavior is asserted, so a failure here is a
+    // construction bug, never a solver verdict.
+    let far = chain_layout(a, c, b1, radius, true);
+    let (mut written_arc, mut written_line2) = match (
+        scene.document.get_entity(arc),
+        scene.document.get_entity(line2),
+    ) {
+        (Some(EntityType::Arc(a)), Some(EntityType::Line(l))) => (a.clone(), l.clone()),
+        _ => panic!("expected an Arc and a Line"),
+    };
+    written_arc.center = Vector3::new(far.arc_center.0, far.arc_center.1, 0.0);
+    written_arc.start_angle = far.arc_start_angle;
+    written_arc.end_angle = far.arc_end_angle;
+    written_line2.start = Vector3::new(far.line2[0].0, far.line2[0].1, 0.0);
+    written_line2.end = Vector3::new(far.line2[1].0, far.line2[1].1, 0.0);
+    let mut written_line1 = match scene.document.get_entity(line1) {
+        Some(EntityType::Line(l)) => l.clone(),
+        other => panic!("expected a Line, got {other:?}"),
+    };
+    written_line1.end = Vector3::new(far.line1[1].0, far.line1[1].1, 0.0);
+    let mut written_middle = match scene.document.get_entity(middle_marker) {
+        Some(EntityType::Circle(m)) => m.clone(),
+        other => panic!("expected a Circle, got {other:?}"),
+    };
+    written_middle.center = Vector3::new(b1.0, b1.1, 0.0);
+    // construction checks: the far branch must be exact on its own reading.
+    {
+        let arc_start = written_arc.start_point();
+        let arc_end = written_arc.end_point();
+        assert!(
+            (arc_start.x - far.line1[1].0).abs() < 1.0e-9
+                && (arc_start.y - far.line1[1].1).abs() < 1.0e-9,
+            "construction: arc start = leg 1's end: {arc_start:?} vs {:?}",
+            far.line1[1]
+        );
+        assert!(
+            (arc_end.x - far.line2[0].0).abs() < 1.0e-9 && (arc_end.y - far.line2[0].1).abs() < 1.0e-9,
+            "construction: arc end = leg 2's start: {arc_end:?} vs {:?}",
+            far.line2[0]
+        );
+        let (ux, uy) = (
+            far.line1[1].0 - far.line1[0].0,
+            far.line1[1].1 - far.line1[0].1,
+        );
+        let leg1_len = (ux * ux + uy * uy).sqrt();
+        let h1 = (ux * (far.arc_center.1 - far.line1[0].1) - uy * (far.arc_center.0 - far.line1[0].0))
+            / leg1_len;
+        assert!(
+            (h1.abs() - radius).abs() < 1.0e-9,
+            "construction: leg 1's line must carry the arc's radius: h1={h1}"
+        );
+        let (vx, vy) = (
+            far.line2[1].0 - far.line2[0].0,
+            far.line2[1].1 - far.line2[0].1,
+        );
+        let leg2_len = (vx * vx + vy * vy).sqrt();
+        let h2 = (vx * (far.arc_center.1 - far.line2[0].1) - vy * (far.arc_center.0 - far.line2[0].0))
+            / leg2_len;
+        assert!(
+            (h2.abs() - radius).abs() < 1.0e-9,
+            "construction: leg 2's line must carry the arc's radius: h2={h2}"
+        );
+        // THE CROSSING, per the plugin's own op definition: the moved corner
+        // and the written arc's body sit on the OPPOSITE side of the chord
+        // (the line through the neighbour PIs a..c = the corner's turn-sense
+        // line) from the initial corner and its near-side body. The bodies
+        // are each arc's sweep midpoint; the legs reorient, so per-leg
+        // crosses do not compare - the chord side does.
+        let chord_side = |point: (f64, f64)| {
+            let (dx, dy) = (c.0 - a.0, c.1 - a.1);
+            let l = (dx * dx + dy * dy).sqrt();
+            (dx * (point.1 - a.1) - dy * (point.0 - a.0)) / l
+        };
+        assert!(
+            chord_side(b0) * chord_side(b1) < 0.0,
+            "construction: the corner must cross the turn-sense line: {} vs {}",
+            chord_side(b0),
+            chord_side(b1)
+        );
+        let body_mid = |branch: &ChainLayout| {
+            // the sweep midpoint's polar direction from the arc center
+            let mid_angle = branch.arc_start_angle + (branch.arc_end_angle - branch.arc_start_angle) / 2.0;
+            (
+                branch.arc_center.0 + radius * mid_angle.cos(),
+                branch.arc_center.1 + radius * mid_angle.sin(),
+            )
+        };
+        assert!(
+            chord_side(body_mid(&near)) * chord_side(b0) > 0.0
+                && chord_side(body_mid(&far)) * chord_side(b1) > 0.0,
+            "construction: the two bodies must straddle the turn-sense line: near-vs-b0 {} far-vs-b1 {}",
+            chord_side(body_mid(&near)) * chord_side(b0),
+            chord_side(body_mid(&far)) * chord_side(b1)
+        );
+        // the arc's complement sweep (> pi) is the far-body encoding.
+        let mut sweep = far.arc_end_angle - far.arc_start_angle;
+        sweep = sweep.rem_euclid(std::f64::consts::TAU);
+        assert!(
+            sweep > std::f64::consts::PI,
+            "construction: the far write's sweep must be the complement: {sweep}"
+        );
+    }
+    // The plugin's write route: ONE batched write, one bump over the final
+    // state (update_entities_transaction batching comment: the solver sees
+    // every entity at once).
+    let moved = scene.update_entities_plugin(vec![
+        EntityType::Line(written_line1),
+        EntityType::Arc(written_arc),
+        EntityType::Line(written_line2),
+        EntityType::Circle(written_middle),
+    ]);
+    assert_eq!(moved, 4);
+
+    // R1: the crossing write is a fixpoint of the scope - zero residual in
+    // its own far-side reading - so the bump must keep the written values
+    // exactly and keep the bulge side: never a re-projection between the two
+    // readings (that one lands the arc within the 2*R(1-cos(delta/2)) band,
+    // the mirrored-arc-body signature the live crossing run measured).
+    let check_held = |name: &str, actually: (f64, f64), wanted: (f64, f64)| {
+        assert!(
+            (actually.0 - wanted.0).abs() < HOLD && (actually.1 - wanted.1).abs() < HOLD,
+            "{name} must keep the written far-side value {wanted:?}, displaced to {actually:?}"
+        );
+    };
+    let (line1_start, line1_end) = line_endpoints(&scene, line1);
+    check_held("line 1 start", (line1_start.x, line1_start.y), far.line1[0]);
+    check_held("line 1 end (the written joint)", (line1_end.x, line1_end.y), far.line1[1]);
+    let (arc_center, arc_radius) = arc_geom(&scene, arc);
+    check_held("arc center", (arc_center.x, arc_center.y), far.arc_center);
+    assert!(
+        (arc_radius - radius).abs() < HOLD,
+        "written radius must hold: {arc_radius}"
+    );
+    let (line2_start, line2_end) = line_endpoints(&scene, line2);
+    check_held("line 2 start (the written joint)", (line2_start.x, line2_start.y), far.line2[0]);
+    check_held("line 2 end", (line2_end.x, line2_end.y), far.line2[1]);
+    // The written sweep (the complement, the far-body ordering) survives:
+    // the angles are held modulo the run's 2*pi lane drifts.
+    {
+        let angles = match scene.document.get_entity(arc) {
+            Some(EntityType::Arc(a)) => (a.start_angle, a.end_angle),
+            other => panic!("expected an Arc, got {other:?}"),
+        };
+        let (mut written, mut read) = (far.arc_end_angle - far.arc_start_angle, angles.1 - angles.0);
+        written = written.rem_euclid(std::f64::consts::TAU);
+        read = read.rem_euclid(std::f64::consts::TAU);
+        assert!(
+            (written - read).abs() < HOLD,
+            "the far sweep ordering must survive the bump: written {written} read-back {read}"
+        );
+    }
+    let (start_marker_center, _) = circle_geom(&scene, start_marker);
+    check_held("start marker", (start_marker_center.x, start_marker_center.y), a);
+    let (end_marker_center, _) = circle_geom(&scene, end_marker);
+    check_held("end marker", (end_marker_center.x, end_marker_center.y), c);
+    let (middle_center, _) = circle_geom(&scene, middle_marker);
+    check_held("corner PI marker (refresh-positioned, unwritten)", (middle_center.x, middle_center.y), b1);
+    // The bulge side: same signed cross as the construction check.
+    {
+        let (sx, sy) = (
+            line1_end.x - line1_start.x,
+            line1_end.y - line1_start.y,
+        );
+        let side_now = sx * (arc_center.y - line1_start.y) - sy * (arc_center.x - line1_start.x);
+        assert!(
+            (side_now - {
+                let (sx0, sy0) = (
+                    far.line1[1].0 - far.line1[0].0,
+                    far.line1[1].1 - far.line1[0].1,
+                );
+                sx0 * (far.arc_center.1 - far.line1[0].1) - sy0 * (far.arc_center.0 - far.line1[0].0)
+            })
+            .abs()
+                < 1.0e-6,
+            "the arc's bulge side must stay on the written far reading: cross={side_now}"
+        );
+    }
+}
+// A consistent state nudged by an adversarially small amount (deep inside
+// the solver's own 1e-10 convergence tolerance) still short-circuits: no
+// iteration, no drift - the nudged coordinate survives bit-for-bit instead
+// of being massaged, and nothing else creeps.
+#[test]
+fn a_within_tolerance_nudge_of_a_consistent_write_accumulates_no_drift() {
+    let mut scene = Scene::new();
+    let (line1, arc, line2, start_marker, end_marker) = add_bonded_chain_graph(&mut scene);
+
+    scene.bump_entities(&[
+        (line1, ChangeKind::Modified),
+        (arc, ChangeKind::Modified),
+        (line2, ChangeKind::Modified),
+        (start_marker, ChangeKind::Modified),
+        (end_marker, ChangeKind::Modified),
+    ]);
+
+    // A 1e-12 shift on one coordinate of the consistent chain - far inside
+    // the solver's convergence tolerance (every row stays below 1e-10).
+    if let Some(EntityType::Arc(a)) = scene.document.get_entity_mut(arc) {
+        a.center.x = -15.0 + 1.0e-12;
+    }
+    scene.bump_entities(&[(arc, ChangeKind::Modified)]);
+
+    // The nudged coordinate kept bit-exactly: the solve was a no-op, so no
+    // iteration could massage the low bits or creep anywhere else.
+    match scene.document.get_entity(arc).expect("entity exists") {
+        EntityType::Arc(a) => {
+            assert_eq!(
+                a.center.x,
+                -15.0 + 1.0e-12,
+                "the nudge must survive bit-for-bit"
+            );
+            assert!(
+                (a.center.y - 15.0).abs() < 1e-15,
+                "no drift on the other coordinates"
+            );
+        }
+        other => panic!("expected an Arc, got {other:?}"),
+    }
+    let (line2_start, line2_end) = line_endpoints(&scene, line2);
+    assert!(
+        (line2_start.x - 0.0).abs() < 1e-15,
+        "no drift: {line2_start:?}"
+    );
+    assert!(
+        (line2_start.y - 15.0).abs() < 1e-15,
+        "no drift: {line2_start:?}"
+    );
+    assert!(
+        (line2_end.y - 45.0).abs() < 1e-15,
+        "no drift: {line2_end:?}"
     );
 }

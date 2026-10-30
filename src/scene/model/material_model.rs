@@ -1,12 +1,12 @@
 use codec::objects::{Material, MaterialColor, MaterialMap, ObjectType};
 use codec::xdata::XDataValue;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use std::path::Path;
 use std::sync::Arc;
 
 /// Render-ready subset of an AcDbMaterial.
 ///
-/// The complete decoded object stays authoritative in `CadDocument`; this
+/// The complete decoded object stays authoritative in `Document`; this
 /// compact copy travels with a tessellated mesh so the GPU path does not need
 /// to look back into the document. Map metadata is retained even when the
 /// referenced image cannot be resolved, allowing a later texture upload to
@@ -322,7 +322,7 @@ impl MeshMaterial {
     pub fn apply_to_with_face_overrides(
         &self,
         set: &mut super::mesh_model::MeshLodSet,
-        document: &CadDocument,
+        document: &Document,
         base_dir: Option<&Path>,
     ) {
         self.apply_to(set);
@@ -392,7 +392,7 @@ fn procedural_map_image(map: &MaterialMap) -> Option<Arc<MaterialImage>> {
 /// Outside a block a ByBlock material has no owner source and falls back to
 /// the entity colour, matching the existing ByBlock colour behaviour.
 pub fn resolve_material_with_base(
-    document: &CadDocument,
+    document: &Document,
     entity: &EntityType,
     entity_color: [f32; 4],
     by_block: Option<&MeshMaterial>,
@@ -472,7 +472,7 @@ fn entity_material_mapper(entity: &EntityType) -> Option<MeshMaterialMapper> {
 }
 
 pub fn resolve_layer_material_with_base(
-    document: &CadDocument,
+    document: &Document,
     layer_name: &str,
     layer_color: [f32; 4],
     base_dir: Option<&Path>,
@@ -497,7 +497,7 @@ pub fn resolve_layer_material_with_base(
 }
 
 pub fn resolve_material_handle_with_base(
-    document: &CadDocument,
+    document: &Document,
     handle: Handle,
     fallback: &MeshMaterial,
     base_dir: Option<&Path>,

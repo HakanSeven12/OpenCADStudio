@@ -52,6 +52,54 @@ fn wire_segments_on_plane(wire: &WireModel, plane: WorkingPlane, tolerance: f64)
 }
 
 fn entity_curves_on_plane(entity: &EntityType, plane: WorkingPlane, tolerance: f64) -> Vec<Curve> {
+    // Straight entities have no unique support plane. Check their actual
+    // points and direction against the hatch OCS instead of an arbitrary one.
+    let straight = match entity {
+        EntityType::Line(line) => Some((line.start, line.end, None)),
+        EntityType::Ray(ray) => Some((ray.base_point, ray.base_point, Some((ray.direction, true)))),
+        EntityType::XLine(line) => Some((
+            line.base_point,
+            line.base_point,
+            Some((line.direction, false)),
+        )),
+        _ => None,
+    };
+    if let Some((start, end, direction)) = straight {
+        let local = |point: codec::types::Vector3| {
+            plane.to_local(glam::DVec3::new(point.x, point.y, point.z))
+        };
+        let start = local(start);
+        let end = local(end);
+        if start.z.abs() > tolerance || end.z.abs() > tolerance {
+            return Vec::new();
+        }
+        let start = [start.x, start.y];
+        let curve = if let Some((direction, ray)) = direction {
+            let direction =
+                plane.vector_to_local(glam::DVec3::new(direction.x, direction.y, direction.z));
+            if direction.z.abs() > 1.0e-9 || direction.x.hypot(direction.y) < 1.0e-12 {
+                return Vec::new();
+            }
+            let direction = [direction.x, direction.y];
+            if ray {
+                Curve::Ray(kernel::geom2d::Ray {
+                    origin: start,
+                    direction,
+                })
+            } else {
+                Curve::XLine(kernel::geom2d::XLine {
+                    base: start,
+                    direction,
+                })
+            }
+        } else {
+            Curve::Line(Line {
+                start,
+                end: [end.x, end.y],
+            })
+        };
+        return vec![curve];
+    }
     let Some(planar) = crate::entities::curve::entity_curve(entity) else {
         return Vec::new();
     };
@@ -77,14 +125,51 @@ fn entity_curves_on_plane(entity: &EntityType, plane: WorkingPlane, tolerance: f
     }
 }
 
-fn entity_boundary_source_on_plane(
+fn has_unsupported_polyline_topology(entity: &EntityType) -> bool {
+    match entity {
+        EntityType::Polyline(polyline) => {
+            let unsupported_flags = codec::entities::PolylineFlags::POLYGON_MESH
+                | codec::entities::PolylineFlags::POLYFACE_MESH
+                | codec::entities::PolylineFlags::CURVE_FIT
+                | codec::entities::PolylineFlags::SPLINE_FIT;
+            polyline.flags.bits() & unsupported_flags.bits() != 0
+        }
+        EntityType::Polyline3D(polyline) => {
+            polyline.flags.is_3d_mesh
+                || polyline.flags.is_polyface_mesh
+                || polyline.flags.spline_fit
+                || polyline.smooth_type != codec::entities::polyline3d::SmoothSurfaceType::None
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn entity_boundary_source_on_plane(
     entity: &EntityType,
     plane: WorkingPlane,
     tolerance: f64,
     clip_bounds: Option<([f64; 2], [f64; 2])>,
 ) -> Option<BoundarySource> {
+    // Mesh vertex order describes rows/faces; fit flags describe smooth curves,
+    // not the chordal path the explode fallback would produce.
+    if has_unsupported_polyline_topology(entity) {
+        return None;
+    }
+
     let curves = entity_curves_on_plane(entity, plane, tolerance);
 
+    let curves = if curves.is_empty()
+        && matches!(entity, EntityType::Polyline(_) | EntityType::Polyline3D(_))
+    {
+        // Heavy and 3D polylines are not single planar curves in entity_curve.
+        // Their constituent edges still cut a hatch when they lie in its OCS.
+        crate::modules::draw::modify::explode::explode_polyline_segments(entity)
+            .iter()
+            .flat_map(|piece| entity_curves_on_plane(piece, plane, tolerance))
+            .collect()
+    } else {
+        curves
+    };
     if curves.is_empty() {
         return None;
     }
@@ -134,7 +219,7 @@ fn needs_scene_boundary_sources(entity: &EntityType, plane: WorkingPlane, tolera
 /// tessellating them raw yields a unit stub that can never close a face.
 /// With no bounds there is nothing to clip against, so unbounded curves
 /// contribute nothing.
-fn live_segments_for_curves(
+pub(crate) fn live_segments_for_curves(
     curves: &[Curve],
     clip_bounds: Option<([f64; 2], [f64; 2])>,
     tolerance: f64,
@@ -741,7 +826,7 @@ pub(crate) fn boundary_entities_from_sources(
 /// duplicated along loses its association. `handle_map` maps source handles
 /// to their duplicates (COPY and paste both build one). (#1370)
 pub(crate) fn remap_hatch_associations(
-    doc: &mut codec::CadDocument,
+    doc: &mut codec::Document,
     handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
 ) -> bool {
     let mut touched = false;
@@ -1027,14 +1112,20 @@ impl Scene {
                     {
                         continue;
                     }
-                    let old_count = path.boundary_handles.len();
-                    path.boundary_handles
-                        .retain(|source| self.document.get_entity(*source).is_some());
-                    if path.boundary_handles.is_empty() {
+                    // An erased source leaves the path as it is, no longer
+                    // associative: the remaining sources alone would bound
+                    // a different region.
+                    if path
+                        .boundary_handles
+                        .iter()
+                        .any(|source| self.document.get_entity(*source).is_none())
+                    {
+                        path.boundary_handles.clear();
                         path.flags.set_external(false);
+                        association_changed = true;
+                        modified = true;
+                        continue;
                     }
-                    association_changed |= path.boundary_handles.len() != old_count;
-                    modified |= association_changed;
                     let sources: rustc_hash::FxHashMap<_, _> = path
                         .boundary_handles
                         .iter()
@@ -1117,6 +1208,66 @@ impl Scene {
         refreshed
     }
 
+    /// Keep the boundary sources drawn in the current view. HATCH, GRADIENT
+    /// and BOUNDARY find regions among what is on screen; an object off the
+    /// view, or on a layer that is off or frozen (never drawn), takes no part
+    /// (#2126). A model view seen through a layout viewport is left whole.
+    pub fn retain_sources_on_screen(
+        &self,
+        sources: &mut rustc_hash::FxHashMap<Handle, BoundarySource>,
+        plane: WorkingPlane,
+    ) {
+        if self.active_viewport.is_some() {
+            return;
+        }
+        let (width, height) = self.selection.borrow().view.vp_size;
+        if !(width > 1.0 && height > 1.0) {
+            return;
+        }
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+        };
+        let camera = self.camera.borrow();
+        let corners = [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)].map(|(x, y)| {
+            let world = camera.unproject_on_plane(
+                iced::Point::new(x, y),
+                bounds,
+                plane.z.as_vec3(),
+                plane.origin,
+            );
+            plane.to_local(world)
+        });
+        if !corners.iter().all(|corner| corner.is_finite()) {
+            return;
+        }
+        let (min_x, max_x) = corners
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c.x), hi.max(c.x)));
+        let (min_y, max_y) = corners
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c.y), hi.max(c.y)));
+        let on_screen = |line: &Line| {
+            line.start[0].max(line.end[0]) >= min_x
+                && line.start[0].min(line.end[0]) <= max_x
+                && line.start[1].max(line.end[1]) >= min_y
+                && line.start[1].min(line.end[1]) <= max_y
+        };
+        let shown = |handle: &Handle| {
+            self.document.get_entity(*handle).is_none_or(|entity| {
+                self.document
+                    .layers
+                    .get(&entity.common().layer)
+                    .is_none_or(|layer| !layer.is_off() && !layer.is_frozen())
+            })
+        };
+        sources.retain(|handle, source| {
+            shown(handle) && source.segments.iter().any(on_screen)
+        });
+    }
+
     /// Boundary candidates in the active working plane, with exact curves
     /// where the source entity exposes them.
     pub fn boundary_sources_on_plane(
@@ -1157,10 +1308,10 @@ impl Scene {
                 .extend(segments);
         }
         let wire_ms = crate::perf::elapsed_ms(wire_started);
-        // Objects on a layer that is turned off (not frozen) still bound a
-        // hatch, as in the reference: drawings switch off the layers that
-        // close the regions to be hatched. They draw no wire, so they come
-        // from the document. (#1813)
+        // Objects on a layer that is turned off (not frozen) stay sources, so
+        // an associative hatch keeps a boundary whose layer was switched off.
+        // They draw no wire, so they come from the document. A pick in HATCH
+        // or BOUNDARY drops them again (`retain_sources_on_screen`).
         let space = if self.active_viewport.is_some() || self.current_layout == "Model" {
             self.content_render_block_handle()
         } else {
@@ -1296,10 +1447,6 @@ fn hatch_path_geometry(path: &codec::entities::BoundaryPath) -> (Vec<[f64; 2]>, 
 pub(crate) fn hatch_path_ring(path: &codec::entities::BoundaryPath) -> Option<Vec<[f64; 2]>> {
     let (ring, _) = hatch_path_geometry(path);
     (ring.len() >= 3).then_some(ring)
-}
-
-pub(crate) fn hatch_path_directions(path: &codec::entities::BoundaryPath) -> Vec<f64> {
-    hatch_path_geometry(path).1
 }
 
 pub(crate) fn hatch_boundary_rings(hatch: &codec::entities::Hatch) -> Vec<Vec<[f64; 2]>> {

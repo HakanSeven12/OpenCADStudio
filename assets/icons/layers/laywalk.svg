@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
+  <!-- The layer stack the walk steps through -->
+  <line x1="2" y1="5" x2="16" y2="5"
+        stroke="#777777" stroke-width="2.25" stroke-linecap="round"/>
+  <line x1="2" y1="19" x2="16" y2="19"
+        stroke="#777777" stroke-width="2.25" stroke-linecap="round"
+        stroke-dasharray="3 3"/>
+  <!-- The walked layer stays visible -->
+  <line x1="2" y1="12" x2="16" y2="12"
+        stroke="#6DB7ED" stroke-width="2.25" stroke-linecap="round"/>
+  <!-- Stepping from one layer to the next -->
+  <path d="M18 8h3.5 M19.5 5.5 22 8 19.5 10.5"
+        fill="none" stroke="#f0c040" stroke-width="1.75"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M18 16h3.5 M19.5 13.5 22 16 19.5 18.5"
+        fill="none" stroke="#f0c040" stroke-width="1.75"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

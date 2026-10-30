@@ -69,9 +69,18 @@ impl Release {
         self.assets.iter().find(|a| a.name == "plugin.toml")
     }
 
+    /// Bundles of further plugins for this platform: `<anything>-<platform>.zip`
+    /// holding one `plugin.toml` + library per plugin, at its root or one
+    /// folder per plugin.
+    fn bundle_assets(&self) -> impl Iterator<Item = &Asset> {
+        let suffix = format!("-{}.zip", platform_suffix());
+        self.assets.iter().filter(move |a| a.name.ends_with(&suffix))
+    }
+
     /// True when this release ships an installable package for this platform.
     pub fn installable(&self) -> bool {
-        self.lib_asset().is_some() && self.toml_asset().is_some()
+        (self.lib_asset().is_some() && self.toml_asset().is_some())
+            || self.bundle_assets().next().is_some()
     }
 }
 
@@ -310,15 +319,103 @@ fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// Download and install a release's package into the plugins folder. Verifies
-/// the API version and, when present, the `opencadcodec` fingerprint from the
-/// package's `plugin.toml` first. Returns the plugin id on success.
+/// Download and install a release's packages into the plugins folder: its
+/// library + `plugin.toml`, and every plugin in its platform bundles. Each
+/// `plugin.toml` passes the API-version (and, before v14, ABI) checks before
+/// anything is written. Returns the installed plugin ids, comma-separated.
 pub fn install(release: &Release, repository: &str) -> Result<String, String> {
-    let lib = release.lib_asset().ok_or("no library for this platform")?;
-    let toml = release.toml_asset().ok_or("release has no plugin.toml")?;
+    let mut packages = Vec::new();
+    if let (Some(lib), Some(toml)) = (release.lib_asset(), release.toml_asset()) {
+        let toml_text = download_string(&toml.url)?;
+        let id = checked_manifest(&toml_text)?.id;
+        packages.push(Package {
+            id,
+            toml_text,
+            files: vec![(PathBuf::from(&lib.name), download_bytes(&lib.url)?)],
+        });
+    }
+    for bundle in release.bundle_assets() {
+        packages.extend(bundle_packages(&download_bytes(&bundle.url)?)?);
+    }
+    if packages.is_empty() {
+        return Err("no package for this platform".to_string());
+    }
+    let mut ids = Vec::new();
+    for package in packages {
+        ids.push(write_package(package, repository)?);
+    }
+    Ok(ids.join(", "))
+}
 
-    let toml_text = download_string(&toml.url)?;
-    let manifest = external::parse_plugin_toml(&toml_text).ok_or("plugin.toml is missing an id")?;
+/// One plugin ready to write: its `plugin.toml` and its other files, by path
+/// inside the package folder.
+struct Package {
+    id: String,
+    toml_text: String,
+    files: Vec<(PathBuf, Vec<u8>)>,
+}
+
+/// The packages in a bundle zip: each folder holding a `plugin.toml` (the
+/// root included) with the files below it.
+fn bundle_packages(bytes: &[u8]) -> Result<Vec<Package>, String> {
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("bundle: {e}"))?;
+    let mut files = Vec::new();
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|e| format!("bundle: {e}"))?;
+        let Some(path) = file.enclosed_name().filter(|_| file.is_file()) else {
+            continue;
+        };
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)
+            .map_err(|e| format!("bundle: {e}"))?;
+        files.push((path, data));
+    }
+    let roots: Vec<PathBuf> = files
+        .iter()
+        .filter(|(path, _)| path.file_name().is_some_and(|name| name == "plugin.toml"))
+        .map(|(path, _)| path.parent().unwrap_or(Path::new("")).to_path_buf())
+        .collect();
+    if roots.is_empty() {
+        return Err("bundle has no plugin.toml".to_string());
+    }
+    let mut packages = Vec::new();
+    for root in &roots {
+        let toml_path = root.join("plugin.toml");
+        let toml_text = files
+            .iter()
+            .find(|(path, _)| *path == toml_path)
+            .and_then(|(_, data)| String::from_utf8(data.clone()).ok())
+            .ok_or("bundle: plugin.toml is not UTF-8")?;
+        let id = checked_manifest(&toml_text)?.id;
+        // A file belongs to the deepest package folder above it.
+        let owned = files
+            .iter()
+            .filter(|(path, _)| *path != toml_path)
+            .filter(|(path, _)| {
+                roots
+                    .iter()
+                    .filter(|other| path.starts_with(other))
+                    .max_by_key(|other| other.components().count())
+                    == Some(root)
+            })
+            .map(|(path, data)| {
+                let inner = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+                (inner, data.clone())
+            })
+            .collect();
+        packages.push(Package {
+            id,
+            toml_text,
+            files: owned,
+        });
+    }
+    Ok(packages)
+}
+
+/// Parse `plugin.toml` and refuse a plugin this host cannot load.
+fn checked_manifest(toml_text: &str) -> Result<external::ExternalPlugin, String> {
+    let manifest = external::parse_plugin_toml(toml_text).ok_or("plugin.toml is missing an id")?;
     if !ocs_plugin_api::manifest::host_accepts_plugin_version(manifest.api_version) {
         return Err(format!(
             "API version {} is incompatible (host supports {}-{})",
@@ -376,17 +473,38 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
         }
     }
 
+    Ok(manifest)
+}
+
+/// Write one package into `plugins/<id>/`; its library replaces the resident
+/// one even while that is loaded.
+fn write_package(package: Package, repository: &str) -> Result<String, String> {
     let dir = external::plugins_dir()
         .ok_or("cannot locate the plugins folder")?
-        .join(&manifest.id);
+        .join(&package.id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-
-    let bytes = download_bytes(&lib.url)?;
-    replace_library(&dir, &lib.name, external_lib_ext(), &bytes)?;
-    std::fs::write(dir.join("plugin.toml"), toml_text).map_err(|e| e.to_string())?;
+    let ext = external_lib_ext();
+    let is_library = |path: &Path| {
+        path.parent().is_none_or(|parent| parent.as_os_str().is_empty())
+            && path.extension().is_some_and(|e| e == ext)
+    };
+    let (lib_name, lib_bytes) = package
+        .files
+        .iter()
+        .find(|(path, _)| is_library(path))
+        .ok_or_else(|| format!("{}: no library for this platform", package.id))?;
+    replace_library(&dir, &lib_name.to_string_lossy(), ext, lib_bytes)?;
+    for (path, data) in package.files.iter().filter(|(path, _)| !is_library(path)) {
+        let target = dir.join(path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(target, data).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(dir.join("plugin.toml"), &package.toml_text).map_err(|e| e.to_string())?;
     std::fs::write(dir.join(".source_repo"), format!("{repository}\n"))
         .map_err(|e| e.to_string())?;
-    Ok(manifest.id)
+    Ok(package.id)
 }
 
 /// Install `bytes` as the package's native library at `dir/lib_name`, upgrading

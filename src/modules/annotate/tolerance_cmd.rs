@@ -49,7 +49,7 @@ impl CadCommand for ToleranceCommand {
     }
 
     fn prompt(&self) -> String {
-        t!("TOLERANCE  Specify insertion point:").into_owned()
+        t!("TOLERANCE  Enter tolerance location:").into_owned()
     }
 
     fn wants_text_input(&self) -> bool {

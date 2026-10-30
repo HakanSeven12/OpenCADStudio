@@ -236,6 +236,22 @@ impl Face {
         }
     }
 
+    /// Depth of the descender below the baseline as a fraction of the text
+    /// height (the cap height). Bottom-justified text sits this far above its
+    /// alignment point whatever its characters: an SHX font's header
+    /// `below / above`, a TrueType face's descender over its cap height, and a
+    /// third (the stroke fonts' `2 / 6`) for the embedded stroke fonts.
+    pub fn descent_ratio(&self) -> f32 {
+        match self {
+            Face::Shx { path, .. } => shx::font_metrics(path)
+                .map(|(above, below)| (below / above) as f32)
+                .unwrap_or(1.0 / 3.0),
+            Face::Ttf { family, .. } => ttf_glyph::descent_ratio(family).unwrap_or(1.0 / 3.0),
+            Face::Lff(_) => 1.0 / 3.0,
+            Face::WithBig { primary, .. } => primary.descent_ratio(),
+        }
+    }
+
     /// Line-spacing factor (1.0 = one cap height between baselines as scaled by
     /// the caller). TTF and SHX use the neutral 1.0 — an SHX font's
     /// above/below metrics don't widen the baseline step; LFF carries its

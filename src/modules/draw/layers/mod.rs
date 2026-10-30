@@ -7,6 +7,7 @@ pub(super) mod layon;
 pub(super) mod laythw;
 pub mod laytrans;
 pub(super) mod layulk;
+pub(super) mod laywalk;
 pub(super) mod layuniso;
 pub(super) mod make_current;
 pub mod match_layer;

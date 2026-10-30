@@ -79,6 +79,16 @@ impl OpenCADStudio {
         self.save_config();
     }
 
+    /// Restore Defaults: every preference as a fresh configuration has it,
+    /// the recent files kept. Like any change it waits for Apply or OK.
+    pub(super) fn options_restore_defaults(&mut self) {
+        let recent = self.current_config().recent;
+        self.apply_config(super::config::AppConfig {
+            recent,
+            ..Default::default()
+        });
+    }
+
     /// Close: put everything back to the last commit. The caller closes the
     /// window afterwards.
     pub(super) fn options_discard(&mut self) {

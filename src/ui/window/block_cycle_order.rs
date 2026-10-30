@@ -1,5 +1,5 @@
 use crate::app::Message;
-use codec::{CadDocument, Handle};
+use codec::{Document, Handle};
 use iced::{
     widget::{button, checkbox, column, container, row, scrollable, text, Space},
     Element, Fill,
@@ -26,7 +26,7 @@ impl State {
     pub(crate) fn new(
         document: u64,
         definition: Handle,
-        doc: &CadDocument,
+        doc: &Document,
     ) -> Result<Self, &'static str> {
         let grips = crate::scene::block_grips::grips(doc, definition)?;
         let expected = grips

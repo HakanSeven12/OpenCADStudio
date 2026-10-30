@@ -3,7 +3,7 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::scene::block_visibility as visibility;
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 use iced::Task;
 
 impl OpenCADStudio {
@@ -544,7 +544,7 @@ impl OpenCADStudio {
                 let parameter = self.visibility_parameter(i, block)?;
                 let current = self.visibility_current(i, block);
                 let document = &mut self.tabs[i].scene.document;
-                let index = |document: &CadDocument, name: &str| {
+                let index = |document: &Document, name: &str| {
                     visibility::state_names(document, parameter)
                         .iter()
                         .position(|candidate| candidate.eq_ignore_ascii_case(name))

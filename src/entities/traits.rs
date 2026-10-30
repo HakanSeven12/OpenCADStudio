@@ -1,4 +1,4 @@
-use codec::{CadDocument, EntityType};
+use codec::{Document, EntityType};
 
 use crate::command::EntityTransform;
 use crate::scene::convert::acad_to_render::RenderEntity;
@@ -6,7 +6,7 @@ use crate::scene::convert::tess_util::FallbackGeometry;
 use crate::scene::model::object::{GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection};
 
 pub trait RenderConvertible {
-    fn to_render(&self, document: &CadDocument) -> Option<RenderEntity>;
+    fn to_render(&self, document: &Document) -> Option<RenderEntity>;
 }
 
 /// Fallback geometry for entities not routed through the render
@@ -81,7 +81,7 @@ pub trait Transformable {
 // Helix, Extended) so every other entity is stored narrow; the boxed ones
 // answer through their contents.
 impl<T: RenderConvertible + ?Sized> RenderConvertible for Box<T> {
-    fn to_render(&self, document: &CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &Document) -> Option<RenderEntity> {
         (**self).to_render(document)
     }
 }
@@ -242,7 +242,7 @@ pub fn entity_type_name(et: &EntityType) -> &str {
 }
 
 pub trait EntityTypeOps {
-    fn to_render_entity(&self, document: &CadDocument) -> Option<RenderEntity>;
+    fn to_render_entity(&self, document: &Document) -> Option<RenderEntity>;
     fn grips(&self) -> Vec<GripDef>;
     fn grip_menu(&self, grip_id: usize) -> Vec<GripMenuItem>;
     fn geometry_properties(&self, text_style_names: &[String]) -> Vec<PropSection>;
@@ -359,7 +359,7 @@ macro_rules! impl_entity_basics_with_text_styles {
 }
 
 impl EntityTypeOps for EntityType {
-    fn to_render_entity(&self, document: &CadDocument) -> Option<RenderEntity> {
+    fn to_render_entity(&self, document: &Document) -> Option<RenderEntity> {
         dispatch!(self,
             |e| RenderConvertible::to_render(e, document),
             [
@@ -549,7 +549,20 @@ impl EntityTypeOps for EntityType {
                 ViewBorder, Extended,
             ],
             _ => {},
-        )
+        );
+        // XDATA world points follow the entity, as in opencadcodec's
+        // `EntityType` transforms; the verbatim record would write the old
+        // values back. Section marks / view borders stay with their view.
+        if !matches!(
+            self,
+            EntityType::SectionSymbol(_) | EntityType::ViewBorder(_) | EntityType::Unknown(_)
+        ) && self
+            .common_mut()
+            .extended_data
+            .apply_transform(&crate::scene::view::transform::codec_transform(t))
+        {
+            self.common_mut().raw_record = None;
+        }
     }
 
     fn mass_props(&self) -> Option<MassProps> {
@@ -574,5 +587,84 @@ impl EntityTypeOps for EntityType {
             [Text, MText, AttributeDefinition, AttributeEntity],
             _ => {},
         )
+    }
+}
+
+#[cfg(test)]
+mod xdata_transform_tests {
+    use super::*;
+    use codec::entities::Insert;
+    use codec::types::Vector3;
+    use codec::xdata::{ExtendedDataRecord, XDataValue};
+    use glam::DVec3;
+
+    fn insert_with_xdata() -> EntityType {
+        let mut insert = Insert::new("B", Vector3::new(100.0, 100.0, 0.0));
+        let mut record = ExtendedDataRecord::new("APP");
+        record.add_value(XDataValue::Position3D(Vector3::new(100.0, 100.0, 0.0)));
+        record.add_value(XDataValue::Distance(10.0));
+        insert.common.extended_data.add_record(record);
+        EntityType::Insert(insert)
+    }
+
+    fn xdata(entity: &EntityType) -> (Vector3, f64) {
+        let values = &entity.common().extended_data.records()[0].values;
+        let (XDataValue::Position3D(p), XDataValue::Distance(d)) =
+            (values[0].clone(), values[1].clone())
+        else {
+            panic!("unexpected XDATA {values:?}");
+        };
+        (p, d)
+    }
+
+    fn assert_near(got: Vector3, x: f64, y: f64) {
+        assert!(
+            (got.x - x).abs() < 1e-9 && (got.y - y).abs() < 1e-9 && got.z.abs() < 1e-9,
+            "got {got:?}, expected ({x}, {y}, 0)"
+        );
+    }
+
+    #[test]
+    fn xdata_points_follow_move_rotate_scale_mirror() {
+        let mut moved = insert_with_xdata();
+        EntityTypeOps::apply_transform(
+            &mut moved,
+            &EntityTransform::Translate(DVec3::new(50.0, 0.0, 0.0)),
+        );
+        assert_near(xdata(&moved).0, 150.0, 100.0);
+        assert_eq!(xdata(&moved).1, 10.0);
+
+        let mut rotated = insert_with_xdata();
+        EntityTypeOps::apply_transform(
+            &mut rotated,
+            &EntityTransform::Rotate {
+                center: DVec3::ZERO,
+                axis: DVec3::Z,
+                angle_rad: std::f64::consts::FRAC_PI_2,
+            },
+        );
+        assert_near(xdata(&rotated).0, -100.0, 100.0);
+
+        let mut scaled = insert_with_xdata();
+        EntityTypeOps::apply_transform(
+            &mut scaled,
+            &EntityTransform::Scale {
+                center: DVec3::ZERO,
+                factor: 2.0,
+            },
+        );
+        assert_near(xdata(&scaled).0, 200.0, 200.0);
+        assert!((xdata(&scaled).1 - 20.0).abs() < 1e-9);
+
+        let mut mirrored = insert_with_xdata();
+        EntityTypeOps::apply_transform(
+            &mut mirrored,
+            &EntityTransform::Mirror {
+                p1: DVec3::ZERO,
+                p2: DVec3::new(0.0, 100.0, 0.0),
+                working_normal: DVec3::Z,
+            },
+        );
+        assert_near(xdata(&mirrored).0, -100.0, 100.0);
     }
 }

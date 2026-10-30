@@ -1,5 +1,5 @@
 use codec::objects::{ObjectType, RasterVariables, WipeoutVariables};
-use codec::{CadDocument, EntityType, Handle};
+use codec::{Document, EntityType, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrameKind {
@@ -55,7 +55,7 @@ fn image_flags_from_mode(mode: i16) -> i16 {
     }
 }
 
-fn root_entry(document: &CadDocument, name: &str) -> Option<Handle> {
+fn root_entry(document: &Document, name: &str) -> Option<Handle> {
     let from_dictionary = |handle| match document.objects.get(&handle) {
         Some(ObjectType::Dictionary(dictionary)) => dictionary
             .entries
@@ -74,7 +74,7 @@ fn root_entry(document: &CadDocument, name: &str) -> Option<Handle> {
     })
 }
 
-fn raster_variables_handle(document: &CadDocument) -> Option<Handle> {
+fn raster_variables_handle(document: &Document) -> Option<Handle> {
     root_entry(document, "ACAD_IMAGE_VARS").filter(|handle| {
         matches!(
             document.objects.get(handle),
@@ -83,7 +83,7 @@ fn raster_variables_handle(document: &CadDocument) -> Option<Handle> {
     })
 }
 
-fn wipeout_variables_handle(document: &CadDocument) -> Option<Handle> {
+fn wipeout_variables_handle(document: &Document) -> Option<Handle> {
     root_entry(document, "ACAD_WIPEOUT_VARS").filter(|handle| {
         matches!(
             document.objects.get(handle),
@@ -92,14 +92,14 @@ fn wipeout_variables_handle(document: &CadDocument) -> Option<Handle> {
     })
 }
 
-fn drawing_mode(document: &CadDocument, name: &str, default: i16) -> i16 {
+fn drawing_mode(document: &Document, name: &str, default: i16) -> i16 {
     crate::io::drawing_variable(document, name)
         .and_then(|value| value.parse::<i16>().ok())
         .unwrap_or(default)
         .clamp(0, 2)
 }
 
-pub(crate) fn mode(document: &CadDocument, kind: FrameKind) -> i16 {
+pub(crate) fn mode(document: &Document, kind: FrameKind) -> i16 {
     match kind {
         FrameKind::Image => raster_variables_handle(document)
             .and_then(|handle| match document.objects.get(&handle) {
@@ -129,7 +129,7 @@ pub(crate) fn mode(document: &CadDocument, kind: FrameKind) -> i16 {
     }
 }
 
-pub(crate) fn master_mode(document: &CadDocument) -> i16 {
+pub(crate) fn master_mode(document: &Document) -> i16 {
     let first = mode(document, ALL_KINDS[0]);
     ALL_KINDS
         .iter()
@@ -139,7 +139,7 @@ pub(crate) fn master_mode(document: &CadDocument) -> i16 {
         .unwrap_or(3)
 }
 
-fn attach_root_entry(document: &mut CadDocument, name: &str, handle: Handle) {
+fn attach_root_entry(document: &mut Document, name: &str, handle: Handle) {
     let root = crate::scene::annotative::root_named_dict_handle(document);
     if let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&root) {
         dictionary
@@ -149,7 +149,7 @@ fn attach_root_entry(document: &mut CadDocument, name: &str, handle: Handle) {
     }
 }
 
-fn set_image_mode(document: &mut CadDocument, value: i16) {
+fn set_image_mode(document: &mut Document, value: i16) {
     let owner = crate::scene::annotative::root_named_dict_handle(document);
     let handle = raster_variables_handle(document).unwrap_or_else(|| {
         let handle = document.allocate_handle();
@@ -169,7 +169,7 @@ fn set_image_mode(document: &mut CadDocument, value: i16) {
     attach_root_entry(document, "ACAD_IMAGE_VARS", handle);
 }
 
-fn set_wipeout_mode(document: &mut CadDocument, value: i16) {
+fn set_wipeout_mode(document: &mut Document, value: i16) {
     crate::io::set_drawing_variable(document, "WIPEOUTFRAME", &value.to_string());
     let owner = crate::scene::annotative::root_named_dict_handle(document);
     let handle = wipeout_variables_handle(document).unwrap_or_else(|| {
@@ -189,7 +189,7 @@ fn set_wipeout_mode(document: &mut CadDocument, value: i16) {
     attach_root_entry(document, "ACAD_WIPEOUT_VARS", handle);
 }
 
-pub(crate) fn set_mode(document: &mut CadDocument, kind: FrameKind, value: i16) {
+pub(crate) fn set_mode(document: &mut Document, kind: FrameKind, value: i16) {
     let value = value.clamp(0, 2);
     match kind {
         FrameKind::Image => set_image_mode(document, value),
@@ -204,7 +204,7 @@ pub(crate) fn set_mode(document: &mut CadDocument, kind: FrameKind, value: i16) 
     }
 }
 
-pub(crate) fn set_master_mode(document: &mut CadDocument, value: i16) {
+pub(crate) fn set_master_mode(document: &mut Document, value: i16) {
     let value = value.clamp(0, 2);
     for kind in ALL_KINDS {
         if mode(document, kind) != value {

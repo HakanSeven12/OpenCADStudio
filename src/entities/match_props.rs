@@ -440,7 +440,7 @@ pub enum MatchLayerError {
 /// that resolve to nothing are skipped. Lock-filtering, undo, dirty-state and
 /// command-line echo stay caller-side in `handle_match_entity_layer`.
 pub fn match_layer_kernel(
-    doc: &mut codec::CadDocument,
+    doc: &mut codec::Document,
     dest: &[codec::Handle],
     src: codec::Handle,
 ) -> Result<usize, MatchLayerError> {
@@ -462,7 +462,7 @@ pub fn match_layer_kernel(
 /// (`copy_common`, `copy_thickness`, `copy_special`) run inside
 /// [`match_properties_kernel`]; the document-level transfers
 /// (`copy_hatch_background`, `copy_dim_overrides`) stay caller-side in
-/// `handle_match_properties` (they need `&mut CadDocument` for
+/// `handle_match_properties` (they need `&mut Document` for
 /// `set_entity_xdata` / `dim_override::replace`) but are gated by the same
 /// flags so headless callers and the handler agree on what "match" means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -503,7 +503,7 @@ impl Default for MatchOpts {
 /// MATCHPROP kernel: transfer the source entity's properties onto one
 /// destination entity, gated by `opts`. Covers the `&EntityType`-level work
 /// from `handle_match_properties` — common fields, thickness and
-/// [`match_special_props`]. The `&mut CadDocument` paths (hatch-background
+/// [`match_special_props`]. The `&mut Document` paths (hatch-background
 /// xdata, dim-override replace, dim-block invalidation, fill-model refresh)
 /// stay caller-side; lock-filtering, undo, dirty-state, selection and echo
 /// stay caller-side too.
@@ -544,7 +544,7 @@ pub fn match_properties_kernel(
         match_special_props(src, dst);
     }
     // `copy_hatch_background` / `copy_dim_overrides` are intentionally not
-    // applied here: both ride xdata records through `&mut CadDocument`
+    // applied here: both ride xdata records through `&mut Document`
     // (`set_entity_xdata`, `dim_override::replace`). The handler checks the
     // same flags before running those paths.
 }
@@ -559,13 +559,13 @@ mod match_layer_kernel_tests {
         codec::EntityType::Line(line)
     }
 
-    fn layer_of(doc: &codec::CadDocument, handle: codec::Handle) -> String {
+    fn layer_of(doc: &codec::Document, handle: codec::Handle) -> String {
         doc.get_entity(handle).unwrap().common().layer.clone()
     }
 
     #[test]
     fn copies_src_layer_onto_every_dest_and_returns_count() {
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let src = doc.add_entity(line_on("WALLS")).unwrap();
         let a = doc.add_entity(line_on("0")).unwrap();
         let b = doc.add_entity(line_on("0")).unwrap();
@@ -580,7 +580,7 @@ mod match_layer_kernel_tests {
 
     #[test]
     fn missing_src_errors_and_leaves_dest_untouched() {
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let dest = doc.add_entity(line_on("0")).unwrap();
         let missing = doc.allocate_handle();
 
@@ -592,7 +592,7 @@ mod match_layer_kernel_tests {
 
     #[test]
     fn skips_missing_dest_handles_but_counts_the_rest() {
-        let mut doc = codec::CadDocument::new();
+        let mut doc = codec::Document::new();
         let src = doc.add_entity(line_on("WALLS")).unwrap();
         let dest = doc.add_entity(line_on("0")).unwrap();
         let missing = doc.allocate_handle();

@@ -1460,7 +1460,7 @@ const MAX_SNAP_POINTS: usize = 20_000;
 /// space, when PDFOSNAP is on and the page is shown.
 pub fn underlay_snap_points(
     u: &codec::entities::Underlay,
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> Vec<(glam::DVec3, crate::scene::model::wire_model::SnapHint)> {
     use crate::scene::model::wire_model::SnapHint;
     if !underlay_osnap(u.underlay_type)
@@ -1543,7 +1543,7 @@ pub struct SnapPiece {
 /// PDFOSNAP is off or the page is not shown.
 pub fn underlay_snap_geometry(
     u: &codec::entities::Underlay,
-    document: &codec::CadDocument,
+    document: &codec::Document,
 ) -> Vec<SnapPiece> {
     if !underlay_osnap(u.underlay_type)
         || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON)

@@ -7,7 +7,7 @@ use crate::command::{EntityTransform, PointPickContext, WorkingPlane};
 use codec::{
     entities::Insert,
     objects::{DynamicBlockData, ObjectType},
-    CadDocument, EntityType, Handle,
+    Document, EntityType, Handle,
 };
 use glam::DVec3;
 use kernel::geom2d::{self, Curve, Extent, Line, Tolerance};
@@ -27,10 +27,26 @@ pub struct Alignment {
 #[cfg(test)]
 mod tests;
 
-pub fn grips(doc: &CadDocument, definition: Handle, insert: Handle) -> Vec<Alignment> {
+pub fn grips(doc: &Document, definition: Handle, insert: Handle) -> Vec<Alignment> {
     let Some(EntityType::Insert(reference)) = doc.get_entity(insert) else {
         return vec![];
     };
+    reference_grips(doc, definition, reference)
+}
+
+/// Definition-space insertion grips, measured from the native block base.
+pub(crate) fn insertion_grips(doc: &Document, name: &str) -> Vec<Alignment> {
+    let Some(definition) = doc.block_records.get(name) else {
+        return vec![];
+    };
+    reference_grips(
+        doc,
+        definition.handle,
+        &Insert::new(name, codec::types::Vector3::ZERO),
+    )
+}
+
+fn reference_grips(doc: &Document, definition: Handle, reference: &Insert) -> Vec<Alignment> {
     let transform = render_graph::insert_transform(doc, reference);
     let x = actions::v(transform.apply_rotation(actions::native(DVec3::X)));
     let y = actions::v(transform.apply_rotation(actions::native(DVec3::Y)));
@@ -394,7 +410,10 @@ impl Targets {
             best = Some((distance, nearest.point, tangent));
         }
         let Some((_, point, tangent)) = best else {
-            return Ok((self.plane.to_world(DVec3::new(local.x, local.y, 0.)), 0.));
+            // Off-target placement is free translation in the reference plane;
+            // Flip still reverses the reference direction, without a target tangent.
+            let angle = if flipped { std::f64::consts::PI } else { 0. };
+            return Ok((self.plane.to_world(DVec3::new(local.x, local.y, 0.)), angle));
         };
         let target = if alignment.perpendicular {
             [-tangent[1], tangent[0]]

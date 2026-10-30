@@ -875,7 +875,7 @@ impl Scene {
 }
 
 pub(crate) fn clip_boundary_polygon_for_document(
-    document: &CadDocument,
+    document: &Document,
     handle: Handle,
     z: f32,
 ) -> Vec<[f32; 3]> {

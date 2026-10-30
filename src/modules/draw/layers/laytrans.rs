@@ -78,7 +78,7 @@ pub fn load_targets(path: &Path) -> Result<Vec<TargetLayer>, String> {
 /// Extract the translation targets from an already-parsed drawing — the
 /// tail of [`load_targets`], reused by the web flow, which parses the
 /// picked file's bytes before it gets here.
-pub fn targets_from_document(document: &codec::CadDocument) -> Result<Vec<TargetLayer>, String> {
+pub fn targets_from_document(document: &codec::Document) -> Result<Vec<TargetLayer>, String> {
     let mut targets: Vec<TargetLayer> = document
         .layers
         .iter()
@@ -214,25 +214,65 @@ pub fn translate(
 ///
 /// The entity list is flat and holds block definitions too, so objects inside
 /// blocks travel with the rest rather than being left behind on a layer that no
-/// longer exists.
+/// longer exists. Attributes are not in that list: they live inside their
+/// insert and carry a layer of their own, so they are walked separately.
 pub fn merge_layer(scene: &mut Scene, from: &str, to: &str, force_bylayer: bool) -> usize {
     let mut moved = 0usize;
     for entity in scene.document.entities_mut() {
+        if let codec::EntityType::Insert(insert) = entity {
+            for attribute in &mut insert.attributes {
+                if attribute.common.layer == from {
+                    move_common(&mut attribute.common, to, force_bylayer);
+                    moved += 1;
+                }
+            }
+        }
         if entity.common().layer != from {
             continue;
         }
-        let common = entity.common_mut();
-        common.layer = to.to_string();
-        if force_bylayer {
-            common.color = codec::Color::ByLayer;
-            common.color_name = None;
-            common.color_book_handle = None;
-            common.linetype = String::new();
-            common.linetype_handle = None;
-            common.line_weight = codec::LineWeight::ByLayer;
-        }
+        move_common(entity.common_mut(), to, force_bylayer);
         moved += 1;
     }
     scene.document.layers.remove(from);
     moved
+}
+
+fn move_common(common: &mut codec::entities::EntityCommon, to: &str, force_bylayer: bool) {
+    common.layer = to.to_string();
+    if force_bylayer {
+        common.color = codec::Color::ByLayer;
+        common.color_name = None;
+        common.color_book_handle = None;
+        common.linetype = String::new();
+        common.linetype_handle = None;
+        common.line_weight = codec::LineWeight::ByLayer;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codec::entities::{AttributeEntity, EntityType, Insert};
+    use codec::Vector3;
+
+    #[test]
+    fn merge_layer_moves_attributes_inside_inserts() {
+        let mut scene = Scene::new();
+        let mut attribute = AttributeEntity::new("TAG".into(), "value".into());
+        attribute.common.layer = "A".into();
+        attribute.common.color = codec::Color::from_index(1);
+        let mut insert = Insert::new("BLK", Vector3::ZERO);
+        insert.attributes.push(attribute);
+        let handle = scene.add_entity(EntityType::Insert(insert));
+
+        let moved = merge_layer(&mut scene, "A", "B", true);
+
+        let Some(EntityType::Insert(insert)) = scene.document.get_entity(handle) else {
+            panic!("insert missing");
+        };
+        assert_eq!(moved, 1);
+        assert_eq!(insert.common.layer, "0");
+        assert_eq!(insert.attributes[0].common.layer, "B");
+        assert_eq!(insert.attributes[0].common.color, codec::Color::ByLayer);
+    }
 }

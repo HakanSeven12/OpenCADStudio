@@ -73,7 +73,7 @@ pub(super) struct PendingDelta {
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
-    structure_before: Option<codec::CadDocument>,
+    structure_before: Option<codec::Document>,
 }
 
 pub(super) struct PendingLayerDelta {
@@ -225,6 +225,7 @@ impl OpenCADStudio {
             dirty_before,
             dirty_after: true,
             active_layer: None,
+            layiso_state: None,
             structure: (!objects.is_empty()).then_some(StructureSnapshot::Objects(objects)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
@@ -304,7 +305,7 @@ impl OpenCADStudio {
                     .get(&session.block_name)
                     .map(|record| (session.block_name.clone(), record.entity_handles.clone()))
             });
-        codec::CadDocument::align_added_entity_structure(
+        codec::Document::align_added_entity_structure(
             &mut pending.structure_before,
             &structure_after,
             &added_handles,
@@ -399,6 +400,7 @@ impl OpenCADStudio {
             dirty_after,
             active_layer: (pending.active_layer != active_layer_after)
                 .then_some((pending.active_layer, active_layer_after)),
+            layiso_state: None,
             structure: structure_changed
                 .then_some(StructureSnapshot::Full(pending.structure_before)),
             parametric_constraints,
@@ -422,7 +424,16 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             // A plugin's scope spans the commands its running request drives;
             // the message boundary after the request closes it.
-            if !self.joins_plugin_scope(i) {
+            let grouping = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.groups_undo());
+            let held = self.tabs[i]
+                .history
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.held);
+            if !self.joins_plugin_scope(i) && !grouping && !held {
                 self.finish_pending_history(i);
             }
         }
@@ -463,6 +474,7 @@ impl OpenCADStudio {
             parametric_constraints_before: self.tabs[i].scene.parametric_constraints.clone(),
             plugin_owned: false,
             keep_empty: false,
+            held: false,
         });
     }
 
@@ -591,6 +603,7 @@ impl OpenCADStudio {
             dirty_before: pending.dirty_before,
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
+            layiso_state: None,
             structure: Some(StructureSnapshot::Layers(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
@@ -650,6 +663,7 @@ impl OpenCADStudio {
             dirty_before: pending.dirty_before,
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
+            layiso_state: None,
             structure: Some(StructureSnapshot::TextStyles(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
@@ -709,6 +723,7 @@ impl OpenCADStudio {
             dirty_before: pending.dirty_before,
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
+            layiso_state: None,
             structure: Some(StructureSnapshot::DimStyles(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
@@ -738,6 +753,7 @@ impl OpenCADStudio {
         label: impl Into<String>,
     ) -> PendingObjectDelta {
         self.finish_pending_history(i);
+        self.tabs[i].scene.begin_undo_recording();
         PendingObjectDelta {
             label: label.into(),
             current_layout: self.tabs[i].scene.current_layout.clone(),
@@ -748,6 +764,17 @@ impl OpenCADStudio {
     }
 
     pub(super) fn commit_group_undo(&mut self, i: usize, pending: PendingObjectDelta) {
+        let entities: Vec<_> = self.tabs[i]
+            .scene
+            .take_undo_recording()
+            .map(|rec| rec.into_recorded_images().0)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(handle, before)| {
+                let after = self.tabs[i].scene.document.get_entity_arc(handle);
+                (handle, before, after)
+            })
+            .collect();
         let after = self.group_object_state(i);
         let mut handles: HashSet<Handle> = pending.before.keys().copied().collect();
         handles.extend(after.keys().copied());
@@ -763,12 +790,12 @@ impl OpenCADStudio {
                 })
             })
             .collect();
-        if entries.is_empty() {
+        if entries.is_empty() && entities.is_empty() {
             return;
         }
         let delta = DeltaSnapshot {
             visibility_states: None,
-            entities: Vec::new(),
+            entities,
             current_layout_before: pending.current_layout,
             current_layout_after: self.tabs[i].scene.current_layout.clone(),
             selected_before: pending.selected_before,
@@ -776,6 +803,7 @@ impl OpenCADStudio {
             dirty_before: pending.dirty_before,
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
+            layiso_state: None,
             structure: Some(StructureSnapshot::Objects(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
@@ -807,6 +835,7 @@ impl OpenCADStudio {
             dirty_before,
             dirty_after: true,
             active_layer: None,
+            layiso_state: None,
             structure: Some(StructureSnapshot::Styles {
                 before,
                 after,
@@ -986,7 +1015,7 @@ impl OpenCADStudio {
                         (before.is_none() && after.is_some()).then_some(*handle)
                     })
                     .collect();
-                codec::CadDocument::align_added_entity_structure(
+                codec::Document::align_added_entity_structure(
                     before_structure,
                     &after_structure,
                     &added_handles,
@@ -1014,6 +1043,7 @@ impl OpenCADStudio {
             dirty_before: pending.dirty_before,
             dirty_after,
             active_layer: None,
+            layiso_state: None,
             structure,
             parametric_constraints,
             reference_designations,
@@ -1040,7 +1070,7 @@ impl OpenCADStudio {
                 let inverse = self.tabs[i]
                     .scene
                     .document
-                    .swap_structure(std::mem::replace(stored, codec::CadDocument::new()));
+                    .swap_structure(std::mem::replace(stored, codec::Document::new()));
                 *stored = inverse;
                 self.tabs[i].scene.invalidate_dependency_index();
                 self.tabs[i].scene.bump_layout_epoch();
@@ -1131,6 +1161,9 @@ impl OpenCADStudio {
                         self.tabs[i].scene.document.objects.remove(&entry.handle);
                     }
                 }
+                // Object images can add or drop a DIMASSOC association without
+                // moving geometry (an undone dimension erase, a redone one).
+                self.tabs[i].scene.invalidate_dependency_index();
                 if layout_touched {
                     self.tabs[i].scene.bump_layout_epoch();
                 }
@@ -1245,6 +1278,9 @@ impl OpenCADStudio {
         };
         if let Some((before, after)) = &d.active_layer {
             self.tabs[i].active_layer = if undo { before } else { after }.clone();
+        }
+        if let Some((before, after)) = &d.layiso_state {
+            self.tabs[i].layiso_state = if undo { before } else { after }.clone();
         }
         self.tabs[i].dirty = dirty;
         changes

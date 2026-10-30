@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::f64::consts::PI;
 
 use codec::entities::{
@@ -30,32 +29,97 @@ pub fn tool() -> ToolDef {
     }
 }
 
+/// The dimensions DIM's Baseline and Continue take by a typed point on one
+/// of their extension line origins, and how near the point has to be.
+#[derive(Clone, Default)]
+pub struct OriginPicks {
+    dimensions: Vec<EntityType>,
+    tolerance: f64,
+}
+
+impl OriginPicks {
+    pub fn new(dimensions: Vec<EntityType>, tolerance: f64) -> Self {
+        Self {
+            dimensions,
+            tolerance,
+        }
+    }
+
+    /// The dimension with an extension line origin nearest `point`, within
+    /// the tolerance; any other point (the dimension line, empty space)
+    /// picks nothing.
+    pub(super) fn at(&self, point: DVec3) -> Option<&EntityType> {
+        let mut nearest: Option<(f64, &EntityType)> = None;
+        for entity in &self.dimensions {
+            let EntityType::Dimension(dimension) = entity else {
+                continue;
+            };
+            let origins = match &**dimension {
+                Dimension::Linear(d) => vec![d.first_point, d.second_point],
+                Dimension::Aligned(d) => vec![d.first_point, d.second_point],
+                Dimension::Angular2Ln(d) => vec![
+                    d.first_point,
+                    d.second_point,
+                    d.angle_vertex,
+                    d.definition_point,
+                ],
+                Dimension::Angular3Pt(d) => vec![d.first_point, d.second_point],
+                Dimension::Ordinate(d) => vec![d.definition_point],
+                _ => continue,
+            };
+            for origin in origins {
+                let distance = DVec3::new(origin.x, origin.y, origin.z).distance(point);
+                if distance <= self.tolerance && nearest.is_none_or(|(best, _)| distance < best) {
+                    nearest = Some((distance, entity));
+                }
+            }
+        }
+        nearest.map(|(_, entity)| entity)
+    }
+}
+
+/// What a baseline or continued dimension takes from its base dimension.
 #[derive(Clone)]
-struct SourceStyle {
+pub(super) struct SourceStyle {
     layer: String,
     style_name: String,
-    normal: Vector3,
+    pub(super) normal: Vector3,
     text_rotation: f64,
-    horizontal_direction: f64,
+    pub(super) horizontal_direction: f64,
+    /// The base dimension's dimension variable overrides.
+    overrides: Vec<(i16, codec::xdata::XDataValue)>,
 }
 
 impl SourceStyle {
-    fn from_base(base: &DimensionBase) -> Self {
+    pub(super) fn from_base(base: &DimensionBase) -> Self {
         Self {
             layer: base.common.layer.clone(),
             style_name: base.style_name.clone(),
             normal: base.normal,
             text_rotation: base.text_rotation,
             horizontal_direction: base.horizontal_direction,
+            overrides: crate::entities::dim_override::pairs(&base.common.extended_data),
         }
     }
 
-    fn apply(&self, base: &mut DimensionBase) {
+    /// With DIMCONTINUEMODE 1 (`with_overrides`) the new dimension also
+    /// carries every override of its base; with 0 it gets the drawing's like
+    /// any new dimension.
+    pub(super) fn apply(&self, base: &mut DimensionBase, with_overrides: bool) {
         base.common.layer = self.layer.clone();
         base.style_name = self.style_name.clone();
         base.normal = self.normal;
         base.text_rotation = self.text_rotation;
         base.horizontal_direction = self.horizontal_direction;
+        if with_overrides {
+            for (code, value) in &self.overrides {
+                crate::entities::dim_override::set_on_common(
+                    &mut base.common,
+                    *code,
+                    Some(value.clone()),
+                );
+            }
+        }
     }
 }
 
@@ -99,29 +163,33 @@ struct BaselineState {
 pub struct DimBaselineCommand {
     base: Option<BaselineState>,
     injected: Option<EntityType>,
-    dimdli_by_style: HashMap<String, f64>,
-    current_style_name: String,
-    fallback_dimdli: f64,
     preserve_base_style: bool,
     committed: usize,
+    /// Run from DIM's Baseline option: its own wording and an Offset option.
+    in_dim: bool,
+    /// The Offset distance is being asked.
+    offset_pending: bool,
+    offset_override: Option<f64>,
+    /// The drawing's DIMDLI: the spacing of the series.
+    dimdli: f64,
+    /// DIM's Baseline: dimensions a typed extension line origin picks.
+    origin_picks: OriginPicks,
 }
 
 impl DimBaselineCommand {
-    pub fn new(
-        recent: Option<EntityType>,
-        dimdli_by_style: HashMap<String, f64>,
-        current_style_name: String,
-        fallback_dimdli: f64,
-        preserve_base_style: bool,
-    ) -> Self {
+    /// `dimdli` is the drawing's DIMDLI: baseline dimensions are spaced by
+    /// it whatever the base dimension's own value is.
+    pub fn new(recent: Option<EntityType>, dimdli: f64, preserve_base_style: bool) -> Self {
         let mut command = Self {
             base: None,
             injected: None,
-            dimdli_by_style,
-            current_style_name,
-            fallback_dimdli,
             preserve_base_style,
             committed: 0,
+            in_dim: false,
+            offset_pending: false,
+            offset_override: None,
+            dimdli,
+            origin_picks: OriginPicks::default(),
         };
         if let Some(entity) = recent {
             let _ = command.install_base(&entity, None);
@@ -129,18 +197,55 @@ impl DimBaselineCommand {
         command
     }
 
-    fn effective_increment(&self, style_name: &str) -> f64 {
-        let style_name = if self.preserve_base_style {
-            style_name
-        } else {
-            &self.current_style_name
+    /// The dimensions a typed point on an extension line origin picks as
+    /// the base (DIM's Baseline).
+    pub fn with_origin_picks(mut self, origin_picks: OriginPicks) -> Self {
+        self.origin_picks = origin_picks;
+        self
+    }
+
+    /// DIM's Baseline: the base is picked, and Offset sets the spacing.
+    pub fn run_from_dim(&mut self, dimdli: f64) {
+        self.in_dim = true;
+        self.dimdli = dimdli;
+        self.offset_override = Some(dimdli);
+    }
+
+    /// The spacing Offset typed, applied to the series under way as well.
+    fn set_offset(&mut self, value: f64) {
+        self.offset_override = Some(value);
+        let Some(base) = self.base.as_mut() else {
+            return;
         };
-        self.dimdli_by_style
-            .get(&style_name.to_ascii_lowercase())
-            .copied()
-            .filter(|value| value.is_finite() && value.abs() > 1.0e-9)
-            .unwrap_or(self.fallback_dimdli)
-            .abs()
+        match &mut base.kind {
+            BaselineKind::Linear {
+                next_offset,
+                increment,
+                ..
+            } => {
+                let signed = value.copysign(*increment);
+                *next_offset += signed - *increment;
+                *increment = signed;
+            }
+            BaselineKind::Angular2Ln {
+                next_radius,
+                increment,
+                ..
+            }
+            | BaselineKind::Angular3Pt {
+                next_radius,
+                increment,
+                ..
+            } => {
+                *next_radius = (*next_radius + value - *increment).max(1.0e-9);
+                *increment = value;
+            }
+            BaselineKind::Ordinate { .. } => {}
+        }
+    }
+
+    fn effective_increment(&self) -> f64 {
+        self.offset_override.unwrap_or(self.dimdli).abs()
     }
 
     fn install_base(&mut self, entity: &EntityType, pick: Option<DVec3>) -> bool {
@@ -148,7 +253,7 @@ impl DimBaselineCommand {
             return false;
         };
         let style = SourceStyle::from_base(dimension.base());
-        let increment = self.effective_increment(&style.style_name);
+        let increment = self.effective_increment();
         let plane = plane_from_normal(dimension.base().definition_point, style.normal);
         let pick = pick.and_then(|point| plane.project(point.to_array()).map(Vec2::from));
         let kind = match &**dimension {
@@ -339,7 +444,9 @@ impl DimBaselineCommand {
                 Dimension::Ordinate(result)
             }
         };
-        state.style.apply(dimension.base_mut());
+        state
+            .style
+            .apply(dimension.base_mut(), self.preserve_base_style);
         refresh_measurement(&mut dimension, state.plane);
         dimension.base_mut().common.handle = Handle::NULL;
         dimension.base_mut().block_name.clear();
@@ -386,6 +493,19 @@ impl CadCommand for DimBaselineCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.offset_pending {
+            let current = self.offset_override.unwrap_or(self.dimdli);
+            return crate::tr!("dim-cmd", "offset-distance", offset = format!("{current:.6}"));
+        }
+        if self.in_dim {
+            return match &self.base {
+                None => crate::tr!("dim-cmd", "baseline-first"),
+                Some(base) if matches!(&base.kind, BaselineKind::Ordinate { .. }) => {
+                    crate::tr!("dim-cmd", "baseline-ordinate")
+                }
+                Some(_) => crate::tr!("dim-cmd", "baseline-second"),
+            };
+        }
         if self.base.is_none() {
             crate::t!("DIMBASELINE  Select base dimension:").into_owned()
         } else if self
@@ -401,6 +521,20 @@ impl CadCommand for DimBaselineCommand {
     }
 
     fn options(&self) -> Vec<CmdOption> {
+        if self.offset_pending {
+            return Vec::new();
+        }
+        if self.in_dim {
+            return if self.base.is_none() {
+                vec![CmdOption::new("Offset", "O")]
+            } else {
+                vec![
+                    CmdOption::new("Select", "S"),
+                    CmdOption::new("Offset", "O"),
+                    CmdOption::new("Undo", "U"),
+                ]
+            };
+        }
         self.base.as_ref().map_or_else(Vec::new, |base| {
             if matches!(&base.kind, BaselineKind::Ordinate { .. }) {
                 vec![CmdOption::new("Undo", "U"), CmdOption::new("Select", "S")]
@@ -410,12 +544,20 @@ impl CadCommand for DimBaselineCommand {
         })
     }
 
+    fn input_kind(&self) -> crate::command::InputKind {
+        if self.offset_pending {
+            crate::command::InputKind::SingleToken
+        } else {
+            crate::command::InputKind::Point
+        }
+    }
+
     fn needs_entity_pick(&self) -> bool {
-        self.base.is_none()
+        self.base.is_none() && !self.offset_pending
     }
 
     fn entity_pick_highlights_hover(&self) -> bool {
-        self.base.is_none()
+        self.base.is_none() && !self.offset_pending
     }
 
     fn inject_before_entity_pick(&self) -> bool {
@@ -434,7 +576,22 @@ impl CadCommand for DimBaselineCommand {
         CmdResult::NeedPoint
     }
 
+    fn entity_pick_accepts_points(&self) -> bool {
+        self.in_dim
+    }
+
     fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if self.offset_pending {
+            return CmdResult::NeedPoint;
+        }
+        // DIM's Baseline: a typed extension line origin picks its dimension
+        // as the base; any other point asks again.
+        if self.base.is_none() {
+            if let Some(entity) = self.origin_picks.at(point).cloned() {
+                let _ = self.install_base(&entity, Some(point));
+            }
+            return CmdResult::NeedPoint;
+        }
         let Some(dimension) = self.build_dimension(point) else {
             return CmdResult::NeedPoint;
         };
@@ -449,6 +606,10 @@ impl CadCommand for DimBaselineCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.offset_pending {
+            self.offset_pending = false;
+            return CmdResult::NeedPoint;
+        }
         if self.base.take().is_some() {
             self.committed = 0;
             CmdResult::NeedPoint
@@ -458,15 +619,40 @@ impl CadCommand for DimBaselineCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        self.base.is_some()
+        self.base.is_some() || self.in_dim
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        self.base.is_some()
+        self.base.is_some() || self.in_dim
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        match text.trim().to_ascii_uppercase().as_str() {
+        if self.offset_pending {
+            let Ok(value) = text.trim().parse::<f64>() else {
+                return Some(CmdResult::ReportError(
+                    crate::t!("Requires numeric distance or two points.").into_owned(),
+                ));
+            };
+            if !value.is_finite() || value < 0.0 {
+                return Some(CmdResult::ReportError(
+                    crate::t!("Value must be positive.").into_owned(),
+                ));
+            }
+            self.offset_pending = false;
+            self.set_offset(value);
+            self.dimdli = value;
+            // The drawing's DIMDLI, kept with the drawing.
+            return Some(CmdResult::Dispatch(format!("_DIM_SET_DIMDLI {value}")));
+        }
+        let word = text.trim().trim_start_matches('_').to_ascii_uppercase();
+        if self.in_dim && matches!(word.as_str(), "O" | "OFFSET") {
+            self.offset_pending = true;
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.base.is_none() {
+            return None;
+        }
+        match word.as_str() {
             "S" | "SELECT" => {
                 self.base = None;
                 self.committed = 0;
@@ -653,7 +839,7 @@ fn refresh_measurement(dimension: &mut Dimension, plane: Plane) {
 }
 
 fn preview_for_dimension(dimension: &Dimension) -> WireModel {
-    let mut points = Vec::<[f32; 3]>::new();
+    let mut points = Vec::<[f64; 3]>::new();
     match dimension {
         Dimension::Linear(value) => {
             let plane = plane_from_normal(value.first_point, value.base.normal);
@@ -720,47 +906,13 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
         ),
         _ => {}
     }
-    WireModel {
-        bg_adapt: None,
-        point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
-        world_width: 0.0,
-        depth_override: None,
-        display_visible: true,
-        snap_only: false,
-        plot_visible: true,
-        fill_is_3d: false,
-        fill_is_2d_solid: false,
-        render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
-        dash_from_start: false,
-        dash_align_end: None,
-        text_verts: Vec::new(),
-        name: "dimbaseline_preview".into(),
-        points,
-        points_low: Vec::new(),
-        color: WireModel::CYAN,
-        selected: false,
-        pattern_length: 0.0,
-        pattern: [0.0; 8],
-        line_weight_px: 1.0,
-        snap_pts: Vec::new(),
-        tangent_geoms: Vec::new(),
-        aci: 0,
-        key_vertices: Vec::new(),
-        aabb: WireModel::UNBOUNDED_AABB,
-        plinegen: true,
-        fill_tris: Vec::new(),
-        fill_tris_low: Vec::new(),
-
-        ..Default::default()
-    }
+    // Preview geometry is f64; `solid_f64` keeps the residual so the preview
+    // stays on the dimension points at UTM-scale coordinates.
+    WireModel::solid_f64("dimbaseline_preview".into(), points, WireModel::CYAN, false)
 }
 
 fn linear_preview(
-    points: &mut Vec<[f32; 3]>,
+    points: &mut Vec<[f64; 3]>,
     plane: Plane,
     first: Vec2,
     second: Vec2,
@@ -777,7 +929,7 @@ fn linear_preview(
     append_arrows(points, plane, first_line, second_line);
 }
 
-fn append_arrows(points: &mut Vec<[f32; 3]>, plane: Plane, first: Vec2, second: Vec2) {
+fn append_arrows(points: &mut Vec<[f64; 3]>, plane: Plane, first: Vec2, second: Vec2) {
     let Some(axis) = (second - first).normalize() else {
         return;
     };
@@ -791,7 +943,7 @@ fn append_arrows(points: &mut Vec<[f32; 3]>, plane: Plane, first: Vec2, second: 
 }
 
 fn angular_preview(
-    points: &mut Vec<[f32; 3]>,
+    points: &mut Vec<[f64; 3]>,
     plane: Plane,
     vertex: Vec2,
     first: Vec2,
@@ -841,7 +993,7 @@ fn point(value: Vector3) -> [f64; 3] {
     [value.x, value.y, value.z]
 }
 
-fn segment_local(points: &mut Vec<[f32; 3]>, plane: Plane, first: Vec2, second: Vec2) {
+fn segment_local(points: &mut Vec<[f64; 3]>, plane: Plane, first: Vec2, second: Vec2) {
     segment_world(
         points,
         plane.point_at(first.into()),
@@ -849,18 +1001,14 @@ fn segment_local(points: &mut Vec<[f32; 3]>, plane: Plane, first: Vec2, second: 
     );
 }
 
-fn segment_world(points: &mut Vec<[f32; 3]>, first: [f64; 3], second: [f64; 3]) {
-    points.push(float3(first));
-    points.push(float3(second));
-    points.push([f32::NAN, 0.0, 0.0]);
+fn segment_world(points: &mut Vec<[f64; 3]>, first: [f64; 3], second: [f64; 3]) {
+    points.push(first);
+    points.push(second);
+    points.push([f64::NAN, 0.0, 0.0]);
 }
 
-fn push_local(points: &mut Vec<[f32; 3]>, plane: Plane, point: Vec2) {
-    points.push(float3(plane.point_at(point.into())));
-}
-
-fn float3(value: [f64; 3]) -> [f32; 3] {
-    [value[0] as f32, value[1] as f32, value[2] as f32]
+fn push_local(points: &mut Vec<[f64; 3]>, plane: Plane, point: Vec2) {
+    points.push(plane.point_at(point.into()));
 }
 
 inventory::submit!(crate::command::CommandRegistration {

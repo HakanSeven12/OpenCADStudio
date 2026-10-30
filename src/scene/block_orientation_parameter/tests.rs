@@ -20,7 +20,7 @@ fn fixture() -> (Scene, Handle) {
         .handle;
     (scene, handle)
 }
-fn append_batch(document: &mut CadDocument, definition: Handle) {
+fn append_batch(document: &mut Document, definition: Handle) {
     for kind in [Kind::Rotation, Kind::Alignment, Kind::Flip] {
         create(
             document,
@@ -37,7 +37,7 @@ fn append_batch(document: &mut CadDocument, definition: Handle) {
         .unwrap();
     }
 }
-fn graph_data(document: &CadDocument, definition: Handle) -> &codec::objects::BlockEvaluationGraph {
+fn graph_data(document: &Document, definition: Handle) -> &codec::objects::BlockEvaluationGraph {
     let ObjectType::DynamicBlock(o) =
         &document.objects[&graph_handle(document, definition).unwrap()]
     else {
@@ -48,7 +48,7 @@ fn graph_data(document: &CadDocument, definition: Handle) -> &codec::objects::Bl
     };
     g
 }
-fn assert_roundtrips(document: &CadDocument, definition: Handle, before: &CadDocument) {
+fn assert_roundtrips(document: &Document, definition: Handle, before: &Document) {
     let graph = graph_handle(document, definition).unwrap();
     if let Some(old_graph) = graph_handle(before, definition) {
         for (h, o) in &before.objects {

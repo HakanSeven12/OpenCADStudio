@@ -319,7 +319,17 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
         }
 
         let image_size = Size::new(measured.width as f32, measured.height as f32);
-        let bounds = layout.bounds();
+        // The icon keeps its own square, centred, when a stretched button
+        // lays it out wider: scaling to that width would draw the artwork
+        // larger and cut it off at the bottom.
+        let laid = layout.bounds();
+        let bounds = Rectangle::new(
+            Point::new(
+                laid.center_x() - self.size / 2.0,
+                laid.center_y() - self.size / 2.0,
+            ),
+            Size::new(self.size, self.size),
+        );
         let svg = core_svg::Svg {
             handle,
             color: self.tint.map(|tint| tint(theme)),

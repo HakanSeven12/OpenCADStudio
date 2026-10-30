@@ -545,7 +545,7 @@ fn pack_color(color: [f32; 4]) -> [u8; 4] {
 
 /// Cumulative arc-length per point (NaN-break aware) plus the `"A"`-type
 /// alignment pair `(align_end, align_total)`. Shared by the wasm and native
-/// emission paths.
+/// emission paths and PDF dash materialization.
 ///
 /// AutoCAD-style linetypes are implicitly `A` (aligned): a dashed line must
 /// begin AND end on a solid dash, keeping the interior dashes at their nominal
@@ -560,7 +560,7 @@ fn pack_color(color: [f32; 4]) -> [u8; 4] {
 /// Alignment applies only to a single continuous run (`!has_break`) whose
 /// pattern begins with a dash. NaN-separated (plinegen=false) polylines and
 /// non-dash-first patterns keep the legacy centred phase.
-fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
+pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
     let n = wire.points.len();
     let pat_len = wire.pattern_length;
     if pat_len <= 1e-6 || n < 2 {

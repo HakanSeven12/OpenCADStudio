@@ -617,7 +617,15 @@ pub(crate) fn add_leader_line(ml: &mut MultiLeader, arrow: codec::types::Vector3
         .flat_map(|root| root.lines.first())
         .next()
         .cloned();
-    let index = ml.total_leader_line_count() as i32;
+    // AutoCAD gives a new leader line the lowest index no line uses. The
+    // line count repeats an index once a leader has been removed.
+    let used: Vec<i32> = ml
+        .context
+        .leader_roots
+        .iter()
+        .flat_map(|root| root.lines.iter().map(|line| line.index))
+        .collect();
+    let index = (0..).find(|i| !used.contains(i)).unwrap_or(0);
     let mut target = 0usize;
     if ml.content_type == LeaderContentType::MText && !ml.context.leader_roots.is_empty() {
         let tl = ml.context.text_location;
@@ -3032,6 +3040,26 @@ mod tests {
             (scaled - unit).abs() <= unit * 1.0e-3,
             "overall scale must not resize an annotative MLEADER: {unit} vs {scaled}"
         );
+    }
+
+    #[test]
+    fn test_added_leader_line_takes_lowest_free_index() {
+        // Remove the first leader, then add one: the new line must not repeat
+        // the index of the line that is left (AutoCAD takes the free 0).
+        let mut ml = MultiLeader::default();
+        ml.content_type = LeaderContentType::MText;
+        add_leader_line(&mut ml, codec::types::Vector3::new(0.0, 0.0, 0.0));
+        add_leader_line(&mut ml, codec::types::Vector3::new(0.0, 10.0, 0.0));
+        ml.context.leader_roots[0].lines.remove(0);
+        add_leader_line(&mut ml, codec::types::Vector3::new(0.0, -10.0, 0.0));
+        let mut indices: Vec<i32> = ml
+            .context
+            .leader_roots
+            .iter()
+            .flat_map(|root| root.lines.iter().map(|line| line.index))
+            .collect();
+        indices.sort();
+        assert_eq!(indices, vec![0, 1]);
     }
 
     #[test]

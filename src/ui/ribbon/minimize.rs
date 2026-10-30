@@ -480,7 +480,9 @@ impl Ribbon {
             )
         });
         // The row continues the active tab, with no line between them; a
-        // line closes it at the bottom, as under the tool area.
+        // line closes it at the bottom, as under the tool area. The row takes
+        // the pixel a top line would have, so the minimized ribbon keeps its
+        // height.
         let line =
             container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
                 background: Some(Background::Color(chrome::page(theme))),
@@ -493,7 +495,7 @@ impl Ribbon {
                     ..Default::default()
                 })
                 .padding([0, 2])
-                .height(height)
+                .height(height + 1.0)
                 .width(Fill),
             line,
         ]
@@ -635,9 +637,9 @@ impl Ribbon {
                 row![
                     text(label).size(PANEL_TITLE_SIZE),
                     if more {
-                        icons::chevron_up()
+                        icons::dropup_arrow()
                     } else {
-                        icons::chevron_down()
+                        icons::dropdown_arrow()
                     },
                 ]
                 .spacing(4)

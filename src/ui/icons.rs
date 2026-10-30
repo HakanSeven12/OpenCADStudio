@@ -1023,16 +1023,6 @@ pub fn dropup_arrow<'a, M: 'a>() -> Element<'a, M> {
     arrow(metrics::DROPDOWN_ARROW_W, metrics::DROPDOWN_ARROW_H, true)
 }
 
-/// The chevron of a panel title strip that opens the panel's extra tools.
-pub fn chevron_down<'a, M: 'a>() -> Element<'a, M> {
-    arrow(metrics::CHEVRON_W, metrics::CHEVRON_H, false)
-}
-
-/// [`chevron_down`] pointing up, while the extra tools are open.
-pub fn chevron_up<'a, M: 'a>() -> Element<'a, M> {
-    arrow(metrics::CHEVRON_W, metrics::CHEVRON_H, true)
-}
-
 fn arrow<'a, M: 'a>(width: f32, height: f32, up: bool) -> Element<'a, M> {
     Element::new(VectorShape {
         width,

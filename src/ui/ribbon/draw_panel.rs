@@ -360,9 +360,9 @@ pub(super) fn group_title<'a>(
         };
     };
     let chevron = if look == SlideLook::Closed {
-        icons::chevron_down()
+        icons::dropdown_arrow()
     } else {
-        icons::chevron_up()
+        icons::dropup_arrow()
     };
     let content: Element<'a, Message> = if thin {
         chevron
@@ -785,7 +785,7 @@ fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Eleme
     };
     // The title and its chevron in the footer's text colour.
     let title = button(
-        row![text(t!(panel.title())).size(11.5), icons::chevron_up()]
+        row![text(t!(panel.title())).size(11.5), icons::dropup_arrow()]
             .spacing(4)
             .align_y(iced::Center),
     )

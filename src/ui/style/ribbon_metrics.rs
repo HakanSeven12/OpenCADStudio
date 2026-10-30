@@ -110,9 +110,6 @@ pub const PIN_ICON: f32 = 11.0;
 /// The dropdown arrow: a solid triangle this wide and high.
 pub const DROPDOWN_ARROW_W: f32 = 5.0;
 pub const DROPDOWN_ARROW_H: f32 = 3.0;
-/// The chevron of a panel title strip: a solid triangle this wide and high.
-pub const CHEVRON_W: f32 = 9.0;
-pub const CHEVRON_H: f32 = 5.0;
 
 // The tools fit the content area with its padding, and a collapsed panel the
 // tool area.

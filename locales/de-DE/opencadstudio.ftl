@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Menüleiste anzeigen
     .hide-menu-bar = Menüleiste ausblenden
     .close-ribbon = Multifunktionsleiste schließen
+    .show-ribbon = Multifunktionsleiste anzeigen
     .minimize-cycle = Multifunktionsleiste minimieren (Zyklus)
     .minimize = Multifunktionsleiste minimieren
     .show-full = Vollständige Multifunktionsleiste anzeigen

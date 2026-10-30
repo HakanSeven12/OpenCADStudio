@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Afficher la barre de menus
     .hide-menu-bar = Masquer la barre de menus
     .close-ribbon = Fermer le ruban
+    .show-ribbon = Afficher le ruban
     .minimize-cycle = Réduire le ruban (cycle)
     .minimize = Réduire le ruban
     .show-full = Afficher le ruban complet

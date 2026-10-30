@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = メニュー バーを表示
     .hide-menu-bar = メニュー バーを非表示
     .close-ribbon = リボンを閉じる
+    .show-ribbon = リボンを表示
     .minimize-cycle = リボンを最小化 (循環)
     .minimize = リボンを最小化
     .show-full = リボン全体を表示

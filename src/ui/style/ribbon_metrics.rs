@@ -101,9 +101,11 @@ pub const MINIMIZED_BUTTON_ICON: f32 = 22.0;
 pub const SMALL_ICON: f32 = 16.0;
 /// Size large icons are drawn at.
 pub const LARGE_ICON: f32 = 32.0;
-/// Size of the icons of tiny strip buttons: the slide-out pin, the search
-/// box's collapse button.
+/// Size of the icons of tiny strip buttons, such as the search box's
+/// collapse button.
 pub const STRIP_ICON: f32 = 14.0;
+/// Size of the pin in the footer of a panel's extra tools.
+pub const PIN_ICON: f32 = 11.0;
 /// The icon files are drawn on a 24-unit grid; their artwork spans units
 /// `ICON_ART_START` to `ICON_ART_START + ICON_ART_SPAN`, and that span fills
 /// an icon's box.

@@ -119,8 +119,10 @@ pub(crate) struct Widths {
 }
 
 /// Choose the degradation level per panel. `Auto` degrades from the right, one
-/// panel at a time: first Full -> Compact, then Compact -> Collapsed, each phase
-/// only while the row still overflows; if even the all-collapsed row overflows,
+/// panel at a time and one step at a time: the rightmost panel goes Full ->
+/// Compact -> Collapsed before the next panel shrinks, stopping as soon as the
+/// row fits, so no more width is given up than one step and the row's other
+/// panels keep their large buttons. If even the all-collapsed row overflows,
 /// every collapsed panel drops to Tight at once. Forced modes pin everything.
 pub(crate) fn decide_levels(mode: CollapseMode, widths: &[Widths], max_w: f32) -> Vec<Level> {
     if let Some(level) = mode.forced_level() {
@@ -135,10 +137,10 @@ pub(crate) fn decide_levels(mode: CollapseMode, widths: &[Widths], max_w: f32) -
     let total =
         |levels: &[Level]| -> f32 { (0..levels.len()).map(|i| width_of(levels[i], i)).sum() };
     let mut levels = vec![Level::Full; widths.len()];
-    for degraded in [Level::Compact, Level::Collapsed] {
-        for i in (0..widths.len()).rev() {
+    'panels: for i in (0..widths.len()).rev() {
+        for degraded in [Level::Compact, Level::Collapsed] {
             if total(&levels) <= max_w {
-                break;
+                break 'panels;
             }
             levels[i] = degraded;
         }
@@ -1229,18 +1231,15 @@ mod tests {
         );
     }
 
-    /// The first (compact) phase completes across the whole row before the
-    /// second (collapsed) phase starts: the left panel ends up compact even
-    /// though at FULL it would have fit next to the eventually-collapsed right
-    /// panel (30 + 40 = 70 <= 100).
+    /// A panel shrinks all the way to its collapsed button before the next
+    /// panel to its left shrinks: the left panel keeps its large buttons.
     #[test]
-    fn auto_runs_the_compact_phase_across_the_row_first() {
+    fn auto_collapses_a_panel_before_shrinking_the_next() {
         let widths = [w(30.0, 26.0, 15.0, 12.0), w(100.0, 80.0, 40.0, 20.0)];
-        // phase compact: right (30+100=130>100 -> compact), left (26+80=110>100 -> compact)
-        // phase collapsed: right (26+40=66<=100 after right->collapsed is 26+80=106>100), left (66<=100 -> stop)
+        // right: 130 > 100 -> compact 30 + 80 = 110 > 100 -> collapsed 70 fits.
         assert_eq!(
             decide_levels(CollapseMode::Auto, &widths, 100.0),
-            vec![Level::Compact, Level::Collapsed]
+            vec![Level::Full, Level::Collapsed]
         );
     }
 
@@ -1334,12 +1333,12 @@ mod tests {
         );
     }
 
-    /// The refactor must be a no-op: `decide_levels` equals the pre-refactor
-    /// inline `u8` algorithm (two rightmost-first phases + the tight cascade)
-    /// on a deterministic sweep of widths and budgets, including the degenerate
+    /// `decide_levels` equals a plain `u8` version of its algorithm (each panel
+    /// from the right through its steps + the tight cascade) on a
+    /// deterministic sweep of widths and budgets, including the degenerate
     /// 0 / 0 / inf / NaN corner cases.
     #[test]
-    fn matches_the_pre_refactor_algorithm() {
+    fn matches_the_plain_algorithm() {
         fn legacy(mode: CollapseMode, widths: &[Widths], max_w: f32) -> Vec<u8> {
             let forced = match mode {
                 CollapseMode::Auto => None,
@@ -1359,10 +1358,10 @@ mod tests {
             let total =
                 |levels: &[u8]| -> f32 { (0..levels.len()).map(|i| width_of(levels[i], i)).sum() };
             let mut levels = vec![0u8; widths.len()];
-            for degraded in [1u8, 2u8] {
-                for i in (0..widths.len()).rev() {
+            'panels: for i in (0..widths.len()).rev() {
+                for degraded in [1u8, 2u8] {
                     if total(&levels) <= max_w {
-                        break;
+                        break 'panels;
                     }
                     levels[i] = degraded;
                 }

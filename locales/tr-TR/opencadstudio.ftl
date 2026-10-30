@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Menü çubuğunu göster
     .hide-menu-bar = Menü çubuğunu gizle
     .close-ribbon = Şeridi kapat
+    .show-ribbon = Şeridi göster
     .minimize-cycle = Şeridi küçült (döngü)
     .minimize = Şeridi küçült
     .show-full = Şeridin tamamını göster

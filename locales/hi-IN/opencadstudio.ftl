@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = मेनू बार दिखाएँ
     .hide-menu-bar = मेनू बार छिपाएँ
     .close-ribbon = रिबन बंद करें
+    .show-ribbon = रिबन दिखाएँ
     .minimize-cycle = रिबन छोटा करें (चक्र)
     .minimize = रिबन छोटा करें
     .show-full = पूरा रिबन दिखाएँ

@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Εμφάνιση γραμμής μενού
     .hide-menu-bar = Απόκρυψη γραμμής μενού
     .close-ribbon = Κλείσιμο κορδέλας
+    .show-ribbon = Εμφάνιση κορδέλας
     .minimize-cycle = Ελαχιστοποίηση κορδέλας (κυκλικά)
     .minimize = Ελαχιστοποίηση κορδέλας
     .show-full = Εμφάνιση πλήρους κορδέλας

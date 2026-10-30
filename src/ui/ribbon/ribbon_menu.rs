@@ -20,8 +20,8 @@ use super::widgets::{make_tip, popup_panel_style, tip_style};
 use super::{extras, Ribbon};
 use crate::app::Message;
 use crate::ui::icons;
-use crate::ui::popup::context_menu::{MENU_PAD_TOP, MENU_ROW_H, MENU_SEP_H, MENU_WIDTH};
-use crate::ui::style::chrome;
+use crate::ui::popup::context_menu::{MENU_PAD_TOP, MENU_ROW_H, MENU_SEP_H};
+use crate::ui::style::{chrome, text_metrics};
 
 /// Size of the check mark at the end of a checked row, as in the viewport
 /// menu.
@@ -29,6 +29,10 @@ const CHECK_SIZE: f32 = 10.0;
 const CARET_SIZE: f32 = 9.0;
 /// How far a list overlaps the menu it opens from.
 const SUBMENU_OVERLAP: f32 = 2.0;
+/// Size of a row's label.
+const LABEL_SIZE: f32 = 12.0;
+/// Least gap between a label and the check or caret at the row's end.
+const MARK_GAP: f32 = 16.0;
 
 /// The lists the menu opens beside itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,8 +57,8 @@ pub enum RibbonMenuMsg {
     TogglePanelTitles,
     /// Show or hide the menu bar (handled by the app).
     ShowMenuBar(bool),
-    /// Run RIBBONCLOSE (handled by the app).
-    CloseRibbon,
+    /// Show the ribbon (`true`) or close it (handled by the app).
+    ShowRibbon(bool),
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +96,7 @@ impl Ribbon {
                 self.menu = Some(MenuState { at, open: None });
                 false
             }
-            RibbonMenuMsg::Close | RibbonMenuMsg::ShowMenuBar(_) | RibbonMenuMsg::CloseRibbon => {
+            RibbonMenuMsg::Close | RibbonMenuMsg::ShowMenuBar(_) | RibbonMenuMsg::ShowRibbon(_) => {
                 self.menu = None;
                 false
             }
@@ -186,6 +190,7 @@ impl Ribbon {
         &self,
         win: (f32, f32),
         show_menu_bar: bool,
+        ribbon_closed: bool,
     ) -> Option<Element<'_, Message>> {
         let menu = self.menu.as_ref()?;
         let is_default = self.is_default_layout();
@@ -249,18 +254,23 @@ impl Ribbon {
             )),
             Some((
                 Row {
-                    label: crate::tr!("ribbon-menu", "close-ribbon"),
+                    label: if ribbon_closed {
+                        crate::tr!("ribbon-menu", "show-ribbon")
+                    } else {
+                        crate::tr!("ribbon-menu", "close-ribbon")
+                    },
                     checked: false,
                     enabled: true,
                     reason: None,
-                    action: RibbonMenuMsg::CloseRibbon,
+                    action: RibbonMenuMsg::ShowRibbon(ribbon_closed),
                 },
                 None,
             )),
         ];
 
         let height = list_height(rows.iter().map(Option::is_some));
-        let (left, top) = place(menu.at, (MENU_WIDTH, height), win);
+        let menu_w = fit_width(rows.iter().flatten().map(|(row, _)| row.label.as_str()));
+        let (left, top) = place(menu.at, (menu_w, height), win);
 
         // Where the open list's row sits, for placing the list beside it.
         let mut open_row_y = None;
@@ -290,7 +300,7 @@ impl Ribbon {
                     .on_press(Message::RibbonMenu(RibbonMenuMsg::Close))
                     .on_right_press(Message::RibbonMenu(RibbonMenuMsg::Close)),
             ),
-            placed(panel(items), left, top),
+            placed(panel_of_width(items, menu_w), left, top),
         ];
 
         if let (Some(list), Some(row_y)) = (menu.open, open_row_y) {
@@ -298,11 +308,11 @@ impl Ribbon {
                 Submenu::Tabs => self.tab_rows(),
                 Submenu::Panels => self.panel_rows(),
             };
-            let width = list_width(&rows);
+            let width = fit_width(rows.iter().map(|row| row.label.as_str()));
             let height = list_height(rows.iter().map(|_| true));
             // Beside the menu on the right, or on the left when the right
             // has no room; its first row level with the row that opened it.
-            let right = left + MENU_WIDTH - SUBMENU_OVERLAP;
+            let right = left + menu_w - SUBMENU_OVERLAP;
             let x = if right + width <= win.0 {
                 right
             } else {
@@ -332,14 +342,13 @@ fn list_height(rows: impl Iterator<Item = bool>) -> f32 {
             .sum::<f32>()
 }
 
-/// A list is as wide as the menu, or wider for long labels.
-fn list_width(rows: &[Row]) -> f32 {
-    let longest = rows
-        .iter()
-        .map(|row| row.label.chars().count())
-        .max()
-        .unwrap_or(0) as f32;
-    MENU_WIDTH.max(longest * 7.0 + 48.0)
+/// A menu as wide as its longest label, with room for the check or caret
+/// at the end of a row and the border.
+pub(super) fn fit_width<'a>(labels: impl Iterator<Item = &'a str>) -> f32 {
+    let longest = labels
+        .map(|label| text_metrics::width(label, LABEL_SIZE, false))
+        .fold(0.0, f32::max);
+    longest + ROW_PADDING.left + ROW_PADDING.right + MARK_GAP + CHECK_SIZE.max(CARET_SIZE) + 2.0
 }
 
 fn placed<'a>(panel: Element<'a, Message>, left: f32, top: f32) -> Element<'a, Message> {
@@ -352,10 +361,6 @@ fn placed<'a>(panel: Element<'a, Message>, left: f32, top: f32) -> Element<'a, M
         .width(Fill)
         .height(Fill)
         .into()
-}
-
-fn panel(items: Vec<Element<'_, Message>>) -> Element<'_, Message> {
-    panel_of_width(items, MENU_WIDTH)
 }
 
 /// The menu's frame: a ribbon popup, with the viewport menu's metrics.
@@ -390,7 +395,7 @@ const ROW_PADDING: Padding = Padding {
     top: 3.0,
     right: 12.0,
     bottom: 3.0,
-    left: 28.0,
+    left: 12.0,
 };
 
 fn item_row<'a>(row: Row) -> Element<'a, Message> {
@@ -416,7 +421,7 @@ pub(super) fn check_row<'a>(
     on_press: Option<Message>,
 ) -> button::Button<'a, Message> {
     let enabled = on_press.is_some();
-    let mut content = row![text(label).size(12)].align_y(iced::Center);
+    let mut content = row![text(label).size(LABEL_SIZE)].align_y(iced::Center);
     if checked {
         content = content.push(Space::new().width(Fill)).push(if enabled {
             icons::themed(icons::CHECK, CHECK_SIZE)
@@ -435,7 +440,7 @@ pub(super) fn check_row<'a>(
 /// A row that opens `list` beside the menu when hovered or clicked.
 fn submenu_row<'a>(label: String, open: bool, list: Submenu) -> Element<'a, Message> {
     let content = row![
-        text(label).size(12),
+        text(label).size(LABEL_SIZE),
         Space::new().width(Fill),
         icons::themed_arrow_right(CARET_SIZE),
     ]

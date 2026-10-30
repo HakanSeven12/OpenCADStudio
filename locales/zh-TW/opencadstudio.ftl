@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = 顯示功能表列
     .hide-menu-bar = 隱藏功能表列
     .close-ribbon = 關閉功能區
+    .show-ribbon = 顯示功能區
     .minimize-cycle = 最小化功能區（循環）
     .minimize = 最小化功能區
     .show-full = 顯示完整功能區

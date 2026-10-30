@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Show Menu Bar
     .hide-menu-bar = Hide Menu Bar
     .close-ribbon = Close Ribbon
+    .show-ribbon = Show Ribbon
     .minimize-cycle = Minimize ribbon (cycle)
     .minimize = Minimize ribbon
     .show-full = Show full ribbon

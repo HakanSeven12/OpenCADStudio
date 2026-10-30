@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Hiện thanh menu
     .hide-menu-bar = Ẩn thanh menu
     .close-ribbon = Đóng dải băng
+    .show-ribbon = Hiện dải băng
     .minimize-cycle = Thu nhỏ dải băng (luân phiên)
     .minimize = Thu nhỏ dải băng
     .show-full = Hiện toàn bộ dải băng

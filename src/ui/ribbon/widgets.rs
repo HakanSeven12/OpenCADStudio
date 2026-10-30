@@ -1484,14 +1484,21 @@ pub fn module_event_to_message(event: ModuleEvent) -> Message {
 
 /// Quick-access chrome button (New / Open / Save / Save As / Print) in the top
 /// strip: an SVG icon that dispatches a command string, with a hover tooltip.
+/// A Quick Access button; greyed out and inert unless `enabled` (the Start
+/// tab has no drawing for it).
 pub(super) fn quick_access_btn<'a>(
     icon_bytes: &'static [u8],
     label: &'static str,
     cmd: &'static str,
+    enabled: bool,
 ) -> Element<'a, Message> {
     // The bundled UI SVGs are black-stroked; tint them to a light chrome grey so
     // they read on the dark top strip (raw black is invisible there).
-    let icon = icons::chrome(icon_bytes, SMALL_ICON);
+    let icon = if enabled {
+        icons::chrome(icon_bytes, SMALL_ICON)
+    } else {
+        icons::chrome_disabled(icon_bytes, SMALL_ICON)
+    };
     let btn = button(
         container(icon)
             .width(Fill)
@@ -1499,8 +1506,8 @@ pub(super) fn quick_access_btn<'a>(
             .align_x(iced::Center)
             .align_y(iced::Center),
     )
-    .on_press(Message::Command(cmd.to_string()))
-    .style(|theme: &Theme, status| top_hist_btn_style(theme, true, false, status))
+    .on_press_maybe(enabled.then(|| Message::Command(cmd.to_string())))
+    .style(move |theme: &Theme, status| top_hist_btn_style(theme, enabled, false, status))
     .width(Length::Fixed(TOP_HIST_W))
     .height(TOP_BUTTON_H)
     .padding([2, 0]);

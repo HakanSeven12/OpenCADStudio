@@ -35,7 +35,6 @@ const OPEN_DELAY: Duration = Duration::from_millis(150);
 const CLOSE_DELAY: Duration = Duration::from_millis(1000);
 /// Two clicks on a tab within this time are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
-const MENU_W: f32 = 210.0;
 /// The body of the open peek, whose width the extra tools in it take.
 const PEEK_BODY_ID: &str = "ribbon_peek_body";
 
@@ -329,7 +328,8 @@ impl Ribbon {
     /// ribbon, and an arrow part that opens the list of minimize states. Its
     /// icons are in the title colour, strong while hovered or while the list
     /// is open; one outline goes round both parts on hover.
-    pub(super) fn minimize_button(&self) -> Element<'_, Message> {
+    /// On the Start tab it is greyed out and inert.
+    pub(super) fn minimize_button(&self, is_start: bool) -> Element<'_, Message> {
         let minimized = self.layout.minimize != RibbonMinimize::Off;
         let to_full = next(self.layout.minimize, self.layout.minimize_pref) == RibbonMinimize::Off;
         let tip = if to_full {
@@ -341,6 +341,12 @@ impl Ribbon {
         };
         let menu_open = self.open_dropdown.as_deref() == Some(MINIMIZE_MENU_ID);
         let part_style = move |theme: &Theme, status: button::Status| {
+            if is_start {
+                return button::Style {
+                    text_color: chrome::muted(theme),
+                    ..Default::default()
+                };
+            }
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             button::Style {
                 text_color: if hovered || menu_open {
@@ -353,7 +359,7 @@ impl Ribbon {
         };
         let face = tooltip(
             button(container(icons::ribbon_toggle(minimized)).center(Fill))
-                .on_press(Message::RibbonMinimize(MinimizeMsg::Toggle))
+                .on_press_maybe((!is_start).then_some(Message::RibbonMinimize(MinimizeMsg::Toggle)))
                 .style(part_style)
                 .width(metrics::MINIMIZE_FACE_W)
                 .height(metrics::QAT_BUTTON)
@@ -364,13 +370,19 @@ impl Ribbon {
         .delay(Duration::from_millis(400))
         .style(tip_style);
         let arrow = button(container(icons::dropdown_arrow()).center(Fill))
-            .on_press(Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string()))
+            .on_press_maybe(
+                (!is_start).then(|| Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string())),
+            )
             .style(part_style)
             .width(metrics::SPLIT_ARROW_W)
             .height(metrics::QAT_BUTTON)
             .padding(0);
         // A split button like Undo's: one hover outline round both parts.
-        let parts = split_outline(row![face, arrow].into());
+        let parts = if is_start {
+            row![face, arrow].into()
+        } else {
+            split_outline(row![face, arrow].into())
+        };
         // At the bottom of the tab row, beside the last tab.
         container(PosReport::new(MINIMIZE_MENU_ID, parts))
             .padding(Padding {
@@ -404,6 +416,7 @@ impl Ribbon {
             ),
         ];
         let current = self.layout.minimize_pref;
+        let width = ribbon_menu::fit_width(choices.iter().map(|(_, label)| label.as_str()));
         let rows: Vec<Element<'_, Message>> = choices
             .into_iter()
             .map(|(pref, label)| {
@@ -412,8 +425,8 @@ impl Ribbon {
             })
             .collect();
         // The same menu as the ribbon's right-click menu.
-        let panel = ribbon_menu::panel_of_width(rows, MENU_W);
-        self.place_dropdown(MINIMIZE_MENU_ID, panel, MENU_W, win.0)
+        let panel = ribbon_menu::panel_of_width(rows, width);
+        self.place_dropdown(MINIMIZE_MENU_ID, panel, width, win.0)
     }
 
     /// The row that stands for the tool area when the ribbon is minimized

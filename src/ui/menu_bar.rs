@@ -7,12 +7,12 @@ use crate::ui::style::chrome;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{mouse, overlay, renderer, Shell};
-use iced::widget::{button, container, row, text, Space};
+use iced::widget::{button, container, mouse_area, row, text, Space};
 use iced::{
     Background, Border, Element, Event, Fill, Length, Rectangle, Renderer, Shadow, Size, Theme,
     Vector,
 };
-use iced_aw::menu::{Item, Menu, MenuBar};
+use iced_aw::menu::{DrawPath, Item, Menu, MenuBar};
 
 /// Height of the menu row, and of a menu title in it.
 const ROW_H: f32 = 25.0;
@@ -137,7 +137,7 @@ const MENUS: &[(&str, &[Entry])] = &[
                 ],
             ),
             Sep,
-            Cmd("Clean Screen", "CLEANSCREENON", "Ctrl+0"),
+            Cmd("Clean Screen", "CLEANSCREEN", "Ctrl+0"),
             Sep,
             Sub(
                 "Viewports",
@@ -304,7 +304,7 @@ const MENUS: &[(&str, &[Entry])] = &[
             ),
             Cmd("Toolbars...", "TOOLBAR", ""),
             Cmd("Command Line", "COMMANDLINE", "Ctrl+9"),
-            Cmd("Clean Screen", "CLEANSCREENON", "Ctrl+0"),
+            Cmd("Clean Screen", "CLEANSCREEN", "Ctrl+0"),
             Sep,
             Cmd("Spelling", "SPELL", ""),
             Cmd("Quick Select...", "QSELECT", ""),
@@ -660,41 +660,66 @@ const MENUS: &[(&str, &[Entry])] = &[
     ),
 ];
 
-/// Width of a pull-down menu.
-const MENU_W: f32 = 290.0;
 const ENTRY_H: f32 = 22.0;
 const ICON: f32 = crate::ui::style::ribbon_metrics::SMALL_ICON;
+/// A row's label and the shortcut and aliases at its end.
+const LABEL_SIZE: f32 = 12.0;
+const TAIL_SIZE: f32 = 11.0;
+/// Gap between a row's parts, its side padding, the least gap before the
+/// shortcut, and the submenu arrow.
+const ROW_SPACING: f32 = 8.0;
+const ROW_PAD: f32 = 8.0;
+const TAIL_GAP: f32 = 8.0;
+const ARROW: f32 = 8.0;
+/// The menu's own padding.
+const MENU_PAD: f32 = 2.0;
+/// The menus the Start tab keeps: it has no drawing for the others.
+const START_MENUS: [&str; 3] = ["File", "Window", "Help"];
 
-/// The menu bar, one pull-down per menu. `drawings` are the open drawings
-/// the Window menu lists: tab index and name.
-pub fn view<'a>(drawings: Vec<(usize, String)>) -> Element<'a, Message> {
-    let roots = MENUS
-        .iter()
-        .map(|&(title, entries)| {
-            let mut items = items(entries);
-            if title == "Window" && !drawings.is_empty() {
-                items.push(Item::new(separator()));
-                items.extend(drawings.iter().enumerate().map(|(n, (tab, name))| {
-                    Item::new(entry(
-                        None,
-                        format!("{} {name}", n + 1),
-                        "",
-                        Some(Message::TabSwitch(*tab)),
-                    ))
-                }));
-            }
-            Item::with_menu(
-                Title::new(
-                    container(text(crate::t!(title).into_owned()).size(12))
-                        .center_y(TITLE_H)
-                        .padding([0, 9]),
-                ),
-                menu(items),
-            )
-        })
-        .collect();
+/// What the menu bar shows besides its fixed menus.
+pub struct MenuContext<'a> {
+    /// The open drawings the Window menu lists: tab index and name.
+    pub drawings: Vec<(usize, String)>,
+    /// The command aliases (alias → command), shown after the shortcuts.
+    pub aliases: &'a rustc_hash::FxHashMap<String, String>,
+    /// The Start tab is on show: only File, Window and Help.
+    pub is_start: bool,
+}
+
+/// The menu bar, one pull-down per menu.
+pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
+    let aliases = aliases_by_command(context.aliases);
+    let roots =
+        MENUS
+            .iter()
+            .filter(|(title, _)| !context.is_start || START_MENUS.contains(title))
+            .map(|&(title, entries)| {
+                let mut rows = rows(entries, &aliases);
+                if title == "Window" && !context.drawings.is_empty() {
+                    rows.push(Row::Sep);
+                    rows.extend(context.drawings.iter().enumerate().map(|(n, (tab, name))| {
+                        Row::Cmd {
+                            icon: None,
+                            label: format!("{} {name}", n + 1),
+                            tail: String::new(),
+                            on_press: Some(Box::new(Message::TabSwitch(*tab))),
+                        }
+                    }));
+                }
+                Item::with_menu(
+                    Title::new(
+                        container(text(crate::t!(title).into_owned()).size(12))
+                            .center_y(TITLE_H)
+                            .padding([0, 9]),
+                    ),
+                    menu(rows),
+                )
+            })
+            .collect();
     let bar = MenuBar::new(roots)
         .close_on_item_click_global(true)
+        // The open menu's title stays lit while the pointer is in the menu.
+        .draw_path(DrawPath::Backdrop)
         .style(|theme: &Theme, _| iced_aw::style::menu_bar::Style {
             bar_background: Background::Color(chrome::bar(theme)),
             bar_border: Border::default(),
@@ -708,8 +733,7 @@ pub fn view<'a>(drawings: Vec<(usize, String)>) -> Element<'a, Message> {
             menu_shadow: Default::default(),
             path: Background::Color(chrome::hover(theme)),
             path_border: Border::default(),
-        })
-        .width(Fill);
+        });
     container(bar)
         .padding(iced::Padding {
             top: 1.0,
@@ -722,6 +746,36 @@ pub fn view<'a>(drawings: Vec<(usize, String)>) -> Element<'a, Message> {
             ..Default::default()
         })
         .into()
+}
+
+/// The aliases of each command, sorted, from the alias → command table.
+fn aliases_by_command(
+    aliases: &rustc_hash::FxHashMap<String, String>,
+) -> rustc_hash::FxHashMap<String, Vec<String>> {
+    let mut by_command: rustc_hash::FxHashMap<String, Vec<String>> = Default::default();
+    for (alias, command) in aliases {
+        by_command
+            .entry(command.to_uppercase())
+            .or_default()
+            .push(alias.to_uppercase());
+    }
+    for list in by_command.values_mut() {
+        list.sort_unstable_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+    }
+    by_command
+}
+
+/// Whether OCS has the command a menu line starts.
+fn implemented(line: &str) -> bool {
+    thread_local! {
+        static KNOWN: rustc_hash::FxHashSet<&'static str> =
+            crate::command::all_registered_command_names().into_iter().collect();
+    }
+    let Some(verb) = line.split_whitespace().next() else {
+        return false;
+    };
+    let verb = verb.to_uppercase();
+    KNOWN.with(|known| known.contains(verb.as_str()))
 }
 
 /// A menu item as the command search lists it.
@@ -759,25 +813,87 @@ pub fn search_entries() -> Vec<SearchEntry> {
     out
 }
 
-fn menu<'a>(items: Vec<Item<'a, Message, Theme, Renderer>>) -> Menu<'a, Message, Theme, Renderer> {
-    Menu::new(items).width(MENU_W).padding(2).offset(0.0)
+/// One row of a menu before it is drawn, so the menu can be as wide as its
+/// widest row.
+enum Row {
+    /// A command: its icon, label, shortcut and aliases, and what a click
+    /// sends (`None` while OCS does not have the command yet).
+    Cmd {
+        icon: Option<&'static [u8]>,
+        label: String,
+        tail: String,
+        on_press: Option<Box<Message>>,
+    },
+    Sep,
+    Sub(String, Vec<Row>),
 }
 
-fn items<'a>(entries: &'static [Entry]) -> Vec<Item<'a, Message, Theme, Renderer>> {
+impl Row {
+    /// The width the row needs.
+    fn width(&self) -> f32 {
+        use crate::ui::style::text_metrics::width;
+        let (label, end) = match self {
+            Row::Cmd { label, tail, .. } if tail.is_empty() => (label, 0.0),
+            Row::Cmd { label, tail, .. } => (label, TAIL_GAP + width(tail, TAIL_SIZE, false)),
+            Row::Sub(label, _) => (label, TAIL_GAP + ARROW),
+            Row::Sep => return 0.0,
+        };
+        // Icon, label, filler and tail with a gap between each.
+        ROW_PAD + ICON + 3.0 * ROW_SPACING + width(label, LABEL_SIZE, false) + end + ROW_PAD
+    }
+}
+
+/// A menu as wide as its widest row.
+fn menu<'a>(rows: Vec<Row>) -> Menu<'a, Message, Theme, Renderer> {
+    let width = rows.iter().map(Row::width).fold(0.0, f32::max) + 2.0 * MENU_PAD + 2.0;
+    let items = rows
+        .into_iter()
+        .map(|row| match row {
+            Row::Cmd {
+                icon,
+                label,
+                tail,
+                on_press,
+            } => Item::new(entry(icon, label, tail, on_press.map(|m| *m), false)),
+            Row::Sep => Item::new(idle(separator())),
+            Row::Sub(label, rows) => {
+                Item::with_menu(entry(None, label, String::new(), None, true), menu(rows))
+            }
+        })
+        .collect();
+    Menu::new(items).width(width).padding(MENU_PAD).offset(0.0)
+}
+
+fn rows(
+    entries: &'static [Entry],
+    aliases: &rustc_hash::FxHashMap<String, Vec<String>>,
+) -> Vec<Row> {
     entries
         .iter()
         .map(|entry_def| match *entry_def {
-            Cmd(label, command, shortcut) => Item::new(entry(
-                command_icon(command),
-                crate::t!(label).into_owned(),
-                shortcut,
-                Some(Message::MenuCommand(command.to_string())),
-            )),
-            Sep => Item::new(separator()),
-            Sub(label, entries) => Item::with_menu(
-                entry(None, crate::t!(label).into_owned(), "", None),
-                menu(items(entries)),
-            ),
+            Cmd(label, command, shortcut) => {
+                // A command's aliases follow its shortcut; not those of a
+                // line that answers prompts too.
+                let own = (!command.contains(' '))
+                    .then(|| aliases.get(command))
+                    .flatten()
+                    .map(|list| list.join(", "))
+                    .unwrap_or_default();
+                let tail = [shortcut, own.as_str()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("   ");
+                Row::Cmd {
+                    icon: command_icon(command),
+                    label: crate::t!(label).into_owned(),
+                    tail,
+                    on_press: implemented(command)
+                        .then(|| Box::new(Message::MenuCommand(command.to_string()))),
+                }
+            }
+            Sep => Row::Sep,
+            Sub(label, entries) => Row::Sub(crate::t!(label).into_owned(), rows(entries, aliases)),
         })
         .collect()
 }
@@ -787,42 +903,58 @@ fn command_icon(line: &str) -> Option<&'static [u8]> {
     crate::modules::registry::command_icon(line.split_whitespace().next()?)
 }
 
-/// A 22 px menu row: a 16 px icon column, the label, and the shortcut
-/// right-aligned in muted text; or, without `on_press`, a submenu's row
-/// with an arrow.
+/// `content` with the plain pointer: a row that takes no click would let the
+/// drawing's crosshair cursor show through the menu.
+fn idle<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
+    mouse_area(content)
+        .interaction(mouse::Interaction::Idle)
+        .into()
+}
+
+/// A 22 px menu row: a 16 px icon column, the label, and the shortcut and
+/// aliases right-aligned in muted text; a `submenu`'s row has an arrow
+/// instead. Without `on_press` a command row is greyed out: OCS does not
+/// have that command yet.
 fn entry<'a>(
     icon: Option<&'static [u8]>,
     label: String,
-    shortcut: &'static str,
+    tail: String,
     on_press: Option<Message>,
+    submenu: bool,
 ) -> Element<'a, Message> {
+    let enabled = on_press.is_some() || submenu;
     let icon: Element<'a, Message> = match icon {
-        Some(bytes) => crate::ui::icons::tool(bytes, ICON),
+        Some(bytes) if enabled => crate::ui::icons::tool(bytes, ICON),
+        Some(bytes) => crate::ui::icons::tool_disabled(bytes, ICON),
         None => Space::new().width(ICON).height(ICON).into(),
     };
-    let tail: Element<'a, Message> = if on_press.is_some() {
-        text(shortcut)
-            .size(11)
+    let tail: Element<'a, Message> = if submenu {
+        crate::ui::icons::themed_arrow_right(ARROW)
+    } else {
+        text(tail)
+            .size(TAIL_SIZE)
             .style(|theme: &Theme| text::Style {
                 color: Some(chrome::muted(theme)),
             })
             .into()
-    } else {
-        crate::ui::icons::themed_arrow_right(8.0)
     };
-    let submenu = on_press.is_none();
     let row = button(
-        row![icon, text(label).size(12), Space::new().width(Fill), tail]
-            .spacing(8)
-            .align_y(iced::Center),
+        row![
+            icon,
+            text(label).size(LABEL_SIZE),
+            Space::new().width(Fill),
+            tail
+        ]
+        .spacing(ROW_SPACING)
+        .align_y(iced::Center),
     )
     .style(move |theme: &Theme, status| entry_style(theme, status, submenu))
     .width(Fill)
     .height(ENTRY_H)
-    .padding([0, 8]);
+    .padding([0.0, ROW_PAD]);
     match on_press {
         Some(message) => row.on_press(message).into(),
-        None => row.into(),
+        None => idle(row.into()),
     }
 }
 

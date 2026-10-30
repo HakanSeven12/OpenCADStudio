@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Pokaż pasek menu
     .hide-menu-bar = Ukryj pasek menu
     .close-ribbon = Zamknij wstążkę
+    .show-ribbon = Pokaż wstążkę
     .minimize-cycle = Minimalizuj wstążkę (cyklicznie)
     .minimize = Minimalizuj wstążkę
     .show-full = Pokaż pełną wstążkę

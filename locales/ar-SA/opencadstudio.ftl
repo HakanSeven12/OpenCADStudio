@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = إظهار شريط القوائم
     .hide-menu-bar = إخفاء شريط القوائم
     .close-ribbon = إغلاق الشريط
+    .show-ribbon = إظهار الشريط
     .minimize-cycle = تصغير الشريط (تدوير)
     .minimize = تصغير الشريط
     .show-full = إظهار الشريط كاملاً

@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = ສະແດງແຖບເມນູ
     .hide-menu-bar = ເຊື່ອງແຖບເມນູ
     .close-ribbon = ປິດແຖບໂບ
+    .show-ribbon = ສະແດງແຖບໂບ
     .minimize-cycle = ຫຍໍ້ແຖບໂບ (ໝູນວຽນ)
     .minimize = ຫຍໍ້ແຖບໂບ
     .show-full = ສະແດງແຖບໂບເຕັມ

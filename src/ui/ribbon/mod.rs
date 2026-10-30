@@ -971,7 +971,8 @@ impl Ribbon {
 
     /// The ribbon. With `menu_row` (MENUBAR 1) the large logo spans the
     /// menu row and the tab row; without it a compact logo starts the tab
-    /// row. A `closed` ribbon (RIBBONCLOSE) keeps the tab row.
+    /// row. A `closed` ribbon (RIBBONCLOSE) keeps the Quick Access buttons,
+    /// the logo and the search box, without the tabs and the tool area.
     #[allow(clippy::too_many_arguments)]
     pub fn view<'a>(
         &'a self,
@@ -988,18 +989,18 @@ impl Ribbon {
         let lead = iced::widget::Row::with_children(
             QUICK_ACCESS
                 .iter()
-                .map(|&(icon, label, cmd)| quick_access_btn(icon, label, cmd))
+                .map(|&(icon, label, cmd)| quick_access_btn(icon, label, cmd, !is_start))
                 .chain([
                     render_history_control(
                         "Undo",
                         UNDO_HISTORY_ID,
-                        undo_count,
+                        if is_start { 0 } else { undo_count },
                         &self.open_dropdown,
                     ),
                     render_history_control(
                         "Redo",
                         REDO_HISTORY_ID,
-                        redo_count,
+                        if is_start { 0 } else { redo_count },
                         &self.open_dropdown,
                     ),
                 ]),
@@ -1042,8 +1043,15 @@ impl Ribbon {
                     )
                     .center_y(Fill),
                 )
-                .on_press(Message::RibbonSelectTab(i))
+                // The Start tab has no drawing: the tabs grey out and rest.
+                .on_press_maybe((!is_start).then_some(Message::RibbonSelectTab(i)))
                 .style(move |theme: &Theme, status| {
+                    if is_start {
+                        return button::Style {
+                            text_color: chrome::muted(theme),
+                            ..Default::default()
+                        };
+                    }
                     let hovered =
                         matches!(status, button::Status::Hovered | button::Status::Pressed);
                     let background = if is_active || hovered {
@@ -1097,13 +1105,16 @@ impl Ribbon {
         if self.layout.minimize != RibbonMinimize::Off
             || !self.collapse_tight.load(Ordering::Relaxed)
         {
-            tab_items.push(self.minimize_button());
+            tab_items.push(self.minimize_button(is_start));
         }
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
         // down to -12px on a narrow (e.g. phone) tab row, tucking neighbours into
         // each other's 14px side padding without overlapping the labels. When the
         // row has room the gap stays 6px, so wide/desktop layouts are unchanged.
+        if closed {
+            tab_items.clear();
+        }
         let tabs = WrapFlow::new(tab_items)
             .spacing_x(metrics::TAB_GAP)
             .min_spacing_x(-6.0)
@@ -1486,7 +1497,7 @@ impl Ribbon {
                     .size(11)
                     .wrapping(iced::advanced::text::Wrapping::None)
                     .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: (!is_current || disabled).then_some(chrome::muted(theme)),
+                        color: disabled.then_some(chrome::muted(theme)),
                     });
                 let label_el = keytips::label_anchor(
                     || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
@@ -1602,11 +1613,7 @@ impl Ribbon {
                 });
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_active);
-                let label = text(&info.name).size(11).style(move |theme: &Theme| {
-                    iced::widget::text::Style {
-                        color: (!is_active).then_some(chrome::muted(theme)),
-                    }
-                });
+                let label = text(&info.name).size(11);
 
                 // The swatch + label area selects the layer as active; the
                 // icon buttons above handle their own toggles.
@@ -1726,16 +1733,9 @@ impl Ribbon {
                 let n = name.clone();
                 let checkmark: Element<Message> = crate::ui::icons::themed_check_cell(is_sel);
                 button(
-                    row![
-                        checkmark,
-                        text(name.clone()).size(11).style(move |theme: &Theme| {
-                            iced::widget::text::Style {
-                                color: (!is_sel).then_some(chrome::muted(theme)),
-                            }
-                        }),
-                    ]
-                    .spacing(4)
-                    .align_y(iced::Center),
+                    row![checkmark, text(name.clone()).size(11),]
+                        .spacing(4)
+                        .align_y(iced::Center),
                 )
                 .on_press(Message::RibbonStyleChanged {
                     key: style_key,
@@ -1819,9 +1819,6 @@ impl Ribbon {
                 let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 let name_col = text(linetype_display_name(&lt.name))
                     .size(11)
-                    .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: (!is_cur).then_some(chrome::muted(theme)),
-                    })
                     .width(Length::Fixed(90.0));
                 let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
                 let name = lt.name.clone();
@@ -1860,16 +1857,9 @@ impl Ribbon {
                 let label = item.to_string();
                 let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 button(
-                    row![
-                        check,
-                        text(label).size(11).style(move |theme: &Theme| {
-                            iced::widget::text::Style {
-                                color: (!is_cur).then_some(chrome::muted(theme)),
-                            }
-                        })
-                    ]
-                    .spacing(5)
-                    .align_y(iced::Center),
+                    row![check, text(label).size(11)]
+                        .spacing(5)
+                        .align_y(iced::Center),
                 )
                 .on_press(Message::RibbonLineweightChanged(item.0))
                 .style(popup_row_style)

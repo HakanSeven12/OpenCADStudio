@@ -679,7 +679,7 @@ fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Eleme
             } else {
                 icons::PIN_ACTIVE
             },
-            metrics::STRIP_ICON,
+            metrics::PIN_ICON,
         ))
         .on_press(Message::RibbonSlideOut(SlideOutMsg::TogglePin(key)))
         .style(|theme: &Theme, status| tool_btn_style(theme, false, status))

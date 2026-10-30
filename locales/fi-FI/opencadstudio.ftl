@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Näytä valikkorivi
     .hide-menu-bar = Piilota valikkorivi
     .close-ribbon = Sulje valintanauha
+    .show-ribbon = Näytä valintanauha
     .minimize-cycle = Pienennä valintanauha (kierrä)
     .minimize = Pienennä valintanauha
     .show-full = Näytä koko valintanauha

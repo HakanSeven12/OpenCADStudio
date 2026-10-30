@@ -2682,7 +2682,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         row![
                             container(self.ribbon.logo_button(false)).padding([0, 6]),
                             self.ribbon
-                                .with_search_box(crate::ui::menu_bar::view(self.open_drawings())),
+                                .with_search_box(crate::ui::menu_bar::view(self.menu_context())),
                         ]
                         .align_y(iced::Center),
                     );
@@ -2691,7 +2691,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 col = col.push(
                     self.ribbon.view(
                         self.show_menu_bar
-                            .then(|| crate::ui::menu_bar::view(self.open_drawings())),
+                            .then(|| crate::ui::menu_bar::view(self.menu_context())),
                         self.ribbon_closed,
                         is_paper,
                         self.tabs[self.active_tab].is_start,
@@ -2956,7 +2956,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
         let ribbon_menu_layer: Element<'_, Message> = self
             .ribbon
-            .menu_overlay(self.win_size, self.show_menu_bar)
+            .menu_overlay(self.win_size, self.show_menu_bar, self.ribbon_closed)
             .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
         // Key tips: the hint bar under the dropdowns, the codes above all.
@@ -3600,6 +3600,16 @@ impl OpenCADStudio {
             .filter(|(_, tab)| !tab.is_start)
             .map(|(index, tab)| (index, tab.tab_display_name()))
             .collect()
+    }
+
+    /// What the menu bar shows: the open drawings, the command aliases, and
+    /// whether the Start tab is on show.
+    fn menu_context(&self) -> crate::ui::menu_bar::MenuContext<'_> {
+        crate::ui::menu_bar::MenuContext {
+            drawings: self.open_drawings(),
+            aliases: &self.command_line.command_aliases,
+            is_start: self.tabs[self.active_tab].is_start,
+        }
     }
 }
 

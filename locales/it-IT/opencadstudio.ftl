@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Mostra barra dei menu
     .hide-menu-bar = Nascondi barra dei menu
     .close-ribbon = Chiudi barra multifunzione
+    .show-ribbon = Mostra barra multifunzione
     .minimize-cycle = Riduci barra multifunzione (ciclo)
     .minimize = Riduci barra multifunzione
     .show-full = Mostra barra multifunzione completa

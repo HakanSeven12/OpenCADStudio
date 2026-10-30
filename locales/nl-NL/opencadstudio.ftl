@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Menubalk tonen
     .hide-menu-bar = Menubalk verbergen
     .close-ribbon = Lint sluiten
+    .show-ribbon = Lint tonen
     .minimize-cycle = Lint minimaliseren (rouleren)
     .minimize = Lint minimaliseren
     .show-full = Volledig lint tonen

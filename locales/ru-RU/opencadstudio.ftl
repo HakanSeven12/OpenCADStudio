@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Показать строку меню
     .hide-menu-bar = Скрыть строку меню
     .close-ribbon = Закрыть ленту
+    .show-ribbon = Показать ленту
     .minimize-cycle = Свернуть ленту (по кругу)
     .minimize = Свернуть ленту
     .show-full = Показать всю ленту

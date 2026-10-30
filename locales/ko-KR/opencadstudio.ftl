@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = 메뉴 막대 표시
     .hide-menu-bar = 메뉴 막대 숨기기
     .close-ribbon = 리본 닫기
+    .show-ribbon = 리본 표시
     .minimize-cycle = 리본 최소화(순환)
     .minimize = 리본 최소화
     .show-full = 전체 리본 표시

@@ -49,6 +49,7 @@ ribbon-menu =
     .show-menu-bar = Menüsor megjelenítése
     .hide-menu-bar = Menüsor elrejtése
     .close-ribbon = Szalag bezárása
+    .show-ribbon = Szalag megjelenítése
     .minimize-cycle = Szalag kis méretre (körbe)
     .minimize = Szalag kis méretre
     .show-full = Teljes szalag megjelenítése

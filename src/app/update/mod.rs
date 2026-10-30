@@ -2698,7 +2698,7 @@ impl OpenCADStudio {
                 use crate::ui::ribbon::RibbonMenuMsg;
                 let follow = match &msg {
                     RibbonMenuMsg::ShowMenuBar(shown) => Some(Message::MenuBarChanged(*shown)),
-                    RibbonMenuMsg::CloseRibbon => Some(Message::Command("RIBBONCLOSE".into())),
+                    RibbonMenuMsg::ShowRibbon(shown) => Some(Message::RibbonVisibleChanged(*shown)),
                     _ => None,
                 };
                 if self.ribbon.on_menu(msg) {

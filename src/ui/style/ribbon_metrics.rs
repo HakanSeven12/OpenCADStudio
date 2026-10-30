@@ -32,8 +32,9 @@ pub const MINIMIZE_BOTTOM: f32 = 1.0;
 
 /// Height of the tool area with panel titles.
 pub const TOOL_AREA_H: f32 = CONTENT_H + TITLE_STRIP_H;
-/// Height of the tool area without panel titles.
-pub const TOOL_AREA_UNTITLED_H: f32 = 89.0;
+/// Height of the tool area without panel titles: a thin strip stands for
+/// the title strip.
+pub const TOOL_AREA_UNTITLED_H: f32 = CONTENT_H + THIN_STRIP_H;
 /// Height of a panel's content area, above its title strip.
 pub const CONTENT_H: f32 = 79.0;
 /// Padding of the content area around the tools.
@@ -48,6 +49,11 @@ pub const LAUNCHER_H: f32 = 18.0;
 /// How far above a panel's bottom its slide-out starts: over the title
 /// strip and the line on top of it.
 pub const SLIDE_OUT_TOP: f32 = TITLE_STRIP_H + 1.0;
+/// Without panel titles: the thin strip without text that stands for the
+/// title strip, its dialog launcher, and where the slide-out starts.
+pub const THIN_STRIP_H: f32 = 10.0;
+pub const THIN_LAUNCHER_H: f32 = 9.0;
+pub const SLIDE_OUT_TOP_THIN: f32 = THIN_STRIP_H + 1.0;
 
 // ── Buttons ────────────────────────────────────────────────────────────────
 
@@ -132,5 +138,7 @@ mod tests {
         assert_eq!(TOOL_AREA_H, 99.0);
         assert_eq!(LARGE_H, 70.0);
         assert_eq!(SLIDE_OUT_TOP, 21.0);
+        assert_eq!(TOOL_AREA_UNTITLED_H, 89.0);
+        assert_eq!(SLIDE_OUT_TOP_THIN, 11.0);
     }
 }

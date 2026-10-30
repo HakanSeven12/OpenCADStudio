@@ -831,7 +831,7 @@ impl Ribbon {
         let strip = if self.layout.show_panel_titles {
             Strip::Titled
         } else {
-            Strip::Untitled
+            Strip::Thin
         };
         let look = self.slide_look(&key);
         let group = move |compact: bool| {
@@ -1257,12 +1257,12 @@ impl Ribbon {
                     }
                 })
                 .collect();
-            // Panels drag by their title strips; without titles they stay put.
+            // Panels drag by their title strips, thin without titles.
             let module = self.modules[effective_active].id();
             let strip = if self.layout.show_panel_titles {
                 PANEL_TITLE_H
             } else {
-                0.0
+                metrics::THIN_STRIP_H
             };
             CollapsePanels::new(panels, self.panel_h())
                 .draggable(strip, move |titles| Message::RibbonReorderPanels {
@@ -1908,8 +1908,8 @@ impl Ribbon {
 enum Strip {
     /// The title strip, with the title.
     Titled,
-    /// Panel titles are off.
-    Untitled,
+    /// Panel titles are off: a thin strip without text.
+    Thin,
     /// No strip: the body of a collapsed or minimized panel's peek, whose
     /// footer stands for the strip.
     Peek,
@@ -1984,40 +1984,32 @@ fn render_group<'a>(
     );
 
     // The tools sit 3 px from the title strip's top line and the tool area's
-    // top edge; without titles they are centred in the shorter area.
+    // top edge.
     let body = container(tools_el).padding(Padding {
         top: metrics::CONTENT_PAD_TOP,
         right: metrics::CONTENT_PAD_SIDE,
         bottom: metrics::CONTENT_PAD_BOTTOM,
         left: metrics::CONTENT_PAD_SIDE,
     });
-    let body = match strip {
-        Strip::Titled | Strip::Peek => body.height(metrics::CONTENT_H),
-        Strip::Untitled => body.height(TOOL_BAR_H_UNTITLED).align_y(iced::Center),
-    };
+    let body = body.height(metrics::CONTENT_H);
     let mut panel = column![body];
     let mut launcher = None;
     let mut press = None;
-    if strip == Strip::Titled {
-        let title = draw_panel::group_title(group.title, key, look);
+    let strip_h = match strip {
+        Strip::Titled => PANEL_TITLE_H,
+        Strip::Thin => metrics::THIN_STRIP_H,
+        Strip::Peek => 0.0,
+    };
+    if strip_h > 0.0 {
+        let title = draw_panel::group_title(group.title, key, look, strip == Strip::Thin);
         panel = panel.push(title.row);
         launcher = title.launcher;
         press = title.press;
     }
-    let height = match strip {
-        Strip::Titled => TOOL_BAR_H,
-        Strip::Untitled => TOOL_BAR_H_UNTITLED,
-        Strip::Peek => metrics::CONTENT_H,
-    };
     let panel = panel
         .align_x(iced::Center)
         .spacing(0)
-        .height(Length::Fixed(height));
-    let strip_h = if strip == Strip::Titled {
-        PANEL_TITLE_H
-    } else {
-        0.0
-    };
+        .height(Length::Fixed(metrics::CONTENT_H + strip_h));
     let panel = panel_frame::PanelFrame::new(panel.into(), strip_h, launcher)
         .lit(look == draw_panel::SlideLook::Open)
         .on_press(press);

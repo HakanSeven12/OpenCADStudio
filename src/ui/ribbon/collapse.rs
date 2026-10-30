@@ -309,7 +309,8 @@ impl<'a> CollapsePanels<'a> {
 
     /// Let a press on the bottom `strip` px of a full or compact panel drag
     /// it to another place; a drop sends `on_reorder` with the panel ids in
-    /// their new order.
+    /// their new order. The title strip continues after the last panel to
+    /// the right edge.
     pub fn draggable(
         mut self,
         strip: f32,
@@ -585,7 +586,13 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             out.store(row_h.to_bits(), Ordering::Relaxed);
         }
 
-        layout::Node::with_children(Size::new(x, row_h), children)
+        // As wide as the space, so the title strip reaches its right edge.
+        let width = if limits.max().width.is_finite() {
+            x.max(limits.max().width)
+        } else {
+            x
+        };
+        layout::Node::with_children(Size::new(width, row_h), children)
     }
 
     fn update(
@@ -808,6 +815,38 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         let is_btn = |lv: Level| lv == Level::Collapsed || lv == Level::Tight;
         let bounds: Vec<Rectangle> = layout.children().map(|l| l.bounds()).collect();
         let wb = layout.bounds();
+        // The title strip after the last panel, with its line on top, and a
+        // divider closing the last panel.
+        let end = bounds.iter().map(|b| b.x + b.width).fold(wb.x, f32::max);
+        if self.drag_strip > 0.0 && end < wb.x + wb.width {
+            let quad = |x: f32, y: f32, width: f32, height: f32| renderer::Quad {
+                bounds: Rectangle {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+                border: Border::default(),
+                shadow: Shadow::default(),
+                snap: true,
+            };
+            let top = wb.y + wb.height - self.drag_strip;
+            let width = wb.x + wb.width - end;
+            renderer.fill_quad(
+                quad(end, top, width, self.drag_strip),
+                Background::Color(chrome::title_bar(theme)),
+            );
+            renderer.fill_quad(
+                quad(end, top, width, 1.0),
+                Background::Color(chrome::page(theme)),
+            );
+            if !bounds.is_empty() {
+                renderer.fill_quad(
+                    quad(end, wb.y, 1.0, wb.height),
+                    Background::Color(chrome::page(theme)),
+                );
+            }
+        }
         let order: Vec<usize> = drag.map_or_else(|| (0..n).collect(), |drag| drag.order.clone());
         for pair in order.windows(2) {
             let (left, right) = (pair[0], pair[1]);

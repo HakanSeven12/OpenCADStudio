@@ -311,10 +311,30 @@ pub(super) struct TitleRow<'a> {
 /// The title row of the panel `key`: its title, and for a panel with extra
 /// tools a chevron, ▾ while they are closed and ▴ while open; the title is
 /// strong while they are open and not pinned. A click anywhere on the strip
-/// opens them; a pinned panel closes from its footer only.
-pub(super) fn group_title<'a>(title: &'static str, key: &str, look: SlideLook) -> TitleRow<'a> {
+/// opens them; a pinned panel closes from its footer only. A `thin` strip,
+/// without panel titles, shows the chevron alone.
+pub(super) fn group_title<'a>(
+    title: &'static str,
+    key: &str,
+    look: SlideLook,
+    thin: bool,
+) -> TitleRow<'a> {
+    let height = if thin {
+        metrics::THIN_STRIP_H
+    } else {
+        PANEL_TITLE_H
+    };
     let panel = panel_for_group(key);
-    let launcher = panel.and_then(launcher);
+    let launcher = panel.and_then(|panel| {
+        launcher_of_height(
+            panel,
+            if thin {
+                metrics::THIN_LAUNCHER_H
+            } else {
+                LAUNCHER_H
+            },
+        )
+    });
     // Room for the launcher on both sides keeps the title centred.
     let side = if launcher.is_some() {
         LAUNCHER_W + 2.0
@@ -325,9 +345,13 @@ pub(super) fn group_title<'a>(title: &'static str, key: &str, look: SlideLook) -
         .size(PANEL_TITLE_SIZE)
         .wrapping(iced::widget::text::Wrapping::None);
     let Some(panel) = panel else {
-        let label = keytips::label_anchor(|| format!("title:{title}"), label);
+        let label: Element<'a, Message> = if thin {
+            Space::new().into()
+        } else {
+            keytips::label_anchor(|| format!("title:{title}"), label)
+        };
         return TitleRow {
-            row: strip_row(label, SlideLook::Closed, side),
+            row: strip_row(label, SlideLook::Closed, side, height),
             launcher,
             press: None,
         };
@@ -337,15 +361,20 @@ pub(super) fn group_title<'a>(title: &'static str, key: &str, look: SlideLook) -
     } else {
         icons::chevron_up()
     };
-    let content = row![
-        keytips::label_anchor(|| keytips::label_id(panel.id), label),
+    let content: Element<'a, Message> = if thin {
         chevron
-    ]
-    .spacing(4)
-    .align_y(iced::Center);
+    } else {
+        row![
+            keytips::label_anchor(|| keytips::label_id(panel.id), label),
+            chevron
+        ]
+        .spacing(4)
+        .align_y(iced::Center)
+        .into()
+    };
     TitleRow {
         // The key tips and the minimized ribbon find the opener here.
-        row: strip_row(PosReport::new(panel.id, content), look, side),
+        row: strip_row(PosReport::new(panel.id, content), look, side, height),
         launcher,
         press: match look {
             SlideLook::Pinned => None,
@@ -354,16 +383,17 @@ pub(super) fn group_title<'a>(title: &'static str, key: &str, look: SlideLook) -
     }
 }
 
-/// `content` centred in a title strip, in the strip's text colour: strong
-/// while the extra tools are open and not pinned.
+/// `content` centred in a title strip `height` high, in the strip's text
+/// colour: strong while the extra tools are open and not pinned.
 fn strip_row<'a>(
     content: impl Into<Element<'a, Message>>,
     look: SlideLook,
     side: f32,
+    height: f32,
 ) -> Element<'a, Message> {
     container(content)
-        .height(PANEL_TITLE_H)
-        .center_y(PANEL_TITLE_H)
+        .height(height)
+        .center_y(height)
         .padding([0.0, side])
         .style(move |theme: &Theme| container::Style {
             text_color: Some(if look == SlideLook::Open {
@@ -378,6 +408,11 @@ fn strip_row<'a>(
 
 /// The corner arrow that runs the dialog command of `panel`, if it has one.
 pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> {
+    launcher_of_height(panel, LAUNCHER_H)
+}
+
+/// [`launcher`] `height` high, as a thin strip has it.
+fn launcher_of_height<'a>(panel: &PanelExtras, height: f32) -> Option<Element<'a, Message>> {
     let dialog = panel.dialog?;
     // The corner arrow runs the panel's dialog command.
     let launcher = tooltip(
@@ -398,7 +433,7 @@ pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> 
         .on_press(launcher_message(dialog))
         .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
         .width(LAUNCHER_W)
-        .height(LAUNCHER_H)
+        .height(height)
         .padding(0),
         make_tip(format!(
             "{}\n{} {dialog}",
@@ -413,16 +448,17 @@ pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> 
 }
 
 /// Where the slide-out of `panel` shows, as (left, top, width): under the
-/// panel's body, over its title strip, as wide as the panel. Under the
-/// minimized ribbon's panel popup it hangs below the "More tools" footer.
+/// panel's body, over its title strip (or the thin strip without panel
+/// titles), as wide as the panel.
 fn slide_out_place(ribbon: &Ribbon, panel: &PanelExtras) -> Option<(f32, f32, f32)> {
     let id = panel_box_id(panel.key);
     let body = recent_bounds(&id).or_else(|| dropdown_bounds(&id))?;
-    let top = if ribbon.layout.minimize == RibbonMinimize::Off && ribbon.layout.show_panel_titles {
-        body.y + body.height - TITLE_STRIP
+    let strip = if ribbon.layout.show_panel_titles {
+        TITLE_STRIP
     } else {
-        dropdown_bounds(panel.id).map_or(body.y + body.height, |b| b.y + b.height)
+        metrics::SLIDE_OUT_TOP_THIN
     };
+    let top = body.y + body.height - strip;
     Some((body.x, top, body.width))
 }
 

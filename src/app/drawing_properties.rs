@@ -188,6 +188,10 @@ impl OpenCADStudio {
         self.tabs[i].scene.document.summary_info = edited;
         self.tabs[i].dirty = true;
         // Fields showing Title, Author or a custom property read it again.
+        let hosts = crate::entities::field::acvar_hosts(&self.tabs[i].scene.document);
+        if !hosts.is_empty() {
+            self.tabs[i].scene.update_fields(32, Some(&hosts));
+        }
         self.tabs[i].scene.bump_geometry();
         Task::none()
     }
@@ -296,6 +300,32 @@ mod tests {
         assert_eq!(undo_len(&mut app), undo + 1);
         let _ = app.automation_op(r#"{"op":"undo"}"#);
         assert_eq!(app.tabs[i].scene.document.summary_info, before);
+    }
+
+    /// S6: a text showing a custom property field shows the new value once
+    /// the dialog's OK has stored it.
+    #[test]
+    fn ok_updates_the_text_showing_a_custom_property_field() {
+        use codec::entities::{EntityType, MText};
+        let mut app = app_with_summary();
+        let i = app.active_tab;
+        let document = &mut app.tabs[i].scene.document;
+        let text = document
+            .add_entity(EntityType::MText(Box::new(MText::new())))
+            .unwrap();
+        crate::entities::field::set_text_field(
+            document,
+            text,
+            Some((r"\AcVar CustomDP.cost".to_string(), vec![])),
+            "12,5",
+        );
+        let _ = app.dispatch_command("DWGPROPS");
+        let _ = app.update(Message::DwgProps(DwgPropsMsg::CustomValue(0, "99".into())));
+        let _ = app.update(Message::DwgProps(DwgPropsMsg::Ok));
+        let Some(EntityType::MText(shown)) = app.tabs[i].scene.document.get_entity(text) else {
+            panic!("the text stays");
+        };
+        assert_eq!(shown.value, "99");
     }
 
     #[test]

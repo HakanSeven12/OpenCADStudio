@@ -1857,6 +1857,105 @@ pub fn dropped_on_save_count(
     n
 }
 
+/// MTEXT data the pinned codec's writer has no place for in an older target.
+/// DWG 2018 keeps all of it; DXF keeps all but columns before R2007, the
+/// first format that stores MTEXT columns. The table is pinned against the
+/// writer by `mtext_save_loss_tests`, so a codec change fails a test instead
+/// of silently making this warning wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MTextTargetLoss {
+    /// Column type, count, width, gutter, flow and per-column heights.
+    Columns,
+    /// A defined box height (`rectangle_height`).
+    BoxHeight,
+    /// Background mask flags, colour, border scale and transparency.
+    Background,
+    /// A non-default line spacing factor or style.
+    LineSpacing,
+}
+
+impl MTextTargetLoss {
+    pub const ALL: [Self; 4] = [
+        Self::Columns,
+        Self::BoxHeight,
+        Self::Background,
+        Self::LineSpacing,
+    ];
+
+    pub fn lost_in(self, version: codec::DxfVersion, is_dxf: bool) -> bool {
+        use codec::DxfVersion::*;
+        match self {
+            Self::Columns if is_dxf => version < AC1021,
+            Self::Columns => version < AC1032,
+            _ if is_dxf => false,
+            Self::BoxHeight => version < AC1021,
+            Self::Background => version < AC1018,
+            Self::LineSpacing => version < AC1015,
+        }
+    }
+
+    pub fn carried_by(self, t: &codec::entities::MText) -> bool {
+        let default = codec::entities::MText::default();
+        match self {
+            Self::Columns => t.column_data != codec::entities::MTextColumnData::new(),
+            Self::BoxHeight => t.rectangle_height.is_some(),
+            Self::Background => {
+                t.background_fill_flags != default.background_fill_flags
+                    || t.background_scale != default.background_scale
+                    || t.background_color != default.background_color
+                    || t.background_transparency != default.background_transparency
+            }
+            Self::LineSpacing => {
+                t.line_spacing_factor != default.line_spacing_factor
+                    || t.line_spacing_style != default.line_spacing_style
+            }
+        }
+    }
+
+    /// Stable machine-readable name for automation replies.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Columns => "columns",
+            Self::BoxHeight => "box_height",
+            Self::Background => "background",
+            Self::LineSpacing => "line_spacing",
+        }
+    }
+
+    pub fn message(self, count: usize) -> String {
+        match self {
+            Self::Columns => crate::tf!("{count} MTEXT object(s): column layout"),
+            Self::BoxHeight => crate::tf!("{count} MTEXT object(s): defined box height"),
+            Self::Background => crate::tf!("{count} MTEXT object(s): background mask"),
+            Self::LineSpacing => crate::tf!("{count} MTEXT object(s): line spacing"),
+        }
+        .into_owned()
+    }
+}
+
+/// How many MTEXT objects, in any space or block definition, would lose each
+/// [`MTextTargetLoss`] when written as a `target_version` DWG or DXF.
+pub fn mtext_losses_on_save(
+    doc: &codec::Document,
+    target_version: codec::DxfVersion,
+    is_dxf: bool,
+) -> Vec<(MTextTargetLoss, usize)> {
+    MTextTargetLoss::ALL
+        .into_iter()
+        .filter(|loss| loss.lost_in(target_version, is_dxf))
+        .filter_map(|loss| {
+            let count = doc
+                .entities()
+                .filter(|e| matches!(e, codec::EntityType::MText(t) if loss.carried_by(t)))
+                .count();
+            (count > 0).then_some((loss, count))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod mtext_save_loss_tests;
+
 /// Before overwriting `path`, copy the existing file to a sibling `<name>.bak`
 /// so a faulty or accidental save can be recovered (#205). Best-effort: a
 /// failed backup never blocks the save itself.

@@ -7675,3 +7675,9 @@ center-props =
     .start-extension = Start extension
     .end-extension = End extension
     .centerline = Centerline
+
+mtext-editor-errors = MTEXT
+    .target-columns = __ocs_fmt_0__ MTEXT object(s): column layout
+    .target-box-height = __ocs_fmt_0__ MTEXT object(s): defined box height
+    .target-background = __ocs_fmt_0__ MTEXT object(s): background mask
+    .target-spacing = __ocs_fmt_0__ MTEXT object(s): line spacing

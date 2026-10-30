@@ -2061,19 +2061,24 @@ pub(super) enum PendingConversionSave {
 impl PendingConversionSave {
     /// The name of the converter the held-back save writes with.
     pub(super) fn format_name(&self) -> String {
-        let ext = match self {
+        let (ext, version) = match self {
             #[cfg(not(target_arch = "wasm32"))]
-            Self::Native(save) => save
-                .path
-                .extension()
-                .map(|ext| ext.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            Self::Native(save) => (
+                save.path
+                    .extension()
+                    .map(|ext| ext.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                save.version,
+            ),
             #[cfg(target_arch = "wasm32")]
-            Self::Web { ext, .. } => ext.clone(),
+            Self::Web { ext, version, .. } => (ext.clone(), *version),
         };
+        // A DWG/DXF loss depends on the target version, so name it too.
         ocs_save::external_format(&ext)
             .map(|format| format.name().to_string())
-            .unwrap_or(ext)
+            .unwrap_or_else(|| {
+                crate::io::format_for_version(version, ext.eq_ignore_ascii_case("dxf"))
+            })
     }
 }
 

@@ -209,6 +209,10 @@ const TAB_TEXT_SIZE: f32 = 12.5;
 /// Width of the accent outline of a contextual tab.
 const TAB_OUTLINE: f32 = 1.5;
 
+/// The contextual tab, which the tool area's accent line leaves a gap
+/// under.
+const CONTEXTUAL_TAB_ID: &str = "ribbon_contextual_tab";
+
 /// `tab` with an accent line along its top and sides.
 fn tab_outline(tab: Element<'_, Message>) -> Element<'_, Message> {
     let line = |width: Length, height: Length| {
@@ -235,6 +239,33 @@ fn tab_outline(tab: Element<'_, Message>) -> Element<'_, Message> {
             .align_right(Fill),
     ]
     .into()
+}
+
+/// The Start tab has no drawing context: a theme-aware shield fades the
+/// tabs and the tool area, the active tab included, toward `colour` (the
+/// colour behind them) and takes their clicks. The application menu and
+/// Quick Access stay outside it.
+fn start_shield<'a>(colour: fn(&Theme) -> Color) -> Element<'a, Message> {
+    let shield = mouse_area(
+        container(iced::widget::Space::new())
+            .width(Fill)
+            .height(Fill)
+            .style(move |theme: &Theme| container::Style {
+                background: Some(Background::Color(colour(theme).scale_alpha(0.6))),
+                ..Default::default()
+            }),
+    )
+    .on_press(Message::CloseRibbonDropdown)
+    .interaction(iced::mouse::Interaction::Idle);
+    let shield = iced::widget::tooltip(
+        shield,
+        make_tip(t!("Open or create a drawing to use ribbon commands.").into_owned()),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .gap(6.0)
+    .delay(std::time::Duration::from_millis(400))
+    .style(tip_style);
+    iced::widget::opaque(shield)
 }
 
 /// The height of the tool area, with or without panel titles.
@@ -1043,15 +1074,8 @@ impl Ribbon {
                     )
                     .center_y(Fill),
                 )
-                // The Start tab has no drawing: the tabs grey out and rest.
-                .on_press_maybe((!is_start).then_some(Message::RibbonSelectTab(i)))
+                .on_press(Message::RibbonSelectTab(i))
                 .style(move |theme: &Theme, status| {
-                    if is_start {
-                        return button::Style {
-                            text_color: chrome::muted(theme),
-                            ..Default::default()
-                        };
-                    }
                     let hovered =
                         matches!(status, button::Status::Hovered | button::Status::Pressed);
                     let background = if is_active || hovered {
@@ -1077,7 +1101,8 @@ impl Ribbon {
                 // it. A contextual tab is outlined on three sides, also while
                 // another tab is on show, so it is easy to find again.
                 let tab: Element<'_, Message> = if is_contextual {
-                    tab_outline(tab.into())
+                    // The tool area's accent line leaves a gap under it.
+                    PosReport::new(CONTEXTUAL_TAB_ID, tab_outline(tab.into())).into()
                 } else {
                     tab.into()
                 };
@@ -1105,7 +1130,7 @@ impl Ribbon {
         if self.layout.minimize != RibbonMinimize::Off
             || !self.collapse_tight.load(Ordering::Relaxed)
         {
-            tab_items.push(self.minimize_button(is_start));
+            tab_items.push(self.minimize_button());
         }
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
@@ -1122,14 +1147,26 @@ impl Ribbon {
 
         let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
         if menu_row.is_none() {
-            tab_row = tab_row.push(self.logo_button(false));
+            // As far from the window's edge as the large logo's artwork; the
+            // button's 1 px border sits inside that.
+            tab_row = tab_row.push(container(self.logo_button(false)).padding(Padding {
+                left: app_menu::LOGO_PAD - 1.0,
+                ..Padding::ZERO
+            }));
         }
         tab_row = tab_row.push(
             container(
-                WrapBar::new(lead.into(), tabs.into())
-                    .spacing(6.0)
-                    .min_row_h(TAB_ROW_H)
-                    .report_height(self.tab_bar_h.clone()),
+                WrapBar::new(
+                    lead.into(),
+                    if is_start {
+                        iced::widget::stack![tabs, start_shield(chrome::bar)].into()
+                    } else {
+                        tabs.into()
+                    },
+                )
+                .spacing(6.0)
+                .min_row_h(TAB_ROW_H)
+                .report_height(self.tab_bar_h.clone()),
             )
             .width(Length::Fill),
         );
@@ -1306,51 +1343,43 @@ impl Ribbon {
         ]
         .into();
         // A contextual tab's tool area has an accent line along its top,
-        // drawn over the area's own border so its height stays.
+        // drawn over the area's own border so its height stays. It meets the
+        // tab's outline and leaves a gap under the tab, which opens into the
+        // area.
         let tool_bar = if self
             .modules
             .get(effective_active)
             .is_some_and(|module| is_contextual(module.id()))
         {
-            let line = container(
-                iced::widget::Space::new()
-                    .width(Fill)
-                    .height(CONTEXTUAL_LINE),
-            )
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(crate::ui::style::chrome::accent(theme))),
-                ..Default::default()
-            });
+            let line = |width: Length| {
+                container(
+                    iced::widget::Space::new()
+                        .width(width)
+                        .height(CONTEXTUAL_LINE),
+                )
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(chrome::accent(theme))),
+                    ..Default::default()
+                })
+            };
+            let line: Element<'_, Message> =
+                match crate::ui::wrap_bar::recent_bounds(CONTEXTUAL_TAB_ID) {
+                    Some(tab) => row![
+                        line(Length::Fixed((tab.x + TAB_OUTLINE).max(0.0))),
+                        iced::widget::Space::new()
+                            .width(Length::Fixed((tab.width - 2.0 * TAB_OUTLINE).max(0.0))),
+                        line(Fill),
+                    ]
+                    .into(),
+                    None => line(Fill).into(),
+                };
             iced::widget::stack![tool_bar, line].into()
         } else {
             tool_bar
         };
 
         if is_start {
-            // The Start tab has no drawing context. One theme-aware shield
-            // fades and blocks only the tool area; the tabs and application
-            // controls above it remain available and clearly identifiable.
-            let shield = mouse_area(
-                container(iced::widget::Space::new())
-                    .width(Fill)
-                    .height(Fill)
-                    .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(chrome::page(theme).scale_alpha(0.6))),
-                        ..Default::default()
-                    }),
-            )
-            .on_press(Message::CloseRibbonDropdown)
-            .interaction(iced::mouse::Interaction::Idle);
-            let shield = iced::widget::tooltip(
-                shield,
-                make_tip(t!("Open or create a drawing to use ribbon commands.").into_owned()),
-                iced::widget::tooltip::Position::Bottom,
-            )
-            .gap(6.0)
-            .delay(std::time::Duration::from_millis(400))
-            .style(tip_style);
-
-            iced::widget::stack![tool_bar, iced::widget::opaque(shield)].into()
+            iced::widget::stack![tool_bar, start_shield(chrome::page)].into()
         } else {
             tool_bar
         }
@@ -1973,8 +2002,8 @@ fn render_group<'a>(
         |r, e| r.push(e),
     );
 
-    // The tools sit 3 px from the title strip's top line and the tool area's
-    // top edge.
+    // The tools sit as far from the tool area's top edge as from the title
+    // strip's top line, within a pixel.
     let body = container(tools_el).padding(Padding {
         top: metrics::CONTENT_PAD_TOP,
         right: metrics::CONTENT_PAD_SIDE,
@@ -1982,25 +2011,19 @@ fn render_group<'a>(
         left: metrics::CONTENT_PAD_SIDE,
     });
     let body = body.height(metrics::CONTENT_H);
-    let mut panel = column![body];
-    let mut launcher = None;
-    let mut press = None;
     let strip_h = match strip {
         Strip::Titled => PANEL_TITLE_H,
         Strip::Thin => metrics::THIN_STRIP_H,
         Strip::Peek => 0.0,
     };
-    if strip_h > 0.0 {
+    let (title, launcher, press) = if strip_h > 0.0 {
         let title = draw_panel::group_title(group.title, key, look, strip == Strip::Thin);
-        panel = panel.push(title.row);
-        launcher = title.launcher;
-        press = title.press;
-    }
-    let panel = panel
-        .align_x(iced::Center)
-        .spacing(0)
-        .height(Length::Fixed(metrics::CONTENT_H + strip_h));
-    let panel = panel_frame::PanelFrame::new(panel.into(), strip_h, launcher)
+        (Some(title.row), title.launcher, title.press)
+    } else {
+        (None, None, None)
+    };
+    let panel = panel_frame::PanelFrame::new(body.into(), strip_h, launcher)
+        .title(title)
         .lit(look == draw_panel::SlideLook::Open)
         .on_press(press);
     // A peek shows the extra tools inside itself.

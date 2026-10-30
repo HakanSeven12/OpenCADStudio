@@ -671,7 +671,7 @@ const ROW_SPACING: f32 = 8.0;
 const ROW_PAD: f32 = 8.0;
 const TAIL_GAP: f32 = 8.0;
 const ARROW: f32 = 8.0;
-/// The menu's own padding.
+/// The menu's own padding above and below its rows.
 const MENU_PAD: f32 = 2.0;
 /// The menus the Start tab keeps: it has no drawing for the others.
 const START_MENUS: [&str; 3] = ["File", "Window", "Help"];
@@ -845,7 +845,7 @@ impl Row {
 
 /// A menu as wide as its widest row.
 fn menu<'a>(rows: Vec<Row>) -> Menu<'a, Message, Theme, Renderer> {
-    let width = rows.iter().map(Row::width).fold(0.0, f32::max) + 2.0 * MENU_PAD + 2.0;
+    let width = rows.iter().map(Row::width).fold(0.0, f32::max) + 2.0;
     let items = rows
         .into_iter()
         .map(|row| match row {
@@ -861,7 +861,15 @@ fn menu<'a>(rows: Vec<Row>) -> Menu<'a, Message, Theme, Renderer> {
             }
         })
         .collect();
-    Menu::new(items).width(width).padding(MENU_PAD).offset(0.0)
+    // No side padding: the menu's edge lines up with its title.
+    Menu::new(items)
+        .width(width)
+        .padding(iced::Padding {
+            top: MENU_PAD,
+            bottom: MENU_PAD,
+            ..iced::Padding::ZERO
+        })
+        .offset(0.0)
 }
 
 fn rows(

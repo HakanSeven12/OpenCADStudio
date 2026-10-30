@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use iced::time::Instant;
 use iced::widget::{button, column, container, mouse_area, opaque, row, text, tooltip, Space};
-use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
+use iced::{Background, Element, Fill, Length, Padding, Theme};
 
 use super::widgets::{
     make_icon, make_tip, popup_panel_style, qat_split_part_style, split_outline, tip_style,
@@ -328,8 +328,7 @@ impl Ribbon {
     /// ribbon, and an arrow part that opens the list of minimize states. Its
     /// icons are in the title colour, strong while hovered or while the list
     /// is open; one outline goes round both parts on hover.
-    /// On the Start tab it is greyed out and inert.
-    pub(super) fn minimize_button(&self, is_start: bool) -> Element<'_, Message> {
+    pub(super) fn minimize_button(&self) -> Element<'_, Message> {
         let minimized = self.layout.minimize != RibbonMinimize::Off;
         let to_full = next(self.layout.minimize, self.layout.minimize_pref) == RibbonMinimize::Off;
         let tip = if to_full {
@@ -341,12 +340,6 @@ impl Ribbon {
         };
         let menu_open = self.open_dropdown.as_deref() == Some(MINIMIZE_MENU_ID);
         let part_style = move |theme: &Theme, status: button::Status| {
-            if is_start {
-                return button::Style {
-                    text_color: chrome::muted(theme),
-                    ..Default::default()
-                };
-            }
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             button::Style {
                 text_color: if hovered || menu_open {
@@ -359,7 +352,7 @@ impl Ribbon {
         };
         let face = tooltip(
             button(container(icons::ribbon_toggle(minimized)).center(Fill))
-                .on_press_maybe((!is_start).then_some(Message::RibbonMinimize(MinimizeMsg::Toggle)))
+                .on_press(Message::RibbonMinimize(MinimizeMsg::Toggle))
                 .style(part_style)
                 .width(metrics::MINIMIZE_FACE_W)
                 .height(metrics::QAT_BUTTON)
@@ -370,19 +363,13 @@ impl Ribbon {
         .delay(Duration::from_millis(400))
         .style(tip_style);
         let arrow = button(container(icons::dropdown_arrow()).center(Fill))
-            .on_press_maybe(
-                (!is_start).then(|| Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string())),
-            )
+            .on_press(Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string()))
             .style(part_style)
             .width(metrics::SPLIT_ARROW_W)
             .height(metrics::QAT_BUTTON)
             .padding(0);
         // A split button like Undo's: one hover outline round both parts.
-        let parts = if is_start {
-            row![face, arrow].into()
-        } else {
-            split_outline(row![face, arrow].into())
-        };
+        let parts = split_outline(row![face, arrow].into());
         // At the bottom of the tab row, beside the last tab.
         container(PosReport::new(MINIMIZE_MENU_ID, parts))
             .padding(Padding {
@@ -492,20 +479,25 @@ impl Ribbon {
                 PosReport::owned(opener_id(title), opener),
             )
         });
-        container(row(openers).spacing(1).align_y(iced::Center))
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::panel(theme))),
-                border: Border {
-                    color: chrome::page(theme),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
+        // The row continues the active tab, with no line between them; a
+        // line closes it at the bottom, as under the tool area.
+        let line =
+            container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(chrome::page(theme))),
                 ..Default::default()
-            })
-            .padding([0, 2])
-            .height(height + 2.0)
-            .width(Fill)
-            .into()
+            });
+        column![
+            container(row(openers).spacing(1).align_y(iced::Center))
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(chrome::panel(theme))),
+                    ..Default::default()
+                })
+                .padding([0, 2])
+                .height(height)
+                .width(Fill),
+            line,
+        ]
+        .into()
     }
 
     /// The open popup over the drawing: with the ribbon minimized to tabs,

@@ -37,10 +37,11 @@ pub const TOOL_AREA_H: f32 = CONTENT_H + TITLE_STRIP_H;
 pub const TOOL_AREA_UNTITLED_H: f32 = CONTENT_H + THIN_STRIP_H;
 /// Height of a panel's content area, above its title strip.
 pub const CONTENT_H: f32 = 79.0;
-/// Padding of the content area around the tools.
-pub const CONTENT_PAD_TOP: f32 = 3.0;
+/// Padding of the content area around the tools: the 9 px the 70 px tools
+/// leave split as evenly as whole pixels allow.
+pub const CONTENT_PAD_TOP: f32 = 4.0;
 pub const CONTENT_PAD_SIDE: f32 = 4.0;
-pub const CONTENT_PAD_BOTTOM: f32 = 4.0;
+pub const CONTENT_PAD_BOTTOM: f32 = 5.0;
 /// Height of a panel's title strip.
 pub const TITLE_STRIP_H: f32 = 20.0;
 /// The dialog launcher at the right end of the title strip.
@@ -116,7 +117,7 @@ pub const CHEVRON_H: f32 = 5.0;
 // The tools fit the content area with its padding, and a collapsed panel the
 // tool area.
 const _: () = {
-    assert!(CONTENT_PAD_TOP + LARGE_H + CONTENT_PAD_BOTTOM <= CONTENT_H);
+    assert!(CONTENT_PAD_TOP + LARGE_H + CONTENT_PAD_BOTTOM == CONTENT_H);
     assert!(LARGE_H <= TOOL_AREA_UNTITLED_H);
     assert!(COLLAPSED_H <= TOOL_AREA_H && COLLAPSED_UNTITLED_H <= TOOL_AREA_UNTITLED_H);
 };

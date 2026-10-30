@@ -17,10 +17,10 @@ use crate::ui::wrap_bar::PosReport;
 pub const APP_MENU_ID: &str = "APP_MENU";
 /// The large logo, with its padding, beside the menu row and the tab row.
 const LOGO: f32 = 38.0;
-const LOGO_PAD: f32 = 6.0;
+pub(super) const LOGO_PAD: f32 = 6.0;
 /// The compact logo at the start of the tab row.
 const COMPACT_W: f32 = 38.0;
-const COMPACT_H: f32 = 18.0;
+const COMPACT_H: f32 = 19.0;
 const MENU_W: f32 = 300.0;
 const ROW_H: f32 = 28.0;
 const ICON: f32 = crate::ui::style::ribbon_metrics::SMALL_ICON;

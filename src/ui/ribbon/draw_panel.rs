@@ -7,7 +7,7 @@ use iced::time::Instant;
 use iced::widget::{
     button, column, container, mouse_area, opaque, row, stack, text, tooltip, Space,
 };
-use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
+use iced::{Background, Element, Fill, Length, Padding, Theme};
 
 use super::extras::{self, Layout, MoreGroup, MoreTool, PanelExtras};
 use super::widgets::{
@@ -351,7 +351,7 @@ pub(super) fn group_title<'a>(
             keytips::label_anchor(|| format!("title:{title}"), label)
         };
         return TitleRow {
-            row: strip_row(label, SlideLook::Closed, side, height),
+            row: strip_row(label, side, height),
             launcher,
             press: None,
         };
@@ -374,7 +374,7 @@ pub(super) fn group_title<'a>(
     };
     TitleRow {
         // The key tips and the minimized ribbon find the opener here.
-        row: strip_row(PosReport::new(panel.id, content), look, side, height),
+        row: strip_row(PosReport::new(panel.id, content), side, height),
         launcher,
         press: match look {
             SlideLook::Pinned => None,
@@ -383,11 +383,10 @@ pub(super) fn group_title<'a>(
     }
 }
 
-/// `content` centred in a title strip `height` high, in the strip's text
-/// colour: strong while the extra tools are open and not pinned.
+/// `content` centred in a title strip `height` high. The panel frame draws
+/// it in the strip's text colour.
 fn strip_row<'a>(
     content: impl Into<Element<'a, Message>>,
-    look: SlideLook,
     side: f32,
     height: f32,
 ) -> Element<'a, Message> {
@@ -395,14 +394,6 @@ fn strip_row<'a>(
         .height(height)
         .center_y(height)
         .padding([0.0, side])
-        .style(move |theme: &Theme| container::Style {
-            text_color: Some(if look == SlideLook::Open {
-                chrome::strong(theme)
-            } else {
-                chrome::title_text(theme)
-            }),
-            ..Default::default()
-        })
         .into()
 }
 
@@ -493,19 +484,30 @@ fn slide_out<'a>(
         extra_tools(ribbon, panel, width),
         footer(ribbon.slide.footer == Some(panel.key), panel, pinned),
     ];
-    let body = container(body)
+    // Outlined in the colour of the lines between panels, on the sides and
+    // the bottom: at the top it continues the panel.
+    let body =
+        container(
+            container(body)
+                .width(Fill)
+                .style(move |theme: &Theme| container::Style {
+                    background: Some(Background::Color(if pinned {
+                        chrome::panel(theme)
+                    } else {
+                        chrome::open_panel(theme)
+                    })),
+                    ..Default::default()
+                }),
+        )
         .width(Length::Fixed(width))
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(if pinned {
-                chrome::panel(theme)
-            } else {
-                chrome::open_panel(theme)
-            })),
-            border: Border {
-                color: chrome::border(theme),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
+        .padding(Padding {
+            top: 0.0,
+            right: 1.0,
+            bottom: 1.0,
+            left: 1.0,
+        })
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::page(theme))),
             ..Default::default()
         });
     // Opaque: the drawing's controls under it show no hover or tooltips.

@@ -1228,7 +1228,10 @@ pub fn view_window(
             .padding([6, 8])
             .into()
     } else {
-        scrollable(column(rows).spacing(1)).height(height).into()
+        scrollable(column(rows).spacing(1))
+            .width(Length::Fill)
+            .height(height)
+            .into()
     };
     // The name gets the sidebar's full width; beside the buttons it was
     // squeezed to nothing. (#1817)
@@ -1868,4 +1871,57 @@ pub fn view_window(
         .width(width)
         .height(height)
         .into()
+}
+
+#[cfg(test)]
+mod sidebar_layout_tests {
+    use super::*;
+    use iced::advanced::widget::{self, Operation};
+
+    #[test]
+    fn page_setup_scrollbar_viewport_fills_sidebar_width() {
+        struct ScrollBounds(Vec<iced::Rectangle>);
+        impl Operation for ScrollBounds {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                operate(self);
+            }
+            fn scrollable(
+                &mut self,
+                _: Option<&widget::Id>,
+                bounds: iced::Rectangle,
+                _: iced::Rectangle,
+                _: iced::Vector,
+                _: &mut dyn widget::operation::Scrollable,
+            ) {
+                self.0.push(bounds);
+            }
+        }
+        let _lock = crate::headless_ui_lock();
+        let mut renderer = iced::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                None,
+            ),
+        )
+        .expect("headless renderer");
+        let mut state = PlotDialogState::default();
+        state.page_setups = (0..25).map(|i| format!("Setup {i:02}")).collect();
+        let mut ui = iced_test::runtime::user_interface::UserInterface::build(
+            view_window(&state, false, crate::ui::modal::ModalSizing::FILL),
+            iced::Size::new(1100.0, 360.0),
+            iced_test::runtime::user_interface::Cache::default(),
+            &mut renderer,
+        );
+        let mut bounds = ScrollBounds(Vec::new());
+        ui.operate(&renderer, &mut widget::operation::black_box(&mut bounds));
+        let sidebar = bounds
+            .0
+            .iter()
+            .find(|bounds| bounds.x < 160.0)
+            .expect("page setup list scrollable");
+        assert!(
+            (sidebar.width - 136.0).abs() < 1.0,
+            "scrollbar must sit at the sidebar edge: {sidebar:?}"
+        );
+    }
 }

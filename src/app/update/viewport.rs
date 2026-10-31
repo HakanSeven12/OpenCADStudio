@@ -11051,10 +11051,10 @@ mod selection_preview_tests {
         );
     }
 
-    /// With the 3D master off, solid corners are invisible even when the
-    /// Vertex mode is configured — and the 2D system must not catch them.
+    /// With the 3D master off, a solid's corner is no 3D Vertex snap, but
+    /// the 2D Endpoint mode still catches it, as on any edge (#2153).
     #[test]
-    fn box_corner_ignores_3d_master_off() {
+    fn box_corner_answers_2d_endpoint_with_3d_master_off() {
         use crate::snap::SnapType;
         use codec::{entities::Solid3D, EntityType};
 
@@ -11062,6 +11062,7 @@ mod selection_preview_tests {
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         app.snapper.snap_enabled = true;
+        app.snapper.enabled.insert(SnapType::Endpoint);
         app.snapper.snap3d_enabled = false;
         app.snapper.enabled3d.insert(SnapType::Vertex);
         app.snapper.grid_snap_on = false;
@@ -11111,10 +11112,10 @@ mod selection_preview_tests {
             .unwrap();
         let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
 
-        assert!(
-            app.tabs[i].snap_result.is_none(),
-            "3D master off must hide solid corners, got {:?}",
-            app.tabs[i].snap_result.map(|s| (s.snap_type, s.world))
+        assert_eq!(
+            app.tabs[i].snap_result.map(|s| s.snap_type),
+            Some(SnapType::Endpoint),
+            "3D master off leaves the corner to the 2D Endpoint mode"
         );
     }
 

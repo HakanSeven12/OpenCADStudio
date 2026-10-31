@@ -521,7 +521,7 @@ async fn open_path_with_phase_attempt(
                     progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9600, 0, 1);
                     let t_finalize = Instant::now();
                     let (prepared_doc, prepared_geometry) =
-                        crate::scene::prepare_open_geometry(doc, &caches, model_bg);
+                        crate::scene::prepare_open_geometry(doc, &mut caches, model_bg);
                     caches.timings.finalize_ms = t_finalize.elapsed().as_millis() as u32;
                     doc = prepared_doc;
                     caches.prepared_geometry = Some(prepared_geometry);

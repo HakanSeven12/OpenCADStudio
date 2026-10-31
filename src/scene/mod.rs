@@ -1860,11 +1860,15 @@ fn build_derived_caches_impl(
 #[cfg(not(target_arch = "wasm32"))]
 pub fn prepare_open_geometry(
     doc: Document,
-    caches: &DerivedCaches,
+    caches: &mut DerivedCaches,
     model_bg: [f32; 4],
 ) -> (Document, PreparedOpenGeometry) {
     let mut scene = Scene::new();
     scene.document = doc;
+    // Solid meshes give solid wires their corner snaps; lent to the scene
+    // for the build and handed back below.
+    scene.meshes = std::mem::take(&mut caches.meshes);
+    scene.block_meshes = std::mem::take(&mut caches.block_meshes);
     scene.local_extent_max = caches.local_extent_max;
     scene.local_center = caches.local_center;
     scene.bg_color = model_bg;
@@ -1932,6 +1936,8 @@ pub fn prepare_open_geometry(
             .map(|(key, (_epoch, cache))| (key, cache))
             .collect();
     let doc = std::mem::replace(&mut scene.document, Document::new());
+    caches.meshes = std::mem::take(&mut scene.meshes);
+    caches.block_meshes = std::mem::take(&mut scene.block_meshes);
     (
         doc,
         PreparedOpenGeometry {
@@ -3511,7 +3517,13 @@ impl Scene {
         // 1.0). An annotative block scales as ONE unit at the INSERT level, so
         // its internal geometry / text / attributes must NOT be scaled
         // individually because that would apply the same scale twice.
-        let mut built = cache::block_cache::BlockCache::build(
+        let solid_snaps: HashMap<Handle, _> = self
+            .block_meshes
+            .keys()
+            .map(|handle| (*handle, self.solid_snap_points(*handle)))
+            .filter(|(_, points)| !points.is_empty())
+            .collect();
+        let mut built = cache::block_cache::BlockCache::build_with_solid_snaps(
             &self.document,
             1.0,
             annotation_scale_handle,
@@ -3519,6 +3531,7 @@ impl Scene {
             bg,
             viewport,
             &self.draw_depth_map(),
+            &solid_snaps,
         );
         if self.constraint_shading_active() { built.disable_prototypes(); }
         let arc = Arc::new(built);
@@ -15617,9 +15630,9 @@ mod journal_tests {
 
         let mut document = Document::new();
         document.add_entity(line(0.0)).unwrap();
-        let caches = build_derived_caches_impl(&document, None, None);
+        let mut caches = build_derived_caches_impl(&document, None, None);
         let model_bg = [0.0, 0.0, 0.0, 1.0];
-        let (document, prepared) = prepare_open_geometry(document, &caches, model_bg);
+        let (document, prepared) = prepare_open_geometry(document, &mut caches, model_bg);
         assert!(prepared.resident_layout.is_some());
         assert!(prepared.entity_index.is_some());
 

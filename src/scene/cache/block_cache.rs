@@ -276,6 +276,31 @@ impl BlockCache {
         // block child's in-block rank, shared by cached wires and graph leaves.
         depth_map: &HashMap<u64, [f32; 2]>,
     ) -> Self {
+        Self::build_with_solid_snaps(
+            doc,
+            anno_scale,
+            annotation_scale_handle,
+            all_visible,
+            bg_color,
+            viewport,
+            depth_map,
+            &HashMap::default(),
+        )
+    }
+
+    /// [`Self::build`], with the block-local B-rep snaps of block solids
+    /// (their vertices and edge middles, from the scene's block meshes).
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_with_solid_snaps(
+        doc: &Document,
+        anno_scale: f32,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        bg_color: [f32; 4],
+        viewport: Option<Handle>,
+        depth_map: &HashMap<u64, [f32; 2]>,
+        solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
+    ) -> Self {
         use crate::par::prelude::*;
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
         let mut cache = Self::new();
@@ -312,6 +337,7 @@ impl BlockCache {
                         bg_color,
                         viewport,
                         depth_map,
+                        solid_snaps,
                     )),
                 )
             })
@@ -350,6 +376,7 @@ impl BlockCache {
                         bg_color,
                         viewport,
                         depth_map,
+                        &HashMap::default(),
                     )),
                 )
             })
@@ -548,6 +575,7 @@ fn build_defn(
     bg_color: [f32; 4],
     viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
+    solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
 ) -> BlockDefn {
     let br = match crate::scene::render_graph::block_record_by_name(doc, block_name) {
         Some(br) => br,
@@ -659,7 +687,8 @@ fn build_defn(
                 // the LocalWire; `emit_wire` scales it by the insert transform
                 // so the shader band matches the scaled geometry (same band the
                 // top-level path draws — depth-tested + linetype-dashed).
-                for lw in tessellate_sub_local(
+                let solid = solid_snaps.get(&entity.common().handle);
+                for mut lw in tessellate_sub_local(
                     doc,
                     entity,
                     anno_scale,
@@ -668,6 +697,14 @@ fn build_defn(
                     viewport,
                     depth_map,
                 ) {
+                    // A solid's shell wire carries its corner snaps, as at
+                    // the top level; its box grows to hold them.
+                    if let Some(points) = solid.filter(|_| lw.points.is_empty()) {
+                        lw.snap_pts.extend(points.iter().copied());
+                        lw.aabb_local = aabb_from_points_iter(
+                            lw.snap_pts.iter().map(|(p, _)| p.as_vec3().to_array()),
+                        );
+                    }
                     subs.push(LocalSub::Wire(lw));
                 }
             }
@@ -2578,6 +2615,7 @@ fn emit_wire(
         && lw.fill_tris.is_empty()
         && lw.text_verts.is_empty()
         && lw.pick_tris.is_empty()
+        && lw.snap_pts.is_empty()
     {
         return;
     }
@@ -3027,6 +3065,13 @@ fn emit_wire(
         entry
             .snap_pts
             .push((glam::DVec3::new(v.x, v.y, v.z), *hint));
+        // A solid's shell wire has only snaps: they bound it.
+        if lw.points.is_empty() {
+            entry.min_x = entry.min_x.min(v.x as f32);
+            entry.min_y = entry.min_y.min(v.y as f32);
+            entry.max_x = entry.max_x.max(v.x as f32);
+            entry.max_y = entry.max_y.max(v.y as f32);
+        }
     }
     for tg in &lw.tangent_geoms {
         if let Some(tangent) = transform_tangent(tg, accum_xform) {

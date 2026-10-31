@@ -208,6 +208,27 @@ fn panel_measure_key(
 const TAB_H: f32 = metrics::TAB_H;
 const TAB_ROW_H: f32 = metrics::TAB_ROW_H;
 const TAB_TEXT_SIZE: f32 = 12.5;
+/// The list of a ribbon dropdown: its names, the room around a row, the
+/// check of the current item and the gap between a row's parts; a large
+/// button's list has larger names and rows.
+const DD_LABEL: f32 = 11.0;
+const DD_LARGE_LABEL: f32 = 13.0;
+const DD_PAD: Padding = Padding {
+    top: 4.0,
+    right: 10.0,
+    bottom: 4.0,
+    left: 10.0,
+};
+const DD_LARGE_PAD: Padding = Padding {
+    top: 3.0,
+    right: 10.0,
+    bottom: 3.0,
+    left: 6.0,
+};
+const DD_CHECK_W: f32 = 14.0;
+/// The least width of a list with a header, which wraps within it.
+const DD_HEADER_MIN_W: f32 = 190.0;
+const DD_GAP: f32 = 6.0;
 /// Width of the accent outline of a contextual tab.
 const TAB_OUTLINE: f32 = 1.5;
 
@@ -1377,7 +1398,12 @@ impl Ribbon {
                     ..Default::default()
                 })
                 .width(Length::Fill),
-            container(iced::widget::Space::new().width(Fill).height(1)).style(|theme: &Theme| {
+            container(
+                iced::widget::Space::new()
+                    .width(Fill)
+                    .height(crate::ui::icons::hairline())
+            )
+            .style(|theme: &Theme| {
                 container::Style {
                     background: Some(Background::Color(chrome::page(theme))),
                     ..Default::default()
@@ -1554,25 +1580,28 @@ impl Ribbon {
         let mut items_list: Option<Vec<(&'static str, &'static str, IconKind)>> = None;
         let mut dd_default = "";
         let mut dd_id: &'static str = "";
+        // A large button's list shows large icons with their names.
+        let mut large = false;
 
         'outer: for group in groups {
             for item in &group.tools {
-                let (id, items, default) = match item {
+                let (id, items, default, is_large) = match item {
                     RibbonItem::Dropdown {
                         id, items, default, ..
-                    } => (*id, items, *default),
+                    } => (*id, items, *default, false),
                     RibbonItem::LabeledDropdown {
                         id, items, default, ..
-                    } => (*id, items, *default),
+                    } => (*id, items, *default, false),
                     RibbonItem::LargeDropdown {
                         id, items, default, ..
-                    } => (*id, items, *default),
+                    } => (*id, items, *default, true),
                     _ => continue,
                 };
                 if id == open_id {
                     items_list = Some(items.clone());
                     dd_default = default;
                     dd_id = id;
+                    large = is_large;
                     break 'outer;
                 }
             }
@@ -1580,18 +1609,24 @@ impl Ribbon {
         let items = items_list?;
         let last_cmd = self.last_cmd.get(dd_id).copied().unwrap_or(dd_default);
 
+        // A small list: a check for the current item, a small icon and the
+        // name. A large button's: a large icon and the name, the current
+        // item lit.
+        let (icon_size, label_size, padding, lead) = if large {
+            (LARGE_ICON, DD_LARGE_LABEL, DD_LARGE_PAD, 0.0)
+        } else {
+            (SMALL_ICON, DD_LABEL, DD_PAD, DD_CHECK_W + DD_GAP)
+        };
         let rows: Vec<Element<Message>> = items
             .iter()
             .map(|(cmd, label, item_icon)| {
                 let is_current = *cmd == last_cmd;
                 let disabled = widgets::is_disabled_item(cmd);
-                let checkmark: Element<'_, Message> =
-                    crate::ui::icons::themed_check_cell(is_current);
-                let icon_el: Element<Message> = container(make_icon(*item_icon, SMALL_ICON))
-                    .width(Length::Fixed(SMALL_ICON))
+                let icon_el: Element<Message> = container(make_icon(*item_icon, icon_size))
+                    .width(Length::Fixed(icon_size))
                     .into();
                 let label_el = text(t!(*label))
-                    .size(11)
+                    .size(label_size)
                     .wrapping(iced::advanced::text::Wrapping::None)
                     .style(move |theme: &Theme| iced::widget::text::Style {
                         color: disabled.then_some(chrome::muted(theme)),
@@ -1600,27 +1635,33 @@ impl Ribbon {
                     || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
                     label_el,
                 );
-
-                let item = button(
-                    row![checkmark, icon_el, label_el]
-                        .spacing(4)
-                        .align_y(iced::Center),
-                )
-                .on_press_maybe((!disabled).then_some(Message::DropdownSelectItem {
-                    dropdown_id: dd_id,
-                    cmd: *cmd,
-                }))
-                .style(popup_row_style)
-                .width(Fill)
-                .padding([4, 10]);
+                let content = if large {
+                    row![icon_el, label_el]
+                } else {
+                    row![
+                        crate::ui::icons::themed_check_cell(is_current),
+                        icon_el,
+                        label_el
+                    ]
+                };
+                let item = button(content.spacing(DD_GAP).align_y(iced::Center))
+                    .on_press_maybe((!disabled).then_some(Message::DropdownSelectItem {
+                        dropdown_id: dd_id,
+                        cmd: *cmd,
+                    }))
+                    .style(move |theme: &Theme, status| {
+                        if large && is_current {
+                            popup_row_style(theme, button::Status::Hovered)
+                        } else {
+                            popup_row_style(theme, status)
+                        }
+                    })
+                    .width(Fill)
+                    .padding(padding);
                 keytips::anchor_with(|| keytips::item_anchor(dd_id, cmd), item)
             })
             .collect();
 
-        let labels: Vec<String> = items
-            .iter()
-            .map(|(_, label, _)| t!(*label).to_string())
-            .collect();
         let header = dropdown_header(dd_id).map(|header| t!(header).into_owned());
         let mut rows = rows;
         if let Some(header) = &header {
@@ -1631,13 +1672,20 @@ impl Ribbon {
                     .into(),
             );
         }
-        let panel_w = crate::ui::style::common::dropdown_popup_width(
-            labels.iter().map(|s| s.as_str()),
-            11.0,
-            68.0,
-            // A header wraps rather than widening the menu.
-            if header.is_some() { 240.0 } else { 190.0 },
-        );
+        // As wide as the longest name, as the right-click menus are; a
+        // header wraps rather than widening the list.
+        let longest = items
+            .iter()
+            .map(|(_, label, _)| {
+                crate::ui::style::text_metrics::width(&t!(*label), label_size, false)
+            })
+            .fold(0.0, f32::max);
+        let panel_w = padding.left + lead + icon_size + DD_GAP + longest + padding.right + 2.0;
+        let panel_w = if header.is_some() {
+            panel_w.max(DD_HEADER_MIN_W)
+        } else {
+            panel_w
+        };
 
         let panel = container(column(rows))
             .style(popup_panel_style)
@@ -1694,7 +1742,7 @@ impl Ribbon {
                         background: Some(color.into()),
                         border: Border {
                             color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                            width: 1.0,
+                            width: crate::ui::icons::hairline(),
                             radius: 2.0.into(),
                         },
                         ..Default::default()
@@ -1765,7 +1813,7 @@ impl Ribbon {
                         background: Some(Background::Color(lc)),
                         border: Border {
                             color: chrome::border(theme),
-                            width: 1.0,
+                            width: crate::ui::icons::hairline(),
                             radius: 1.0.into(),
                         },
                         ..Default::default()
@@ -1860,7 +1908,7 @@ impl Ribbon {
                     .style(|theme: &Theme| container::Style {
                         border: Border {
                             color: chrome::border(theme),
-                            width: 1.0,
+                            width: crate::ui::icons::hairline(),
                             radius: 0.0.into(),
                         },
                         ..Default::default()

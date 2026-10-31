@@ -536,7 +536,7 @@ pub(super) fn split_outline<'a>(content: Element<'a, Message>) -> Element<'a, Me
         .style(|theme: &Theme| container::Style {
             border: Border {
                 color: chrome::hover_border(theme),
-                width: 1.0,
+                width: crate::ui::icons::hairline(),
                 radius: BUTTON_RADIUS.into(),
             },
             ..Default::default()
@@ -561,7 +561,7 @@ pub(super) fn combo_btn_style(
         text_color: chrome::text(theme),
         border: Border {
             radius: BUTTON_RADIUS.into(),
-            width: 1.0,
+            width: crate::ui::icons::hairline(),
             color: if is_open {
                 chrome::accent(theme)
             } else if hovered {
@@ -596,7 +596,7 @@ pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
         text_color: Some(chrome::text(theme)),
         border: Border {
             color: chrome::border(theme),
-            width: 1.0,
+            width: crate::ui::icons::hairline(),
             radius: 0.0.into(),
         },
         ..Default::default()
@@ -646,7 +646,7 @@ pub(super) fn tip_style(theme: &Theme) -> container::Style {
         background: Some(Background::Color(chrome::panel(theme))),
         border: Border {
             color: chrome::border(theme),
-            width: 1.0,
+            width: crate::ui::icons::hairline(),
             radius: BUTTON_RADIUS.into(),
         },
         text_color: Some(chrome::text(theme)),
@@ -1292,7 +1292,7 @@ pub(super) fn render_large_with<'a>(
                     background: Some(Background::Color(lc)),
                     border: Border {
                         color: chrome::border(theme),
-                        width: 1.0,
+                        width: crate::ui::icons::hairline(),
                         radius: 1.0.into(),
                     },
                     ..Default::default()
@@ -1374,7 +1374,7 @@ pub(super) fn render_large_with<'a>(
                             background: Some(Background::Color(c)),
                             border: Border {
                                 color: chrome::border(theme),
-                                width: 1.0,
+                                width: crate::ui::icons::hairline(),
                                 radius: 1.0.into(),
                             },
                             ..Default::default()
@@ -1605,7 +1605,7 @@ pub(super) fn layer_combo<'a>(
                 background: Some(color.into()),
                 border: Border {
                     color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                    width: 1.0,
+                    width: crate::ui::icons::hairline(),
                     radius: 2.0.into(),
                 },
                 ..Default::default()
@@ -1883,7 +1883,7 @@ pub(super) fn top_hist_btn_style(
             } else {
                 Color::TRANSPARENT
             },
-            width: 1.0,
+            width: crate::ui::icons::hairline(),
         },
         shadow: iced::Shadow::default(),
         snap: false,

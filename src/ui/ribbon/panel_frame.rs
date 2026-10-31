@@ -295,8 +295,11 @@ impl<'a> Widget<Message, Theme, Renderer> for PanelFrame<'a> {
                     chrome::title_bar(theme)
                 }),
             );
-            // A 1 px line over the strip.
-            renderer.fill_quad(quad(top, 1.0), Background::Color(chrome::page(theme)));
+            // A one-pixel line over the strip.
+            renderer.fill_quad(
+                quad(top, crate::ui::icons::hairline()),
+                Background::Color(chrome::page(theme)),
+            );
         }
         let title_style = renderer::Style {
             text_color: if hot {

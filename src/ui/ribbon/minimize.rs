@@ -483,11 +483,15 @@ impl Ribbon {
         // line closes it at the bottom, as under the tool area. The row takes
         // the pixel a top line would have, so the minimized ribbon keeps its
         // height.
-        let line =
-            container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::page(theme))),
-                ..Default::default()
-            });
+        let line = container(
+            Space::new()
+                .width(Fill)
+                .height(crate::ui::icons::hairline()),
+        )
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::page(theme))),
+            ..Default::default()
+        });
         column![
             container(row(openers).spacing(1).align_y(iced::Center))
                 .style(|theme: &Theme| container::Style {

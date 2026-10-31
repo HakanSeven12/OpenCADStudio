@@ -453,11 +453,11 @@ fn slide_out_place(ribbon: &Ribbon, panel: &PanelExtras) -> Option<(f32, f32, f3
         metrics::SLIDE_OUT_TOP_THIN
     };
     let top = body.y + body.height - strip;
-    // One pixel wider than the panel: its right border lies on the line
-    // between this panel and the next.
+    // One physical pixel wider than the panel: its right border lies on
+    // the line between this panel and the next.
     let width = match panel.layout {
-        Layout::TextLayer | Layout::CenterLayer => (body.width + 1.0).max(LIST_MIN_W),
-        Layout::Grid | Layout::Reference => body.width + 1.0,
+        Layout::TextLayer | Layout::CenterLayer => (body.width + icons::hairline()).max(LIST_MIN_W),
+        Layout::Grid | Layout::Reference => body.width + icons::hairline(),
     };
     Some((body.x, top, width))
 }
@@ -511,9 +511,9 @@ fn slide_out<'a>(
         .width(Length::Fixed(width))
         .padding(Padding {
             top: 0.0,
-            right: 1.0,
-            bottom: 1.0,
-            left: 1.0,
+            right: crate::ui::icons::hairline(),
+            bottom: crate::ui::icons::hairline(),
+            left: crate::ui::icons::hairline(),
         })
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(chrome::page(theme))),
@@ -579,7 +579,7 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
                     background: Some(color.into()),
                     border: iced::Border {
                         color: chrome::border(theme),
-                        width: 1.0,
+                        width: crate::ui::icons::hairline(),
                         radius: 0.0.into(),
                     },
                     ..Default::default()
@@ -637,11 +637,15 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
 
 /// The name of a tool group, upper case, with a hairline after it.
 fn group_label<'a>(group: &MoreGroup) -> Element<'a, Message> {
-    let line =
-        container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::border(theme))),
-            ..Default::default()
-        });
+    let line = container(
+        Space::new()
+            .width(Fill)
+            .height(crate::ui::icons::hairline()),
+    )
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(chrome::border(theme))),
+        ..Default::default()
+    });
     row![
         text(t!(group.title).to_uppercase())
             .size(9.5)

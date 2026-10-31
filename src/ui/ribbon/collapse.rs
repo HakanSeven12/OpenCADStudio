@@ -839,12 +839,12 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                 Background::Color(chrome::title_bar(theme)),
             );
             renderer.fill_quad(
-                quad(end, top, width, 1.0),
+                quad(end, top, width, crate::ui::icons::hairline()),
                 Background::Color(chrome::page(theme)),
             );
             if !bounds.is_empty() {
                 renderer.fill_quad(
-                    quad(end, wb.y, 1.0, wb.height),
+                    quad(end, wb.y, crate::ui::icons::hairline(), wb.height),
                     Background::Color(chrome::page(theme)),
                 );
             }
@@ -861,7 +861,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                     bounds: Rectangle {
                         x,
                         y: wb.y,
-                        width: 1.0,
+                        width: crate::ui::icons::hairline(),
                         height: wb.height,
                     },
                     border: Border::default(),

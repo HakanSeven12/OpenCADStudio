@@ -1103,6 +1103,13 @@ fn scale_factor() -> f32 {
     SCALE_FACTOR.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
 }
 
+/// The width of a line one physical pixel wide, in logical pixels: a 1 px
+/// line at a fractional window scale (125 %, 150 %) would cover one or two
+/// pixels depending on where it falls.
+pub fn hairline() -> f32 {
+    1.0 / scale_factor()
+}
+
 /// `value` moved onto the nearest whole physical pixel.
 fn on_physical_pixel(value: f32) -> f32 {
     let scale = scale_factor();

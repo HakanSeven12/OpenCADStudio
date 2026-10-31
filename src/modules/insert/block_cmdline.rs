@@ -62,6 +62,23 @@ fn mode_name(mode: BlockObjectMode) -> &'static str {
     }
 }
 
+/// The live mode as a prompt default reads it — lower case, "convert to block".
+fn mode_default_name(mode: BlockObjectMode) -> &'static str {
+    match mode {
+        BlockObjectMode::Retain => "retain",
+        BlockObjectMode::Convert => "convert to block",
+        BlockObjectMode::Delete => "delete",
+    }
+}
+
+/// The `Mode` keyword's prompt, shared by -BLOCK and -WBLOCK.
+fn mode_prompt(mode: BlockObjectMode) -> String {
+    format!(
+        "Choose mode for selected object conversion [Convert to block Retain Delete] <{}>:",
+        mode_default_name(mode)
+    )
+}
+
 /// `Current settings: Object conversion=…`, printed as -BLOCK and -WBLOCK start.
 pub fn current_settings_line(mode: BlockObjectMode) -> String {
     format!("Current settings: Object conversion={}", mode_name(mode))
@@ -315,10 +332,7 @@ impl CadCommand for DashBlockCommand {
             BlockStep::Orient => {
                 "Orient relative to sheet in paper space viewports [Yes/No] <N>:".to_string()
             }
-            BlockStep::Mode => format!(
-                "Choose mode for selected object conversion [Convert to block/Retain/Delete] <{}>:",
-                mode_name(self.mode)
-            ),
+            BlockStep::Mode => mode_prompt(self.mode),
             BlockStep::Objects => "Select objects:".to_string(),
         }
     }
@@ -605,10 +619,7 @@ impl CadCommand for DashWblockCommand {
             ),
             WblockStep::Source => "Enter name of existing block or\n[= (block=output file)/* (whole drawing)] <define new drawing>:".to_string(),
             WblockStep::Base => "Specify insertion base point or [mOde]:".to_string(),
-            WblockStep::Mode => format!(
-                "Choose mode for selected object conversion [Convert to block/Retain/Delete] <{}>:",
-                mode_name(self.mode)
-            ),
+            WblockStep::Mode => mode_prompt(self.mode),
             WblockStep::Objects => "Select objects:".to_string(),
         }
     }
@@ -1033,5 +1044,183 @@ impl CadCommand for AttsyncCommand {
             AttsyncStep::Pick => CmdResult::Cancel,
             _ => self.on_text_input("").unwrap_or(CmdResult::Cancel),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::helpers::UcsXform;
+
+    fn plan_table() -> BlockTable {
+        let mut document = Document::new();
+        let mut record = codec::tables::BlockRecord::new("PLAN");
+        record.handle = document.allocate_handle();
+        document
+            .block_records
+            .add(record)
+            .expect("the record is added");
+        BlockTable::of(&document)
+    }
+
+    #[test]
+    fn dash_block_echoes_the_conversion_and_walks_name_base_point_and_mode() {
+        let mut command = DashBlockCommand::new(plan_table(), UcsXform::identity(), Vec::new(), 4);
+        assert_eq!(
+            command.settings_line(),
+            "Current settings: Object conversion=Convert"
+        );
+        assert_eq!(command.prompt(), "Enter block name or [?]:");
+
+        assert!(matches!(
+            command.on_text_input("PART").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Specify insertion base point or [Annotative/mOde]:"
+        );
+
+        assert!(matches!(
+            command.on_text_input("O").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Choose mode for selected object conversion [Convert to block Retain Delete] <convert to block>:"
+        );
+
+        assert!(matches!(
+            command.on_text_input("R").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_point(DVec3::new(1.0, 2.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(command.prompt(), "Select objects:");
+        let CmdResult::CreateBlockWithOptions { options } = command.on_enter() else {
+            panic!("Enter finishes the definition");
+        };
+        assert_eq!(options.name, "PART");
+        assert_eq!(options.mode, BlockObjectMode::Retain);
+        assert_eq!(options.base_point, DVec3::new(1.0, 2.0, 0.0));
+        assert!(options.handles.is_empty());
+    }
+
+    #[test]
+    fn dash_wblock_asks_for_the_file_then_the_whole_drawing() {
+        let path = std::env::temp_dir().join(format!(
+            "ocs_dash_wblock_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::remove_file(&path).ok();
+        let mut command = DashWblockCommand::new(plan_table(), Vec::new());
+        assert_eq!(
+            command.settings_line(),
+            "Current settings: Object conversion=Retain"
+        );
+        assert_eq!(command.prompt(), "Enter name of output file:");
+        assert!(matches!(
+            command.on_text_input(&path.to_string_lossy()).unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter name of existing block or\n[= (block=output file)/* (whole drawing)] <define new drawing>:"
+        );
+        let CmdResult::Dispatch(dispatch) = command.on_text_input("*").unwrap() else {
+            panic!("* writes the whole drawing");
+        };
+        let payload = dispatch
+            .strip_prefix("_WBLOCKWRITE ")
+            .expect("the write request");
+        let request: serde_json::Value = serde_json::from_str(payload).expect("valid JSON");
+        assert_eq!(request["path"], path.to_string_lossy().as_ref());
+        assert_eq!(request["source"]["drawing"], true);
+    }
+
+    #[test]
+    fn dash_wblock_reaches_the_conversion_mode_from_the_base_point() {
+        let path = std::env::temp_dir().join(format!(
+            "ocs_dash_wblock_mode_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut command = DashWblockCommand::new(plan_table(), Vec::new());
+        assert!(matches!(
+            command.on_text_input(&path.to_string_lossy()).unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_text_input("").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(command.prompt(), "Specify insertion base point or [mOde]:");
+        assert!(matches!(
+            command.on_text_input("O").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Choose mode for selected object conversion [Convert to block Retain Delete] <retain>:"
+        );
+        assert!(matches!(
+            command.on_text_input("D").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_text_input("O").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Choose mode for selected object conversion [Convert to block Retain Delete] <delete>:"
+        );
+        assert!(matches!(
+            command.on_text_input("C").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_text_input("O").unwrap(),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Choose mode for selected object conversion [Convert to block Retain Delete] <convert to block>:"
+        );
+    }
+
+    #[test]
+    fn dash_wblock_names_the_output_block_after_the_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs_dash_wblock_eq_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let named = dir.join("PLAN.dwg");
+        let mut command = DashWblockCommand::new(plan_table(), Vec::new());
+        assert!(matches!(
+            command.on_text_input(&named.to_string_lossy()).unwrap(),
+            CmdResult::NeedPoint
+        ));
+        let CmdResult::Dispatch(dispatch) = command.on_text_input("=").unwrap() else {
+            panic!("= extracts the block named after the file");
+        };
+        let payload = dispatch
+            .strip_prefix("_WBLOCKWRITE ")
+            .expect("the write request");
+        let request: serde_json::Value = serde_json::from_str(payload).expect("valid JSON");
+        assert_eq!(request["source"]["block"], "PLAN");
     }
 }

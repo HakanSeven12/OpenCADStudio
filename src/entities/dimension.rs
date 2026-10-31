@@ -3940,6 +3940,8 @@ fn tessellate_dimension_inner(
             dimatfit: style.map(|s| s.dimatfit).unwrap_or(3),
             dimtix: style.is_some_and(|s| s.dimtix),
             dimtofl: style.map(|s| s.dimtofl).unwrap_or(false),
+            flip1: dim.base().flip_arrow1,
+            flip2: dim.base().flip_arrow2,
             text_position: text_layout.position,
             horizontal_text: text_layout.horizontal,
             text_lifted: style.map(|s| s.dimtad).unwrap_or(1) != 0,
@@ -5172,6 +5174,10 @@ struct DimLineParams {
     dimatfit: i16,
     dimtix: bool,
     dimtofl: bool,
+    /// The dimension's Flip Arrow flags: each arrowhead turns to the other
+    /// side of its extension line from where fit puts it.
+    flip1: bool,
+    flip2: bool,
     text_position: Vec3,
     horizontal_text: bool,
     /// DIMTAD lifts aligned text off its dimension line.
@@ -5731,7 +5737,8 @@ fn append_linear_dimension(
         .filter(|along| *along > 0.0 && *along < line_len)
         .unwrap_or(line_len * 0.5);
     let split_point = d1_out + line_dir * split;
-    let draw_inside_line = !arrows_outside || params.dimtofl;
+    let (out1, out2) = (arrows_outside != params.flip1, arrows_outside != params.flip2);
+    let draw_inside_line = !(out1 && out2) || params.dimtofl;
     if draw_inside_line && !suppress.dim1 && split > 1e-6 {
         add_segment_with_text_break(&mut g.dim_lines, d1_out, split_point, params.text_break);
     }
@@ -5755,15 +5762,15 @@ fn append_linear_dimension(
     let chase_text = params.text_movement != 2;
     let beyond_d1 = chase_text.then_some(text_beyond_d1).flatten();
     let beyond_d2 = chase_text.then_some(text_beyond_d2).flatten();
-    if (arrows_outside && !params.dimsoxd) || beyond_d1.is_some() || beyond_d2.is_some() {
-        if !suppress.dim1 && (arrows_outside || beyond_d1.is_some()) {
+    if ((out1 || out2) && !params.dimsoxd) || beyond_d1.is_some() || beyond_d2.is_some() {
+        if !suppress.dim1 && (out1 || beyond_d1.is_some()) {
             add_segment(
                 &mut g.dim_lines,
                 d1 - dir_d1_to_d2 * reach(stub, beyond_d1),
                 d1,
             );
         }
-        if !suppress.dim2 && (arrows_outside || beyond_d2.is_some()) {
+        if !suppress.dim2 && (out2 || beyond_d2.is_some()) {
             add_segment(
                 &mut g.dim_lines,
                 d2,
@@ -5772,14 +5779,10 @@ fn append_linear_dimension(
         }
     }
 
-    if arrows_outside {
-        // Tip on the ext line, body pointing outward.
-        append_dim_arrow(g, d1, normalized_or(d1 - d2, -axis), arrow1);
-        append_dim_arrow(g, d2, normalized_or(d2 - d1, axis), arrow2);
-    } else {
-        append_dim_arrow(g, d1, normalized_or(d2 - d1, axis), arrow1);
-        append_dim_arrow(g, d2, normalized_or(d1 - d2, -axis), arrow2);
-    }
+    // Outside: tip on the ext line, body pointing outward.
+    let toward_d2 = normalized_or(d2 - d1, axis);
+    append_dim_arrow(g, d1, if out1 { -toward_d2 } else { toward_d2 }, arrow1);
+    append_dim_arrow(g, d2, if out2 { toward_d2 } else { -toward_d2 }, arrow2);
 
     // Horizontal text outside the extension lines of a dimension that is not
     // horizontal itself: the dimension line runs on to the text's height and
@@ -5953,19 +5956,20 @@ fn append_diameter_dimension(
         .unwrap_or(line_length * 0.5);
     let split_point = first + axis * split;
 
-    let draw_inside_line = text_outside || !arrows_outside || params.dimtofl;
+    let (out1, out2) = (arrows_outside != params.flip1, arrows_outside != params.flip2);
+    let draw_inside_line = text_outside || !(out1 && out2) || params.dimtofl;
     if draw_inside_line && !suppress.dim1 && split > 1e-6 {
         add_segment_with_text_break(&mut g.dim_lines, first, split_point, params.text_break);
     }
     if draw_inside_line && !suppress.dim2 && line_length - split > 1e-6 {
         add_segment_with_text_break(&mut g.dim_lines, split_point, second, params.text_break);
     }
-    if arrows_outside && !params.dimsoxd {
+    if !params.dimsoxd {
         let stub = params.arrow_len * 2.0;
-        if !suppress.dim1 {
+        if out1 && !suppress.dim1 {
             add_segment(&mut g.dim_lines, chord - axis * stub, chord);
         }
-        if !suppress.dim2 {
+        if out2 && !suppress.dim2 {
             add_segment(&mut g.dim_lines, far_chord, far_chord + axis * stub);
         }
     }
@@ -5976,13 +5980,8 @@ fn append_diameter_dimension(
         let center = (chord + far_chord) * 0.5;
         append_center_mark(g, center, params.dimcen, diameter * 0.5);
     }
-    if arrows_outside {
-        append_dim_arrow(g, chord, -axis, arrow1);
-        append_dim_arrow(g, far_chord, axis, arrow2);
-    } else {
-        append_dim_arrow(g, chord, axis, arrow1);
-        append_dim_arrow(g, far_chord, -axis, arrow2);
-    }
+    append_dim_arrow(g, chord, if out1 { -axis } else { axis }, arrow1);
+    append_dim_arrow(g, far_chord, if out2 { axis } else { -axis }, arrow2);
 
     if params.text_movement == 0 {
         let (tip, direction, suppressed) = if params.text_position.distance_squared(chord)
@@ -9053,6 +9052,8 @@ pub(crate) fn baked_large_radial_geometry(
             dimatfit: style.map(|style| style.dimatfit).unwrap_or(3),
             dimtix: style.is_some_and(|style| style.dimtix),
             dimtofl: style.is_some_and(|style| style.dimtofl),
+            flip1: false,
+            flip2: false,
             text_position: text.position,
             horizontal_text: text.horizontal,
             text_lifted: style.map(|style| style.dimtad).unwrap_or(1) != 0,

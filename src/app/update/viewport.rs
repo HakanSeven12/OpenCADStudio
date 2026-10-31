@@ -8074,8 +8074,17 @@ properties={:.1}ms picked={}",
 
     pub(super) fn on_view_cube_snap(&mut self, region: CubeRegion) -> Task<Message> {
         // The cube is oriented in the active UCS, so snap in the UCS frame.
-        let r_ucs = self.tabs[self.active_tab].scene.viewcube_ucs_mat();
-        self.snap_view_region(region, r_ucs)
+        let i = self.active_tab;
+        let r_ucs = self.tabs[i].scene.viewcube_ucs_mat();
+        let task = self.snap_view_region(region, r_ucs);
+        // Alt+click on a face also sets the UCS to that view (#2272).
+        if self.alt_down
+            && matches!(region, CubeRegion::Face(_))
+            && self.tabs[i].active_cmd.is_none()
+        {
+            return task.chain(self.dispatch_command("UCS V"));
+        }
+        task
     }
 
     /// Compass cardinals are world-fixed, so they snap in the world frame

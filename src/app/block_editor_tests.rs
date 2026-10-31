@@ -3019,6 +3019,142 @@ fn orientation_parameter_chooser_cancels_invalid_picks_and_rotation_default_angl
 }
 
 #[test]
+fn rotation_parameter_accepts_a_base_angle_option() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let prompt = |app: &OpenCADStudio| {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("command active")
+            .prompt()
+            .to_string()
+    };
+    let near = |value: Vector3, x: f64, y: f64| {
+        (value - Vector3::new(x, y, 0.0)).length() < 1e-9
+    };
+    let parameter = |app: &OpenCADStudio, index: usize| {
+        let mut all = crate::scene::block_orientation_parameter::parameters(
+            &app.tabs[i].scene.document,
+            definition,
+        );
+        let placed = all.swap_remove(index);
+        (
+            placed.native.definition_base_point,
+            placed.reference,
+            placed.native.definition_end_point,
+        )
+    };
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "0,0");
+    assert!(
+        prompt(&app).contains("Specify radius of parameter:"),
+        "{}",
+        prompt(&app)
+    );
+    feed(&mut app, "2");
+    let default_prompt = "Specify default rotation angle or [Base angle] <0>:";
+    assert!(prompt(&app).contains(default_prompt), "{}", prompt(&app));
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .options()
+        .iter()
+        .any(|option| option.keyword == "B"));
+    feed(&mut app, "B");
+    assert!(
+        prompt(&app).contains("Specify base angle <0>:"),
+        "{}",
+        prompt(&app)
+    );
+    assert!(app.tabs[i].active_cmd.as_ref().unwrap().options().is_empty());
+    let before = app.tabs[i].scene.document.clone();
+    for (invalid, error) in [
+        ("inf", "Specify a finite base angle."),
+        ("0,0", "Specify a finite nonzero base angle direction."),
+    ] {
+        app.command_line.last_error = None;
+        feed(&mut app, invalid);
+        assert_eq!(app.tabs[i].scene.document, before, "{invalid}");
+        assert_eq!(app.command_line.last_error.as_deref(), Some(error));
+        assert!(
+            prompt(&app).contains("Specify base angle <0>:"),
+            "{}",
+            prompt(&app)
+        );
+    }
+    feed(&mut app, "30");
+    assert_eq!(
+        app.tabs[i].scene.document, before,
+        "the base angle alone does not place the parameter"
+    );
+    assert!(
+        prompt(&app).contains(default_prompt),
+        "the base angle returns to the default angle: {}",
+        prompt(&app)
+    );
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let (_, reference_angle, end) = parameter(&app, 0);
+    assert!(near(reference_angle, 2.0 * 30f64.to_radians().cos(), 1.0));
+    assert!(near(end, 2.0 * 30f64.to_radians().cos(), 1.0));
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "B");
+    feed(&mut app, "30");
+    feed(&mut app, "60");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let (_, reference_angle, end) = parameter(&app, 1);
+    assert!(near(reference_angle, 2.0 * 30f64.to_radians().cos(), 1.0));
+    assert!(near(end, 0.0, 2.0));
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "5,0");
+    feed(&mut app, "2");
+    feed(&mut app, "B");
+    feed(&mut app, "5,3");
+    assert!(
+        prompt(&app).contains(default_prompt),
+        "a base angle pick returns to the default angle: {}",
+        prompt(&app)
+    );
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let (base, reference_angle, end) = parameter(&app, 2);
+    assert!(near(base, 5.0, 0.0));
+    assert!(near(reference_angle, 5.0, 2.0));
+    assert!(near(end, 5.0, 2.0));
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "10,0");
+    feed(&mut app, "3");
+    feed(&mut app, "BASE");
+    assert!(
+        prompt(&app).contains("Specify base angle <0>:"),
+        "{}",
+        prompt(&app)
+    );
+    feed(&mut app, "");
+    assert!(
+        prompt(&app).contains(default_prompt),
+        "Enter takes the zero base angle: {}",
+        prompt(&app)
+    );
+    feed(&mut app, "45");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let (_, reference_angle, end) = parameter(&app, 3);
+    assert!(near(reference_angle, 13.0, 0.0));
+    assert!(near(end, 10.0 + 3.0 * 45f64.to_radians().cos(), 3.0 * 45f64.to_radians().sin()));
+    assert_eq!(orientation_parameter_count(&app), 4);
+}
+
+#[test]
 fn orientation_parameter_stale_context_and_invalid_result_do_not_start_history() {
     use crate::scene::block_orientation_parameter::Kind;
     let (mut app, reference) = fixture();

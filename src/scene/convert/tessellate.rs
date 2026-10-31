@@ -33,7 +33,7 @@ fn split_ds(v: f64) -> (f32, f32) {
 }
 
 #[inline]
-fn split_ds_xyz(x: f64, y: f64, z: f64) -> ([f32; 3], [f32; 3]) {
+pub(crate) fn split_ds_xyz(x: f64, y: f64, z: f64) -> ([f32; 3], [f32; 3]) {
     let (xh, xl) = split_ds(x);
     let (yh, yl) = split_ds(y);
     let (zh, zl) = split_ds(z);

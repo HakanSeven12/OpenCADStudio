@@ -9,6 +9,7 @@ pub(crate) mod config;
 pub use automation::{export_headless, run_batch, serve};
 mod annotation_data;
 mod extraction_catalog;
+mod array_grips;
 mod block_actions;
 mod block_parameter_properties;
 mod block_alignment;

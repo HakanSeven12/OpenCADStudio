@@ -3254,6 +3254,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         self.refresh_table_grip(wo);
         self.refresh_test_action_grips(wo);
         self.refresh_authoring_grips(wo);
+        self.refresh_array_grips(wo);
     }
 
     /// Enumerate one entity's built-in grips exactly as the selection cache

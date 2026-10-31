@@ -158,6 +158,32 @@ impl OpenCADStudio {
         self.tabs[i].scene.deselect_all();
         self.start_dim(i);
     }
+
+    /// An array arrow grip was released: write the new counts/spacings and
+    /// keep the array selected with its arrows at their new places.
+    pub(super) fn handle_edit_assoc_array(
+        &mut self,
+        insert: Handle,
+        changes: Vec<(&'static str, f64)>,
+    ) {
+        let i = self.active_tab;
+        self.tabs[i].scene.clear_preview_wire();
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        let Some(array) =
+            crate::scene::assoc_array::array_of_insert(&self.tabs[i].scene.document, insert)
+        else {
+            return;
+        };
+        self.push_undo_snapshot(i, "ARRAYEDIT");
+        match crate::scene::assoc_array::update(&mut self.tabs[i].scene, &array, &changes) {
+            Ok(()) => self.tabs[i].dirty = true,
+            Err(error) => self.command_line.push_error(&format!("ARRAYEDIT: {error}")),
+        }
+        self.finish_pending_history(i);
+        self.refresh_properties();
+        self.refresh_selected_grips();
+    }
 }
 
 struct DimBreakResult {

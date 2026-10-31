@@ -294,41 +294,6 @@ impl SourceIndex<'_> {
         (units_start == span.start && units_end == span.end).then_some(controls)
     }
 
-    pub fn align_paragraphs(&self, range: Range<usize>, align: char) -> Result<String, EditError> {
-        self.validate_range(&range)?;
-        if !matches!(align, 'l' | 'c' | 'r' | 'j') {
-            return Err(EditError::InvalidRange);
-        }
-        let paragraph_at = |pos: usize| {
-            self.units
-                .iter()
-                .filter(|u| matches!(u.kind, Kind::Break | Kind::Column) && u.visible.start < pos)
-                .count()
-        };
-        let first = paragraph_at(range.start);
-        let last = paragraph_at(if range.end > range.start {
-            range.end - 1
-        } else {
-            range.start
-        });
-        let mut ends: Vec<usize> = self
-            .tokens
-            .iter()
-            .filter(|t| matches!(t.kind, Kind::Break | Kind::Column))
-            .map(|t| t.raw.start)
-            .collect();
-        ends.push(self.tail_boundary());
-        let patches = ends
-            .into_iter()
-            .enumerate()
-            .filter(|(n, _)| *n >= first && *n <= last)
-            .map(|(_, end)| (end..end, format!("\\pq{align};")))
-            .collect();
-        let raw = apply_patches(self.raw, patches)?;
-        self.certify(&raw, self.visible_len.unwrap())?;
-        Ok(raw)
-    }
-
     pub(super) fn insertion_byte(&self, caret: usize) -> Result<usize, EditError> {
         // Left affinity inside a paragraph; after a break use the next run's
         // leading controls. No byte position inside an escape or a fraction.
@@ -703,17 +668,5 @@ mod tests {
         assert!(matches!(&cells[0], super::super::Cell::Char(_, p) if p.underline()));
         assert!(matches!(&cells[1], super::super::Cell::Char(_, p) if !p.underline()));
         assert!(matches!(&cells[2], super::super::Cell::Char(_, p) if p.underline()));
-    }
-    #[test]
-    fn alignment_appends_only_alignment_and_observes_selection_end() {
-        let raw = r"\pxqc,i-1,l2,t4;ab\P\pqr;cd";
-        let out = SourceIndex::new(raw).align_paragraphs(0..3, 'l').unwrap();
-        assert_eq!(out, r"\pxqc,i-1,l2,t4;ab\pql;\P\pqr;cd");
-        let doc = parse_mtext(&out, true);
-        assert_eq!(doc.paragraphs[0].properties.tab_stops.len(), 1);
-        assert_eq!(
-            doc.paragraphs[1].properties.alignment,
-            Some(codec::entities::mtext_format::MTextParagraphAlignment::Right)
-        );
     }
 }

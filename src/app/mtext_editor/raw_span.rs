@@ -442,4 +442,20 @@ mod tests {
         app.mtext_apply_align(ParaAlign::Right);
         assert_eq!(raw(&app), r"ab\Zopaque");
     }
+
+    #[test]
+    fn alignment_appends_only_alignment_and_observes_the_selection_end() {
+        // The selection ends on the break: only the first paragraph changes,
+        // and its tab stops and the second one's alignment stay.
+        let mut app = app(r"\pxqc,i-1,l2,t4;ab\P\pqr;cd");
+        select(&mut app, 0, 3);
+        app.mtext_apply_align(ParaAlign::Left);
+        assert_eq!(raw(&app), r"\pxqc,i-1,l2,t4;ab\pql;\P\pqr;cd");
+        let doc = &app.mtext_editor.as_ref().unwrap().doc;
+        assert_eq!(doc.paragraphs[0].properties.tab_stops.len(), 1);
+        assert_eq!(
+            doc.paragraphs[1].properties.alignment,
+            Some(MTextParagraphAlignment::Right)
+        );
+    }
 }

@@ -532,8 +532,6 @@ pub(super) enum EditError {
     UnsupportedInput,
     ProjectionMismatch,
     NestingLimit,
-    /// Bold/italic on a stroke (SHX/LFF) face, which MTEXT cannot store.
-    FontFlags,
     /// Index or fraction text that a `\S` stack cannot hold.
     StackText,
     /// An index or fraction over differently formatted characters.
@@ -559,7 +557,6 @@ impl std::fmt::Display for EditError {
             Self::UnsupportedInput => "MTEXT: the inserted text contains an unsupported control character.",
             Self::ProjectionMismatch => "MTEXT: the source and rendered character positions do not agree; the edit was not applied.",
             Self::NestingLimit => "MTEXT: this edit would exceed the safe formatting-group nesting limit.",
-            Self::FontFlags => "MTEXT: bold and italic can only be stored with a TrueType font; this text uses a stroke (SHX) font.",
             Self::StackText => "MTEXT: an index or fraction holds plain characters only: no line break, fraction, backslash, brace or / # ^ % ; character.",
             Self::StackFormat => "MTEXT: an index or fraction takes one formatting; the selection mixes formats.",
             Self::FractionParts => "MTEXT: a fraction needs both a numerator and a denominator.",

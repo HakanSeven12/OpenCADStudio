@@ -114,7 +114,13 @@ mtext-toolbar = MTEXT
     .format-off = Off
     .format-mixed = Mixed
     .format-unavailable = Not available for this text or selection
-    .counts = { $characters } characters · { $paragraphs } paragraphs
+    .counts = { $characters ->
+        [one] { $characters } character
+       *[other] { $characters } characters
+    } · { $paragraphs ->
+        [one] { $paragraphs } paragraph
+       *[other] { $paragraphs } paragraphs
+    }
     .box-width = Box width
     .tip-box = The width the text wraps at; drag the ruler above the text to change it
     .fraction = Fraction…
@@ -6321,7 +6327,6 @@ ui =
     .viewport-count-in-active-layout = 目前配置中的視口數量
     .lock-unlock-viewport = 鎖定/解鎖視口
     .what-s-new = 更新內容
-    .width-value = 寬度：__ocs_arg_value__
     .working = 正在處理…
     .recent-input = 最近的輸入
     .copy-with-base-point = 帶基準點複製

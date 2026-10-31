@@ -16,10 +16,8 @@ use glam::DVec3;
 use iced::widget::text_editor;
 
 mod entity_options;
-// Lossless index of the raw MTEXT source and the source patches the editor
-// edits through. Typing and deleting use them; the parts the other editing
-// commands will use are allowed to be unused until they switch over.
-#[allow(dead_code)]
+// Lossless index of the raw MTEXT source and the source patches every
+// editing command goes through.
 mod raw_adapter;
 mod raw_clear;
 mod raw_commit;
@@ -27,7 +25,6 @@ mod raw_edit;
 mod raw_field;
 mod raw_geometry;
 mod raw_list;
-#[allow(dead_code)]
 mod raw_operations;
 mod raw_span;
 mod raw_stack;

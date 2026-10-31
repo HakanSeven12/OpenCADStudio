@@ -546,3 +546,13 @@ fn a_narrow_editor_scrolls_the_second_row_to_its_last_menu() {
     let find = bounds_of(&mut ui, label!("find"));
     assert!(find.x + find.width <= strip.x + strip.width + 1.);
 }
+
+#[test]
+fn the_counts_read_one_character_and_one_paragraph_in_the_singular() {
+    let one = crate::tr!("mtext-toolbar", "counts", characters = 1, paragraphs = 1);
+    let more = crate::tr!("mtext-toolbar", "counts", characters = 2, paragraphs = 3);
+    // Fluent isolates each placeable with FSI / PDI marks.
+    let plain = |s: String| s.replace(['\u{2068}', '\u{2069}'], "");
+    assert_eq!(plain(one), "1 character · 1 paragraph");
+    assert_eq!(plain(more), "2 characters · 3 paragraphs");
+}

@@ -114,7 +114,13 @@ mtext-toolbar = MTEXT
     .format-off = Off
     .format-mixed = Mixed
     .format-unavailable = Not available for this text or selection
-    .counts = { $characters } characters · { $paragraphs } paragraphs
+    .counts = { $characters ->
+        [one] { $characters } character
+       *[other] { $characters } characters
+    } · { $paragraphs ->
+        [one] { $paragraphs } paragraph
+       *[other] { $paragraphs } paragraphs
+    }
     .box-width = Box width
     .tip-box = The width the text wraps at; drag the ruler above the text to change it
     .fraction = Fraction…
@@ -6326,7 +6332,6 @@ ui =
     .viewport-count-in-active-layout = Πλήθος θυρών προβολής στην ενεργή διάταξη
     .lock-unlock-viewport = Κλείδωμα/ξεκλείδωμα θύρας προβολής
     .what-s-new = Τι νέο υπάρχει
-    .width-value = Πλάτος: __ocs_arg_value__
     .working = Εκτέλεση…
     .recent-input = Πρόσφατες εισαγωγές
     .copy-with-base-point = Αντιγραφή με σημείο βάσης

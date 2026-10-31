@@ -6350,7 +6350,6 @@ ui =
     .viewport-count-in-active-layout = Nézetablakok száma aktív elrendezésben
     .lock-unlock-viewport = Nézetablak zárolása/feloldása
     .what-s-new = Újdonságok
-    .width-value = Szélesség: __ocs_arg_value__
     .working = Dolgozik…
     .recent-input = Legutóbbi bevitel
     .copy-with-base-point = Másolás bázisponttal

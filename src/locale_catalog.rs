@@ -3920,7 +3920,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Width Factor" => Some(("common", "width-factor-title-case")),
         "Width Factor:" => Some(("common", "width-factor-label-title-case")),
         "Width factor" => Some(("common", "width-factor-sentence-case")),
-        "Width: %{value}" => Some(("ui", "width-value")),
         "Window" => Some(("common", "window")),
         "Column spacing" => Some(("common", "assoc-array-column-spacing")),
         "Row spacing" => Some(("common", "assoc-array-row-spacing")),

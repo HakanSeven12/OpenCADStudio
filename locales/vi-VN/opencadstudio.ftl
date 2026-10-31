@@ -114,7 +114,13 @@ mtext-toolbar = MTEXT
     .format-off = Off
     .format-mixed = Mixed
     .format-unavailable = Not available for this text or selection
-    .counts = { $characters } characters · { $paragraphs } paragraphs
+    .counts = { $characters ->
+        [one] { $characters } character
+       *[other] { $characters } characters
+    } · { $paragraphs ->
+        [one] { $paragraphs } paragraph
+       *[other] { $paragraphs } paragraphs
+    }
     .box-width = Box width
     .tip-box = The width the text wraps at; drag the ruler above the text to change it
     .fraction = Fraction…
@@ -6333,7 +6339,6 @@ ui =
     .viewport-count-in-active-layout = Số lượng khung nhìn trong bố cục đang hoạt động
     .lock-unlock-viewport = Khóa/Mở khóa khung nhìn
     .what-s-new = Có gì mới
-    .width-value = Chiều rộng: __ocs_arg_value__
     .working = Đang xử lý…
     .recent-input = Đầu vào gần đây
     .copy-with-base-point = Sao chép bằng điểm cơ sở

@@ -114,7 +114,13 @@ mtext-toolbar = MTEXT
     .format-off = Off
     .format-mixed = Mixed
     .format-unavailable = Not available for this text or selection
-    .counts = { $characters } characters · { $paragraphs } paragraphs
+    .counts = { $characters ->
+        [one] { $characters } character
+       *[other] { $characters } characters
+    } · { $paragraphs ->
+        [one] { $paragraphs } paragraph
+       *[other] { $paragraphs } paragraphs
+    }
     .box-width = Box width
     .tip-box = The width the text wraps at; drag the ruler above the text to change it
     .fraction = Fraction…
@@ -6249,7 +6255,6 @@ ui =
     .viewport-count-in-active-layout = Etkin yerleşimdeki görünüm alanı sayısı
     .lock-unlock-viewport = Görünüm Alanını Kilitle/Kilidi Aç
     .what-s-new = Yenilikler
-    .width-value = Genişlik: __ocs_arg_value__
     .working = Çalışıyor…
     .recent-input = Son girişler
     .copy-with-base-point = Taban noktasıyla kopyala

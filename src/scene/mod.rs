@@ -11145,6 +11145,46 @@ impl Scene {
                 }
             }
         }
+        // Only some entities changed since the cached map was built (no
+        // structural delta in between): rebuild the entries of those
+        // entities alone. A paste of many INSERTs otherwise paid a walk of
+        // every block reference in the drawing on the first click after it.
+        let stale = self.insert_hatch_cache.borrow_mut().take();
+        if let Some((epoch, cached_space, mut map)) = stale {
+            if cached_space == space_key {
+                if let Some(changes) = self.replay_since(epoch) {
+                    let changed: Vec<Handle> = changes.iter().map(|(handle, _)| *handle).collect();
+                    let fresh = self.collect_insert_hatches(
+                        interaction_block,
+                        changed
+                            .iter()
+                            .filter_map(|handle| self.document.get_entity(*handle)),
+                    );
+                    let entries = Arc::make_mut(&mut map);
+                    for handle in &changed {
+                        entries.remove(handle);
+                    }
+                    entries.extend(fresh);
+                    *self.insert_hatch_cache.borrow_mut() =
+                        Some((self.geometry_epoch, space_key, Arc::clone(&map)));
+                    return map;
+                }
+            }
+        }
+        let arc =
+            Arc::new(self.collect_insert_hatches(interaction_block, self.document.entities()));
+        *self.insert_hatch_cache.borrow_mut() =
+            Some((self.geometry_epoch, space_key, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Hatches inside the block references among `entities`, placed in
+    /// world space, keyed by the reference that draws them.
+    fn collect_insert_hatches<'a>(
+        &'a self,
+        interaction_block: Handle,
+        entities: impl Iterator<Item = &'a EntityType>,
+    ) -> HashMap<Handle, Vec<HatchModel>> {
         let layer_hidden =
             |layer: &str| self.layer_hidden(layer) || self.interaction_layer_frozen(layer);
         let mut out: HashMap<Handle, Vec<HatchModel>> = HashMap::default();
@@ -11174,7 +11214,7 @@ impl Scene {
         // so this build always serves the walked interaction space.
         .with_layer_walk(self.interaction_layer_walk())
         .with_annotation_scale(self.annotation_scale);
-        for entity in self.document.entities() {
+        for entity in entities {
             let contextual = crate::scene::annotative::entity_for_annotation_context(
                 &self.document,
                 entity,
@@ -11182,6 +11222,24 @@ impl Scene {
             );
             let host = contextual.as_ref();
             let common = host.common();
+            // Cheap, memoised filter first: most entities use no block that
+            // holds a hatch, and the visibility tests below are far costlier
+            // per entity than this lookup.
+            let block_uses: Vec<_> =
+                render_graph::entity_render_block_uses(&self.document, host, self.annotation_scale)
+                    .into_iter()
+                    .filter(|block_use| {
+                        block_use.active
+                            && render_graph::block_contains_hatch(
+                                &self.document,
+                                &block_use.insert.block_name,
+                                &mut hatch_memo,
+                            )
+                    })
+                    .collect();
+            if block_uses.is_empty() {
+                continue;
+            }
             if self.display_entity_invisible(common)
                 || self.entity_temporarily_hidden(common.handle)
                 || layer_hidden(&common.layer)
@@ -11198,18 +11256,7 @@ impl Scene {
             {
                 continue;
             }
-            for block_use in
-                render_graph::entity_render_block_uses(&self.document, host, self.annotation_scale)
-                    .into_iter()
-                    .filter(|block_use| block_use.active)
-            {
-                if !render_graph::block_contains_hatch(
-                    &self.document,
-                    &block_use.insert.block_name,
-                    &mut hatch_memo,
-                ) {
-                    continue;
-                }
+            for block_use in block_uses {
                 graph.walk_block_use(
                     &block_use,
                     common.handle,
@@ -11250,10 +11297,7 @@ impl Scene {
                 );
             }
         }
-        let arc = Arc::new(out);
-        *self.insert_hatch_cache.borrow_mut() =
-            Some((self.geometry_epoch, space_key, Arc::clone(&arc)));
-        arc
+        out
     }
 
     /// Wires that should participate in hit-testing, snapping, and selection.
@@ -15945,6 +15989,55 @@ mod journal_tests {
         s.erase_entities(&[insert]);
         let after_erase = s.insert_hatches_for_click();
         assert!(!Arc::ptr_eq(&after_insert, &after_erase));
+    }
+
+    #[test]
+    fn added_insert_updates_insert_hatches_without_rebuilding_the_others() {
+        use codec::entities::{BoundaryEdge, BoundaryPath, Hatch, Insert, PolylineEdge};
+        use codec::types::{Vector2, Vector3};
+
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        let mut path = BoundaryPath::new();
+        path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+            [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]
+                .into_iter()
+                .map(|p| Vector2::new(p[0], p[1]))
+                .collect(),
+            true,
+        )));
+        hatch.paths.push(path);
+        let mut s = Scene::new();
+        s.define_block_raw(
+            "FILLED",
+            Vector3::new(0.0, 0.0, 0.0),
+            vec![EntityType::Hatch(Box::new(hatch))],
+        );
+        let first = s.add_entity(EntityType::Insert(Insert::new(
+            "FILLED",
+            Vector3::new(0.0, 0.0, 0.0),
+        )));
+        let before = s.insert_hatches_for_click();
+        assert_eq!(before.get(&first).map(Vec::len), Some(1));
+
+        let second = s.add_entity(EntityType::Insert(Insert::new(
+            "FILLED",
+            Vector3::new(100.0, 0.0, 0.0),
+        )));
+        let after = s.insert_hatches_for_click();
+        let placed = after
+            .get(&second)
+            .expect("the new insert's hatch is pickable");
+        assert_eq!(placed.len(), 1);
+        assert!(
+            Arc::ptr_eq(&before[&first][0].boundary, &after[&first][0].boundary),
+            "adding one insert must not re-explode every other insert"
+        );
+
+        s.erase_entities(&[second]);
+        let after_erase = s.insert_hatches_for_click();
+        assert!(!after_erase.contains_key(&second));
+        assert!(after_erase.contains_key(&first));
     }
 
     #[test]

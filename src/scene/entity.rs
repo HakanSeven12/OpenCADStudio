@@ -3183,6 +3183,9 @@ impl Scene {
                 })
             })
             .collect();
+        // An incremental pass that found nothing new changed no mesh, so it
+        // must not force a whole-drawing rebuild (every paste runs one).
+        let changed = !incremental || !built.is_empty();
         for (handle, mut m, top_level) in built {
             if top_level {
                 self.meshes.insert(handle, m);
@@ -3192,7 +3195,7 @@ impl Scene {
             }
         }
 
-        if bump {
+        if bump && changed {
             self.bump_geometry();
         }
     }

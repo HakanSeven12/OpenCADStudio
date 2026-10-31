@@ -90,15 +90,10 @@ pub(super) const PANEL_TITLE_SIZE: f32 = 11.5;
 
 /// Gap between the combo dropdown and the tool rows beneath it.
 const COMBO_ROW_SPACING: f32 = ROW_GAP;
-/// Shared padding of combo-style panels (Layers, Properties, style selectors).
-/// The top inset pins every primary dropdown to the same baseline regardless
-/// of how many icon rows sit underneath it.
-const COMBO_PANEL_PAD: Padding = Padding {
-    top: 0.0,
-    bottom: 0.0,
-    left: 4.0,
-    right: 4.0,
-};
+/// Shared padding of combo-style panels (Layers, Properties, style
+/// selectors): none, so their lists stand as far from the panel's edge and
+/// from a neighbouring button as buttons do from each other and the edge.
+const COMBO_PANEL_PAD: Padding = Padding::ZERO;
 
 // ── Automatic large-button sizing ────────────────────────────────────────
 
@@ -1443,7 +1438,7 @@ pub(super) fn render_large_with<'a>(
             });
 
             row![mp_el, combos]
-                .spacing(4)
+                .spacing(metrics::GAP)
                 .align_y(iced::Top)
                 .height(Fill)
                 .into()

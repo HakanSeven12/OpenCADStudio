@@ -604,8 +604,16 @@ impl OpenCADStudio {
             }
             // DSETTINGS / OSNAP — open the drafting-settings popup, which is OCS's
             // settings surface (the persisted DYN/ORTHO/POLAR/OSNAP prefs).
-            "DSETTINGS" | "OSNAP" => {
+            "DSETTINGS" => {
                 return Some(Task::done(Message::ToggleSnapPopup));
+            }
+            // OSNAP opens it on the Object Snap tab.
+            "OSNAP" => {
+                return Some(Task::done(Message::ToggleSnapPopup).chain(Task::done(
+                    Message::DraftingSettingsTabChanged(
+                        crate::ui::window::drafting_settings::DraftingSettingsTab::ObjectSnap,
+                    ),
+                )));
             }
             // UNITS — length and angle formats, plus the insertion unit. The
             // status-bar button covers the length format alone; everything else

@@ -908,15 +908,13 @@ fn tessellate_entity_inner(
             return vec![];
         }
         let is_active = active_viewport == Some(h);
-        let is_locked = vp.status.locked;
         let color = if sel {
             [1.0, 1.0, 1.0, 1.0]
         } else if is_active {
             [1.0, 0.90, 0.20, 1.0]
-        } else if is_locked {
-            [0.90, 0.55, 0.10, 1.0]
         } else {
-            [0.0, 0.75, 0.75, 1.0]
+            let color = view::render::render_style_for_viewport(document, e, active_viewport).0;
+            view::render::adapt_to_bg(color, bg_color)
         };
         let (pattern_length, pattern) = if is_active {
             (1.5_f32, [0.8, -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0_f32])
@@ -2028,4 +2026,64 @@ pub(crate) fn is_unindexable_entity(e: &codec::EntityType) -> bool {
         e,
         E::Insert(_) | E::Viewport(_) | E::Block(_) | E::BlockEnd(_)
     )
+}
+
+#[cfg(test)]
+mod viewport_colour_tests {
+    use super::*;
+
+    #[test]
+    fn inactive_viewport_frame_uses_entity_and_layer_colour() {
+        use codec::types::Color;
+        let mut document = codec::Document::new();
+        document.layers.get_mut("0").unwrap().color = Color::Rgb {
+            r: 51,
+            g: 102,
+            b: 153,
+        };
+        for locked in [false, true] {
+            for (color, expected) in [
+                (Color::ByLayer, [0.2, 0.4, 0.6, 1.0]),
+                (
+                    Color::Rgb {
+                        r: 153,
+                        g: 51,
+                        b: 102,
+                    },
+                    [0.6, 0.2, 0.4, 1.0],
+                ),
+            ] {
+                let mut viewport = codec::entities::Viewport::new();
+                viewport.id = 2;
+                viewport.common.handle = document.allocate_handle();
+                viewport.common.color = color;
+                viewport.status.locked = locked;
+                let entity = EntityType::Viewport(Box::new(viewport));
+                let wires = tessellate_entity(
+                    &document,
+                    &HashSet::default(),
+                    None,
+                    [1.0; 4],
+                    1.0,
+                    None,
+                    &entity,
+                    None,
+                    None,
+                    None,
+                    false,
+                    &HashSet::default(),
+                );
+                assert!(!wires.is_empty());
+                assert!(
+                    wires.iter().all(|wire| wire
+                        .color
+                        .iter()
+                        .zip(expected)
+                        .all(|(actual, expected)| (actual - expected).abs() < 1e-6)),
+                    "locked={locked}: {:?}",
+                    wires[0].color
+                );
+            }
+        }
+    }
 }

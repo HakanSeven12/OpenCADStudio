@@ -34,6 +34,7 @@ mtext-source-errors = MTEXT
     .input = MTEXT: a beszúrandó szöveg nem támogatott vezérlőkaraktert tartalmaz.
     .projection = MTEXT: a forrás és a megjelenítés karakterpozíciói eltérnek; a módosítás nem történt meg.
     .object-default = MTEXT: az objektumalap nem választható el biztonságosan a karakterjelzőktől vagy a védett vezérlőktől.
+    .rotation-unsupported = MTEXT: a forgatás ezen a szövegsíkon vagy szerkesztési célon nem igazolt; az állapot változatlan maradt.
 
 mtext-object-origin = MTEXT
     .style = Stílus szerint

@@ -4792,6 +4792,8 @@ pub enum Message {
     MTextInsert(String),
     /// Per-object annotation flag edited from the text toolbar.
     MTextAnnotative(bool),
+    /// The rotation field, in degrees, as typed.
+    MTextRotation(String),
     /// Column layout controls.
     MTextColumnMode(String),
     MTextColumnCount(String),

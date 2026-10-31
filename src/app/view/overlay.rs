@@ -116,16 +116,36 @@ struct MTextPreview {
     content_h: f32,
     /// On-screen width of the MText wrapping rectangle.
     wrap_width_px: f32,
+    /// The text's rotation (cos, sin). Strokes and glyph boxes are laid out
+    /// upright; the preview turns them only when drawing, and turns pointer
+    /// positions back, so caret and selection stay in the layout frame.
+    rotation: (f32, f32),
+}
+
+/// Rotate a layout-frame point by the text's rotation.
+fn turn((cos, sin): (f32, f32), x: f32, y: f32) -> (f32, f32) {
+    (x * cos - y * sin, x * sin + y * cos)
 }
 
 impl MTextPreview {
+    /// Screen point of a layout-frame point: turned by the rotation, drawn
+    /// at the real size, Y flipped (world up → screen down).
+    fn to_screen(&self, x: f32, y: f32) -> iced::Point {
+        let (x, y) = turn(self.rotation, x, y);
+        iced::Point::new(
+            MTEXT_PREVIEW_PAD + (x - self.minx) * self.scale,
+            self.content_h - (MTEXT_PREVIEW_PAD + (y - self.miny) * self.scale),
+        )
+    }
+
     /// Visible-char offset (0..=N) nearest the cursor point (bounds-local px).
     fn offset_at(&self, p: iced::Point) -> usize {
         if self.boxes.is_empty() {
             return 0;
         }
-        let wx = self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale;
-        let wy = self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale;
+        let rx = self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale;
+        let ry = self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale;
+        let (wx, wy) = turn((self.rotation.0, -self.rotation.1), rx, ry);
         let mut best = 0usize;
         let mut best_d = f32::MAX;
         for b in &self.boxes {
@@ -221,36 +241,34 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         use iced::widget::canvas::{Frame, Path, Stroke};
         let mut frame = Frame::new(renderer, bounds.size());
         let pad = MTEXT_PREVIEW_PAD;
-        // Draw at the real size; flip Y (world up → screen down).
-        let map = |x: f32, y: f32| {
-            iced::Point::new(
-                pad + (x - self.minx) * self.scale,
-                self.content_h - (pad + (y - self.miny) * self.scale),
-            )
-        };
+        let map = |x: f32, y: f32| self.to_screen(x, y);
         // Wrap ruler: same screen-space position as the width slider handle.
-        let wrap_x = (pad + self.wrap_width_px).clamp(pad, bounds.width.max(pad));
-        let wrap_line = Path::new(|path| {
-            path.move_to(iced::Point::new(wrap_x, 0.0));
-            path.line_to(iced::Point::new(wrap_x, self.content_h));
-        });
-        frame.stroke(
-            &wrap_line,
-            Stroke::default()
-                .with_color(theme.palette().primary.base.color.scale_alpha(0.65))
-                .with_width(1.0),
-        );
-        // Selection highlight behind the glyphs.
+        // A turned text's box edge is not a vertical line, so it has none.
+        if self.rotation == (1.0, 0.0) {
+            let wrap_x = (pad + self.wrap_width_px).clamp(pad, bounds.width.max(pad));
+            let wrap_line = Path::new(|path| {
+                path.move_to(iced::Point::new(wrap_x, 0.0));
+                path.line_to(iced::Point::new(wrap_x, self.content_h));
+            });
+            frame.stroke(
+                &wrap_line,
+                Stroke::default()
+                    .with_color(theme.palette().primary.base.color.scale_alpha(0.65))
+                    .with_width(1.0),
+            );
+        }
+        // Selection highlight behind the glyphs, turned with the text.
         if let Some((a, b)) = self.sel {
             for bx in &self.boxes {
                 if bx.vis >= a && bx.vis < b {
-                    let p0 = map(bx.xmin, bx.ymax);
-                    let p1 = map(bx.xmax, bx.ymin);
-                    let rect = Path::rectangle(
-                        iced::Point::new(p0.x.min(p1.x), p0.y.min(p1.y)),
-                        iced::Size::new((p1.x - p0.x).abs(), (p1.y - p0.y).abs()),
-                    );
-                    frame.fill(&rect, theme.palette().primary.base.color.scale_alpha(0.45));
+                    let quad = Path::new(|p| {
+                        p.move_to(map(bx.xmin, bx.ymin));
+                        p.line_to(map(bx.xmax, bx.ymin));
+                        p.line_to(map(bx.xmax, bx.ymax));
+                        p.line_to(map(bx.xmin, bx.ymax));
+                        p.close();
+                    });
+                    frame.fill(&quad, theme.palette().primary.base.color.scale_alpha(0.45));
                 }
             }
         }
@@ -566,6 +584,17 @@ fn mtext_editor_content<'a>(
                 64.0
             )
         ),
+        labelled(
+            t!("Rotation"),
+            None,
+            row![
+                small_input("0", &ed.rotation, Message::MTextRotation, 52.0),
+                text("°").size(12)
+            ]
+            .spacing(3)
+            .align_y(iced::Alignment::Center)
+            .into()
+        ),
         labelled(t!("Color"), None, color_pl.into()),
         row![annotative, text(t!("Annotative")).size(11)]
             .spacing(3)
@@ -865,22 +894,37 @@ fn mtext_editor_content<'a>(
             .into()
     } else {
         let segments = mtext_preview_segments(ed);
+        // The preview shows the text at the angle it will have in the drawing.
+        let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
+        let rotation = if angle == 0.0 {
+            (1.0, 0.0)
+        } else {
+            (angle.cos(), angle.sin())
+        };
         let (mut minx, mut miny, mut maxx, mut maxy) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        let mut extend = |x: f32, y: f32| {
+            let (x, y) = turn(rotation, x, y);
+            minx = minx.min(x);
+            miny = miny.min(y);
+            maxx = maxx.max(x);
+            maxy = maxy.max(y);
+        };
         for (seg, _, _) in &segments {
             for &(x, y) in seg {
-                minx = minx.min(x);
-                miny = miny.min(y);
-                maxx = maxx.max(x);
-                maxy = maxy.max(y);
+                extend(x, y);
             }
         }
         // Include glyph boxes so all-whitespace / box-only lines still anchor
         // the transform (hit-testing relies on minx/miny).
         for b in &ed.glyph_boxes {
-            minx = minx.min(b.xmin);
-            miny = miny.min(b.ymin);
-            maxx = maxx.max(b.xmax);
-            maxy = maxy.max(b.ymax);
+            for (x, y) in [
+                (b.xmin, b.ymin),
+                (b.xmax, b.ymin),
+                (b.xmax, b.ymax),
+                (b.xmin, b.ymax),
+            ] {
+                extend(x, y);
+            }
         }
         let scale = preview_scale;
         let content_h = if maxx >= minx {
@@ -907,6 +951,7 @@ fn mtext_editor_content<'a>(
             scale,
             content_h,
             wrap_width_px: ed.rect_width as f32 * scale,
+            rotation,
         };
         let cv = canvas(prog)
             .width(iced::Length::Fixed(content_w))

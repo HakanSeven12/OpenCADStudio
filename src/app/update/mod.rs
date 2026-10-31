@@ -7833,6 +7833,10 @@ impl OpenCADStudio {
                 self.mtext_type(&value);
                 Task::none()
             }
+            Message::MTextRotation(value) => {
+                self.mtext_rotation(value);
+                Task::none()
+            }
             Message::MTextAnnotative(value) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.annotative = value;

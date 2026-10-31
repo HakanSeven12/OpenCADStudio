@@ -22,6 +22,7 @@ use iced::widget::text_editor;
 mod raw_adapter;
 mod raw_clear;
 mod raw_edit;
+mod raw_geometry;
 #[allow(dead_code)]
 mod raw_operations;
 mod raw_style;
@@ -128,6 +129,13 @@ pub struct MTextEditorState {
     pub attachment: AttachmentPoint,
     /// Line spacing factor (entity field).
     pub line_spacing: f32,
+    /// Object rotation in degrees, kept as typed so partial input is allowed.
+    pub rotation: String,
+    /// The rotation field was edited; until then the opened angle is kept
+    /// exactly, never re-derived from the field's rounded degrees.
+    pub(super) rotation_dirty: bool,
+    /// A new text's working plane is the drawing's XY plane.
+    pub(super) rotation_plane_supported: bool,
     /// Fixed MText box width (drawing units). The text wraps within this —
     /// it is NOT derived from the typed content, so adding characters wraps
     /// to the next line instead of stretching the box into one long line.
@@ -215,6 +223,9 @@ impl MTextEditorState {
             caret_blink_on: true,
             attachment: AttachmentPoint::TopLeft,
             line_spacing: 1.0,
+            rotation: "0".to_string(),
+            rotation_dirty: false,
+            rotation_plane_supported: true,
             // Default box ~20 characters wide; overwritten with the entity's
             // own width when editing an existing MText.
             rect_width: (height * 20.0).max(1.0),
@@ -357,6 +368,7 @@ impl MTextEditorState {
         mt.line_spacing_factor = self.line_spacing as f64;
         mt.style = self.style.clone();
         mt.is_annotative = self.annotative;
+        self.patch_rotation(&mut mt);
         let rectangle_height = self.rect_height.trim().parse::<f64>().unwrap_or(0.0);
         mt.rectangle_height = (rectangle_height > 0.0).then_some(rectangle_height);
         mt.column_data.column_type = self.column_type;
@@ -713,6 +725,11 @@ fn vertical_caret_target(
 fn seed_mtext_state(state: &mut MTextEditorState, m: &MText) {
     state.attachment = m.attachment_point;
     state.line_spacing = m.line_spacing_factor as f32;
+    let degrees = format!("{:.6}", m.rotation.to_degrees());
+    state.rotation = degrees
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string();
     state.rect_width = m.rectangle_width.max(0.0);
     state.rect_height = m.rectangle_height.unwrap_or(0.0).max(0.0).to_string();
     state.annotative = m.is_annotative;
@@ -789,6 +806,15 @@ impl super::OpenCADStudio {
             }
         }
         state.seed_object_values(&self.tabs[self.active_tab].scene.document);
+        // A rotation typed for a new text turns about the working plane's Z,
+        // supported only where that is the drawing's.
+        if handle.is_none() && self.tabs[self.active_tab].editing_model_space() {
+            state.rotation_plane_supported = self.tabs[self.active_tab]
+                .ucs_xform()
+                .working_plane()
+                .z
+                .abs_diff_eq(DVec3::Z, 1e-12);
+        }
         self.mtext_editor = Some(state);
         // Open centred at the editor's natural size: it renders through the
         // shared modal frame, which `modal_offset` positions and `modal_resize`
@@ -1547,6 +1573,8 @@ impl super::OpenCADStudio {
                     t.rectangle_width = mt.rectangle_width;
                     t.rectangle_height = mt.rectangle_height;
                     t.column_data = mt.column_data;
+                    t.rotation = mt.rotation;
+                    t.dwg_x_direction = mt.dwg_x_direction;
                 }
                 Some(EntityType::MultiLeader(ml)) => {
                     ml.context.text_string = mt.value;
@@ -1666,6 +1694,8 @@ impl super::OpenCADStudio {
                     t.rectangle_width = mt.rectangle_width;
                     t.rectangle_height = mt.rectangle_height;
                     t.column_data = mt.column_data;
+                    t.rotation = mt.rotation;
+                    t.dwg_x_direction = mt.dwg_x_direction;
                 }
                 Some(EntityType::MultiLeader(ml)) => {
                     ml.context.text_string = mt.value;
@@ -1751,6 +1781,9 @@ impl super::OpenCADStudio {
         self.reset_modal_geometry();
     }
 }
+
+#[cfg(test)]
+mod rotation_tests;
 
 #[cfg(test)]
 mod cell_tests {

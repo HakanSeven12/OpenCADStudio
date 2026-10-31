@@ -34,6 +34,7 @@ mtext-source-errors = MTEXT
     .input = MTEXT: the inserted text contains an unsupported control character.
     .projection = MTEXT: the source and rendered character positions do not agree; the edit was not applied.
     .object-default = MTEXT: the object default cannot be safely separated from character flags or protected controls.
+    .rotation-unsupported = MTEXT: rotation is not verified for this text plane or editor target; the state was left unchanged.
 
 mtext-object-origin = MTEXT
     .style = By style

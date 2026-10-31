@@ -24,6 +24,16 @@ language =
     .greek = Ελληνικά
     .vietnamese = Tiếng Việt
 
+mtext-source-errors = MTEXT
+    .nesting = MTEXT: a módosítás túllépné a formázási csoportok biztonságos beágyazási mélységét.
+    .raw-field = MTEXT: a szöveg védett mezőkifejezést tartalmaz.
+    .unknown = MTEXT: ismeretlen, hiányos vagy hibás vezérlő miatt a szöveg nem szerkeszthető biztonságosan.
+    .range = MTEXT: a karaktertartomány forráshatárai nem oldhatók fel biztonságosan.
+    .atomic = MTEXT: a művelet védett törtet vagy oszloptörést bontana meg.
+    .paragraph = MTEXT: a művelet megváltoztathatná a bekezdés- vagy tabulátorbeállításokat.
+    .input = MTEXT: a beszúrandó szöveg nem támogatott vezérlőkaraktert tartalmaz.
+    .projection = MTEXT: a forrás és a megjelenítés karakterpozíciói eltérnek; a módosítás nem történt meg.
+
 action =
     .close = Bezárás
     .options = Beállítások

@@ -6553,6 +6553,14 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "{count} were filtered out." => Some(("annotate-data", "filtered-out")),
         "Select dimensions:" => Some(("annotate-data", "select-dimensions")),
         "Select dimension:" => Some(("annotate-data", "select-dimension")),
+        "MTEXT: this edit would exceed the safe formatting-group nesting limit." => Some(("mtext-source-errors", "nesting")),
+        "MTEXT: the text contains a protected field expression." => Some(("mtext-source-errors", "raw-field")),
+        "MTEXT: an unknown, incomplete or invalid control prevents safe text editing." => Some(("mtext-source-errors", "unknown")),
+        "MTEXT: the character range has no safe source boundaries." => Some(("mtext-source-errors", "range")),
+        "MTEXT: this operation would split or change a protected fraction or column break." => Some(("mtext-source-errors", "atomic")),
+        "MTEXT: this change could alter paragraph or tab-stop settings." => Some(("mtext-source-errors", "paragraph")),
+        "MTEXT: the inserted text contains an unsupported control character." => Some(("mtext-source-errors", "input")),
+        "MTEXT: the source and rendered character positions do not agree; the edit was not applied." => Some(("mtext-source-errors", "projection")),
         _ => None,
     }
 }

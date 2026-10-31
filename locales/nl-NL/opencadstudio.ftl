@@ -24,6 +24,16 @@ language =
     .greek = Ελληνικά
     .vietnamese = Tiếng Việt
 
+mtext-source-errors = MTEXT
+    .nesting = MTEXT: this edit would exceed the safe formatting-group nesting limit.
+    .raw-field = MTEXT: the text contains a protected field expression.
+    .unknown = MTEXT: an unknown, incomplete or invalid control prevents safe text editing.
+    .range = MTEXT: the character range has no safe source boundaries.
+    .atomic = MTEXT: this operation would split or change a protected fraction or column break.
+    .paragraph = MTEXT: this change could alter paragraph or tab-stop settings.
+    .input = MTEXT: the inserted text contains an unsupported control character.
+    .projection = MTEXT: the source and rendered character positions do not agree; the edit was not applied.
+
 action =
     .close = Sluiten
     .options = Opties

@@ -725,4 +725,78 @@ mod tests {
         assert_eq!(e.uv_min, e2.uv_min);
         assert_eq!(e.uv_max, e2.uv_max);
     }
+
+    /// Field value (0..1) at a glyph-space point, filtered the way the GPU
+    /// sampler reads it: bilinear between texel centres, clamped at the edge.
+    fn sample_linear(tile: &BakedTile, gx: f32, gy: f32) -> f32 {
+        let fx = (gx - tile.plane_min[0]) * PX_PER_UNIT - 0.5;
+        let fy = (tile.plane_max[1] - gy) * PX_PER_UNIT - 0.5;
+        let (x0, y0) = (fx.floor(), fy.floor());
+        let (tx, ty) = (fx - x0, fy - y0);
+        let at = |x: f32, y: f32| {
+            let x = (x as i32).clamp(0, tile.w as i32 - 1) as u32;
+            let y = (y as i32).clamp(0, tile.h as i32 - 1) as u32;
+            f32::from(tile.data[(y * tile.w + x) as usize]) / 255.0
+        };
+        let top = at(x0, y0) * (1.0 - tx) + at(x0 + 1.0, y0) * tx;
+        let bottom = at(x0, y0 + 1.0) * (1.0 - tx) + at(x0 + 1.0, y0 + 1.0) * tx;
+        top * (1.0 - ty) + bottom * ty
+    }
+
+    /// The value of `const <name>: f32` in a WGSL source.
+    fn wgsl_const(source: &str, name: &str) -> f32 {
+        let decl = format!("const {name}: f32 = ");
+        let start = source
+            .find(&decl)
+            .unwrap_or_else(|| panic!("the shader declares {name}"))
+            + decl.len();
+        let end = start + source[start..].find(';').expect("the declaration ends");
+        source[start..end].trim().parse().expect("a float literal")
+    }
+
+    // Zoomed in, the text shaders draw a stroke glyph as its centreline read
+    // back from the filtered field. Between texel centres that field puts the
+    // line up to about half a texel off, so a centreline drawn narrower than
+    // that falls apart into dots. Both shaders must keep at least that much.
+    #[test]
+    fn zoomed_in_stroke_centreline_stays_within_the_shader_floor() {
+        let mut worst = 0.0f32;
+        for step in 0..=12 {
+            let angle = step as f32 * std::f32::consts::FRAC_PI_2 / 12.0;
+            let (dx, dy) = (angle.cos(), angle.sin());
+            for phase in 0..10 {
+                // Shift the stroke across a texel so every sub-texel offset is met.
+                let shift = phase as f32 / (10.0 * PX_PER_UNIT);
+                let a = [shift, 0.37 * shift];
+                let b = [a[0] + 4.0 * dx, a[1] + 4.0 * dy];
+                let glyph = Glyph {
+                    strokes: vec![vec![a, b]],
+                    advance: 4.0,
+                    fill_tris: vec![],
+                };
+                let tile = bake_glyph(&glyph, PEN_HALF_UNITS).expect("stroke bakes");
+                for i in 0..=40 {
+                    let t = i as f32 / 40.0;
+                    let (gx, gy) = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
+                    let field = sample_linear(&tile, gx, gy);
+                    let from_centre = tile.pen - (field - 0.5) * 2.0 * SPREAD_UNITS;
+                    worst = worst.max(from_centre.abs());
+                }
+            }
+        }
+        for (name, source) in [
+            ("text.wgsl", include_str!("../../shaders/text.wgsl")),
+            (
+                "block_text.wgsl",
+                include_str!("../../shaders/block_text.wgsl"),
+            ),
+        ] {
+            let floor = wgsl_const(source, "CENTRELINE_FLOOR_UNITS");
+            assert!(
+                floor >= worst && floor < PEN_HALF_UNITS,
+                "{name}: centreline floor {floor} must cover the field's {worst} \
+                 and stay inside the pen band {PEN_HALF_UNITS}"
+            );
+        }
+    }
 }

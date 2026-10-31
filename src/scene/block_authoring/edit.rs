@@ -44,9 +44,10 @@ pub fn items(doc: &Document, definition: Handle) -> Vec<Item> {
             (Part::Base, p.native.definition_base_point),
             (Part::End, p.native.definition_end_point),
         ];
-        // Polar's second label is derived from its angle arc, not an editable offset.
-        // XY labels sit on the dimension lines derived from the endpoint.
-        if p.kind != distance::Kind::XY {
+        // The polar label sits on the angle bisector and the XY labels on the
+        // dimension lines, both derived from the endpoint; only the linear
+        // label is an authored offset.
+        if p.kind == distance::Kind::Linear {
             grips.extend(
                 graphic
                     .labels
@@ -304,11 +305,8 @@ pub fn move_part(
                         p.distance = label_offset(&p.parameter, at)
                     }
                 }
-                DynamicBlockData::PolarParameter(p) => {
-                    if let Part::Label(_) = part {
-                        p.offset = label_offset(&p.parameter, at)
-                    }
-                }
+                // Only the base and endpoint are draggable; the polar label follows them.
+                DynamicBlockData::PolarParameter(_) => {}
                 DynamicBlockData::XYParameter(p) => {
                     if (p.parameter.definition_end_point.x - p.parameter.definition_base_point.x)
                         .abs()

@@ -280,12 +280,7 @@ fn block_editor_lookup_visibility_and_component_grips_use_owned_description_text
                 })
                 .unwrap();
             let tip = app.dynamic_grip_tip(parameter, grip.id).unwrap();
-            if *part == edit::Part::Label(1) {
-                assert!(tip.contains(AUTHORED_SECONDARY_DESCRIPTION));
-                assert!(!tip.contains(AUTHORED_DESCRIPTION));
-            } else {
-                assert!(tip.contains(AUTHORED_DESCRIPTION));
-            }
+            assert!(tip.contains(AUTHORED_DESCRIPTION));
             assert!(
                 app.dynamic_grip_tip(reference, grip.id).is_none(),
                 "foreign owner is rejected"

@@ -374,6 +374,53 @@ pub(crate) fn graphic(parameter: &Parameter<'_>) -> Graphic {
             Vector3::new(parameter.offsets[1], 0.0, 0.0),
             parameter.labels[1].clone(),
         );
+    } else if parameter.kind == Kind::Polar {
+        let d = end - base;
+        let radius = d.x.hypot(d.y);
+        if radius <= 1e-10 || !radius.is_finite() {
+            return result;
+        }
+        let angle = d.y.atan2(d.x);
+        let at = |t: f64| base + Vector3::new(t.cos(), t.sin(), 0.0) * radius;
+        const DASHES: usize = 72;
+        for i in 0..DASHES {
+            if i % 6 == 5 {
+                continue;
+            }
+            result.lines.push([
+                at(std::f64::consts::TAU * i as f64 / DASHES as f64),
+                at(std::f64::consts::TAU * (i + 1) as f64 / DASHES as f64),
+            ]);
+        }
+        const ARC_STEPS: usize = 24;
+        for i in 0..ARC_STEPS {
+            result.lines.push([
+                at(angle * i as f64 / ARC_STEPS as f64),
+                at(angle * (i + 1) as f64 / ARC_STEPS as f64),
+            ]);
+        }
+        let tip = at(angle);
+        let sign = if angle < 0.0 { -1.0 } else { 1.0 };
+        let (sin, cos) = angle.sin_cos();
+        let direction = Vector3::new(-sin * sign, cos * sign, 0.0);
+        for turn in [-0.5f64, 0.5] {
+            let (s, c) = turn.sin_cos();
+            let towards = Vector3::new(
+                direction.x * c - direction.y * s,
+                direction.x * s + direction.y * c,
+                0.0,
+            );
+            result.lines.push([tip, tip - towards * (radius * 0.12)]);
+        }
+        let bisector = angle * 0.5;
+        let inward = Vector3::new(bisector.cos(), bisector.sin(), 0.0);
+        result.lines.push([
+            base + inward * (radius * 0.92),
+            base + inward * (radius * 0.78),
+        ]);
+        result
+            .labels
+            .push((base + inward * (radius * 0.70), parameter.labels[1].clone()));
     } else {
         let d = end - base;
         let length = d.x.hypot(d.y).hypot(d.z);
@@ -386,22 +433,6 @@ pub(crate) fn graphic(parameter: &Parameter<'_>) -> Graphic {
             dimension_normal(base, end) * parameter.offsets[0],
             parameter.labels[0].clone(),
         );
-        if parameter.kind == Kind::Polar {
-            let angle = d.y.atan2(d.x);
-            let radius = length * 0.25;
-            let at = |angle: f64| base + Vector3::new(angle.cos(), angle.sin(), 0.0) * radius;
-            result.lines.push([base, at(0.0)]);
-            result.lines.push([base, end]);
-            for step in 0..24 {
-                result.lines.push([
-                    at(angle * step as f64 / 24.0),
-                    at(angle * (step + 1) as f64 / 24.0),
-                ]);
-            }
-            result
-                .labels
-                .push((at(angle * 0.5), parameter.labels[1].clone()));
-        }
     }
     result.grips.push((end, parameter.kind == Kind::Linear));
     result
@@ -460,13 +491,15 @@ pub(crate) fn reframe(
                 if let Some(y) = y {
                     *y = native.definition_end_point.y - native.definition_base_point.y;
                 }
-            } else if let Some(label) = labels.first() {
-                *x = offsets(
-                    kind,
-                    native.definition_base_point,
-                    native.definition_end_point,
-                    transform.apply(*label),
-                )[0];
+            } else if kind == Kind::Linear {
+                if let Some(label) = labels.first() {
+                    *x = offsets(
+                        kind,
+                        native.definition_base_point,
+                        native.definition_end_point,
+                        transform.apply(*label),
+                    )[0];
+                }
             }
             changed += 1;
         }
@@ -700,6 +733,51 @@ mod tests {
         )
         .is_err());
         assert_eq!(scene.document, before);
+    }
+
+    #[test]
+    fn polar_parameter_draws_a_dashed_radius_circle_an_arrowed_arc_and_one_label() {
+        let (mut scene, definition) = fixture();
+        create(
+            &mut scene.document,
+            definition,
+            Kind::Polar,
+            Vector3::ZERO,
+            Vector3::new(6.0, 8.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        )
+        .unwrap();
+        let parameter = &parameters(&scene.document, definition)[0];
+        let g = graphic(parameter);
+        let radius = 10.0;
+        let on_circle = |p: Vector3| (p.x.hypot(p.y) - radius).abs() < 1e-9;
+        let mut covered = 0.0;
+        for [a, b] in &g.lines {
+            if on_circle(*a) && on_circle(*b) {
+                let turn = (b.y.atan2(b.x) - a.y.atan2(a.x)).abs();
+                covered += turn.min(std::f64::consts::TAU - turn);
+            }
+        }
+        assert!(
+            covered > std::f64::consts::TAU * 0.8,
+            "the radius circle is drawn around the base: {covered}"
+        );
+        assert!(
+            covered < std::f64::consts::TAU,
+            "the radius circle is dashed: {covered}"
+        );
+        let tip = Vector3::new(6.0, 8.0, 0.0);
+        let barbs = g
+            .lines
+            .iter()
+            .filter(|[a, _]| (*a - tip).length() < 1e-9)
+            .count();
+        assert_eq!(barbs, 2, "the arc carries an arrowhead at the grip");
+        assert!(g.dimensions.is_empty(), "no bracket dimension line");
+        assert_eq!(g.labels.len(), 1, "one label, inside the sector");
+        assert_eq!(g.labels[0].1, parameter.labels[1]);
+        assert!(g.labels[0].0.x.hypot(g.labels[0].0.y) < radius);
+        assert_eq!(g.grips, vec![(tip, false)]);
     }
 
     #[test]

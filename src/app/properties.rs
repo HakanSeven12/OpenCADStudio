@@ -2687,9 +2687,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                     crate::scene::block_authoring::edit::Part::End => "End point",
                                     crate::scene::block_authoring::edit::Part::Reference =>
                                         "Reference point",
-                                    crate::scene::block_authoring::edit::Part::Label(0) =>
-                                        "Label position",
-                                    _ => "Second label position",
+                                    _ => "Label position",
                                 })
                                 .into_owned(),
                                 field: "authoring_grip_position",

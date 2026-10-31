@@ -1797,13 +1797,18 @@ fn double_clicking_block_parameter_label_starts_rename() {
         let _ = app.update(Message::ViewportLeftPressAt(cursor));
 
         assert_eq!(app.tabs[i].selected_authoring, Some(parameter));
+        let expected_field = if kind == "POLAR" {
+            "authoring_secondary_name"
+        } else {
+            "authoring_name"
+        };
         assert_eq!(
             app.tabs[i]
                 .properties
                 .edit_buf
-                .get(&crate::ui::properties::FieldKey::Geom("authoring_name"))
+                .get(&crate::ui::properties::FieldKey::Geom(expected_field))
                 .map(String::as_str),
-            Some(crate::scene::block_authoring::metadata::read(&app.tabs[i].scene.document, definition, parameter).unwrap().text[0].value),
+            Some(item.graphic.labels[0].1.as_str()),
         );
     }
 }

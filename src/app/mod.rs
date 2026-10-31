@@ -4767,8 +4767,6 @@ pub enum Message {
     MTextFmt(mtext_editor::MTextFmt),
     /// Toolbar height field changed.
     MTextHeight(String),
-    /// MText wrapping width changed from the editor slider.
-    MTextRectWidth(f64),
     /// Toolbar text-style dropdown changed.
     MTextStyle(String),
     /// Toolbar font dropdown changed.
@@ -4798,6 +4796,10 @@ pub enum Message {
     MTextMenu(Option<mtext_editor::EditorMenu>),
     /// A menu action: the menu closes, then the message runs.
     MTextMenuPick(Box<Message>),
+    /// The status bar's box-width field, as typed.
+    MTextRectWidthField(String),
+    /// A ruler drag: the width while it moves, `None` when it ends.
+    MTextBoxDrag(Option<f64>),
     /// Column layout controls.
     MTextColumnMode(String),
     MTextColumnCount(String),

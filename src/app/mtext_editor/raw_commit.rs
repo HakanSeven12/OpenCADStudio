@@ -25,7 +25,7 @@ editor_history! {
     object_color: Option<codec::types::Color>, color_aci: u16, oblique: String, char_space: String,
     annotative: bool, attachment: AttachmentPoint, line_spacing: f32, rect_width: f64,
     sel: Option<(usize, usize)>, caret: usize, sel_anchor: usize,
-    typing_format: super::raw_edit::TypingFormat,
+    typing_format: super::raw_edit::TypingFormat, rect_width_draft: Option<String>,
 }
 
 impl MTextEditorState {
@@ -70,7 +70,80 @@ impl MTextEditorState {
     }
 }
 
+impl MTextEditorState {
+    /// What the status bar's box-width field shows.
+    pub(in crate::app) fn rect_width_field(&self) -> String {
+        self.rect_width_draft
+            .clone()
+            .unwrap_or_else(|| super::raw_span::number(self.rect_width))
+    }
+
+    /// Characters in the text (a fraction counts its glyphs), not counting
+    /// paragraph breaks.
+    pub(in crate::app) fn visible_character_count(&self) -> usize {
+        doc_to_cells(&self.doc)
+            .iter()
+            .filter(|c| !matches!(c, Cell::Break(..)))
+            .count()
+    }
+
+    /// Which way the box grows from its attachment point: 1 rightwards,
+    /// 2 both ways (centred), -1 leftwards.
+    pub(in crate::app) fn box_growth(&self) -> f32 {
+        use AttachmentPoint as A;
+        match self.attachment {
+            A::TopCenter | A::MiddleCenter | A::BottomCenter => 2.0,
+            A::TopRight | A::MiddleRight | A::BottomRight => -1.0,
+            _ => 1.0,
+        }
+    }
+}
+
 impl crate::app::OpenCADStudio {
+    /// The status bar's box-width field: kept as typed; a positive number
+    /// sets the box width, as the command's box does.
+    pub(in crate::app) fn mtext_rect_width_field(&mut self, value: String) {
+        let Some(ed) = self.mtext_editor.as_mut() else {
+            return;
+        };
+        match value
+            .trim()
+            .replace(',', ".")
+            .parse::<f64>()
+            .ok()
+            .filter(|w| w.is_finite() && *w > 0.0)
+        {
+            Some(width) => {
+                ed.record_undo();
+                ed.rect_width = width;
+                ed.keep_width = true;
+                ed.rect_width_draft = (super::raw_span::number(width) != value).then_some(value);
+            }
+            None => ed.rect_width_draft = Some(value),
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    /// A ruler drag: `Some` width while it moves, `None` when it ends. The
+    /// whole drag is one undo step.
+    pub(in crate::app) fn mtext_box_drag(&mut self, width: Option<f64>) {
+        let Some(ed) = self.mtext_editor.as_mut() else {
+            return;
+        };
+        let Some(width) = width.filter(|w| w.is_finite() && *w > 0.0) else {
+            ed.box_dragging = false;
+            return;
+        };
+        if !ed.box_dragging {
+            ed.record_undo();
+            ed.box_dragging = true;
+        }
+        ed.rect_width = width;
+        ed.rect_width_draft = None;
+        ed.keep_width = true;
+        self.rebuild_mtext_preview();
+    }
+
     pub(in crate::app) fn mtext_undo(&mut self) {
         if let Some(ed) = self.mtext_editor.as_mut() {
             if let Some(previous) = ed.undo.pop() {

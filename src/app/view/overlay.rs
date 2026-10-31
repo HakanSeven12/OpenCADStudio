@@ -121,12 +121,57 @@ struct MTextPreview {
     miny: f32,
     scale: f32,
     content_h: f32,
-    /// On-screen width of the MText wrapping rectangle.
-    wrap_width_px: f32,
+    /// The box-width ruler above the text; absent on a turned preview.
+    ruler: Option<BoxRuler>,
     /// The text's rotation (cos, sin). Strokes and glyph boxes are laid out
     /// upright; the preview turns them only when drawing, and turns pointer
     /// positions back, so caret and selection stay in the layout frame.
     rotation: (f32, f32),
+}
+
+/// Height of the box-width ruler band at the top of the preview.
+pub(in crate::app) const MTEXT_RULER_H: f32 = 18.0;
+/// How near (px) to the handle a press grabs it.
+const RULER_GRAB_PX: f32 = 7.0;
+
+/// The text box along the ruler, in layout units, and its draggable edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BoxRuler {
+    left: f32,
+    right: f32,
+    /// Width change per unit the handle moves: 1 left-attached (right edge),
+    /// 2 centred (both edges), -1 right-attached (the left edge moves).
+    growth: f32,
+}
+
+impl BoxRuler {
+    fn handle(&self) -> f32 {
+        if self.growth < 0.0 {
+            self.left
+        } else {
+            self.right
+        }
+    }
+}
+
+/// The full height of the text line a glyph box sits on: the box spans the
+/// cap height only, so descenders, accents and the line gap are added, and
+/// a line never reaches into its neighbour's band.
+fn line_band(
+    boxes: &[crate::entities::text_support::GlyphBox],
+    b: &crate::entities::text_support::GlyphBox,
+) -> (f32, f32) {
+    let h = (b.ymax - b.ymin).max(f32::EPSILON);
+    let mut low = b.ymin - 0.35 * h;
+    let mut high = b.ymax + 0.2 * h;
+    for other in boxes {
+        if other.ymax <= b.ymin {
+            low = low.max((other.ymax + b.ymin) * 0.5);
+        } else if other.ymin >= b.ymax {
+            high = high.min((other.ymin + b.ymax) * 0.5);
+        }
+    }
+    (low, high)
 }
 
 /// Rotate a layout-frame point by the text's rotation.
@@ -143,6 +188,21 @@ impl MTextPreview {
             MTEXT_PREVIEW_PAD + (x - self.minx) * self.scale,
             self.content_h - (MTEXT_PREVIEW_PAD + (y - self.miny) * self.scale),
         )
+    }
+
+    /// Whether a point (bounds-local px) grabs the ruler handle.
+    fn on_handle(&self, p: iced::Point) -> bool {
+        p.y <= MTEXT_RULER_H
+            && self
+                .ruler
+                .is_some_and(|r| (p.x - self.to_screen(r.handle(), 0.0).x).abs() <= RULER_GRAB_PX)
+    }
+
+    /// The width a drag reaches after moving `dx` px from where it started.
+    fn dragged_width(&self, start_width: f32, dx: f32) -> Option<f64> {
+        let ruler = self.ruler?;
+        let width = start_width + ruler.growth * dx / self.scale;
+        Some(f64::from(width.max(self.scale.recip())))
     }
 
     /// Visible-char offset (0..=N) nearest the cursor point (bounds-local px).
@@ -195,6 +255,8 @@ impl MTextPreview {
 #[derive(Default)]
 struct MTextPreviewState {
     dragging: bool,
+    /// A ruler drag: where it started (px) and the box width then.
+    width_drag: Option<(f32, f32)>,
 }
 
 impl iced::widget::canvas::Program<Message> for MTextPreview {
@@ -213,12 +275,25 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         match event {
             Event::Mouse(Me::ButtonPressed(Button::Left)) => {
                 if let Some(p) = cursor.position_in(bounds) {
+                    if let Some(ruler) = self.ruler.filter(|_| self.on_handle(p)) {
+                        state.width_drag = Some((p.x, ruler.right - ruler.left));
+                        return Some(Action::capture());
+                    }
+                    if p.y <= MTEXT_RULER_H && self.ruler.is_some() {
+                        // The ruler band is not text: no caret move.
+                        return Some(Action::capture());
+                    }
                     state.dragging = true;
                     let off = self.offset_at(p);
                     return Some(Action::publish(Message::MTextSelStart(off)).and_capture());
                 }
             }
             Event::Mouse(Me::CursorMoved { .. }) => {
+                if let Some((start, width)) = state.width_drag {
+                    let x = cursor.position_from(bounds.position())?.x;
+                    let width = self.dragged_width(width, x - start)?;
+                    return Some(Action::publish(Message::MTextBoxDrag(Some(width))).and_capture());
+                }
                 if state.dragging {
                     if let Some(p) = cursor.position_in(bounds) {
                         let off = self.offset_at(p);
@@ -227,6 +302,9 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 }
             }
             Event::Mouse(Me::ButtonReleased(Button::Left)) => {
+                if state.width_drag.take().is_some() {
+                    return Some(Action::publish(Message::MTextBoxDrag(None)).and_capture());
+                }
                 if state.dragging {
                     state.dragging = false;
                     return Some(Action::capture());
@@ -235,6 +313,23 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             _ => {}
         }
         None
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &MTextPreviewState,
+        bounds: iced::Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> iced::mouse::Interaction {
+        let grabbing = state.width_drag.is_some()
+            || cursor
+                .position_in(bounds)
+                .is_some_and(|p| self.on_handle(p));
+        if grabbing {
+            iced::mouse::Interaction::ResizingHorizontally
+        } else {
+            iced::mouse::Interaction::default()
+        }
     }
 
     fn draw(
@@ -247,32 +342,18 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
     ) -> Vec<iced::widget::canvas::Geometry> {
         use iced::widget::canvas::{Frame, Path, Stroke};
         let mut frame = Frame::new(renderer, bounds.size());
-        let pad = MTEXT_PREVIEW_PAD;
         let map = |x: f32, y: f32| self.to_screen(x, y);
-        // Wrap ruler: same screen-space position as the width slider handle.
-        // A turned text's box edge is not a vertical line, so it has none.
-        if self.rotation == (1.0, 0.0) {
-            let wrap_x = (pad + self.wrap_width_px).clamp(pad, bounds.width.max(pad));
-            let wrap_line = Path::new(|path| {
-                path.move_to(iced::Point::new(wrap_x, 0.0));
-                path.line_to(iced::Point::new(wrap_x, self.content_h));
-            });
-            frame.stroke(
-                &wrap_line,
-                Stroke::default()
-                    .with_color(theme.palette().primary.base.color.scale_alpha(0.65))
-                    .with_width(1.0),
-            );
-        }
-        // Selection highlight behind the glyphs, turned with the text.
+        // Selection highlight behind the glyphs, over the whole line height
+        // (descenders and accents included), turned with the text.
         if let Some((a, b)) = self.sel {
             for bx in &self.boxes {
                 if bx.vis >= a && bx.vis < b {
+                    let (low, high) = line_band(&self.boxes, bx);
                     let quad = Path::new(|p| {
-                        p.move_to(map(bx.xmin, bx.ymin));
-                        p.line_to(map(bx.xmax, bx.ymin));
-                        p.line_to(map(bx.xmax, bx.ymax));
-                        p.line_to(map(bx.xmin, bx.ymax));
+                        p.move_to(map(bx.xmin, low));
+                        p.line_to(map(bx.xmax, low));
+                        p.line_to(map(bx.xmax, high));
+                        p.line_to(map(bx.xmin, high));
                         p.close();
                     });
                     frame.fill(&quad, theme.palette().primary.base.color.scale_alpha(0.45));
@@ -292,6 +373,28 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             let col = readable_on(*col, theme.palette().background.base);
             frame.stroke(&path, Stroke::default().with_color(col).with_width(*width));
         }
+        if let Some(ruler) = self.ruler {
+            // The box width: a rule between the box edges with end ticks and
+            // a handle on the edge that moves.
+            let color = theme.palette().primary.base.color;
+            let mid = MTEXT_RULER_H * 0.5;
+            let (l, r) = (map(ruler.left, 0.0).x, map(ruler.right, 0.0).x);
+            let rule = Path::new(|p| {
+                p.move_to(iced::Point::new(l, mid));
+                p.line_to(iced::Point::new(r, mid));
+                for x in [l, r] {
+                    p.move_to(iced::Point::new(x, 4.0));
+                    p.line_to(iced::Point::new(x, MTEXT_RULER_H - 4.0));
+                }
+            });
+            frame.stroke(&rule, Stroke::default().with_color(color).with_width(1.0));
+            let x = map(ruler.handle(), 0.0).x;
+            frame.fill_rectangle(
+                iced::Point::new(x - 3.0, 2.0),
+                iced::Size::new(6.0, MTEXT_RULER_H - 4.0),
+                color,
+            );
+        }
         // Caret — a vertical bar at the caret's glyph boundary, shown when the
         // selection is empty (a plain text cursor).
         // Caret is shown only when the selection is empty and the blink is in
@@ -301,11 +404,12 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             // Empty text: show a caret at the top-left so the user can type.
             // Its height matches the preview's constant em (see EM_PX) so the
             // empty-editor caret isn't tiny.
+            let top = MTEXT_PREVIEW_PAD + self.ruler.map_or(0.0, |_| MTEXT_RULER_H);
             let path = Path::new(|p| {
-                p.move_to(iced::Point::new(MTEXT_PREVIEW_PAD, MTEXT_PREVIEW_PAD));
+                p.move_to(iced::Point::new(MTEXT_PREVIEW_PAD, top));
                 p.line_to(iced::Point::new(
                     MTEXT_PREVIEW_PAD,
-                    (MTEXT_PREVIEW_PAD + 40.0).min(self.content_h),
+                    (top + 40.0).min(self.content_h),
                 ));
             });
             frame.stroke(
@@ -415,14 +519,12 @@ pub(super) fn mtext_editor_overlay<'a>(
         ed,
         &styles,
         crate::ui::modal::ModalSizing::INTRINSIC,
-        writing_area_px,
         (writing_area_px * 0.5).max(1.0),
     );
     let content = mtext_editor_content(
         ed,
         &styles,
         crate::ui::modal::ModalSizing::FILL,
-        writing_area_px,
         (writing_area_px * 0.5).max(1.0),
     );
     let content = crate::ui::modal::intrinsic_with_min(
@@ -447,7 +549,6 @@ fn mtext_editor_content<'a>(
     ed: &'a super::super::mtext_editor::MTextEditorState,
     styles: &[String],
     sizing: crate::ui::modal::ModalSizing,
-    writing_area_px: f32,
     intrinsic_preview_height: f32,
 ) -> Element<'a, Message> {
     let width = sizing.width;
@@ -598,33 +699,6 @@ fn mtext_editor_content<'a>(
     let row2 = mtext_toolbar::format_row(ed);
 
     let preview_scale = ed.preview_scale();
-    let slider_min = 1e-6_f64;
-    let slider_max = f64::from(writing_area_px / preview_scale).max(slider_min * 2.0);
-    let width_slider = column![
-        row![
-            text(t!(
-                "Width: %{value}",
-                value = format!("{:.3}", ed.rect_width)
-            ))
-            .size(11),
-            Space::new().width(width),
-            text(format!("{:.0}%", ed.rect_width / slider_max * 100.0)).size(11),
-        ]
-        .width(width),
-        container(
-            iced::widget::slider(
-                slider_min..=slider_max,
-                ed.rect_width.clamp(slider_min, slider_max),
-                Message::MTextRectWidth,
-            )
-            .step((slider_max * 0.01).max(1e-6))
-            .width(width),
-        )
-        .padding([0.0, MTEXT_PREVIEW_PAD])
-        .width(width),
-    ]
-    .spacing(2)
-    .width(width);
 
     // ── Body: the rendered preview (the editor is preview-only). It fills the
     // space left by the toolbars, so the resizable modal's extra height flows
@@ -686,11 +760,39 @@ fn mtext_editor_content<'a>(
             }
         }
         let scale = preview_scale;
-        let content_h = if maxx >= minx {
-            ((maxy - miny) * scale + 2.0 * MTEXT_PREVIEW_PAD).max(40.0)
-        } else {
-            40.0
-        };
+        // The ruler reads along the layout's x axis, so a turned preview has
+        // none (the status bar's field still sets the width). The box grows
+        // from its attachment: rightwards, both ways or leftwards.
+        let ruler = (rotation == (1.0, 0.0)).then(|| {
+            let width = ed.rect_width as f32;
+            let growth = ed.box_growth();
+            let (left, right) = if growth == 2.0 {
+                (-width * 0.5, width * 0.5)
+            } else if growth < 0.0 {
+                (-width, 0.0)
+            } else {
+                (0.0, width)
+            };
+            BoxRuler {
+                left,
+                right,
+                growth,
+            }
+        });
+        if let Some(ruler) = ruler {
+            if maxx < minx {
+                (minx, maxx, miny, maxy) = (ruler.left, ruler.right, 0.0, 0.0);
+            }
+            minx = minx.min(ruler.left);
+            maxx = maxx.max(ruler.right);
+        }
+        let band = ruler.map_or(0.0, |_| MTEXT_RULER_H);
+        let content_h = band
+            + if maxx >= minx {
+                ((maxy - miny) * scale + 2.0 * MTEXT_PREVIEW_PAD).max(40.0)
+            } else {
+                40.0
+            };
         // Multi-column MTEXT lays its columns out side by side, so the content
         // can be wider than the editor; size the canvas to the real content
         // width and let the scroll area pan horizontally to reach later columns.
@@ -709,7 +811,7 @@ fn mtext_editor_content<'a>(
             miny,
             scale,
             content_h,
-            wrap_width_px: ed.rect_width as f32 * scale,
+            ruler,
             rotation,
         };
         let cv = canvas(prog)
@@ -744,34 +846,14 @@ fn mtext_editor_content<'a>(
             }
         })
         .padding(2)
+        .id("mtext-editor-viewport")
         .width(width)
         .height(preview_height)
         .into()
     };
 
-    // ── Top action bar: Apply keeps editing; Close saves and exits. Escape
-    // remains the explicit discard path.
-    let action_bar = container(
-        row![
-            iced::widget::Space::new().width(width),
-            crate::ui::style::style_manager::tb_button(t!("Apply"), Message::MTextApply, true),
-            crate::ui::style::style_manager::tb_button(
-                t!("Close Text Editor"),
-                Message::MTextOk,
-                true
-            ),
-        ]
-        .align_y(iced::Alignment::Center),
-    )
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.weak.color)),
-        ..Default::default()
-    })
-    .width(width)
-    .padding([5, 8]);
-
     container(
-        column![action_bar, row1, row2, width_slider, body]
+        column![row1, row2, body, mtext_toolbar::status_bar(ed)]
             .spacing(6)
             .width(width)
             .height(height),

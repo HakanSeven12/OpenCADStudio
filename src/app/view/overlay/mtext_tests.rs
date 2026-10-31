@@ -369,3 +369,151 @@ fn a_menu_action_closes_the_menu_and_acts() {
         Some(EditorMenu::Find)
     );
 }
+
+fn app_with(raw: &str) -> crate::app::OpenCADStudio {
+    let mut app = crate::app::OpenCADStudio::new_for_test();
+    app.tabs
+        .push(crate::app::document::DocumentTab::new_drawing(1));
+    app.active_tab = 1;
+    app.open_mtext_editor(glam::DVec3::ZERO, None, raw, 2.5, None);
+    app
+}
+
+fn mouse(event: iced::mouse::Event) -> Vec<Event> {
+    vec![Event::Mouse(event)]
+}
+
+#[test]
+fn the_ruler_handle_drags_the_box_width_and_the_band_is_not_text() {
+    let mut app = app_with("");
+    let ed = app.mtext_editor.as_mut().unwrap();
+    ed.rect_width = 20.0;
+    app.rebuild_mtext_preview();
+    let ed = app.mtext_editor.as_ref().unwrap();
+    let scale = ed.preview_scale();
+    let mut ui = overlay_sim(ed, Size::new(1280., 720.));
+    let view = ui
+        .find(iced::widget::Id::new("mtext-editor-viewport"))
+        .unwrap()
+        .visible_bounds()
+        .unwrap();
+    // Inside the frame's padding: the empty text starts at the ruler's left end.
+    let origin = view.x + 2. + MTEXT_PREVIEW_PAD;
+    let handle = iced::Point::new(origin + 20.0 * scale, view.y + 2. + MTEXT_RULER_H * 0.5);
+    ui.point_at(handle);
+    ui.simulate(mouse(iced::mouse::Event::ButtonPressed(
+        iced::mouse::Button::Left,
+    )));
+    let moved = iced::Point::new(handle.x + 5.0 * scale, handle.y);
+    ui.point_at(moved);
+    ui.simulate(mouse(iced::mouse::Event::CursorMoved { position: moved }));
+    ui.simulate(mouse(iced::mouse::Event::ButtonReleased(
+        iced::mouse::Button::Left,
+    )));
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::MTextBoxDrag(Some(w)) if (w - 25.0).abs() < 0.1)),
+        "{messages:?}"
+    );
+    assert!(messages
+        .iter()
+        .any(|m| matches!(m, Message::MTextBoxDrag(None))));
+    assert!(!messages
+        .iter()
+        .any(|m| matches!(m, Message::MTextSelStart(_))));
+    // A press on the band away from the handle does not move the caret.
+    let mut ui = overlay_sim(ed, Size::new(1280., 720.));
+    ui.point_at(iced::Point::new(origin + 5.0 * scale, handle.y));
+    ui.simulate(simulator::click());
+    assert!(!ui
+        .into_messages()
+        .any(|m| matches!(m, Message::MTextSelStart(_) | Message::MTextBoxDrag(_))));
+}
+
+#[test]
+fn a_ruler_drag_is_one_undo_step_and_the_field_takes_typing() {
+    let mut app = app_with("ab");
+    let before = app.mtext_editor.as_ref().unwrap().rect_width;
+    for width in [Some(30.0), Some(31.5), Some(33.0), None] {
+        let _ = app.update(Message::MTextBoxDrag(width));
+    }
+    let ed = app.mtext_editor.as_ref().unwrap();
+    assert_eq!(ed.rect_width, 33.0);
+    assert!(ed.keep_width);
+    assert_eq!(ed.rect_width_field(), "33");
+    app.mtext_undo();
+    assert_eq!(app.mtext_editor.as_ref().unwrap().rect_width, before);
+    // Typing: a valid width applies at once; a half-typed one is shown as typed.
+    let _ = app.update(Message::MTextRectWidthField("12.".into()));
+    let ed = app.mtext_editor.as_ref().unwrap();
+    assert_eq!(
+        (ed.rect_width, ed.rect_width_field().as_str()),
+        (12.0, "12.")
+    );
+    let _ = app.update(Message::MTextRectWidthField("x".into()));
+    let ed = app.mtext_editor.as_ref().unwrap();
+    assert_eq!((ed.rect_width, ed.rect_width_field().as_str()), (12.0, "x"));
+    assert_eq!(
+        app.mtext_editor
+            .as_ref()
+            .unwrap()
+            .build_mtext()
+            .rectangle_width,
+        12.0
+    );
+}
+
+#[test]
+fn the_status_bar_counts_and_carries_the_three_actions() {
+    let app = app_with(r"ab\Pc\S1/2;");
+    let ed = app.mtext_editor.as_ref().unwrap();
+    let mut ui = overlay_sim(ed, Size::new(1280., 720.));
+    let counts = crate::tr!("mtext-toolbar", "counts", characters = 6, paragraphs = 2);
+    assert!(ui.find(counts).is_ok());
+    for (label, expected) in [
+        (t!("Cancel").into_owned(), "cancel"),
+        (t!("Apply").into_owned(), "apply"),
+        (t!("Close Text Editor").into_owned(), "ok"),
+    ] {
+        let mut ui = overlay_sim(ed, Size::new(1280., 720.));
+        ui.click(label.clone()).unwrap();
+        let messages: Vec<_> = ui.into_messages().collect();
+        let found = messages.iter().any(|m| match expected {
+            "cancel" => matches!(m, Message::MTextCancel),
+            "apply" => matches!(m, Message::MTextApply),
+            _ => matches!(m, Message::MTextOk),
+        });
+        assert!(found, "{label}: {messages:?}");
+    }
+    // The actions sit under the text.
+    let view = ui
+        .find(iced::widget::Id::new("mtext-editor-viewport"))
+        .unwrap()
+        .visible_bounds()
+        .unwrap();
+    let apply = bounds_of(&mut ui, t!("Apply").into_owned());
+    assert!(apply.y > view.y + view.height);
+}
+
+#[test]
+fn a_selection_band_covers_descenders_without_reaching_the_next_line() {
+    let glyph = |vis: usize, y: f32| crate::entities::text_support::GlyphBox {
+        vis,
+        xmin: vis as f32,
+        xmax: vis as f32 + 1.0,
+        ymin: y,
+        ymax: y + 2.0,
+        is_rtl: false,
+        local: [0.0; 4],
+    };
+    let boxes = [glyph(0, 10.0), glyph(1, 6.0)];
+    let (low, high) = line_band(&boxes, &boxes[0]);
+    // Below the box for descenders, above it for accents.
+    assert!(low < 10.0 && high > 12.0);
+    // Never into the next line's half of the gap.
+    assert!(low >= (8.0 + 10.0) * 0.5);
+    let (low, high) = line_band(&boxes, &boxes[1]);
+    assert!(high <= (8.0 + 10.0) * 0.5 && low < 6.0);
+}

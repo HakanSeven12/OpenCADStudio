@@ -160,3 +160,58 @@ pub(super) fn format_row(ed: &MTextEditorState) -> Element<'static, Message> {
     .padding([2, 2])
     .into()
 }
+
+/// The bar under the text: what the text holds, the box width, and the
+/// editor's actions. Cancel discards, as Escape does; Apply saves and keeps
+/// editing; Close Text Editor saves and closes.
+pub(super) fn status_bar(ed: &MTextEditorState) -> Element<'static, Message> {
+    let counts = crate::tr!(
+        "mtext-toolbar",
+        "counts",
+        characters = ed.visible_character_count(),
+        paragraphs = ed.doc.paragraphs.len().max(1)
+    );
+    let box_width = tip(
+        row![
+            text(label!("box-width")).size(11),
+            text_input("", &ed.rect_width_field())
+                .on_input(Message::MTextRectWidthField)
+                .width(90)
+                .padding([3, 5])
+                .size(11),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center),
+        label!("tip-box"),
+    );
+    let action = |name: String, message: Message, primary: bool| {
+        button(text(name).size(12))
+            .on_press(message)
+            .padding([5, 14])
+            .style(if primary {
+                button::primary
+            } else {
+                button::secondary
+            })
+    };
+    container(
+        row![
+            text(counts).size(11),
+            separator(),
+            box_width,
+            Space::new().width(Fill),
+            action(t!("Cancel").into_owned(), Message::MTextCancel, false),
+            action(t!("Apply").into_owned(), Message::MTextApply, false),
+            action(t!("Close Text Editor").into_owned(), Message::MTextOk, true),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([5, 8])
+    .width(Fill)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.weak.color)),
+        ..Default::default()
+    })
+    .into()
+}

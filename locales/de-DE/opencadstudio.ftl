@@ -108,6 +108,9 @@ mtext-toolbar = MTEXT
     .format-off = Off
     .format-mixed = Mixed
     .format-unavailable = Not available for this text or selection
+    .counts = { $characters } characters · { $paragraphs } paragraphs
+    .box-width = Box width
+    .tip-box = The width the text wraps at; drag the ruler above the text to change it
 
 action =
     .close = Schließen

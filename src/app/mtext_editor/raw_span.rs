@@ -136,7 +136,7 @@ fn patch_paragraphs(
 }
 
 /// A number as a code writes it.
-fn number(value: f64) -> String {
+pub(super) fn number(value: f64) -> String {
     let text = format!("{value:.6}");
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }

@@ -108,6 +108,9 @@ mtext-toolbar = MTEXT
     .format-off = Ki
     .format-mixed = Vegyes
     .format-unavailable = Ennél a szövegnél vagy kijelölésnél nem érhető el
+    .counts = { $characters } karakter · { $paragraphs } bekezdés
+    .box-width = Dobozszélesség
+    .tip-box = A szöveg tördelési szélessége; a szöveg feletti vonalzó húzásával is állítható
 
 action =
     .close = Bezárás

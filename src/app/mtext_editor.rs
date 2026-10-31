@@ -159,6 +159,11 @@ pub struct MTextEditorState {
     /// The width was set by the MTEXT command's box (or its Width option):
     /// the editor keeps it instead of fitting its own size.
     pub keep_width: bool,
+    /// The box width as typed in the status bar while it is not a valid
+    /// width yet; `None` shows `rect_width` itself.
+    pub rect_width_draft: Option<String>,
+    /// A ruler drag is under way: the whole drag is one undo step.
+    pub(super) box_dragging: bool,
     pub rect_height: String,
     pub annotative: bool,
     pub column_type: i16,
@@ -254,6 +259,8 @@ impl MTextEditorState {
             // own width when editing an existing MText.
             rect_width: (height * 20.0).max(1.0),
             keep_width: false,
+            rect_width_draft: None,
+            box_dragging: false,
             rect_height: "0".to_string(),
             annotative: false,
             column_type: 0,

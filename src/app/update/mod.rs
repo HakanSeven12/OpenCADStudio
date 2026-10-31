@@ -7771,14 +7771,6 @@ impl OpenCADStudio {
                 self.mtext_apply_span_number("height", s);
                 Task::none()
             }
-            Message::MTextRectWidth(width) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.rect_width = width.max(1e-6);
-                    ed.keep_width = true;
-                }
-                self.rebuild_mtext_preview();
-                Task::none()
-            }
             Message::MTextColorChanged(color) => {
                 self.mtext_apply_color(color);
                 Task::none()
@@ -7839,6 +7831,14 @@ impl OpenCADStudio {
                     ed.menu = if ed.menu == menu { None } else { menu };
                     ed.color_picker_open = false;
                 }
+                Task::none()
+            }
+            Message::MTextRectWidthField(value) => {
+                self.mtext_rect_width_field(value);
+                Task::none()
+            }
+            Message::MTextBoxDrag(width) => {
+                self.mtext_box_drag(width);
                 Task::none()
             }
             Message::MTextMenuPick(message) => {

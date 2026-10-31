@@ -24,13 +24,15 @@ mod raw_clear;
 mod raw_commit;
 mod raw_edit;
 mod raw_geometry;
+mod raw_list;
 #[allow(dead_code)]
 mod raw_operations;
 mod raw_span;
 mod raw_stack;
 mod raw_style;
-pub(in crate::app) use raw_stack::{FractionPart, Script};
 pub(in crate::app) use raw_edit::FormatState;
+pub(in crate::app) use raw_list::ListKind;
+pub(in crate::app) use raw_stack::{FractionPart, Script};
 pub(in crate::app) use raw_style::ValueOrigin;
 
 /// Character-level format toggles applied to the current selection by the
@@ -149,6 +151,11 @@ pub struct MTextEditorState {
     pub attachment: AttachmentPoint,
     /// Line spacing factor (entity field).
     pub line_spacing: f32,
+    /// Whether the spacing is at least the factor or exactly it (entity
+    /// field of an MTEXT and of a multileader's text).
+    pub line_spacing_style: codec::entities::LineSpacingStyle,
+    /// The spacing factor as typed while it is not a valid factor yet.
+    pub line_spacing_draft: Option<String>,
     /// Object rotation in degrees, kept as typed so partial input is allowed.
     pub rotation: String,
     /// The rotation field was edited; until then the opened angle is kept
@@ -259,6 +266,8 @@ impl MTextEditorState {
             caret_blink_on: true,
             attachment: AttachmentPoint::TopLeft,
             line_spacing: 1.0,
+            line_spacing_style: Default::default(),
+            line_spacing_draft: None,
             rotation: "0".to_string(),
             rotation_dirty: false,
             rotation_plane_supported: true,
@@ -404,6 +413,7 @@ impl MTextEditorState {
         mt.rectangle_width = self.rect_width;
         mt.attachment_point = self.attachment;
         mt.line_spacing_factor = self.line_spacing as f64;
+        mt.line_spacing_style = self.line_spacing_style;
         mt.style = self.style.clone();
         mt.is_annotative = self.annotative;
         if let Some(color) = self.object_color {
@@ -721,6 +731,7 @@ fn vertical_caret_target(
 fn seed_mtext_state(state: &mut MTextEditorState, m: &MText) {
     state.attachment = m.attachment_point;
     state.line_spacing = m.line_spacing_factor as f32;
+    state.line_spacing_style = m.line_spacing_style;
     let degrees = format!("{:.6}", m.rotation.to_degrees());
     state.rotation = degrees
         .trim_end_matches('0')
@@ -777,6 +788,7 @@ impl super::OpenCADStudio {
                 }
                 Some(EntityType::MultiLeader(ml)) => {
                     state.line_spacing = ml.context.line_spacing_factor as f32;
+                    state.line_spacing_style = ml.context.line_spacing_style;
                     // A multileader without a width keeps none until one is set.
                     state.keep_width = ml.context.text_width > 0.0;
                     if state.keep_width {
@@ -1098,6 +1110,10 @@ impl super::OpenCADStudio {
     /// Insert text (or replace the current selection) at the preview caret,
     /// patching the raw source in place (a line break goes in as `\P`).
     pub(super) fn mtext_type(&mut self, s: &str) {
+        // Enter in a list item continues the list or leaves it.
+        if s == "\n" && self.mtext_list_enter() {
+            return;
+        }
         self.raw_type(s, true);
     }
 
@@ -1288,6 +1304,8 @@ impl super::OpenCADStudio {
 
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod list_tests;
 #[cfg(test)]
 mod rotation_tests;
 #[cfg(test)]

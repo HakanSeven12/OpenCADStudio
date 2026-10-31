@@ -123,6 +123,13 @@ mtext-toolbar = MTEXT
     .stack-tolerance = Egymás alatt, vonal nélkül
     .insert = Beszúrás
     .cancel = Mégse
+    .bullets = Felsorolás
+    .numbering = Számozott lista
+    .no-list = Nincs lista
+    .tab = Tabulátor beszúrása
+    .spacing-factor = Sorköz tényező (0,25–4)
+    .at-least = Legalább
+    .exactly = Pontosan
 
 action =
     .close = Bezárás

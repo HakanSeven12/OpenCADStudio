@@ -24,6 +24,7 @@ editor_history! {
     style: String, font: String, width: String, object_style: super::raw_style::ObjectStyle,
     object_color: Option<codec::types::Color>, color_aci: u16, oblique: String, char_space: String,
     annotative: bool, attachment: AttachmentPoint, line_spacing: f32, rect_width: f64,
+    line_spacing_style: codec::entities::LineSpacingStyle, line_spacing_draft: Option<String>,
     sel: Option<(usize, usize)>, caret: usize, sel_anchor: usize,
     typing_format: super::raw_edit::TypingFormat, rect_width_draft: Option<String>,
 }
@@ -144,6 +145,44 @@ impl crate::app::OpenCADStudio {
         self.rebuild_mtext_preview();
     }
 
+    /// The spacing factor typed in the Paragraph menu: kept as typed; a
+    /// factor from 0.25 to 4 applies at once, as AutoCAD accepts.
+    pub(in crate::app) fn mtext_line_spacing_input(&mut self, value: String) {
+        let Some(ed) = self.mtext_editor.as_mut() else {
+            return;
+        };
+        match value
+            .trim()
+            .replace(',', ".")
+            .parse::<f32>()
+            .ok()
+            .filter(|f| (0.25..=4.0).contains(f))
+        {
+            Some(factor) => {
+                ed.record_undo();
+                ed.line_spacing = factor;
+                ed.line_spacing_draft =
+                    (super::raw_span::number(f64::from(factor)) != value).then_some(value);
+            }
+            None => ed.line_spacing_draft = Some(value),
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    /// At least the factor (`false`) or exactly it (`true`).
+    pub(in crate::app) fn mtext_line_spacing_mode(&mut self, exact: bool) {
+        use codec::entities::LineSpacingStyle as S;
+        let Some(ed) = self.mtext_editor.as_mut() else {
+            return;
+        };
+        let style = if exact { S::Exactly } else { S::AtLeast };
+        if ed.line_spacing_style != style {
+            ed.record_undo();
+            ed.line_spacing_style = style;
+        }
+        self.rebuild_mtext_preview();
+    }
+
     pub(in crate::app) fn mtext_undo(&mut self) {
         if let Some(ed) = self.mtext_editor.as_mut() {
             if let Some(previous) = ed.undo.pop() {
@@ -232,6 +271,7 @@ impl crate::app::OpenCADStudio {
                         && t.style == mt.style
                         && t.attachment_point == mt.attachment_point
                         && t.line_spacing_factor == mt.line_spacing_factor
+                        && t.line_spacing_style == mt.line_spacing_style
                         && t.rectangle_width == mt.rectangle_width
                         && t.rectangle_height == mt.rectangle_height
                         && t.column_data == mt.column_data
@@ -242,6 +282,7 @@ impl crate::app::OpenCADStudio {
                     ml.context.text_string == mt.value
                         && ml.context.text_height == mt.height
                         && ml.context.line_spacing_factor == mt.line_spacing_factor
+                        && ml.context.line_spacing_style == mt.line_spacing_style
                         && !(keep_width
                             && mt.rectangle_width > 0.0
                             && ml.context.text_width != mt.rectangle_width),
@@ -266,6 +307,7 @@ impl crate::app::OpenCADStudio {
                         t.style = mt.style;
                         t.attachment_point = mt.attachment_point;
                         t.line_spacing_factor = mt.line_spacing_factor;
+                        t.line_spacing_style = mt.line_spacing_style;
                         t.rectangle_width = mt.rectangle_width;
                         t.rectangle_height = mt.rectangle_height;
                         t.column_data = mt.column_data;
@@ -274,6 +316,7 @@ impl crate::app::OpenCADStudio {
                         ml.context.text_string = mt.value;
                         ml.context.text_height = mt.height;
                         ml.context.line_spacing_factor = mt.line_spacing_factor;
+                        ml.context.line_spacing_style = mt.line_spacing_style;
                         if keep_width && mt.rectangle_width > 0.0 {
                             ml.context.text_width = mt.rectangle_width;
                         }

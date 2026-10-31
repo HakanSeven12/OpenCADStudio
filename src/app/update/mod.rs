@@ -7833,6 +7833,22 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::MTextList(kind) => {
+                self.mtext_list(kind);
+                Task::none()
+            }
+            Message::MTextTab => {
+                self.mtext_type("\t");
+                Task::none()
+            }
+            Message::MTextLineSpacingInput(value) => {
+                self.mtext_line_spacing_input(value);
+                Task::none()
+            }
+            Message::MTextLineSpacingMode(exact) => {
+                self.mtext_line_spacing_mode(exact);
+                Task::none()
+            }
             Message::MTextFractionOpen => {
                 self.mtext_fraction_open();
                 Task::none()
@@ -7975,6 +7991,7 @@ impl OpenCADStudio {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.record_undo();
                     ed.line_spacing = f;
+                    ed.line_spacing_draft = None;
                 }
                 self.rebuild_mtext_preview();
                 Task::none()

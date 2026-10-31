@@ -123,6 +123,13 @@ mtext-toolbar = MTEXT
     .stack-tolerance = Stacked, no line
     .insert = Insert
     .cancel = Cancel
+    .bullets = Bulleted list
+    .numbering = Numbered list
+    .no-list = No list
+    .tab = Insert tab
+    .spacing-factor = Spacing factor (0.25–4)
+    .at-least = At least
+    .exactly = Exactly
 
 action =
     .close = Schließen

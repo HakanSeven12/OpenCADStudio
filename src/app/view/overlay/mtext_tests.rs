@@ -243,7 +243,7 @@ fn every_popup_opens_under_its_own_trigger_inside_the_window() {
             let trigger = bounds_of(&mut ui, menu_title(key));
             let first = match menu {
                 EditorMenu::More => label!("superscript"),
-                EditorMenu::Paragraph => format!("{} 1", label!("line-spacing")),
+                EditorMenu::Paragraph => label!("bullets"),
                 EditorMenu::Columns => label!("no-columns"),
                 EditorMenu::Justify => t!("Top Left").into_owned(),
                 EditorMenu::Symbols => label!("diameter"),

@@ -4796,6 +4796,14 @@ pub enum Message {
     MTextMenu(Option<mtext_editor::EditorMenu>),
     /// A menu action: the menu closes, then the message runs.
     MTextMenuPick(Box<Message>),
+    /// Bullets, numbering, or (`None`) plain paragraphs again.
+    MTextList(Option<mtext_editor::ListKind>),
+    /// Insert a tab at the caret.
+    MTextTab,
+    /// The line spacing factor typed in the Paragraph menu.
+    MTextLineSpacingInput(String),
+    /// Line spacing exactly the factor (`true`) or at least it.
+    MTextLineSpacingMode(bool),
     /// Open (or, from its own row, close) the Fraction panel.
     MTextFractionOpen,
     /// A Fraction panel field, as typed.

@@ -4,7 +4,8 @@
 //! menu and then acts; a field or a toggle leaves it open.
 use super::*;
 use crate::app::mtext_editor::{
-    EditorMenu, FractionPart, JustifyChoice, MTextEditorState, MTextFmt, ParaNumber, Script,
+    EditorMenu, FractionPart, JustifyChoice, ListKind, MTextEditorState, MTextFmt, ParaNumber,
+    Script,
 };
 use codec::entities::mtext_format::StackingType;
 use iced::widget::column;
@@ -270,7 +271,38 @@ fn more_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 }
 
 fn paragraph_panel(ed: &MTextEditorState) -> Element<'static, Message> {
-    let mut panel = Panel::new(title(EditorMenu::Paragraph), 240.0);
+    let list = ed.list_kind();
+    let exact = ed.line_spacing_style == codec::entities::LineSpacingStyle::Exactly;
+    let factor = ed
+        .line_spacing_draft
+        .clone()
+        .unwrap_or_else(|| format!("{}", ed.line_spacing));
+    let mut panel = Panel::new(title(EditorMenu::Paragraph), 260.0)
+        .push(item(
+            if list == Some(ListKind::Bullet) {
+                "✓"
+            } else {
+                "•"
+            },
+            label!("bullets"),
+            Message::MTextList(Some(ListKind::Bullet)),
+        ))
+        .push(item(
+            if list == Some(ListKind::Number) {
+                "✓"
+            } else {
+                "1."
+            },
+            label!("numbering"),
+            Message::MTextList(Some(ListKind::Number)),
+        ))
+        .push(item(
+            check(list.is_none()),
+            label!("no-list"),
+            Message::MTextList(None),
+        ))
+        .push(item("⇥", label!("tab"), Message::MTextTab))
+        .separator();
     for (factor, name) in [(1.0, "1"), (1.5, "1.5"), (2.0, "2")] {
         panel = panel.push(item(
             check((ed.line_spacing - factor).abs() < 1e-3),
@@ -278,6 +310,22 @@ fn paragraph_panel(ed: &MTextEditorState) -> Element<'static, Message> {
             Message::MTextLineSpacing(factor),
         ));
     }
+    let panel = panel
+        .push(field(
+            label!("spacing-factor"),
+            &factor,
+            Message::MTextLineSpacingInput,
+        ))
+        .push(row_button(
+            check(!exact),
+            label!("at-least"),
+            Message::MTextLineSpacingMode(false),
+        ))
+        .push(row_button(
+            check(exact),
+            label!("exactly"),
+            Message::MTextLineSpacingMode(true),
+        ));
     let number = |name: String, value: &str, kind: ParaNumber| {
         field(name, value, move |v| Message::MTextParagraphNumber(kind, v))
     };

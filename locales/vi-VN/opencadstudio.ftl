@@ -5334,6 +5334,7 @@ properties =
     .current-color-scheme = Phối màu hiện tại
     .current-vertex-title-case = Đỉnh hiện tại
     .current-vertex-sentence-case = Đỉnh hiện tại
+    .visible-block = Khối hiển thị
     .current-control-point = Điểm điều khiển hiện tại
     .current-fit-point = Điểm khớp hiện tại
     .cv-frame = Khung điểm điều khiển (CV)

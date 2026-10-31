@@ -5340,6 +5340,7 @@ properties =
     .current-color-scheme = Nykyinen värimalli
     .current-vertex-title-case = Nykyinen Vertex
     .current-vertex-sentence-case = Nykyinen huippupiste
+    .visible-block = Näkyvä lohko
     .cutting-line = Leikkauslinja
     .dwg-payload = DWG hyötykuorma
     .dwg-version = DWG versio

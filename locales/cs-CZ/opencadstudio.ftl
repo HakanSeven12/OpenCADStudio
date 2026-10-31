@@ -5338,6 +5338,7 @@ properties =
     .current-color-scheme = Aktuální barevné schéma
     .current-vertex-title-case = Aktuální Vertex
     .current-vertex-sentence-case = Aktuální vrchol
+    .visible-block = Viditelný blok
     .cutting-line = Řezná linka
     .dwg-payload = DWG Užitečné zatížení
     .dwg-version = Verze DWG

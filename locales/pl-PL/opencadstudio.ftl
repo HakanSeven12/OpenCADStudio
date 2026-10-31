@@ -5340,6 +5340,7 @@ properties =
     .current-color-scheme = Aktualny schemat kolorów
     .current-vertex-title-case = Bieżący wierzchołek
     .current-vertex-sentence-case = Bieżący wierzchołek
+    .visible-block = Widoczny blok
     .cutting-line = Linia cięcia
     .dwg-payload = Ładunek DWG
     .dwg-version = Wersja DWG

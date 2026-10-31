@@ -5324,6 +5324,7 @@ properties =
     .current-color-scheme = 当前颜色方案
     .current-vertex-title-case = 当前顶点
     .current-vertex-sentence-case = 当前顶点
+    .visible-block = 可见块
     .cutting-line = 剖切线
     .dwg-payload = DWG 有效负载
     .dwg-version = DWG 版本

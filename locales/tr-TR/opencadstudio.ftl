@@ -5268,6 +5268,7 @@ properties =
     .current-color-scheme = Geçerli Renk Düzeni
     .current-vertex-title-case = Geçerli Köşe
     .current-vertex-sentence-case = Geçerli köşe
+    .visible-block = Görünür blok
     .current-control-point = Geçerli kontrol noktası
     .current-fit-point = Geçerli uydurma noktası
     .cv-frame = Kontrol çerçevesi

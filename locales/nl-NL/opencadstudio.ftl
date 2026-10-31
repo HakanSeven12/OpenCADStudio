@@ -5339,6 +5339,7 @@ properties =
     .current-color-scheme = Huidig kleurenschema
     .current-vertex-title-case = Huidig hoekpunt
     .current-vertex-sentence-case = Huidig hoekpunt
+    .visible-block = Zichtbaar blok
     .cutting-line = Snijlijn
     .dwg-payload = DWG Betaling
     .dwg-version = DWG Versie

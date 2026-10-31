@@ -5328,6 +5328,7 @@ properties =
     .current-color-scheme = Current Color Scheme
     .current-vertex-title-case = Current Vertex
     .current-vertex-sentence-case = Current vertex
+    .visible-block = Visible block
     .current-control-point = Current Control point
     .current-fit-point = Current fit point
     .cv-frame = CV frame

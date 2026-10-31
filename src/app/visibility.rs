@@ -388,6 +388,41 @@ impl OpenCADStudio {
         })
     }
 
+    /// The blocks a dynamic-block reference shows in its current visibility
+    /// state, as a read-only Properties row (#1862). None when it shows no
+    /// nested block.
+    pub(super) fn visible_blocks_property(
+        doc: &codec::Document,
+        handle: Handle,
+    ) -> Option<crate::scene::model::object::Property> {
+        let Some(EntityType::Insert(ins)) = doc.get_entity(handle) else {
+            return None;
+        };
+        doc.dynamic_visibility_for_insert(handle)?;
+        let record = doc.block_records.get(&ins.block_name)?;
+        let mut names: Vec<String> = Vec::new();
+        for member in &record.entity_handles {
+            let Some(EntityType::Insert(nested)) = doc.get_entity(*member) else {
+                continue;
+            };
+            if nested.common.invisible {
+                continue;
+            }
+            let name = doc
+                .dynamic_definition_for_insert(*member)
+                .and_then(|definition| doc.block_records.iter().find(|b| b.handle == definition))
+                .map_or_else(|| nested.block_name.clone(), |b| b.name.clone());
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        (!names.is_empty()).then(|| crate::scene::model::object::Property {
+            label: crate::t!("Visible block").into_owned(),
+            field: "dyn_visible_block",
+            value: crate::scene::model::object::PropValue::ReadOnly(names.join(", ")),
+        })
+    }
+
     /// Recompute the visibility grip for the active tab's single selection and
     /// append it (as a Triangle grip) to `selected_grips`. Clears it when the
     /// selection is not a dynamic-block reference. `wo` is the world offset

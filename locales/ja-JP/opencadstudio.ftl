@@ -5329,6 +5329,7 @@ properties =
     .current-color-scheme = 現在の配色
     .current-vertex-title-case = 現在の頂点
     .current-vertex-sentence-case = 現在の頂点
+    .visible-block = 表示ブロック
     .cutting-line = 切断線
     .dwg-payload = DWG ペイロード
     .dwg-version = DWG バージョン

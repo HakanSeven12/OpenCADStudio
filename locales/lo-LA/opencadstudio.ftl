@@ -5328,6 +5328,7 @@ properties =
     .current-color-scheme = ຊຸດສີປັດຈຸບັນ
     .current-vertex-title-case = ຈຸດຍອດປັດຈຸບັນ
     .current-vertex-sentence-case = ຈຸດຍອດປັດຈຸບັນ
+    .visible-block = ບລັອກທີ່ເຫັນ
     .current-control-point = ຈຸດຄວບຄຸມປັດຈຸບັນ
     .current-fit-point = ຈຸດແນບພໍດີປັດຈຸບັນ
     .cv-frame = ເຟຣມ CV

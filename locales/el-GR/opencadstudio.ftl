@@ -5330,6 +5330,7 @@ properties =
     .current-color-scheme = Τρέχων συνδυασμός χρωμάτων
     .current-vertex-title-case = Τρέχουσα κορυφή
     .current-vertex-sentence-case = Τρέχουσα κορυφή
+    .visible-block = Ορατό μπλοκ
     .current-control-point = Τρέχον σημείο ελέγχου
     .current-fit-point = Τρέχον σημείο προσαρμογής
     .cv-frame = Πλαίσιο CV

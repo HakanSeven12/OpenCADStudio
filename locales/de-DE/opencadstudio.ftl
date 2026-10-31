@@ -5339,6 +5339,7 @@ properties =
     .current-color-scheme = Aktuelles Farbschema
     .current-vertex-title-case = Aktueller Scheitelpunkt
     .current-vertex-sentence-case = Aktueller Scheitelpunkt
+    .visible-block = Sichtbarer Block
     .cutting-line = Schnittlinie
     .dwg-payload = DWG-Nutzdaten
     .dwg-version = DWG-Version

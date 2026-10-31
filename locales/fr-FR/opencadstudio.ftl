@@ -5342,6 +5342,7 @@ properties =
     .current-color-scheme = Schéma de couleur actuel
     .current-vertex-title-case = Sommet actuel
     .current-vertex-sentence-case = Sommet actuel
+    .visible-block = Bloc visible
     .cutting-line = Ligne de coupe
     .dwg-payload = DWG Charge utile
     .dwg-version = Version DWG

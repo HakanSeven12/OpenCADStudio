@@ -5340,6 +5340,7 @@ properties =
     .current-color-scheme = 현재 색 구성표
     .current-vertex-title-case = 현재 정점
     .current-vertex-sentence-case = 현재 정점
+    .visible-block = 표시 블록
     .cutting-line = 절단선
     .dwg-payload = DWG 페이로드
     .dwg-version = DWG 버전

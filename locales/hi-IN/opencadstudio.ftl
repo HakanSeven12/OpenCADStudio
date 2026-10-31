@@ -5329,6 +5329,7 @@ properties =
     .current-color-scheme = वर्तमान रंग योजना
     .current-vertex-title-case = वर्तमान शीर्ष
     .current-vertex-sentence-case = वर्तमान शीर्ष
+    .visible-block = दृश्य ब्लॉक
     .cutting-line = काटना लाइन
     .dwg-payload = DWGPलोड
     .dwg-version = DWG संस्करण

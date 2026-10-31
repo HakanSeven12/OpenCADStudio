@@ -5353,6 +5353,7 @@ properties =
     .current-color-scheme = نظام الألوان الحالي
     .current-vertex-title-case = الرأس الحالي
     .current-vertex-sentence-case = الرأس الحالي
+    .visible-block = الكتلة المرئية
     .cutting-line = خط القطع
     .dwg-payload = حمولة DWG
     .dwg-version = إصدار DWG

@@ -5340,6 +5340,7 @@ properties =
     .current-color-scheme = Текуща цветова схема
     .current-vertex-title-case = Текущ връх
     .current-vertex-sentence-case = Текущ връх
+    .visible-block = Видим блок
     .cutting-line = Режеща линия
     .dwg-payload = DWG данни
     .dwg-version = DWG Версия

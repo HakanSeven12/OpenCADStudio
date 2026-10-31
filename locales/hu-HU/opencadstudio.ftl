@@ -5324,6 +5324,7 @@ properties =
     .current-color-scheme = Jelenlegi színséma
     .current-vertex-title-case = Jelenlegi csúcs
     .current-vertex-sentence-case = Aktuális csúcs
+    .visible-block = Látható blokk
     .cutting-line = Vágási vonal
     .dwg-payload = DWG-adattartalom
     .dwg-version = DWG verzió

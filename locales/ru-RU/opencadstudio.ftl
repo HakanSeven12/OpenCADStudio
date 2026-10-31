@@ -5342,6 +5342,7 @@ properties =
     .current-color-scheme = Текущая цветовая схема
     .current-vertex-title-case = Текущая вершина
     .current-vertex-sentence-case = Текущая вершина
+    .visible-block = Видимый блок
     .cutting-line = Линия разрезания
     .dwg-payload = DWG Полезная нагрузка
     .dwg-version = DWG Версия

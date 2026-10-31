@@ -1071,7 +1071,7 @@ impl Pipeline {
             visibility: vis,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+                has_dynamic_offset: binding < 2,
                 min_binding_size: None,
             },
             count: None,
@@ -5058,7 +5058,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     if self.wipeout_skip_flags.get(i).copied().unwrap_or(false) {
                         continue;
                     }
-                    pass.set_bind_group(1, &wipeout.bind_group, &[]);
+                    pass.set_bind_group(1, &wipeout.bind_group, &wipeout.dynamic_offsets);
                     pass.set_vertex_buffer(0, wipeout.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, wipeout.instance_buffer.slice(..));
                     pass.draw(0..6, 0..wipeout.instance_count);

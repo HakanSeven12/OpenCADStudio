@@ -3,6 +3,7 @@
 //! character. Changing one patches only those controls (and the runs that
 //! merely repeat them); every other byte stays.
 use super::raw_adapter::{EditError, Kind, SourceIndex};
+use super::raw_edit::editor_document;
 use super::raw_operations::apply_patches;
 use super::*;
 use std::ops::Range;
@@ -19,21 +20,46 @@ pub(in crate::app) struct ObjectStyle {
     pub font_flags: (bool, bool),
 }
 
-/// The top-level `code` controls ahead of the first character: the object
-/// defaults. A control inside a group or after text formats characters.
+/// The `code` controls ahead of the first character that apply to the whole
+/// text: the object defaults. That is a top-level control, or one inside
+/// groups that hold all of the text, as AutoCAD writes a whole-text font
+/// (`{\fArial|b0|i0;...}`). A control in a group that ends before the last
+/// character, or after any character, formats only part of it.
 pub(super) fn leading_controls(raw: &str, code: char) -> Vec<Range<usize>> {
     let index = SourceIndex::new(raw);
     let end = index.units.first().map_or(raw.len(), |u| u.raw.start);
-    let mut depth = 0;
+    let text_end = index.units.last().map_or(raw.len(), |u| u.raw.end);
+    // Where each group closes, by the position of its opening brace.
+    let mut closes = std::collections::HashMap::new();
+    let mut open = Vec::new();
+    for t in &index.tokens {
+        match t.kind {
+            Kind::Open => open.push(t.raw.start),
+            Kind::Close => {
+                if let Some(start) = open.pop() {
+                    closes.insert(start, t.raw.start);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut enclosing: Vec<usize> = Vec::new();
     let mut ranges = Vec::new();
     for t in &index.tokens {
         if t.raw.start >= end {
             break;
         }
         match t.kind {
-            Kind::Open => depth += 1,
-            Kind::Close => depth -= 1,
-            Kind::Control(c) if depth == 0 && c.eq_ignore_ascii_case(&code) => {
+            Kind::Open => enclosing.push(t.raw.start),
+            Kind::Close => {
+                enclosing.pop();
+            }
+            Kind::Control(c)
+                if c.eq_ignore_ascii_case(&code)
+                    && enclosing
+                        .iter()
+                        .all(|g| closes.get(g).is_some_and(|close| *close >= text_end)) =>
+            {
                 ranges.push(t.raw.clone())
             }
             _ => {}
@@ -144,6 +170,32 @@ fn root_font(raw: &str) -> Option<MTextFont> {
     font_of(&raw[last])
 }
 
+/// The one font every character in `cells` is written in, when they share
+/// one; a character in the style's font, or two faces, gives none.
+fn uniform_font(cells: &[Cell]) -> Option<MTextFont> {
+    let mut font: Option<MTextFont> = None;
+    for cell in cells {
+        let (Cell::Char(_, p) | Cell::Stack { props: p, .. }) = cell else {
+            continue;
+        };
+        let own = p.font.as_ref().filter(|f| !f.name.trim().is_empty())?;
+        match &font {
+            None => font = Some(own.clone()),
+            Some(f) if f.name.eq_ignore_ascii_case(&own.name) => {}
+            Some(_) => return None,
+        }
+    }
+    font
+}
+
+/// The font the whole text is written in: the object font, or else the one
+/// font every character shares, however the codes group them (AutoCAD can
+/// write a font group per paragraph, and text typed later can sit outside
+/// the first one).
+fn text_font(raw: &str) -> Option<MTextFont> {
+    root_font(raw).or_else(|| uniform_font(&doc_to_cells(&editor_document(raw))))
+}
+
 /// Runs whose own font only repeats the object face (bold and italic must
 /// name a face to be stored) follow an object font change, keeping their
 /// flags. Runs in a genuinely different face keep it.
@@ -186,6 +238,8 @@ fn patch_font(
     let index = SourceIndex::new(raw);
     let count = index.validate(false)?;
     let old = root_font(raw);
+    // A new object font keeps the flags of the font the text is written in.
+    let template = old.clone().or_else(|| text_font(raw));
     if name.is_none()
         && old.as_ref().is_some_and(|f| {
             (f.bold_explicit && f.bold != style_flags.0)
@@ -201,7 +255,7 @@ fn patch_font(
         .map(|r| (r, String::new()))
         .collect();
     if let Some(name) = name {
-        let mut font = old.unwrap_or_else(|| MTextFont::from_name(name));
+        let mut font = template.unwrap_or_else(|| MTextFont::from_name(name));
         font.name = name.to_owned();
         patches.push((0..0, super::raw_edit::font_code(&font)?));
     }
@@ -233,14 +287,28 @@ impl MTextEditorState {
     pub(super) fn seed_object_values(&mut self, doc: &codec::Document) {
         let raw = self.content.text();
         self.object_style = ObjectStyle::of(doc, &self.style);
-        self.font = root_font(&raw).map_or_else(String::new, |f| f.name);
+        self.font = text_font(&raw).map_or_else(String::new, |f| f.name);
         self.width = number_text(base_width(&raw, self.object_style.width).unwrap_or(1.));
+    }
+
+    /// What the Font field shows: the selection's font when every selected
+    /// character shares one, else the font of the whole text.
+    pub(in crate::app) fn font_field(&self) -> String {
+        let range = self.selected_range();
+        if !range.is_empty() {
+            let selected = doc_to_cells(&self.doc).get(range).and_then(uniform_font);
+            if let Some(font) = selected {
+                return font.name;
+            }
+        }
+        self.font.clone()
     }
 
     pub(in crate::app) fn value_origin(&self, field: &str) -> ValueOrigin {
         let raw = self.content.text();
         let code = if field == "font" { 'f' } else { 'W' };
-        if !leading_controls(&raw, code).is_empty() {
+        if !leading_controls(&raw, code).is_empty() || field == "font" && text_font(&raw).is_some()
+        {
             return ValueOrigin::Custom;
         }
         // A run that only repeats the style's face to carry bold or italic
@@ -333,7 +401,7 @@ impl crate::app::OpenCADStudio {
         let raw = ed.content.text();
         let name = (font != "[Style default]").then_some(font);
         let face = &ed.object_style.face;
-        let old = root_font(&raw).map_or_else(|| face.clone(), |f| f.name);
+        let old = text_font(&raw).map_or_else(|| face.clone(), |f| f.name);
         let new = name.map_or_else(|| face.clone(), str::to_owned);
         let result = patch_font(&raw, name, ed.object_style.font_flags)
             .and_then(|raw| follow_object_font(&raw, &old, &new));
@@ -486,5 +554,66 @@ mod tests {
         app.mtext_apply_font("Arial");
         app.mtext_apply_span_number("width", "2".into());
         assert_eq!(ed(&app).build_mtext().value, r"\W2;\fArial;ab");
+    }
+
+    #[test]
+    fn an_autocad_whole_text_font_group_is_the_object_font() {
+        // AutoCAD wraps a whole-text font in one group around all the text.
+        let mut app = app(r"{\fISOCTEUR|b0|i0|c238|p34;asd\Pqwe}");
+        assert_eq!(ed(&app).font, "ISOCTEUR");
+        assert_eq!(ed(&app).value_origin("font"), ValueOrigin::Custom);
+        app.mtext_apply_font("Arial");
+        assert_eq!(raw(&app), r"\fArial|b0|i0|c238|p34;{asd\Pqwe}");
+        assert_eq!(ed(&app).font, "Arial");
+        // A group around part of the text formats only that part.
+        let app = self::app(r"{\fISOCTEUR;ab}c");
+        assert_eq!(ed(&app).font, "");
+        assert_eq!(ed(&app).value_origin("font"), ValueOrigin::Mixed);
+    }
+
+    #[test]
+    fn a_font_every_character_shares_is_changed_whatever_groups_hold_it() {
+        // AutoCAD may write a font group per paragraph or per run: the text
+        // is still in one font.
+        for source in [
+            r"{\fISOCTEUR|b0|i0|c238|p34;asd}\P{\fISOCTEUR|b0|i0|c238|p34;qwe}",
+            r"{\fISOCTEUR|b0|i0|c238|p34;asd}{\fISOCTEUR|b0|i0|c238|p34;\S2^;}",
+        ] {
+            let mut app = app(source);
+            assert_eq!(ed(&app).font, "ISOCTEUR", "{source}");
+            assert_eq!(ed(&app).value_origin("font"), ValueOrigin::Custom);
+            app.mtext_apply_font("Arial");
+            assert_eq!(ed(&app).font, "Arial", "{source}");
+            let cells = super::doc_to_cells(&ed(&app).doc);
+            for cell in &cells {
+                if let super::Cell::Char(_, p) | super::Cell::Stack { props: p, .. } = cell {
+                    let font = p.font.as_ref().unwrap();
+                    assert_eq!(font.name, "Arial", "{source}: {}", raw(&app));
+                    assert_eq!(font.charset, Some(238), "{source}: flags kept");
+                }
+            }
+        }
+        // Characters in the style's font beside one in another: no one font.
+        let app = self::app(r"a{\fISOCTEUR;b}");
+        assert_eq!(ed(&app).font, "");
+    }
+
+    #[test]
+    fn the_font_field_shows_the_selections_own_font() {
+        let mut app = app(r"a{\fCourier New;bc}");
+        let select = |app: &mut OpenCADStudio, a: usize, b: usize| {
+            let ed = app.mtext_editor.as_mut().unwrap();
+            ed.sel = Some((a, b));
+            ed.sel_anchor = a;
+            ed.caret = b;
+        };
+        select(&mut app, 1, 3);
+        assert_eq!(ed(&app).font_field(), "Courier New");
+        // After a font for the selection, the field names it.
+        app.mtext_apply_font("Arial");
+        assert_eq!(ed(&app).font_field(), "Arial");
+        // A selection in two fonts shows the text's own (here the style's).
+        select(&mut app, 0, 3);
+        assert_eq!(ed(&app).font_field(), "");
     }
 }

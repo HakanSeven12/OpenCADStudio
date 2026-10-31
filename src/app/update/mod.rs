@@ -8275,7 +8275,14 @@ impl OpenCADStudio {
             Message::MTextPasteClip(text) => {
                 if let Some(text) = text.filter(|t| !t.is_empty()) {
                     // CR/LF arrive as line breaks; MText keeps "\n", drop "\r".
-                    self.mtext_type(&text.replace('\r', ""));
+                    let text = text.replace('\r', "");
+                    match self.mtext_clipboard.clone() {
+                        // Copied in this editor: paste it with its formatting.
+                        Some((plain, fragment)) if plain.replace('\r', "") == text => {
+                            self.raw_paste_fragment(&fragment)
+                        }
+                        _ => self.mtext_type(&text),
+                    }
                     self.rebuild_mtext_preview();
                 }
                 Task::none()

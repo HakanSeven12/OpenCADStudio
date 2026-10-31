@@ -556,3 +556,23 @@ fn the_counts_read_one_character_and_one_paragraph_in_the_singular() {
     assert_eq!(plain(one), "1 character · 1 paragraph");
     assert_eq!(plain(more), "2 characters · 3 paragraphs");
 }
+
+#[test]
+fn the_editor_measures_its_own_size_not_the_window() {
+    // The modal's natural size is its floor: it can grow from it but never
+    // shrink below it, and it stops at the window edge when moved. A bar
+    // asking for the whole window made the editor as wide as the window, so
+    // it could neither be made narrower nor moved.
+    let ed = editor();
+    let width_in = |window: f32| {
+        let mut ui = overlay_sim(&ed, Size::new(window, 900.));
+        ui.find(iced::widget::Id::new("mtext-editor-viewport"))
+            .unwrap()
+            .visible_bounds()
+            .unwrap()
+            .width
+    };
+    let (narrow, wide) = (width_in(1770.), width_in(2400.));
+    assert_eq!(narrow, wide, "the window's width leaked into the editor's");
+    assert!(narrow < 1500., "{narrow}");
+}

@@ -1290,13 +1290,17 @@ impl super::OpenCADStudio {
     }
 
     /// The currently selected text as plain text (for Ctrl+C), or `None` when
-    /// the selection is empty.
-    pub(super) fn mtext_selected_text(&self) -> Option<String> {
+    /// the selection is empty. The same characters as formatted MTEXT are
+    /// kept for a paste back into the editor.
+    pub(super) fn mtext_selected_text(&mut self) -> Option<String> {
         let ed = self.mtext_editor.as_ref()?;
         let (a, b) = ed.sel.filter(|&(a, b)| a < b)?;
         let cells = doc_to_cells(&ed.doc);
         let slice = cells.get(a..b.min(cells.len()))?;
-        Some(cells_to_doc(&ParagraphProperties::default(), slice).to_plain_text())
+        let doc = cells_to_doc(&ParagraphProperties::default(), slice);
+        let plain = doc.to_plain_text();
+        self.mtext_clipboard = Some((plain.clone(), doc.to_mtext_string()));
+        Some(plain)
     }
 
     /// Save & Close. See [`Self::commit_mtext_draft`].

@@ -616,10 +616,9 @@ fn mtext_editor_content<'a>(
     let annotative = checkbox(ed.annotative)
         .on_toggle(Message::MTextAnnotative)
         .size(14);
-    let font_sel = if ed.font.trim().is_empty() {
-        "[Style default]".to_string()
-    } else {
-        ed.font.clone()
+    let font_sel = match ed.font_field() {
+        font if font.trim().is_empty() => "[Style default]".to_string(),
+        font => font,
     };
     let mut font_opts: Vec<String> = MTEXT_FONTS.iter().map(|s| s.to_string()).collect();
     // The text's own font stays listed when it is not one of the bundled ones.
@@ -863,7 +862,7 @@ fn mtext_editor_content<'a>(
     };
 
     container(
-        column![row1, row2, body, mtext_toolbar::status_bar(ed)]
+        column![row1, row2, body, mtext_toolbar::status_bar(ed, width)]
             .spacing(6)
             .width(width)
             .height(height),

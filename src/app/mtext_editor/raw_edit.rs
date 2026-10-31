@@ -159,6 +159,49 @@ impl crate::app::OpenCADStudio {
         });
     }
 
+    /// Paste MTEXT copied in this editor: `fragment` keeps the characters'
+    /// formatting (superscript, fractions, fonts, colours). It replaces the
+    /// selection inside a group of its own, so nothing around it changes;
+    /// the characters must come out as the fragment holds them, or the paste
+    /// is refused.
+    pub(in crate::app) fn raw_paste_fragment(&mut self, fragment: &str) {
+        // The visible slots of a cell run: characters, breaks, fraction glyphs.
+        let glyphs = |cells: &[Cell]| -> String {
+            cells
+                .iter()
+                .map(|c| match c {
+                    Cell::Char(ch, _) => *ch,
+                    Cell::Break(..) => '\n',
+                    Cell::Stack { .. } => '\u{fffc}',
+                })
+                .collect()
+        };
+        self.edit_raw(|ed, index| {
+            let fragment_index = SourceIndex::new(fragment);
+            let added = fragment_index.validate(false)?;
+            let cleared = index.replace(ed.selected_range(), "")?;
+            let base = SourceIndex::new(&cleared.raw);
+            let count = base.validate(false)?;
+            let at = base.insertion_byte(cleared.caret)?;
+            let raw = apply_patches(&cleared.raw, vec![(at..at, format!("{{{fragment}}}"))])?;
+            base.certify(&raw, count + added)?;
+            SourceIndex::new(&raw).validate(false)?;
+            let before = doc_to_cells(&editor_document(&cleared.raw));
+            let after = doc_to_cells(&editor_document(&raw));
+            let caret = cleared.caret + added;
+            let inserted = after
+                .get(cleared.caret..caret)
+                .ok_or(EditError::ProjectionMismatch)?;
+            let kept = after.get(..cleared.caret) == before.get(..cleared.caret)
+                && after.get(caret..) == before.get(cleared.caret..);
+            // The text around stays; the pasted characters are the fragment's.
+            if !kept || glyphs(inserted) != glyphs(&doc_to_cells(&editor_document(fragment))) {
+                return Err(EditError::ProjectionMismatch);
+            }
+            Ok(TextEdit { raw, caret })
+        });
+    }
+
     /// Delete the selection, or one visible character (a fraction whole)
     /// before (`backspace`) or after the caret.
     pub(in crate::app) fn raw_delete(&mut self, backspace: bool) {
@@ -908,5 +951,37 @@ mod tests {
         assert_eq!(state(&app, Bold), Unavailable);
         app.mtext_undo();
         assert_eq!(raw(&app), r"a\Zopaque");
+    }
+
+    #[test]
+    fn copy_and_paste_in_the_editor_keep_superscript_fractions_and_formatting() {
+        use super::Cell;
+        let mut app = app(r"x\S2^;{\C1;\Lab}\S1/2;");
+        // Copy the superscript, the formatted letters and the fraction.
+        select(&mut app, 1, 7);
+        let plain = app.mtext_selected_text().unwrap();
+        let end = cells(&app).len();
+        caret(&mut app, end);
+        let _ = app.update(crate::app::Message::MTextPasteClip(Some(plain)));
+        let after = cells(&app);
+        assert_eq!(after.len(), 2 * end - 1);
+        // The pasted copy has the same stacks and character formatting.
+        for n in 1..7 {
+            match (&after[n], &after[n + 6]) {
+                (Cell::Char(a, p), Cell::Char(b, q)) => assert!(a == b && p == q, "{n}"),
+                (Cell::Stack { data: a, .. }, Cell::Stack { data: b, .. }) => {
+                    assert_eq!(a, b, "{n}")
+                }
+                other => panic!("{n}: {other:?}"),
+            }
+        }
+        // The text before the paste is byte for byte as it was.
+        assert!(raw(&app).starts_with(r"x\S2^;{\C1;\Lab}\S1/2;"));
+        // One undo step takes the paste back.
+        app.mtext_undo();
+        assert_eq!(raw(&app), r"x\S2^;{\C1;\Lab}\S1/2;");
+        // Text from elsewhere is pasted as plain text, as before.
+        let _ = app.update(crate::app::Message::MTextPasteClip(Some("2/3".into())));
+        assert!(raw(&app).ends_with("2/3"));
     }
 }

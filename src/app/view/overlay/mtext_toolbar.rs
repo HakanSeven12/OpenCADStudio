@@ -166,7 +166,9 @@ pub(super) fn format_row(ed: &MTextEditorState) -> Element<'static, Message> {
 /// The bar under the text: what the text holds, the box width, and the
 /// editor's actions. Cancel discards, as Escape does; Apply saves and keeps
 /// editing; Close Text Editor saves and closes.
-pub(super) fn status_bar(ed: &MTextEditorState) -> Element<'static, Message> {
+/// `width` is the editor's own: shrink while the window measures its natural
+/// size, fill once laid out, so the bar never asks for the whole window.
+pub(super) fn status_bar(ed: &MTextEditorState, width: Length) -> Element<'static, Message> {
     let counts = crate::tr!(
         "mtext-toolbar",
         "counts",
@@ -201,7 +203,7 @@ pub(super) fn status_bar(ed: &MTextEditorState) -> Element<'static, Message> {
             text(counts).size(11),
             separator(),
             box_width,
-            Space::new().width(Fill),
+            Space::new().width(width),
             action(t!("Cancel").into_owned(), Message::MTextCancel, false),
             action(t!("Apply").into_owned(), Message::MTextApply, false),
             action(t!("Close Text Editor").into_owned(), Message::MTextOk, true),
@@ -210,7 +212,7 @@ pub(super) fn status_bar(ed: &MTextEditorState) -> Element<'static, Message> {
         .align_y(iced::Alignment::Center),
     )
     .padding([5, 8])
-    .width(Fill)
+    .width(width)
     .style(|theme: &Theme| container::Style {
         background: Some(Background::Color(theme.palette().background.weak.color)),
         ..Default::default()

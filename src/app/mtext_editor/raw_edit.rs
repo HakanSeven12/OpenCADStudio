@@ -389,6 +389,28 @@ impl crate::app::OpenCADStudio {
         self.keep_selection(range);
     }
 
+    /// Clear the character formatting of the selection, or of the whole
+    /// text when nothing is selected, removing or splitting only the codes
+    /// that format it. Refused when that cannot be done exactly.
+    pub(in crate::app) fn raw_clear_formatting(&mut self) {
+        let Some(ed) = self.mtext_editor.as_ref() else {
+            return;
+        };
+        let range = Some(ed.selected_range())
+            .filter(|r| !r.is_empty())
+            .unwrap_or(0..doc_to_cells(&ed.doc).len());
+        if range.is_empty() {
+            return;
+        }
+        self.edit_raw(|_, index| {
+            Ok(TextEdit {
+                raw: index.cleared_selection(range.clone(), &[])?,
+                caret: range.end,
+            })
+        });
+        self.keep_selection(range);
+    }
+
     /// A formatting command keeps its selection, as before.
     fn keep_selection(&mut self, range: std::ops::Range<usize>) {
         if let Some(ed) = self.mtext_editor.as_mut() {
@@ -604,5 +626,68 @@ mod tests {
         fmt(&mut app, Lowercase);
         assert_eq!(raw(&app), r"{\Labc}dé\Pß");
         assert!(props(&app, 0).underline());
+    }
+
+    #[test]
+    fn clear_formatting_patches_the_selection_or_the_whole_text() {
+        let source = r"{\Léa}b\pxqc,t4;\P\S1/2;\C3;xyz";
+        let mut app = app(source);
+        select(&mut app, 0, 2);
+        app.mtext_clear_formatting();
+        let first = r"{éa}b\pxqc,t4;\P\S1/2;\C3;xyz";
+        assert_eq!(raw(&app), first);
+        assert_eq!(app.mtext_editor.as_ref().unwrap().sel, Some((0, 2)));
+        select(&mut app, 8, 9);
+        app.mtext_clear_formatting();
+        let second = r"{éa}b\pxqc,t4;\P\S1/2;{\C3;x}y\C3;z";
+        assert_eq!(raw(&app), second);
+        app.mtext_undo();
+        assert_eq!(raw(&app), first);
+        app.mtext_redo();
+        assert_eq!(raw(&app), second);
+        // Nothing selected: the whole text, with the paragraph settings and
+        // the fraction kept.
+        caret(&mut app, 0);
+        app.mtext_clear_formatting();
+        // Only the colour codes go; an empty group is left as harmless.
+        assert_eq!(raw(&app), r"{éa}b\pxqc,t4;\P\S1/2;{x}yz");
+        let cells = cells(&app);
+        assert!(cells.iter().all(|c| match c {
+            super::Cell::Char(_, p) => p.color.is_none() && !p.underline(),
+            _ => true,
+        }));
+    }
+
+    #[test]
+    fn a_cleared_text_saves_and_reads_back_byte_for_byte() {
+        let mut app = app(r"{\Léa}b\C3;xyz");
+        select(&mut app, 3, 4);
+        app.mtext_clear_formatting();
+        let value = raw(&app);
+        assert_eq!(value, r"{\Léa}bx\C3;yz");
+        assert!(app.mtext_commit());
+        let (h, saved) = app.tabs[1]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                codec::EntityType::MText(t) => Some((t.common.handle, t.value.clone())),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(saved, value);
+        for ext in ["dwg", "dxf"] {
+            let bytes = crate::io::save_to_bytes(
+                &app.tabs[1].scene.document,
+                ext,
+                codec::DxfVersion::AC1032,
+            )
+            .unwrap();
+            let doc = crate::io::load_bytes(&format!("clear.{ext}"), bytes).unwrap();
+            let Some(codec::EntityType::MText(t)) = doc.get_entity(h) else {
+                panic!()
+            };
+            assert_eq!(t.value, value, "{ext}");
+        }
     }
 }

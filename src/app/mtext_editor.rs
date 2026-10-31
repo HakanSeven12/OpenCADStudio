@@ -20,6 +20,7 @@ use iced::widget::text_editor;
 // commands will use are allowed to be unused until they switch over.
 #[allow(dead_code)]
 mod raw_adapter;
+mod raw_clear;
 mod raw_edit;
 #[allow(dead_code)]
 mod raw_operations;
@@ -1109,27 +1110,10 @@ impl super::OpenCADStudio {
         self.rebuild_mtext_preview();
     }
 
+    /// Remove the character formatting of the selection, or of the whole
+    /// text without one. Paragraph settings, fractions and fields stay.
     pub(super) fn mtext_clear_formatting(&mut self) {
-        if let Some(ed) = self.mtext_editor.as_mut() {
-            let para0 = doc_para0(&ed.doc);
-            let mut cells = doc_to_cells(&ed.doc);
-            let (start, end) = ed
-                .sel
-                .filter(|(start, end)| start < end)
-                .unwrap_or((0, cells.len()));
-            let end = end.min(cells.len());
-            ed.record_undo();
-            for cell in &mut cells[start.min(end)..end] {
-                if let Cell::Char(_, props) | Cell::Stack { props, .. } = cell {
-                    *props = SpanProperties::default();
-                }
-            }
-            ed.content =
-                text_editor::Content::with_text(&cells_to_doc(&para0, &cells).to_mtext_string());
-            ed.sel = Some((start, end));
-            ed.caret = end;
-        }
-        self.rebuild_mtext_preview();
+        self.raw_clear_formatting();
     }
 
     pub(super) fn mtext_find_next(&mut self) {

@@ -143,7 +143,7 @@ impl CadCommand for ActionCommand {
         }
         if self.kind.is_none() {
             return crate::t!(
-                "BACTION  Enter action type [Move/Scale/Stretch/Polar Stretch/Rotate/Flip/Array]:"
+                "BACTION  Enter action type [Move/Scale/Stretch/Polar Stretch/Rotate/Flip/Array/Lookup]:"
             )
             .into_owned();
         }
@@ -233,6 +233,7 @@ impl CadCommand for ActionCommand {
                 CmdOption::new("Rotate", "Rotate"),
                 CmdOption::new("Flip", "Flip"),
                 CmdOption::new("Array", "Array"),
+                CmdOption::new("Lookup", "Lookup"),
             ]
         } else if self.parameter.is_some()
             && self.kind.is_some_and(actions::needs_frame)
@@ -333,13 +334,24 @@ impl CadCommand for ActionCommand {
             }
         }
         if self.kind.is_none() {
+            if matches!(
+                s.trim().to_ascii_uppercase().as_str(),
+                "LOOKUP" | "L"
+            ) {
+                return Some(CmdResult::StartBlockLookupAction {
+                    document: self.document,
+                    definition: self.definition,
+                });
+            }
             return Some(if let Some(k) = Kind::parse(s) {
                 self.kind = Some(k);
                 CmdResult::NeedPoint
             } else {
                 CmdResult::ReportError(
-                    crate::t!("Choose Move, Scale, Stretch, Polar Stretch, Rotate, Flip or Array.")
-                        .into_owned(),
+                    crate::t!(
+                        "Choose Move, Scale, Stretch, Polar Stretch, Rotate, Flip, Array or Lookup."
+                    )
+                    .into_owned(),
                 )
             });
         }

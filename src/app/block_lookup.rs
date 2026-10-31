@@ -88,6 +88,25 @@ impl OpenCADStudio {
             lookup::placement_error(&tab.scene.document, session.br_handle)
         }
     }
+    /// Open the property table the chosen Lookup parameter owns; the action
+    /// command that picked the parameter stays active, as the reference does.
+    pub(in crate::app) fn open_lookup_table_from_action(
+        &mut self,
+        document: u64,
+        definition: codec::Handle,
+        name: String,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        if self.tabs[i].id != document
+            || self.tabs[i].active_block_edit_session().map(|s| s.br_handle) != Some(definition)
+        {
+            self.command_line.push_error(
+                crate::t!("The action's Block Editor session is no longer active.").as_ref(),
+            );
+            return Task::none();
+        }
+        self.open_lookup_table(&name)
+    }
     pub(in crate::app) fn open_lookup_table(&mut self, name: &str) -> Task<Message> {
         if let Some(error) = self.lookup_table_error() {
             self.command_line.push_error(crate::t!(error).as_ref());

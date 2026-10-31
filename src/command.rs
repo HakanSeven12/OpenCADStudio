@@ -1890,6 +1890,18 @@ pub enum CmdResult {
         kind: crate::modules::block_editor::single_parameter::Kind,
         location: DVec3,
     },
+    /// An action type was chosen that has no geometry action of its own:
+    /// continue with Lookup parameter selection.
+    StartBlockLookupAction {
+        document: u64,
+        definition: Handle,
+    },
+    /// The chosen Lookup parameter's property table should open for editing.
+    OpenBlockLookupTable {
+        document: u64,
+        definition: Handle,
+        name: String,
+    },
     /// Place a native Rotation, Alignment or Flip parameter.
     PlaceBlockOrientationParameter {
         document_id: u64,

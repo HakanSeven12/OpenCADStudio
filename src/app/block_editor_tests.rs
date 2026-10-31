@@ -2824,6 +2824,93 @@ fn lookup_editor_multiple_tables_apply_atomically_and_parameter_cancel_is_clean(
 }
 
 #[test]
+fn action_type_list_offers_lookup_and_routes_the_chosen_parameter_to_its_table() {
+    let (mut app, definition, parameter) = lookup_editor_fixture();
+    let i = app.active_tab;
+    let _ = app.run_command_line("BPARAMETER LOOKUP 3,3");
+    let second =
+        crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)[1].0;
+    assert_ne!(parameter, second);
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+
+    let _ = app.dispatch_command("BACTIONTOOL");
+    let prompt = app.command_line.history.last().unwrap().text.clone();
+    assert!(prompt.contains("Lookup"), "{prompt}");
+    assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().name(), "BACTION");
+
+    feed(&mut app, "Lookup");
+    assert!(app.active_modal.is_none(), "the parameter comes first");
+    feed(&mut app, "Lookup2");
+    assert_eq!(app.active_modal, Some(ModalKind::BlockLookup));
+    let state = app.block_lookup.as_ref().unwrap();
+    let draft = &state.drafts[state.selected];
+    assert_eq!(draft.parameter, second, "the named parameter, not the first");
+    assert_eq!(state.definition, definition);
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+    let _ = app.update(Message::CloseModal);
+    assert!(app.block_lookup.is_none());
+    assert_eq!(app.tabs[i].scene.document, before);
+
+    for command in ["BACTION LOOKUP", "_BACTIONTOOL LOOKUP"] {
+        let _ = app.dispatch_command(command);
+        let prompt = app.command_line.history.last().unwrap().text.clone();
+        assert!(
+            prompt.to_ascii_lowercase().contains("lookup"),
+            "{command}: {prompt}"
+        );
+        feed(&mut app, "Lookup2");
+        assert_eq!(app.active_modal, Some(ModalKind::BlockLookup), "{command}");
+        assert_eq!(
+            app.block_lookup.as_ref().unwrap().drafts
+                [app.block_lookup.as_ref().unwrap().selected]
+                .parameter,
+            second,
+            "{command}"
+        );
+        let _ = app.update(Message::CloseModal);
+    }
+
+    let _ = app.dispatch_command("BACTION LOOKUP");
+    feed(&mut app, "Missing");
+    assert!(app.command_line.last_error.is_some());
+    assert!(
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .unwrap()
+            .prompt()
+            .contains("Lookup"),
+        "an unknown name keeps the parameter prompt active"
+    );
+    let _ = app.update(Message::CommandEscape);
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(app.tabs[i].scene.document, before);
+}
+
+#[test]
+fn action_type_list_appears_when_only_a_lookup_parameter_is_placed() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.dispatch_command("BACTIONBARMODE 0");
+    let _ = app.run_command_line("BPARAMETER LOOKUP 1,1");
+    let i = app.active_tab;
+    let _ = app.dispatch_command("BACTIONTOOL");
+    let prompt = app.command_line.history.last().unwrap().text.clone();
+    assert!(prompt.contains("Lookup"), "{prompt}");
+    feed(&mut app, "Lookup");
+    feed(&mut app, "Lookup1");
+    assert_eq!(app.active_modal, Some(ModalKind::BlockLookup));
+    assert_eq!(
+        app.block_lookup.as_ref().unwrap().drafts[0].original_parameter.lookup_name,
+        "Lookup1"
+    );
+    let _ = app.update(Message::CloseModal);
+}
+
+
+#[test]
 fn orientation_parameter_batch_numeric_rotation_local_history_save_and_parent_undo() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

@@ -4053,6 +4053,9 @@ pub enum Message {
         build_ms: f64,
     },
     WindowResized(f32, f32),
+    /// A window opened at this size; the main window's sets the layout as
+    /// a resize does.
+    WindowOpened(window::Id, f32, f32),
     /// Enter pressed globally — finalises the active command (no text-input involvement).
     CommandFinalize,
     /// Space pressed globally — a literal space in the MText preview, otherwise

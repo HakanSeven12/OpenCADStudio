@@ -367,7 +367,7 @@ const MENUS: &[(&str, &[Entry])] = &[
                 &[
                     Cmd("Interface...", "CUI", ""),
                     Cmd("Tool Palettes...", "CUSTOMIZE", ""),
-                    Cmd("Edit Program Parameters (acad.pgp)", "AI_EDITCUSTFILE", ""),
+                    Cmd("Edit Program Parameters (ocad.pgp)", "AI_EDITCUSTFILE", ""),
                 ],
             ),
             Cmd("Options...", "OPTIONS", ""),
@@ -689,34 +689,35 @@ pub struct MenuContext<'a> {
 
 /// The menu bar, one pull-down per menu.
 pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
-    let aliases = aliases_by_command(context.aliases);
-    let roots =
-        MENUS
-            .iter()
-            .filter(|(title, _)| !context.is_start || START_MENUS.contains(title))
-            .map(|&(title, entries)| {
-                let mut rows = rows(entries, &aliases);
-                if title == "Window" && !context.drawings.is_empty() {
-                    rows.push(Row::Sep);
-                    rows.extend(context.drawings.iter().enumerate().map(|(n, (tab, name))| {
-                        Row::Cmd {
-                            icon: None,
-                            label: format!("{} {name}", n + 1),
-                            tail: String::new(),
-                            on_press: Some(Box::new(Message::TabSwitch(*tab))),
-                        }
-                    }));
-                }
-                Item::with_menu(
-                    Title::new(
-                        container(text(crate::t!(title).into_owned()).size(12))
-                            .center_y(TITLE_H)
-                            .padding([0, 9]),
-                    ),
-                    menu(rows),
-                )
-            })
-            .collect();
+    let menus = menu_rows(context.aliases);
+    let roots = MENUS
+        .iter()
+        .zip(menus.iter())
+        .filter(|((title, _), _)| !context.is_start || START_MENUS.contains(title))
+        .map(|(&(title, _), rows)| {
+            let mut extra = Vec::new();
+            if title == "Window" && !context.drawings.is_empty() {
+                extra.push(Row::Sep);
+                extra.extend(context.drawings.iter().enumerate().map(|(n, (tab, name))| {
+                    Row::Cmd {
+                        icon: None,
+                        label: format!("{} {name}", n + 1),
+                        tail: String::new(),
+                        on_press: Some(Box::new(Message::TabSwitch(*tab))),
+                    }
+                }));
+            }
+            let rows: Vec<&Row> = rows.iter().chain(&extra).collect();
+            Item::with_menu(
+                Title::new(
+                    container(text(crate::t!(title).into_owned()).size(12))
+                        .center_y(TITLE_H)
+                        .padding([0, 9]),
+                ),
+                menu(&rows),
+            )
+        })
+        .collect();
     let bar = MenuBar::new(roots)
         .close_on_item_click_global(true)
         // The open menu's title stays lit while the pointer is in the menu.
@@ -749,8 +750,44 @@ pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
         .into()
 }
 
+/// The rows of every menu, in `MENUS` order: built again only when the
+/// language or the alias → command table changes, since the bar is built
+/// every frame.
+fn menu_rows(aliases: &rustc_hash::FxHashMap<String, String>) -> std::rc::Rc<Vec<Vec<Row>>> {
+    use std::hash::{Hash, Hasher};
+    type Menus = std::rc::Rc<Vec<Vec<Row>>>;
+    thread_local! {
+        static CACHE: std::cell::RefCell<Option<((u64, u64), Menus)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    // A fingerprint of the table, the same whatever order it is read in.
+    let fingerprint = aliases.iter().fold(aliases.len() as u64, |acc, pair| {
+        let mut hasher = rustc_hash::FxHasher::default();
+        pair.hash(&mut hasher);
+        acc ^ hasher.finish()
+    });
+    let key = (crate::i18n::language_generation(), fingerprint);
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((seen, menus)) = cache.as_ref() {
+            if *seen == key {
+                return menus.clone();
+            }
+        }
+        let by_command = group_aliases(aliases);
+        let menus: Menus = std::rc::Rc::new(
+            MENUS
+                .iter()
+                .map(|&(_, entries)| rows(entries, &by_command))
+                .collect(),
+        );
+        *cache = Some((key, menus.clone()));
+        menus
+    })
+}
+
 /// The aliases of each command, sorted, from the alias → command table.
-fn aliases_by_command(
+fn group_aliases(
     aliases: &rustc_hash::FxHashMap<String, String>,
 ) -> rustc_hash::FxHashMap<String, Vec<String>> {
     let mut by_command: rustc_hash::FxHashMap<String, Vec<String>> = Default::default();
@@ -845,21 +882,28 @@ impl Row {
 }
 
 /// A menu as wide as its widest row.
-fn menu<'a>(rows: Vec<Row>) -> Menu<'a, Message, Theme, Renderer> {
-    let width = rows.iter().map(Row::width).fold(0.0, f32::max) + 2.0;
+fn menu<'a>(rows: &[&Row]) -> Menu<'a, Message, Theme, Renderer> {
+    let width = rows.iter().map(|row| row.width()).fold(0.0, f32::max) + 2.0;
     let items = rows
-        .into_iter()
+        .iter()
         .map(|row| match row {
             Row::Cmd {
                 icon,
                 label,
                 tail,
                 on_press,
-            } => Item::new(entry(icon, label, tail, on_press.map(|m| *m), false)),
+            } => Item::new(entry(
+                *icon,
+                label.clone(),
+                tail.clone(),
+                on_press.as_deref().cloned(),
+                false,
+            )),
             Row::Sep => Item::new(idle(separator())),
-            Row::Sub(label, rows) => {
-                Item::with_menu(entry(None, label, String::new(), None, true), menu(rows))
-            }
+            Row::Sub(label, rows) => Item::with_menu(
+                entry(None, label.clone(), String::new(), None, true),
+                menu(&rows.iter().collect::<Vec<_>>()),
+            ),
         })
         .collect();
     // No side padding: the menu's edge lines up with its title.

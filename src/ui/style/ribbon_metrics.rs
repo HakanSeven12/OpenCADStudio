@@ -1,5 +1,5 @@
-//! Sizes of the ribbon and the bars above it, in logical pixels, at
-//! AutoCAD's proportions (100 % scale). Ribbon widget code takes its
+//! Sizes of the ribbon and the bars above it, in logical pixels, at the
+//! reference proportions (100 % scale). Ribbon widget code takes its
 //! numbers from here; the colours are in `chrome`.
 
 // ── Tab row ────────────────────────────────────────────────────────────────
@@ -16,10 +16,6 @@ pub const QAT_BUTTON: f32 = 22.0;
 pub const QAT_GAP: f32 = 2.0;
 /// Width of the arrow part of a Quick Access split button.
 pub const QAT_SPLIT_ARROW_W: f32 = 11.0;
-/// The search box shrunk to its magnifier: a square button with the icon
-/// `SEARCH_BUTTON_PAD` from each side.
-pub const SEARCH_BUTTON: f32 = SMALL_ICON + 2.0 * SEARCH_BUTTON_PAD;
-pub const SEARCH_BUTTON_PAD: f32 = 2.0;
 /// Gap between two tabs: none, so a hovered tab meets the active one.
 pub const TAB_GAP: f32 = 0.0;
 /// The minimize split button after the last tab: this far from the tab,

@@ -3373,9 +3373,11 @@ impl OpenCADStudio {
                         Some(Message::WindowResized(sz.width as f32, sz.height as f32))
                     }
                     // The ribbon's arrows sit on whole physical pixels.
-                    iced::Event::Window(window::Event::Opened { scale_factor, .. }) => {
+                    iced::Event::Window(window::Event::Opened {
+                        scale_factor, size, ..
+                    }) => {
                         crate::ui::icons::set_scale_factor(scale_factor);
-                        None
+                        Some(Message::WindowOpened(win_id, size.width, size.height))
                     }
                     iced::Event::Window(window::Event::Rescaled(scale_factor)) => {
                         crate::ui::icons::set_scale_factor(scale_factor);

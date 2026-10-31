@@ -5698,6 +5698,14 @@ impl OpenCADStudio {
 
             Message::ViewportClick(viewport) => self.on_viewport_click(viewport),
 
+            // The ribbon knows the window's width from the start, not only
+            // after the first resize.
+            Message::WindowOpened(id, w, h) => {
+                if Some(id) == self.main_window {
+                    return self.update(Message::WindowResized(w, h));
+                }
+                Task::none()
+            }
             Message::WindowResized(w, h) => {
                 self.vp_size = ((w - 440.0).max(200.0), h);
                 self.win_size = (w, h);

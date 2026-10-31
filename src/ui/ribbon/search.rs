@@ -463,10 +463,26 @@ impl Ribbon {
         }
     }
 
-    /// The window changed width: a temporary box closes when it turns
-    /// narrow or wide; the kept-open preference stays as it is.
+    /// Whether the button `id` on tab `tab` shows on the ribbon: the ribbon
+    /// is not minimized and the panel holding it is not collapsed.
+    fn button_shows(&self, tab: usize, id: &str) -> bool {
+        if self.layout.minimize != super::RibbonMinimize::Off {
+            return false;
+        }
+        let Some(module) = self.modules.get(tab) else {
+            return false;
+        };
+        !self.groups_for(tab).any(|group| {
+            super::locate::group_holds(&extras::panel_key(module.id(), group.title), group, id)
+                && recent_bounds(&super::minimize::opener_id(group.title)).is_some()
+        })
+    }
+
+    /// The window changed width: turning narrow or wide closes a temporary
+    /// box and empties the search, whose results would otherwise hang from
+    /// a box that went; the kept-open preference stays as it is.
     pub(super) fn search_resized(&mut self, was_narrow: bool) {
-        if self.narrow() != was_narrow && self.search.temp_open {
+        if self.narrow() != was_narrow {
             self.clear_search();
         }
     }
@@ -509,9 +525,13 @@ impl Ribbon {
                 };
                 self.clear_search();
                 if let Some((tab, id)) = hit.place {
-                    self.keytip_tab(tab);
-                    self.search.flash = Some((id, now));
-                    self.search.lit = Some(id.to_string());
+                    self.select(tab);
+                    // The button blinks only where it shows: not on a
+                    // minimized ribbon or in a collapsed panel.
+                    if self.button_shows(tab, id) {
+                        self.search.flash = Some((id, now));
+                        self.search.lit = Some(id.to_string());
+                    }
                 }
                 out.run = Some(hit.run);
             }

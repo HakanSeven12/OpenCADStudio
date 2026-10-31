@@ -15,6 +15,7 @@ use codec::{EntityType, Handle, MText};
 use glam::DVec3;
 use iced::widget::text_editor;
 
+mod entity_options;
 // Lossless index of the raw MTEXT source and the source patches the editor
 // edits through. Typing and deleting use them; the parts the other editing
 // commands will use are allowed to be unused until they switch over.
@@ -78,6 +79,10 @@ pub enum EditorMenu {
     Find,
     /// The Fraction panel, opened from More formatting.
     Fraction,
+    /// The background mask.
+    Background,
+    /// The drawing direction.
+    Position,
 }
 
 /// `pick_list`-friendly wrapper for the 9 attachment points.
@@ -201,6 +206,10 @@ pub struct MTextEditorState {
     pub color_picker_open: bool,
     /// The open toolbar menu.
     pub menu: Option<EditorMenu>,
+    /// The Background menu's mask while it differs from the stored one.
+    pub mask_draft: Option<entity_options::MaskDraft>,
+    /// The Position menu's direction while it differs from the stored one.
+    pub direction: Option<codec::entities::DrawingDirection>,
     /// The Fraction panel's parts while it is open.
     pub fraction: Option<raw_stack::FractionDraft>,
     /// B / I / U / overline / S switched with nothing selected, for the
@@ -257,6 +266,8 @@ impl MTextEditorState {
             color_picker_open: false,
             menu: None,
             fraction: None,
+            mask_draft: None,
+            direction: None,
             typing_format: Default::default(),
             glyph_boxes: Vec::new(),
             sel: None,
@@ -420,6 +431,7 @@ impl MTextEditorState {
             mt.common.color = color;
         }
         self.patch_rotation(&mut mt);
+        self.apply_entity_options(&mut mt);
         let rectangle_height = self.rect_height.trim().parse::<f64>().unwrap_or(0.0);
         mt.rectangle_height = (rectangle_height > 0.0).then_some(rectangle_height);
         mt.column_data.column_type = self.column_type;
@@ -1306,6 +1318,8 @@ impl super::OpenCADStudio {
 mod data_tests;
 #[cfg(test)]
 mod list_tests;
+#[cfg(test)]
+mod options_tests;
 #[cfg(test)]
 mod rotation_tests;
 #[cfg(test)]

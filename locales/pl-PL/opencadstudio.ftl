@@ -50,6 +50,7 @@ mtext-commit-errors = MTEXT
     .locked = MTEXT: the target layer is locked; the draft was not saved.
     .missing = MTEXT: the target entity no longer exists; the draft was not saved.
     .creation = MTEXT: creation failed; the draft was retained.
+    .mask-scale = MTEXT: the mask border offset factor must be from 1 to 5.
 
 mtext-toolbar = MTEXT
     .bold = Bold
@@ -130,6 +131,15 @@ mtext-toolbar = MTEXT
     .spacing-factor = Spacing factor (0.25–4)
     .at-least = At least
     .exactly = Exactly
+    .background = Background
+    .use-mask = Use background mask
+    .border = Border offset factor (1–5)
+    .drawing-background = Drawing background colour
+    .position = Position
+    .direction-style = By style
+    .normal = Normal (left to right)
+    .vertical = Vertical (top to bottom)
+    .options-unavailable = A multileader's text has no mask or direction of its own; set them on the multileader.
 
 action =
     .close = Zamknij

@@ -25,6 +25,8 @@ editor_history! {
     object_color: Option<codec::types::Color>, color_aci: u16, oblique: String, char_space: String,
     annotative: bool, attachment: AttachmentPoint, line_spacing: f32, rect_width: f64,
     line_spacing_style: codec::entities::LineSpacingStyle, line_spacing_draft: Option<String>,
+    mask_draft: Option<super::entity_options::MaskDraft>,
+    direction: Option<codec::entities::DrawingDirection>,
     sel: Option<(usize, usize)>, caret: usize, sel_anchor: usize,
     typing_format: super::raw_edit::TypingFormat, rect_width_draft: Option<String>,
 }
@@ -67,7 +69,12 @@ impl MTextEditorState {
         let valid = positive(&self.height)
             && positive(&self.width)
             && self.rotation_input_value().is_some();
-        (!valid).then_some("MTEXT: enter a valid height, width factor and rotation before saving.")
+        if !valid {
+            return Some("MTEXT: enter a valid height, width factor and rotation before saving.");
+        }
+        self.mask_scale_value()
+            .is_none()
+            .then_some("MTEXT: the mask border offset factor must be from 1 to 5.")
     }
 }
 
@@ -275,6 +282,10 @@ impl crate::app::OpenCADStudio {
                         && t.rectangle_width == mt.rectangle_width
                         && t.rectangle_height == mt.rectangle_height
                         && t.column_data == mt.column_data
+                        && t.background_fill_flags == mt.background_fill_flags
+                        && t.background_scale == mt.background_scale
+                        && t.background_color == mt.background_color
+                        && t.drawing_direction == mt.drawing_direction
                         && t.is_annotative == mt.is_annotative,
                     t.is_annotative != mt.is_annotative,
                 ),
@@ -311,6 +322,10 @@ impl crate::app::OpenCADStudio {
                         t.rectangle_width = mt.rectangle_width;
                         t.rectangle_height = mt.rectangle_height;
                         t.column_data = mt.column_data;
+                        t.background_fill_flags = mt.background_fill_flags;
+                        t.background_scale = mt.background_scale;
+                        t.background_color = mt.background_color;
+                        t.drawing_direction = mt.drawing_direction;
                     }
                     Some(EntityType::MultiLeader(ml)) => {
                         ml.context.text_string = mt.value;
@@ -411,6 +426,8 @@ impl crate::app::OpenCADStudio {
             }
             ed.rotation_dirty = false;
             ed.object_color = None;
+            ed.mask_draft = None;
+            ed.direction = None;
             ed.undo.clear();
             ed.redo.clear();
             self.rebuild_mtext_preview();

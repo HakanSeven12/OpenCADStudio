@@ -6570,6 +6570,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MTEXT: the target layer is locked; the draft was not saved." => Some(("mtext-commit-errors", "locked")),
         "MTEXT: the target entity no longer exists; the draft was not saved." => Some(("mtext-commit-errors", "missing")),
         "MTEXT: creation failed; the draft was retained." => Some(("mtext-commit-errors", "creation")),
+        "MTEXT: the mask border offset factor must be from 1 to 5." => Some(("mtext-commit-errors", "mask-scale")),
         _ => None,
     }
 }

@@ -7849,6 +7849,22 @@ impl OpenCADStudio {
                 self.mtext_line_spacing_mode(exact);
                 Task::none()
             }
+            Message::MTextMaskToggle => {
+                self.mtext_mask_toggle();
+                Task::none()
+            }
+            Message::MTextMaskColor(color) => {
+                self.mtext_mask_color(color);
+                Task::none()
+            }
+            Message::MTextMaskScale(value) => {
+                self.mtext_mask_scale(value);
+                Task::none()
+            }
+            Message::MTextDirection(direction) => {
+                self.mtext_direction(direction);
+                Task::none()
+            }
             Message::MTextFractionOpen => {
                 self.mtext_fraction_open();
                 Task::none()

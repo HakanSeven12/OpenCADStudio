@@ -2181,6 +2181,8 @@ pub enum ColorPickTarget {
     PlotStyle,
     /// Selected entities' colour (left properties panel).
     Properties,
+    /// The MTEXT editor's background mask colour.
+    MTextMask,
     /// Selected entities' background colour (hatch / MTEXT background row).
     PropertiesBg,
     /// A named per-entity Properties colour field.
@@ -4804,6 +4806,14 @@ pub enum Message {
     MTextLineSpacingInput(String),
     /// Line spacing exactly the factor (`true`) or at least it.
     MTextLineSpacingMode(bool),
+    /// Background mask on or off.
+    MTextMaskToggle,
+    /// Mask colour: the drawing background (`None`) or a colour of its own.
+    MTextMaskColor(Option<AcadColor>),
+    /// The mask's border offset factor, as typed.
+    MTextMaskScale(String),
+    /// The MTEXT's drawing direction.
+    MTextDirection(codec::entities::DrawingDirection),
     /// Open (or, from its own row, close) the Fraction panel.
     MTextFractionOpen,
     /// A Fraction panel field, as typed.

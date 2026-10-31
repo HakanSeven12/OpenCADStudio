@@ -152,6 +152,8 @@ pub(super) fn format_row(ed: &MTextEditorState) -> Element<'static, Message> {
         mtext_menu::toolbar_menu(ed, EditorMenu::Paragraph),
         mtext_menu::toolbar_menu(ed, EditorMenu::Columns),
         mtext_menu::toolbar_menu(ed, EditorMenu::Justify),
+        mtext_menu::toolbar_menu(ed, EditorMenu::Position),
+        mtext_menu::toolbar_menu(ed, EditorMenu::Background),
         mtext_menu::toolbar_menu(ed, EditorMenu::Symbols),
         mtext_menu::toolbar_menu(ed, EditorMenu::Find),
     ]

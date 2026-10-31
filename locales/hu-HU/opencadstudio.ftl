@@ -50,6 +50,7 @@ mtext-commit-errors = MTEXT
     .locked = MTEXT: a célréteg zárolt; a szerkesztési puffer nem lett mentve.
     .missing = MTEXT: a célobjektum már nem létezik; a szerkesztési puffer nem lett mentve.
     .creation = MTEXT: a létrehozás sikertelen; a szerkesztési puffer megmaradt.
+    .mask-scale = MTEXT: a maszk szegélytávolság-tényezője 1 és 5 között lehet.
 
 mtext-toolbar = MTEXT
     .bold = Félkövér
@@ -130,6 +131,15 @@ mtext-toolbar = MTEXT
     .spacing-factor = Sorköz tényező (0,25–4)
     .at-least = Legalább
     .exactly = Pontosan
+    .background = Háttér
+    .use-mask = Háttérmaszk használata
+    .border = Szegélytávolság tényező (1–5)
+    .drawing-background = A rajz háttérszíne
+    .position = Pozíció
+    .direction-style = Stílus szerint
+    .normal = Normál (balról jobbra)
+    .vertical = Függőleges (fentről lefelé)
+    .options-unavailable = A MultiLeader szövegének nincs saját maszkja vagy iránya; ezeket a MultiLeaderen állítsd.
 
 action =
     .close = Bezárás

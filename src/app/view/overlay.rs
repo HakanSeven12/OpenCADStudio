@@ -696,7 +696,17 @@ fn mtext_editor_content<'a>(
     .width(width);
 
     // ── Row 2: character formatting, undo, alignment and the menus ─────────
-    let row2 = mtext_toolbar::format_row(ed);
+    // Below its full width the row scrolls sideways; the thin bar sits
+    // under the controls, never over them.
+    let row2 = iced::widget::scrollable(mtext_toolbar::format_row(ed))
+        .id("mtext-toolbar-2")
+        .direction(iced::widget::scrollable::Direction::Horizontal(
+            iced::widget::scrollable::Scrollbar::new()
+                .width(4)
+                .scroller_width(4)
+                .spacing(2),
+        ))
+        .width(width);
 
     let preview_scale = ed.preview_scale();
 

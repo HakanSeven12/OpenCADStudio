@@ -182,6 +182,8 @@ fn title(menu: EditorMenu) -> String {
         EditorMenu::Symbols => label!("symbols"),
         EditorMenu::Find => label!("find"),
         EditorMenu::Fraction => label!("panel-fraction"),
+        EditorMenu::Background => label!("background"),
+        EditorMenu::Position => label!("position"),
     }
 }
 
@@ -207,6 +209,8 @@ pub(super) fn toolbar_menu(ed: &MTextEditorState, menu: EditorMenu) -> Element<'
     let panel = open.then(|| match ed.menu.unwrap_or(menu) {
         EditorMenu::Fraction => fraction_panel(ed),
         EditorMenu::More => more_panel(ed),
+        EditorMenu::Background => background_panel(ed),
+        EditorMenu::Position => position_panel(ed),
         EditorMenu::Paragraph => paragraph_panel(ed),
         EditorMenu::Columns => columns_panel(ed),
         EditorMenu::Justify => justify_panel(ed),
@@ -564,4 +568,100 @@ fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
         .separator()
         .push(buttons.into())
         .build()
+}
+
+/// A row that cannot act here, with the reason as its hint.
+fn inert(mark: &str, name: String, reason: String) -> Element<'static, Message> {
+    iced::widget::tooltip(
+        button(
+            row![
+                text(mark.to_string()).size(12).width(22),
+                text(name).size(11).width(Fill),
+            ]
+            .spacing(2)
+            .align_y(iced::Alignment::Center)
+            .height(Fill),
+        )
+        .padding([0, 6])
+        .width(Fill)
+        .height(ROW_H)
+        .style(item_style),
+        container(text(reason).size(11).width(240))
+            .padding(6)
+            .style(container::rounded_box),
+        iced::widget::tooltip::Position::Right,
+    )
+    .gap(8)
+    .into()
+}
+
+/// Use mask, its colour (the drawing background or its own) and the border
+/// offset factor. The colour and the factor wait until the mask is on.
+fn background_panel(ed: &MTextEditorState) -> Element<'static, Message> {
+    let panel = Panel::new(title(EditorMenu::Background), 240.0);
+    if !ed.entity_options_supported() {
+        return panel
+            .push(inert("", label!("use-mask"), label!("options-unavailable")))
+            .build();
+    }
+    let mask = ed.mask();
+    let panel = panel.push(row_button(
+        if mask.on { "☑" } else { "☐" },
+        label!("use-mask"),
+        Message::MTextMaskToggle,
+    ));
+    if !mask.on {
+        return panel.build();
+    }
+    use crate::ui::color_select;
+    panel
+        .push(field(
+            label!("border"),
+            &mask.scale,
+            Message::MTextMaskScale,
+        ))
+        .separator()
+        .push(row_button(
+            check(mask.window),
+            label!("drawing-background"),
+            Message::MTextMaskColor(None),
+        ))
+        .push(
+            scrollable(color_select::color_list(
+                color_select::ColorExtras::default(),
+                |color| Message::MTextMaskColor(Some(color)),
+                Message::OpenColorWindow(
+                    crate::app::ColorPickTarget::MTextMask,
+                    mask.color.clone(),
+                ),
+            ))
+            .height(Length::Shrink.max(220.0))
+            .into(),
+        )
+        .build()
+}
+
+/// Normal, vertical or by style set the MTEXT's own drawing direction.
+fn position_panel(ed: &MTextEditorState) -> Element<'static, Message> {
+    use codec::entities::DrawingDirection as D;
+    let panel = Panel::new(title(EditorMenu::Position), 240.0);
+    let current = ed.direction_value();
+    [
+        ("", label!("direction-style"), D::ByStyle),
+        ("A", label!("normal"), D::LeftToRight),
+        ("↓", label!("vertical"), D::TopToBottom),
+    ]
+    .into_iter()
+    .fold(panel, |panel, (mark, name, value)| {
+        panel.push(if ed.entity_options_supported() {
+            item(
+                if current == value { "✓" } else { mark },
+                name,
+                Message::MTextDirection(value),
+            )
+        } else {
+            inert(mark, name, label!("options-unavailable"))
+        })
+    })
+    .build()
 }

@@ -44,7 +44,9 @@ fn picked(messages: impl Iterator<Item = Message>) -> Vec<Message> {
         .collect()
 }
 
-const MENUS: [(EditorMenu, &str); 6] = [
+const MENUS: [(EditorMenu, &str); 8] = [
+    (EditorMenu::Position, "position"),
+    (EditorMenu::Background, "background"),
     (EditorMenu::More, "more"),
     (EditorMenu::Paragraph, "paragraph"),
     (EditorMenu::Columns, "columns"),
@@ -60,6 +62,8 @@ fn menu_title(key: &str) -> String {
         "columns" => label!("columns"),
         "justification" => label!("justification"),
         "symbols" => label!("symbols"),
+        "position" => label!("position"),
+        "background" => label!("background"),
         _ => label!("find"),
     }
 }
@@ -235,7 +239,7 @@ fn menu_fields_take_typing_and_keep_the_menu_open() {
 
 #[test]
 fn every_popup_opens_under_its_own_trigger_inside_the_window() {
-    for size in [Size::new(1280., 720.), Size::new(960., 600.)] {
+    for size in [Size::new(1280., 720.), Size::new(1100., 600.)] {
         for (menu, key) in MENUS {
             let mut ed = editor();
             ed.menu = Some(menu);
@@ -249,6 +253,8 @@ fn every_popup_opens_under_its_own_trigger_inside_the_window() {
                 EditorMenu::Symbols => label!("diameter"),
                 EditorMenu::Find => label!("find-what"),
                 EditorMenu::Fraction => unreachable!("opened from More"),
+                EditorMenu::Background => label!("use-mask"),
+                EditorMenu::Position => label!("direction-style"),
             };
             let item = bounds_of(&mut ui, first);
             assert!(item.y >= trigger.y + trigger.height, "{menu:?} {size:?}");
@@ -517,4 +523,26 @@ fn a_selection_band_covers_descenders_without_reaching_the_next_line() {
     assert!(low >= (8.0 + 10.0) * 0.5);
     let (low, high) = line_band(&boxes, &boxes[1]);
     assert!(high <= (8.0 + 10.0) * 0.5 && low < 6.0);
+}
+
+#[test]
+fn a_narrow_editor_scrolls_the_second_row_to_its_last_menu() {
+    let ed = editor();
+    let mut ui = overlay_sim(&ed, Size::new(960., 600.));
+    let strip = ui
+        .find(iced::widget::Id::new("mtext-toolbar-2"))
+        .unwrap()
+        .visible_bounds()
+        .unwrap();
+    assert!(ui
+        .find(label!("find"))
+        .unwrap()
+        .visible_bounds()
+        .is_none_or(|b| b.x + b.width > strip.x + strip.width));
+    ui.point_at(strip.center());
+    ui.simulate([Event::Mouse(iced::mouse::Event::WheelScrolled {
+        delta: iced::mouse::ScrollDelta::Pixels { x: -1000., y: 0. },
+    })]);
+    let find = bounds_of(&mut ui, label!("find"));
+    assert!(find.x + find.width <= strip.x + strip.width + 1.);
 }

@@ -117,6 +117,11 @@ pub struct ColorPicker {
 
 impl ColorPicker {
     pub fn new(target: ColorPickTarget, current: AcadColor, varies: bool) -> Self {
+        let tab = if matches!(target, ColorPickTarget::Interface(_)) {
+            ColorPickerTab::TrueColor
+        } else {
+            ColorPickerTab::Document
+        };
         Self {
             target,
             current,
@@ -124,7 +129,7 @@ impl ColorPicker {
             pending: current,
             current_name: None,
             pending_name: None,
-            tab: ColorPickerTab::Document,
+            tab,
             editor: ColorEditor::new(math::color_rgb(current).unwrap_or((255, 255, 255))),
             eyedropper: None,
             doc: Vec::new(),
@@ -237,8 +242,9 @@ impl ColorPicker {
         self.tab
     }
 
-    /// Interface colours (Options) only get the colour editor.
-    fn editor_only(&self) -> bool {
+    /// Interface colours (Options) get the index colours and the editor,
+    /// with no document colours, books or ByLayer.
+    fn interface(&self) -> bool {
         matches!(self.target, ColorPickTarget::Interface(_))
     }
 
@@ -407,58 +413,49 @@ impl ColorPicker {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let editor_only = self.editor_only();
         let body = match self.tab {
-            _ if editor_only => self.true_color_tab(),
             ColorPickerTab::Document => self.document_tab(),
             ColorPickerTab::Index => self.index_tab(),
             ColorPickerTab::TrueColor => self.true_color_tab(),
             ColorPickerTab::Books => self.books_tab(),
         };
 
-        // The interface picker shrinks to the editor; the CAD panel keeps one
-        // height across its tabs, with the info line at the bottom.
+        // One height across the tabs, with the info line at the bottom.
         let mut body = column![body].spacing(8);
-        if !editor_only {
-            // The other tabs fill the height themselves.
-            if self.tab == ColorPickerTab::Index {
-                body = body.push(Space::new().height(Length::Fill));
-            }
-            let fill = self.shown(self.pending);
-            let info = match (&self.status, &self.pending_name) {
-                (Some(status), _) => status.clone(),
-                (None, Some(name)) => {
-                    let (r, g, b) = math::color_rgb(self.pending).unwrap_or_default();
-                    format!("{} · RGB {r}, {g}, {b}", name.replacen('$', " - ", 1))
-                }
-                (None, None) => math::describe(self.pending),
-            };
-            let error = self.status.is_some();
-            body = body.push(divider()).push(
-                row![
-                    container(Space::new())
-                        .width(12)
-                        .height(12)
-                        .style(move |_theme: &Theme| swatch_style(fill)),
-                    text(info)
-                        .size(11)
-                        .font(iced::Font::MONOSPACE)
-                        .style(move |theme: &Theme| text::Style {
-                            color: error.then(|| theme.palette().danger.base.color),
-                        }),
-                ]
-                .spacing(8)
-                .align_y(iced::Center),
-            );
+        // The other tabs fill the height themselves.
+        if self.tab == ColorPickerTab::Index {
+            body = body.push(Space::new().height(Length::Fill));
         }
+        let fill = self.shown(self.pending);
+        let info = match (&self.status, &self.pending_name) {
+            (Some(status), _) => status.clone(),
+            (None, Some(name)) => {
+                let (r, g, b) = math::color_rgb(self.pending).unwrap_or_default();
+                format!("{} · RGB {r}, {g}, {b}", name.replacen('$', " - ", 1))
+            }
+            (None, None) => math::describe(self.pending),
+        };
+        let error = self.status.is_some();
+        body = body.push(divider()).push(
+            row![
+                container(Space::new())
+                    .width(12)
+                    .height(12)
+                    .style(move |_theme: &Theme| swatch_style(fill)),
+                text(info)
+                    .size(11)
+                    .font(iced::Font::MONOSPACE)
+                    .style(move |theme: &Theme| text::Style {
+                        color: error.then(|| theme.palette().danger.base.color),
+                    }),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        );
         let body = container(body)
             .padding(12)
             .width(Length::Fill)
-            .height(if editor_only {
-                Length::Shrink
-            } else {
-                Length::Fixed(BODY_HEIGHT)
-            })
+            .height(Length::Fixed(BODY_HEIGHT))
             .style(panel_style);
 
         let actions = row![
@@ -474,11 +471,8 @@ impl ColorPicker {
         ]
         .spacing(8);
 
-        let mut panel = column![].spacing(12).width(PANEL_WIDTH);
-        if !editor_only {
-            panel = panel.push(self.tabs());
-        }
-        container(panel.push(self.preview_row()).push(body).push(actions))
+        let panel = column![].spacing(12).width(PANEL_WIDTH);
+        container(panel.push(self.tabs()).push(self.preview_row()).push(body).push(actions))
             .id(PANEL_ID)
             .into()
     }
@@ -492,14 +486,16 @@ impl ColorPicker {
                 .padding([5, 4])
                 .style(move |theme: &Theme, status| segment_style(theme, active, status))
         };
+        let cad = !self.interface();
+        let document = cad.then(|| tab(t!("Document").into_owned(), ColorPickerTab::Document));
+        let books = cad.then(|| tab(t!("Color Books").into_owned(), ColorPickerTab::Books));
         container(
-            row![
-                tab(t!("Document").into_owned(), ColorPickerTab::Document),
-                tab(t!("Index Color").into_owned(), ColorPickerTab::Index),
-                tab(t!("True Color").into_owned(), ColorPickerTab::TrueColor),
-                tab(t!("Color Books").into_owned(), ColorPickerTab::Books),
-            ]
-            .spacing(2),
+            row![]
+                .push(document)
+                .push(tab(t!("Index Color").into_owned(), ColorPickerTab::Index))
+                .push(tab(t!("True Color").into_owned(), ColorPickerTab::TrueColor))
+                .push(books)
+                .spacing(2),
         )
         .padding(2)
         .style(panel_style)
@@ -959,8 +955,8 @@ impl ColorPicker {
                 .into(),
             )
         };
-        let nearest = (!self.editor_only()).then(|| self.nearest_button());
-        self.editor.view(pipette, nearest, !self.editor_only())
+        let nearest = (!self.interface()).then(|| self.nearest_button());
+        self.editor.view(pipette, nearest, !self.interface())
     }
 
     fn nearest_button(&self) -> Element<'_, Message> {
@@ -1599,7 +1595,7 @@ mod tests {
     }
 
     #[test]
-    fn interface_colours_show_only_the_editor() {
+    fn interface_colours_show_index_and_editor_only() {
         let p = ColorPicker::new(
             ColorPickTarget::Interface(crate::app::UiColor::ModelBackground),
             AcadColor::Rgb {
@@ -1610,7 +1606,8 @@ mod tests {
             false,
         );
         let mut ui = simulator(&p);
-        assert!(ui.find(t!("Index Color").as_ref()).is_err());
+        assert!(ui.find(t!("Index Color").as_ref()).is_ok());
+        assert!(ui.find(t!("Color Books").as_ref()).is_err());
         assert!(ui.find(t!("Nearest index").as_ref()).is_err());
         assert!(ui.find("HSB").is_ok());
     }

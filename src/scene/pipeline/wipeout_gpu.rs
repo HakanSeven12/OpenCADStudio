@@ -2,11 +2,9 @@
 // for wipeout masks (solid fills drawn after wires to hide them). Real hatch
 // fills go through the capability-selected `hatch_gpu` renderer.
 //
-// It retains a general pattern/gradient capability (mode 0/2 below) and the
-// `MAX_FAMILIES = 16` cap, but wipeouts are always solid (mode 1, zero pattern
-// families), so the cap never truncates anything in practice. The family code
-// is kept only as a latent non-batched fallback; do NOT read `MAX_FAMILIES` as
-// a limit on visible hatch fills.
+// Wipeouts are solid (mode 1, zero pattern families). The legacy shader
+// structs retain their pattern/gradient fields, but all masks share the
+// same empty family record and use dynamic uniform/boundary offsets.
 //
 // Group 1 bindings per fill:
 //   binding 0 — HatchUniformData  fill and plane parameters
@@ -160,9 +158,56 @@ pub struct WipeoutGpu {
     /// boundary polygon. Used by the per-frame LOD pass to skip hatches
     /// whose entire footprint projects to less than ~2 px (Phase 3.3).
     pub world_aabb: [f32; 4],
-    _uniform_buf: wgpu::Buffer,
-    _boundary_buf: wgpu::Buffer,
-    _family_buf: wgpu::Buffer,
+    /// Binding 0 (uniform) and binding 1 (boundary), in binding order.
+    pub dynamic_offsets: [u32; 2],
+}
+
+// Dynamic offsets are u32 even when max_buffer_size is larger. Each
+// binding exposes one record; the backing allocation can be much larger
+// than max_uniform_buffer_binding_size.
+struct WipeoutPacking {
+    uniform_stride: u64,
+    boundary_stride: u64,
+    capacity: usize,
+}
+
+impl WipeoutPacking {
+    fn new(limits: &wgpu::Limits) -> Option<Self> {
+        let alignment = u64::from(limits.min_uniform_buffer_offset_alignment).max(1);
+        let uniform_size = std::mem::size_of::<HatchUniformData>() as u64;
+        let boundary_size = std::mem::size_of::<BoundaryData>() as u64;
+        for size in [
+            uniform_size,
+            boundary_size,
+            std::mem::size_of::<FamilyBatchData>() as u64,
+        ] {
+            if size > u64::from(limits.max_uniform_buffer_binding_size)
+                || size > limits.max_buffer_size
+            {
+                return None;
+            }
+        }
+        let uniform_stride = uniform_size.div_ceil(alignment) * alignment;
+        let boundary_stride = boundary_size.div_ceil(alignment) * alignment;
+        let max_bytes = limits.max_buffer_size.min(u64::from(u32::MAX) + 1);
+        let capacity = (max_bytes / uniform_stride).min(max_bytes / boundary_stride) as usize;
+        if capacity == 0 {
+            return None;
+        }
+        Some(Self {
+            uniform_stride,
+            boundary_stride,
+            capacity,
+        })
+    }
+
+    fn offsets(&self, index: usize) -> [u32; 2] {
+        assert!(index < self.capacity);
+        [
+            (index as u64 * self.uniform_stride) as u32,
+            (index as u64 * self.boundary_stride) as u32,
+        ]
+    }
 }
 
 impl WipeoutGpu {
@@ -172,27 +217,81 @@ impl WipeoutGpu {
         models: &[HatchModel],
         bgl1: &wgpu::BindGroupLayout,
     ) -> Vec<Self> {
-        // A source_id only identifies reusable render geometry, not an
-        // interchangeable hatch boundary in world space. Grouping masks by
-        // source_id can incorrectly reuse the first model's boundary, origin,
-        // plane and uniform for later INSERT copies. Unlike wires, a mask's
-        // GPU shader clips against its own boundary, so build each mask from
-        // its actual transformed model until we have a geometry-local,
-        // translation-safe instancing path.
-        models
-            .iter()
-            .map(|model| Self::new(device, queue, &[model], bgl1))
-            .collect()
+        if models.is_empty() {
+            return Vec::new();
+        }
+        let Some(packing) = WipeoutPacking::new(&device.limits()) else {
+            static WARNING: std::sync::Once = std::sync::Once::new();
+            WARNING
+                .call_once(|| eprintln!("[gpu] wipeouts skipped: uniform buffer limits too small"));
+            return Vec::new();
+        };
+        let families = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "wipeout.families",
+            std::slice::from_ref(&build_family_batch(&HatchPattern::Solid)),
+            wgpu::BufferUsages::UNIFORM,
+        );
+        let mut result = Vec::with_capacity(models.len());
+        for chunk in models.chunks(packing.capacity) {
+            let buffer = |label, stride| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: stride * chunk.len() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            };
+            let uniforms = buffer("wipeout.uniforms", packing.uniform_stride);
+            let boundaries = buffer("wipeout.boundaries", packing.boundary_stride);
+            // Bind one record, not the allocation. Dynamic offsets select
+            // the mask without exceeding max_uniform_buffer_binding_size.
+            let entry = |binding, buffer, size| wgpu::BindGroupEntry {
+                binding,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(size),
+                }),
+            };
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wipeout.bind_group1"),
+                layout: bgl1,
+                entries: &[
+                    entry(0, &uniforms, std::mem::size_of::<HatchUniformData>() as u64),
+                    entry(1, &boundaries, std::mem::size_of::<BoundaryData>() as u64),
+                    entry(2, &families, std::mem::size_of::<FamilyBatchData>() as u64),
+                ],
+            });
+            for (index, model) in chunk.iter().enumerate() {
+                // Keep each transformed boundary, plane and placement.
+                // A shared source_id does not make mask geometry interchangeable.
+                result.push(Self::new(
+                    device,
+                    queue,
+                    &[model],
+                    &uniforms,
+                    &boundaries,
+                    bind_group.clone(),
+                    packing.offsets(index),
+                ));
+            }
+        }
+        result
     }
 
     fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         models: &[&HatchModel],
-        bgl1: &wgpu::BindGroupLayout,
+        uniforms: &wgpu::Buffer,
+        boundaries: &wgpu::Buffer,
+        bind_group: wgpu::BindGroup,
+        dynamic_offsets: [u32; 2],
     ) -> Self {
         let model = models[0];
-        // ── Decode pattern mode ──────────────────────────────────────────
+        debug_assert!(matches!(model.pattern, HatchPattern::Solid));
         let (mode, color2, grad_cos, grad_sin) = match &model.pattern {
             HatchPattern::Solid => (1u32, [0.0f32; 4], 0.0f32, 0.0f32),
             HatchPattern::Pattern(_) => (0u32, [0.0f32; 4], 0.0f32, 0.0f32),
@@ -361,50 +460,16 @@ impl WipeoutGpu {
             }
         }
 
-        // ── FamilyBatchData ───────────────────────────────────────────────
-        let family_batch = build_family_batch(&model.pattern);
-
-        // ── GPU buffers ───────────────────────────────────────────────────
-        let _uniform_buf = super::gpu_upload::upload_buffer(
-            device,
-            queue,
-            "hatch.uniforms",
-            std::slice::from_ref(&uniform_data),
-            wgpu::BufferUsages::UNIFORM,
+        queue.write_buffer(
+            uniforms,
+            dynamic_offsets[0] as u64,
+            bytemuck::bytes_of(&uniform_data),
         );
-        let _boundary_buf = super::gpu_upload::upload_buffer(
-            device,
-            queue,
-            "hatch.boundary",
-            std::slice::from_ref(&boundary_data),
-            wgpu::BufferUsages::UNIFORM,
+        queue.write_buffer(
+            boundaries,
+            dynamic_offsets[1] as u64,
+            bytemuck::bytes_of(&boundary_data),
         );
-        let _family_buf = super::gpu_upload::upload_buffer(
-            device,
-            queue,
-            "hatch.families",
-            std::slice::from_ref(&family_batch),
-            wgpu::BufferUsages::UNIFORM,
-        );
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hatch.bind_group1"),
-            layout: bgl1,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: _uniform_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: _boundary_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: _family_buf.as_entire_binding(),
-                },
-            ],
-        });
 
         // Boundary vertices are stored as f32 offsets from
         // `model.world_origin` (so f32 keeps precision at UTM-scale
@@ -488,9 +553,7 @@ impl WipeoutGpu {
             instance_count: placements.len() as u32,
             bind_group,
             world_aabb,
-            _uniform_buf,
-            _boundary_buf,
-            _family_buf,
+            dynamic_offsets,
         }
     }
 }
@@ -574,3 +637,7 @@ fn build_family_batch(pattern: &HatchPattern) -> FamilyBatchData {
 
     batch
 }
+
+#[cfg(test)]
+#[path = "wipeout_gpu_tests.rs"]
+mod tests;

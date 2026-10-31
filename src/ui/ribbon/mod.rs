@@ -1847,8 +1847,16 @@ impl Ribbon {
         let row_count = rows.len().max(1);
         let list_h = (row_count as f32 * 26.0).min(420.0);
         // Search box (#343): filters the list live as the user types.
+        // Enter makes the first match current.
+        let first_match = self
+            .layer_infos
+            .iter()
+            .find(|info| filter.is_empty() || info.name.to_lowercase().contains(&filter))
+            .map(|info| Message::RibbonLayerChanged(info.name.clone()));
         let search = iced::widget::text_input(t!("Search layers…").as_ref(), &self.layer_filter)
+            .id(iced::widget::Id::new(widgets::LAYER_SEARCH_ID))
             .on_input(Message::RibbonLayerFilterChanged)
+            .on_submit_maybe(first_match)
             .size(11)
             .padding([4, 6]);
         let state_manager = button(

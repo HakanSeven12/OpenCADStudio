@@ -7725,6 +7725,14 @@ impl OpenCADStudio {
                         self.refresh_layer_panel();
                     }
                     self.ribbon.toggle_dropdown(&id);
+                    // Typing goes straight to the layer list's search box.
+                    if self.ribbon.open_dropdown.as_deref()
+                        == Some(crate::ui::ribbon::widgets::LAYER_COMBO_ID)
+                    {
+                        task = task.chain(iced::widget::operation::focus(iced::widget::Id::new(
+                            crate::ui::ribbon::widgets::LAYER_SEARCH_ID,
+                        )));
+                    }
                 }
                 task
             }

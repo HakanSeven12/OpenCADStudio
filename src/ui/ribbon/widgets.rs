@@ -380,6 +380,8 @@ pub(super) const TOP_BUTTON_H: f32 = metrics::QAT_BUTTON;
 pub(crate) const UNDO_HISTORY_ID: &str = "UNDO_HISTORY";
 pub(crate) const REDO_HISTORY_ID: &str = "REDO_HISTORY";
 pub(crate) const LAYER_COMBO_ID: &str = "LAYER_COMBO";
+/// The layer list's search box, focused when the list opens.
+pub(crate) const LAYER_SEARCH_ID: &str = "LAYER_SEARCH";
 pub(super) const PROP_COLOR_ID: &str = "PROP_COLOR";
 pub(super) const PROP_LINETYPE_ID: &str = "PROP_LINETYPE";
 pub(super) const PROP_LW_ID: &str = "PROP_LW";

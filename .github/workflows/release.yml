@@ -402,7 +402,7 @@ jobs:
 
   build-macos:
     if: github.event_name == 'release' || inputs.tag != '' || inputs.target == 'all' || inputs.target == 'macos'
-    runs-on: macos-14    # Apple Silicon (arm64) only
+    runs-on: macos-15    # Apple Silicon (arm64) only
     permissions:
       contents: write
 

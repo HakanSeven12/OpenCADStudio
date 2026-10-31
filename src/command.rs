@@ -2092,6 +2092,11 @@ pub enum CmdResult {
         handle: Handle,
         entity: EntityType,
     },
+    /// Update one entity in place, preserve its handle, and keep the command active.
+    UpdateEntityContinue {
+        handle: Handle,
+        entity: EntityType,
+    },
     /// `UpdateEntityAndFinish`, then print `message`.
     UpdateEntityAndReport {
         handle: Handle,

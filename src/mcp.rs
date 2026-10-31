@@ -2259,8 +2259,9 @@ fn call_tool(
                 req["annotate"] = json!(annotate);
             }
             let result = client(clients, session_id)?.request(req, 30.0, pump, mcp_id)?;
+            let status = result["status"].as_str().unwrap_or("");
             if result["ok"].as_bool() != Some(true)
-                || result["status"].as_str() != Some("completed")
+                || (status != "completed" && status != "waiting_input")
             {
                 // Failed capture response from the GUI: retryable, stays Tool.
                 return Err(result.to_string().into());

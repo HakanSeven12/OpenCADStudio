@@ -2977,7 +2977,9 @@ impl Scene {
         });
         let new_model = match contextual.as_deref() {
             Some(EntityType::Hatch(dxf)) => {
-                let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
+                let mut color = convert::tess_util::aci_to_rgba(&dxf.common.color);
+                let alpha = 1.0 - dxf.common.transparency.as_percent() as f32;
+                color[3] = alpha.clamp(0.01, 1.0);
                 Self::hatch_model_from_dxf(dxf, color)
             }
             Some(EntityType::Solid(s)) => {
@@ -3024,7 +3026,9 @@ impl Scene {
                 // Paper-space entities live in sheet coordinates — world_offset must not
                 let model = match &kind {
                     EntityType::Hatch(dxf) => {
-                        let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
+                        let mut color = convert::tess_util::aci_to_rgba(&dxf.common.color);
+                        let alpha = 1.0 - dxf.common.transparency.as_percent() as f32;
+                        color[3] = alpha.clamp(0.01, 1.0);
                         Self::hatch_model_from_dxf(dxf, color)
                     }
                     EntityType::Solid(solid) => {

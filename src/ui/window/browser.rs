@@ -63,6 +63,27 @@ fn bodies(document: &Document) -> Vec<(Handle, String)> {
         .collect()
 }
 
+/// 3D Polylines in model space.
+fn polylines3d(document: &Document) -> Vec<(Handle, String)> {
+    document
+        .entities()
+        .filter(|entity| matches!(entity, EntityType::Polyline3D(_)))
+        .map(|entity| {
+            let handle = entity.common().handle;
+            let layer = &entity.common().layer;
+            (handle, format!("Polyline3D: {layer} [{:X}]", handle.value()))
+        })
+        .collect()
+}
+
+/// Point entities in model space.
+fn points_count(document: &Document) -> usize {
+    document
+        .entities()
+        .filter(|entity| matches!(entity, EntityType::Point(_)))
+        .count()
+}
+
 fn section_header(label: String) -> Element<'static, Message> {
     container(text(label).size(11))
         .width(Fill)
@@ -123,6 +144,23 @@ pub fn view<'a>(
         None => {
             tree = tree.push(note_row(crate::t!("No sketch open").into_owned()));
         }
+    }
+
+    let polylines = polylines3d(document);
+    if !polylines.is_empty() {
+        tree = tree.push(section_header(
+            crate::tf!("3D Polylines ({})", polylines.len()).into_owned(),
+        ));
+        for (handle, label) in polylines {
+            tree = tree.push(entry_row(label, format!("SELECT {:X}", handle.value())));
+        }
+    }
+
+    let pt_count = points_count(document);
+    if pt_count > 0 {
+        tree = tree.push(section_header(
+            crate::tf!("Points ({})", pt_count).into_owned(),
+        ));
     }
 
     let bodies = bodies(document);

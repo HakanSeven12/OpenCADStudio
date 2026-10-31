@@ -10875,6 +10875,9 @@ impl OpenCADStudio {
                     Ok(()) => {
                         self.language = language;
                         self.persist_settings_if_changed();
+                        // Ribbon labels are built in the language they were
+                        // made in; rebuild them so no restart is needed.
+                        self.rebuild_ribbon_modules();
                         #[cfg(target_arch = "wasm32")]
                         {
                             let script = crate::scene::text::web_font::preload_language(

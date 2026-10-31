@@ -68,7 +68,7 @@ jobs:
           sudo apt-get install -y \
             libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
             libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev \
-            librsvg2-bin fuse libfuse2
+            librsvg2-bin fuse libfuse2 zsync
 
       - name: Build
         env:
@@ -103,16 +103,25 @@ jobs:
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
 
+      # The AppImage carries update information so AppImageUpdate and
+      # similar tools can delta-update it from the matching .zsync file.
+      # The .zsync records the AppImage's file name, so it is built under
+      # the name it is uploaded as.
       - name: Build AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
+          ASSET: OpenCADStudio-${{ env.RELEASE_TAG || 'dev' }}-linux-x86_64.AppImage
+          UPDATE_INFO: gh-releases-zsync|${{ github.repository_owner }}|${{ github.event.repository.name }}|latest|OpenCADStudio-*-linux-x86_64.AppImage.zsync
         run: |
+          export OUTPUT="$ASSET" LDAI_OUTPUT="$ASSET"
+          export UPDATE_INFORMATION="$UPDATE_INFO" LDAI_UPDATE_INFORMATION="$UPDATE_INFO"
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/io.github.HakanSeven12.OpenCadStudio.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/io.github.HakanSeven12.OpenCadStudio.png \
             --output appimage
-          mv Open*CAD*Studio*.AppImage OpenCADStudio.AppImage
+          test -f "$ASSET"
+          test -f "$ASSET.zsync" || echo "::warning::no $ASSET.zsync produced"
 
       - name: Upload AppImage to release
         if: env.RELEASE_TAG != ''
@@ -120,8 +129,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ASSET=OpenCADStudio-${{ env.RELEASE_TAG }}-linux-x86_64.AppImage
-          mv OpenCADStudio.AppImage "$ASSET"
-          gh release upload ${{ env.RELEASE_TAG }} "$ASSET" --clobber --repo ${{ github.repository }}
+          FILES=("$ASSET")
+          [ -f "$ASSET.zsync" ] && FILES+=("$ASSET.zsync")
+          gh release upload ${{ env.RELEASE_TAG }} "${FILES[@]}" --clobber --repo ${{ github.repository }}
 
   build-snap:
     needs: build-appimage

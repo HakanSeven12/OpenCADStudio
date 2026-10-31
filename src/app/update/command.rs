@@ -1306,7 +1306,12 @@ impl OpenCADStudio {
             self.resolve_user_select(false);
             return Task::none();
         }
-        if self.ribbon.escape_extension() {
+        if self.ribbon.escape_search()
+            || self.ribbon.close_menu()
+            || self.ribbon.close_app_menu()
+            || self.ribbon.escape_extension()
+            || self.ribbon.close_popup()
+        {
             return Task::none();
         }
         if self.awaiting_fill_close_answer() {

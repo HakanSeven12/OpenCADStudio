@@ -5,7 +5,7 @@
 
 use crate::modules::{ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
-use super::{draw_panel, item_id, Ribbon};
+use super::{draw_panel, extras, Ribbon};
 
 /// One button of a group: the id its highlight is keyed on, and the command
 /// line it dispatches (`None` for a button that raises a non-command event).
@@ -41,24 +41,20 @@ fn item_entries(item: &RibbonItem) -> Vec<Entry<'_>> {
     }
 }
 
-/// Every button `group` offers: its items' buttons and the tools of its title
-/// slide-out, keyed like dropdown items on the command they dispatch.
-pub(super) fn group_entries(group: &RibbonGroup) -> Vec<Entry<'_>> {
+/// Every button `group`, the panel `key`, offers: its items' buttons and the
+/// tools of its title slide-out, keyed like dropdown items on the command they
+/// dispatch.
+pub(super) fn group_entries<'g>(key: &str, group: &'g RibbonGroup) -> Vec<Entry<'g>> {
     let mut out: Vec<_> = group.tools.iter().flat_map(item_entries).collect();
-    let ids: Vec<_> = group.tools.iter().filter_map(item_id).collect();
-    out.extend(draw_panel::slide_out_commands(group.title, &ids).map(|cmd| (cmd, Some(cmd))));
+    out.extend(draw_panel::slide_out_commands(key).map(|cmd| (cmd, Some(cmd))));
     out
 }
 
-/// Whether `item` shows the button keyed `id`, lit or as the item a lit
-/// dropdown holds.
-pub(super) fn item_holds(item: &RibbonItem, id: &str) -> bool {
-    item_entries(item).iter().any(|(entry, _)| *entry == id)
-}
-
-/// Whether `group` holds the button keyed `id`.
-pub(super) fn group_holds(group: &RibbonGroup, id: &str) -> bool {
-    group_entries(group).iter().any(|(entry, _)| *entry == id)
+/// Whether `group`, the panel `key`, holds the button keyed `id`.
+pub(super) fn group_holds(key: &str, group: &RibbonGroup, id: &str) -> bool {
+    group_entries(key, group)
+        .iter()
+        .any(|(entry, _)| *entry == id)
 }
 
 impl Ribbon {
@@ -69,8 +65,11 @@ impl Ribbon {
         let order = std::iter::once(self.active)
             .chain((0..self.modules.len()).filter(move |i| *i != self.active));
         order.flat_map(|i| {
+            let module_id = self.modules[i].id();
             self.groups_for(i)
-                .flat_map(group_entries)
+                .flat_map(move |group| {
+                    group_entries(&extras::panel_key(module_id, group.title), group)
+                })
                 .map(move |entry| (i, entry))
         })
     }
@@ -107,7 +106,11 @@ impl Ribbon {
     /// module has no tab (its tools are on the side toolbar).
     pub(super) fn tab_holding_active_tool(&self) -> Option<usize> {
         let id = self.active_tool.as_deref()?;
-        let holds = |i: usize| self.groups_for(i).any(|group| group_holds(group, id));
+        let holds = |i: usize| {
+            let module_id = self.modules[i].id();
+            self.groups_for(i)
+                .any(|group| group_holds(&extras::panel_key(module_id, group.title), group, id))
+        };
         if self
             .modules
             .get(self.active)
@@ -115,7 +118,8 @@ impl Ribbon {
         {
             return None;
         }
-        (0..self.modules.len()).find(|i| self.modules[*i].id() != "layout" && holds(*i))
+        (0..self.modules.len())
+            .find(|i| self.modules[*i].id() != "layout" && !self.tab_hidden(*i) && holds(*i))
     }
 }
 
@@ -255,12 +259,12 @@ mod tests {
             title: "Draw",
             tools: vec![],
         };
-        assert!(group_holds(&draw, "SPLINE"));
+        assert!(group_holds("draw/Draw", &draw, "SPLINE"));
         let modify = RibbonGroup {
             title: "Modify",
             tools: vec![],
         };
-        assert!(group_holds(&modify, "DRAWORDER_BACK"));
+        assert!(group_holds("draw/Modify", &modify, "DRAWORDER_BACK"));
     }
 
     #[test]

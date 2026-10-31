@@ -17,7 +17,7 @@ use iced::{
     Theme, Vector,
 };
 
-use super::{draw_panel, item_id, Ribbon};
+use super::{draw_panel, extras, Ribbon};
 use crate::app::Message;
 use crate::modules::{RibbonItem, ToolDef};
 use crate::ui::wrap_bar::{fresh_bounds, PosReport};
@@ -746,7 +746,7 @@ impl Ribbon {
         match tip.action.clone() {
             Action::Tab(index) => {
                 state.top = false;
-                self.select(index);
+                self.keytip_tab(index);
                 KeyTipStep::Stay
             }
             Action::Open(message) => KeyTipStep::Open(message),
@@ -769,9 +769,10 @@ impl Ribbon {
     }
 
     fn tab_tips(&self) -> Vec<Tip> {
-        let tabs = self.modules.iter().enumerate().filter(|(_, module)| {
+        let tabs = self.modules.iter().enumerate().filter(|(index, module)| {
             module.id() != "layout"
                 && (module.id() != "block_editor" || self.block_editing.is_some())
+                && !self.tab_hidden(*index)
         });
         let mut tips: Vec<Tip> = tabs
             .map(|(index, module)| Tip {
@@ -840,7 +841,6 @@ impl Ribbon {
             // panel's slide-out. Both carry it; only the drawn one shows, and
             // the form the panel had in the last frame comes first, so the
             // code runs that one.
-            let ids: Vec<&'static str> = group.tools.iter().filter_map(item_id).collect();
             let collapsed = collapsed_anchor(group.title);
             let was_collapsed = crate::ui::wrap_bar::recent_bounds(&collapsed).is_some();
             let flyout = Tip {
@@ -849,24 +849,28 @@ impl Ribbon {
                 code: code(scope, group.title).map(str::to_string),
                 action: Action::Open(Message::ToggleRibbonPanel(group.title.to_string())),
             };
-            let Some(id) = draw_panel::slide_out_id(group.title, &ids) else {
+            let key = extras::panel_key(scope, group.title);
+            // The panel's dialog launcher, with or without a slide-out.
+            if let Some(panel) = extras::for_panel(&key) {
+                if let Some(dialog) = panel.dialog {
+                    tips.push(Tip {
+                        anchor: panel.launcher.to_string(),
+                        target: panel.launcher,
+                        code: code(scope, panel.launcher).map(str::to_string),
+                        action: Action::Run(draw_panel::launcher_message(dialog)),
+                    });
+                }
+            }
+            if key == extras::panel_key("annotate", "Text") {
+                tips.push(Tip {
+                    anchor: TEXT_HEIGHT.to_string(),
+                    target: TEXT_HEIGHT,
+                    code: code(scope, TEXT_HEIGHT).map(str::to_string),
+                    action: Action::Run(Message::RibbonTextHeightFocus),
+                });
+            }
+            let Some(id) = draw_panel::slide_out_id(&key) else {
                 tips.push(flyout);
-                if group.title == "Leaders" && ids.contains(&"MLEADER") {
-                    tips.push(Tip {
-                        anchor: LEADER_LAUNCHER.to_string(),
-                        target: LEADER_LAUNCHER,
-                        code: code(scope, LEADER_LAUNCHER).map(str::to_string),
-                        action: Action::Run(Message::Command("MLEADERSTYLE".to_string())),
-                    });
-                }
-                if group.title == "Tables" && ids.contains(&"TABLE") {
-                    tips.push(Tip {
-                        anchor: TABLE_LAUNCHER.to_string(),
-                        target: TABLE_LAUNCHER,
-                        code: code(scope, TABLE_LAUNCHER).map(str::to_string),
-                        action: Action::Run(Message::Command("TABLESTYLE".to_string())),
-                    });
-                }
                 continue;
             };
             let slide_out = Tip {
@@ -880,36 +884,6 @@ impl Ribbon {
                 tips.extend([flyout, slide_out]);
             } else {
                 tips.extend([slide_out, flyout]);
-            }
-            if id == draw_panel::REFERENCE_PANEL_ID {
-                tips.push(Tip {
-                    anchor: XREF_LAUNCHER.to_string(),
-                    target: XREF_LAUNCHER,
-                    code: code(scope, XREF_LAUNCHER).map(str::to_string),
-                    action: Action::Run(Message::ToggleXrefManager),
-                });
-            }
-            if id == draw_panel::DIMENSIONS_PANEL_ID {
-                tips.push(Tip {
-                    anchor: DIMENSION_LAUNCHER.to_string(),
-                    target: DIMENSION_LAUNCHER,
-                    code: code(scope, DIMENSION_LAUNCHER).map(str::to_string),
-                    action: Action::Run(Message::Command("DIMSTYLE".to_string())),
-                });
-            }
-            if id == draw_panel::TEXT_PANEL_ID {
-                tips.push(Tip {
-                    anchor: TEXT_LAUNCHER.to_string(),
-                    target: TEXT_LAUNCHER,
-                    code: code(scope, TEXT_LAUNCHER).map(str::to_string),
-                    action: Action::Run(Message::Command("STYLE".to_string())),
-                });
-                tips.push(Tip {
-                    anchor: TEXT_HEIGHT.to_string(),
-                    target: TEXT_HEIGHT,
-                    code: code(scope, TEXT_HEIGHT).map(str::to_string),
-                    action: Action::Run(Message::RibbonTextHeightFocus),
-                });
             }
         }
         tips
@@ -958,10 +932,10 @@ impl Ribbon {
                 },
             })
             .collect();
-        if open == draw_panel::CENTERLINES_PANEL_ID {
+        if open == extras::CENTERLINES_ID {
             tips.push(dropdown_tip(open, super::widgets::CENTER_LAYER_COMBO));
         }
-        if open == draw_panel::REFERENCE_PANEL_ID {
+        if open == extras::REFERENCE_ID {
             tips.push(Tip {
                 anchor: item_anchor(open, XREF_FADE),
                 target: XREF_FADE,
@@ -1365,10 +1339,11 @@ fn draw_bar(renderer: &mut Renderer, theme: &Theme, parts: &[String; 3]) {
     };
     let (fill, edge, ink) = colors(theme);
     let font = bold(renderer);
-    let bar = Rectangle::new(
-        Point::new(ribbon.x, ribbon.y + ribbon.height),
-        Size::new(ribbon.width, BAR_H),
-    );
+    // Under a minimized ribbon's open popup, which hangs below the ribbon.
+    let top = fresh_bounds(super::minimize::POPUP_ID).map_or(ribbon.y + ribbon.height, |popup| {
+        (popup.y + popup.height).max(ribbon.y + ribbon.height)
+    });
+    let bar = Rectangle::new(Point::new(ribbon.x, top), Size::new(ribbon.width, BAR_H));
     renderer.fill_quad(
         renderer::Quad {
             bounds: bar,
@@ -1448,7 +1423,7 @@ fn pill_candidates(
             Point::new(b.x + 14.0, b.center_y()),
         ];
     }
-    if anchor == XREF_LAUNCHER {
+    if anchor.ends_with("_LAUNCHER") {
         return vec![
             b.center(),
             Point::new(b.x + b.width + 2.0 + width / 2.0, b.center_y()),
@@ -1491,10 +1466,10 @@ fn pill_candidates(
         let icon = Point::new(b.center_x(), (b.y + label.y) / 2.0);
         let mut spots = Vec::new();
         if dropdown {
-            // The arrow strip lies under the label.
+            // The arrow lies under the label.
             spots.push(Point::new(
                 b.center_x(),
-                b.y + b.height - super::widgets::LARGE_ARR / 2.0,
+                b.y + b.height - crate::ui::style::ribbon_metrics::LARGE_ARROW_BOTTOM,
             ));
         }
         spots.extend([

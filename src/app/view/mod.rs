@@ -2744,18 +2744,32 @@ bg={bg_ms:.1}ms n={view_count}"
             // menu bar and status bar stay so commands remain reachable and
             // the mode can be toggled back off.
             let mut col = column![];
-            if self.show_menu_bar {
-                col = col.push(crate::ui::menu_bar::view());
-            }
-            if !self.clean_screen && !self.ribbon_closed {
-                col = col.push(self.ribbon.view(
-                    is_paper,
-                    self.tabs[self.active_tab].is_start,
-                    self.tabs[self.active_tab].history.undo_stack.len(),
-                    self.tabs[self.active_tab].history.redo_stack.len(),
-                    self.show_block_palette,
-                    self.block_visibility_context(),
-                ));
+            if self.clean_screen {
+                // Clean screen keeps the menu row, led by the compact logo.
+                if self.show_menu_bar {
+                    col = col.push(
+                        row![
+                            container(self.ribbon.logo_button(false)).padding([0, 6]),
+                            self.ribbon
+                                .with_search_box(crate::ui::menu_bar::view(self.menu_context())),
+                        ]
+                        .align_y(iced::Center),
+                    );
+                }
+            } else {
+                col = col.push(
+                    self.ribbon.view(
+                        self.show_menu_bar
+                            .then(|| crate::ui::menu_bar::view(self.menu_context())),
+                        self.ribbon_closed,
+                        is_paper,
+                        self.tabs[self.active_tab].is_start,
+                        self.tabs[self.active_tab].history.undo_stack.len(),
+                        self.tabs[self.active_tab].history.redo_stack.len(),
+                        self.show_block_palette,
+                        self.block_visibility_context(),
+                    ),
+                );
             }
             // Split the `chrome` bucket so live `view-detail` traces show
             // ribbon vs status-bar construction separately (both gated on
@@ -2944,6 +2958,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.win_size,
                     self.tabs[self.active_tab].is_start,
                     &self.tabs[self.active_tab].recent_colors,
+                    &self.recent_files,
                 )
                 .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
         };
@@ -2978,6 +2993,39 @@ bg={bg_ms:.1}ms n={view_count}"
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        // A minimized ribbon's popup lies over the drawing, under dropdowns.
+        let ribbon_popup_layer: Element<'_, Message> = if self.clean_screen || self.ribbon_closed {
+            None
+        } else {
+            self.ribbon.minimized_popup(
+                is_paper,
+                self.tabs[self.active_tab].is_start,
+                self.show_block_palette,
+                self.block_visibility_context(),
+                self.win_size,
+            )
+        }
+        .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
+        // Pinned slide-outs hang under their panels, over the drawing.
+        let pinned_layer: Element<'_, Message> = if self.clean_screen || self.ribbon_closed {
+            None
+        } else {
+            self.ribbon
+                .pinned_slide_outs(self.tabs[self.active_tab].is_start, self.win_size)
+        }
+        .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
+        let search_layer: Element<'_, Message> = self
+            .ribbon
+            .search_layer()
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
+        let ribbon_menu_layer: Element<'_, Message> = self
+            .ribbon
+            .menu_overlay(self.win_size, self.show_menu_bar, self.ribbon_closed)
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
         // Key tips: the hint bar under the dropdowns, the codes above all.
         let (keytip_bar, keytip_layer): (Element<'_, Message>, Element<'_, Message>) =
             self.ribbon.keytip_layers().unwrap_or_else(|| {
@@ -2989,8 +3037,12 @@ bg={bg_ms:.1}ms n={view_count}"
 
         let composed = stack![
             main_ui,
+            pinned_layer,
+            ribbon_popup_layer,
             keytip_bar,
             dropdown_layer,
+            search_layer,
+            ribbon_menu_layer,
             qselect_layer,
             snap_override_layer,
             open_progress_layer,
@@ -3206,6 +3258,12 @@ impl OpenCADStudio {
             Subscription::none()
         };
         // Expire the QuickCalc status message ("Copied 870").
+        // Open or close a ribbon popup or slide-out after its delay.
+        let ribbon_minimize = if self.ribbon.wants_tick() {
+            iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::RibbonTick)
+        } else {
+            Subscription::none()
+        };
         let quick_calc_flash = if self.quick_calc.flash.is_some() {
             iced::time::every(crate::ui::window::quick_calc::QuickCalcPalette::flash_interval())
                 .map(|_| {
@@ -3316,6 +3374,17 @@ impl OpenCADStudio {
                     }
                     iced::Event::Window(window::Event::Resized(sz)) => {
                         Some(Message::WindowResized(sz.width as f32, sz.height as f32))
+                    }
+                    // The ribbon's arrows sit on whole physical pixels.
+                    iced::Event::Window(window::Event::Opened {
+                        scale_factor, size, ..
+                    }) => {
+                        crate::ui::icons::set_scale_factor(scale_factor);
+                        Some(Message::WindowOpened(win_id, size.width, size.height))
+                    }
+                    iced::Event::Window(window::Event::Rescaled(scale_factor)) => {
+                        crate::ui::icons::set_scale_factor(scale_factor);
+                        None
                     }
                     iced::Event::Window(window::Event::FileDropped(path)) => {
                         Some(Message::FileDropped(path))
@@ -3512,6 +3581,7 @@ impl OpenCADStudio {
             capture_frame,
             caret_blink,
             quick_calc_flash,
+            ribbon_minimize,
             web_fonts,
             autosave,
             plugin_drain,
@@ -3597,6 +3667,28 @@ fn doc_tab_context_menu(
         .padding([4, 0])
         .width(iced::Length::Fixed(MENU_W))
         .into()
+}
+
+impl OpenCADStudio {
+    /// The open drawings, as the Window menu lists them: tab index and name.
+    fn open_drawings(&self) -> Vec<(usize, String)> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| !tab.is_start)
+            .map(|(index, tab)| (index, tab.tab_display_name()))
+            .collect()
+    }
+
+    /// What the menu bar shows: the open drawings, the command aliases, and
+    /// whether the Start tab is on show.
+    fn menu_context(&self) -> crate::ui::menu_bar::MenuContext<'_> {
+        crate::ui::menu_bar::MenuContext {
+            drawings: self.open_drawings(),
+            aliases: &self.command_line.command_aliases,
+            is_start: self.tabs[self.active_tab].is_start,
+        }
+    }
 }
 
 pub(super) fn doc_tab_bar<'a>(

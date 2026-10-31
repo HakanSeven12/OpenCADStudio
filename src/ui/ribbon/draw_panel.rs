@@ -1,321 +1,65 @@
-//! Additional drawing tools, reached from the Draw panel's title.
+//! The slide-outs under panel titles and the panels' dialog launchers, drawn
+//! from the registry in `extras`.
 
 use std::time::Duration;
 
-use iced::widget::{button, column, container, row, scrollable, text, tooltip};
-use iced::{Element, Fill, Theme};
-
-use super::widgets::{
-    make_icon, make_tip, muted_text_style, popup_panel_style, popup_row_style, tip_style,
-    tool_btn_style, LARGE_DROPDOWN_ARROW_SIZE,
+use iced::time::Instant;
+use iced::widget::{
+    button, column, container, mouse_area, opaque, row, stack, text, tooltip, Space,
 };
-use super::{dropdown_backdrop, keytips, position_ribbon_dropdown, Ribbon};
+use iced::{Background, Element, Fill, Length, Padding, Theme};
+
+use super::extras::{self, Layout, MoreGroup, MoreTool, PanelExtras};
+use super::widgets::{
+    make_icon, make_tip, popup_panel_style, popup_row_style, tip_style, tool_btn_style,
+    PANEL_TITLE_H, PANEL_TITLE_SIZE,
+};
+use super::{dropdown_backdrop, keytips, position_ribbon_dropdown, Ribbon, RibbonMinimize};
 use crate::app::Message;
 use crate::modules::IconKind;
 use crate::t;
-use crate::ui::{icons, wrap_bar::PosReport};
+use crate::ui::icons;
+use crate::ui::style::{chrome, ribbon_metrics as metrics};
+use crate::ui::wrap_bar::{dropdown_bounds, recent_bounds, PosReport};
 
-pub(super) const PANEL_ID: &str = "draw_extension";
-const TITLE_ID: &str = "draw_extension_title";
-const SCALE: f32 = 0.7;
-const CELL: f32 = 36.0 * SCALE;
-const GAP: f32 = 3.0 * SCALE;
-const OPTION_HEIGHT: f32 = 30.0 * SCALE;
-const GROUP_TITLE_ARROW_SIZE: f32 = LARGE_DROPDOWN_ARROW_SIZE * 1.5;
+/// The title strip at the bottom of a panel and the line over it, which an
+/// open slide-out covers.
+const TITLE_STRIP: f32 = metrics::SLIDE_OUT_TOP;
+/// A panel's dialog launcher, at the right end of its title strip.
+const LAUNCHER_W: f32 = metrics::LAUNCHER_W;
+const LAUNCHER_H: f32 = metrics::LAUNCHER_H;
+/// Height of a slide-out's footer.
+pub(super) const FOOTER_H: f32 = 19.0;
+/// A slide-out tool button, and the arrow of one with a submenu.
+const CELL: f32 = metrics::SMALL_W;
+const CELL_ICON: f32 = metrics::SMALL_ICON;
+const SPLIT_W: f32 = metrics::SPLIT_ARROW_W;
+const GAP: f32 = 2.0;
+const PAD: f32 = 4.0;
+const OPTION_HEIGHT: f32 = 22.0;
+const OPTIONS_W: f32 = 190.0;
+/// The least width of a slide-out with a layer list.
+const LIST_MIN_W: f32 = 180.0;
+/// How long an unpinned slide-out stays after the pointer leaves it and its
+/// panel, so the pointer can cross the gap between them.
+const CLOSE_DELAY: Duration = Duration::from_millis(300);
 
-pub(super) struct Tool {
-    pub command: &'static str,
-    pub label: &'static str,
-    pub icon: &'static [u8],
-    pub options: &'static [(&'static str, &'static str)],
-}
-
-const TOOLS: &[Tool] = &[
-    Tool {
-        command: "SPLINE",
-        label: "Spline Fit",
-        icon: include_bytes!("../../../assets/icons/spline.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "SPLINECV",
-        label: "Spline CV",
-        icon: include_bytes!("../../../assets/icons/spline_cv.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "XLINE",
-        label: "Construction Line",
-        icon: include_bytes!("../../../assets/icons/xline.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "RAY",
-        label: "Ray",
-        icon: include_bytes!("../../../assets/icons/ray.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "DIVIDE",
-        label: "Divide",
-        icon: include_bytes!("../../../assets/icons/divide.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "MEASURE",
-        label: "Measure",
-        icon: include_bytes!("../../../assets/icons/measure.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "REGION",
-        label: "Region",
-        icon: include_bytes!("../../../assets/icons/region.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "BOUNDARY",
-        label: "Boundary",
-        icon: include_bytes!("../../../assets/icons/boundary.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "HELIX",
-        label: "Helix",
-        icon: include_bytes!("../../../assets/icons/helix.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "DONUT",
-        label: "Donut",
-        icon: include_bytes!("../../../assets/icons/donut.svg"),
-        options: &[],
-    },
-    Tool {
-        command: "MULTIPOINT",
-        label: "Multiple Points",
-        icon: include_bytes!("../../../assets/icons/multipoint.svg"),
-        options: &[
-            ("POINT", "Single Point"),
-            ("MULTIPOINT", "Multiple Points"),
-            ("DDPTYPE", "Point Style"),
-        ],
-    },
-];
-
-#[derive(Clone, Copy)]
-struct Panel {
-    id: &'static str,
-    /// A command the owning ribbon group must hold, for titles more than one
-    /// tab uses ("Block" on Home and Insert).
-    anchor: Option<&'static str>,
-    title_id: &'static str,
-    title: &'static str,
-    tools: &'static [Tool],
-}
-
-/// The Reference panel's slide-out: Edit Reference, then the xref fading
-/// switch and amount (drawn by `reference_overlay`).
-const REFERENCE_TOOLS: &[Tool] = &[Tool {
-    command: "REFEDIT",
-    label: "Edit Reference",
-    icon: include_bytes!("../../../assets/icons/edit_block.svg"),
-    options: &[],
-}];
-pub(super) const REFERENCE_PANEL_ID: &str = "reference_extension";
-/// Insert > Block Definition slide-out: its tools are listed with labels.
-const BLOCK_DEFINITION_PANEL_ID: &str = "block_definition_extension";
-
-const fn icon_tool(command: &'static str, label: &'static str, icon: &'static [u8]) -> Tool {
-    Tool {
-        command,
-        label,
-        icon,
-        options: &[],
-    }
-}
-
-/// Home > Block slide-out.
-const HOME_BLOCK_TOOLS: &[Tool] = &[
-    icon_tool(
-        "ATTDEF",
-        "Define Attributes",
-        include_bytes!("../../../assets/icons/attdef.svg"),
-    ),
-    icon_tool(
-        "ATTMAN",
-        "Manage Attributes",
-        include_bytes!("../../../assets/icons/attman.svg"),
-    ),
-    icon_tool(
-        "ATTSYNC",
-        "Synchronize",
-        include_bytes!("../../../assets/icons/attsync.svg"),
-    ),
-    icon_tool(
-        "BASE",
-        "Set Base Point",
-        include_bytes!("../../../assets/icons/base_point.svg"),
-    ),
-];
-
-/// Insert > Block Definition slide-out.
-const BLOCK_DEFINITION_TOOLS: &[Tool] = &[
-    icon_tool(
-        "BASE",
-        "Set Base Point",
-        include_bytes!("../../../assets/icons/base_point.svg"),
-    ),
-    icon_tool(
-        "ATTSYNC",
-        "Synchronize",
-        include_bytes!("../../../assets/icons/attsync.svg"),
-    ),
-];
-
-/// Insert > Import slide-out, its tools named beside their icons.
-const IMPORT_TOOLS: &[Tool] = &[icon_tool(
-    "LANDXMLIMPORT",
-    "Land XML",
-    include_bytes!("../../../assets/icons/landxml.svg"),
-)];
-const IMPORT_PANEL_ID: &str = "import_extension";
-
-/// Annotate > Text slide-out: Scale, then the text layer list (drawn by
-/// `text_overlay`).
-const TEXT_TOOLS: &[Tool] = &[icon_tool(
-    "SCALETEXT",
-    "Scale",
-    include_bytes!("../../../assets/icons/scale.svg"),
-)];
-pub(super) const TEXT_PANEL_ID: &str = "text_extension";
-
-/// Annotate > Dimensions slide-out, its tools named beside their icons.
-const DIMENSION_TOOLS: &[Tool] = &[
-    icon_tool(
-        "TOLERANCE",
-        "Tolerance",
-        include_bytes!("../../../assets/icons/tolerance.svg"),
-    ),
-    icon_tool(
-        "DIMEDIT;O",
-        "Oblique",
-        include_bytes!("../../../assets/icons/dim_edit.svg"),
-    ),
-    icon_tool(
-        "DIMTEDIT_ANGLE",
-        "Text Angle",
-        include_bytes!("../../../assets/icons/dim_tedit.svg"),
-    ),
-    icon_tool(
-        "DIMTEDIT_LEFT",
-        "Left Justify",
-        include_bytes!("../../../assets/icons/align_left.svg"),
-    ),
-    icon_tool(
-        "DIMTEDIT_CENTER",
-        "Center Justify",
-        include_bytes!("../../../assets/icons/align_hcenter.svg"),
-    ),
-    icon_tool(
-        "DIMTEDIT_RIGHT",
-        "Right Justify",
-        include_bytes!("../../../assets/icons/align_right.svg"),
-    ),
-    icon_tool(
-        "DIMOVERRIDE",
-        "Override",
-        include_bytes!("../../../assets/icons/dim_style.svg"),
-    ),
-];
-pub(super) const DIMENSIONS_PANEL_ID: &str = "dimensions_extension";
-
-/// Annotate > Centerlines slide-out: the center layer list (drawn by
-/// `centerlines_overlay`).
-pub(super) const CENTERLINES_PANEL_ID: &str = "centerlines_extension";
-
-const PANELS: &[Panel] = &[
-    Panel {
-        id: PANEL_ID,
-        anchor: None,
-        title_id: TITLE_ID,
-        title: "Draw",
-        tools: TOOLS,
-    },
-    Panel {
-        id: "modify_extension",
-        anchor: None,
-        title_id: "modify_extension_title",
-        title: "Modify",
-        tools: super::modify_panel::TOOLS,
-    },
-    Panel {
-        id: REFERENCE_PANEL_ID,
-        anchor: None,
-        title_id: "reference_extension_title",
-        title: "Reference",
-        tools: REFERENCE_TOOLS,
-    },
-    Panel {
-        id: "home_block_extension",
-        anchor: Some("BEDIT"),
-        title_id: "home_block_extension_title",
-        title: "Block",
-        tools: HOME_BLOCK_TOOLS,
-    },
-    Panel {
-        id: BLOCK_DEFINITION_PANEL_ID,
-        anchor: None,
-        title_id: "block_definition_extension_title",
-        title: "Block Definition",
-        tools: BLOCK_DEFINITION_TOOLS,
-    },
-    Panel {
-        id: IMPORT_PANEL_ID,
-        anchor: None,
-        title_id: "import_extension_title",
-        title: "Import",
-        tools: IMPORT_TOOLS,
-    },
-    Panel {
-        id: TEXT_PANEL_ID,
-        anchor: Some("ANNOTATE_TEXT"),
-        title_id: "text_extension_title",
-        title: "Text",
-        tools: TEXT_TOOLS,
-    },
-    Panel {
-        id: DIMENSIONS_PANEL_ID,
-        anchor: Some("DIM"),
-        title_id: "dimensions_extension_title",
-        title: "Dimensions",
-        tools: DIMENSION_TOOLS,
-    },
-    Panel {
-        id: CENTERLINES_PANEL_ID,
-        anchor: Some("CENTERMARK"),
-        title_id: "centerlines_extension_title",
-        title: "Centerlines",
-        tools: &[],
-    },
-];
-
-/// Command, label and icon of every tool in the expanded Draw and Modify
-/// panels.
+/// Command, label and icon of every slide-out tool.
 pub(crate) fn tools() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
-    PANELS
-        .iter()
-        .flat_map(|panel| panel.tools)
-        .map(|tool| (tool.command, tool.label, tool.icon))
+    extras::all()
+        .flat_map(PanelExtras::tools)
+        .filter_map(|tool| match tool.tool.icon {
+            IconKind::Svg(icon) => Some((tool.command(), tool.tool.label, icon)),
+            IconKind::Glyph(_) => None,
+        })
 }
 
-fn panel_for_dropdown(id: &str) -> Option<Panel> {
-    PANELS.iter().copied().find(|panel| {
+pub(super) fn panel_for_dropdown(id: &str) -> Option<&'static PanelExtras> {
+    extras::all().find(|panel| {
         panel.id == id
             || panel
-                .tools
-                .iter()
-                .any(|tool| tool.command == id && !tool.options.is_empty())
+                .tools()
+                .any(|tool| tool.command() == id && !tool.options.is_empty())
     })
 }
 
@@ -327,21 +71,23 @@ pub(super) fn parent_panel(id: &str) -> Option<&'static str> {
     panel_for_dropdown(id).map(|panel| panel.id)
 }
 
-/// The slide-out under the title of the ribbon group `title`, whose items
-/// are `group_ids`.
-fn panel_for_group(title: &str, group_ids: &[&'static str]) -> Option<Panel> {
-    PANELS.iter().copied().find(|panel| {
-        panel.title == title
-            && (!panel.tools.is_empty() || panel.id == CENTERLINES_PANEL_ID)
-            && panel
-                .anchor
-                .is_none_or(|anchor| group_ids.contains(&anchor))
-    })
+/// The slide-out under the title of the panel `key`.
+pub(super) fn panel_for_group(key: &str) -> Option<&'static PanelExtras> {
+    extras::for_panel(key).filter(|panel| panel.has_slide_out())
 }
 
-/// The slide-out under the group `title`, if it has one.
-pub(super) fn slide_out_id(title: &str, group_ids: &[&'static str]) -> Option<&'static str> {
-    panel_for_group(title, group_ids).map(|panel| panel.id)
+/// The slide-out under the panel `key`, if it has one.
+pub(super) fn slide_out_id(key: &str) -> Option<&'static str> {
+    panel_for_group(key).map(|panel| panel.id)
+}
+
+/// The message the dialog launcher of a panel sends: its command, run like a
+/// ribbon button's.
+pub(super) fn launcher_message(command: &'static str) -> Message {
+    Message::RibbonToolClick {
+        tool_id: command.to_string(),
+        event: crate::modules::ModuleEvent::Command(command.to_string()),
+    }
 }
 
 /// What the open slide-out or tool submenu `id` offers, as (dropdown id,
@@ -352,233 +98,634 @@ pub(super) fn keytip_items(id: &str) -> Vec<(&'static str, &'static str, bool)> 
     };
     if panel.id == id {
         return panel
-            .tools
-            .iter()
-            .map(|tool| (panel.id, tool.command, !tool.options.is_empty()))
+            .tools()
+            .map(|tool| (panel.id, tool.command(), !tool.options.is_empty()))
             .collect();
     }
     panel
-        .tools
-        .iter()
-        .filter(|tool| tool.command == id)
+        .tools()
+        .filter(|tool| tool.command() == id)
         .flat_map(|tool| {
             tool.options
                 .iter()
-                .map(|(cmd, _)| (tool.command, *cmd, false))
+                .map(|(cmd, _)| (tool.command(), *cmd, false))
         })
         .collect()
 }
 
-/// Every command the slide-out of the group `title` offers: each tool and
-/// each of its submenu options.
-pub(super) fn slide_out_commands(
-    title: &str,
-    group_ids: &[&'static str],
-) -> impl Iterator<Item = &'static str> {
-    panel_for_group(title, group_ids)
+/// Every command the slide-out of the panel `key` offers: each tool and each
+/// of its submenu options.
+pub(super) fn slide_out_commands(key: &str) -> impl Iterator<Item = &'static str> {
+    panel_for_group(key)
         .into_iter()
-        .flat_map(|panel| panel.tools)
+        .flat_map(PanelExtras::tools)
         .flat_map(|tool| {
-            std::iter::once(tool.command).chain(tool.options.iter().map(|(cmd, _)| *cmd))
+            std::iter::once(tool.command()).chain(tool.options.iter().map(|(cmd, _)| *cmd))
         })
 }
 
-/// A slide-out tool is lit while it or one of its submenu options runs.
-fn tool_is_active(tool: &Tool, active_tool: Option<&str>) -> bool {
-    active_tool.is_some_and(|active| {
-        tool.command == active || tool.options.iter().any(|(cmd, _)| *cmd == active)
-    })
+/// A panel's slide-out: closed, open, or pinned open.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum SlideLook {
+    Closed,
+    Open,
+    Pinned,
 }
 
+/// Anchor of the body of panel `key`, which its slide-out opens under.
+pub(super) fn panel_box_id(key: &str) -> String {
+    format!("panelbox:{key}")
+}
+
+#[derive(Clone, Debug)]
+pub enum SlideOutMsg {
+    /// The pointer entered or left the panel with this key.
+    EnterPanel(&'static str),
+    LeavePanel(&'static str),
+    /// The pointer entered or left the open slide-out.
+    OverSlideOut(bool),
+    /// The pointer entered or left the submenu of a slide-out tool.
+    OverSubmenu(bool),
+    /// The pointer is over the footer of this panel's slide-out.
+    OverFooter(Option<&'static str>),
+    /// Pin or unpin the slide-out of this panel.
+    TogglePin(&'static str),
+    /// Close the slide-out of this panel, unpinning it.
+    Collapse(&'static str),
+}
+
+/// Where the pointer is, for closing an unpinned slide-out.
+#[derive(Default)]
+pub(super) struct SlideState {
+    /// The panel with a slide-out the pointer is over.
+    over_panel: Option<&'static str>,
+    over_slide: bool,
+    over_submenu: bool,
+    /// The slide-out whose footer the pointer is over: its pin shows.
+    footer: Option<&'static str>,
+    /// When the open slide-out closes.
+    pub(super) closing: Option<Instant>,
+}
+
+impl SlideState {
+    /// Forget the pointer over a slide-out or submenu that closed: a widget
+    /// that goes sends no exit.
+    pub(super) fn closed(&mut self, slide_out: bool) {
+        self.over_submenu = false;
+        if slide_out {
+            self.over_slide = false;
+            self.closing = None;
+        }
+    }
+}
+
+impl Ribbon {
+    /// How the slide-out of panel `key` shows.
+    pub(super) fn slide_look(&self, key: &str) -> SlideLook {
+        let Some(panel) = panel_for_group(key) else {
+            return SlideLook::Closed;
+        };
+        if self.layout.pinned_slideouts.contains(key) {
+            SlideLook::Pinned
+        } else if self.open_dropdown.as_deref().and_then(parent_panel) == Some(panel.id) {
+            SlideLook::Open
+        } else {
+            SlideLook::Closed
+        }
+    }
+
+    /// The open slide-out that is not pinned, if any.
+    fn open_slide_out(&self) -> Option<&'static PanelExtras> {
+        let panel = self.open_dropdown.as_deref().and_then(panel_for_dropdown)?;
+        (!self.layout.pinned_slideouts.contains(panel.key)).then_some(panel)
+    }
+
+    /// Apply a slide-out message. Returns whether the pins changed and
+    /// should be saved.
+    pub fn on_slide_out(&mut self, msg: SlideOutMsg, now: Instant) -> bool {
+        let mut changed = false;
+        match msg {
+            SlideOutMsg::EnterPanel(key) => self.slide.over_panel = Some(key),
+            SlideOutMsg::LeavePanel(key) => {
+                if self.slide.over_panel == Some(key) {
+                    self.slide.over_panel = None;
+                }
+            }
+            SlideOutMsg::OverSlideOut(over) => self.slide.over_slide = over,
+            SlideOutMsg::OverSubmenu(over) => self.slide.over_submenu = over,
+            SlideOutMsg::OverFooter(key) => self.slide.footer = key,
+            SlideOutMsg::TogglePin(key) => {
+                if !self.layout.pinned_slideouts.remove(key) {
+                    // A pinned slide-out shows on its own, not as a dropdown.
+                    self.layout.pinned_slideouts.insert(key.to_string());
+                    if self.open_slide_out().is_none() {
+                        self.close_dropdown();
+                    }
+                }
+                self.slide.over_slide = false;
+                changed = true;
+            }
+            SlideOutMsg::Collapse(key) => {
+                changed = self.layout.pinned_slideouts.remove(key);
+                if self
+                    .open_dropdown
+                    .as_deref()
+                    .and_then(panel_for_dropdown)
+                    .is_some_and(|panel| panel.key == key)
+                {
+                    self.close_dropdown();
+                }
+                self.slide.over_slide = false;
+                self.slide.footer = None;
+            }
+        }
+        // An unpinned slide-out closes once the pointer is off it and its
+        // panel.
+        self.slide.closing = match self.open_slide_out() {
+            Some(panel)
+                if self.slide.over_panel != Some(panel.key)
+                    && !self.slide.over_slide
+                    && !self.slide.over_submenu =>
+            {
+                Some(now + CLOSE_DELAY)
+            }
+            _ => None,
+        };
+        changed
+    }
+
+    pub(super) fn slide_out_tick(&mut self, now: Instant) {
+        if self.slide.closing.is_some_and(|at| now >= at) {
+            self.slide.closing = None;
+            if self.open_slide_out().is_some() {
+                self.close_dropdown();
+            }
+        }
+    }
+
+    /// The pinned slide-outs of the tab on show, under their panels.
+    pub fn pinned_slide_outs(
+        &self,
+        is_start: bool,
+        win: (f32, f32),
+    ) -> Option<Element<'_, Message>> {
+        if is_start
+            || self.layout.minimize != RibbonMinimize::Off
+            || self.layout.pinned_slideouts.is_empty()
+        {
+            return None;
+        }
+        let module = self.modules.get(self.active)?;
+        let layers: Vec<Element<'_, Message>> = self
+            .groups_for(self.active)
+            .filter_map(|group| {
+                let key = extras::panel_key(module.id(), group.title);
+                if !self.layout.pinned_slideouts.contains(&key) {
+                    return None;
+                }
+                let panel = panel_for_group(&key)?;
+                // Only under a panel the row shows at full or compact size.
+                recent_bounds(&panel_box_id(&key))?;
+                let (left, top, width) = slide_out_place(self, panel)?;
+                Some(placed(
+                    slide_out(self, panel, width, true),
+                    left,
+                    top,
+                    width,
+                    win,
+                ))
+            })
+            .collect();
+        (!layers.is_empty()).then(|| stack(layers).width(Fill).height(Fill).into())
+    }
+}
+
+/// The title row of panel `key`, laid out in its title strip.
+pub(super) struct TitleRow<'a> {
+    /// The title, with a chevron for a panel with extra tools.
+    pub row: Element<'a, Message>,
+    /// The dialog launcher, at the right end of the strip.
+    pub launcher: Option<Element<'a, Message>>,
+    /// What a click on the strip sends: opens or closes the extra tools.
+    pub press: Option<Message>,
+}
+
+/// The title row of the panel `key`: its title, and for a panel with extra
+/// tools a chevron, ▾ while they are closed and ▴ while open; the title is
+/// strong while they are open and not pinned. A click anywhere on the strip
+/// opens them; a pinned panel closes from its footer only. A `thin` strip,
+/// without panel titles, shows the chevron alone.
 pub(super) fn group_title<'a>(
     title: &'static str,
-    group_ids: &[&'static str],
-    open: &Option<String>,
-    active_tool: Option<&str>,
-) -> Element<'a, Message> {
-    let Some(panel) = panel_for_group(title, group_ids) else {
-        let label = keytips::label_anchor(
-            || format!("title:{title}"),
-            text(t!(title)).size(9).style(muted_text_style),
-        );
-        let label: Element<'a, Message> = container(label).padding([1, 4]).into();
-        // Leaders has no slide-out, only the corner arrow to its style.
-        if title == "Leaders" && group_ids.contains(&"MLEADER") {
-            let launcher = corner_launcher(
-                Message::Command("MLEADERSTYLE".to_string()),
-                format!("{}\n{} MLEADERSTYLE", t!("Multileader Style"), t!("Command:")),
-                keytips::LEADER_LAUNCHER,
-            );
-            return row![label, launcher].spacing(6).align_y(iced::Center).into();
-        }
-        // Tables: the corner arrow opens the table styles.
-        if title == "Tables" && group_ids.contains(&"TABLE") {
-            let launcher = corner_launcher(
-                Message::Command("TABLESTYLE".to_string()),
-                format!("{}
-{} TABLESTYLE", t!("Table Style"), t!("Command:")),
-                keytips::TABLE_LAUNCHER,
-            );
-            return row![label, launcher].spacing(6).align_y(iced::Center).into();
-        }
-        return label;
-    };
-    let expanded = open.as_deref().and_then(parent_panel) == Some(panel.id);
-    // A command running from the closed slide-out lights its title, the way a
-    // dropdown lights while one of its items runs.
-    let lit = expanded
-        || panel
-            .tools
-            .iter()
-            .any(|tool| tool_is_active(tool, active_tool));
-    let arrow = if expanded {
-        icons::themed_arrow_up(GROUP_TITLE_ARROW_SIZE)
+    key: &str,
+    look: SlideLook,
+    thin: bool,
+) -> TitleRow<'a> {
+    let height = if thin {
+        metrics::THIN_STRIP_H
     } else {
-        icons::themed_arrow_down(GROUP_TITLE_ARROW_SIZE)
+        PANEL_TITLE_H
     };
-    let title_button: Element<'a, Message> = PosReport::new(
-        panel.id,
-        button(
-            row![
-                keytips::label_anchor(
-                    || keytips::label_id(panel.id),
-                    PosReport::new(panel.title_id, text(t!(title)).size(9)),
-                ),
-                arrow
-            ]
-            .spacing(4)
-            .align_y(iced::Center),
+    let panel = panel_for_group(key);
+    // A panel may have a launcher without a slide-out.
+    let launcher = extras::for_panel(key).and_then(|panel| {
+        launcher_of_height(
+            panel,
+            if thin {
+                metrics::THIN_LAUNCHER_H
+            } else {
+                LAUNCHER_H
+            },
         )
-        .on_press(Message::ToggleRibbonDropdown(panel.id.to_string()))
-        .style(move |theme: &Theme, status| tool_btn_style(theme, lit, status))
-        .padding([1, 4]),
-    )
-    .into();
-    // The corner arrow opens the External References palette (or closes
-    // it when it is open), or the Text Style window.
-    let (on_press, tip, anchor) = match panel.id {
-        REFERENCE_PANEL_ID => (
-            Message::ToggleXrefManager,
-            format!("{}\n{} EXTERNALREFERENCES", t!("External References"), t!("Command:")),
-            keytips::XREF_LAUNCHER,
-        ),
-        TEXT_PANEL_ID => (
-            Message::Command("STYLE".to_string()),
-            format!("{}\n{} STYLE", t!("Text Style"), t!("Command:")),
-            keytips::TEXT_LAUNCHER,
-        ),
-        DIMENSIONS_PANEL_ID => (
-            Message::Command("DIMSTYLE".to_string()),
-            format!("{}\n{} DIMSTYLE", t!("Dimension Style"), t!("Command:")),
-            keytips::DIMENSION_LAUNCHER,
-        ),
-        _ => return title_button,
+    });
+    // Room for the launcher on both sides keeps the title centred.
+    let side = if launcher.is_some() {
+        LAUNCHER_W + 2.0
+    } else {
+        4.0
     };
-    let launcher = corner_launcher(on_press, tip, anchor);
-    row![title_button, launcher]
-        .spacing(6)
+    let label = text(t!(title))
+        .size(PANEL_TITLE_SIZE)
+        .wrapping(iced::widget::text::Wrapping::None);
+    let Some(panel) = panel else {
+        let label: Element<'a, Message> = if thin {
+            Space::new().into()
+        } else {
+            keytips::label_anchor(|| format!("title:{title}"), label)
+        };
+        return TitleRow {
+            row: strip_row(label, side, height),
+            launcher,
+            press: None,
+        };
+    };
+    let chevron = if look == SlideLook::Closed {
+        icons::dropdown_arrow()
+    } else {
+        icons::dropup_arrow()
+    };
+    let content: Element<'a, Message> = if thin {
+        chevron
+    } else {
+        row![
+            keytips::label_anchor(|| keytips::label_id(panel.id), label),
+            chevron
+        ]
+        .spacing(4)
         .align_y(iced::Center)
+        .into()
+    };
+    TitleRow {
+        // The key tips and the minimized ribbon find the opener here.
+        row: strip_row(PosReport::new(panel.id, content), side, height),
+        launcher,
+        press: match look {
+            SlideLook::Pinned => None,
+            _ => Some(Message::ToggleRibbonDropdown(panel.id.to_string())),
+        },
+    }
+}
+
+/// `content` centred in a title strip `height` high. The panel frame draws
+/// it in the strip's text colour.
+fn strip_row<'a>(
+    content: impl Into<Element<'a, Message>>,
+    side: f32,
+    height: f32,
+) -> Element<'a, Message> {
+    container(content)
+        .height(height)
+        .center_y(height)
+        .padding([0.0, side])
         .into()
 }
 
-/// A panel's corner arrow running `on_press`.
-fn corner_launcher<'a>(
-    on_press: Message,
-    tip: String,
-    anchor: &'static str,
-) -> Element<'a, Message> {
+/// The corner arrow that runs the dialog command of `panel`, if it has one.
+pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> {
+    launcher_of_height(panel, LAUNCHER_H)
+}
+
+/// [`launcher`] `height` high, as a thin strip has it.
+fn launcher_of_height<'a>(panel: &PanelExtras, height: f32) -> Option<Element<'a, Message>> {
+    let dialog = panel.dialog?;
+    // The corner arrow runs the panel's dialog command.
     let launcher = tooltip(
         // A right arrow turned to point into the corner.
         button(
-            iced::widget::svg(icons::themed_handle(icons::ARROW_LONG_RIGHT))
-                .width(10)
-                .height(10)
-                .rotation(iced::Radians(std::f32::consts::FRAC_PI_4))
-                .style(|theme: &Theme, _| iced::widget::svg::Style {
-                    color: Some(theme.palette().background.base.text),
-                }),
+            container(
+                iced::widget::svg(icons::themed_handle(icons::ARROW_LONG_RIGHT))
+                    .width(9)
+                    .height(9)
+                    .rotation(iced::Radians(std::f32::consts::FRAC_PI_4))
+                    .style(|theme: &Theme, _| iced::widget::svg::Style {
+                        color: Some(chrome::title_text(theme)),
+                    }),
+            )
+            .center_x(Fill)
+            .center_y(Fill),
         )
-        .on_press(on_press)
+        .on_press(launcher_message(dialog))
         .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
-        .padding([0, 3]),
-        make_tip(tip),
+        .width(LAUNCHER_W)
+        .height(height)
+        .padding(0),
+        make_tip(format!(
+            "{}\n{} {dialog}",
+            t!(panel.dialog_label),
+            t!("Command:")
+        )),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_millis(400))
     .style(tip_style);
-    // Shrink-sized: a Fill here would make the panel claim the whole row.
-    keytips::anchor(anchor, launcher)
+    Some(keytips::anchor(panel.launcher, launcher))
 }
 
-fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
-    let face = button(make_icon(IconKind::Svg(tool.icon), 23.0 * SCALE))
-        .on_press(Message::DropdownSelectItem {
-            dropdown_id: panel_id,
-            cmd: tool.command,
+/// Where the slide-out of `panel` shows, as (left, top, width): under the
+/// panel's body, over its title strip (or the thin strip without panel
+/// titles), as wide as the panel, and wide enough for a layer list.
+fn slide_out_place(ribbon: &Ribbon, panel: &PanelExtras) -> Option<(f32, f32, f32)> {
+    let id = panel_box_id(panel.key);
+    let body = recent_bounds(&id).or_else(|| dropdown_bounds(&id))?;
+    let strip = if ribbon.layout.show_panel_titles {
+        TITLE_STRIP
+    } else {
+        metrics::SLIDE_OUT_TOP_THIN
+    };
+    let top = body.y + body.height - strip;
+    // One physical pixel wider than the panel: its right border lies on
+    // the line between this panel and the next.
+    let width = match panel.layout {
+        Layout::TextLayer | Layout::CenterLayer => (body.width + icons::hairline()).max(LIST_MIN_W),
+        Layout::Grid | Layout::Reference => body.width + icons::hairline(),
+    };
+    Some((body.x, top, width))
+}
+
+/// `content` (`width` wide) at (`left`, `top`), kept inside the window.
+fn placed<'a>(
+    content: Element<'a, Message>,
+    left: f32,
+    top: f32,
+    width: f32,
+    win: (f32, f32),
+) -> Element<'a, Message> {
+    container(content)
+        .padding(Padding {
+            left: left.min(win.0 - width).max(0.0),
+            top: top.max(0.0),
+            ..Padding::ZERO
         })
-        .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-        .width(if tool.options.is_empty() {
+        .width(Fill)
+        .height(Fill)
+        .into()
+}
+
+/// A slide-out: its tool groups, the xref fading row on Reference, and the
+/// footer. Unpinned it is lighter than the panels; pinned it matches them.
+fn slide_out<'a>(
+    ribbon: &Ribbon,
+    panel: &'static PanelExtras,
+    width: f32,
+    pinned: bool,
+) -> Element<'a, Message> {
+    let body = column![
+        extra_tools(ribbon, panel, width),
+        footer(ribbon.slide.footer == Some(panel.key), panel, pinned),
+    ];
+    // Outlined in the colour of the lines between panels, on the sides and
+    // the bottom: at the top it continues the panel.
+    let body =
+        container(
+            container(body)
+                .width(Fill)
+                .style(move |theme: &Theme| container::Style {
+                    background: Some(Background::Color(if pinned {
+                        chrome::panel(theme)
+                    } else {
+                        chrome::open_panel(theme)
+                    })),
+                    ..Default::default()
+                }),
+        )
+        .width(Length::Fixed(width))
+        .padding(Padding {
+            top: 0.0,
+            right: crate::ui::icons::hairline(),
+            bottom: crate::ui::icons::hairline(),
+            left: crate::ui::icons::hairline(),
+        })
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::page(theme))),
+            ..Default::default()
+        });
+    // Opaque: the drawing's controls under it show no hover or tooltips.
+    opaque(
+        mouse_area(body)
+            .on_enter(Message::RibbonSlideOut(SlideOutMsg::OverSlideOut(true)))
+            .on_exit(Message::RibbonSlideOut(SlideOutMsg::OverSlideOut(false))),
+    )
+}
+
+/// The extra tools of `panel` in a box `width` wide: its tool groups, and
+/// the xref fading row on Reference, the text layer list on Text or the
+/// center layer list on Centerlines.
+pub(super) fn extra_tools<'a>(
+    ribbon: &Ribbon,
+    panel: &'static PanelExtras,
+    width: f32,
+) -> Element<'a, Message> {
+    let active = ribbon.lit_tool().as_deref();
+    let inner = (width - 2.0 * PAD).max(CELL + SPLIT_W);
+    let labelled = panel.more.len() > 1;
+    let mut groups = column![].spacing(4);
+    for group in &panel.more {
+        if labelled {
+            groups = groups.push(group_label(group));
+        }
+        groups = groups.push(tool_rows(&group.tools, panel.id, active, inner));
+    }
+    match panel.layout {
+        Layout::Grid => {}
+        Layout::Reference => groups = groups.push(fade_row(ribbon.xref_fade, panel.id)),
+        Layout::TextLayer => groups = groups.push(text_layers(ribbon)),
+        Layout::CenterLayer => {
+            groups = groups.push(super::widgets::layer_combo(
+                super::widgets::CENTER_LAYER_COMBO,
+                &ribbon.center_layer,
+                ribbon.center_layer_color(),
+                false,
+                format!("{}\n{} CENTERLAYER", t!("Center Layer"), t!("Command:")),
+            ))
+        }
+    }
+    container(groups).padding(PAD).width(Fill).into()
+}
+
+/// The layer new text goes on (TEXTLAYER): Use Current, or a layer of the
+/// drawing, each with its colour.
+fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
+    const SWATCH: f32 = 10.0;
+    const ROW: f32 = 24.0;
+    const MAX_H: f32 = 220.0;
+    let current = ribbon.text_layer.clone();
+    let entry = |value: String, label: String, color: Option<iced::Color>| {
+        let on = value.eq_ignore_ascii_case(&current);
+        let swatch: Element<'a, Message> = match color {
+            Some(color) => container(Space::new())
+                .width(SWATCH)
+                .height(SWATCH)
+                .style(move |theme: &Theme| container::Style {
+                    background: Some(color.into()),
+                    border: iced::Border {
+                        color: chrome::border(theme),
+                        width: crate::ui::icons::hairline(),
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into(),
+            None => Space::new().width(SWATCH).height(SWATCH).into(),
+        };
+        let item: Element<'a, Message> = button(
+            row![swatch, text(label).size(11)]
+                .spacing(6)
+                .align_y(iced::Center),
+        )
+        .on_press(Message::RibbonTextLayer(value))
+        .style(move |theme: &Theme, status| {
+            if on {
+                tool_btn_style(theme, true, status)
+            } else {
+                popup_row_style(theme, status)
+            }
+        })
+        .width(Fill)
+        .padding([3, 6])
+        .into();
+        item
+    };
+    let mut layers: Vec<Element<'a, Message>> =
+        vec![entry(String::new(), t!("Use Current").into_owned(), None)];
+    layers.extend(
+        ribbon
+            .layer_infos
+            .iter()
+            .map(|info| entry(info.name.clone(), info.name.clone(), Some(info.color))),
+    );
+    let list_height = ((ribbon.layer_infos.len() + 1) as f32 * ROW).min(MAX_H);
+    let title = row![
+        make_icon(
+            IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg")),
+            metrics::SMALL_ICON
+        ),
+        text(t!("Text Layer"))
+            .size(11)
+            .style(|theme: &Theme| text::Style {
+                color: Some(chrome::muted(theme)),
+            }),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    column![
+        title,
+        iced::widget::scrollable(column(layers).spacing(1)).height(Length::Fixed(list_height)),
+    ]
+    .spacing(4)
+    .into()
+}
+
+/// The name of a tool group, upper case, with a hairline after it.
+fn group_label<'a>(group: &MoreGroup) -> Element<'a, Message> {
+    let line = container(
+        Space::new()
+            .width(Fill)
+            .height(crate::ui::icons::hairline()),
+    )
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(chrome::border(theme))),
+        ..Default::default()
+    });
+    row![
+        text(t!(group.title).to_uppercase())
+            .size(9.5)
+            .style(|theme: &Theme| text::Style {
+                color: Some(chrome::muted(theme)),
+            }),
+        line,
+    ]
+    .spacing(4)
+    .align_y(iced::Center)
+    .into()
+}
+
+/// `tools` as icon buttons in rows that wrap at `inner` px.
+fn tool_rows<'a>(
+    tools: &[MoreTool],
+    panel_id: &'static str,
+    active: Option<&str>,
+    inner: f32,
+) -> Element<'a, Message> {
+    let mut rows: Vec<Element<'a, Message>> = Vec::new();
+    let mut current: Vec<Element<'a, Message>> = Vec::new();
+    let mut used = 0.0;
+    for tool in tools {
+        let width = if tool.options.is_empty() {
             CELL
         } else {
-            CELL - 11.0 * SCALE
+            CELL + SPLIT_W
+        };
+        let mut needed = if current.is_empty() {
+            width
+        } else {
+            used + GAP + width
+        };
+        if needed > inner && !current.is_empty() {
+            rows.push(row(std::mem::take(&mut current)).spacing(GAP).into());
+            needed = width;
+        }
+        current.push(tool_button(tool, tool.is_active(active), panel_id));
+        used = needed;
+    }
+    if !current.is_empty() {
+        rows.push(row(current).spacing(GAP).into());
+    }
+    column(rows).spacing(GAP).into()
+}
+
+fn tool_button(tool: &MoreTool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
+    let command = tool.command();
+    let face = button(make_icon(tool.tool.icon, CELL_ICON))
+        .on_press(Message::DropdownSelectItem {
+            dropdown_id: panel_id,
+            cmd: command,
         })
+        .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
+        .width(CELL)
         .height(CELL)
-        .padding(3.0 * SCALE);
-    let tip = format!("{}\n{} {}", t!(tool.label), t!("Command:"), tool.command);
+        .padding((CELL - CELL_ICON) / 2.0);
+    let tip = format!("{}\n{} {}", t!(tool.tool.label), t!("Command:"), command);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
         .delay(Duration::from_millis(400))
         .style(tip_style)
         .into();
-    let face = keytips::anchor_with(|| keytips::item_anchor(panel_id, tool.command), face);
-    if !tool.options.is_empty() {
-        row![
-            face,
-            button(icons::themed_arrow_down(6.0 * SCALE))
-                .on_press(Message::ToggleRibbonDropdown(tool.command.to_string()))
-                .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
-                .width(11.0 * SCALE)
-                .height(CELL)
-                .padding(2.0 * SCALE)
-        ]
-        .into()
-    } else {
-        face
+    let face = keytips::anchor_with(|| keytips::item_anchor(panel_id, command), face);
+    if tool.options.is_empty() {
+        return face;
     }
+    // The arrow opens the tool's submenu under itself.
+    let arrow = button(container(icons::dropdown_arrow()).center(Fill))
+        .on_press(Message::ToggleRibbonDropdown(command.to_string()))
+        .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
+        .width(SPLIT_W)
+        .height(CELL)
+        .padding(2);
+    row![face, PosReport::new(command, arrow)].into()
 }
 
-/// A slide-out tool as one row: its icon, then its name.
-fn labeled_row(panel_id: &'static str, tool: &Tool) -> Element<'static, Message> {
-    let command = tool.command;
-    let row = button(
-        row![
-            make_icon(IconKind::Svg(tool.icon), 16.0),
-            keytips::label_anchor(
-                move || keytips::label_id(&keytips::item_anchor(panel_id, command)),
-                text(t!(tool.label)).size(11),
-            ),
-        ]
-        .spacing(6)
-        .align_y(iced::Center),
-    )
-    .on_press(Message::DropdownSelectItem {
-        dropdown_id: panel_id,
-        cmd: command,
-    })
-    .style(popup_row_style)
-    .width(Fill)
-    .padding([3, 6]);
-    keytips::anchor_with(move || keytips::item_anchor(panel_id, command), row)
-}
-
-/// The Reference slide-out: Edit Reference, and xref fading on/off with its
-/// amount (XDWGFADECTL; the switch keeps the amount as a negative value).
-fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Element<'a, Message> {
-    let width: f32 = 260.0_f32.min((win.0 - 8.0).max(120.0));
-    let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
-    let left = x.clamp(0.0, (win.0 - width).max(0.0));
-    let top = anchor_top.min((win.1 - 80.0).max(0.0));
-    let edit = labeled_row(panel.id, &panel.tools[0]);
-    let fade = ribbon.xref_fade;
+/// Xref fading on/off with its amount (XDWGFADECTL; the switch keeps the
+/// amount as a negative value).
+fn fade_row<'a>(fade: i32, panel_id: &'static str) -> Element<'a, Message> {
     let on = fade > 0;
     let switch = button(make_icon(
         IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg")),
@@ -600,13 +747,13 @@ fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elem
     .delay(Duration::from_millis(400))
     .style(tip_style);
     let switch = keytips::anchor_with(
-        || keytips::item_anchor(panel.id, keytips::XREF_FADE),
+        || keytips::item_anchor(panel_id, keytips::XREF_FADE),
         switch,
     );
-    let fading = row![
+    row![
         switch,
         keytips::label_anchor(
-            || keytips::label_id(&keytips::item_anchor(panel.id, keytips::XREF_FADE)),
+            || keytips::label_id(&keytips::item_anchor(panel_id, keytips::XREF_FADE)),
             text(t!("Xref fading")).size(11),
         ),
         iced::widget::slider(0..=90u8, amount, Message::XrefFadeSlide)
@@ -615,268 +762,216 @@ fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elem
         text(amount.to_string()).size(11).width(22),
     ]
     .spacing(6)
-    .align_y(iced::Center);
-    let body = container(column![edit, fading].spacing(4).padding(6))
-        .width(width)
-        .style(|theme: &Theme| {
-            let mut style = popup_panel_style(theme);
-            style.border.color = theme.palette().primary.base.color;
-            style
-        });
-    dropdown_backdrop(position_ribbon_dropdown(body.into(), false, left, top))
+    .align_y(iced::Center)
+    .into()
 }
 
-/// The Text slide-out: Scale, and the layer new text goes on (TEXTLAYER:
-/// Use Current, or a layer of the drawing).
-fn text_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Element<'a, Message> {
-    let width: f32 = 240.0_f32.min((win.0 - 8.0).max(120.0));
-    let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
-    let left = x.clamp(0.0, (win.0 - width).max(0.0));
-    let top = anchor_top.min((win.1 - 80.0).max(0.0));
-    let scale = labeled_row(panel.id, &panel.tools[0]);
-    let current = ribbon.text_layer.clone();
-    let entry = |value: String, label: String, color: Option<iced::Color>| {
-        let on = value.eq_ignore_ascii_case(&current);
-        let swatch: Element<'a, Message> = match color {
-            Some(color) => container(text(""))
-                .width(10)
-                .height(10)
-                .style(move |_: &Theme| container::Style {
-                    background: Some(color.into()),
-                    border: iced::Border {
-                        color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                })
-                .into(),
-            None => iced::widget::Space::new().width(10).height(10).into(),
-        };
-        let item: Element<'a, Message> =
-            button(row![swatch, text(label).size(11)].spacing(6).align_y(iced::Center))
-                .on_press(Message::RibbonTextLayer(value))
-                .style(move |theme: &Theme, status| {
-                    if on {
-                        tool_btn_style(theme, true, status)
-                    } else {
-                        popup_row_style(theme, status)
-                    }
-                })
-                .width(Fill)
-                .padding([3, 6])
-                .into();
-        item
-    };
-    let mut layers: Vec<Element<'a, Message>> =
-        vec![entry(String::new(), t!("Use Current").into_owned(), None)];
-    layers.extend(
-        ribbon
-            .layer_infos
-            .iter()
-            .map(|info| entry(info.name.clone(), info.name.clone(), Some(info.color))),
-    );
-    let list_height = ((ribbon.layer_infos.len() + 1) as f32 * 24.0).min(220.0);
-    let list = container(
-        scrollable(column(layers).spacing(1)).height(iced::Length::Fixed(list_height)),
-    )
-    .padding(2);
-    let layer_title = row![
-        make_icon(
-            IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg")),
-            16.0
-        ),
-        text(t!("Text Layer")).size(11).style(muted_text_style),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
-    let body = container(column![scale, layer_title, list].spacing(4).padding(6))
-        .width(width)
-        .style(|theme: &Theme| {
-            let mut style = popup_panel_style(theme);
-            style.border.color = theme.palette().primary.base.color;
-            style
-        });
-    dropdown_backdrop(position_ribbon_dropdown(body.into(), false, left, top))
+/// The footer: the pin (while the pointer is on the footer), the panel's
+/// title with an up arrow that folds the slide-out away, and its dialog
+/// launcher.
+fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Element<'a, Message> {
+    footer_bar(hovered, panel, pinned, false)
 }
 
-/// The Centerlines slide-out: the center layer list (CENTERLAYER: Use
-/// Current, or a layer of the drawing).
-fn centerlines_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Element<'a, Message> {
-    let width: f32 = 220.0_f32.min((win.0 - 8.0).max(120.0));
-    let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
-    let left = x.clamp(0.0, (win.0 - width).max(0.0));
-    let top = anchor_top.min((win.1 - 80.0).max(0.0));
-    let combo = super::widgets::layer_combo(
-        super::widgets::CENTER_LAYER_COMBO,
-        &ribbon.center_layer,
-        ribbon.center_layer_color(),
-        false,
-        format!("{}\n{} CENTERLAYER", t!("Center Layer"), t!("Command:")),
-    );
-    let body = container(column![combo].spacing(4).padding(6))
-        .width(width)
-        .style(|theme: &Theme| {
-            let mut style = popup_panel_style(theme);
-            style.border.color = theme.palette().primary.base.color;
-            style
-        });
-    dropdown_backdrop(position_ribbon_dropdown(body.into(), false, left, top))
+/// [`footer`] of the extra tools in a peek: no pin, and its title folds
+/// them back into the peek's strip.
+pub(super) fn peek_footer<'a>(panel: &'static PanelExtras) -> Element<'a, Message> {
+    footer_bar(false, panel, false, true)
 }
 
-/// A slide-out listing each tool as icon and label, one per row.
-fn labeled_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Element<'a, Message> {
-    let width: f32 = 200.0_f32.min((win.0 - 8.0).max(120.0));
-    let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
-    let left = x.clamp(0.0, (win.0 - width).max(0.0));
-    let top = anchor_top.min((win.1 - 80.0).max(0.0));
-    let rows = panel.tools.iter().map(|tool| {
-        let active = tool_is_active(tool, ribbon.active_tool.as_deref());
-        let item = button(
-            row![
-                make_icon(IconKind::Svg(tool.icon), 16.0),
-                keytips::label_anchor(
-                    || keytips::label_id(&keytips::item_anchor(panel.id, tool.command)),
-                    text(t!(tool.label)).size(11),
-                ),
-            ]
-            .spacing(6)
-            .align_y(iced::Center),
-        )
-        .on_press(Message::DropdownSelectItem {
-            dropdown_id: panel.id,
-            cmd: tool.command,
-        })
-        .style(move |theme: &Theme, status| {
-            if active {
-                tool_btn_style(theme, true, status)
+fn footer_bar<'a>(
+    hovered: bool,
+    panel: &'static PanelExtras,
+    pinned: bool,
+    peek: bool,
+) -> Element<'a, Message> {
+    const SIDE: f32 = 20.0;
+    let key = panel.key;
+    let pin: Element<'a, Message> = if hovered && !peek {
+        button(icons::chrome(
+            if pinned {
+                icons::PIN
             } else {
-                popup_row_style(theme, status)
-            }
-        })
-        .width(Fill)
-        .padding([3, 6]);
-        keytips::anchor_with(|| keytips::item_anchor(panel.id, tool.command), item)
-    });
-    let body = container(column(rows.collect::<Vec<_>>()).spacing(2).padding(6))
-        .width(width)
-        .style(|theme: &Theme| {
-            let mut style = popup_panel_style(theme);
-            style.border.color = theme.palette().primary.base.color;
-            style
-        });
-    dropdown_backdrop(position_ribbon_dropdown(body.into(), false, left, top))
-}
-
-pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
-    let panel = panel_for_dropdown(id).expect("registered ribbon extension");
-    if panel.id == REFERENCE_PANEL_ID {
-        return reference_overlay(ribbon, panel, win);
-    }
-    if panel.id == BLOCK_DEFINITION_PANEL_ID
-        || panel.id == IMPORT_PANEL_ID
-        || panel.id == DIMENSIONS_PANEL_ID
-    {
-        return labeled_overlay(ribbon, panel, win);
-    }
-    if panel.id == TEXT_PANEL_ID {
-        return text_overlay(ribbon, panel, win);
-    }
-    if panel.id == CENTERLINES_PANEL_ID {
-        return centerlines_overlay(ribbon, panel, win);
-    }
-    let tools = panel.tools;
-    let width = (7.0 * (CELL + GAP) - GAP + 12.0).min((win.0 - 8.0).max(CELL + 12.0));
-    let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
-    let anchor = crate::ui::wrap_bar::dropdown_bounds(panel.title_id);
-    let left = anchor
-        .map_or(x, |b| b.x + (b.width - width) / 2.0)
-        .clamp(0.0, (win.0 - width).max(0.0));
-    let top = anchor_top.min((win.1 - 80.0).max(0.0));
-    let available_height = (win.1 - top - 4.0).max(1.0);
-    let cols = (((width - 12.0 + GAP) / (CELL + GAP)).floor() as usize).clamp(1, 7);
-    let option_tool = tools
-        .iter()
-        .find(|tool| tool.command == id && !tool.options.is_empty());
-    let content_height = option_tool.map_or_else(
-        || tools.len().div_ceil(cols) as f32 * (CELL + GAP) - GAP + 12.0,
-        |tool| tool.options.len() as f32 * OPTION_HEIGHT,
-    );
-    let contents: Element<'static, Message> = if let Some(tool) = option_tool {
-        column(
-            tool.options
-                .iter()
-                .map(|&(cmd, label)| {
-                    let item = button(text(t!(label)).size(11))
-                        .on_press(Message::DropdownSelectItem {
-                            dropdown_id: tool.command,
-                            cmd,
-                        })
-                        .style(popup_row_style)
-                        .width(Fill)
-                        .height(OPTION_HEIGHT)
-                        .padding([3, 7]);
-                    keytips::anchor_with(|| keytips::item_anchor(tool.command, cmd), item)
-                })
-                .collect::<Vec<Element<'static, Message>>>(),
-        )
+                icons::PIN_ACTIVE
+            },
+            metrics::PIN_ICON,
+        ))
+        .on_press(Message::RibbonSlideOut(SlideOutMsg::TogglePin(key)))
+        .style(|theme: &Theme, status| tool_btn_style(theme, false, status))
+        .width(SIDE)
+        .padding([1, 4])
         .into()
     } else {
-        column(
-            tools
-                .chunks(cols)
-                .map(|tools| {
-                    row(tools
-                        .iter()
-                        .map(|tool| {
-                            tool_button(
-                                tool,
-                                tool_is_active(tool, ribbon.active_tool.as_deref()),
-                                panel.id,
-                            )
-                        })
-                        .collect::<Vec<_>>())
-                    .spacing(GAP)
-                    .into()
-                })
-                .collect::<Vec<Element<'static, Message>>>(),
-        )
-        .spacing(GAP)
-        .padding(6)
-        .into()
+        Space::new().width(SIDE).into()
     };
-    let panel = container(scrollable(contents).height(content_height.min(available_height)))
-        .width(width)
-        .style(|theme: &Theme| {
-            let mut style = popup_panel_style(theme);
-            style.border.color = theme.palette().primary.base.color;
-            style
-        });
-    dropdown_backdrop(position_ribbon_dropdown(panel.into(), false, left, top))
+    // The title and its chevron in the footer's text colour.
+    let title = button(
+        row![text(t!(panel.title())).size(11.5), icons::dropup_arrow()]
+            .spacing(4)
+            .align_y(iced::Center),
+    )
+    .on_press(if peek {
+        Message::ToggleRibbonDropdown(panel.id.to_string())
+    } else {
+        Message::RibbonSlideOut(SlideOutMsg::Collapse(key))
+    })
+    .style(move |theme: &Theme, status| button::Style {
+        text_color: if pinned {
+            chrome::title_text(theme)
+        } else {
+            chrome::strong(theme)
+        },
+        ..tool_btn_style(theme, false, status)
+    })
+    .padding([0, 4]);
+    let launcher = launcher(panel).unwrap_or_else(|| Space::new().width(SIDE).into());
+    let bar = container(
+        row![
+            pin,
+            Space::new().width(Fill),
+            title,
+            Space::new().width(Fill),
+            launcher
+        ]
+        .align_y(iced::Center)
+        .padding([0, 3]),
+    )
+    .center_y(FOOTER_H)
+    .width(Fill)
+    .style(move |theme: &Theme| container::Style {
+        background: Some(Background::Color(if pinned {
+            chrome::title_bar(theme)
+        } else {
+            chrome::hover(theme)
+        })),
+        ..Default::default()
+    });
+    mouse_area(bar)
+        .on_enter(Message::RibbonSlideOut(SlideOutMsg::OverFooter(Some(key))))
+        .on_exit(Message::RibbonSlideOut(SlideOutMsg::OverFooter(None)))
+        .into()
+}
+
+/// The submenu of the split tool `tool`, under its arrow.
+fn options_list<'a>(
+    ribbon: &Ribbon,
+    tool: &'static MoreTool,
+    win: (f32, f32),
+) -> Element<'a, Message> {
+    let command = tool.command();
+    let rows: Vec<Element<'a, Message>> = tool
+        .options
+        .iter()
+        .map(|&(cmd, label)| {
+            let item = button(text(t!(label)).size(11))
+                .on_press(Message::DropdownSelectItem {
+                    dropdown_id: command,
+                    cmd,
+                })
+                .style(popup_row_style)
+                .width(Fill)
+                .height(OPTION_HEIGHT)
+                .padding([3, 7]);
+            keytips::anchor_with(|| keytips::item_anchor(command, cmd), item)
+        })
+        .collect();
+    let list = container(column(rows))
+        .style(popup_panel_style)
+        .width(OPTIONS_W);
+    let list = opaque(
+        mouse_area(list)
+            .on_enter(Message::RibbonSlideOut(SlideOutMsg::OverSubmenu(true)))
+            .on_exit(Message::RibbonSlideOut(SlideOutMsg::OverSubmenu(false))),
+    );
+    let (align_right, h_pad, top) = ribbon.dd_anchor(command, OPTIONS_W, win.0);
+    position_ribbon_dropdown(list, align_right, h_pad, top)
+}
+
+/// The open slide-out `id`, or a submenu of one of its tools over it. A
+/// click elsewhere closes it.
+pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
+    let panel = panel_for_dropdown(id).expect("registered ribbon extension");
+    let mut layers: Vec<Element<'a, Message>> = Vec::new();
+    // A pinned slide-out shows on its own layer, and a peek shows the
+    // extra tools inside itself.
+    if !ribbon.layout.pinned_slideouts.contains(panel.key) && ribbon.collapsed_open.is_none() {
+        if let Some((left, top, width)) = slide_out_place(ribbon, panel) {
+            layers.push(placed(
+                slide_out(ribbon, panel, width, false),
+                left,
+                top,
+                width,
+                win,
+            ));
+        }
+    }
+    if let Some(tool) = panel
+        .tools()
+        .find(|tool| tool.command() == id && !tool.options.is_empty())
+    {
+        layers.push(options_list(ribbon, tool, win));
+    }
+    dropdown_backdrop(stack(layers).width(Fill).height(Fill).into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parent_panel, PANEL_ID, TOOLS};
+    use super::extras::{DRAW_ID, MODIFY_ID};
+    use super::parent_panel;
 
     #[test]
-    fn extension_submenus_resolve_to_their_parent_panel() {
-        assert_eq!(parent_panel("MULTIPOINT"), Some(PANEL_ID));
-        assert_eq!(parent_panel("DRAWORDER_FRONT"), Some("modify_extension"));
-        assert_eq!(parent_panel("unknown"), None);
+    fn a_pinned_slide_out_stays_and_collapsing_unpins_it() {
+        use super::{Ribbon, SlideLook, SlideOutMsg};
+        use iced::time::Instant;
+        let mut ribbon = Ribbon::default();
+        let now = Instant::now();
+        ribbon.toggle_dropdown(DRAW_ID);
+        assert_eq!(ribbon.slide_look("draw/Draw"), SlideLook::Open);
+
+        // Pinning saves the pin and leaves the dropdown slot free.
+        assert!(ribbon.on_slide_out(SlideOutMsg::TogglePin("draw/Draw"), now));
+        assert_eq!(ribbon.slide_look("draw/Draw"), SlideLook::Pinned);
+        assert!(ribbon.open_dropdown.is_none());
+        // Another panel's slide-out opens beside it.
+        ribbon.toggle_dropdown(MODIFY_ID);
+        assert_eq!(ribbon.slide_look("draw/Modify"), SlideLook::Open);
+        assert_eq!(ribbon.slide_look("draw/Draw"), SlideLook::Pinned);
+
+        assert!(ribbon.on_slide_out(SlideOutMsg::Collapse("draw/Draw"), now));
+        assert_eq!(ribbon.slide_look("draw/Draw"), SlideLook::Closed);
+        // Collapsing an unpinned slide-out closes it, with nothing to save.
+        assert!(!ribbon.on_slide_out(SlideOutMsg::Collapse("draw/Modify"), now));
+        assert_eq!(ribbon.slide_look("draw/Modify"), SlideLook::Closed);
     }
 
     #[test]
-    fn split_tools_follow_plain_tools() {
-        let first_split = TOOLS
-            .iter()
-            .position(|tool| !tool.options.is_empty())
-            .unwrap_or(TOOLS.len());
-        assert!(TOOLS[..first_split]
-            .iter()
-            .all(|tool| tool.options.is_empty()));
-        assert!(TOOLS[first_split..]
-            .iter()
-            .all(|tool| !tool.options.is_empty()));
+    fn an_unpinned_slide_out_closes_after_the_pointer_leaves_it_and_its_panel() {
+        use super::{Ribbon, SlideOutMsg};
+        use iced::time::Instant;
+        use std::time::Duration;
+        let mut ribbon = Ribbon::default();
+        let t0 = Instant::now();
+        ribbon.toggle_dropdown(DRAW_ID);
+        ribbon.on_slide_out(SlideOutMsg::EnterPanel("draw/Draw"), t0);
+        // Crossing from the panel to the slide-out keeps it open.
+        ribbon.on_slide_out(SlideOutMsg::LeavePanel("draw/Draw"), t0);
+        ribbon.on_slide_out(SlideOutMsg::OverSlideOut(true), t0);
+        ribbon.tick(t0 + Duration::from_secs(1));
+        assert!(ribbon.open_dropdown.is_some());
+        // Leaving both closes it after the delay.
+        let t1 = t0 + Duration::from_secs(2);
+        ribbon.on_slide_out(SlideOutMsg::OverSlideOut(false), t1);
+        ribbon.tick(t1 + Duration::from_millis(100));
+        assert!(ribbon.open_dropdown.is_some());
+        ribbon.tick(t1 + Duration::from_millis(400));
+        assert!(ribbon.open_dropdown.is_none());
+        assert!(!ribbon.wants_tick());
+    }
+
+    #[test]
+    fn extension_submenus_resolve_to_their_parent_panel() {
+        assert_eq!(parent_panel("MULTIPOINT"), Some(DRAW_ID));
+        assert_eq!(parent_panel("DRAWORDER_FRONT"), Some(MODIFY_ID));
+        assert_eq!(parent_panel("unknown"), None);
     }
 }

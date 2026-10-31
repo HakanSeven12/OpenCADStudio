@@ -1503,7 +1503,7 @@ impl OpenCADStudio {
             graphic_fills_on_current_layer: self.graphic_attributes.fill_on_current_layer,
             annotation_auto_scale: self.annotation_auto_scale,
             ribbon: crate::app::config::RibbonConfig {
-                collapse: self.ribbon.collapse_mode(),
+                layout: self.ribbon.layout().clone(),
             },
             plot: self.plot_dialog.clone(),
             shortcuts: crate::app::config::ShortcutConfig {
@@ -1577,7 +1577,7 @@ impl OpenCADStudio {
         self.ribbon
             .set_graphic_attributes(self.show_graphic_attributes);
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
-        self.ribbon.set_collapse_mode(cfg.ribbon.collapse);
+        self.ribbon.set_layout(cfg.ribbon.layout);
         self.plot_dialog = cfg.plot;
         self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
         self.shortcut_bindings

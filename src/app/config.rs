@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::settings::UserSettings;
-use crate::ui::ribbon::CollapseMode;
+use crate::ui::ribbon::RibbonLayout;
 use crate::ui::statusbar::statusbar_config::StatusBarConfig;
 use crate::ui::window::plot::PlotDialogState;
 
@@ -37,7 +37,7 @@ pub struct AppConfig {
     pub graphic_fills_on_current_layer: bool,
     /// Add a newly selected annotation scale to existing annotative objects.
     pub annotation_auto_scale: i8,
-    /// Ribbon collapse density.
+    /// Ribbon layout.
     pub ribbon: RibbonConfig,
     /// Print dialog preferences (only the persisted fields; runtime state is
     /// skipped by `PlotDialogState`'s serde attributes).
@@ -553,7 +553,10 @@ pub struct StartConfig {
 #[derive(Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct RibbonConfig {
-    pub collapse: CollapseMode,
+    /// Hidden tabs and panels, panel order, panel titles, minimize state and
+    /// pinned slide-outs, stored as fields of this section.
+    #[serde(flatten)]
+    pub layout: RibbonLayout,
 }
 
 impl AppConfig {
@@ -728,6 +731,42 @@ mod tests {
         let serialized = serde_json::to_string(&original).expect("serialize config");
         let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
         assert!(restored.show_graphic_attributes);
+    }
+
+    #[test]
+    fn ribbon_layout_defaults_and_round_trips() {
+        use crate::ui::ribbon::{MinimizePref, RibbonMinimize};
+
+        // A config from before the layout settings keeps loading, with the
+        // default layout; the panel density it may still hold is ignored.
+        let old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"collapse":"Compact"}}"#).expect("old config");
+        assert!(old.ribbon.layout == RibbonLayout::default());
+        assert!(old.ribbon.layout.show_panel_titles);
+        assert!(old.ribbon.layout.search_expanded);
+
+        let mut original = AppConfig::default();
+        let layout = &mut original.ribbon.layout;
+        layout.hidden_tabs.insert("manage".into());
+        layout.hidden_panels.insert("draw/Groups".into());
+        layout.panel_order.insert(
+            "draw".into(),
+            vec!["draw/Modify".into(), "draw/Draw".into()],
+        );
+        layout.show_panel_titles = false;
+        layout.minimize = RibbonMinimize::PanelTitles;
+        layout.minimize_pref = MinimizePref::Tabs;
+        layout.pinned_slideouts.insert("draw/Draw".into());
+        layout.search_expanded = false;
+
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        // The fields sit directly in the ribbon section.
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
+        assert_eq!(value["ribbon"]["hidden_tabs"][0], "manage");
+        assert_eq!(value["ribbon"]["minimize"], "PanelTitles");
+        assert_eq!(value["ribbon"]["search_expanded"], false);
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.ribbon == original.ribbon);
     }
 
     #[test]

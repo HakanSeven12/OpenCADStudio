@@ -1302,7 +1302,7 @@ fn visibility_ribbon_real_controls_disable_enable_and_open_manager() {
         authoring_capture(&app, "visibility-ribbon-enabled");
         app.ribbon
             .set_collapse_mode(crate::ui::ribbon::CollapseMode::Collapsed);
-        let point = find_in_view(&app, "Visibility ▾");
+        let point = find_in_view(&app, "Visibility");
         authoring_click(&mut app, point);
         let messages = {
             let mut simulator = iced_test::Simulator::with_size(

@@ -1284,6 +1284,8 @@ impl OpenCADStudio {
             ),
 
             Message::OpenRecent(path) => {
+                // Opened from the application menu, which closes.
+                self.ribbon.close_app_menu();
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     // Recents are read from disk every save → the path may be
@@ -2758,18 +2760,83 @@ impl OpenCADStudio {
             Message::SheetSet(message) => self.on_sheet_set(message),
             Message::KeyTip(input) => self.on_keytip(input),
             Message::RibbonSelectTab(idx) => {
-                self.ribbon.select(idx);
+                if self.ribbon.click_tab(idx, iced::time::Instant::now()) {
+                    self.save_config();
+                }
                 Task::none()
             }
-
-            Message::SetRibbonCollapseMode(mode) => {
-                self.ribbon.set_collapse_mode(mode);
+            Message::RibbonMinimize(msg) => {
+                if self.ribbon.on_minimize(msg, iced::time::Instant::now()) {
+                    self.save_config();
+                }
+                Task::none()
+            }
+            Message::RibbonSlideOut(msg) => {
+                if self.ribbon.on_slide_out(msg, iced::time::Instant::now()) {
+                    self.save_config();
+                }
+                Task::none()
+            }
+            Message::RibbonTick => {
+                self.ribbon.tick(iced::time::Instant::now());
+                Task::none()
+            }
+            Message::RibbonSearch(msg) => {
+                let out = self.ribbon.on_search(msg, iced::time::Instant::now());
+                if out.save {
+                    self.save_config();
+                }
+                let mut tasks = Vec::new();
+                if out.focus {
+                    tasks.push(iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::ribbon::SEARCH_INPUT_ID,
+                    )));
+                }
+                if let Some(y) = out.scroll_to {
+                    tasks.push(iced::widget::operation::scroll_to(
+                        crate::ui::ribbon::results_scroll_id(),
+                        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y },
+                    ));
+                }
+                if let Some(run) = out.run {
+                    tasks.push(self.update(run));
+                }
+                Task::batch(tasks)
+            }
+            Message::MenuCommand(line) => {
+                let sweep = self.sync_active_field_if_any();
                 self.ribbon.close_dropdown();
+                // A single word dispatches as a ribbon button does; a line
+                // with answers runs its command and feeds them to its
+                // prompts, leaving the command at its next one.
+                let run = if line.split_whitespace().nth(1).is_some() {
+                    self.run_command_line_streaming(&line, false)
+                } else {
+                    self.dispatch_ribbon_command(&line)
+                };
+                Task::batch([sweep, run])
+            }
+            Message::RibbonReorderPanels { module, titles } => {
+                self.ribbon.reorder_panels(module, &titles);
                 self.save_config();
                 Task::none()
             }
+            Message::RibbonMenu(msg) => {
+                use crate::ui::ribbon::RibbonMenuMsg;
+                let follow = match &msg {
+                    RibbonMenuMsg::ShowMenuBar(shown) => Some(Message::MenuBarChanged(*shown)),
+                    RibbonMenuMsg::ShowRibbon(shown) => Some(Message::RibbonVisibleChanged(*shown)),
+                    _ => None,
+                };
+                if self.ribbon.on_menu(msg) {
+                    self.save_config();
+                }
+                follow.map_or_else(Task::none, Task::done)
+            }
 
             Message::RibbonToolClick { tool_id, event } => {
+                // A tool clicked in a minimized ribbon's popup closes it.
+                self.ribbon.close_popup();
                 let sweep = self.sync_active_field_if_any();
                 Task::batch(vec![sweep, self.on_ribbon_tool_click(tool_id, event)])
             }
@@ -3783,6 +3850,14 @@ impl OpenCADStudio {
                 shortcut,
                 extend_selection,
             } => {
+                // ↑/↓ step through the command search's results.
+                if self.ribbon.search_results_open()
+                    && matches!(direction, ArrowKey::Up | ArrowKey::Down)
+                {
+                    let down = matches!(direction, ArrowKey::Down);
+                    let step = crate::ui::ribbon::SearchMsg::Move(down);
+                    return self.update(Message::RibbonSearch(step));
+                }
                 if self.mtext_editor.is_some() {
                     match direction {
                         ArrowKey::Left => self.mtext_caret_move(-1, extend_selection),
@@ -4016,6 +4091,8 @@ impl OpenCADStudio {
             }
 
             Message::Command(cmd) => {
+                // A command picked from the application menu closes it.
+                self.ribbon.close_app_menu();
                 // Close viewport context menu if open.
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
@@ -5642,9 +5719,18 @@ impl OpenCADStudio {
 
             Message::ViewportClick(viewport) => self.on_viewport_click(viewport),
 
+            // The ribbon knows the window's width from the start, not only
+            // after the first resize.
+            Message::WindowOpened(id, w, h) => {
+                if Some(id) == self.main_window {
+                    return self.update(Message::WindowResized(w, h));
+                }
+                Task::none()
+            }
             Message::WindowResized(w, h) => {
                 self.vp_size = ((w - 440.0).max(200.0), h);
                 self.win_size = (w, h);
+                self.ribbon.set_window_size((w, h));
                 Task::none()
             }
 
@@ -7570,7 +7656,10 @@ impl OpenCADStudio {
             // ── Ribbon dropdowns ──────────────────────────────────────────
             Message::ToggleRibbonDropdown(id) => {
                 let mut task = Task::none();
-                if self.tabs[self.active_tab].is_start {
+                // The minimize button's menu works without a drawing.
+                if self.tabs[self.active_tab].is_start
+                    && !crate::ui::ribbon::works_without_drawing(&id)
+                {
                     self.ribbon.close_dropdown();
                 } else {
                     if id == crate::modules::insert::insert_block::GALLERY_ID
@@ -7679,6 +7768,8 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::DropdownSelectItem { dropdown_id, cmd } => {
+                // A tool picked from a minimized ribbon's popup closes it.
+                self.ribbon.close_popup();
                 if self.tabs[self.active_tab].is_start {
                     self.ribbon.close_dropdown();
                     return Task::none();

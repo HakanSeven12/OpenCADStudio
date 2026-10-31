@@ -3511,10 +3511,28 @@ pub enum Message {
     SetProjection(bool),
     /// Select a ribbon module tab by index.
     RibbonSelectTab(usize),
+    /// The ribbon's right-click menu.
+    RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
+    /// A menu-bar entry: its command line, run like a ribbon button's. A
+    /// space separates the answers to the command's prompts, as in a menu
+    /// macro, and no Enter follows the last one.
+    MenuCommand(String),
+    /// The minimize button and the minimized ribbon's popups.
+    RibbonMinimize(crate::ui::ribbon::MinimizeMsg),
+    /// The pointer and pins of the ribbon's slide-outs.
+    RibbonSlideOut(crate::ui::ribbon::SlideOutMsg),
+    /// Time for a ribbon popup or slide-out to open or close.
+    RibbonTick,
+    /// The command search box and its results.
+    RibbonSearch(crate::ui::ribbon::SearchMsg),
+    /// Panels of a ribbon tab dropped in a new order: the shown panels'
+    /// titles, in that order.
+    RibbonReorderPanels {
+        module: &'static str,
+        titles: Vec<String>,
+    },
     /// Ribbon key tips: Alt, typed codes and Esc.
     KeyTip(crate::ui::ribbon::KeyTipInput),
-    /// Change the ribbon tool-panel density (persisted).
-    SetRibbonCollapseMode(crate::ui::ribbon::CollapseMode),
     /// A ribbon tool button was clicked — highlights the tool and dispatches its event.
     RibbonToolClick {
         tool_id: String,
@@ -4055,6 +4073,9 @@ pub enum Message {
         build_ms: f64,
     },
     WindowResized(f32, f32),
+    /// A window opened at this size; the main window's sets the layout as
+    /// a resize does.
+    WindowOpened(window::Id, f32, f32),
     /// Enter pressed globally — finalises the active command (no text-input involvement).
     CommandFinalize,
     /// Space pressed globally — a literal space in the MText preview, otherwise

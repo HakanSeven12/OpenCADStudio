@@ -17,6 +17,7 @@ use iced::{Color, ContentFit, Element, Length, Point, Radians, Rectangle, Render
 use rustc_hash::FxHashMap;
 
 use crate::ui::style::common::{accessible_accent, wcag_contrast};
+use crate::ui::style::ribbon_metrics as metrics;
 
 static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_down.svg");
 static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
@@ -90,7 +91,6 @@ pub static SAVE: &[u8] = include_bytes!("../../assets/icons/ui/save.svg");
 pub static FILE_EXPORT: &[u8] = include_bytes!("../../assets/icons/ui/file_export.svg");
 pub static PRINT: &[u8] = include_bytes!("../../assets/icons/ui/print.svg");
 pub static HEART: &[u8] = include_bytes!("../../assets/icons/ui/heart.svg");
-#[cfg(target_arch = "wasm32")]
 pub static GEAR: &[u8] = include_bytes!("../../assets/icons/ui/gear.svg");
 pub static DOT: &[u8] = include_bytes!("../../assets/icons/ui/dot.svg");
 pub static DIRTY_DOT: &[u8] = include_bytes!("../../assets/icons/ui/dirty_dot.svg");
@@ -275,6 +275,8 @@ struct SemanticIcon {
     bytes: &'static [u8],
     size: f32,
     opacity: f32,
+    /// One colour for the whole icon instead of its semantic colours.
+    tint: Option<fn(&Theme) -> Color>,
 }
 
 impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
@@ -301,31 +303,190 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
         _cursor: iced::advanced::mouse::Cursor,
         _viewport: &Rectangle,
     ) {
-        let handle = semantic_handle(self.bytes, theme);
+        let handle = match self.tint {
+            Some(_) => tinted_handle(self.bytes),
+            None => semantic_handle(self.bytes, theme),
+        };
         let measured = renderer.measure_svg(&handle);
         if measured.width == 0 || measured.height == 0 {
             return;
         }
 
         let image_size = Size::new(measured.width as f32, measured.height as f32);
-        let bounds = layout.bounds();
+        // The icon keeps its own square, centred, when a stretched button
+        // lays it out wider.
+        let laid = layout.bounds();
+        let bounds = Rectangle::new(
+            Point::new(
+                laid.center_x() - self.size / 2.0,
+                laid.center_y() - self.size / 2.0,
+            ),
+            Size::new(self.size, self.size),
+        );
+        let svg = core_svg::Svg {
+            handle,
+            color: self.tint.map(|tint| tint(theme)),
+            rotation: Radians(0.0),
+            opacity: self.opacity,
+        };
         let fitted = ContentFit::Contain.fit(image_size, bounds.size());
         let position = Point::new(
             bounds.center_x() - fitted.width / 2.0,
             bounds.center_y() - fitted.height / 2.0,
         );
 
+        renderer.draw_svg(svg, Rectangle::new(position, fitted), bounds);
+    }
+}
+
+// ── Application logo ──────────────────────────────────────────────────────
+
+/// The application logo, as the window icon and the About dialog show it.
+const LOGO: &[u8] = include_bytes!("../../assets/logo.svg");
+
+/// The logo's letters alone: its four letter shapes, without the
+/// background, the crosshair and the corner stripes.
+fn logo_letters() -> &'static [u8] {
+    static LETTERS: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    LETTERS.get_or_init(|| {
+        let source = std::str::from_utf8(LOGO).expect("logo.svg is UTF-8");
+        let paths: String = source
+            .split("<path")
+            .skip(1)
+            .map(|rest| format!("<path{}/>", &rest[..rest.find("/>").unwrap_or(rest.len())]))
+            .collect();
+        format!(
+            r#"<svg width="724" height="292" viewBox="110 192 724 292" fill="none" xmlns="http://www.w3.org/2000/svg">{paths}</svg>"#
+        )
+        .into_bytes()
+    })
+}
+
+/// The logo in the theme's colours: blue to the accent, white to the text
+/// colour, the background to the chrome's `page` tone and its shadow
+/// stripe to a deeper one.
+fn recolor_logo(source: &[u8], theme: &Theme) -> Vec<u8> {
+    let hex = |color: Color| {
+        let [r, g, b, _] = color.into_rgba8();
+        format!("#{r:02x}{g:02x}{b:02x}")
+    };
+    let background = theme.palette().background.base;
+    let accent = hex(theme.palette().primary.base.color);
+    let text = hex(background.text);
+    let page = hex(crate::ui::style::chrome::page(theme));
+    let shadow = hex(crate::ui::style::chrome::mix(
+        background.color,
+        background.text,
+        -0.2,
+    ));
+    let map: [(&str, &str); 6] = [
+        ("#327DE8", &accent),
+        ("#337CE5", &accent),
+        ("#F7F7F8", &text),
+        ("\"white\"", &format!("\"{text}\"")),
+        ("#1C2430", &page),
+        ("#141D26", &shadow),
+    ];
+    let mut svg = String::from_utf8_lossy(source).into_owned();
+    for (from, to) in map {
+        svg = svg.replace(from, to);
+    }
+    svg.into_bytes()
+}
+
+/// The recoloured logo per (letters only, theme colours).
+type LogoCache = FxHashMap<(bool, [[u8; 4]; 6]), svg::Handle>;
+
+thread_local! {
+    static LOGO_CACHE: RefCell<LogoCache> = RefCell::new(FxHashMap::default());
+}
+
+fn logo_handle(letters: bool, theme: &Theme) -> svg::Handle {
+    let key = (letters, palette_key(theme));
+    LOGO_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(handle) = cache.get(&key) {
+            return handle.clone();
+        }
+        let source = if letters { logo_letters() } else { LOGO };
+        let handle = svg::Handle::from_memory(recolor_logo(source, theme));
+        if cache.len() >= 8 {
+            cache.clear();
+        }
+        cache.insert(key, handle.clone());
+        handle
+    })
+}
+
+struct Logo {
+    letters: bool,
+    width: f32,
+    height: f32,
+}
+
+impl<M> Widget<M, Theme, Renderer> for Logo {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fixed(self.width), Length::Fixed(self.height))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::atomic(
+            limits,
+            Length::Fixed(self.width),
+            Length::Fixed(self.height),
+        )
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: iced::advanced::mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let handle = logo_handle(self.letters, theme);
+        let measured = renderer.measure_svg(&handle);
+        if measured.width == 0 || measured.height == 0 {
+            return;
+        }
+        let bounds = layout.bounds();
+        let fitted = ContentFit::Contain.fit(
+            Size::new(measured.width as f32, measured.height as f32),
+            bounds.size(),
+        );
+        let position = Point::new(
+            bounds.center_x() - fitted.width / 2.0,
+            bounds.center_y() - fitted.height / 2.0,
+        );
         renderer.draw_svg(
             core_svg::Svg {
                 handle,
                 color: None,
                 rotation: Radians(0.0),
-                opacity: self.opacity,
+                opacity: 1.0,
             },
             Rectangle::new(position, fitted),
             bounds,
         );
     }
+}
+
+/// The application logo in the theme's colours, `width` × `height`; with
+/// `letters` only its letters.
+pub fn logo<'a, M: 'a>(letters: bool, width: f32, height: f32) -> Element<'a, M> {
+    Element::new(Logo {
+        letters,
+        width,
+        height,
+    })
 }
 
 /// Render a multi-colour tool icon using semantic colours from the active theme.
@@ -334,6 +495,7 @@ pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
         bytes,
         size,
         opacity: 1.0,
+        tint: None,
     })
 }
 
@@ -343,7 +505,70 @@ pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<
         bytes,
         size,
         opacity: 0.42,
+        tint: None,
     })
+}
+
+/// A tool icon in its semantic colours, `size` × `size`, drawn as its file
+/// is: the whole canvas fits the box and the lines keep their own width.
+pub fn tool<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 1.0,
+        tint: None,
+    })
+}
+
+/// [`tool`] faded like disabled menu text.
+pub fn tool_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 0.42,
+        tint: None,
+    })
+}
+
+/// A chrome icon in the theme's text colour, drawn like [`tool`].
+pub fn chrome<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 1.0,
+        tint: Some(|theme| theme.palette().background.base.text),
+    })
+}
+
+/// [`chrome`] faded like disabled menu text.
+pub fn chrome_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 0.42,
+        tint: Some(|theme| theme.palette().background.base.text),
+    })
+}
+
+/// Tenths of a pixel, as the arrow cache keys a size.
+fn size_key(size: f32) -> u16 {
+    (size * 10.0).round() as u16
+}
+
+thread_local! {
+    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize), svg::Handle>> =
+        RefCell::new(FxHashMap::default());
+}
+
+/// The handle of a one-colour icon.
+fn tinted_handle(bytes: &'static [u8]) -> svg::Handle {
+    let key = (bytes.as_ptr() as usize, bytes.len());
+    if let Some(handle) = TINTED_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return handle;
+    }
+    let handle = svg::Handle::from_memory(bytes);
+    TINTED_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
+    handle
 }
 
 fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
@@ -786,6 +1011,212 @@ pub fn themed_arrow_toggle<'a, M: 'a>(open: bool, size: f32) -> Element<'a, M> {
     }
 }
 
+/// The dropdown arrow of split buttons, combos and menus: a solid triangle
+/// `DROPDOWN_ARROW_W` x `DROPDOWN_ARROW_H`, in the text colour of the button
+/// it is in.
+pub fn dropdown_arrow<'a, M: 'a>() -> Element<'a, M> {
+    arrow(metrics::DROPDOWN_ARROW_W, metrics::DROPDOWN_ARROW_H, false)
+}
+
+/// [`dropdown_arrow`] pointing up, for a list or slide-out that is open.
+pub fn dropup_arrow<'a, M: 'a>() -> Element<'a, M> {
+    arrow(metrics::DROPDOWN_ARROW_W, metrics::DROPDOWN_ARROW_H, true)
+}
+
+/// A stroked line icon from `path` on a 24-unit grid, drawn like the icon
+/// files: the whole grid fits the `size` px box and the lines keep the
+/// icons' usual 1.625-unit width, with round caps and joins, in the text
+/// colour of the widget it is in.
+pub fn line_icon<'a, M: 'a>(path: &'static str, size: f32) -> Element<'a, M> {
+    thread_local! {
+        static LINE_CACHE: RefCell<FxHashMap<usize, svg::Handle>> =
+            RefCell::new(FxHashMap::default());
+    }
+    let handle = LINE_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry(path.as_ptr() as usize)
+            .or_insert_with(|| {
+                let source = format!(
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="{path}" fill="none" stroke="black" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+                );
+                svg::Handle::from_memory(source.into_bytes())
+            })
+            .clone()
+    });
+    Element::new(VectorShape {
+        width: size,
+        height: size,
+        handle,
+    })
+}
+
+fn arrow<'a, M: 'a>(width: f32, height: f32, up: bool) -> Element<'a, M> {
+    Element::new(VectorShape {
+        width,
+        height,
+        handle: arrow_handle(width, height, up),
+    })
+}
+
+/// The minimize button's icon on a 16 px grid: the ribbon as a 15 x 10
+/// outline with a solid triangle in it, pointing up to minimize the ribbon
+/// and down, once `minimized`, to show it in full. Drawn like the arrows, in
+/// the text colour.
+pub fn ribbon_toggle<'a, M: 'a>(minimized: bool) -> Element<'a, M> {
+    thread_local! {
+        static HANDLES: [svg::Handle; 2] = [false, true].map(|minimized| {
+            // The triangle is 6 wide and 3 high between x 5 and 11; its flat
+            // edge is at y 10 pointing up, at y 7 pointing down.
+            let triangle = if minimized {
+                "M5 7 H11 L8 10 Z"
+            } else {
+                "M5 10 H11 L8 7 Z"
+            };
+            let source = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect x="0.5" y="3.5" width="15" height="10" fill="none" stroke="black" stroke-width="1"/><path d="{triangle}" fill="black"/></svg>"#
+            );
+            svg::Handle::from_memory(source.into_bytes())
+        });
+    }
+    let size = metrics::SMALL_ICON;
+    Element::new(VectorShape {
+        width: size,
+        height: size,
+        handle: HANDLES.with(|handles| handles[usize::from(minimized)].clone()),
+    })
+}
+
+/// The window's scale factor, in thousandths: where a whole physical pixel
+/// lies, so an arrow's flat edge can sit on one.
+static SCALE_FACTOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1000);
+
+/// Note the window's scale factor (when it opens and whenever it changes).
+pub fn set_scale_factor(scale: f32) {
+    SCALE_FACTOR.store(
+        (scale * 1000.0).round() as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+fn scale_factor() -> f32 {
+    SCALE_FACTOR.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
+}
+
+/// The width of a line one physical pixel wide, in logical pixels: a 1 px
+/// line at a fractional window scale (125 %, 150 %) would cover one or two
+/// pixels depending on where it falls.
+pub fn hairline() -> f32 {
+    1.0 / scale_factor()
+}
+
+/// `value` moved onto the nearest whole physical pixel.
+fn on_physical_pixel(value: f32) -> f32 {
+    let scale = scale_factor();
+    (value * scale).round() / scale
+}
+
+thread_local! {
+    static ARROW_CACHE: RefCell<FxHashMap<(u16, u16, bool), svg::Handle>> =
+        RefCell::new(FxHashMap::default());
+}
+
+/// A solid triangle `width` x `height` as a vector, flat edge on top
+/// (pointing down) or at the bottom (pointing up). The renderer draws it at
+/// the window's scale with smooth sides.
+fn arrow_handle(width: f32, height: f32, up: bool) -> svg::Handle {
+    let key = (size_key(width), size_key(height), up);
+    if let Some(handle) = ARROW_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return handle;
+    }
+    let tip = width / 2.0;
+    let path = if up {
+        format!("M0 {height} H{width} L{tip} 0 Z")
+    } else {
+        format!("M0 0 H{width} L{tip} {height} Z")
+    };
+    let source = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><path d="{path}" fill="black"/></svg>"#
+    );
+    let handle = svg::Handle::from_memory(source.into_bytes());
+    ARROW_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
+    handle
+}
+
+/// A vector shape `width` x `height` drawn in the text colour.
+struct VectorShape {
+    width: f32,
+    height: f32,
+    handle: svg::Handle,
+}
+
+impl<M> Widget<M, Theme, Renderer> for VectorShape {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fixed(self.width), Length::Fixed(self.height))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::atomic(
+            limits,
+            Length::Fixed(self.width),
+            Length::Fixed(self.height),
+        )
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: iced::advanced::mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        // The shape is drawn as it is; only its corner sits on a whole
+        // physical pixel, which keeps the flat edge sharp at every scale.
+        let bounds = layout.bounds();
+        let at = Point::new(on_physical_pixel(bounds.x), on_physical_pixel(bounds.y));
+        let drawn = Rectangle::new(at, Size::new(self.width, self.height));
+        renderer.draw_svg(
+            core_svg::Svg {
+                handle: self.handle.clone(),
+                color: Some(style.text_color),
+                rotation: Radians(0.0),
+                opacity: 1.0,
+            },
+            drawn,
+            drawn
+                .expand(1.0)
+                .intersection(&viewport.expand(1.0))
+                .unwrap_or(drawn),
+        );
+    }
+}
+
+/// The undo arrow drawn like [`chrome`].
+pub fn chrome_undo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
+    if enabled {
+        chrome(UNDO, size)
+    } else {
+        chrome_disabled(UNDO, size)
+    }
+}
+
+/// The redo arrow drawn like [`chrome`].
+pub fn chrome_redo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
+    if enabled {
+        chrome(REDO, size)
+    } else {
+        chrome_disabled(REDO, size)
+    }
+}
+
 pub fn themed_undo<'a, M: 'a>(size: f32, enabled: bool) -> Element<'a, M> {
     if enabled {
         themed(UNDO, size)
@@ -826,6 +1257,25 @@ mod tests {
         assert!(contains(&themed, &colors.danger));
         assert!(contains(&themed, &colors.success));
         assert!(contains(&themed, b"#123456"));
+    }
+
+    #[test]
+    fn the_logo_follows_the_theme() {
+        let theme = Theme::Dark;
+        let svg = String::from_utf8(super::recolor_logo(super::LOGO, &theme)).unwrap();
+        for original in [
+            "#327DE8",
+            "#337CE5",
+            "#F7F7F8",
+            "#1C2430",
+            "#141D26",
+            "\"white\"",
+        ] {
+            assert!(!svg.contains(original), "{original} is left");
+        }
+        let letters = std::str::from_utf8(super::logo_letters()).unwrap();
+        assert_eq!(letters.matches("<path").count(), 4);
+        assert!(!letters.contains("<rect"));
     }
 
     #[test]

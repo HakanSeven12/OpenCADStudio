@@ -2648,27 +2648,7 @@ bg={bg_ms:.1}ms n={view_count}"
         // `3` must not open the 3DALIGN / 3DARRAY suggestions).
         let allow_autocomplete = self.grip_pending.is_none()
             && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions());
-        // Dynamic input captures keystrokes when its fields are showing,
-        // so the command-line field must release focus / its on_input.
-        // The MText preview also captures keystrokes (typing edits it), so the
-        // command line must likewise release its on_input there.
-        let interactive_value_grip = tab.active_grip.as_ref().is_some_and(|grip| {
-            matches!(
-                grip.mode,
-                crate::scene::pick::grip::GripEditMode::Lengthen
-                    | crate::scene::pick::grip::GripEditMode::Radius
-                    | crate::scene::pick::grip::GripEditMode::ArcLength
-                    | crate::scene::pick::grip::GripEditMode::RectangleWidth
-                    | crate::scene::pick::grip::GripEditMode::RectangleHeight
-                    | crate::scene::pick::grip::GripEditMode::MoveParallel
-            )
-        });
-        let dyn_capturing = (self.dyn_input
-            && (tab.active_cmd.is_some() || tab.active_grip.is_some())
-            && !tab.dyn_fields.is_empty()
-            && !interactive_value_grip)
-            || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
-            || self.text_inline.is_some();
+        let dyn_capturing = self.dyn_capturing();
         // The workspace row is: left edge stack, viewport, right edge stack.
         let mut parts: Vec<Element<'_, Message>> = Vec::new();
         if let Some(e) = left_edge {
@@ -5224,4 +5204,33 @@ fn refedit_working_set_count(
             entity.common().owner_handle == space && session.in_working_set(entity.common().handle)
         })
         .count()
+}
+
+impl OpenCADStudio {
+    /// Whether the dynamic-input fields, the MText preview or an inline text
+    /// edit take the keystrokes: the command-line field is read-only then.
+    pub(in crate::app) fn dyn_capturing(&self) -> bool {
+        let tab = &self.tabs[self.active_tab];
+        // Dynamic input captures keystrokes when its fields are showing,
+        // so the command-line field must release focus / its on_input.
+        // The MText preview also captures keystrokes (typing edits it), so the
+        // command line must likewise release its on_input there.
+        let interactive_value_grip = tab.active_grip.as_ref().is_some_and(|grip| {
+            matches!(
+                grip.mode,
+                crate::scene::pick::grip::GripEditMode::Lengthen
+                    | crate::scene::pick::grip::GripEditMode::Radius
+                    | crate::scene::pick::grip::GripEditMode::ArcLength
+                    | crate::scene::pick::grip::GripEditMode::RectangleWidth
+                    | crate::scene::pick::grip::GripEditMode::RectangleHeight
+                    | crate::scene::pick::grip::GripEditMode::MoveParallel
+            )
+        });
+        (self.dyn_input
+            && (tab.active_cmd.is_some() || tab.active_grip.is_some())
+            && !tab.dyn_fields.is_empty()
+            && !interactive_value_grip)
+            || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
+            || self.text_inline.is_some()
+    }
 }

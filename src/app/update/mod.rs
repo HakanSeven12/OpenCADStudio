@@ -8246,7 +8246,14 @@ impl OpenCADStudio {
                     Task::none()
                 } else if !self.clipboard.is_empty() {
                     self.update(Message::Command("PASTECLIP".to_string()))
-                } else if focus == PasteFocus::CommandLine {
+                } else if focus == PasteFocus::CommandLine
+                    && !(self.dyn_capturing()
+                        && self.text_inline.is_none()
+                        && !self.mtext_editor.as_ref().is_some_and(|e| e.show_preview))
+                {
+                    // The command line pasted it natively. While dynamic input
+                    // holds the keystrokes the field is read-only, so the
+                    // text is read here and typed in as rows. (#1883)
                     Task::none()
                 } else {
                     self.read_system_clipboard_for_paste()

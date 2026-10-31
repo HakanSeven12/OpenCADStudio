@@ -16,6 +16,9 @@ use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 use iced_aw::ContextMenu;
 
+#[cfg(test)]
+mod select_similar_clipboard_tests;
+
 /// Invisible event surface for accurate point picking. MouseArea emits a
 /// positionless press message; capturing the cursor in the actual button
 /// event avoids using the previous hover location when clicking quickly.

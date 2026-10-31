@@ -122,6 +122,9 @@ impl OpenCADStudio {
                 self.command_line
                     .push_output(crate::tf!("Select Similar: {} added.", added).as_ref());
                 self.refresh_properties();
+                // The completed selection belongs to the canvas; an empty
+                // focused command field would swallow the next Ctrl+C.
+                return Some(self.unfocus_widgets());
             }
 
             // ADDSELECTED — draw a new object of the same type as the selected
@@ -1825,5 +1828,58 @@ mod cal_tests {
         let _ = app.dispatch_command("CAL 1500mm");
         let last = &app.command_line.history.last().unwrap().text;
         assert!(last.ends_with("= 1.5"), "{last}");
+    }
+}
+
+#[cfg(test)]
+mod select_similar_clipboard_tests {
+    use super::*;
+    use iced::futures::StreamExt;
+
+    #[test]
+    fn select_similar_releases_command_focus_for_copy_shortcut() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handles = app.tabs[i].scene.add_entities(
+            (0..2)
+                .map(|y| {
+                    codec::EntityType::Line(codec::entities::Line::from_points(
+                        codec::types::Vector3::new(0.0, y as f64, 0.0),
+                        codec::types::Vector3::new(10.0, y as f64, 0.0),
+                    ))
+                })
+                .collect(),
+        );
+        app.tabs[i].scene.select_entities(&handles[..1]);
+        type Paragraph = <iced::Renderer as iced::advanced::text::Renderer>::Paragraph;
+        let mut input = iced::widget::text_input::State::<Paragraph>::new();
+        input.focus();
+        let task = app.dispatch_command("SELECTSIMILAR");
+        if let Some(mut stream) = iced_runtime::task::into_stream(task) {
+            while let Some(action) = iced::futures::executor::block_on(stream.next()) {
+                if let iced_runtime::Action::Widget(mut operation) = action {
+                    operation.focusable(
+                        Some(&iced::widget::Id::new(
+                            crate::ui::command_line::CMD_INPUT_ID,
+                        )),
+                        iced::Rectangle::default(),
+                        &mut input,
+                    );
+                }
+            }
+        }
+        assert_eq!(app.tabs[i].scene.selected.len(), 2);
+        assert!(
+            !input.is_focused(),
+            "empty command input must not capture Ctrl+C"
+        );
+        let shortcut = if cfg!(target_os = "macos") {
+            "CMD+C"
+        } else {
+            "CTRL+C"
+        };
+        let _ = app.run_shortcut(shortcut);
+        assert_eq!(app.clipboard.len(), 2, "both similar entities must copy");
     }
 }

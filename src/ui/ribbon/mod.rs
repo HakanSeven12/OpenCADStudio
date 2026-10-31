@@ -54,6 +54,8 @@ pub(crate) fn tooltip_style(theme: &Theme) -> container::Style {
     widgets::tip_style(theme)
 }
 
+pub(crate) const LANGUAGE_DROPDOWN_ID: &str = "LANGUAGE_DROPDOWN";
+
 /// A line over the items of a split button whose face names the chosen item.
 fn dropdown_header(id: &str) -> Option<&'static str> {
     (id == "IMPORT_FILE").then_some("Import File — the face runs the last one chosen")
@@ -294,6 +296,8 @@ pub struct Ribbon {
     pub mleader_layer: String,
     /// Annotate > Centerlines: CENTERLAYER (empty: the current layer).
     pub center_layer: String,
+    /// Active UI language displayed on the top bar.
+    pub language: crate::i18n::Language,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
 }
@@ -431,6 +435,7 @@ impl Ribbon {
             dim_layer: String::new(),
             center_layer: String::new(),
             mleader_layer: String::new(),
+            language: crate::i18n::Language::default(),
             keytips: None,
         }
     }
@@ -928,6 +933,47 @@ impl Ribbon {
             .min_spacing_x(-12.0)
             .row_h(28.0);
 
+        // Language selector pinned to the top bar
+        let lang_open = self.open_dropdown.as_deref() == Some(LANGUAGE_DROPDOWN_ID);
+        let label_owned: String;
+        let lang_label = match self.language {
+            crate::i18n::Language::ArSa => "العربية",
+            crate::i18n::Language::FrFr => "Français",
+            crate::i18n::Language::EnUs => "English",
+            crate::i18n::Language::EsEs => "Español",
+            crate::i18n::Language::DeDe => "Deutsch",
+            crate::i18n::Language::ItIt => "Italiano",
+            crate::i18n::Language::PtBr => "Português",
+            crate::i18n::Language::RuRu => "Русский",
+            crate::i18n::Language::TrTr => "Türkçe",
+            crate::i18n::Language::ZhCn => "简体中文",
+            crate::i18n::Language::JaJp => "日本語",
+            crate::i18n::Language::KoKr => "한국어",
+            crate::i18n::Language::System => "System",
+            other => {
+                label_owned = other.label();
+                if label_owned.is_empty() {
+                    "Lang"
+                } else {
+                    &label_owned
+                }
+            }
+        };
+        let lang_btn = button(
+            row![
+                text("🌐").size(12),
+                text(lang_label.to_string()).size(11),
+                crate::ui::icons::themed_arrow_down(9.0),
+            ]
+            .spacing(4)
+            .align_y(iced::Center),
+        )
+        .on_press(Message::ToggleRibbonDropdown(LANGUAGE_DROPDOWN_ID.to_string()))
+        .style(move |theme: &Theme, status| top_hist_btn_style(theme, true, lang_open, status))
+        .height(24)
+        .padding([2, 8]);
+        let lang_dd = PosReport::new(LANGUAGE_DROPDOWN_ID, lang_btn);
+
         // Panel-density selector, pinned to the right edge of the tab row: a bare
         // ▾ button that opens a list of modes (see `dropdown_overlay`). `Auto`
         // sizes panels to the window; the others force one density. The choice is
@@ -950,7 +996,8 @@ impl Ribbon {
             .width(Length::Fill)
         ]
         .spacing(6.0)
-        .align_y(iced::Center);
+        .align_y(iced::Center)
+        .push(lang_dd);
         if !self.collapse_tight.load(Ordering::Relaxed) {
             tab_row = tab_row.push(mode_dd);
         }
@@ -1146,6 +1193,57 @@ impl Ribbon {
             let (align_right, h_pad, top) = self.dd_anchor(open_id, 170.0, win.0);
             let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
 
+            return Some(dropdown_backdrop(positioned));
+        }
+
+        if open_id == LANGUAGE_DROPDOWN_ID {
+            const W: f32 = 195.0;
+            let current = self.language;
+
+            let supported_langs = [
+                (crate::i18n::Language::ArSa, "العربية (Arabic)"),
+                (crate::i18n::Language::EnUs, "English"),
+                (crate::i18n::Language::FrFr, "Français (French)"),
+                (crate::i18n::Language::EsEs, "Español (Spanish)"),
+                (crate::i18n::Language::DeDe, "Deutsch (German)"),
+                (crate::i18n::Language::ItIt, "Italiano (Italian)"),
+                (crate::i18n::Language::PtBr, "Português (Portuguese)"),
+                (crate::i18n::Language::RuRu, "Русский (Russian)"),
+                (crate::i18n::Language::TrTr, "Türkçe (Turkish)"),
+                (crate::i18n::Language::ZhCn, "简体中文 (Chinese)"),
+                (crate::i18n::Language::JaJp, "日本語 (Japanese)"),
+                (crate::i18n::Language::KoKr, "한국어 (Korean)"),
+                (crate::i18n::Language::System, "System Default"),
+            ];
+
+            let rows: Vec<Element<Message>> = supported_langs
+                .iter()
+                .map(|&(lang, display_name)| {
+                    let is_active = lang == current;
+                    button(
+                        row![
+                            crate::ui::icons::themed_check_cell(is_active),
+                            text(display_name).size(11),
+                        ]
+                        .spacing(6)
+                        .align_y(iced::Center),
+                    )
+                    .on_press(Message::LanguageChanged(lang))
+                    .style(popup_row_style)
+                    .width(Fill)
+                    .padding([5, 10])
+                    .into()
+                })
+                .collect();
+
+            let row_count = rows.len();
+            let list_h = (row_count as f32 * 28.0).min(350.0);
+            let panel = container(scrollable(column(rows)).height(Length::Fixed(list_h)))
+                .style(popup_panel_style)
+                .width(Length::Fixed(W));
+
+            let (align_right, h_pad, top) = self.dd_anchor(open_id, W, win.0);
+            let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
             return Some(dropdown_backdrop(positioned));
         }
 

@@ -1136,6 +1136,7 @@ impl OpenCADStudio {
         );
         if crate::i18n::set_language(s.language).is_ok() {
             self.language = s.language;
+            self.ribbon.language = s.language;
         }
         self.cliprompt_lines = crate::app::settings::clamp_clipromptlines(s.cliprompt_lines);
         self.command_line

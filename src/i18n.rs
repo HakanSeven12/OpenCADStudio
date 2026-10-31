@@ -247,9 +247,59 @@ pub fn loader() -> &'static FluentLanguageLoader {
     })
 }
 
+static CURRENT_LANGUAGE: std::sync::RwLock<Language> = std::sync::RwLock::new(Language::System);
+
+pub fn active_language() -> Language {
+    let lang = CURRENT_LANGUAGE
+        .read()
+        .map(|guard| *guard)
+        .unwrap_or(Language::System);
+    if lang == Language::System {
+        let tag = active_language_tag();
+        if tag.starts_with("ar") {
+            Language::ArSa
+        } else if tag.starts_with("fr") {
+            Language::FrFr
+        } else if tag.starts_with("es") {
+            Language::EsEs
+        } else if tag.starts_with("de") {
+            Language::DeDe
+        } else if tag.starts_with("it") {
+            Language::ItIt
+        } else if tag.starts_with("pt") {
+            Language::PtBr
+        } else if tag.starts_with("ru") {
+            Language::RuRu
+        } else if tag.starts_with("tr") {
+            Language::TrTr
+        } else if tag.starts_with("zh") {
+            Language::ZhCn
+        } else if tag.starts_with("ja") {
+            Language::JaJp
+        } else if tag.starts_with("ko") {
+            Language::KoKr
+        } else {
+            Language::EnUs
+        }
+    } else {
+        lang
+    }
+}
+
+pub fn lang_str<'a>(en: &'a str, ar: &'a str, fr: &'a str) -> &'a str {
+    match active_language() {
+        Language::ArSa => ar,
+        Language::FrFr => fr,
+        _ => en,
+    }
+}
+
 /// Apply a user preference process-wide. The loader swaps resources atomically,
 /// so the next Iced view pass immediately receives the new language.
 pub fn set_language(language: Language) -> Result<(), i18n_embed::I18nEmbedError> {
+    if let Ok(mut lock) = CURRENT_LANGUAGE.write() {
+        *lock = language;
+    }
     switch_language(loader(), language)
 }
 
@@ -262,7 +312,6 @@ fn switch_language(
     result
 }
 
-#[cfg(target_arch = "wasm32")]
 pub fn active_language_tag() -> String {
     loader()
         .current_languages()
@@ -458,7 +507,14 @@ pub fn ribbon_module_title(id: &str, fallback: &str) -> String {
         "manage" => crate::tr!("ribbon-tab", "manage"),
         "view" => crate::tr!("ribbon-tab", "view"),
         "block_editor" => crate::tr!("ribbon-tab", "block-editor"),
-        _ => fallback.to_string(),
+        _ => {
+            let translated = translate(fallback);
+            if !translated.is_empty() && translated.as_ref() != fallback {
+                translated.into_owned()
+            } else {
+                fallback.to_string()
+            }
+        }
     }
 }
 
@@ -824,5 +880,22 @@ mod tests {
         let before = LANGUAGE_GENERATION.load(Ordering::Acquire);
         switch_language(&loader, Language::DeDe).expect("German Fluent resources must parse");
         assert!(LANGUAGE_GENERATION.load(Ordering::Acquire) > before);
+    }
+
+    #[test]
+    fn active_language_and_lang_str_follow_set_language() {
+        set_language(Language::ArSa).expect("Arabic must load");
+        assert_eq!(active_language(), Language::ArSa);
+        assert_eq!(lang_str("File", "ملف", "Fichier"), "ملف");
+
+        set_language(Language::FrFr).expect("French must load");
+        assert_eq!(active_language(), Language::FrFr);
+        assert_eq!(lang_str("File", "ملف", "Fichier"), "Fichier");
+
+        set_language(Language::EnUs).expect("English must load");
+        assert_eq!(active_language(), Language::EnUs);
+        assert_eq!(lang_str("File", "ملف", "Fichier"), "File");
+
+        let _ = set_language(Language::System);
     }
 }

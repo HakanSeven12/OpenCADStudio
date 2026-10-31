@@ -10869,11 +10869,15 @@ impl OpenCADStudio {
             }
             Message::LanguageChanged(language) => {
                 if self.language == language {
+                    self.ribbon.open_dropdown = None;
                     return Task::none();
                 }
                 match crate::i18n::set_language(language) {
                     Ok(()) => {
                         self.language = language;
+                        self.ribbon.language = language;
+                        self.ribbon.open_dropdown = None;
+                        self.rebuild_ribbon_modules();
                         self.persist_settings_if_changed();
                         #[cfg(target_arch = "wasm32")]
                         {

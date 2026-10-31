@@ -239,7 +239,7 @@ fn external_card<'a>(
         (t!("Restart to load"), StatusKind::Warning)
     };
     let header = row![
-        text(p.name.clone()).size(15),
+        text(t!(p.name.clone())).size(15),
         Space::new().width(8),
         badge(format!("v{}", p.version)),
         Space::new().width(8),
@@ -252,7 +252,7 @@ fn external_card<'a>(
     let id_line = text(p.id.clone()).size(11).style(muted_style);
     let mut info_body = column![header, id_line].spacing(5);
     if !p.description.is_empty() {
-        info_body = info_body.push(text(p.description.clone()).size(12).style(muted_style));
+        info_body = info_body.push(text(t!(p.description.clone())).size(12).style(muted_style));
     }
     if !p.command_prefixes.is_empty() {
         info_body = info_body.push(
@@ -590,9 +590,9 @@ fn marketplace_section<'a>(m: &MarketView, externals: &[ExternalPlugin]) -> Elem
         visible += 1;
         let tags = m.release_tags.get(&e.repo).cloned().unwrap_or_default();
         let selected = m.selected_tag.get(&e.repo).cloned();
-        let mut info = column![text(e.name.clone()).size(14)].spacing(4);
+        let mut info = column![text(t!(e.name.clone())).size(14)].spacing(4);
         if !e.description.is_empty() {
-            info = info.push(text(e.description.clone()).size(12).style(muted_style));
+            info = info.push(text(t!(e.description.clone())).size(12).style(muted_style));
         }
         let info = button(info.width(Fill))
             .width(Fill)

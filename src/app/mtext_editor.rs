@@ -1240,132 +1240,28 @@ impl super::OpenCADStudio {
     /// oblique; underline / overline / strike flip the stroke flags; case
     /// rewrites the glyphs. All are true ON/OFF toggles.
     pub(super) fn mtext_apply_fmt(&mut self, kind: MTextFmt) {
-        // Does every span-carrying cell in the range satisfy `get`?
-        fn all_have(cells: &[Cell], get: impl Fn(&SpanProperties) -> bool) -> bool {
-            cells.iter().all(|c| match c {
-                Cell::Char(_, p) | Cell::Stack { props: p, .. } => get(p),
-                Cell::Break(..) => true,
+        if matches!(kind, MTextFmt::Uppercase | MTextFmt::Lowercase) {
+            self.raw_change_case(kind == MTextFmt::Uppercase);
+            return;
+        }
+        // The face a bold run without its own font is stamped with, so the
+        // bold flag has a name to ride on and still draws the same font.
+        let doc = &self.tabs[self.active_tab].scene.document;
+        let face = self
+            .mtext_editor
+            .as_ref()
+            .map(|ed| {
+                if !ed.font.trim().is_empty() {
+                    ed.font.clone()
+                } else {
+                    // The family, not the style's bold / italic face of it.
+                    let font =
+                        crate::entities::text_support::resolve_text_style(&ed.style, doc).font_name;
+                    crate::scene::text::sysfont::split_style(&font).0.to_string()
+                }
             })
-        }
-        // Apply `f` to every span-carrying cell's properties in the range.
-        fn each(cells: &mut [Cell], mut f: impl FnMut(&mut SpanProperties)) {
-            for c in cells {
-                match c {
-                    Cell::Char(_, p) | Cell::Stack { props: p, .. } => f(p),
-                    Cell::Break(..) => {}
-                }
-            }
-        }
-        // The effective font name to stamp on bold runs. `to_mtext_string` drops
-        // a font code whose name is empty, which would lose the bold flag on the
-        // round-trip; stamping the resolved style (or global) font keeps bold AND
-        // renders the same font, just with the wider bold pen.
-        let bold_font: String = if matches!(kind, MTextFmt::Bold) {
-            let doc = &self.tabs[self.active_tab].scene.document;
-            self.mtext_editor
-                .as_ref()
-                .map(|ed| {
-                    if !ed.font.trim().is_empty() {
-                        ed.font.clone()
-                    } else {
-                        // The family, not the style's bold / italic face of it.
-                        let font =
-                            crate::entities::text_support::resolve_text_style(&ed.style, doc)
-                                .font_name;
-                        crate::scene::text::sysfont::split_style(&font).0.to_string()
-                    }
-                })
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
-        if let Some(ed) = self.mtext_editor.as_mut() {
-            let Some((a, b)) = ed.sel.filter(|&(a, b)| a < b) else {
-                return;
-            };
-            let para0 = doc_para0(&ed.doc);
-            let mut cells = doc_to_cells(&ed.doc);
-            let b = b.min(cells.len());
-            if a >= b {
-                return;
-            }
-            ed.record_undo();
-            match kind {
-                MTextFmt::Underline => {
-                    let on = !all_have(&cells[a..b], |p| p.underline());
-                    each(&mut cells[a..b], |p| p.set_underline(on));
-                }
-                MTextFmt::Overline => {
-                    let on = !all_have(&cells[a..b], |p| p.overline());
-                    each(&mut cells[a..b], |p| p.set_overline(on));
-                }
-                MTextFmt::Strike => {
-                    let on = !all_have(&cells[a..b], |p| p.strikethrough());
-                    each(&mut cells[a..b], |p| p.set_strikethrough(on));
-                }
-                MTextFmt::Italic => {
-                    // Italic is the editor's canonical 15° oblique. An imported
-                    // run may instead carry the font italic flag (`\f…|i1;`);
-                    // recognise that as italic too, and clear it on toggle so
-                    // the one canonical form is the oblique — otherwise an
-                    // imported italic run could never be switched off.
-                    let on = !all_have(&cells[a..b], |p| {
-                        p.oblique_angle == Some(15.0) || p.font.as_ref().is_some_and(|f| f.italic)
-                    });
-                    each(&mut cells[a..b], |p| {
-                        p.oblique_angle = on.then_some(15.0);
-                        if let Some(f) = p.font.as_mut() {
-                            f.italic = false;
-                        }
-                    });
-                }
-                MTextFmt::Bold => {
-                    // Real bold: set the font's bold flag (the SDF renderer bakes
-                    // a wider pen), keeping the run's font name + italic.
-                    let on = !all_have(&cells[a..b], |p| p.font.as_ref().is_some_and(|f| f.bold));
-                    each(&mut cells[a..b], |p| {
-                        let (name, italic) = p
-                            .font
-                            .as_ref()
-                            .map(|f| (f.name.clone(), f.italic))
-                            .unwrap_or_default();
-                        // Bold needs a non-empty name to serialize; stamp the
-                        // effective font when the run had none.
-                        let name = if name.trim().is_empty() {
-                            bold_font.clone()
-                        } else {
-                            name
-                        };
-                        p.font = if on {
-                            Some(MTextFont::with_flags(name, true, italic))
-                        } else if !italic && (name.is_empty() || name == bold_font) {
-                            None // bold was the only reason for the font override
-                        } else {
-                            Some(MTextFont::with_flags(name, false, italic))
-                        };
-                    });
-                }
-                MTextFmt::Uppercase | MTextFmt::Lowercase => {
-                    let up = kind == MTextFmt::Uppercase;
-                    for c in &mut cells[a..b] {
-                        if let Cell::Char(ch, _) = c {
-                            let mapped = if up {
-                                ch.to_uppercase().next()
-                            } else {
-                                ch.to_lowercase().next()
-                            };
-                            *ch = mapped.unwrap_or(*ch);
-                        }
-                    }
-                }
-            }
-            ed.content =
-                text_editor::Content::with_text(&cells_to_doc(&para0, &cells).to_mtext_string());
-            ed.sel = Some((a, b));
-            ed.caret = b;
-            ed.caret_blink_on = true;
-        }
-        self.rebuild_mtext_preview();
+            .unwrap_or_default();
+        self.raw_format(kind, &face);
     }
 
     /// Set the alignment of every paragraph the selection (or caret) touches.

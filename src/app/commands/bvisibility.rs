@@ -551,6 +551,16 @@ impl OpenCADStudio {
                 };
                 let shown = match fields.as_slice() {
                     ["NEW", name] => visibility::add_state(document, parameter, name, current),
+                    ["NEW", name, choice] => {
+                        let mode = if choice.eq_ignore_ascii_case("SHOW") {
+                            visibility::NewStateVisibility::Show
+                        } else if choice.eq_ignore_ascii_case("HIDE") {
+                            visibility::NewStateVisibility::Hide
+                        } else {
+                            visibility::NewStateVisibility::Keep
+                        };
+                        visibility::add_state_with(document, block, parameter, name, current, mode)
+                    }
                     ["SET", name] => index(document, name),
                     ["RENAME", from, to] => {
                         if let Some(state) = index(document, from) {

@@ -3,6 +3,7 @@
 // block makes it dynamic with a visibility parameter.
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
+use crate::scene::block_visibility::NewStateVisibility;
 use codec::Handle;
 use glam::DVec3;
 
@@ -12,6 +13,7 @@ pub const SEP: char = '\u{1f}';
 enum Step {
     Option,
     NewName,
+    NewVisibility(String),
     SetName,
     RenameFrom,
     RenameTo(String),
@@ -70,6 +72,14 @@ impl CadCommand for BvStateCommand {
                     .into_owned()
             }
             Step::NewName => crate::t!("BVSTATE  Enter name of new visibility state:").into_owned(),
+            Step::NewVisibility(_) => crate::tf!(
+                "BVSTATE  Enter visibility option [{} / {} / {}] <{}>:",
+                NewStateVisibility::Show,
+                NewStateVisibility::Hide,
+                NewStateVisibility::Keep,
+                NewStateVisibility::Keep
+            )
+            .into_owned(),
             Step::SetName => crate::tf!(
                 "BVSTATE  Enter visibility state to make current <{}>:",
                 self.current_name()
@@ -96,6 +106,11 @@ impl CadCommand for BvStateCommand {
                 CmdOption::new(crate::t!("Delete").as_ref(), "D"),
                 CmdOption::new(crate::t!("Dialog").as_ref(), "DIALOG"),
             ],
+            Step::NewVisibility(_) => vec![
+                CmdOption::new(crate::t!("Show all objects").as_ref(), "SHOW"),
+                CmdOption::new(crate::t!("Hide all objects").as_ref(), "HIDE"),
+                CmdOption::new(crate::t!("Keep current visibility").as_ref(), "KEEP"),
+            ],
             _ => Vec::new(),
         }
     }
@@ -106,7 +121,7 @@ impl CadCommand for BvStateCommand {
 
     fn input_kind(&self) -> InputKind {
         match self.step {
-            Step::Option => InputKind::SingleToken,
+            Step::Option | Step::NewVisibility(_) => InputKind::SingleToken,
             _ => InputKind::FreeText,
         }
     }
@@ -134,8 +149,22 @@ impl CadCommand for BvStateCommand {
                 Some(_) => Some(CmdResult::ReportError(
                     crate::tf!("Visibility state \"{}\" already exists.", text).into_owned(),
                 )),
-                None => Some(Self::done(&["NEW", text])),
+                None => {
+                    self.step = Step::NewVisibility(text.to_string());
+                    Some(CmdResult::NeedPoint)
+                }
             },
+            Step::NewVisibility(name) => {
+                let keyword = text.trim_start_matches('_').to_ascii_uppercase();
+                Some(match keyword.as_str() {
+                    "S" | "SHOW" => Self::done(&["NEW", name, "SHOW"]),
+                    "H" | "HIDE" => Self::done(&["NEW", name, "HIDE"]),
+                    "" | "K" | "KEEP" => Self::done(&["NEW", name]),
+                    _ => CmdResult::ReportError(
+                        crate::t!("Invalid option keyword.").into_owned(),
+                    ),
+                })
+            }
             Step::SetName => {
                 let name = if text.is_empty() {
                     self.current_name()

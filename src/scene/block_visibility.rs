@@ -329,6 +329,106 @@ pub fn add_state(
     .flatten()
 }
 
+/// How a new state treats objects the visibility parameter did not govern yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NewStateVisibility {
+    Keep,
+    Show,
+    Hide,
+}
+
+impl std::fmt::Display for NewStateVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            crate::t!(match self {
+                Self::Keep => "Keep current visibility",
+                Self::Show => "Show all objects",
+                Self::Hide => "Hide all objects",
+            })
+            .as_ref(),
+        )
+    }
+}
+
+/// Every object of `definition`, paired with whether it is currently visible.
+pub fn definition_members(document: &Document, definition: Handle) -> Vec<(Handle, bool)> {
+    document
+        .block_records
+        .iter()
+        .find(|record| record.handle == definition)
+        .map(|record| {
+            record
+                .entity_handles
+                .iter()
+                .map(|&handle| {
+                    let visible = document
+                        .get_entity(handle)
+                        .is_some_and(|entity| !entity.common().invisible);
+                    (handle, visible)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Append state `name`, starting from state `like`. `Show`/`Hide` govern
+/// every member: a member not governed before is shown in the states that
+/// already exist, as it was, and the new state shows all of them or none.
+/// Returns false when the name is taken.
+pub fn append_state(
+    parameter: &mut BlockVisibilityParameter,
+    name: &str,
+    like: usize,
+    mode: NewStateVisibility,
+    members: &[(Handle, bool)],
+) -> bool {
+    if parameter
+        .states
+        .iter()
+        .any(|state| state.name.eq_ignore_ascii_case(name))
+    {
+        return false;
+    }
+    let mut new = parameter.states.get(like).cloned().unwrap_or_default();
+    new.name = name.to_string();
+    if mode != NewStateVisibility::Keep {
+        for &(handle, visible) in members {
+            if parameter.all_blocks.contains(&handle) {
+                continue;
+            }
+            parameter.all_blocks.push(handle);
+            if visible {
+                for old in &mut parameter.states {
+                    old.visible_blocks.push(handle);
+                }
+            }
+        }
+        new.visible_blocks = if mode == NewStateVisibility::Show {
+            parameter.all_blocks.clone()
+        } else {
+            Vec::new()
+        };
+    }
+    parameter.states.push(new);
+    true
+}
+
+/// Add state `name` through the document, with the visibility `mode` asks for.
+pub fn add_state_with(
+    document: &mut Document,
+    definition: Handle,
+    parameter: Handle,
+    name: &str,
+    like: usize,
+    mode: NewStateVisibility,
+) -> Option<usize> {
+    let members = definition_members(document, definition);
+    edit(document, parameter, |parameter| {
+        append_state(parameter, name, like, mode, &members).then(|| parameter.states.len() - 1)
+    })
+    .flatten()
+}
+
 /// Rename state `index`; false when the new name is taken.
 pub fn rename_state(
     document: &mut Document,

@@ -3323,6 +3323,89 @@ fn visibility_dialog_help_explains_itself_without_touching_the_staged_edits() {
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
 }
 
+/// Creating a state from the command line offers the same three visibility
+/// choices as the dialog; the default leaves the current state's set alone.
+#[test]
+fn visibility_creation_from_the_command_line_asks_about_existing_objects() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let _ = app.run_command_line("BPARAMETER VISIBILITY 0,0");
+    let _ = app.dispatch_command("BVSTATE");
+    feed(&mut app, "N");
+    feed(&mut app, "Solo");
+    let prompt = app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .map(|command| command.prompt())
+        .unwrap_or_default();
+    assert!(
+        prompt.contains("Show all objects") && prompt.contains("Hide all objects"),
+        "the name should be followed by the visibility choice, got {prompt:?}"
+    );
+    feed(&mut app, "");
+    let block = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let parameter =
+        crate::scene::block_visibility::parameter(&app.tabs[i].scene.document, block).unwrap();
+    let created = parameter
+        .states
+        .iter()
+        .find(|state| state.name == "Solo")
+        .expect("the default choice still creates the state");
+    assert_eq!(
+        created.visible_blocks, parameter.states[0].visible_blocks,
+        "Enter keeps what the current state shows"
+    );
+    drop(parameter);
+    let member = members(&app)[0];
+    let _ = app.dispatch_command("BVSTATE");
+    feed(&mut app, "N");
+    feed(&mut app, "Loud");
+    feed(&mut app, "S");
+    let parameter =
+        crate::scene::block_visibility::parameter(&app.tabs[i].scene.document, block).unwrap();
+    let loud = parameter
+        .states
+        .iter()
+        .find(|state| state.name == "Loud")
+        .expect("the Show keyword creates the state");
+    assert!(
+        loud.visible_blocks.contains(&member),
+        "the Show keyword shows the members in the new state"
+    );
+}
+
+/// `Show` and `Hide` govern every member and set the new state's set.
+#[test]
+fn visibility_state_created_with_show_or_hide_sets_the_new_states_visibility() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let member = members(&app)[0];
+    let _ = app.run_command_line("BPARAMETER VISIBILITY 0,0");
+    let _ = app.dispatch_command("_BVSTATE\u{1f}NEW\u{1f}Shown\u{1f}SHOW");
+    let _ = app.dispatch_command("_BVSTATE\u{1f}NEW\u{1f}Hidden\u{1f}HIDE");
+    let block = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let parameter =
+        crate::scene::block_visibility::parameter(&app.tabs[i].scene.document, block).unwrap();
+    let state = |name: &str| {
+        parameter
+            .states
+            .iter()
+            .find(|state| state.name == name)
+            .unwrap_or_else(|| panic!("state {name} was created"))
+    };
+    assert!(
+        state("Shown").visible_blocks.contains(&member),
+        "Show all objects shows the members in the new state"
+    );
+    assert!(
+        state("Hidden").visible_blocks.is_empty(),
+        "Hide all objects hides the members in the new state"
+    );
+    assert!(parameter.all_blocks.contains(&member));
+}
+
 #[test]
 fn visibility_ribbon_new_modes_state_selection_and_native_roundtrip() {
     use crate::ui::window::block_visibility::{Action as A, NewVisibility as V};

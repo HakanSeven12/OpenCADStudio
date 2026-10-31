@@ -4049,6 +4049,10 @@ pub enum Message {
     /// visibility dropdown's items.
     VisibilityPick(usize),
     TableRowPick(usize),
+    /// The Test Block window's visibility widget picked a state.
+    TestVisibilityPick(usize),
+    /// The Test Block window's lookup widget picked a table entry.
+    TestLookupPick(usize),
     /// User picked a dynamic-block flip state — `0` base, `1` flipped.
     FlipPick(usize),
     /// Timer pulse while the cursor is dwelling on a grip; drives the

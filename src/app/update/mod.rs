@@ -5922,6 +5922,54 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::TestVisibilityPick(idx) => {
+                let i = self.active_tab;
+                if let Some(insert) = self.tabs[i].block_test.as_ref().map(|test| test.insert) {
+                    self.apply_visibility_state(insert, idx);
+                    self.finish_pending_history(i);
+                    self.refresh_properties();
+                }
+                Task::none()
+            }
+            Message::TestLookupPick(idx) => {
+                let i = self.active_tab;
+                let Some((insert, baseline)) = self.tabs[i]
+                    .block_test
+                    .as_ref()
+                    .map(|test| (test.insert, test.baseline.clone()))
+                else {
+                    return Task::none();
+                };
+                if self.reject_locked_edit(i, insert) {
+                    return Task::none();
+                }
+                let Some(value) = self
+                    .test_block_widgets(i)
+                    .and_then(|widgets| widgets.lookup)
+                    .and_then(|widget| widget.items.get(idx).cloned())
+                else {
+                    return Task::none();
+                };
+                let result = crate::scene::block_lookup::evaluate_test_choice(
+                    &self.tabs[i].scene.document,
+                    baseline.as_ref(),
+                    insert,
+                    &value,
+                );
+                match result {
+                    Ok(Some(staged)) => {
+                        self.push_undo_snapshot(i, "Lookup value");
+                        self.apply_action_document(i, staged);
+                        self.tabs[i].scene.bump_geometry();
+                        self.tabs[i].dirty = true;
+                        self.finish_pending_history(i);
+                        self.refresh_properties();
+                    }
+                    Ok(None) => {}
+                    Err(error) => self.command_line.push_error(crate::t!(error).as_ref()),
+                }
+                Task::none()
+            }
             Message::FlipPick(idx) => {
                 if let Some(popup) = self.flip_popup.take() {
                     self.apply_flip_state(popup, idx == 1);

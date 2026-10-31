@@ -56,6 +56,96 @@ impl ViewportPointerState {
     }
 }
 
+/// Width of the floating Test Block widget panel, including its padding.
+const TEST_WIDGET_PANEL_W: f32 = 202.0;
+const TEST_WIDGET_ROW_H: f32 = 26.0;
+const TEST_WIDGET_ROW_GAP: f32 = 6.0;
+const TEST_WIDGET_PAD: f32 = 6.0;
+
+/// Height of the floating Test Block widget panel for the rows it shows.
+fn test_block_widgets_height(widgets: &super::visibility::TestBlockWidgets) -> f32 {
+    let rows = widgets.visibility.is_some() as usize + widgets.lookup.is_some() as usize;
+    if rows == 0 {
+        return 0.0;
+    }
+    TEST_WIDGET_PAD * 2.0
+        + rows as f32 * TEST_WIDGET_ROW_H
+        + (rows - 1) as f32 * TEST_WIDGET_ROW_GAP
+}
+
+/// Vertical space the overlaid command line takes at the viewport bottom.
+fn command_line_inset(app: &OpenCADStudio) -> f32 {
+    if app.command_line.history_open {
+        app.command_line.history_height.clamp(
+            crate::ui::command_line::HISTORY_HEIGHT_MIN,
+            crate::ui::command_line::history_max_height(app.win_size.1),
+        ) + 72.0
+    } else {
+        34.0 + app.command_line.overlay_lines_height()
+    }
+}
+
+/// Floating lists for the Test Block window: the current visibility state
+/// and lookup value stay on screen instead of living only on a grip of the
+/// selected reference.
+fn test_block_widgets_panel<'a>(
+    widgets: &super::visibility::TestBlockWidgets,
+) -> Element<'a, Message> {
+    let mut col = column![].spacing(TEST_WIDGET_ROW_GAP);
+    if let Some(widget) = &widgets.visibility {
+        col = col.push(test_block_widget_picker(
+            widget,
+            "test-block-visibility",
+            Message::TestVisibilityPick,
+        ));
+    }
+    if let Some(widget) = &widgets.lookup {
+        col = col.push(test_block_widget_picker(
+            widget,
+            "test-block-lookup",
+            Message::TestLookupPick,
+        ));
+    }
+    container(col)
+        .padding(TEST_WIDGET_PAD)
+        .width(iced::Length::Fixed(TEST_WIDGET_PANEL_W))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+fn test_block_widget_picker<'a>(
+    widget: &super::visibility::TestWidget,
+    id: &'static str,
+    on_pick: fn(usize) -> Message,
+) -> Element<'a, Message> {
+    let labels = widget.items.clone();
+    container(
+        iced::widget::pick_list(
+            widget.current,
+            (0..widget.items.len()).collect::<Vec<_>>(),
+            move |idx: &usize| labels.get(*idx).cloned().unwrap_or_default(),
+        )
+        .on_select(on_pick)
+        .placeholder(widget.label.clone())
+        .text_size(12)
+        .padding([4, 6])
+        .width(Fill),
+    )
+    .id(iced::widget::Id::new(id))
+    .into()
+}
+
 /// Pane-local point of a lone finger driving the cursor. Touch events stay
 /// uncaptured: the gesture handler listens to them as well.
 fn touch_cursor_move(event: &iced::Event, bounds: iced::Rectangle) -> Option<iced::Point> {
@@ -2106,6 +2196,31 @@ bg={bg_ms:.1}ms n={view_count}"
                 let bar=crate::ui::window::block_action_bars::view(group,tab.selected_authoring,offset,width,tab.active_cmd.is_none(),bar_color);
                 viewport_stack=viewport_stack.push(position_canvas_overlay(point,bar));
             }
+            // The Test Block window keeps the definition's current
+            // visibility state and lookup row on screen.
+            if tab.block_test.is_some() {
+                if let Some(widgets) = self.test_block_widgets(i) {
+                    let height = test_block_widgets_height(&widgets);
+                    if height > 0.0 {
+                        let min_x = bar_bounds.x + 4.0;
+                        let max_x = (bar_bounds.x + bar_bounds.width
+                            - TEST_WIDGET_PANEL_W
+                            - 4.0)
+                            .max(min_x);
+                        let x = (bar_bounds.x
+                            + (bar_bounds.width - TEST_WIDGET_PANEL_W) * 0.5)
+                            .clamp(min_x, max_x);
+                        let y = bar_bounds.y + bar_bounds.height
+                            - height
+                            - command_line_inset(self)
+                            - 8.0;
+                        viewport_stack = viewport_stack.push(position_canvas_overlay(
+                            iced::Point::new(x, y),
+                            test_block_widgets_panel(&widgets),
+                        ));
+                    }
+                }
+            }
             if let Some(popup) = self.grip_popup.as_ref() {
                 if !tab.is_start {
                     let labels: Vec<String> = popup
@@ -2410,14 +2525,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
             // Reserve the overlaid command line when placing cursor-anchored panels.
             mark("chrome");
-            let command_line_inset = if self.command_line.history_open {
-                self.command_line.history_height.clamp(
-                    crate::ui::command_line::HISTORY_HEIGHT_MIN,
-                    crate::ui::command_line::history_max_height(self.win_size.1),
-                ) + 72.0
-            } else {
-                34.0 + self.command_line.overlay_lines_height()
-            };
+            let command_line_inset = command_line_inset(self);
             if let Some((cursor, tip)) = self.hovered_dynamic_grip_tip() {
                 viewport_stack = viewport_stack.push(overlay::grip_tip_overlay(cursor, command_line_inset, tip));
             }

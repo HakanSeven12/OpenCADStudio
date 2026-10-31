@@ -596,6 +596,190 @@ fn block_test_lookup_choice_evaluates_temporary_reference_only() {
     ));
 }
 
+/// The Test Block window keeps the definition's current visibility state and
+/// lookup row on screen, and a pick from either widget changes only the
+/// temporary reference.
+#[test]
+fn test_window_widgets_apply_visibility_and_lookup_to_the_reference() {
+    use crate::scene::{block_actions, block_distance_parameter as distance, block_lookup};
+
+    let (mut app, source, _) = fixture();
+    let definition = app.tabs[source]
+        .active_block_edit_session()
+        .unwrap()
+        .br_handle;
+    let line = app.tabs[source]
+        .scene
+        .document
+        .block_records
+        .get("SAMPLE")
+        .unwrap()
+        .entity_handles[0];
+    let doc = &mut app.tabs[source].scene.document;
+    let mut frame = Line::from_points(
+        Vector3::new(10.0, 21.0, 0.0),
+        Vector3::new(15.0, 21.0, 0.0),
+    );
+    frame.common.owner_handle = definition;
+    let frame = doc.add_entity(EntityType::Line(frame)).unwrap();
+    let visibility =
+        crate::scene::block_visibility::create(doc, definition, Vector3::ZERO).unwrap();
+    let hidden =
+        crate::scene::block_visibility::add_state(doc, visibility, "WindowHidden", 0).unwrap();
+    crate::scene::block_visibility::set_visible(doc, visibility, hidden, &[frame], false);
+    let parameter = distance::create(
+        doc,
+        definition,
+        distance::Kind::Linear,
+        Vector3::new(10.0, 20.0, 0.0),
+        Vector3::new(12.0, 20.0, 0.0),
+        Vector3::new(10.0, 21.0, 0.0),
+    )
+    .unwrap();
+    block_actions::create(
+        doc,
+        definition,
+        block_actions::Kind::Move,
+        parameter,
+        &[line],
+        glam::DVec3::new(10.0, 20.0, 0.0),
+    )
+    .unwrap();
+    let lookup = block_lookup::create(doc, definition, Vector3::new(11.0, 21.0, 0.0)).unwrap();
+    let mut table = block_lookup::empty_table(
+        block_lookup::parameters(doc, definition)
+            .into_iter()
+            .find(|(handle, _)| *handle == lookup)
+            .unwrap()
+            .1,
+    );
+    table.columns.insert(
+        0,
+        block_lookup::properties(doc, definition)[0].column.clone(),
+    );
+    table.column_count = 2;
+    table.row_count = 2;
+    table.expressions = vec!["2".into(), "Small".into(), "4".into(), "Large".into()];
+    block_lookup::apply_table(doc, definition, lookup, table).unwrap();
+
+    let original = app.tabs[source].scene.document.clone();
+    let _ = app.open_block_test(source);
+    let test = app.active_tab;
+    let reference = app.tabs[test].block_test.as_ref().unwrap().insert;
+
+    assert!(
+        app.test_block_widgets(source).is_none(),
+        "a drawing tab has no Test Block widgets"
+    );
+    let widgets = app
+        .test_block_widgets(test)
+        .expect("the Test Block window shows its widgets");
+    let vis = widgets.visibility.expect("visibility widget");
+    assert_eq!(vis.items, ["VisibilityState0", "WindowHidden"]);
+    assert_eq!(vis.current, Some(0));
+    let lookup_widget = widgets.lookup.expect("lookup widget");
+    assert_eq!(lookup_widget.items, ["Small", "Large"]);
+    assert_eq!(lookup_widget.current, Some(0));
+
+    let _ = app.update(Message::TestVisibilityPick(hidden));
+    assert_eq!(
+        app.test_block_widgets(test)
+            .unwrap()
+            .visibility
+            .unwrap()
+            .current,
+        Some(hidden)
+    );
+    assert_eq!(app.tabs[source].scene.document, original);
+
+    let _ = app.update(Message::TestLookupPick(1));
+    assert_eq!(
+        app.test_block_widgets(test)
+            .unwrap()
+            .lookup
+            .unwrap()
+            .current,
+        Some(1)
+    );
+    let EntityType::Insert(insert) = app.tabs[test].scene.document.get_entity(reference).unwrap()
+    else {
+        panic!("expected the temporary Test Block reference")
+    };
+    let member = app.tabs[test]
+        .scene
+        .document
+        .block_records
+        .get(&insert.block_name)
+        .unwrap()
+        .entity_handles[0];
+    let EntityType::Line(line) = app.tabs[test].scene.document.get_entity(member).unwrap() else {
+        panic!("expected the materialized line")
+    };
+    assert_eq!(line.start, Vector3::new(12.0, 20.0, 0.0));
+    assert_eq!(line.end, Vector3::new(17.0, 20.0, 0.0));
+    assert_eq!(
+        app.tabs[test]
+            .scene
+            .document
+            .entities_in_block(&insert.block_name)
+            .filter(|entity| entity.common().invisible)
+            .count(),
+        1,
+        "the lookup pick keeps the hidden member hidden"
+    );
+    assert_eq!(app.tabs[source].scene.document, original);
+
+    // Picks routed while a drawing tab is in front must not touch either the
+    // source drawing or the Test Block window.
+    let test_before = app.tabs[test].scene.document.clone();
+    app.active_tab = source;
+    let _ = app.update(Message::TestVisibilityPick(0));
+    let _ = app.update(Message::TestLookupPick(0));
+    assert_eq!(app.tabs[test].scene.document, test_before);
+    assert_eq!(app.tabs[source].scene.document, original);
+    app.active_tab = test;
+
+    // The floating lists live in the active viewport, so laying the whole
+    // window out with the Test Block tab in front must show both current
+    // values.
+    let mut simulator = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        iced::Size::new(1280.0, 800.0),
+        app.view_main(),
+    );
+    for id in ["test-block-visibility", "test-block-lookup"] {
+        let target = simulator
+            .find(iced::widget::Id::new(id))
+            .unwrap_or_else(|_| panic!("the Test Block window lays out the {id} widget"));
+        let bounds = target
+            .visible_bounds()
+            .unwrap_or_else(|| panic!("{id} is not clipped away"));
+        assert!(
+            bounds.width > 0.0 && bounds.height > 0.0,
+            "{id} occupies space"
+        );
+        assert!(
+            bounds.x >= 0.0 && bounds.x + bounds.width <= 1280.0,
+            "{id} stays inside the window"
+        );
+        assert!(
+            bounds.y + bounds.height <= 800.0 - 34.0,
+            "{id} sits above the command line"
+        );
+    }
+}
+
+/// A widget pick routed while a drawing tab is in front changes nothing.
+#[test]
+fn test_widget_picks_on_a_drawing_tab_do_nothing() {
+    let (mut app, source, _) = fixture();
+    let before = app.tabs[source].scene.document.clone();
+    let _ = app.update(Message::TestVisibilityPick(0));
+    let _ = app.update(Message::TestLookupPick(0));
+    assert_eq!(app.tabs[source].scene.document, before);
+    assert!(app.tabs[source].block_test.is_none());
+}
+
 #[test]
 fn block_test_attributes_use_defaults_and_the_stored_base_point() {
     use codec::entities::AttributeDefinition;

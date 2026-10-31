@@ -215,6 +215,8 @@ impl OpenCADStudio {
                             cliprompt_lines: self.cliprompt_lines,
                             commandline_fade_ms: self.commandline_fade_ms,
                             command_line_opacity: self.command_line.opacity_percent(),
+                            command_line_font: self.command_line.font_family().to_owned(),
+                            command_line_font_size: self.command_line.font_size(),
                             show_menu_bar: self.show_menu_bar,
                             show_ribbon: !self.ribbon_closed,
                             hatch_associative: self.hatch_associative,

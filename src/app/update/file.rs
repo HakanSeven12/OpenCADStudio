@@ -930,6 +930,8 @@ impl OpenCADStudio {
             language: self.language,
             cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
             command_line_opacity: self.command_line.opacity_percent(),
+            command_line_font: self.command_line.font_family().to_owned(),
+            command_line_font_size: self.command_line.font_size(),
             commandline_fade_ms: crate::app::settings::clamp_commandline_fade_ms(
                 self.commandline_fade_ms,
             ),
@@ -1142,6 +1144,8 @@ impl OpenCADStudio {
             .set_cliprompt_lines(self.cliprompt_lines.clamp(0, 50) as u8);
         self.command_line
             .set_opacity_percent(s.command_line_opacity);
+        self.command_line
+            .set_font(&s.command_line_font, s.command_line_font_size);
         self.commandline_fade_ms =
             crate::app::settings::clamp_commandline_fade_ms(s.commandline_fade_ms);
         self.command_line

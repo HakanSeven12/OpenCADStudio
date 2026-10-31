@@ -10537,6 +10537,18 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+            Message::CommandLineFontChanged(family) => {
+                let size = self.command_line.font_size();
+                self.command_line.set_font(&family, size);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::CommandLineFontSizeChanged(size) => {
+                let family = self.command_line.font_family().to_owned();
+                self.command_line.set_font(&family, size);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
 
             Message::CommandLineFadeChanged(ms) => {
                 let ms = crate::app::settings::clamp_commandline_fade_ms(ms);

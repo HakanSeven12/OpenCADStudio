@@ -199,6 +199,10 @@ pub struct CommandLine {
     /// COMMANDLINEOPACITY: how opaque the command line's panels are, in
     /// percent (20–100, default 80), so the drawing shows through.
     opacity_percent: u8,
+    /// The family and size the history, prompt and input are written in.
+    font_family: String,
+    font: iced::Font,
+    font_size: f32,
     /// Since when the pointer rests on the overlay history: lines still
     /// showing then stay until it leaves, and fade from that moment.
     hover_since: Option<Instant>,
@@ -230,6 +234,9 @@ impl Default for CommandLine {
             cliprompt_lines: 3,
             fade_ms: DEFAULT_COMMANDLINE_FADE_MS,
             opacity_percent: 80,
+            font_family: String::new(),
+            font: iced::Font::DEFAULT,
+            font_size: 11.0,
             hover_since: None,
         }
     }
@@ -551,6 +558,28 @@ impl CommandLine {
         self.opacity_percent
     }
 
+    /// The command line font: a family name (empty for the interface font)
+    /// and a size in pixels, clamped to 8–24.
+    pub fn set_font(&mut self, family: &str, size: u16) {
+        if family != self.font_family {
+            self.font_family = family.to_owned();
+            self.font = if family.is_empty() {
+                iced::Font::DEFAULT
+            } else {
+                iced::Font::with_family(iced::font::Family::name(family))
+            };
+        }
+        self.font_size = f32::from(size.clamp(8, 24));
+    }
+
+    pub fn font_family(&self) -> &str {
+        &self.font_family
+    }
+
+    pub fn font_size(&self) -> u16 {
+        self.font_size as u16
+    }
+
     fn fade_secs(&self) -> f32 {
         self.fade_ms as f32 / 1000.0
     }
@@ -800,14 +829,17 @@ impl CommandLine {
                 let kind = entry.kind.clone();
                 let is_error = kind == EntryKind::Error;
                 let entry_text = |value: String| {
-                    let mut txt = text(value).size(11).style({
+                    let mut txt = text(value).size(self.font_size).font(self.font).style({
                         let kind = kind.clone();
                         move |theme: &Theme| iced::widget::text::Style {
                             color: Some(history_color(theme, &kind)),
                         }
                     });
                     if is_error {
-                        txt = txt.font(iced::Font::DEFAULT.weight(iced::font::Weight::Bold));
+                        txt = txt.font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..self.font
+                        });
                     }
                     txt
                 };
@@ -859,7 +891,7 @@ impl CommandLine {
                     col.push(container(entry_text(entry.text.clone())).padding([1, 8]))
                 }
             });
-        let prompt = container(text(crate::tr!("command-line", "label")).size(11).style(
+        let prompt = container(text(crate::tr!("command-line", "label")).size(self.font_size).font(self.font).style(
             |theme: &Theme| {
                 let p = theme.palette();
                 let color = accessible_accent_threshold(
@@ -916,7 +948,8 @@ impl CommandLine {
                 .on_submit(Message::CommandSubmit);
         }
         let input = input
-            .size(11)
+            .size(self.font_size)
+            .font(self.font)
             .padding(Padding {
                 top: 4.0,
                 right: 30.0,

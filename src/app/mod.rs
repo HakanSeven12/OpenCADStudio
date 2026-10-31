@@ -3370,6 +3370,9 @@ pub enum Message {
     CommandLineFadeChanged(i32),
     /// Change the command line's panel opacity (COMMANDLINEOPACITY).
     CommandLineOpacityChanged(u8),
+    /// Options › Display: the command line font family ("" = interface font).
+    CommandLineFontChanged(String),
+    CommandLineFontSizeChanged(u16),
     /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
     ZoomWheelReversedChanged(bool),
     NavigationStyleChanged(crate::app::settings::NavigationStyle),

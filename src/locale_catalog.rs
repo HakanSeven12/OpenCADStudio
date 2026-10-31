@@ -3975,6 +3975,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "View Twist" => Some(("common", "menu-view-twist")),
         "Viewports" => Some(("common", "menu-viewports")),
         "Command line opacity" => Some(("common", "command-line-opacity")),
+        "Command line font" => Some(("common", "command-line-font")),
+        "Interface font" => Some(("common", "interface-font")),
         "TXTEXP: no text selected." => Some(("common", "txtexp-no-text-selected")),
         "Windows desktop" => Some(("styles", "windows-desktop")),
         "Wipeout" => Some(("common", "wipeout")),

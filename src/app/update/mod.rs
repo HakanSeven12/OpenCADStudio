@@ -7999,6 +7999,7 @@ impl OpenCADStudio {
                     3 => self.mtext_select_all(),
                     _ => {
                         if let Some(ed) = self.mtext_editor.as_mut() {
+                            ed.typing_format = Default::default();
                             ed.sel_anchor = off;
                             ed.sel = Some((off, off));
                             ed.caret = off;
@@ -8010,6 +8011,7 @@ impl OpenCADStudio {
             }
             Message::MTextSelTo(off) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.typing_format = Default::default();
                     let a = ed.sel_anchor;
                     ed.sel = Some((a.min(off), a.max(off)));
                     ed.caret = off;

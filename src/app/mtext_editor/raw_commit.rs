@@ -25,6 +25,7 @@ editor_history! {
     object_color: Option<codec::types::Color>, color_aci: u16, oblique: String, char_space: String,
     annotative: bool, attachment: AttachmentPoint, line_spacing: f32, rect_width: f64,
     sel: Option<(usize, usize)>, caret: usize, sel_anchor: usize,
+    typing_format: super::raw_edit::TypingFormat,
 }
 
 impl MTextEditorState {

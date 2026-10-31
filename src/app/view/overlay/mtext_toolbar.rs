@@ -1,7 +1,7 @@
 //! The MTEXT toolbar's second row: character formatting, undo, paragraph
 //! alignment and the menus that hold the rest of the editor's commands.
 use super::*;
-use crate::app::mtext_editor::{EditorMenu, MTextEditorState, MTextFmt, ParaAlign};
+use crate::app::mtext_editor::{EditorMenu, FormatState, MTextEditorState, MTextFmt, ParaAlign};
 
 macro_rules! label {
     ($id:literal) => {
@@ -69,30 +69,58 @@ pub(super) fn format_row(ed: &MTextEditorState) -> Element<'static, Message> {
             hint,
         )
     };
+    // A format button shows whether the selection (or what is typed next)
+    // has it: highlighted when on, a warning border when mixed, inert when
+    // the text or selection cannot take it. The hint says which.
+    let format = |bytes: &'static [u8], kind: MTextFmt, name: String| {
+        let state = ed.format_state(kind);
+        let status = match state {
+            FormatState::Off => label!("format-off"),
+            FormatState::On => label!("format-on"),
+            FormatState::Mixed => label!("format-mixed"),
+            FormatState::Unavailable => label!("format-unavailable"),
+        };
+        let control = button(crate::ui::icons::themed(bytes, 18.0))
+            .on_press_maybe((state != FormatState::Unavailable).then_some(Message::MTextFmt(kind)))
+            .padding(3)
+            .style(move |theme: &Theme, status| {
+                let mut style = if state == FormatState::On {
+                    button::primary(theme, status)
+                } else {
+                    button_style(theme, status)
+                };
+                if state == FormatState::Mixed {
+                    style.border.width = 2.0;
+                    style.border.color = theme.palette().warning.base.color;
+                }
+                style
+            });
+        tip(control, format!("{name}: {status}"))
+    };
     row![
-        icon(
+        format(
             include_bytes!("../../../../assets/icons/mt_bold.svg"),
-            Message::MTextFmt(MTextFmt::Bold),
+            MTextFmt::Bold,
             label!("bold")
         ),
-        icon(
+        format(
             include_bytes!("../../../../assets/icons/mt_italic.svg"),
-            Message::MTextFmt(MTextFmt::Italic),
+            MTextFmt::Italic,
             label!("italic")
         ),
-        icon(
+        format(
             include_bytes!("../../../../assets/icons/mt_underline.svg"),
-            Message::MTextFmt(MTextFmt::Underline),
+            MTextFmt::Underline,
             label!("underline")
         ),
-        icon(
+        format(
             include_bytes!("../../../../assets/icons/mt_overline.svg"),
-            Message::MTextFmt(MTextFmt::Overline),
+            MTextFmt::Overline,
             label!("overline")
         ),
-        icon(
+        format(
             include_bytes!("../../../../assets/icons/mt_strike.svg"),
-            Message::MTextFmt(MTextFmt::Strike),
+            MTextFmt::Strike,
             label!("strike")
         ),
         separator(),

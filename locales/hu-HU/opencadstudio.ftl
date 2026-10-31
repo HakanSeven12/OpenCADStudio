@@ -104,6 +104,10 @@ mtext-toolbar = MTEXT
     .less-equal = Kisebb vagy egyenlő
     .greater-equal = Nagyobb vagy egyenlő
     .approximately = Közelítőleg egyenlő
+    .format-on = Be
+    .format-off = Ki
+    .format-mixed = Vegyes
+    .format-unavailable = Ennél a szövegnél vagy kijelölésnél nem érhető el
 
 action =
     .close = Bezárás

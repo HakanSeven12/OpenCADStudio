@@ -27,6 +27,7 @@ mod raw_geometry;
 #[allow(dead_code)]
 mod raw_operations;
 mod raw_style;
+pub(in crate::app) use raw_edit::FormatState;
 pub(in crate::app) use raw_style::ValueOrigin;
 
 /// Character-level format toggles applied to the current selection by the
@@ -183,6 +184,9 @@ pub struct MTextEditorState {
     pub color_picker_open: bool,
     /// The open toolbar menu.
     pub menu: Option<EditorMenu>,
+    /// B / I / U / overline / S switched with nothing selected, for the
+    /// next typed text. Any caret move or new selection drops it.
+    pub(super) typing_format: raw_edit::TypingFormat,
     /// Per-visible-character boxes (world XY, world_offset already removed) for
     /// click-to-select in the preview, and the current selection as a visible-
     /// character range `[start, end)`.
@@ -233,6 +237,7 @@ impl MTextEditorState {
             show_preview: true,
             color_picker_open: false,
             menu: None,
+            typing_format: Default::default(),
             glyph_boxes: Vec::new(),
             sel: None,
             span_input: None,
@@ -1244,11 +1249,15 @@ impl super::OpenCADStudio {
             self.raw_change_case(kind == MTextFmt::Uppercase);
             return;
         }
-        // The face a bold run without its own font is stamped with, so the
-        // bold flag has a name to ride on and still draws the same font.
+        let face = self.format_face();
+        self.raw_format(kind, &face);
+    }
+
+    /// The face a bold run without its own font is stamped with, so the
+    /// bold flag has a name to ride on and still draws the same font.
+    pub(super) fn format_face(&self) -> String {
         let doc = &self.tabs[self.active_tab].scene.document;
-        let face = self
-            .mtext_editor
+        self.mtext_editor
             .as_ref()
             .map(|ed| {
                 if !ed.font.trim().is_empty() {
@@ -1260,8 +1269,7 @@ impl super::OpenCADStudio {
                     crate::scene::text::sysfont::split_style(&font).0.to_string()
                 }
             })
-            .unwrap_or_default();
-        self.raw_format(kind, &face);
+            .unwrap_or_default()
     }
 
     /// Set the alignment of every paragraph the selection (or caret) touches.
@@ -1325,6 +1333,7 @@ impl super::OpenCADStudio {
     /// Move the caret horizontally by `delta` visible characters.
     pub(super) fn mtext_caret_move(&mut self, delta: i32, extend_selection: bool) {
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.typing_format = Default::default();
             let n = doc_to_cells(&ed.doc).len() as i32;
             let c = if extend_selection {
                 (ed.caret as i32 + delta).clamp(0, n) as usize
@@ -1350,6 +1359,7 @@ impl super::OpenCADStudio {
     /// horizontal position as closely as the laid-out glyph boxes allow.
     pub(super) fn mtext_caret_move_vertical(&mut self, direction: i8, extend_selection: bool) {
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.typing_format = Default::default();
             let visible_count = doc_to_cells(&ed.doc).len();
             let caret = vertical_caret_target(&ed.glyph_boxes, ed.caret, visible_count, direction);
             ed.caret = caret;
@@ -1374,6 +1384,7 @@ impl super::OpenCADStudio {
     /// Select the whole editor text (Ctrl+A / triple-click).
     pub(super) fn mtext_select_all(&mut self) {
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.typing_format = Default::default();
             let n = doc_to_cells(&ed.doc).len();
             ed.sel_anchor = 0;
             ed.sel = Some((0, n));
@@ -1508,6 +1519,7 @@ impl super::OpenCADStudio {
     /// Select the word at visible offset `off` (double-click).
     pub(super) fn mtext_select_word(&mut self, off: usize) {
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.typing_format = Default::default();
             let cells = doc_to_cells(&ed.doc);
             let (a, b) = word_range(&cells, off);
             ed.sel_anchor = a;

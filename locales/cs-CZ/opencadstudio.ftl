@@ -104,6 +104,10 @@ mtext-toolbar = MTEXT
     .less-equal = Less than or equal
     .greater-equal = Greater than or equal
     .approximately = Approximately equal
+    .format-on = On
+    .format-off = Off
+    .format-mixed = Mixed
+    .format-unavailable = Not available for this text or selection
 
 action =
     .close = Zavřít

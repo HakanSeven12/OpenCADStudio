@@ -104,6 +104,7 @@ impl crate::app::OpenCADStudio {
     /// Insert `text` at the caret, replacing the selection. A line break goes
     /// in as `\P`. Typing `d`, `p` or `c` right after `%%` makes the symbol.
     pub(in crate::app) fn raw_type(&mut self, text: &str, typing: bool) {
+        let face = self.format_face();
         self.edit_raw(|ed, index| {
             let mut range = ed.selected_range();
             let mut text = text.to_string();
@@ -125,7 +126,14 @@ impl crate::app::OpenCADStudio {
                     }
                 }
             }
-            index.replace(range, &text)
+            let start = range.start;
+            let mut edit = index.replace(range, &text)?;
+            // B, I, U, overline or S switched with nothing selected format
+            // what is typed next, as the toolbar shows.
+            for &(kind, on) in &ed.typing_format.0 {
+                edit.raw = format_range(&edit.raw, start..edit.caret, kind, on, &face)?;
+            }
+            Ok(edit)
         });
     }
 
@@ -256,6 +264,133 @@ fn format_prefix(
     })
 }
 
+/// `kind` switched to `on` over the visible `range` of `raw`. Only those
+/// characters change, and only in that one property; anything else refuses.
+fn format_range(
+    raw: &str,
+    range: std::ops::Range<usize>,
+    kind: MTextFmt,
+    on: bool,
+    face: &str,
+) -> Result<String, EditError> {
+    let index = SourceIndex::new(raw);
+    let cells = doc_to_cells(&editor_document(raw));
+    let selected = cells.get(range.clone()).ok_or(EditError::InvalidRange)?;
+    if selected.iter().any(|c| matches!(c, Cell::Stack { .. })) {
+        return Err(EditError::AtomicStructure);
+    }
+    let raw = index.format(range.clone(), |n| match cells.get(n) {
+        Some(Cell::Char(_, p)) => format_prefix(kind, on, p, face),
+        _ => Err(EditError::ProjectionMismatch),
+    })?;
+    let after = doc_to_cells(&editor_document(&raw));
+    let certified = after.len() == cells.len()
+        && cells
+            .iter()
+            .zip(&after)
+            .enumerate()
+            .all(|(n, pair)| match pair {
+                (Cell::Char(a, p), Cell::Char(b, q)) if range.contains(&n) => {
+                    a == b && format_active(kind, q) == on && only_format_changed(kind, p, q)
+                }
+                (old, new) => old == new,
+            });
+    if !certified {
+        return Err(EditError::ProjectionMismatch);
+    }
+    Ok(raw)
+}
+
+/// B, I, U, overline or S switched with nothing selected: the format the
+/// next typed text takes, in the order they were switched.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(in crate::app) struct TypingFormat(Vec<(MTextFmt, bool)>);
+
+impl TypingFormat {
+    fn value(&self, kind: MTextFmt) -> Option<bool> {
+        self.0.iter().find(|(k, _)| *k == kind).map(|(_, on)| *on)
+    }
+
+    fn set(&mut self, kind: MTextFmt, on: bool) {
+        self.0.retain(|(k, _)| *k != kind);
+        self.0.push((kind, on));
+    }
+}
+
+/// What a format button shows for the selection, or for the caret.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum FormatState {
+    Off,
+    On,
+    /// Part of the selection has it.
+    Mixed,
+    /// The text or the selection cannot be formatted (a protected code, a
+    /// fraction in the selection).
+    Unavailable,
+}
+
+impl MTextEditorState {
+    /// The properties a character typed at `caret` takes.
+    fn insertion_properties(
+        index: &SourceIndex,
+        caret: usize,
+    ) -> Result<SpanProperties, EditError> {
+        let probe = index.replace(caret..caret, "\u{e000}")?;
+        match doc_to_cells(&editor_document(&probe.raw)).get(caret) {
+            Some(Cell::Char(_, props)) => Ok(props.clone()),
+            _ => Err(EditError::ProjectionMismatch),
+        }
+    }
+
+    /// Whether `kind` is on: over the selection, or at the caret including
+    /// what was switched for the next typed text.
+    pub(in crate::app) fn format_state(&self, kind: MTextFmt) -> FormatState {
+        if matches!(kind, MTextFmt::Uppercase | MTextFmt::Lowercase) {
+            return FormatState::Off;
+        }
+        let raw = self.content.text();
+        let index = SourceIndex::new(&raw);
+        let state = (|| -> Result<FormatState, EditError> {
+            index.validate(false)?;
+            let range = self.selected_range();
+            index.validate_range(&range)?;
+            if range.is_empty() {
+                let active = match self.typing_format.value(kind) {
+                    Some(on) => on,
+                    None => format_active(kind, &Self::insertion_properties(&index, range.start)?),
+                };
+                return Ok(if active {
+                    FormatState::On
+                } else {
+                    FormatState::Off
+                });
+            }
+            let mut value = None;
+            let mut mixed = false;
+            for cell in doc_to_cells(&self.doc)
+                .get(range)
+                .ok_or(EditError::InvalidRange)?
+            {
+                let active = match cell {
+                    Cell::Char(_, props) => format_active(kind, props),
+                    Cell::Break(..) => continue,
+                    Cell::Stack { .. } => return Err(EditError::AtomicStructure),
+                };
+                mixed |= value.is_some_and(|previous| previous != active);
+                value = Some(active);
+            }
+            Ok(if mixed {
+                FormatState::Mixed
+            } else if value == Some(true) {
+                FormatState::On
+            } else {
+                FormatState::Off
+            })
+        })();
+        state.unwrap_or(FormatState::Unavailable)
+    }
+}
+
 /// Toggling `kind` changed nothing else about the character: the same
 /// face name, the other flags and every other property.
 fn only_format_changed(kind: MTextFmt, before: &SpanProperties, after: &SpanProperties) -> bool {
@@ -299,14 +434,22 @@ impl crate::app::OpenCADStudio {
     /// character already has it, then off. Only the selection changes, and
     /// only in that one property; anything else refuses the toggle.
     pub(in crate::app) fn raw_format(&mut self, kind: MTextFmt, face: &str) {
-        let Some(range) = self
-            .mtext_editor
-            .as_ref()
-            .map(MTextEditorState::selected_range)
-            .filter(|r| !r.is_empty())
-        else {
+        let Some(ed) = self.mtext_editor.as_mut() else {
             return;
         };
+        let range = ed.selected_range();
+        if range.is_empty() {
+            // Nothing selected: the next typed text takes it, as the button
+            // then shows; the text itself does not change.
+            match ed.format_state(kind) {
+                FormatState::Unavailable => {}
+                state => {
+                    ed.record_undo();
+                    ed.typing_format.set(kind, state != FormatState::On);
+                }
+            }
+            return;
+        }
         self.edit_raw(|ed, index| {
             let cells = doc_to_cells(&ed.doc);
             let selected = cells.get(range.clone()).ok_or(EditError::InvalidRange)?;
@@ -318,30 +461,8 @@ impl crate::app::OpenCADStudio {
                     Cell::Break(..) => {}
                 }
             }
-            let on = !all;
-            let raw = index.format(range.clone(), |n| match cells.get(n) {
-                Some(Cell::Char(_, p)) => format_prefix(kind, on, p, face),
-                _ => Err(EditError::ProjectionMismatch),
-            })?;
-            let after = doc_to_cells(&editor_document(&raw));
-            let certified = after.len() == cells.len()
-                && cells
-                    .iter()
-                    .zip(&after)
-                    .enumerate()
-                    .all(|(n, pair)| match pair {
-                        (Cell::Char(a, p), Cell::Char(b, q)) if range.contains(&n) => {
-                            a == b
-                                && format_active(kind, q) == on
-                                && only_format_changed(kind, p, q)
-                        }
-                        (old, new) => old == new,
-                    });
-            if !certified {
-                return Err(EditError::ProjectionMismatch);
-            }
             Ok(TextEdit {
-                raw,
+                raw: format_range(index.raw, range.clone(), kind, !all, face)?,
                 caret: range.end,
             })
         });
@@ -691,5 +812,79 @@ mod tests {
             };
             assert_eq!(t.value, value, "{ext}");
         }
+    }
+
+    fn state(app: &OpenCADStudio, kind: crate::app::mtext_editor::MTextFmt) -> super::FormatState {
+        app.mtext_editor.as_ref().unwrap().format_state(kind)
+    }
+
+    #[test]
+    fn a_format_switched_with_nothing_selected_takes_the_next_typed_text() {
+        use crate::app::mtext_editor::MTextFmt::*;
+        let mut app = app(r"\pxqc,t4;ab");
+        caret(&mut app, 2);
+        fmt(&mut app, Underline);
+        fmt(&mut app, Italic);
+        // Nothing is written until something is typed; the buttons say so.
+        assert_eq!(raw(&app), r"\pxqc,t4;ab");
+        assert_eq!(state(&app, Underline), super::FormatState::On);
+        assert_eq!(state(&app, Italic), super::FormatState::On);
+        for ch in ["c", "d", "e"] {
+            app.mtext_type(ch);
+        }
+        // One group for the typed run, not one per character.
+        assert_eq!(raw(&app), r"\pxqc,t4;ab{\L\Q15;cde}");
+        assert!(!props(&app, 1).underline());
+        assert!(props(&app, 2).underline() && props(&app, 4).underline());
+        assert_eq!(props(&app, 4).oblique_angle, Some(15.0));
+    }
+
+    #[test]
+    fn a_caret_move_drops_the_pending_format_and_undo_restores_it() {
+        use crate::app::mtext_editor::MTextFmt::*;
+        let mut app = app("ab");
+        caret(&mut app, 2);
+        fmt(&mut app, Strike);
+        app.mtext_caret_move(-1, false);
+        assert_eq!(state(&app, Strike), super::FormatState::Off);
+        app.mtext_type("x");
+        assert_eq!(raw(&app), "axb");
+        app.mtext_undo();
+        assert_eq!(raw(&app), "ab");
+        // Undo of the switch itself puts the button back.
+        let mut app = self::app("ab");
+        caret(&mut app, 2);
+        fmt(&mut app, Strike);
+        app.mtext_undo();
+        assert_eq!(state(&app, Strike), super::FormatState::Off);
+        app.mtext_redo();
+        assert_eq!(state(&app, Strike), super::FormatState::On);
+    }
+
+    #[test]
+    fn the_buttons_show_on_off_mixed_and_unavailable() {
+        use super::FormatState::*;
+        use crate::app::mtext_editor::MTextFmt::*;
+        let mut app = app(r"{\Lab}c\S1/2;");
+        select(&mut app, 0, 2);
+        assert_eq!(state(&app, Underline), On);
+        select(&mut app, 1, 3);
+        assert_eq!(state(&app, Underline), Mixed);
+        select(&mut app, 2, 3);
+        assert_eq!(state(&app, Underline), Off);
+        // A fraction in the selection cannot be formatted.
+        select(&mut app, 2, 6);
+        assert_eq!(state(&app, Bold), Unavailable);
+        // The caret takes the format of the text it continues.
+        caret(&mut app, 1);
+        assert_eq!(state(&app, Underline), On);
+        // A protected code: nothing can be formatted, and a press changes nothing.
+        let mut app = self::app(r"a\Zopaque");
+        caret(&mut app, 1);
+        assert_eq!(state(&app, Bold), Unavailable);
+        fmt(&mut app, Bold);
+        assert_eq!(state(&app, Bold), Unavailable);
+        app.mtext_undo();
+        assert_eq!(raw(&app), r"a\Zopaque");
     }
 }

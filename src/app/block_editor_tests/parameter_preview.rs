@@ -362,3 +362,72 @@ fn block_array_over_budget_preview_restores_source_and_preserves_history() {
         assert_eq!(app.tabs[i].scene.document.objects, before.objects);
     }
 }
+
+fn rotation_arc_samples(preview: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    preview
+        .iter()
+        .copied()
+        .filter(|point| point[0].hypot(point[1]) > 1e-6)
+        .collect()
+}
+
+fn assert_rotation_arc(preview: &[[f64; 3]], start: f64, end: f64) {
+    let samples = rotation_arc_samples(preview);
+    assert!(!samples.is_empty(), "no rotation preview");
+    for point in &samples {
+        let radius = point[0].hypot(point[1]);
+        assert!(
+            radius <= 10.0 + 1e-6,
+            "preview point outside the parameter radius: {point:?}"
+        );
+        let angle = point[1].atan2(point[0]).to_degrees().rem_euclid(360.0);
+        assert!(
+            (start - 1e-6..=end + 1e-6).contains(&angle),
+            "preview point at {angle}° lies outside the {start}–{end}° arc: {point:?}"
+        );
+    }
+    let middle = (start + end).to_radians() * 0.5;
+    let target = [10.0 * middle.cos(), 10.0 * middle.sin()];
+    assert!(
+        samples
+            .iter()
+            .any(|p| (p[0] - target[0]).hypot(p[1] - target[1]) < 0.5),
+        "no arc sample near {target:?}: {samples:?}"
+    );
+    for (angle, label) in [(start, "base angle"), (end, "default angle")] {
+        let target = [
+            10.0 * angle.to_radians().cos(),
+            10.0 * angle.to_radians().sin(),
+        ];
+        assert!(
+            samples
+                .iter()
+                .any(|p| (p[0] - target[0]).hypot(p[1] - target[1]) < 1e-6),
+            "the {label} radius line is missing: {samples:?}"
+        );
+    }
+}
+
+#[test]
+fn rotation_parameter_preview_draws_the_angle_arc_from_the_base_angle() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10");
+    app.tabs[i].last_cursor_world = DVec3::new(0.0, 10.0, 0.0);
+    app.refresh_active_cmd_preview(i);
+    assert_rotation_arc(&points(&app.tabs[i].scene.preview_wires), 0.0, 90.0);
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10");
+    feed(&mut app, "B");
+    feed(&mut app, "30");
+    let cursor = DVec3::new(8.660_254_037_844_386, 5.0, 0.0);
+    app.tabs[i].last_cursor_world = cursor;
+    app.refresh_active_cmd_preview(i);
+    assert_rotation_arc(&points(&app.tabs[i].scene.preview_wires), 30.0, 60.0);
+    assert!(app.tabs[i].active_cmd.is_some());
+}

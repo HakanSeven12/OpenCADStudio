@@ -330,26 +330,44 @@ impl CadCommand for OrientationParameterCommand {
             if !radius.is_finite() {
                 return vec![];
             }
-            let angle = if let Some(angle) = self.rotation {
-                self.base_angle + angle
+            let direction = |angle: f64| DVec3::new(angle.cos(), angle.sin(), 0.0) * radius;
+            if self.second.is_none() || self.asking_base_angle() {
+                let angle = (point.y - base.y).atan2(point.x - base.x);
+                lines.push(vec![base.to_array(), (base + direction(angle)).to_array()]);
+                lines.push(
+                    (0..=64)
+                        .map(|i| {
+                            let a = std::f64::consts::TAU * i as f64 / 64.0;
+                            (base + direction(a)).to_array()
+                        })
+                        .collect(),
+                );
             } else {
-                let turn = if self.asking_base_angle() {
-                    0.0
-                } else {
-                    self.base_angle
-                };
-                turn + (point.y - base.y).atan2(point.x - base.x)
-            };
-            let end = base + DVec3::new(angle.cos(), angle.sin(), 0.0) * radius;
-            lines.push(vec![base.to_array(), end.to_array()]);
-            lines.push(
-                (0..=64)
-                    .map(|i| {
-                        let a = std::f64::consts::TAU * i as f64 / 64.0;
-                        (base + DVec3::new(a.cos(), a.sin(), 0.0) * radius).to_array()
-                    })
-                    .collect(),
-            );
+                let rotation = self
+                    .rotation
+                    .unwrap_or_else(|| (point.y - base.y).atan2(point.x - base.x));
+                let reference = base + direction(self.base_angle);
+                let end = base + direction(self.base_angle + rotation);
+                lines.push(vec![base.to_array(), reference.to_array()]);
+                lines.push(vec![base.to_array(), end.to_array()]);
+                let native = |p: DVec3| Vector3::new(p.x, p.y, p.z);
+                if let Some((u, v, arc_radius, sweep)) = block_orientation_parameter::rotation_arc(
+                    native(base),
+                    native(end),
+                    native(reference),
+                ) {
+                    let u = DVec3::new(u.x, u.y, u.z);
+                    let v = DVec3::new(v.x, v.y, v.z);
+                    lines.push(
+                        (0..=48)
+                            .map(|step| {
+                                let a = sweep * step as f64 / 48.0;
+                                (base + (u * a.cos() + v * a.sin()) * arc_radius).to_array()
+                            })
+                            .collect(),
+                    );
+                }
+            }
         } else {
             lines.push(vec![
                 base.to_array(),

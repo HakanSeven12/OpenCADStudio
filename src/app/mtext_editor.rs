@@ -21,6 +21,7 @@ use iced::widget::text_editor;
 #[allow(dead_code)]
 mod raw_adapter;
 mod raw_clear;
+mod raw_commit;
 mod raw_edit;
 mod raw_geometry;
 #[allow(dead_code)]
@@ -122,6 +123,8 @@ pub struct MTextEditorState {
     pub width: String,
     /// What the current text style supplies where the source sets nothing.
     pub object_style: raw_style::ObjectStyle,
+    /// The object colour set in the editor; `None` keeps the entity's own.
+    pub object_color: Option<codec::types::Color>,
     /// Tessellated strokes of the current text, drawn in the editor's own
     /// preview area (NOT on the drawing canvas).
     pub preview_wires: Vec<WireModel>,
@@ -158,8 +161,8 @@ pub struct MTextEditorState {
     pub paragraph_space_after: String,
     pub find_text: String,
     pub replace_text: String,
-    undo: Vec<String>,
-    redo: Vec<String>,
+    undo: Vec<raw_commit::EditorSnapshot>,
+    redo: Vec<raw_commit::EditorSnapshot>,
     /// `Some` when editing an existing entity; `None` for a fresh MText.
     pub editing: Option<Handle>,
     /// When true the panel shows the rendered preview; when false the raw
@@ -212,6 +215,7 @@ impl MTextEditorState {
             width: "1".to_string(),
             char_space: "0".to_string(),
             object_style: Default::default(),
+            object_color: None,
             preview_wires: Vec::new(),
             show_preview: true,
             color_picker_open: false,
@@ -368,6 +372,9 @@ impl MTextEditorState {
         mt.line_spacing_factor = self.line_spacing as f64;
         mt.style = self.style.clone();
         mt.is_annotative = self.annotative;
+        if let Some(color) = self.object_color {
+            mt.common.color = color;
+        }
         self.patch_rotation(&mut mt);
         let rectangle_height = self.rect_height.trim().parse::<f64>().unwrap_or(0.0);
         mt.rectangle_height = (rectangle_height > 0.0).then_some(rectangle_height);
@@ -396,23 +403,20 @@ impl MTextEditorState {
                     mt.column_data.gutter = gutter;
                 }
             }
-            if !self.column_auto_height && rectangle_height > 0.0 {
+            // Manual columns of their own heights keep them while the column
+            // settings and the box height stay as they were opened.
+            let settings_kept = self.original.as_ref().is_some_and(|m| {
+                m.column_data.column_type == mt.column_data.column_type
+                    && m.column_data.column_count == mt.column_data.column_count
+                    && m.column_data.auto_height == mt.column_data.auto_height
+                    && m.rectangle_height == mt.rectangle_height
+            });
+            if !self.column_auto_height && rectangle_height > 0.0 && !settings_kept {
                 mt.column_data.heights =
                     vec![rectangle_height; mt.column_data.column_count as usize];
             }
         }
         mt
-    }
-
-    fn record_undo(&mut self) {
-        let value = self.content.text();
-        if self.undo.last().is_none_or(|last| last != &value) {
-            self.undo.push(value);
-            if self.undo.len() > 100 {
-                self.undo.remove(0);
-            }
-        }
-        self.redo.clear();
     }
 }
 
@@ -913,35 +917,6 @@ impl super::OpenCADStudio {
         }
     }
 
-    /// Splice text around the preview selection (visible-char range) in the
-    /// raw value. `case` optionally transforms the selected slice. Returns
-    /// true when a preview selection was present and applied.
-    pub(super) fn mtext_undo(&mut self) {
-        if let Some(ed) = self.mtext_editor.as_mut() {
-            if let Some(previous) = ed.undo.pop() {
-                ed.redo.push(ed.content.text());
-                ed.content = text_editor::Content::with_text(&previous);
-                ed.caret = previous.chars().count();
-                ed.sel = Some((ed.caret, ed.caret));
-                ed.sel_anchor = ed.caret;
-            }
-        }
-        self.rebuild_mtext_preview();
-    }
-
-    pub(super) fn mtext_redo(&mut self) {
-        if let Some(ed) = self.mtext_editor.as_mut() {
-            if let Some(next) = ed.redo.pop() {
-                ed.undo.push(ed.content.text());
-                ed.content = text_editor::Content::with_text(&next);
-                ed.caret = next.chars().count();
-                ed.sel = Some((ed.caret, ed.caret));
-                ed.sel_anchor = ed.caret;
-            }
-        }
-        self.rebuild_mtext_preview();
-    }
-
     pub(super) fn mtext_apply_span_number(&mut self, field: &'static str, value: String) {
         let number = value
             .trim()
@@ -969,6 +944,7 @@ impl super::OpenCADStudio {
             if has_selection {
                 ed.span_input = ed.sel.map(|sel| (sel, field, value));
             } else {
+                ed.record_undo();
                 match field {
                     "height" => ed.height = value,
                     "oblique" => ed.oblique = value,
@@ -1492,9 +1468,18 @@ impl super::OpenCADStudio {
                     ed.caret_blink_on = true;
                 }
             }
+        } else if let Some(ed) = self.mtext_editor.as_mut().filter(|ed| {
+            !self.command_mtext_input && !(ed.editing.is_some() && ed.original.is_none())
+        }) {
+            // No selection: the MTEXT's own colour, as the Properties panel
+            // sets it; the text itself is not rewritten.
+            ed.record_undo();
+            ed.object_color = Some(color);
         } else if let Some(ed) = self.mtext_editor.as_mut() {
-            // No selection: the global colour applies (ACI only; a true colour
-            // with no selection falls back to ByLayer).
+            // A multileader's text or command-line input has no colour of
+            // its own: the whole-text colour applies (ACI only; a true
+            // colour with no selection falls back to ByLayer).
+            ed.record_undo();
             ed.color_aci = match color {
                 C::Index(i) => i as u16,
                 _ => 256,
@@ -1528,249 +1513,16 @@ impl super::OpenCADStudio {
         Some(cells_to_doc(&ParagraphProperties::default(), slice).to_plain_text())
     }
 
-    /// Commit the editor — create a new MText or update the edited one.
+    /// Save & Close. See [`Self::commit_mtext_draft`].
     pub(super) fn mtext_commit(&mut self) -> bool {
-        let i = self.active_tab;
-        let Some(ed) = self.mtext_editor.take() else {
-            return false;
-        };
-        if self.command_mtext_input {
-            self.pending_command_editor_text = Some(ed.build_mtext().value);
-            self.command_mtext_input = false;
-            self.refresh_properties();
-            return true;
-        }
-        let body_empty = ed.content.text().trim().is_empty();
-        let keep_width = ed.keep_width;
-        let mut mt = ed.build_mtext();
-        let annotative = mt.is_annotative
-            || ed.editing.is_none()
-                && crate::scene::annotative::text_style_is_annotative(
-                    &self.tabs[i].scene.document,
-                    &mt.style,
-                );
-        if annotative {
-            mt.is_annotative = true;
-        }
-        if body_empty {
-            // Empty content: drop a new entity; leave an edited one untouched.
-            self.refresh_properties();
-            return false;
-        }
-        if let Some(h) = ed.editing {
-            if self.tabs[i].scene.is_layer_locked(h) {
-                self.refresh_properties();
-                return false;
-            }
-            self.push_undo_snapshot(i, "MTEXT");
-            match self.tabs[i].scene.document.get_entity_mut(h) {
-                Some(EntityType::MText(t)) => {
-                    t.value = mt.value;
-                    t.height = mt.height;
-                    t.style = mt.style;
-                    t.attachment_point = mt.attachment_point;
-                    t.line_spacing_factor = mt.line_spacing_factor;
-                    t.rectangle_width = mt.rectangle_width;
-                    t.rectangle_height = mt.rectangle_height;
-                    t.column_data = mt.column_data;
-                    t.rotation = mt.rotation;
-                    t.dwg_x_direction = mt.dwg_x_direction;
-                }
-                Some(EntityType::MultiLeader(ml)) => {
-                    ml.context.text_string = mt.value;
-                    ml.context.text_height = mt.height;
-                    ml.context.line_spacing_factor = mt.line_spacing_factor;
-                    if keep_width && mt.rectangle_width > 0.0 {
-                        ml.context.text_width = mt.rectangle_width;
-                    }
-                }
-                _ => {}
-            }
-            // Keep the displayed annotation context in sync.
-            if matches!(
-                self.tabs[i].scene.document.get_entity(h),
-                Some(EntityType::MText(_))
-            ) {
-                crate::scene::annotative::set_entity_annotative(
-                    &mut self.tabs[i].scene.document,
-                    h,
-                    annotative,
-                );
-                if annotative {
-                    if let Some(scale) = self.tabs[i].scene.creation_annotation_scale_handle() {
-                        crate::scene::annotative::create_annotation_context(
-                            &mut self.tabs[i].scene.document,
-                            h,
-                            scale,
-                        );
-                    }
-                }
-            }
-            if matches!(
-                self.tabs[i].scene.document.get_entity(h),
-                Some(EntityType::MText(_) | EntityType::MultiLeader(_))
-            ) {
-                self.tabs[i].scene.sync_displayed_annotation_context(h);
-            }
-            self.tabs[i]
-                .scene
-                .bump_entities(&[(h, crate::scene::ChangeKind::Modified)]);
-            self.tabs[i].dirty = true;
-        } else {
-            let plane = if self.tabs[i].editing_model_space() {
-                self.tabs[i].ucs_xform().working_plane()
-            } else {
-                crate::command::WorkingPlane::default()
-            };
-            let position = plane.to_local(glam::DVec3::new(
-                mt.insertion_point.x,
-                mt.insertion_point.y,
-                mt.insertion_point.z,
-            ));
-            mt.insertion_point = codec::types::Vector3::new(position.x, position.y, position.z);
-            self.push_undo_snapshot(i, "MTEXT");
-            let handle =
-                self.commit_new_text(plane.place_entity(EntityType::MText(Box::new(mt))));
-            if annotative {
-                let scale = self.tabs[i].scene.creation_annotation_scale_handle();
-                if let (Some(handle), Some(scale)) = (handle, scale) {
-                    crate::scene::annotative::create_annotation_context(
-                        &mut self.tabs[i].scene.document,
-                        handle,
-                        scale,
-                    );
-                }
-            }
-            self.tabs[i].dirty = true;
-        }
-        self.refresh_properties();
-        true
+        self.commit_mtext_draft(false)
     }
 
-    /// Apply the buffer to the drawing but keep the editor open — the
-    /// style-manager model, where **Apply** commits and the dialog stays up
-    /// (closing is the ✕). A brand-new MText is created on the first apply and
-    /// then updated in place on later applies, so repeated Apply never leaves
-    /// duplicate entities behind.
+    /// Apply: save and keep editing the saved entity, the style-manager
+    /// model. A new MText is created on the first Apply and updated in
+    /// place after that, so repeated Apply never leaves duplicates.
     pub(super) fn mtext_apply(&mut self) {
-        if self.command_mtext_input {
-            self.rebuild_mtext_preview();
-            return;
-        }
-        let i = self.active_tab;
-        let (mut mt, editing, body_empty, keep_width) = match self.mtext_editor.as_ref() {
-            Some(ed) => (
-                ed.build_mtext(),
-                ed.editing,
-                ed.content.text().trim().is_empty(),
-                ed.keep_width,
-            ),
-            None => return,
-        };
-        let annotative = mt.is_annotative
-            || editing.is_none()
-                && crate::scene::annotative::text_style_is_annotative(
-                    &self.tabs[i].scene.document,
-                    &mt.style,
-                );
-        if annotative {
-            mt.is_annotative = true;
-        }
-        if body_empty {
-            return;
-        }
-        if let Some(h) = editing {
-            if self.tabs[i].scene.is_layer_locked(h) {
-                return;
-            }
-            self.push_undo_snapshot(i, "MTEXT");
-            match self.tabs[i].scene.document.get_entity_mut(h) {
-                Some(EntityType::MText(t)) => {
-                    t.value = mt.value;
-                    t.height = mt.height;
-                    t.style = mt.style;
-                    t.attachment_point = mt.attachment_point;
-                    t.line_spacing_factor = mt.line_spacing_factor;
-                    t.rectangle_width = mt.rectangle_width;
-                    t.rectangle_height = mt.rectangle_height;
-                    t.column_data = mt.column_data;
-                    t.rotation = mt.rotation;
-                    t.dwg_x_direction = mt.dwg_x_direction;
-                }
-                Some(EntityType::MultiLeader(ml)) => {
-                    ml.context.text_string = mt.value;
-                    ml.context.text_height = mt.height;
-                    ml.context.line_spacing_factor = mt.line_spacing_factor;
-                    if keep_width && mt.rectangle_width > 0.0 {
-                        ml.context.text_width = mt.rectangle_width;
-                    }
-                }
-                _ => {}
-            }
-            if matches!(
-                self.tabs[i].scene.document.get_entity(h),
-                Some(EntityType::MText(_))
-            ) {
-                crate::scene::annotative::set_entity_annotative(
-                    &mut self.tabs[i].scene.document,
-                    h,
-                    annotative,
-                );
-                if annotative {
-                    if let Some(scale) = self.tabs[i].scene.creation_annotation_scale_handle() {
-                        crate::scene::annotative::create_annotation_context(
-                            &mut self.tabs[i].scene.document,
-                            h,
-                            scale,
-                        );
-                    }
-                }
-            }
-            if matches!(
-                self.tabs[i].scene.document.get_entity(h),
-                Some(EntityType::MText(_) | EntityType::MultiLeader(_))
-            ) {
-                self.tabs[i].scene.sync_displayed_annotation_context(h);
-            }
-            self.tabs[i]
-                .scene
-                .bump_entities(&[(h, crate::scene::ChangeKind::Modified)]);
-            self.tabs[i].dirty = true;
-        } else {
-            let plane = if self.tabs[i].editing_model_space() {
-                self.tabs[i].ucs_xform().working_plane()
-            } else {
-                crate::command::WorkingPlane::default()
-            };
-            let position = plane.to_local(glam::DVec3::new(
-                mt.insertion_point.x,
-                mt.insertion_point.y,
-                mt.insertion_point.z,
-            ));
-            mt.insertion_point = codec::types::Vector3::new(position.x, position.y, position.z);
-            self.push_undo_snapshot(i, "MTEXT");
-            let handle =
-                self.commit_new_text(plane.place_entity(EntityType::MText(Box::new(mt))));
-            self.tabs[i].dirty = true;
-            if annotative {
-                let scale = self.tabs[i].scene.creation_annotation_scale_handle();
-                if let (Some(handle), Some(scale)) = (handle, scale) {
-                    crate::scene::annotative::create_annotation_context(
-                        &mut self.tabs[i].scene.document,
-                        handle,
-                        scale,
-                    );
-                }
-            }
-            // Bind the editor to the fresh entity so the next Apply updates it.
-            if let (Some(h), Some(ed)) = (handle, self.mtext_editor.as_mut()) {
-                ed.editing = Some(h);
-                if let Some(EntityType::MText(mtext)) = self.tabs[i].scene.document.get_entity(h) {
-                    ed.original = Some((**mtext).clone());
-                }
-            }
-        }
-        self.refresh_properties();
+        self.commit_mtext_draft(true);
     }
 
     /// Discard the editor without changing the drawing.
@@ -1782,6 +1534,8 @@ impl super::OpenCADStudio {
     }
 }
 
+#[cfg(test)]
+mod data_tests;
 #[cfg(test)]
 mod rotation_tests;
 

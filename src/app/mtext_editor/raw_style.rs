@@ -347,6 +347,9 @@ impl crate::app::OpenCADStudio {
             base_width(&raw, ed.object_style.width)
                 .and_then(|target| patch_width(&raw, style.width, Some(target)))
         };
+        if let (Ok(_), Some(ed)) = (&result, self.mtext_editor.as_mut()) {
+            ed.record_undo();
+        }
         if self.set_object_source(result) {
             if let Some(ed) = self.mtext_editor.as_mut() {
                 ed.style = name;

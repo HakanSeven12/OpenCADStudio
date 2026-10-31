@@ -41,6 +41,13 @@ mtext-object-origin = MTEXT
     .custom = Egyedi
     .mixed = Vegyes
 
+mtext-commit-errors = MTEXT
+    .numeric = MTEXT: mentéshez érvényes magasság, szélességi tényező és forgatás szükséges.
+    .empty = MTEXT: meglévő objektum itt nem üríthető ki; törléshez használd a rajzi törlés parancsot.
+    .locked = MTEXT: a célréteg zárolt; a szerkesztési puffer nem lett mentve.
+    .missing = MTEXT: a célobjektum már nem létezik; a szerkesztési puffer nem lett mentve.
+    .creation = MTEXT: a létrehozás sikertelen; a szerkesztési puffer megmaradt.
+
 action =
     .close = Bezárás
     .options = Beállítások

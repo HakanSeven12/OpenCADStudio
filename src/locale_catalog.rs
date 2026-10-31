@@ -6562,6 +6562,11 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MTEXT: the inserted text contains an unsupported control character." => Some(("mtext-source-errors", "input")),
         "MTEXT: the source and rendered character positions do not agree; the edit was not applied." => Some(("mtext-source-errors", "projection")),
         "MTEXT: the object default cannot be safely separated from character flags or protected controls." => Some(("mtext-source-errors", "object-default")),
+        "MTEXT: enter a valid height, width factor and rotation before saving." => Some(("mtext-commit-errors", "numeric")),
+        "MTEXT: an existing entity cannot be emptied here; use the drawing's delete command." => Some(("mtext-commit-errors", "empty")),
+        "MTEXT: the target layer is locked; the draft was not saved." => Some(("mtext-commit-errors", "locked")),
+        "MTEXT: the target entity no longer exists; the draft was not saved." => Some(("mtext-commit-errors", "missing")),
+        "MTEXT: creation failed; the draft was retained." => Some(("mtext-commit-errors", "creation")),
         _ => None,
     }
 }

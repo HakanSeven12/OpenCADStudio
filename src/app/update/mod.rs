@@ -7839,6 +7839,7 @@ impl OpenCADStudio {
             }
             Message::MTextAnnotative(value) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.record_undo();
                     ed.annotative = value;
                 }
                 self.rebuild_mtext_preview();
@@ -7930,6 +7931,7 @@ impl OpenCADStudio {
             }
             Message::MTextJustify(ap) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.record_undo();
                     ed.attachment = ap;
                 }
                 self.rebuild_mtext_preview();
@@ -7941,6 +7943,7 @@ impl OpenCADStudio {
             }
             Message::MTextLineSpacing(f) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.record_undo();
                     ed.line_spacing = f;
                 }
                 self.rebuild_mtext_preview();
@@ -8018,6 +8021,10 @@ impl OpenCADStudio {
             }
             Message::MTextOk => {
                 let committed = self.mtext_commit();
+                // A draft that could not be saved stays open with its message.
+                if self.mtext_editor.is_some() {
+                    return Task::none();
+                }
                 self.post_editor_closed(committed)
             }
             Message::MTextApply => {

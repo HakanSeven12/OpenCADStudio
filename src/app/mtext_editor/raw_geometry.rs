@@ -58,6 +58,7 @@ impl crate::app::OpenCADStudio {
                 .push_error(&crate::tr!("mtext-source-errors", "rotation-unsupported"));
             return;
         }
+        ed.record_undo();
         ed.rotation = value;
         ed.rotation_dirty = true;
         self.rebuild_mtext_preview();

@@ -66,7 +66,9 @@ fn invalid_rotation_and_unverified_text_planes_never_change_the_entity() {
         let (mut app, h) = self::app(Vector3::new(0., 0., 1.));
         let _ = app.update(Message::MTextRotation(invalid.into()));
         assert_eq!(app.mtext_editor.as_ref().unwrap().rotation, invalid);
-        assert!(app.mtext_commit());
+        // Saving is refused and the draft stays open to be corrected.
+        assert!(!app.mtext_commit());
+        assert!(app.mtext_editor.is_some());
         assert_eq!(mt_of(&app, h).rotation, original.rotation, "{invalid}");
     }
 }

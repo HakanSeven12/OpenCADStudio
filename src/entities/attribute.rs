@@ -40,6 +40,7 @@ struct AttrTextInputs<'a> {
     mtext_flag: MTextFlag,
     is_multiline: bool,
     line_count: i16,
+    rectangle_width: f64,
 }
 
 fn halign_str(a: AHA) -> &'static str {
@@ -255,7 +256,7 @@ fn build_attr_layout(
             value: &display_value,
             insertion: [anchor_pt.x, anchor_pt.y, anchor_pt.z],
             height: input.height as f32,
-            rect_w: 0.0,
+            rect_w: input.rectangle_width as f32,
             rotation,
             style: &style_for_mtext,
             attach_h_anchor,
@@ -427,6 +428,7 @@ impl RenderConvertible for AttributeDefinition {
                 mtext_flag: MTextFlag::SingleLine,
                 is_multiline: false,
                 line_count: 1,
+                rectangle_width: 0.0,
             },
             document,
         ))
@@ -988,6 +990,7 @@ fn attr_inputs(a: &AttributeEntity) -> AttrTextInputs<'_> {
         mtext_flag: a.mtext_flag,
         is_multiline: a.is_multiline,
         line_count: a.line_count,
+        rectangle_width: a.embedded_mtext.as_ref().map_or(0.0, |m| m.rectangle_width),
     }
 }
 
@@ -1010,6 +1013,10 @@ impl RenderConvertible for AttributeEntity {
                 mtext_flag: self.mtext_flag,
                 is_multiline: self.is_multiline,
                 line_count: self.line_count,
+                rectangle_width: self
+                    .embedded_mtext
+                    .as_ref()
+                    .map_or(0.0, |m| m.rectangle_width),
             },
             document,
         ))
@@ -1297,5 +1304,44 @@ impl crate::entities::traits::TextContent for codec::entities::AttributeEntity {
         if cur.to_lowercase().contains(&search_lc) {
             self.set_value(cur.replace(search, rep));
         }
+    }
+}
+
+#[cfg(test)]
+mod wrapping_tests {
+    use super::*;
+
+    #[test]
+    fn multiline_attribute_uses_embedded_boundary_width() {
+        let document = codec::Document::new();
+        let mut attribute = AttributeEntity::new("TITLE".into(), "Alpha Beta Gamma Delta".into());
+        attribute.mtext_flag = MTextFlag::MultiLine;
+        attribute.is_multiline = true;
+        let mut mtext = codec::entities::MText::new();
+        mtext.rectangle_width = 15.0;
+        attribute.embedded_mtext = Some(Box::new(mtext));
+        let rendered = attribute.to_render(&document).expect("attribute render");
+        let RenderObject::Text(strokes) = rendered.object else {
+            panic!("attribute must render as text");
+        };
+        let baseline = strokes.first().expect("text runs").origin[1];
+        assert!(strokes
+            .iter()
+            .any(|stroke| (stroke.origin[1] - baseline).abs() > 1.0));
+        let layout = attribute_cells(&attribute, &document).expect("multiline cells");
+        let min_y = layout
+            .0
+            .iter()
+            .map(|cell| cell.ymin)
+            .fold(f32::INFINITY, f32::min);
+        let max_y = layout
+            .0
+            .iter()
+            .map(|cell| cell.ymin)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            max_y - min_y > attribute.height as f32,
+            "defined width must produce multiple baselines: {min_y}..{max_y}"
+        );
     }
 }

@@ -110,6 +110,9 @@ fn scale_attribute_for_insert(
         )
     };
     attribute.height *= block_scale;
+    if let Some(mtext) = attribute.embedded_mtext.as_mut() {
+        mtext.rectangle_width *= block_scale;
+    }
     attribute.insertion_point = scale_about(attribute.insertion_point);
     attribute.alignment_point = scale_about(attribute.alignment_point);
 }
@@ -639,5 +642,25 @@ mod tests {
 
         assert_eq!(grips.len(), 2);
         assert_eq!(grips[1].world, glam::DVec3::new(12.0, 10.0, 0.0));
+    }
+}
+
+#[cfg(test)]
+mod attribute_width_tests {
+    use super::*;
+
+    #[test]
+    fn annotative_attribute_scales_its_wrap_width_with_its_height() {
+        let insert = Insert::new("TITLE", Vector3::ZERO);
+        let mut attribute = codec::entities::AttributeEntity::new("TITLE".into(), "A B".into());
+        let mut mtext = codec::entities::MText::new();
+        mtext.rectangle_width = 15.0;
+        attribute.embedded_mtext = Some(Box::new(mtext));
+        let ratio = 15.0 / attribute.height;
+        scale_attribute_for_insert(&insert, &mut attribute, 3.0);
+        assert_eq!(
+            attribute.embedded_mtext.unwrap().rectangle_width / attribute.height,
+            ratio
+        );
     }
 }

@@ -857,7 +857,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "LAYMATCH" | "LAYMCH" => {
+            "LAYMATCH" | "LAYMCH" | "COPYTOLAYER" => {
                 use crate::modules::draw::layers::match_layer::LayMatchCommand;
                 let dest: Vec<_> = self.tabs[i]
                     .scene
@@ -865,7 +865,14 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|(h, _)| h)
                     .collect();
-                let cmd = LayMatchCommand::new(dest);
+                // The preselection is consumed so it cannot become the
+                // source object picked next.
+                self.tabs[i].scene.deselect_all();
+                let cmd = if cmd == "COPYTOLAYER" {
+                    LayMatchCommand::copy_to_layer(dest)
+                } else {
+                    LayMatchCommand::new(dest)
+                };
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

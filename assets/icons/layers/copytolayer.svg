@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg viewBox="0 0 24 24" width="64" height="64" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <!-- The object stays on its layer; a copy lands on the target layer -->
+  <line x1="1.2" y1="4.6" x2="22.8" y2="4.6" stroke="#B4B6B9" stroke-linecap="round" style="stroke-width:2.25" />
+  <circle cx="6" cy="4.6" r="2.16" fill="#B4B6B9" />
+  <line x1="1.2" y1="19.8" x2="22.8" y2="19.8" stroke="#6DB7ED" stroke-linecap="round" style="stroke-width:2.25" />
+  <circle cx="6" cy="19.8" r="2.16" fill="#6DB7ED" />
+  <line x1="6" y1="8.4" x2="6" y2="14.6" stroke="#6DB7ED" stroke-linecap="round" style="stroke-width:2.25" />
+  <polyline points="3.6,12.6 6,15.2 8.4,12.6" fill="none" stroke="#6DB7ED" stroke-linecap="round" stroke-linejoin="round" style="stroke-width:2.25" />
+  <rect x="13" y="8.2" width="5.4" height="5.4" rx="0.8" fill="none" stroke="#B4B6B9" style="stroke-width:1.6" />
+  <rect x="15.4" y="10.6" width="5.4" height="5.4" rx="0.8" fill="none" stroke="#6DB7ED" style="stroke-width:1.6" />
+</svg>

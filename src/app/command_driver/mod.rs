@@ -1046,8 +1046,8 @@ impl OpenCADStudio {
                     return task;
                 }
             }
-            CmdResult::MatchEntityLayer { dest, src } => {
-                self.handle_match_entity_layer(dest, src);
+            CmdResult::MatchEntityLayer { dest, src, copy } => {
+                self.handle_match_entity_layer(dest, src, copy);
             }
             CmdResult::MatchProperties { dest, src } => {
                 if let Some(task) = self.handle_match_properties(dest, src) {

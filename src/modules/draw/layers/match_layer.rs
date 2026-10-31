@@ -13,6 +13,30 @@ pub fn tool() -> ToolDef {
     }
 }
 
+/// LAYCUR: the selected objects move to the current layer.
+pub fn laycur_tool() -> ToolDef {
+    ToolDef {
+        id: "LAYCUR",
+        label: "Change to Current Layer",
+        icon: IconKind::Svg(include_bytes!(
+            "../../../../assets/icons/layers/laycur.svg"
+        )),
+        event: ModuleEvent::Command("LAYCUR".to_string()),
+    }
+}
+
+/// COPYTOLAYER: copies of the selected objects go to another layer.
+pub fn copy_to_layer_tool() -> ToolDef {
+    ToolDef {
+        id: "COPYTOLAYER",
+        label: "Copy to Layer",
+        icon: IconKind::Svg(include_bytes!(
+            "../../../../assets/icons/layers/copytolayer.svg"
+        )),
+        event: ModuleEvent::Command("COPYTOLAYER".to_string()),
+    }
+}
+
 // ── CadCommand implementation ─────────────────────────────────────────────
 
 use codec::Handle;
@@ -23,20 +47,43 @@ use crate::scene::model::wire_model::WireModel;
 
 pub struct LayMatchCommand {
     dest_handles: Vec<Handle>,
+    /// COPYTOLAYER: copies of the objects go to the layer; they stay put.
+    copy: bool,
 }
 
 impl LayMatchCommand {
     pub fn new(dest: Vec<Handle>) -> Self {
-        Self { dest_handles: dest }
+        Self {
+            dest_handles: dest,
+            copy: false,
+        }
+    }
+
+    pub fn copy_to_layer(dest: Vec<Handle>) -> Self {
+        Self {
+            dest_handles: dest,
+            copy: true,
+        }
     }
 }
 
 impl CadCommand for LayMatchCommand {
     fn name(&self) -> &'static str {
-        "LAYMATCH"
+        if self.copy {
+            "COPYTOLAYER"
+        } else {
+            "LAYMATCH"
+        }
     }
 
     fn prompt(&self) -> String {
+        if self.copy {
+            return if self.dest_handles.is_empty() {
+                crate::t!("COPYTOLAYER  Select objects to copy:").into_owned()
+            } else {
+                crate::t!("COPYTOLAYER  Select an object on the destination layer:").into_owned()
+            };
+        }
         if self.dest_handles.is_empty() {
             crate::t!("LAYMATCH  Select objects to change layer:").into_owned()
         } else {
@@ -62,6 +109,7 @@ impl CadCommand for LayMatchCommand {
             CmdResult::MatchEntityLayer {
                 dest: std::mem::take(&mut self.dest_handles),
                 src,
+                copy: self.copy,
             }
         }
     }
@@ -82,5 +130,5 @@ impl CadCommand for LayMatchCommand {
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["LAYMATCH", "LAYMCH", "LAYCUR"]
+    names: &["LAYMATCH", "LAYMCH", "LAYCUR", "COPYTOLAYER"]
 }); // LayMatchCommand

@@ -2400,10 +2400,12 @@ pub enum CmdResult {
     /// command calls of a script). A plugin command's script starts from an
     /// empty selection.
     Script(String),
-    /// Move `dest` entities to the layer of the `src` entity; end command.
+    /// Move `dest` entities to the layer of the `src` entity, or put copies
+    /// of them there when `copy` is set; end command.
     MatchEntityLayer {
         dest: Vec<Handle>,
         src: Handle,
+        copy: bool,
     },
     /// Copy all visual properties (layer/color/linetype/lineweight) from `src` to `dest`; end command.
     MatchProperties {

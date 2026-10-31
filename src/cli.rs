@@ -107,6 +107,12 @@ pub struct Cli {
     #[arg(long, value_name = "VERSION", requires = "export")]
     pub target_version: Option<String>,
 
+    /// Let --export write an older DWG or DXF target that cannot store some
+    /// MTEXT data (columns, box height, background mask, line spacing). Without it
+    /// such an export is refused with exit code 3 and nothing is written.
+    #[arg(long, requires = "export")]
+    pub allow_lossy: bool,
+
     /// Run a command script at startup: one command line per line of FILE.
     #[arg(long, value_name = "FILE")]
     #[arg(help = crate::t!("Run a command script at startup, one command per line.").into_owned(), long_help = None)]

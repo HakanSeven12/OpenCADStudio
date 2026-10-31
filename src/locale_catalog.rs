@@ -3,6 +3,10 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "{count} MTEXT object(s): column layout" => Some(("mtext-editor-errors", "target-columns")),
+        "{count} MTEXT object(s): defined box height" => Some(("mtext-editor-errors", "target-box-height")),
+        "{count} MTEXT object(s): background mask" => Some(("mtext-editor-errors", "target-background")),
+        "{count} MTEXT object(s): line spacing" => Some(("mtext-editor-errors", "target-spacing")),
         "Cross size" => Some(("center-props", "cross-size")),
         "Cross gap" => Some(("center-props", "cross-gap")),
         "Left extension" => Some(("center-props", "left-extension")),

@@ -7674,3 +7674,9 @@ center-props =
     .start-extension = Start extension
     .end-extension = End extension
     .centerline = Centerline
+
+mtext-editor-errors = MTEXT
+    .target-columns = __ocs_fmt_0__ MTEXT-objektum: hasábelrendezés
+    .target-box-height = __ocs_fmt_0__ MTEXT-objektum: megadott keretmagasság
+    .target-background = __ocs_fmt_0__ MTEXT-objektum: háttérmaszk
+    .target-spacing = __ocs_fmt_0__ MTEXT-objektum: sorköz

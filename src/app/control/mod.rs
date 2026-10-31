@@ -216,6 +216,15 @@ struct Operation {
 fn failure(code: &str, error: impl ToString) -> Value {
     json!({"ok":false,"status":"failed","code":code,"error":error.to_string()})
 }
+/// A save that needs `allow_lossy`, with what it would lose.
+fn lossy_refusal(losses: &super::automation::SaveLosses) -> Value {
+    let mut error = losses.refusal();
+    error[..1].make_ascii_uppercase();
+    let mut reply = failure("lossy_conversion_not_acknowledged", error);
+    reply["dropped_on_save"] = json!(losses.dropped);
+    reply["mtext_losses"] = losses.mtext_json();
+    reply
+}
 /// `{"op":"open","name":"plan.dwg","data_base64":"…"}`: the web build has no
 /// filesystem path to open, so the caller sends the file itself. `name` is
 /// reduced to its file name; it labels the tab and the recent-files entry.
@@ -1400,20 +1409,20 @@ impl OpenCADStudio {
                     Some(&path),
                 )
                 .map_err(|error| failure("invalid_target", error))?;
-                let dropped =
-                    crate::io::dropped_on_save_count(&self.tabs[i].scene.document, version, is_dxf);
-                if dropped > 0 && req["allow_lossy"].as_bool() != Some(true) {
-                    return Err(failure(
-                        "lossy_conversion_not_acknowledged",
-                        format!(
-                            "Conversion would drop {dropped} unsupported record(s); set allow_lossy=true to acknowledge"
-                        ),
-                    ));
+                let losses = super::automation::SaveLosses::of(
+                    &self.tabs[i].scene.document,
+                    version,
+                    is_dxf,
+                );
+                let dropped = losses.dropped;
+                if !losses.lossless() && req["allow_lossy"].as_bool() != Some(true) {
+                    return Err(lossy_refusal(&losses));
                 }
                 self.set_control_result(json!({
                     "saved":path,
                     "target_format":super::automation::source_format(Some(&path), is_dxf),
                     "target_version":format!("{version:?}"),"dropped_on_save":dropped,
+                    "mtext_losses":losses.mtext_json(),
                 }));
                 if self.main_window.is_none() {
                     self.save_tab_synchronously_protected_as(i, path, version, true)
@@ -1459,15 +1468,14 @@ impl OpenCADStudio {
                     None,
                 )
                 .map_err(|error| failure("invalid_target", error))?;
-                let dropped =
-                    crate::io::dropped_on_save_count(&self.tabs[i].scene.document, version, is_dxf);
-                if dropped > 0 && req["allow_lossy"].as_bool() != Some(true) {
-                    return Err(failure(
-                        "lossy_conversion_not_acknowledged",
-                        format!(
-                            "Conversion would drop {dropped} unsupported record(s); set allow_lossy=true to acknowledge"
-                        ),
-                    ));
+                let losses = super::automation::SaveLosses::of(
+                    &self.tabs[i].scene.document,
+                    version,
+                    is_dxf,
+                );
+                let dropped = losses.dropped;
+                if !losses.lossless() && req["allow_lossy"].as_bool() != Some(true) {
+                    return Err(lossy_refusal(&losses));
                 }
                 let ext = if is_dxf { "dxf" } else { "dwg" };
                 self.sync_view_state_for_save(i);
@@ -1485,6 +1493,7 @@ impl OpenCADStudio {
                     "target_format": ext,
                     "target_version": format!("{version:?}"),
                     "dropped_on_save": dropped,
+                    "mtext_losses": losses.mtext_json(),
                     "bytes": bytes.len(),
                     "data_base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
                 }));

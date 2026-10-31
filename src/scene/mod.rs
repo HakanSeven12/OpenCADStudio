@@ -4235,12 +4235,15 @@ impl Scene {
 
     /// Apply a newly-created ordered relation while temporarily anchoring
     /// its reference side. The anchors guide only this first solve and are
-    /// never added to the persistent constraint graph.
+    /// never added to the persistent constraint graph. `pre_move` carries
+    /// the copies a handler took before it nudged geometry onto the relation
+    /// itself, so the delta still names that geometry.
     pub fn bump_entities_with_initial_parametric_policy(
         &mut self,
         changes: &[(Handle, ChangeKind)],
         fixed_refs: &[parametric_constraints::ParametricRef],
         retain_size: bool,
+        pre_move: &[(Handle, EntityType)],
     ) {
         self.bump_entities_with_solve_policy(
             changes,
@@ -4250,7 +4253,7 @@ impl Scene {
             fixed_refs,
             true,
             false,
-            Some(&[]),
+            Some(pre_move),
         );
     }
 

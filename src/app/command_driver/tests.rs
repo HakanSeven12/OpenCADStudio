@@ -242,6 +242,169 @@ mod parametric_constraint_undo_tests {
         }
     }
 
+    fn line_segment(app: &OpenCADStudio, handle: Handle) -> ([f64; 2], [f64; 2]) {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(codec::EntityType::Line(l)) => ([l.start.x, l.start.y], [l.end.x, l.end.y]),
+            other => panic!("expected a Line, got {other:?}"),
+        }
+    }
+
+    fn assert_segment_unmoved(
+        app: &OpenCADStudio,
+        handle: Handle,
+        start: [f64; 2],
+        end: [f64; 2],
+    ) {
+        let (s, e) = line_segment(app, handle);
+        assert!(
+            (s[0] - start[0]).abs() < 1e-9
+                && (s[1] - start[1]).abs() < 1e-9
+                && (e[0] - end[0]).abs() < 1e-9
+                && (e[1] - end[1]).abs() < 1e-9,
+            "the first-picked entity should not move: {s:?} -> {e:?}"
+        );
+    }
+
+    /// A parallel constraint keeps the first-selected entity where it is and
+    /// turns the second to match it, the order its prompt names.
+    #[test]
+    fn parallel_constraint_holds_the_first_selected_entity() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let horizontal = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let vertical = add_line(&mut app, 0.0, 0.0, 0.0, 100.0);
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity_mut(vertical)
+            .unwrap()
+            .common_mut()
+            .layer = "WALLS".to_string();
+        let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+            kind: ConstraintKind::Parallel,
+            refs: vec![
+                ParametricRef::whole(horizontal),
+                ParametricRef::whole(vertical),
+            ],
+            driving_param: None,
+            label: "Parallel constraint",
+        });
+        assert_segment_unmoved(&app, horizontal, [0.0, 0.0], [100.0, 0.0]);
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .document
+                .get_entity(vertical)
+                .unwrap()
+                .common()
+                .layer,
+            "WALLS",
+            "turning the second entity must keep its layer"
+        );
+        let angle = line_angle_deg(&app, vertical);
+        assert!(
+            angle.abs() < 1e-6,
+            "the second entity should turn parallel to the first, got {angle} degrees"
+        );
+    }
+
+    #[test]
+    fn parallel_constraint_holds_whichever_entity_was_picked_first() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let vertical = add_line(&mut app, 0.0, 0.0, 0.0, 100.0);
+        let horizontal = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+            kind: ConstraintKind::Parallel,
+            refs: vec![
+                ParametricRef::whole(vertical),
+                ParametricRef::whole(horizontal),
+            ],
+            driving_param: None,
+            label: "Parallel constraint",
+        });
+        assert_segment_unmoved(&app, vertical, [0.0, 0.0], [0.0, 100.0]);
+        let angle = line_angle_deg(&app, horizontal);
+        assert!(
+            (angle - 90.0).abs() < 1e-6,
+            "the second entity should turn parallel to the first, got {angle} degrees"
+        );
+    }
+
+    /// A line already parallel but running the opposite way is left alone:
+    /// the second entity takes the shorter turn, which is none at all.
+    #[test]
+    fn parallel_constraint_leaves_an_opposite_direction_pair_alone() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let datum = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let reversed = add_line(&mut app, 0.0, 50.0, -100.0, 50.0);
+        let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+            kind: ConstraintKind::Parallel,
+            refs: vec![
+                ParametricRef::whole(datum),
+                ParametricRef::whole(reversed),
+            ],
+            driving_param: None,
+            label: "Parallel constraint",
+        });
+        assert_segment_unmoved(&app, datum, [0.0, 0.0], [100.0, 0.0]);
+        assert_segment_unmoved(&app, reversed, [0.0, 50.0], [-100.0, 50.0]);
+    }
+
+    /// The redraw journal must name the entity the ordered command turned.
+    #[test]
+    fn parallel_constraint_publishes_the_entity_it_turned() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let horizontal = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let vertical = add_line(&mut app, 0.0, 0.0, 0.0, 100.0);
+        let epoch = app.tabs[app.active_tab].scene.geometry_epoch;
+        let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+            kind: ConstraintKind::Parallel,
+            refs: vec![
+                ParametricRef::whole(horizontal),
+                ParametricRef::whole(vertical),
+            ],
+            driving_param: None,
+            label: "Parallel constraint",
+        });
+        let delta = app.tabs[app.active_tab]
+            .scene
+            .replay_since(epoch)
+            .expect("the add publishes a replayable delta");
+        assert!(
+            delta
+                .iter()
+                .any(|&(handle, kind)| handle == vertical
+                    && kind == crate::scene::ChangeKind::Modified),
+            "the turned handle must be named in the delta: {delta:?}"
+        );
+    }
+
+    /// The turn the ordered command applies is part of the same undo step.
+    #[test]
+    fn undo_restores_the_second_entity_a_parallel_constraint_turned() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let horizontal = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let vertical = add_line(&mut app, 0.0, 0.0, 0.0, 100.0);
+        let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+            kind: ConstraintKind::Parallel,
+            refs: vec![
+                ParametricRef::whole(horizontal),
+                ParametricRef::whole(vertical),
+            ],
+            driving_param: None,
+            label: "Parallel constraint",
+        });
+        let turned = line_segment(&app, vertical);
+        app.undo_steps(1);
+        assert_segment_unmoved(&app, vertical, [0.0, 0.0], [0.0, 100.0]);
+        app.redo_steps(1);
+        assert_eq!(line_segment(&app, vertical), turned);
+    }
+
     /// Constraint state and solved geometry share one undo/redo transaction.
     #[test]
     fn adding_a_constraint_is_undoable_and_redoable_atomically() {

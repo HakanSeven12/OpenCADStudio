@@ -2984,6 +2984,56 @@ fn lookup_parameter_asks_for_a_grip_count_after_its_location() {
 }
 
 #[test]
+fn alignment_visibility_and_lookup_name_their_labels_without_asking() {
+    use crate::scene::block_orientation_parameter::{self as orientation, Kind};
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER ALIGNMENT");
+    feed(&mut app, "0,0");
+    feed(&mut app, "0,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let _ = app.dispatch_command("BPARAMETER VISIBILITY");
+    feed(&mut app, "4,4");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "6,6");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter number of grips [0/1] <1>:",
+        "a lookup never asks for a label"
+    );
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let alignment = orientation::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == Kind::Alignment)
+        .expect("alignment parameter");
+    assert_eq!(alignment.label, "Alignment1");
+    assert_eq!(
+        orientation::graphic(&alignment).labels.first(),
+        Some(&(Vector3::new(0.0, 2.0, 0.0), "Alignment1".to_string()))
+    );
+    assert_eq!(
+        crate::scene::block_visibility::parameter(doc, definition).map(|p| p.name.as_str()),
+        Some("Visibility1")
+    );
+    let lookups = crate::scene::block_lookup::parameters(doc, definition);
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].1.lookup_name, "Lookup1");
+    assert_eq!(
+        lookups[0].1.parameter.definition_point,
+        Vector3::new(6.0, 6.0, 0.0)
+    );
+}
+
+#[test]
 fn orientation_parameter_batch_numeric_rotation_local_history_save_and_parent_undo() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

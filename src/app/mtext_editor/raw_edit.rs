@@ -65,7 +65,7 @@ impl crate::app::OpenCADStudio {
     /// Apply one text edit to the raw source. `edit` patches the source it is
     /// given; nothing else is rewritten. A refused edit leaves the text, the
     /// caret and the undo history as they were and says why.
-    fn edit_raw(
+    pub(super) fn edit_raw(
         &mut self,
         edit: impl FnOnce(&MTextEditorState, &SourceIndex) -> Result<TextEdit, EditError>,
     ) {
@@ -535,7 +535,7 @@ impl crate::app::OpenCADStudio {
     }
 
     /// A formatting command keeps its selection, as before.
-    fn keep_selection(&mut self, range: std::ops::Range<usize>) {
+    pub(super) fn keep_selection(&mut self, range: std::ops::Range<usize>) {
         if let Some(ed) = self.mtext_editor.as_mut() {
             ed.sel = Some((range.start, range.end));
             ed.sel_anchor = range.start;

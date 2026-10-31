@@ -7,8 +7,8 @@
 
 use codec::entities::mtext::AttachmentPoint;
 use codec::entities::mtext_format::{
-    parse_mtext, MTextColor, MTextDocument, MTextFont, MTextParagraph, MTextParagraphAlignment,
-    MTextScalar, MTextSpan, ParagraphProperties, SpanProperties, StackingData, StackingType,
+    parse_mtext, MTextColor, MTextDocument, MTextFont, MTextParagraph, MTextSpan,
+    ParagraphProperties, SpanProperties, StackingData, StackingType,
 };
 use codec::types::Vector3;
 use codec::{EntityType, Handle, MText};
@@ -26,6 +26,7 @@ mod raw_edit;
 mod raw_geometry;
 #[allow(dead_code)]
 mod raw_operations;
+mod raw_span;
 mod raw_style;
 pub(in crate::app) use raw_edit::FormatState;
 pub(in crate::app) use raw_style::ValueOrigin;
@@ -567,49 +568,6 @@ fn cells_to_doc(para0: &ParagraphProperties, cells: &[Cell]) -> MTextDocument {
     doc
 }
 
-/// The paragraph properties in force at flat index `caret` — the last `Break`
-/// before it, or the para-0 default. Used so a newly inserted break clones the
-/// current paragraph's properties.
-fn para_props_at(para0: &ParagraphProperties, cells: &[Cell], caret: usize) -> ParagraphProperties {
-    let mut props = para0.clone();
-    for cell in cells.iter().take(caret) {
-        if let Cell::Break(p, _) = cell {
-            props = p.clone();
-        }
-    }
-    props
-}
-
-/// Turn an inserted string (which may carry `\P` breaks) into cells, tagging
-/// every plain char with `span_props` and every break with `para_props`.
-fn str_to_cells(
-    s: &str,
-    span_props: &SpanProperties,
-    para_props: &ParagraphProperties,
-) -> Vec<Cell> {
-    let mut cells = Vec::new();
-    for (i, seg) in s.split("\\P").enumerate() {
-        if i > 0 {
-            // A typed / pasted break is a plain `\P`; the editor offers no way to
-            // insert a column break, so existing `\N`s are the only columnar ones.
-            cells.push(Cell::Break(para_props.clone(), false));
-        }
-        for ch in seg.chars() {
-            cells.push(Cell::Char(ch, span_props.clone()));
-        }
-    }
-    cells
-}
-
-/// Properties newly-typed text at `caret` inherits — the cell to its left, or
-/// the default at the start of a paragraph / document.
-fn insert_props(cells: &[Cell], caret: usize) -> SpanProperties {
-    match caret.checked_sub(1).and_then(|i| cells.get(i)) {
-        Some(Cell::Char(_, p)) | Some(Cell::Stack { props: p, .. }) => p.clone(),
-        _ => SpanProperties::default(),
-    }
-}
-
 /// True when the serialized MText value ends with a hard paragraph break —
 /// i.e. a trailing empty paragraph, which `parse_mtext` drops. `to_mtext_string`
 /// wraps multi-paragraph output in `{…}`, so strip a trailing `}` first, then
@@ -971,31 +929,11 @@ impl super::OpenCADStudio {
                     _ => {}
                 }
             }
-            if let (true, Some(number)) = (has_selection, number) {
-                let (start, end) = ed.sel.unwrap();
-                ed.record_undo();
-                let para0 = doc_para0(&ed.doc);
-                let mut cells = doc_to_cells(&ed.doc);
-                let end = end.min(cells.len());
-                for cell in &mut cells[start.min(end)..end] {
-                    if let Cell::Char(_, props) | Cell::Stack { props, .. } = cell {
-                        match field {
-                            "height" => props.height = Some(MTextScalar::Absolute(number)),
-                            "oblique" => props.oblique_angle = (number != 0.0).then_some(number),
-                            "width" => props.width_factor = (number != 1.0).then_some(number),
-                            "tracking" => props.tracking = (number != 0.0).then_some(number),
-                            _ => {}
-                        }
-                    }
-                }
-                ed.content = text_editor::Content::with_text(
-                    &cells_to_doc(&para0, &cells).to_mtext_string(),
-                );
-                ed.sel = Some((start, end));
-                ed.caret = end;
-            }
         }
-        self.rebuild_mtext_preview();
+        match (has_selection, number) {
+            (true, Some(number)) => self.raw_span_number(field, number),
+            _ => self.rebuild_mtext_preview(),
+        }
     }
 
     pub(super) fn mtext_apply_paragraph_number(&mut self, field: ParaNumber, value: String) {
@@ -1006,7 +944,6 @@ impl super::OpenCADStudio {
             return;
         }
         if let Some(ed) = self.mtext_editor.as_mut() {
-            ed.record_undo();
             match field {
                 ParaNumber::FirstIndent => ed.paragraph_first_indent = value,
                 ParaNumber::LeftIndent => ed.paragraph_left_indent = value,
@@ -1014,40 +951,9 @@ impl super::OpenCADStudio {
                 ParaNumber::SpaceBefore => ed.paragraph_space_before = value,
                 ParaNumber::SpaceAfter => ed.paragraph_space_after = value,
             }
-            let para0 = doc_para0(&ed.doc);
-            let cells = doc_to_cells(&ed.doc);
-            let (start, end) = ed
-                .sel
-                .filter(|(start, end)| start < end)
-                .unwrap_or((ed.caret, ed.caret));
-            let paragraph_of = |index: usize| {
-                cells
-                    .iter()
-                    .take(index.min(cells.len()))
-                    .filter(|cell| matches!(cell, Cell::Break(..)))
-                    .count()
-            };
-            let first = paragraph_of(start);
-            let last = paragraph_of(end.saturating_sub((end > start) as usize));
-            let mut doc = cells_to_doc(&para0, &cells);
-            for paragraph in doc
-                .paragraphs
-                .iter_mut()
-                .skip(first)
-                .take(last.saturating_sub(first) + 1)
-            {
-                let optional = (number != 0.0).then_some(number);
-                match field {
-                    ParaNumber::FirstIndent => paragraph.properties.first_line_indent = optional,
-                    ParaNumber::LeftIndent => paragraph.properties.left_margin = optional,
-                    ParaNumber::RightIndent => paragraph.properties.right_margin = optional,
-                    ParaNumber::SpaceBefore => paragraph.properties.spacing_before = optional,
-                    ParaNumber::SpaceAfter => paragraph.properties.spacing_after = optional,
-                }
-            }
-            ed.content = text_editor::Content::with_text(&doc.to_mtext_string());
         }
-        self.rebuild_mtext_preview();
+        // Every paragraph the selection (or the caret) touches.
+        self.raw_paragraph_number(field, number);
     }
 
     pub(super) fn mtext_stack_selection(&mut self) {
@@ -1199,44 +1105,7 @@ impl super::OpenCADStudio {
     }
 
     pub(super) fn mtext_replace_all(&mut self) {
-        if let Some(ed) = self.mtext_editor.as_mut() {
-            let needle: Vec<char> = ed.find_text.chars().collect();
-            if needle.is_empty() {
-                return;
-            }
-            let para0 = doc_para0(&ed.doc);
-            let mut cells = doc_to_cells(&ed.doc);
-            let replacement = ed.replace_text.clone();
-            let mut matches = Vec::new();
-            let mut index = 0usize;
-            while index + needle.len() <= cells.len() {
-                let found = cells[index..index + needle.len()].iter().zip(&needle).all(
-                    |(cell, expected)| matches!(cell, Cell::Char(actual, _) if actual == expected),
-                );
-                if found {
-                    matches.push(index);
-                    index += needle.len();
-                } else {
-                    index += 1;
-                }
-            }
-            if matches.is_empty() {
-                return;
-            }
-            ed.record_undo();
-            for start in matches.into_iter().rev() {
-                let props = insert_props(&cells, start);
-                let paragraph = para_props_at(&para0, &cells, start);
-                let replacement_cells = str_to_cells(&replacement, &props, &paragraph);
-                cells.splice(start..start + needle.len(), replacement_cells);
-            }
-            ed.content =
-                text_editor::Content::with_text(&cells_to_doc(&para0, &cells).to_mtext_string());
-            ed.caret = cells.len();
-            ed.sel = Some((ed.caret, ed.caret));
-            ed.sel_anchor = ed.caret;
-        }
-        self.rebuild_mtext_preview();
+        self.raw_replace_all();
     }
 
     /// Toggle a character format over the preview selection, on the structured
@@ -1274,42 +1143,7 @@ impl super::OpenCADStudio {
 
     /// Set the alignment of every paragraph the selection (or caret) touches.
     pub(super) fn mtext_apply_align(&mut self, align: ParaAlign) {
-        if let Some(ed) = self.mtext_editor.as_mut() {
-            ed.record_undo();
-            let para0 = doc_para0(&ed.doc);
-            let cells = doc_to_cells(&ed.doc);
-            let (a, b) = ed
-                .sel
-                .filter(|&(a, b)| a < b)
-                .unwrap_or((ed.caret, ed.caret));
-            let a = a.min(cells.len());
-            let b = b.min(cells.len());
-            let want = Some(match align {
-                ParaAlign::Left => MTextParagraphAlignment::Left,
-                ParaAlign::Center => MTextParagraphAlignment::Center,
-                ParaAlign::Right => MTextParagraphAlignment::Right,
-                ParaAlign::Justify => MTextParagraphAlignment::Justified,
-            });
-            // Paragraph index of a cell = number of breaks before it.
-            let para_of = |idx: usize| {
-                cells
-                    .iter()
-                    .take(idx)
-                    .filter(|c| matches!(c, Cell::Break(..)))
-                    .count()
-            };
-            let last_cell = if b > a { b - 1 } else { a };
-            let first = para_of(a);
-            let last = para_of(last_cell);
-            let mut doc = cells_to_doc(&para0, &cells);
-            let end = last.min(doc.paragraphs.len().saturating_sub(1));
-            for p in first..=end {
-                doc.paragraphs[p].properties.alignment = want;
-            }
-            ed.content = text_editor::Content::with_text(&doc.to_mtext_string());
-            ed.caret_blink_on = true;
-        }
-        self.rebuild_mtext_preview();
+        self.raw_align(align);
     }
 
     // ── Caret editing directly on the preview ───────────────────────────────
@@ -1420,40 +1254,10 @@ impl super::OpenCADStudio {
             .and_then(|e| e.sel)
             .is_some_and(|(a, b)| a < b);
         if has_sel {
-            if let Some(ed) = self.mtext_editor.as_mut() {
-                let (a, b) = ed.sel.unwrap();
-                let para0 = doc_para0(&ed.doc);
-                let mut cells = doc_to_cells(&ed.doc);
-                let b = b.min(cells.len());
-                if a < b {
-                    ed.record_undo();
-                    for c in &mut cells[a..b] {
-                        if let Cell::Char(_, p) | Cell::Stack { props: p, .. } = c {
-                            let (bold, italic) = p
-                                .font
-                                .as_ref()
-                                .map(|f| (f.bold, f.italic))
-                                .unwrap_or_default();
-                            p.font = if default && !bold && !italic {
-                                None // reset to inherit the style font
-                            } else {
-                                Some(MTextFont::with_flags(name.clone(), bold, italic))
-                            };
-                        }
-                    }
-                    ed.content = text_editor::Content::with_text(
-                        &cells_to_doc(&para0, &cells).to_mtext_string(),
-                    );
-                    ed.sel = Some((a, b));
-                    ed.caret = b;
-                    ed.caret_blink_on = true;
-                }
-            }
+            self.raw_selection_font(&name);
         } else {
             self.mtext_object_font(font);
-            return;
         }
-        self.rebuild_mtext_preview();
     }
 
     /// Apply a colour from the shared Properties-style picker: to the selection
@@ -1461,38 +1265,13 @@ impl super::OpenCADStudio {
     /// Closes the picker popup.
     pub(super) fn mtext_apply_color(&mut self, color: codec::types::Color) {
         use codec::types::Color as C;
-        let (mcolor, rgb): (Option<MTextColor>, Option<(u8, u8, u8)>) = match color {
-            C::Index(i) => (Some(MTextColor::Index(i as u16)), None),
-            C::Rgb { r, g, b } => (None, Some((r, g, b))),
-            _ => (None, None), // ByLayer / ByBlock → inherit
-        };
         let has_sel = self
             .mtext_editor
             .as_ref()
             .and_then(|e| e.sel)
             .is_some_and(|(a, b)| a < b);
         if has_sel {
-            if let Some(ed) = self.mtext_editor.as_mut() {
-                let (a, b) = ed.sel.unwrap();
-                let para0 = doc_para0(&ed.doc);
-                let mut cells = doc_to_cells(&ed.doc);
-                let b = b.min(cells.len());
-                if a < b {
-                    ed.record_undo();
-                    for c in &mut cells[a..b] {
-                        if let Cell::Char(_, p) | Cell::Stack { props: p, .. } = c {
-                            p.color = mcolor.clone();
-                            p.color_rgb = rgb;
-                        }
-                    }
-                    ed.content = text_editor::Content::with_text(
-                        &cells_to_doc(&para0, &cells).to_mtext_string(),
-                    );
-                    ed.sel = Some((a, b));
-                    ed.caret = b;
-                    ed.caret_blink_on = true;
-                }
-            }
+            self.raw_selection_color(color);
         } else if let Some(ed) = self.mtext_editor.as_mut().filter(|ed| {
             !self.command_mtext_input && !(ed.editing.is_some() && ed.original.is_none())
         }) {
@@ -1568,6 +1347,7 @@ mod rotation_tests;
 #[cfg(test)]
 mod cell_tests {
     use super::*;
+    use codec::entities::mtext_format::MTextParagraphAlignment;
 
     fn rt(s: &str) -> String {
         let doc = parse_mtext(s, true);
@@ -1623,37 +1403,6 @@ mod cell_tests {
         ];
         let back = doc_to_cells(&cells_to_doc(&ParagraphProperties::default(), &cells));
         assert_eq!(back, cells);
-        // Typing after the trailing break lands on the new (empty) paragraph.
-        let mut c2 = cells.clone();
-        c2.splice(
-            3..3,
-            str_to_cells(
-                "x",
-                &SpanProperties::default(),
-                &ParagraphProperties::default(),
-            ),
-        );
-        assert_eq!(
-            paras(&cells_to_doc(&ParagraphProperties::default(), &c2).to_mtext_string()),
-            vec!["ab", "x"]
-        );
-    }
-
-    #[test]
-    fn insert_break_splits_paragraph() {
-        let mut cells = cells_of("abcd");
-        cells.splice(
-            2..2,
-            str_to_cells(
-                "\\P",
-                &SpanProperties::default(),
-                &ParagraphProperties::default(),
-            ),
-        );
-        assert_eq!(
-            paras(&cells_to_doc(&ParagraphProperties::default(), &cells).to_mtext_string()),
-            vec!["ab", "cd"]
-        );
     }
 
     #[test]
@@ -1688,26 +1437,6 @@ mod cell_tests {
             back.paragraphs[1].properties.alignment,
             Some(MTextParagraphAlignment::Center),
             "alignment must survive the cell round-trip"
-        );
-
-        // A newly inserted break clones the current paragraph's alignment.
-        let mut doc2 = MTextDocument::new();
-        doc2.paragraphs.clear();
-        doc2.paragraphs.push(centred_para("abc"));
-        let p0 = doc_para0(&doc2);
-        let mut cells2 = doc_to_cells(&doc2);
-        let pp = para_props_at(&p0, &cells2, 2);
-        cells2.splice(2..2, str_to_cells("\\P", &SpanProperties::default(), &pp));
-        let out = cells_to_doc(&p0, &cells2);
-        assert_eq!(out.paragraphs.len(), 2);
-        assert_eq!(
-            out.paragraphs[0].properties.alignment,
-            Some(MTextParagraphAlignment::Center)
-        );
-        assert_eq!(
-            out.paragraphs[1].properties.alignment,
-            Some(MTextParagraphAlignment::Center),
-            "split paragraph inherits alignment"
         );
     }
 

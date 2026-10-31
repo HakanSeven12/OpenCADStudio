@@ -269,14 +269,27 @@ impl crate::app::OpenCADStudio {
     /// Put an object-default change into the source as one undo step; a
     /// refused change leaves everything as it was and says why.
     fn set_object_source(&mut self, result: Result<String, EditError>) -> bool {
+        let unlocated = self.unlocated_field_host();
         let Some(ed) = self.mtext_editor.as_mut() else {
             return false;
         };
+        let old = ed.content.text();
+        // The fields of a FIELD host must stay where they are.
+        let result = result.and_then(|raw| {
+            if unlocated && raw != old {
+                return Err(EditError::NativeField);
+            }
+            let fields = ed.track_fields(&old, &raw, None)?;
+            Ok((raw, fields))
+        });
         match result {
-            Ok(raw) => {
-                if raw != ed.content.text() {
+            Ok((raw, fields)) => {
+                if raw != old {
                     ed.record_undo();
                     ed.content = text_editor::Content::with_text(&raw);
+                    if fields.is_some() {
+                        ed.field_host = fields;
+                    }
                 }
                 true
             }

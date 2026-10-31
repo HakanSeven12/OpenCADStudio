@@ -27,6 +27,7 @@ editor_history! {
     line_spacing_style: codec::entities::LineSpacingStyle, line_spacing_draft: Option<String>,
     mask_draft: Option<super::entity_options::MaskDraft>,
     direction: Option<codec::entities::DrawingDirection>,
+    field_host: Option<super::raw_field::FieldHost>,
     sel: Option<(usize, usize)>, caret: usize, sel_anchor: usize,
     typing_format: super::raw_edit::TypingFormat, rect_width_draft: Option<String>,
 }
@@ -241,6 +242,13 @@ impl crate::app::OpenCADStudio {
         }
         let editing = ed.editing;
         let keep_width = ed.keep_width;
+        let field_host = ed.field_host.clone();
+        // A FIELD host's template is made from its edited text; a value
+        // re-serialised with whole-text defaults no longer matches it.
+        if field_host.is_some() && ed.build_mtext().value != ed.content.text() {
+            self.mtext_commit_error(&super::raw_adapter::EditError::FieldText.to_string());
+            return false;
+        }
         let empty = ed.content.text().trim().is_empty();
         let mut mt = ed.build_mtext();
         if empty {
@@ -307,9 +315,15 @@ impl crate::app::OpenCADStudio {
                 }
             };
             if !unchanged {
+                let mut pending_fields = None;
                 self.push_undo_snapshot(i, "MTEXT");
                 match self.tabs[i].scene.document.get_entity_mut(h) {
                     Some(EntityType::MText(t)) => {
+                        if let Some(host) = &field_host {
+                            // The fields' container gets the new template and
+                            // checksum; every FIELD object stays as it is.
+                            pending_fields = Some((host.clone(), mt.value.clone()));
+                        }
                         t.value = mt.value;
                         t.height = mt.height;
                         t.rotation = mt.rotation;
@@ -337,6 +351,9 @@ impl crate::app::OpenCADStudio {
                         }
                     }
                     _ => unreachable!("target checked before the change"),
+                }
+                if let Some((host, value)) = pending_fields {
+                    host.save(&mut self.tabs[i].scene.document, &value);
                 }
                 // The annotation scales change only with the annotative flag.
                 if annotation_changed {

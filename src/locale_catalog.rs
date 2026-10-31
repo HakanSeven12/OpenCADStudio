@@ -6562,6 +6562,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MTEXT: the inserted text contains an unsupported control character." => Some(("mtext-source-errors", "input")),
         "MTEXT: the source and rendered character positions do not agree; the edit was not applied." => Some(("mtext-source-errors", "projection")),
         "MTEXT: the object default cannot be safely separated from character flags or protected controls." => Some(("mtext-source-errors", "object-default")),
+        "MTEXT: a field's text cannot be changed or split; edit the text around it." => Some(("mtext-source-errors", "field-text")),
+        "MTEXT: text editing is disabled for a native FIELD host; its field template must be preserved." => Some(("mtext-source-errors", "native-field")),
         "MTEXT: an index or fraction holds plain characters only: no line break, fraction, backslash, brace or / # ^ % ; character." => Some(("mtext-source-errors", "stack-text")),
         "MTEXT: an index or fraction takes one formatting; the selection mixes formats." => Some(("mtext-source-errors", "stack-format")),
         "MTEXT: a fraction needs both a numerator and a denominator." => Some(("mtext-source-errors", "fraction-parts")),

@@ -62,6 +62,18 @@ impl MTextEditorState {
 }
 
 impl crate::app::OpenCADStudio {
+    /// The edited MTEXT hosts native FIELDs the editor could not locate.
+    pub(super) fn unlocated_field_host(&self) -> bool {
+        let doc = &self.tabs[self.active_tab].scene.document;
+        self.mtext_editor.as_ref().is_some_and(|ed| {
+            ed.field_host.is_none()
+                && ed
+                    .editing
+                    .and_then(|h| doc.get_entity(h))
+                    .is_some_and(|entity| crate::entities::field::hosts_field(doc, entity))
+        })
+    }
+
     /// Apply one text edit to the raw source. `edit` patches the source it is
     /// given; nothing else is rewritten. A refused edit leaves the text, the
     /// caret and the undo history as they were and says why.
@@ -74,19 +86,29 @@ impl crate::app::OpenCADStudio {
         };
         let raw = ed.content.text();
         let index = SourceIndex::new(&raw);
-        let result = index.validate(false).and_then(|count| {
-            // The caret counts the cells the preview shows; both must agree.
-            if doc_to_cells(&ed.doc).len() != count {
-                return Err(EditError::ProjectionMismatch);
-            }
-            edit(ed, &index)
-        });
+        // A FIELD host whose fields could not be located stays read-only:
+        // its template must not drift from its text.
+        let result = index
+            .validate(self.unlocated_field_host())
+            .and_then(|count| {
+                // The caret counts the cells the preview shows; both must agree.
+                if doc_to_cells(&ed.doc).len() != count {
+                    return Err(EditError::ProjectionMismatch);
+                }
+                let edit = edit(ed, &index)?;
+                let caret = SourceIndex::new(&edit.raw).raw_positions(edit.caret);
+                let fields = ed.track_fields(&raw, &edit.raw, Some(&caret))?;
+                Ok((edit, fields))
+            });
         match result {
-            Ok(edit) => {
+            Ok((edit, fields)) => {
                 let ed = self.mtext_editor.as_mut().unwrap();
                 if edit.raw != raw {
                     ed.record_undo();
                     ed.content = text_editor::Content::with_text(&edit.raw);
+                    if fields.is_some() {
+                        ed.field_host = fields;
+                    }
                 }
                 ed.caret = edit.caret;
                 ed.sel = Some((edit.caret, edit.caret));

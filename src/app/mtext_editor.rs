@@ -24,6 +24,7 @@ mod raw_adapter;
 mod raw_clear;
 mod raw_commit;
 mod raw_edit;
+mod raw_field;
 mod raw_geometry;
 mod raw_list;
 #[allow(dead_code)]
@@ -210,6 +211,9 @@ pub struct MTextEditorState {
     pub mask_draft: Option<entity_options::MaskDraft>,
     /// The Position menu's direction while it differs from the stored one.
     pub direction: Option<codec::entities::DrawingDirection>,
+    /// The native FIELDs of the edited MTEXT, located in its value: the
+    /// text around them is edited, their own text is not.
+    pub(super) field_host: Option<raw_field::FieldHost>,
     /// The Fraction panel's parts while it is open.
     pub fraction: Option<raw_stack::FractionDraft>,
     /// B / I / U / overline / S switched with nothing selected, for the
@@ -266,6 +270,7 @@ impl MTextEditorState {
             color_picker_open: false,
             menu: None,
             fraction: None,
+            field_host: None,
             mask_draft: None,
             direction: None,
             typing_format: Default::default(),
@@ -797,6 +802,10 @@ impl super::OpenCADStudio {
             match self.tabs[self.active_tab].scene.document.get_entity(h) {
                 Some(EntityType::MText(m)) => {
                     seed_mtext_state(&mut state, m);
+                    // Native fields located in the value: the text around
+                    // them becomes editable, the fields stay atomic.
+                    let doc = &self.tabs[self.active_tab].scene.document;
+                    state.field_host = raw_field::FieldHost::locate(doc, h, initial);
                 }
                 Some(EntityType::MultiLeader(ml)) => {
                     state.line_spacing = ml.context.line_spacing_factor as f32;
@@ -1316,6 +1325,8 @@ impl super::OpenCADStudio {
 
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod field_tests;
 #[cfg(test)]
 mod list_tests;
 #[cfg(test)]

@@ -61,6 +61,17 @@ pub enum ParaNumber {
     SpaceAfter,
 }
 
+/// The second-row toolbar menus. At most one is open at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorMenu {
+    More,
+    Paragraph,
+    Columns,
+    Justify,
+    Symbols,
+    Find,
+}
+
 /// `pick_list`-friendly wrapper for the 9 attachment points.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct JustifyChoice(pub AttachmentPoint);
@@ -170,6 +181,8 @@ pub struct MTextEditorState {
     pub show_preview: bool,
     /// Whether the toolbar colour picker popup is open.
     pub color_picker_open: bool,
+    /// The open toolbar menu.
+    pub menu: Option<EditorMenu>,
     /// Per-visible-character boxes (world XY, world_offset already removed) for
     /// click-to-select in the preview, and the current selection as a visible-
     /// character range `[start, end)`.
@@ -219,6 +232,7 @@ impl MTextEditorState {
             preview_wires: Vec::new(),
             show_preview: true,
             color_picker_open: false,
+            menu: None,
             glyph_boxes: Vec::new(),
             sel: None,
             span_input: None,

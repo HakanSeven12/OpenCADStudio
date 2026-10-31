@@ -4794,6 +4794,10 @@ pub enum Message {
     MTextAnnotative(bool),
     /// The rotation field, in degrees, as typed.
     MTextRotation(String),
+    /// Open a toolbar menu, or close it (`None`, or its own trigger again).
+    MTextMenu(Option<mtext_editor::EditorMenu>),
+    /// A menu action: the menu closes, then the message runs.
+    MTextMenuPick(Box<Message>),
     /// Column layout controls.
     MTextColumnMode(String),
     MTextColumnCount(String),

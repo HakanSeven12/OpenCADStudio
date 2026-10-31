@@ -7785,6 +7785,7 @@ impl OpenCADStudio {
             }
             Message::MTextColorPickerToggle => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.menu = None;
                     ed.color_picker_open = !ed.color_picker_open;
                 }
                 Task::none()
@@ -7832,6 +7833,19 @@ impl OpenCADStudio {
             Message::MTextInsert(value) => {
                 self.mtext_type(&value);
                 Task::none()
+            }
+            Message::MTextMenu(menu) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.menu = if ed.menu == menu { None } else { menu };
+                    ed.color_picker_open = false;
+                }
+                Task::none()
+            }
+            Message::MTextMenuPick(message) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.menu = None;
+                }
+                self.update(*message)
             }
             Message::MTextRotation(value) => {
                 self.mtext_rotation(value);

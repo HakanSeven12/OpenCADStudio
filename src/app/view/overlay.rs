@@ -1,4 +1,8 @@
 use super::super::Message;
+mod mtext_menu;
+#[cfg(test)]
+mod mtext_tests;
+mod mtext_toolbar;
 use crate::t;
 use crate::ui::popup::context_menu::{
     ContextMenu, MenuIcon, MenuItem, MenuRow, MENU_PAD_TOP, MENU_ROW_H,
@@ -97,6 +101,9 @@ pub(in crate::app) const MTEXT_PREVIEW_EM_PX: f32 = 15.0;
 const MTEXT_EDITOR_FALLBACK_WIDTH: f32 = 660.0;
 pub(in crate::app) const MTEXT_EDITOR_WRITING_WIDTH: f32 =
     MTEXT_EDITOR_FALLBACK_WIDTH - 2.0 * MTEXT_PREVIEW_PAD;
+/// The editor never shrinks below its two toolbar rows and a few lines of
+/// text; a smaller window still caps it.
+const MTEXT_EDITOR_MIN_SIZE: Size = Size::new(900.0, 370.0);
 
 struct MTextPreview {
     /// Disconnected polylines as (x, y) world points + colour (NaN-split done).
@@ -418,8 +425,13 @@ pub(super) fn mtext_editor_overlay<'a>(
         writing_area_px,
         (writing_area_px * 0.5).max(1.0),
     );
-    let content =
-        crate::ui::modal::intrinsic(measurement, content, iced::Size::INFINITE, modal_resize);
+    let content = crate::ui::modal::intrinsic_with_min(
+        measurement,
+        content,
+        iced::Size::INFINITE,
+        modal_resize,
+        MTEXT_EDITOR_MIN_SIZE,
+    );
 
     crate::ui::modal::modal(
         iced::widget::Space::new().width(Fill).height(Fill),
@@ -445,35 +457,8 @@ fn mtext_editor_content<'a>(
     } else {
         iced::Length::Fixed(intrinsic_preview_height)
     };
-    use super::super::mtext_editor::{JustifyChoice, MTextFmt, ParaAlign};
     use iced::widget::canvas;
 
-    let btn_style = |theme: &Theme, status: button::Status| {
-        let palette = theme.palette();
-        let pair = match status {
-            button::Status::Hovered | button::Status::Pressed => palette.background.strong,
-            _ => palette.background.weak,
-        };
-        button::Style {
-            background: Some(Background::Color(pair.color)),
-            text_color: pair.text,
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            shadow: iced::Shadow::default(),
-            snap: false,
-        }
-    };
-    let icon_btn = move |bytes: &'static [u8], msg: Message| -> Element<'static, Message> {
-        button(crate::ui::icons::themed(bytes, 18.0))
-            .on_press(msg)
-            .padding(3)
-            .style(btn_style)
-            .into()
-    };
-    let lbl = |s: &'static str| text(s).size(11);
     let small_input = |placeholder: &'static str,
                        val: &str,
                        on: fn(String) -> Message,
@@ -487,7 +472,7 @@ fn mtext_editor_content<'a>(
             .into()
     };
 
-    // ── Row 1: the object's own values, each labelled, · format icons ─────
+    // ── Row 1: the object's own values, each labelled ──────────────────────
     // A label above its control; font and width also say where their value
     // comes from (the style, the text's own, or the style with overrides).
     let labelled = |name: std::borrow::Cow<'static, str>,
@@ -508,6 +493,9 @@ fn mtext_editor_content<'a>(
                 }
             }));
         }
+        // Every control sits in a band of one height, so the captions and the
+        // controls each share one line whatever the control's own height.
+        let control = container(control).height(30).center_y(30);
         iced::widget::column![caption, control].spacing(2).into()
     };
     let mut style_opts: Vec<String> = if styles.is_empty() {
@@ -593,247 +581,21 @@ fn mtext_editor_content<'a>(
             .into()
         ),
         labelled(t!("Color"), None, color_pl.into()),
-        row![annotative, text(t!("Annotative")).size(11)]
-            .spacing(3)
-            .align_y(iced::Alignment::Center),
-        iced::widget::Space::new().width(6),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_bold.svg"),
-            Message::MTextFmt(MTextFmt::Bold)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_italic.svg"),
-            Message::MTextFmt(MTextFmt::Italic)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_underline.svg"),
-            Message::MTextFmt(MTextFmt::Underline)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_overline.svg"),
-            Message::MTextFmt(MTextFmt::Overline)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_strike.svg"),
-            Message::MTextFmt(MTextFmt::Strike)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_upper.svg"),
-            Message::MTextFmt(MTextFmt::Uppercase)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_lower.svg"),
-            Message::MTextFmt(MTextFmt::Lowercase)
+        labelled(
+            "".into(),
+            None,
+            row![annotative, text(t!("Annotative")).size(11)]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
         ),
     ]
-    .spacing(4)
-    .align_y(iced::Alignment::End)
+    .spacing(10)
+    .align_y(iced::Alignment::Start)
     .width(width);
 
-    // ── Row 2: oblique / char-spacing · align · line spacing · OK ─────────
-    let justify = iced::widget::pick_list(
-        Some(JustifyChoice(ed.attachment)),
-        JustifyChoice::ALL,
-        |value| value.to_string(),
-    )
-    .on_select(|c| Message::MTextJustify(c.0))
-    .text_size(11)
-    .width(iced::Length::Fixed(112.0));
-    let row2 = row![
-        button(lbl("↶"))
-            .on_press(Message::MTextUndo)
-            .padding(3)
-            .style(btn_style),
-        button(lbl("↷"))
-            .on_press(Message::MTextRedo)
-            .padding(3)
-            .style(btn_style),
-        lbl("O"),
-        small_input("0", ed.span_field("oblique", &ed.oblique), Message::MTextOblique, 48.0),
-        lbl("◊"),
-        small_input("0", ed.span_field("tracking", &ed.char_space), Message::MTextCharSpace, 48.0),
-        iced::widget::Space::new().width(6),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_left.svg"),
-            Message::MTextAlign(ParaAlign::Left)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_center.svg"),
-            Message::MTextAlign(ParaAlign::Center)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_right.svg"),
-            Message::MTextAlign(ParaAlign::Right)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_justify.svg"),
-            Message::MTextAlign(ParaAlign::Justify)
-        ),
-        iced::widget::Space::new().width(6),
-        justify,
-        lbl("LS"),
-        button(lbl("1"))
-            .on_press(Message::MTextLineSpacing(1.0))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("1.5"))
-            .on_press(Message::MTextLineSpacing(1.5))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("2"))
-            .on_press(Message::MTextLineSpacing(2.0))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("Stack"))
-            .on_press(Message::MTextStack)
-            .padding(3)
-            .style(btn_style),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_superscript.svg"),
-            Message::MTextScript(true)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_subscript.svg"),
-            Message::MTextScript(false)
-        ),
-        button(lbl("Clear"))
-            .on_press(Message::MTextClearFormatting)
-            .padding(3)
-            .style(btn_style),
-        button(lbl("°"))
-            .on_press(Message::MTextInsert("°".to_string()))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("±"))
-            .on_press(Message::MTextInsert("±".to_string()))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("⌀"))
-            .on_press(Message::MTextInsert("⌀".to_string()))
-            .padding(3)
-            .style(btn_style),
-    ]
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
-    .width(width);
-
-    let column_mode = match (ed.column_type, ed.column_auto_height) {
-        (1, _) => "Static",
-        (2, true) => "Dynamic auto",
-        (2, false) => "Dynamic manual",
-        _ => "No columns",
-    }
-    .to_string();
-    let column_picker = iced::widget::pick_list(
-        Some(column_mode),
-        ["No columns", "Static", "Dynamic auto", "Dynamic manual"]
-            .into_iter()
-            .map(str::to_string)
-            .collect::<Vec<_>>(),
-        |value| t!(value).into_owned(),
-    )
-    .on_select(Message::MTextColumnMode)
-    .text_size(11)
-    .width(iced::Length::Fixed(120.0));
-    let reverse = checkbox(ed.column_flow_reversed)
-        .on_toggle(Message::MTextColumnFlowReversed)
-        .size(14);
-    let row3 = row![
-        lbl("Columns"),
-        column_picker,
-        lbl("Count"),
-        small_input("2", &ed.column_count, Message::MTextColumnCount, 42.0),
-        lbl("Height"),
-        text_input("0", &ed.rect_height)
-            .on_input(Message::MTextColumnHeight)
-            .width(iced::Length::Fixed(58.0))
-            .padding(3)
-            .size(12),
-        lbl("Width"),
-        small_input("0", &ed.column_width, Message::MTextColumnWidth, 58.0),
-        lbl("Gutter"),
-        small_input("0", &ed.column_gutter, Message::MTextColumnGutter, 58.0),
-        reverse,
-        lbl("Reverse"),
-        iced::widget::Space::new().width(8),
-        lbl("First"),
-        text_input("0", &ed.paragraph_first_indent)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::FirstIndent,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("Left"),
-        text_input("0", &ed.paragraph_left_indent)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::LeftIndent,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("Right"),
-        text_input("0", &ed.paragraph_right_indent)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::RightIndent,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("Before"),
-        text_input("0", &ed.paragraph_space_before)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::SpaceBefore,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("After"),
-        text_input("0", &ed.paragraph_space_after)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::SpaceAfter,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-    ]
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
-    .width(width);
-    let row4 = row![
-        lbl("Find"),
-        text_input(&t!("Find"), &ed.find_text)
-            .on_input(Message::MTextFindText)
-            .width(iced::Length::Fixed(140.0))
-            .padding(3)
-            .size(12),
-        button(lbl("Next"))
-            .on_press(Message::MTextFindNext)
-            .padding(3)
-            .style(btn_style),
-        lbl("Replace"),
-        text_input(&t!("Replace"), &ed.replace_text)
-            .on_input(Message::MTextReplaceText)
-            .width(iced::Length::Fixed(140.0))
-            .padding(3)
-            .size(12),
-        button(lbl("Replace"))
-            .on_press(Message::MTextReplaceNext)
-            .padding(3)
-            .style(btn_style),
-        button(lbl("Replace All"))
-            .on_press(Message::MTextReplaceAll)
-            .padding(3)
-            .style(btn_style),
-    ]
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
-    .width(width);
+    // ── Row 2: character formatting, undo, alignment and the menus ─────────
+    let row2 = mtext_toolbar::format_row(ed);
 
     let preview_scale = ed.preview_scale();
     let slider_min = 1e-6_f64;
@@ -1009,7 +771,7 @@ fn mtext_editor_content<'a>(
     .padding([5, 8]);
 
     container(
-        column![action_bar, row1, row2, row3, row4, width_slider, body]
+        column![action_bar, row1, row2, width_slider, body]
             .spacing(6)
             .width(width)
             .height(height),

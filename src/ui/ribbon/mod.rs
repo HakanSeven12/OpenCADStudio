@@ -208,27 +208,18 @@ fn panel_measure_key(
 const TAB_H: f32 = metrics::TAB_H;
 const TAB_ROW_H: f32 = metrics::TAB_ROW_H;
 const TAB_TEXT_SIZE: f32 = 12.5;
-/// The list of a ribbon dropdown: its names, the room around a row, the
-/// check of the current item and the gap between a row's parts; a large
-/// button's list has larger names and rows.
-const DD_LABEL: f32 = 11.0;
-const DD_LARGE_LABEL: f32 = 13.0;
+/// The list of a ribbon dropdown: a large icon and the name on each row,
+/// the room around a row and the gap between its parts.
+const DD_LABEL: f32 = 13.0;
 const DD_PAD: Padding = Padding {
-    top: 4.0,
-    right: 10.0,
-    bottom: 4.0,
-    left: 10.0,
-};
-const DD_LARGE_PAD: Padding = Padding {
     top: 3.0,
     right: 10.0,
     bottom: 3.0,
     left: 6.0,
 };
-const DD_CHECK_W: f32 = 14.0;
+const DD_GAP: f32 = 6.0;
 /// The least width of a list with a header, which wraps within it.
 const DD_HEADER_MIN_W: f32 = 190.0;
-const DD_GAP: f32 = 6.0;
 /// Width of the accent outline of a contextual tab.
 const TAB_OUTLINE: f32 = 1.5;
 
@@ -1580,28 +1571,25 @@ impl Ribbon {
         let mut items_list: Option<Vec<(&'static str, &'static str, IconKind)>> = None;
         let mut dd_default = "";
         let mut dd_id: &'static str = "";
-        // A large button's list shows large icons with their names.
-        let mut large = false;
 
         'outer: for group in groups {
             for item in &group.tools {
-                let (id, items, default, is_large) = match item {
+                let (id, items, default) = match item {
                     RibbonItem::Dropdown {
                         id, items, default, ..
-                    } => (*id, items, *default, false),
-                    RibbonItem::LabeledDropdown {
+                    }
+                    | RibbonItem::LabeledDropdown {
                         id, items, default, ..
-                    } => (*id, items, *default, false),
-                    RibbonItem::LargeDropdown {
+                    }
+                    | RibbonItem::LargeDropdown {
                         id, items, default, ..
-                    } => (*id, items, *default, true),
+                    } => (*id, items, *default),
                     _ => continue,
                 };
                 if id == open_id {
                     items_list = Some(items.clone());
                     dd_default = default;
                     dd_id = id;
-                    large = is_large;
                     break 'outer;
                 }
             }
@@ -1609,24 +1597,17 @@ impl Ribbon {
         let items = items_list?;
         let last_cmd = self.last_cmd.get(dd_id).copied().unwrap_or(dd_default);
 
-        // A small list: a check for the current item, a small icon and the
-        // name. A large button's: a large icon and the name, the current
-        // item lit.
-        let (icon_size, label_size, padding, lead) = if large {
-            (LARGE_ICON, DD_LARGE_LABEL, DD_LARGE_PAD, 0.0)
-        } else {
-            (SMALL_ICON, DD_LABEL, DD_PAD, DD_CHECK_W + DD_GAP)
-        };
+        // Each item: its large icon and its name, the current one lit.
         let rows: Vec<Element<Message>> = items
             .iter()
             .map(|(cmd, label, item_icon)| {
                 let is_current = *cmd == last_cmd;
                 let disabled = widgets::is_disabled_item(cmd);
-                let icon_el: Element<Message> = container(make_icon(*item_icon, icon_size))
-                    .width(Length::Fixed(icon_size))
+                let icon_el: Element<Message> = container(make_icon(*item_icon, LARGE_ICON))
+                    .width(Length::Fixed(LARGE_ICON))
                     .into();
                 let label_el = text(t!(*label))
-                    .size(label_size)
+                    .size(DD_LABEL)
                     .wrapping(iced::advanced::text::Wrapping::None)
                     .style(move |theme: &Theme| iced::widget::text::Style {
                         color: disabled.then_some(chrome::muted(theme)),
@@ -1635,29 +1616,24 @@ impl Ribbon {
                     || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
                     label_el,
                 );
-                let content = if large {
+                let item = button(
                     row![icon_el, label_el]
-                } else {
-                    row![
-                        crate::ui::icons::themed_check_cell(is_current),
-                        icon_el,
-                        label_el
-                    ]
-                };
-                let item = button(content.spacing(DD_GAP).align_y(iced::Center))
-                    .on_press_maybe((!disabled).then_some(Message::DropdownSelectItem {
-                        dropdown_id: dd_id,
-                        cmd: *cmd,
-                    }))
-                    .style(move |theme: &Theme, status| {
-                        if large && is_current {
-                            popup_row_style(theme, button::Status::Hovered)
-                        } else {
-                            popup_row_style(theme, status)
-                        }
-                    })
-                    .width(Fill)
-                    .padding(padding);
+                        .spacing(DD_GAP)
+                        .align_y(iced::Center),
+                )
+                .on_press_maybe((!disabled).then_some(Message::DropdownSelectItem {
+                    dropdown_id: dd_id,
+                    cmd: *cmd,
+                }))
+                .style(move |theme: &Theme, status| {
+                    if is_current {
+                        popup_row_style(theme, button::Status::Hovered)
+                    } else {
+                        popup_row_style(theme, status)
+                    }
+                })
+                .width(Fill)
+                .padding(DD_PAD);
                 keytips::anchor_with(|| keytips::item_anchor(dd_id, cmd), item)
             })
             .collect();
@@ -1677,10 +1653,10 @@ impl Ribbon {
         let longest = items
             .iter()
             .map(|(_, label, _)| {
-                crate::ui::style::text_metrics::width(&t!(*label), label_size, false)
+                crate::ui::style::text_metrics::width(&t!(*label), DD_LABEL, false)
             })
             .fold(0.0, f32::max);
-        let panel_w = padding.left + lead + icon_size + DD_GAP + longest + padding.right + 2.0;
+        let panel_w = DD_PAD.left + LARGE_ICON + DD_GAP + longest + DD_PAD.right + 2.0;
         let panel_w = if header.is_some() {
             panel_w.max(DD_HEADER_MIN_W)
         } else {

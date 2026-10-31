@@ -1320,8 +1320,12 @@ impl OpenCADStudio {
         self.snapper.clear_override();
         // Clear the deferred snap dwell — the command is being cancelled.
         self.snap_dwell = None;
-        // Open MText editor swallows Escape (cancel without committing).
-        if self.mtext_editor.is_some() {
+        // Open MText editor swallows Escape (cancel without committing). An
+        // open menu or the colour list closes first, one per Escape.
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            if ed.menu.take().is_some() || std::mem::take(&mut ed.color_picker_open) {
+                return Task::none();
+            }
             self.mtext_cancel();
             return self.post_editor_closed(false);
         }

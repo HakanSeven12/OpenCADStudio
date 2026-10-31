@@ -1,4 +1,8 @@
 use super::super::Message;
+mod mtext_menu;
+#[cfg(test)]
+mod mtext_tests;
+mod mtext_toolbar;
 use crate::t;
 use crate::ui::popup::context_menu::{
     ContextMenu, MenuIcon, MenuItem, MenuRow, MENU_PAD_TOP, MENU_ROW_H,
@@ -97,6 +101,9 @@ pub(in crate::app) const MTEXT_PREVIEW_EM_PX: f32 = 15.0;
 const MTEXT_EDITOR_FALLBACK_WIDTH: f32 = 660.0;
 pub(in crate::app) const MTEXT_EDITOR_WRITING_WIDTH: f32 =
     MTEXT_EDITOR_FALLBACK_WIDTH - 2.0 * MTEXT_PREVIEW_PAD;
+/// The editor never shrinks below its two toolbar rows and a few lines of
+/// text; a smaller window still caps it.
+const MTEXT_EDITOR_MIN_SIZE: Size = Size::new(900.0, 370.0);
 
 struct MTextPreview {
     /// Disconnected polylines as (x, y) world points + colour (NaN-split done).
@@ -114,18 +121,98 @@ struct MTextPreview {
     miny: f32,
     scale: f32,
     content_h: f32,
-    /// On-screen width of the MText wrapping rectangle.
-    wrap_width_px: f32,
+    /// The box-width ruler above the text; absent on a turned preview.
+    ruler: Option<BoxRuler>,
+    /// The text's rotation (cos, sin). Strokes and glyph boxes are laid out
+    /// upright; the preview turns them only when drawing, and turns pointer
+    /// positions back, so caret and selection stay in the layout frame.
+    rotation: (f32, f32),
+}
+
+/// Height of the box-width ruler band at the top of the preview.
+pub(in crate::app) const MTEXT_RULER_H: f32 = 18.0;
+/// How near (px) to the handle a press grabs it.
+const RULER_GRAB_PX: f32 = 7.0;
+
+/// The text box along the ruler, in layout units, and its draggable edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BoxRuler {
+    left: f32,
+    right: f32,
+    /// Width change per unit the handle moves: 1 left-attached (right edge),
+    /// 2 centred (both edges), -1 right-attached (the left edge moves).
+    growth: f32,
+}
+
+impl BoxRuler {
+    fn handle(&self) -> f32 {
+        if self.growth < 0.0 {
+            self.left
+        } else {
+            self.right
+        }
+    }
+}
+
+/// The full height of the text line a glyph box sits on: the box spans the
+/// cap height only, so descenders, accents and the line gap are added, and
+/// a line never reaches into its neighbour's band.
+fn line_band(
+    boxes: &[crate::entities::text_support::GlyphBox],
+    b: &crate::entities::text_support::GlyphBox,
+) -> (f32, f32) {
+    let h = (b.ymax - b.ymin).max(f32::EPSILON);
+    let mut low = b.ymin - 0.35 * h;
+    let mut high = b.ymax + 0.2 * h;
+    for other in boxes {
+        if other.ymax <= b.ymin {
+            low = low.max((other.ymax + b.ymin) * 0.5);
+        } else if other.ymin >= b.ymax {
+            high = high.min((other.ymin + b.ymax) * 0.5);
+        }
+    }
+    (low, high)
+}
+
+/// Rotate a layout-frame point by the text's rotation.
+fn turn((cos, sin): (f32, f32), x: f32, y: f32) -> (f32, f32) {
+    (x * cos - y * sin, x * sin + y * cos)
 }
 
 impl MTextPreview {
+    /// Screen point of a layout-frame point: turned by the rotation, drawn
+    /// at the real size, Y flipped (world up → screen down).
+    fn to_screen(&self, x: f32, y: f32) -> iced::Point {
+        let (x, y) = turn(self.rotation, x, y);
+        iced::Point::new(
+            MTEXT_PREVIEW_PAD + (x - self.minx) * self.scale,
+            self.content_h - (MTEXT_PREVIEW_PAD + (y - self.miny) * self.scale),
+        )
+    }
+
+    /// Whether a point (bounds-local px) grabs the ruler handle.
+    fn on_handle(&self, p: iced::Point) -> bool {
+        p.y <= MTEXT_RULER_H
+            && self
+                .ruler
+                .is_some_and(|r| (p.x - self.to_screen(r.handle(), 0.0).x).abs() <= RULER_GRAB_PX)
+    }
+
+    /// The width a drag reaches after moving `dx` px from where it started.
+    fn dragged_width(&self, start_width: f32, dx: f32) -> Option<f64> {
+        let ruler = self.ruler?;
+        let width = start_width + ruler.growth * dx / self.scale;
+        Some(f64::from(width.max(self.scale.recip())))
+    }
+
     /// Visible-char offset (0..=N) nearest the cursor point (bounds-local px).
     fn offset_at(&self, p: iced::Point) -> usize {
         if self.boxes.is_empty() {
             return 0;
         }
-        let wx = self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale;
-        let wy = self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale;
+        let rx = self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale;
+        let ry = self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale;
+        let (wx, wy) = turn((self.rotation.0, -self.rotation.1), rx, ry);
         let mut best = 0usize;
         let mut best_d = f32::MAX;
         for b in &self.boxes {
@@ -168,6 +255,8 @@ impl MTextPreview {
 #[derive(Default)]
 struct MTextPreviewState {
     dragging: bool,
+    /// A ruler drag: where it started (px) and the box width then.
+    width_drag: Option<(f32, f32)>,
 }
 
 impl iced::widget::canvas::Program<Message> for MTextPreview {
@@ -186,12 +275,25 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         match event {
             Event::Mouse(Me::ButtonPressed(Button::Left)) => {
                 if let Some(p) = cursor.position_in(bounds) {
+                    if let Some(ruler) = self.ruler.filter(|_| self.on_handle(p)) {
+                        state.width_drag = Some((p.x, ruler.right - ruler.left));
+                        return Some(Action::capture());
+                    }
+                    if p.y <= MTEXT_RULER_H && self.ruler.is_some() {
+                        // The ruler band is not text: no caret move.
+                        return Some(Action::capture());
+                    }
                     state.dragging = true;
                     let off = self.offset_at(p);
                     return Some(Action::publish(Message::MTextSelStart(off)).and_capture());
                 }
             }
             Event::Mouse(Me::CursorMoved { .. }) => {
+                if let Some((start, width)) = state.width_drag {
+                    let x = cursor.position_from(bounds.position())?.x;
+                    let width = self.dragged_width(width, x - start)?;
+                    return Some(Action::publish(Message::MTextBoxDrag(Some(width))).and_capture());
+                }
                 if state.dragging {
                     if let Some(p) = cursor.position_in(bounds) {
                         let off = self.offset_at(p);
@@ -200,6 +302,9 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 }
             }
             Event::Mouse(Me::ButtonReleased(Button::Left)) => {
+                if state.width_drag.take().is_some() {
+                    return Some(Action::publish(Message::MTextBoxDrag(None)).and_capture());
+                }
                 if state.dragging {
                     state.dragging = false;
                     return Some(Action::capture());
@@ -208,6 +313,23 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             _ => {}
         }
         None
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &MTextPreviewState,
+        bounds: iced::Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> iced::mouse::Interaction {
+        let grabbing = state.width_drag.is_some()
+            || cursor
+                .position_in(bounds)
+                .is_some_and(|p| self.on_handle(p));
+        if grabbing {
+            iced::mouse::Interaction::ResizingHorizontally
+        } else {
+            iced::mouse::Interaction::default()
+        }
     }
 
     fn draw(
@@ -220,37 +342,21 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
     ) -> Vec<iced::widget::canvas::Geometry> {
         use iced::widget::canvas::{Frame, Path, Stroke};
         let mut frame = Frame::new(renderer, bounds.size());
-        let pad = MTEXT_PREVIEW_PAD;
-        // Draw at the real size; flip Y (world up → screen down).
-        let map = |x: f32, y: f32| {
-            iced::Point::new(
-                pad + (x - self.minx) * self.scale,
-                self.content_h - (pad + (y - self.miny) * self.scale),
-            )
-        };
-        // Wrap ruler: same screen-space position as the width slider handle.
-        let wrap_x = (pad + self.wrap_width_px).clamp(pad, bounds.width.max(pad));
-        let wrap_line = Path::new(|path| {
-            path.move_to(iced::Point::new(wrap_x, 0.0));
-            path.line_to(iced::Point::new(wrap_x, self.content_h));
-        });
-        frame.stroke(
-            &wrap_line,
-            Stroke::default()
-                .with_color(theme.palette().primary.base.color.scale_alpha(0.65))
-                .with_width(1.0),
-        );
-        // Selection highlight behind the glyphs.
+        let map = |x: f32, y: f32| self.to_screen(x, y);
+        // Selection highlight behind the glyphs, over the whole line height
+        // (descenders and accents included), turned with the text.
         if let Some((a, b)) = self.sel {
             for bx in &self.boxes {
                 if bx.vis >= a && bx.vis < b {
-                    let p0 = map(bx.xmin, bx.ymax);
-                    let p1 = map(bx.xmax, bx.ymin);
-                    let rect = Path::rectangle(
-                        iced::Point::new(p0.x.min(p1.x), p0.y.min(p1.y)),
-                        iced::Size::new((p1.x - p0.x).abs(), (p1.y - p0.y).abs()),
-                    );
-                    frame.fill(&rect, theme.palette().primary.base.color.scale_alpha(0.45));
+                    let (low, high) = line_band(&self.boxes, bx);
+                    let quad = Path::new(|p| {
+                        p.move_to(map(bx.xmin, low));
+                        p.line_to(map(bx.xmax, low));
+                        p.line_to(map(bx.xmax, high));
+                        p.line_to(map(bx.xmin, high));
+                        p.close();
+                    });
+                    frame.fill(&quad, theme.palette().primary.base.color.scale_alpha(0.45));
                 }
             }
         }
@@ -267,6 +373,28 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             let col = readable_on(*col, theme.palette().background.base);
             frame.stroke(&path, Stroke::default().with_color(col).with_width(*width));
         }
+        if let Some(ruler) = self.ruler {
+            // The box width: a rule between the box edges with end ticks and
+            // a handle on the edge that moves.
+            let color = theme.palette().primary.base.color;
+            let mid = MTEXT_RULER_H * 0.5;
+            let (l, r) = (map(ruler.left, 0.0).x, map(ruler.right, 0.0).x);
+            let rule = Path::new(|p| {
+                p.move_to(iced::Point::new(l, mid));
+                p.line_to(iced::Point::new(r, mid));
+                for x in [l, r] {
+                    p.move_to(iced::Point::new(x, 4.0));
+                    p.line_to(iced::Point::new(x, MTEXT_RULER_H - 4.0));
+                }
+            });
+            frame.stroke(&rule, Stroke::default().with_color(color).with_width(1.0));
+            let x = map(ruler.handle(), 0.0).x;
+            frame.fill_rectangle(
+                iced::Point::new(x - 3.0, 2.0),
+                iced::Size::new(6.0, MTEXT_RULER_H - 4.0),
+                color,
+            );
+        }
         // Caret — a vertical bar at the caret's glyph boundary, shown when the
         // selection is empty (a plain text cursor).
         // Caret is shown only when the selection is empty and the blink is in
@@ -276,11 +404,12 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             // Empty text: show a caret at the top-left so the user can type.
             // Its height matches the preview's constant em (see EM_PX) so the
             // empty-editor caret isn't tiny.
+            let top = MTEXT_PREVIEW_PAD + self.ruler.map_or(0.0, |_| MTEXT_RULER_H);
             let path = Path::new(|p| {
-                p.move_to(iced::Point::new(MTEXT_PREVIEW_PAD, MTEXT_PREVIEW_PAD));
+                p.move_to(iced::Point::new(MTEXT_PREVIEW_PAD, top));
                 p.line_to(iced::Point::new(
                     MTEXT_PREVIEW_PAD,
-                    (MTEXT_PREVIEW_PAD + 40.0).min(self.content_h),
+                    (top + 40.0).min(self.content_h),
                 ));
             });
             frame.stroke(
@@ -390,18 +519,21 @@ pub(super) fn mtext_editor_overlay<'a>(
         ed,
         &styles,
         crate::ui::modal::ModalSizing::INTRINSIC,
-        writing_area_px,
         (writing_area_px * 0.5).max(1.0),
     );
     let content = mtext_editor_content(
         ed,
         &styles,
         crate::ui::modal::ModalSizing::FILL,
-        writing_area_px,
         (writing_area_px * 0.5).max(1.0),
     );
-    let content =
-        crate::ui::modal::intrinsic(measurement, content, iced::Size::INFINITE, modal_resize);
+    let content = crate::ui::modal::intrinsic_with_min(
+        measurement,
+        content,
+        iced::Size::INFINITE,
+        modal_resize,
+        MTEXT_EDITOR_MIN_SIZE,
+    );
 
     crate::ui::modal::modal(
         iced::widget::Space::new().width(Fill).height(Fill),
@@ -417,7 +549,6 @@ fn mtext_editor_content<'a>(
     ed: &'a super::super::mtext_editor::MTextEditorState,
     styles: &[String],
     sizing: crate::ui::modal::ModalSizing,
-    writing_area_px: f32,
     intrinsic_preview_height: f32,
 ) -> Element<'a, Message> {
     let width = sizing.width;
@@ -427,35 +558,8 @@ fn mtext_editor_content<'a>(
     } else {
         iced::Length::Fixed(intrinsic_preview_height)
     };
-    use super::super::mtext_editor::{JustifyChoice, MTextFmt, ParaAlign};
     use iced::widget::canvas;
 
-    let btn_style = |theme: &Theme, status: button::Status| {
-        let palette = theme.palette();
-        let pair = match status {
-            button::Status::Hovered | button::Status::Pressed => palette.background.strong,
-            _ => palette.background.weak,
-        };
-        button::Style {
-            background: Some(Background::Color(pair.color)),
-            text_color: pair.text,
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            shadow: iced::Shadow::default(),
-            snap: false,
-        }
-    };
-    let icon_btn = move |bytes: &'static [u8], msg: Message| -> Element<'static, Message> {
-        button(crate::ui::icons::themed(bytes, 18.0))
-            .on_press(msg)
-            .padding(3)
-            .style(btn_style)
-            .into()
-    };
-    let lbl = |s: &'static str| text(s).size(11);
     let small_input = |placeholder: &'static str,
                        val: &str,
                        on: fn(String) -> Message,
@@ -469,12 +573,40 @@ fn mtext_editor_content<'a>(
             .into()
     };
 
-    // ── Row 1: style / font / height · format icons · colour ──────────────
-    let style_opts: Vec<String> = if styles.is_empty() {
+    // ── Row 1: the object's own values, each labelled ──────────────────────
+    // A label above its control; font and width also say where their value
+    // comes from (the style, the text's own, or the style with overrides).
+    let labelled = |name: std::borrow::Cow<'static, str>,
+                    origin: Option<super::super::mtext_editor::ValueOrigin>,
+                    control: Element<'static, Message>|
+     -> Element<'static, Message> {
+        use super::super::mtext_editor::ValueOrigin;
+        let mut caption = row![text(name).size(11)].spacing(4);
+        if let Some(origin) = origin {
+            let origin = match origin {
+                ValueOrigin::Style => crate::tr!("mtext-object-origin", "style"),
+                ValueOrigin::Custom => crate::tr!("mtext-object-origin", "custom"),
+                ValueOrigin::Mixed => crate::tr!("mtext-object-origin", "mixed"),
+            };
+            caption = caption.push(text(format!("· {origin}")).size(11).style(|theme: &Theme| {
+                text::Style {
+                    color: Some(theme.palette().background.strong.color),
+                }
+            }));
+        }
+        // Every control sits in a band of one height, so the captions and the
+        // controls each share one line whatever the control's own height.
+        let control = container(control).height(30).center_y(30);
+        iced::widget::column![caption, control].spacing(2).into()
+    };
+    let mut style_opts: Vec<String> = if styles.is_empty() {
         vec!["Standard".to_string()]
     } else {
         styles.to_vec()
     };
+    if !style_opts.contains(&ed.style) {
+        style_opts.push(ed.style.clone());
+    }
     let style_pl = iced::widget::pick_list(Some(ed.style.clone()), style_opts, |value| {
         value.to_string()
     })
@@ -484,26 +616,24 @@ fn mtext_editor_content<'a>(
     let annotative = checkbox(ed.annotative)
         .on_toggle(Message::MTextAnnotative)
         .size(14);
-    let font_sel = if ed.font.trim().is_empty() {
-        "[Style default]".to_string()
-    } else {
-        ed.font.clone()
+    let font_sel = match ed.font_field() {
+        font if font.trim().is_empty() => "[Style default]".to_string(),
+        font => font,
     };
-    let font_pl = iced::widget::pick_list(
-        Some(font_sel),
-        MTEXT_FONTS
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
-        |value| t!(value).into_owned(),
-    )
-    .on_select(Message::MTextFont)
-    .text_size(11)
-    .width(iced::Length::Fixed(120.0));
+    let mut font_opts: Vec<String> = MTEXT_FONTS.iter().map(|s| s.to_string()).collect();
+    // The text's own font stays listed when it is not one of the bundled ones.
+    if !font_opts.contains(&font_sel) {
+        font_opts.push(font_sel.clone());
+    }
+    let font_pl =
+        iced::widget::pick_list(Some(font_sel), font_opts, |value| t!(value).into_owned())
+            .on_select(Message::MTextFont)
+            .text_size(11)
+            .width(iced::Length::Fixed(120.0));
     // Same colour picker as the Properties panel (named swatches + "More…" full
     // palette), applied to the selection or the whole text.
     let color_pl = iced::widget::container(crate::ui::color_select::color_selector(
-        codec::types::Color::from_index(ed.color_aci as i16),
+        ed.whole_text_color(),
         ed.color_picker_open,
         crate::ui::color_select::ColorExtras {
             by_layer: true,
@@ -512,291 +642,72 @@ fn mtext_editor_content<'a>(
         },
         Message::MTextColorChanged,
         Message::MTextColorPickerToggle,
-        Message::OpenColorWindow(
-            crate::app::ColorPickTarget::MText,
-            codec::types::Color::from_index(ed.color_aci as i16),
-        ),
+        Message::OpenColorWindow(crate::app::ColorPickTarget::MText, ed.whole_text_color()),
     ))
     .width(iced::Length::Fixed(150.0));
 
     let row1 = row![
-        style_pl,
-        row![annotative, text(t!("Annotative")).size(11)]
+        labelled(t!("Style"), None, style_pl.into()),
+        labelled(t!("Font"), Some(ed.value_origin("font")), font_pl.into()),
+        labelled(
+            t!("Height"),
+            None,
+            small_input(
+                "2.5",
+                ed.span_field("height", &ed.height),
+                Message::MTextHeight,
+                64.0
+            )
+        ),
+        labelled(
+            t!("Width factor"),
+            Some(ed.value_origin("width")),
+            small_input(
+                "1",
+                ed.span_field("width", &ed.width),
+                Message::MTextWidth,
+                64.0
+            )
+        ),
+        labelled(
+            t!("Rotation"),
+            None,
+            row![
+                small_input("0", &ed.rotation, Message::MTextRotation, 52.0),
+                text("°").size(12)
+            ]
             .spacing(3)
-            .align_y(iced::Alignment::Center),
-        font_pl,
-        small_input("2.5", ed.span_field("height", &ed.height), Message::MTextHeight, 64.0),
-        iced::widget::Space::new().width(6),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_bold.svg"),
-            Message::MTextFmt(MTextFmt::Bold)
+            .align_y(iced::Alignment::Center)
+            .into()
         ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_italic.svg"),
-            Message::MTextFmt(MTextFmt::Italic)
+        labelled(t!("Color"), None, color_pl.into()),
+        labelled(
+            "".into(),
+            None,
+            row![annotative, text(t!("Annotative")).size(11)]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
         ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_underline.svg"),
-            Message::MTextFmt(MTextFmt::Underline)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_overline.svg"),
-            Message::MTextFmt(MTextFmt::Overline)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_strike.svg"),
-            Message::MTextFmt(MTextFmt::Strike)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_upper.svg"),
-            Message::MTextFmt(MTextFmt::Uppercase)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_lower.svg"),
-            Message::MTextFmt(MTextFmt::Lowercase)
-        ),
-        iced::widget::Space::new().width(width),
-        color_pl,
     ]
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
+    .spacing(10)
+    .align_y(iced::Alignment::Start)
     .width(width);
 
-    // ── Row 2: oblique / width / char-spacing · align · line spacing · OK ─
-    let justify = iced::widget::pick_list(
-        Some(JustifyChoice(ed.attachment)),
-        JustifyChoice::ALL,
-        |value| value.to_string(),
-    )
-    .on_select(|c| Message::MTextJustify(c.0))
-    .text_size(11)
-    .width(iced::Length::Fixed(112.0));
-    let row2 = row![
-        button(lbl("↶"))
-            .on_press(Message::MTextUndo)
-            .padding(3)
-            .style(btn_style),
-        button(lbl("↷"))
-            .on_press(Message::MTextRedo)
-            .padding(3)
-            .style(btn_style),
-        lbl("O"),
-        small_input("0", ed.span_field("oblique", &ed.oblique), Message::MTextOblique, 48.0),
-        lbl("W"),
-        small_input("1", ed.span_field("width", &ed.width), Message::MTextWidth, 48.0),
-        lbl("◊"),
-        small_input("0", ed.span_field("tracking", &ed.char_space), Message::MTextCharSpace, 48.0),
-        iced::widget::Space::new().width(6),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_left.svg"),
-            Message::MTextAlign(ParaAlign::Left)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_center.svg"),
-            Message::MTextAlign(ParaAlign::Center)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_right.svg"),
-            Message::MTextAlign(ParaAlign::Right)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_align_justify.svg"),
-            Message::MTextAlign(ParaAlign::Justify)
-        ),
-        iced::widget::Space::new().width(6),
-        justify,
-        lbl("LS"),
-        button(lbl("1"))
-            .on_press(Message::MTextLineSpacing(1.0))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("1.5"))
-            .on_press(Message::MTextLineSpacing(1.5))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("2"))
-            .on_press(Message::MTextLineSpacing(2.0))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("Stack"))
-            .on_press(Message::MTextStack)
-            .padding(3)
-            .style(btn_style),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_superscript.svg"),
-            Message::MTextScript(true)
-        ),
-        icon_btn(
-            include_bytes!("../../../assets/icons/mt_subscript.svg"),
-            Message::MTextScript(false)
-        ),
-        button(lbl("Clear"))
-            .on_press(Message::MTextClearFormatting)
-            .padding(3)
-            .style(btn_style),
-        button(lbl("°"))
-            .on_press(Message::MTextInsert("°".to_string()))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("±"))
-            .on_press(Message::MTextInsert("±".to_string()))
-            .padding(3)
-            .style(btn_style),
-        button(lbl("⌀"))
-            .on_press(Message::MTextInsert("⌀".to_string()))
-            .padding(3)
-            .style(btn_style),
-    ]
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
-    .width(width);
-
-    let column_mode = match (ed.column_type, ed.column_auto_height) {
-        (1, _) => "Static",
-        (2, true) => "Dynamic auto",
-        (2, false) => "Dynamic manual",
-        _ => "No columns",
-    }
-    .to_string();
-    let column_picker = iced::widget::pick_list(
-        Some(column_mode),
-        ["No columns", "Static", "Dynamic auto", "Dynamic manual"]
-            .into_iter()
-            .map(str::to_string)
-            .collect::<Vec<_>>(),
-        |value| t!(value).into_owned(),
-    )
-    .on_select(Message::MTextColumnMode)
-    .text_size(11)
-    .width(iced::Length::Fixed(120.0));
-    let reverse = checkbox(ed.column_flow_reversed)
-        .on_toggle(Message::MTextColumnFlowReversed)
-        .size(14);
-    let row3 = row![
-        lbl("Columns"),
-        column_picker,
-        lbl("Count"),
-        small_input("2", &ed.column_count, Message::MTextColumnCount, 42.0),
-        lbl("Height"),
-        text_input("0", &ed.rect_height)
-            .on_input(Message::MTextColumnHeight)
-            .width(iced::Length::Fixed(58.0))
-            .padding(3)
-            .size(12),
-        lbl("Width"),
-        small_input("0", &ed.column_width, Message::MTextColumnWidth, 58.0),
-        lbl("Gutter"),
-        small_input("0", &ed.column_gutter, Message::MTextColumnGutter, 58.0),
-        reverse,
-        lbl("Reverse"),
-        iced::widget::Space::new().width(8),
-        lbl("First"),
-        text_input("0", &ed.paragraph_first_indent)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::FirstIndent,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("Left"),
-        text_input("0", &ed.paragraph_left_indent)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::LeftIndent,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("Right"),
-        text_input("0", &ed.paragraph_right_indent)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::RightIndent,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("Before"),
-        text_input("0", &ed.paragraph_space_before)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::SpaceBefore,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-        lbl("After"),
-        text_input("0", &ed.paragraph_space_after)
-            .on_input(|value| Message::MTextParagraphNumber(
-                super::super::mtext_editor::ParaNumber::SpaceAfter,
-                value,
-            ))
-            .width(iced::Length::Fixed(48.0))
-            .padding(3)
-            .size(12),
-    ]
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
-    .width(width);
-    let row4 = row![
-        lbl("Find"),
-        text_input(&t!("Find"), &ed.find_text)
-            .on_input(Message::MTextFindText)
-            .width(iced::Length::Fixed(140.0))
-            .padding(3)
-            .size(12),
-        button(lbl("Next"))
-            .on_press(Message::MTextFindNext)
-            .padding(3)
-            .style(btn_style),
-        lbl("Replace"),
-        text_input(&t!("Replace"), &ed.replace_text)
-            .on_input(Message::MTextReplaceText)
-            .width(iced::Length::Fixed(140.0))
-            .padding(3)
-            .size(12),
-        button(lbl("Replace"))
-            .on_press(Message::MTextReplaceNext)
-            .padding(3)
-            .style(btn_style),
-        button(lbl("Replace All"))
-            .on_press(Message::MTextReplaceAll)
-            .padding(3)
-            .style(btn_style),
-    ]
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
-    .width(width);
+    // ── Row 2: character formatting, undo, alignment and the menus ─────────
+    // Below its full width the row scrolls sideways; the thin bar sits
+    // under the controls, never over them.
+    let row2 = iced::widget::scrollable(mtext_toolbar::format_row(ed))
+        .id("mtext-toolbar-2")
+        .direction(iced::widget::scrollable::Direction::Horizontal(
+            iced::widget::scrollable::Scrollbar::new()
+                .width(4)
+                .scroller_width(4)
+                .spacing(2),
+        ))
+        .width(width);
 
     let preview_scale = ed.preview_scale();
-    let slider_min = 1e-6_f64;
-    let slider_max = f64::from(writing_area_px / preview_scale).max(slider_min * 2.0);
-    let width_slider = column![
-        row![
-            text(t!(
-                "Width: %{value}",
-                value = format!("{:.3}", ed.rect_width)
-            ))
-            .size(11),
-            Space::new().width(width),
-            text(format!("{:.0}%", ed.rect_width / slider_max * 100.0)).size(11),
-        ]
-        .width(width),
-        container(
-            iced::widget::slider(
-                slider_min..=slider_max,
-                ed.rect_width.clamp(slider_min, slider_max),
-                Message::MTextRectWidth,
-            )
-            .step((slider_max * 0.01).max(1e-6))
-            .width(width),
-        )
-        .padding([0.0, MTEXT_PREVIEW_PAD])
-        .width(width),
-    ]
-    .spacing(2)
-    .width(width);
 
     // ── Body: the rendered preview (the editor is preview-only). It fills the
     // space left by the toolbars, so the resizable modal's extra height flows
@@ -825,29 +736,72 @@ fn mtext_editor_content<'a>(
             .into()
     } else {
         let segments = mtext_preview_segments(ed);
+        // The preview shows the text at the angle it will have in the drawing.
+        let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
+        let rotation = if angle == 0.0 {
+            (1.0, 0.0)
+        } else {
+            (angle.cos(), angle.sin())
+        };
         let (mut minx, mut miny, mut maxx, mut maxy) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        let mut extend = |x: f32, y: f32| {
+            let (x, y) = turn(rotation, x, y);
+            minx = minx.min(x);
+            miny = miny.min(y);
+            maxx = maxx.max(x);
+            maxy = maxy.max(y);
+        };
         for (seg, _, _) in &segments {
             for &(x, y) in seg {
-                minx = minx.min(x);
-                miny = miny.min(y);
-                maxx = maxx.max(x);
-                maxy = maxy.max(y);
+                extend(x, y);
             }
         }
         // Include glyph boxes so all-whitespace / box-only lines still anchor
         // the transform (hit-testing relies on minx/miny).
         for b in &ed.glyph_boxes {
-            minx = minx.min(b.xmin);
-            miny = miny.min(b.ymin);
-            maxx = maxx.max(b.xmax);
-            maxy = maxy.max(b.ymax);
+            for (x, y) in [
+                (b.xmin, b.ymin),
+                (b.xmax, b.ymin),
+                (b.xmax, b.ymax),
+                (b.xmin, b.ymax),
+            ] {
+                extend(x, y);
+            }
         }
         let scale = preview_scale;
-        let content_h = if maxx >= minx {
-            ((maxy - miny) * scale + 2.0 * MTEXT_PREVIEW_PAD).max(40.0)
-        } else {
-            40.0
-        };
+        // The ruler reads along the layout's x axis, so a turned preview has
+        // none (the status bar's field still sets the width). The box grows
+        // from its attachment: rightwards, both ways or leftwards.
+        let ruler = (rotation == (1.0, 0.0)).then(|| {
+            let width = ed.rect_width as f32;
+            let growth = ed.box_growth();
+            let (left, right) = if growth == 2.0 {
+                (-width * 0.5, width * 0.5)
+            } else if growth < 0.0 {
+                (-width, 0.0)
+            } else {
+                (0.0, width)
+            };
+            BoxRuler {
+                left,
+                right,
+                growth,
+            }
+        });
+        if let Some(ruler) = ruler {
+            if maxx < minx {
+                (minx, maxx, miny, maxy) = (ruler.left, ruler.right, 0.0, 0.0);
+            }
+            minx = minx.min(ruler.left);
+            maxx = maxx.max(ruler.right);
+        }
+        let band = ruler.map_or(0.0, |_| MTEXT_RULER_H);
+        let content_h = band
+            + if maxx >= minx {
+                ((maxy - miny) * scale + 2.0 * MTEXT_PREVIEW_PAD).max(40.0)
+            } else {
+                40.0
+            };
         // Multi-column MTEXT lays its columns out side by side, so the content
         // can be wider than the editor; size the canvas to the real content
         // width and let the scroll area pan horizontally to reach later columns.
@@ -866,7 +820,8 @@ fn mtext_editor_content<'a>(
             miny,
             scale,
             content_h,
-            wrap_width_px: ed.rect_width as f32 * scale,
+            ruler,
+            rotation,
         };
         let cv = canvas(prog)
             .width(iced::Length::Fixed(content_w))
@@ -900,34 +855,14 @@ fn mtext_editor_content<'a>(
             }
         })
         .padding(2)
+        .id("mtext-editor-viewport")
         .width(width)
         .height(preview_height)
         .into()
     };
 
-    // ── Top action bar: Apply keeps editing; Close saves and exits. Escape
-    // remains the explicit discard path.
-    let action_bar = container(
-        row![
-            iced::widget::Space::new().width(width),
-            crate::ui::style::style_manager::tb_button(t!("Apply"), Message::MTextApply, true),
-            crate::ui::style::style_manager::tb_button(
-                t!("Close Text Editor"),
-                Message::MTextOk,
-                true
-            ),
-        ]
-        .align_y(iced::Alignment::Center),
-    )
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.weak.color)),
-        ..Default::default()
-    })
-    .width(width)
-    .padding([5, 8]);
-
     container(
-        column![action_bar, row1, row2, row3, row4, width_slider, body]
+        column![row1, row2, body, mtext_toolbar::status_bar(ed, width)]
             .spacing(6)
             .width(width)
             .height(height),

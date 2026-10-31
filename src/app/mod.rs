@@ -1569,6 +1569,10 @@ pub(super) struct OpenCADStudio {
     mtext_click_time: Option<Instant>,
     mtext_click_off: usize,
     mtext_click_count: u8,
+    /// The last text copied in the MTEXT editor: its plain text (what the
+    /// system clipboard got) and the same characters as formatted MTEXT, so
+    /// pasting it back keeps superscript, fractions and formatting.
+    mtext_clipboard: Option<(String, String)>,
     /// Pending model-space plot window (x0, y0, x1, y1) in world XY, or None.
     plot_window: Option<(f64, f64, f64, f64)>,
     /// Sheet the Plot dialog opens with when the layout has no page setup;
@@ -2192,6 +2196,8 @@ pub enum ColorPickTarget {
     PlotStyle,
     /// Selected entities' colour (left properties panel).
     Properties,
+    /// The MTEXT editor's background mask colour.
+    MTextMask,
     /// Selected entities' background colour (hatch / MTEXT background row).
     PropertiesBg,
     /// A named per-entity Properties colour field.
@@ -4787,8 +4793,6 @@ pub enum Message {
     MTextFmt(mtext_editor::MTextFmt),
     /// Toolbar height field changed.
     MTextHeight(String),
-    /// MText wrapping width changed from the editor slider.
-    MTextRectWidth(f64),
     /// Toolbar text-style dropdown changed.
     MTextStyle(String),
     /// Toolbar font dropdown changed.
@@ -4812,6 +4816,40 @@ pub enum Message {
     MTextInsert(String),
     /// Per-object annotation flag edited from the text toolbar.
     MTextAnnotative(bool),
+    /// The rotation field, in degrees, as typed.
+    MTextRotation(String),
+    /// Open a toolbar menu, or close it (`None`, or its own trigger again).
+    MTextMenu(Option<mtext_editor::EditorMenu>),
+    /// A menu action: the menu closes, then the message runs.
+    MTextMenuPick(Box<Message>),
+    /// Bullets, numbering, or (`None`) plain paragraphs again.
+    MTextList(Option<mtext_editor::ListKind>),
+    /// Insert a tab at the caret.
+    MTextTab,
+    /// The line spacing factor typed in the Paragraph menu.
+    MTextLineSpacingInput(String),
+    /// Line spacing exactly the factor (`true`) or at least it.
+    MTextLineSpacingMode(bool),
+    /// Background mask on or off.
+    MTextMaskToggle,
+    /// Mask colour: the drawing background (`None`) or a colour of its own.
+    MTextMaskColor(Option<AcadColor>),
+    /// The mask's border offset factor, as typed.
+    MTextMaskScale(String),
+    /// The MTEXT's drawing direction.
+    MTextDirection(codec::entities::DrawingDirection),
+    /// Open (or, from its own row, close) the Fraction panel.
+    MTextFractionOpen,
+    /// A Fraction panel field, as typed.
+    MTextFractionPart(mtext_editor::FractionPart, String),
+    /// The Fraction panel's stacking form.
+    MTextFractionKind(codec::entities::mtext_format::StackingType),
+    /// Insert the Fraction panel's fraction.
+    MTextFractionInsert,
+    /// The status bar's box-width field, as typed.
+    MTextRectWidthField(String),
+    /// A ruler drag: the width while it moves, `None` when it ends.
+    MTextBoxDrag(Option<f64>),
     /// Column layout controls.
     MTextColumnMode(String),
     MTextColumnCount(String),
@@ -5870,6 +5908,7 @@ impl OpenCADStudio {
             mtext_click_time: None,
             mtext_click_off: 0,
             mtext_click_count: 0,
+            mtext_clipboard: None,
             plot_window: None,
             plot_paper: crate::io::paper_catalog::default_paper().clone(),
             plot_orientation: crate::io::paper_catalog::Orientation::Landscape,

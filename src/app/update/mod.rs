@@ -7802,29 +7802,19 @@ impl OpenCADStudio {
                 self.mtext_apply_span_number("height", s);
                 Task::none()
             }
-            Message::MTextRectWidth(width) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.rect_width = width.max(1e-6);
-                    ed.keep_width = true;
-                }
-                self.rebuild_mtext_preview();
-                Task::none()
-            }
             Message::MTextColorChanged(color) => {
                 self.mtext_apply_color(color);
                 Task::none()
             }
             Message::MTextColorPickerToggle => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.menu = None;
                     ed.color_picker_open = !ed.color_picker_open;
                 }
                 Task::none()
             }
             Message::MTextStyle(s) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.style = s;
-                }
-                self.rebuild_mtext_preview();
+                self.mtext_object_style(s);
                 Task::none()
             }
             Message::MTextFont(f) => {
@@ -7867,8 +7857,82 @@ impl OpenCADStudio {
                 self.mtext_type(&value);
                 Task::none()
             }
+            Message::MTextMenu(menu) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.menu = if ed.menu == menu { None } else { menu };
+                    ed.color_picker_open = false;
+                }
+                Task::none()
+            }
+            Message::MTextList(kind) => {
+                self.mtext_list(kind);
+                Task::none()
+            }
+            Message::MTextTab => {
+                self.mtext_type("\t");
+                Task::none()
+            }
+            Message::MTextLineSpacingInput(value) => {
+                self.mtext_line_spacing_input(value);
+                Task::none()
+            }
+            Message::MTextLineSpacingMode(exact) => {
+                self.mtext_line_spacing_mode(exact);
+                Task::none()
+            }
+            Message::MTextMaskToggle => {
+                self.mtext_mask_toggle();
+                Task::none()
+            }
+            Message::MTextMaskColor(color) => {
+                self.mtext_mask_color(color);
+                Task::none()
+            }
+            Message::MTextMaskScale(value) => {
+                self.mtext_mask_scale(value);
+                Task::none()
+            }
+            Message::MTextDirection(direction) => {
+                self.mtext_direction(direction);
+                Task::none()
+            }
+            Message::MTextFractionOpen => {
+                self.mtext_fraction_open();
+                Task::none()
+            }
+            Message::MTextFractionPart(part, value) => {
+                self.mtext_fraction_part(part, value);
+                Task::none()
+            }
+            Message::MTextFractionKind(kind) => {
+                self.mtext_fraction_kind(kind);
+                Task::none()
+            }
+            Message::MTextFractionInsert => {
+                self.mtext_fraction_insert();
+                Task::none()
+            }
+            Message::MTextRectWidthField(value) => {
+                self.mtext_rect_width_field(value);
+                Task::none()
+            }
+            Message::MTextBoxDrag(width) => {
+                self.mtext_box_drag(width);
+                Task::none()
+            }
+            Message::MTextMenuPick(message) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.menu = None;
+                }
+                self.update(*message)
+            }
+            Message::MTextRotation(value) => {
+                self.mtext_rotation(value);
+                Task::none()
+            }
             Message::MTextAnnotative(value) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.record_undo();
                     ed.annotative = value;
                 }
                 self.rebuild_mtext_preview();
@@ -7960,6 +8024,7 @@ impl OpenCADStudio {
             }
             Message::MTextJustify(ap) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.record_undo();
                     ed.attachment = ap;
                 }
                 self.rebuild_mtext_preview();
@@ -7971,7 +8036,9 @@ impl OpenCADStudio {
             }
             Message::MTextLineSpacing(f) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.record_undo();
                     ed.line_spacing = f;
+                    ed.line_spacing_draft = None;
                 }
                 self.rebuild_mtext_preview();
                 Task::none()
@@ -8012,6 +8079,7 @@ impl OpenCADStudio {
                     3 => self.mtext_select_all(),
                     _ => {
                         if let Some(ed) = self.mtext_editor.as_mut() {
+                            ed.typing_format = Default::default();
                             ed.sel_anchor = off;
                             ed.sel = Some((off, off));
                             ed.caret = off;
@@ -8023,6 +8091,7 @@ impl OpenCADStudio {
             }
             Message::MTextSelTo(off) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.typing_format = Default::default();
                     let a = ed.sel_anchor;
                     ed.sel = Some((a.min(off), a.max(off)));
                     ed.caret = off;
@@ -8048,6 +8117,10 @@ impl OpenCADStudio {
             }
             Message::MTextOk => {
                 let committed = self.mtext_commit();
+                // A draft that could not be saved stays open with its message.
+                if self.mtext_editor.is_some() {
+                    return Task::none();
+                }
                 self.post_editor_closed(committed)
             }
             Message::MTextApply => {
@@ -8233,7 +8306,14 @@ impl OpenCADStudio {
             Message::MTextPasteClip(text) => {
                 if let Some(text) = text.filter(|t| !t.is_empty()) {
                     // CR/LF arrive as line breaks; MText keeps "\n", drop "\r".
-                    self.mtext_type(&text.replace('\r', ""));
+                    let text = text.replace('\r', "");
+                    match self.mtext_clipboard.clone() {
+                        // Copied in this editor: paste it with its formatting.
+                        Some((plain, fragment)) if plain.replace('\r', "") == text => {
+                            self.raw_paste_fragment(&fragment)
+                        }
+                        _ => self.mtext_type(&text),
+                    }
                     self.rebuild_mtext_preview();
                 }
                 Task::none()

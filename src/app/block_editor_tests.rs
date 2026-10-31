@@ -3284,6 +3284,45 @@ fn visibility_ribbon_manager_cancel_validation_and_single_undo() {
     );
 }
 
+/// The dialog carries a Help control that explains itself on the command
+/// line; it must not close the dialog or disturb the staged edits.
+#[test]
+fn visibility_dialog_help_explains_itself_without_touching_the_staged_edits() {
+    use crate::ui::window::block_visibility::Action as A;
+    let (mut app, target) = visibility_editor();
+    let i = app.active_tab;
+    visibility_action(&mut app, A::Open(target));
+    visibility_action(&mut app, A::Name("Alternate".into()));
+    visibility_action(&mut app, A::New);
+    let staged = app.block_visibility.as_ref().unwrap().edited.states.len();
+    let selected = app.block_visibility.as_ref().unwrap().selected;
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    visibility_action(&mut app, A::Help);
+    assert_eq!(
+        app.active_modal,
+        Some(ModalKind::BlockVisibility),
+        "Help must leave the dialog open"
+    );
+    let help = app.command_line.history.last().unwrap().text.clone();
+    assert!(
+        help.contains("visibility state"),
+        "Help should explain what the dialog does, got {help:?}"
+    );
+    assert_eq!(
+        app.block_visibility.as_ref().unwrap().edited.states.len(),
+        staged,
+        "Help must not change the staged state list"
+    );
+    assert_eq!(
+        app.block_visibility.as_ref().unwrap().selected,
+        selected,
+        "Help must not change the selection"
+    );
+    assert_eq!(app.tabs[i].scene.document, before, "Help must not apply");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+}
+
 #[test]
 fn visibility_ribbon_new_modes_state_selection_and_native_roundtrip() {
     use crate::ui::window::block_visibility::{Action as A, NewVisibility as V};

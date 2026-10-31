@@ -169,6 +169,15 @@ impl OpenCADStudio {
                 }
                 self.active_modal = None;
             }
+            Action::Help => {
+                self.command_line.push_info(
+                    crate::t!(
+                        "A visibility state controls which objects a block shows. This dialog lists the states, marks the current one, and creates, renames, reorders or deletes them. OK applies the changes; Cancel discards them."
+                    )
+                    .as_ref(),
+                );
+                return Task::none();
+            }
             action => {
                 let Some(state) = self.block_visibility.as_mut() else {
                     return Task::none();

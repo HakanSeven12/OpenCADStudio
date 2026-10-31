@@ -56,6 +56,7 @@ pub enum Action {
     SetCurrent,
     Move(bool),
     Apply,
+    Help,
 }
 
 pub(crate) struct State {
@@ -191,6 +192,7 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
                     .on_press(send(Action::Apply))
                     .style(button::primary),
                 button(text(crate::t!("Cancel").into_owned())).on_press(Message::CloseModal),
+                button(text(crate::t!("Help").into_owned())).on_press(send(Action::Help)),
             ]
             .spacing(8),
         ]

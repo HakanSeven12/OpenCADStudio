@@ -25,7 +25,7 @@ impl OrientationParameterCommand {
             kind,
             base: None,
             second: None,
-            perpendicular: false,
+            perpendicular: kind == Kind::Alignment,
             choosing_type: false,
         }
     }

@@ -6662,6 +6662,64 @@ fn block_runtime_native_roles_drag_cancel_undo_redo_and_preserve_relocated_grips
 }
 
 #[test]
+fn alignment_parameter_defaults_to_perpendicular_and_accepts_an_explicit_type() {
+    use crate::scene::block_orientation_parameter::{self as orientation, Kind};
+    use codec::objects::{DynamicBlockData, ObjectType};
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let perpendicular = |doc: &codec::Document, handle: Handle| match &doc.objects[&handle] {
+        ObjectType::DynamicBlock(object) => match &object.data {
+            DynamicBlockData::AlignmentParameter(p) => p.align_perpendicular,
+            _ => panic!(),
+        },
+        _ => panic!(),
+    };
+    let _ = app.dispatch_command("BPARAMETER ALIGNMENT");
+    feed(&mut app, "0,0");
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .prompt()
+        .contains("<Perpendicular>"));
+    feed(&mut app, "10,0");
+    let first = orientation::parameters(&app.tabs[i].scene.document, definition)[0].handle;
+    assert!(perpendicular(&app.tabs[i].scene.document, first));
+    let _ = app.dispatch_command("BPARAMETER ALIGNMENT");
+    feed(&mut app, "0,0");
+    feed(&mut app, "TYPE");
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .prompt()
+        .contains("Choose alignment type"));
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .prompt()
+        .contains("<Perpendicular>"));
+    feed(&mut app, "T");
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .prompt()
+        .contains("<Tangent>"));
+    feed(&mut app, "10,0");
+    let second = orientation::parameters(&app.tabs[i].scene.document, definition)
+        .into_iter()
+        .find(|p| p.handle != first)
+        .unwrap()
+        .handle;
+    assert!(!perpendicular(&app.tabs[i].scene.document, second));
+    assert!(perpendicular(&app.tabs[i].scene.document, first));
+}
+
+#[test]
 fn block_alignment_type_placement_properties_history_and_native_roundtrips() {
     use crate::scene::block_orientation_parameter::{self as orientation, Kind};
     use codec::objects::{DynamicBlockData, ObjectType};
@@ -6733,7 +6791,7 @@ fn block_alignment_runtime_grip_events_preview_history_and_native_roundtrips() {
             let (mut app, reference) = fixture();
             begin(&mut app, reference);
             let source = app.active_tab;
-            let _ = app.run_command_line(if perpendicular { "BPARAMETER ALIGNMENT 0,0 TYPE P 10,0" } else { "BPARAMETER ALIGNMENT 0,0 10,0" });
+            let _ = app.run_command_line(if perpendicular { "BPARAMETER ALIGNMENT 0,0 10,0" } else { "BPARAMETER ALIGNMENT 0,0 TYPE T 10,0" });
             let definition = app.tabs[source].active_block_edit_session().unwrap().br_handle;
             let parameter = crate::scene::block_orientation_parameter::parameters(&app.tabs[source].scene.document, definition)[0].handle;
             config::set_location(&mut app.tabs[source].scene.document, definition, parameter, 0, Vector3::new(5., 7., 0.)).unwrap();
@@ -6896,7 +6954,7 @@ fn block_alignment_runtime_rejects_stale_sources_and_reevaluates_targets() {
     app.tabs[i].scene.select_entity(reference, true); app.tabs[i].selected_handle = Some(reference);
     assert!(app.start_test_action_grip(reference, current.id));
     let result = app.tabs[i].active_cmd.as_mut().unwrap().on_point(cursor);
-    // A target hidden after preview must not impose its old tangent at commit.
+    // A target hidden after preview must not impose its old direction at commit.
     app.tabs[i].scene.select_entity(target, true); app.tabs[i].scene.hide_selected();
     let _ = app.handle_block_alignment(result);
     let after = app.tabs[i].scene.alignment_grips(reference).remove(0);

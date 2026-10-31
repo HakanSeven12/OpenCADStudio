@@ -1149,12 +1149,51 @@ impl Scene {
             .add_entity(EntityType::BlockEnd(block_end))
             .map_err(|e| e.to_string())?;
         if let Some(stale) = stale {
-            self.document.remove_entity(stale);
+            // A record can name body geometry as its terminator; removing it
+            // blindly would delete the drawing, so only a real ENDBLK owned by
+            // this record (or unowned) is replaced.
+            let removable = matches!(
+                self.document.get_entity(stale),
+                Some(EntityType::BlockEnd(block))
+                    if block.common.owner_handle.is_null()
+                        || block.common.owner_handle == br_handle
+            );
+            if removable {
+                self.document.remove_entity(stale);
+            }
         }
         if let Some(record) = self.document.block_records.get_mut(name) {
             record.block_end_handle = end_handle;
         }
         Ok(())
+    }
+
+    /// Re-append the terminator of `name` after its current body — for a
+    /// definition whose contents grew after it was created (a block-editor
+    /// save, a reference-edit save). A definition already terminated after its
+    /// body is left untouched.
+    pub(crate) fn reterminate_block_definition(&mut self, name: &str) -> Result<(), String> {
+        let Some((br_handle, end, last_body)) =
+            self.document.block_records.get(name).map(|record| {
+                let last_body = record
+                    .entity_handles
+                    .iter()
+                    .map(|handle| handle.value())
+                    .max()
+                    .unwrap_or(0);
+                (record.handle, record.block_end_handle, last_body)
+            })
+        else {
+            return Err(format!("Block \"{name}\" does not exist."));
+        };
+        if !end.is_null()
+            && end.value() > last_body
+            && matches!(self.document.get_entity(end), Some(EntityType::BlockEnd(_)))
+        {
+            return Ok(());
+        }
+        let stale = (!end.is_null()).then_some(end);
+        self.close_block_definition(name, br_handle, stale)
     }
 
     /// A 40 × 40, 32-bit bottom-up DIB of the block's geometry: white strokes
@@ -3625,6 +3664,67 @@ impl Scene {
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// Move the terminator of every definition that grew in place. A path that
+/// appends entities into an existing definition — a reloaded external
+/// reference, a rebuilt representation — can leave the ENDBLK below them;
+/// records already terminated after their body are not touched. Model and
+/// paper space are laid out by the document layer and stay as they are.
+pub(crate) fn normalize_block_terminators(document: &mut codec::Document) {
+    let model_space = document.header.model_space_block_handle;
+    let paper_space = document.header.paper_space_block_handle;
+    let names: Vec<String> = document
+        .block_records
+        .iter()
+        .filter(|record| record.handle != model_space && record.handle != paper_space)
+        .filter(|record| {
+            let end = record.block_end_handle;
+            let last_body = record
+                .entity_handles
+                .iter()
+                .map(|handle| handle.value())
+                .max()
+                .unwrap_or(0);
+            !end.is_null()
+                && (end.value() <= last_body
+                    || !matches!(document.get_entity(end), Some(EntityType::BlockEnd(_))))
+        })
+        .map(|record| record.name.clone())
+        .collect();
+    for name in names {
+        let Some(br_handle) = document.block_records.get(&name).map(|br| br.handle) else {
+            continue;
+        };
+        let stale = document
+            .block_records
+            .get(&name)
+            .map(|br| br.block_end_handle)
+            .filter(|handle| {
+                matches!(
+                    document.get_entity(*handle),
+                    Some(EntityType::BlockEnd(block))
+                        if block.common.owner_handle.is_null()
+                            || block.common.owner_handle == br_handle
+                )
+            });
+        let end_handle = document.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        if document
+            .add_entity(EntityType::BlockEnd(block_end))
+            .is_err()
+        {
+            continue;
+        }
+        if let Some(stale) = stale {
+            document.remove_entity(stale);
+        }
+        if let Some(record) = document.block_records.get_mut(&name) {
+            record.block_end_handle = end_handle;
         }
     }
 }

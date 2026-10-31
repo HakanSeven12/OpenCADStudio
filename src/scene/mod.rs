@@ -68,6 +68,7 @@ mod entity;
 pub use camera_ops::named_view_center;
 pub(crate) use entity::gradient_tint_color;
 pub use entity::CreateBlockOptions;
+pub(crate) use entity::normalize_block_terminators;
 mod group_layer;
 #[cfg(test)]
 mod hatch_boundary;

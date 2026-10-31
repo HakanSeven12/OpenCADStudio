@@ -485,6 +485,10 @@ fn resolve_xrefs_with_filter(
                     remove_pipe_symbols(doc, &block_name);
                     ensure_block_entities(doc, &block_name);
                     merge_xref_into_block(doc, &block_name, br_handle, outcome.document);
+                    // The merged body landed above the pre-merge ENDBLK; any
+                    // definition whose terminator now trails its body is
+                    // re-terminated.
+                    crate::scene::normalize_block_terminators(doc);
                     if visretain {
                         restore_dependent_layers(doc, &block_name, kept_layers);
                     }
@@ -2787,7 +2791,7 @@ mod tests {
     use super::{
         apply_pathtype, child_key, detach_reference, replace_path_prefix, resolve_xrefs_for_keys,
         restore_dependent_layers, set_ref_path, set_ref_type, snapshot_dependent_layers,
-        unload_reference,
+        unload_reference, XrefStatus,
     };
     use crate::io::xref_model::{Pathtype, RefKind, RefStatus, RefType};
 
@@ -3040,6 +3044,51 @@ mod tests {
             .filter(|e| e.common().owner_handle == br_h)
             .collect();
         assert!(owned.is_empty());
+    }
+
+    #[test]
+    fn a_reloaded_reference_ends_its_definition_after_the_merged_body() {
+        // A reload replaces the definition body. The terminator written before
+        // the merge belongs after the imported entities, not below them.
+        let dir = xref_tmpdir("endorder");
+        let mut source = codec::Document::new();
+        let mut line = codec::entities::Line::new();
+        line.start = codec::types::Vector3::ZERO;
+        line.end = codec::types::Vector3::new(5.0, 0.0, 0.0);
+        line.common.owner_handle = source.header.model_space_block_handle;
+        source.add_entity(codec::EntityType::Line(line)).unwrap();
+        let bytes = crate::io::save_to_bytes(&source, "dwg", source.version).unwrap();
+        let path = dir.join("order.dwg");
+        std::fs::write(&path, &bytes).unwrap();
+
+        let (mut doc, key) = xref_doc_with("ORDER", &path.to_string_lossy());
+        let mut keys = HashSet::default();
+        keys.insert(codec::types::Handle::new(key));
+        let infos = resolve_xrefs_for_keys(&mut doc, &dir, &keys);
+        assert!(infos
+            .iter()
+            .any(|info| info.name == "ORDER" && info.status == XrefStatus::Loaded));
+
+        let record = doc.block_records.get("ORDER").expect("the record exists");
+        let marker = record.block_entity_handle.value();
+        let end = record.block_end_handle.value();
+        let body: Vec<_> = record
+            .entity_handles
+            .iter()
+            .map(|handle| handle.value())
+            .collect();
+        assert!(!body.is_empty(), "the reload merged the source body");
+        assert!(body.iter().all(|handle| *handle > marker));
+        let last = body.iter().max().copied().unwrap();
+        assert!(
+            end > last,
+            "the ENDBLK follows the merged body: body {body:?}, end {end}"
+        );
+        assert!(matches!(
+            doc.get_entity(codec::types::Handle::new(end)),
+            Some(codec::EntityType::BlockEnd(_))
+        ));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

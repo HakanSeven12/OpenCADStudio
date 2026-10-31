@@ -252,3 +252,103 @@ fn a_raw_redefine_also_ends_after_its_new_body() {
         "the old ENDBLK is replaced, not left behind"
     );
 }
+
+/// A definition whose terminator handle names one of its own body lines.
+fn corrupt_definition() -> (codec::Document, Handle) {
+    let mut document = codec::Document::new();
+    let mut record = codec::tables::BlockRecord::new("CORRUPT");
+    record.handle = document.allocate_handle();
+    let br = record.handle;
+    document
+        .block_records
+        .add(record)
+        .expect("the record is added");
+    let mut marker = codec::entities::Block::new("CORRUPT", Vector3::ZERO);
+    marker.common.handle = document.allocate_handle();
+    marker.common.owner_handle = br;
+    let marker_handle = marker.common.handle;
+    document.add_entity(EntityType::Block(marker)).unwrap();
+    let mut body = Line::from_points(Vector3::ZERO, Vector3::new(3.0, 0.0, 0.0));
+    body.common.handle = document.allocate_handle();
+    body.common.owner_handle = br;
+    let body_handle = body.common.handle;
+    document.add_entity(EntityType::Line(body)).unwrap();
+    let record = document.block_records.get_mut("CORRUPT").unwrap();
+    record.block_entity_handle = marker_handle;
+    record.entity_handles = vec![body_handle];
+    record.block_end_handle = body_handle;
+    (document, body_handle)
+}
+
+#[test]
+fn a_terminator_naming_body_geometry_is_replaced_but_the_geometry_is_kept() {
+    let (mut document, body_handle) = corrupt_definition();
+
+    crate::scene::normalize_block_terminators(&mut document);
+
+    assert!(
+        document.get_entity(body_handle).is_some(),
+        "repairing the terminator leaves body geometry alone"
+    );
+    assert_ends_after_body(&document, "CORRUPT");
+}
+
+#[test]
+fn reterminating_a_definition_keeps_body_geometry_named_as_its_terminator() {
+    let mut scene = Scene::new();
+    scene.document = corrupt_definition().0;
+    let body_handle = scene
+        .document
+        .block_records
+        .get("CORRUPT")
+        .unwrap()
+        .entity_handles[0];
+
+    scene
+        .reterminate_block_definition("CORRUPT")
+        .expect("the definition is re-terminated");
+
+    assert!(
+        scene.document.get_entity(body_handle).is_some(),
+        "repairing the terminator leaves body geometry alone"
+    );
+    assert_ends_after_body(&scene.document, "CORRUPT");
+}
+
+#[test]
+fn normalizing_never_invents_a_terminator_for_model_space() {
+    let mut scene = Scene::new();
+    let model_space = scene.document.header.model_space_block_handle;
+    let name = scene
+        .document
+        .block_records
+        .iter()
+        .find(|record| record.handle == model_space)
+        .map(|record| record.name.clone())
+        .expect("the model-space record exists");
+    scene
+        .document
+        .block_records
+        .get_mut(&name)
+        .unwrap()
+        .block_end_handle = Handle::NULL;
+    let next_handle = scene.document.next_handle();
+
+    crate::scene::normalize_block_terminators(&mut scene.document);
+
+    assert!(
+        scene
+            .document
+            .block_records
+            .get(&name)
+            .unwrap()
+            .block_end_handle
+            .is_null(),
+        "model space is written by the document layer, not by definition repair"
+    );
+    assert_eq!(
+        scene.document.next_handle(),
+        next_handle,
+        "normalizing does not allocate a handle"
+    );
+}

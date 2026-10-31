@@ -55,6 +55,33 @@ fn members(app: &OpenCADStudio) -> Vec<Handle> {
         .clone()
 }
 
+fn assert_block_ends_after_its_body(app: &OpenCADStudio, name: &str) {
+    let document = &app.tabs[app.active_tab].scene.document;
+    let record = document
+        .block_records
+        .get(name)
+        .expect("the record is added");
+    let marker = record.block_entity_handle.value();
+    let end = record.block_end_handle.value();
+    let body: Vec<_> = record
+        .entity_handles
+        .iter()
+        .map(|handle| handle.value())
+        .collect();
+    assert!(
+        body.iter().all(|handle| *handle > marker),
+        "body handles follow the BLOCK marker: {body:?}"
+    );
+    assert!(
+        end > *body.iter().max().expect("the body is not empty"),
+        "the ENDBLK handle follows the body: marker {marker}, body {body:?}, end {end}"
+    );
+    assert!(
+        matches!(document.get_entity(Handle::new(end)), Some(EntityType::BlockEnd(_))),
+        "the record's end handle names an ENDBLK entity"
+    );
+}
+
 fn main_depth(app: &OpenCADStudio) -> usize {
     let tab = &app.tabs[app.active_tab];
     tab.block_edit_history
@@ -5343,6 +5370,43 @@ fn drawing_history_retains_the_paper_layout_after_save_and_undo() {
     app.redo_steps(1);
     assert!(!app.tabs[i].scene.document.header.show_model_space);
     assert_eq!(members(&app).len(), 2);
+}
+
+#[test]
+fn saving_from_the_block_editor_ends_the_definition_after_its_body() {
+    let (mut app, reference) = fixture();
+    let i = app.active_tab;
+    begin(&mut app, reference);
+    circle(&mut app, 1.0);
+    assert!(app.save_block_edit(i));
+    assert_block_ends_after_its_body(&app, "EDIT_ME");
+}
+
+#[test]
+fn undoing_and_redoing_a_block_editor_save_keeps_the_terminator_after_the_body() {
+    let (mut app, reference) = fixture();
+    let i = app.active_tab;
+    begin(&mut app, reference);
+    circle(&mut app, 1.0);
+    let _ = app.dispatch_command("BSAVE");
+    assert_block_ends_after_its_body(&app, "EDIT_ME");
+    let _ = app.dispatch_command("BCLOSE");
+    app.undo_steps(1);
+    assert_block_ends_after_its_body(&app, "EDIT_ME");
+    app.redo_steps(1);
+    assert_block_ends_after_its_body(&app, "EDIT_ME");
+}
+
+#[test]
+fn saving_without_edits_adds_no_undo_entry() {
+    let (mut app, reference) = fixture();
+    let i = app.active_tab;
+    begin(&mut app, reference);
+    circle(&mut app, 1.0);
+    assert!(app.save_block_edit(i));
+    let depth = main_depth(&app);
+    assert!(app.save_block_edit(i));
+    assert_eq!(main_depth(&app), depth, "a no-edit save adds no undo entry");
 }
 
 #[test]

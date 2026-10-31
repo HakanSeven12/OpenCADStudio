@@ -2319,6 +2319,50 @@ mod block_base_point_tests {
         );
     }
 
+    /// The definition body is replaced on save, so the terminator has to move
+    /// after the new body.
+    #[test]
+    fn a_refedit_save_ends_the_definition_after_its_body() {
+        let mut app = OpenCADStudio::new_for_test();
+        let handle = block_and_instance_with_base(&mut app, "REFEDIT_ORDER");
+        let i = app.active_tab;
+        let _ = app.dispatch_command(&format!("REFEDIT_BEGIN:{}", handle.value()));
+        assert!(
+            app.tabs[i].refedit_session.is_some(),
+            "setup: REFEDIT_BEGIN opens a session"
+        );
+        let _ = app.dispatch_command("REFCLOSE_SAVE");
+        assert!(app.tabs[i].refedit_session.is_none());
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("REFEDIT_ORDER")
+            .expect("the block record");
+        let marker = record.block_entity_handle.value();
+        let end = record.block_end_handle.value();
+        let body: Vec<_> = record
+            .entity_handles
+            .iter()
+            .map(|h| h.value())
+            .collect();
+        assert!(
+            body.iter().all(|h| *h > marker),
+            "body handles follow the BLOCK marker: {body:?}"
+        );
+        assert!(
+            end > *body.iter().max().expect("the body is not empty"),
+            "the ENDBLK handle follows the body: marker {marker}, body {body:?}, end {end}"
+        );
+        assert!(
+            matches!(
+                app.tabs[i].scene.document.get_entity(codec::Handle::new(end)),
+                Some(EntityType::BlockEnd(_))
+            ),
+            "the record's end handle names an ENDBLK entity"
+        );
+    }
+
     /// base-point follow-up fix: the dynamic-block visibility grip is a
     /// block-definition coordinate, so it follows the base-point convention
     /// too: (100,100) + Rot(30)*2*((12,3) - (10,5)) = (105.464102, 98.535898).

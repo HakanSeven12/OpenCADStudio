@@ -747,6 +747,12 @@ impl OpenCADStudio {
             }
             self.tabs[i].scene.visibility_states.remove(&definition);
         }
+        // The saved definition's terminator belongs after its body. The undo
+        // entry below is taken afterwards, so it carries the swap.
+        if let Err(error) = self.tabs[i].scene.reterminate_block_definition(&name) {
+            self.command_line.push_error(&error);
+            return false;
+        }
         if let Some(delta) = self.block_edit_delta(i, true) {
             let mut history = self.tabs[i].block_edit_history.take().unwrap();
             std::mem::swap(&mut self.tabs[i].history, &mut history.main);

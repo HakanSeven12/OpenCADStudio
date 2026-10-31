@@ -9083,7 +9083,14 @@ properties={:.1}ms picked={}",
                 if self.tabs[i].scene.update_entity(original.clone()) {
                     restored.push((*handle, crate::scene::ChangeKind::Modified));
                 }
-                self.tabs[i].scene.add_entity_clone(moved);
+                let copy = self.tabs[i].scene.add_entity_clone(moved);
+                // A copied associative array gets its own blocks and action.
+                crate::scene::assoc_array::clone_array_for_copy(
+                    &mut self.tabs[i].scene,
+                    *handle,
+                    copy,
+                    &Default::default(),
+                );
             }
             self.tabs[i]
                 .scene

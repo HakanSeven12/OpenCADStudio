@@ -95,7 +95,10 @@ pub(crate) fn parameters(document: &Document, definition: Handle) -> Vec<Paramet
                     Kind::XY,
                     &p.parameter,
                     vec![p.x_label.clone(), p.y_label.clone()],
-                    [p.x_value, p.y_value],
+                    [
+                        p.parameter.definition_end_point.y - p.parameter.definition_base_point.y,
+                        p.parameter.definition_end_point.x - p.parameter.definition_base_point.x,
+                    ],
                 ),
                 _ => return None,
             };
@@ -195,7 +198,10 @@ pub(crate) fn create(
     let angle_name = unique("Angle");
     let x_label = unique("DistanceX");
     let y_label = unique("DistanceY");
-    let values = offsets(kind, base, end, label);
+    let values = match kind {
+        Kind::XY => [end.x - base.x, end.y - base.y],
+        _ => offsets(kind, base, end, label),
+    };
     let (graph, slots) = authoring::prepare(document, definition)?;
     let (class, cpp) = kind.class();
     let (grip_class, grip_cpp) = match kind {
@@ -449,16 +455,18 @@ pub(crate) fn reframe(
             {
                 *point = transform.apply(*point);
             }
-            if let Some(label) = labels.first() {
+            if kind == Kind::XY {
+                *x = native.definition_end_point.x - native.definition_base_point.x;
+                if let Some(y) = y {
+                    *y = native.definition_end_point.y - native.definition_base_point.y;
+                }
+            } else if let Some(label) = labels.first() {
                 *x = offsets(
                     kind,
                     native.definition_base_point,
                     native.definition_end_point,
                     transform.apply(*label),
                 )[0];
-            }
-            if let (Some(y), Some(label)) = (y, labels.get(1)) {
-                *y = transform.apply(*label).x - native.definition_base_point.x;
             }
             changed += 1;
         }
@@ -550,7 +558,7 @@ mod tests {
                 }
                 DynamicBlockData::XYParameter(p) => {
                     assert_ne!(p.x_label, p.y_label);
-                    assert_eq!([p.x_value, p.y_value], [5.0, -1.0]);
+                    assert_eq!([p.x_value, p.y_value], [4.0, 4.0]);
                     &p.parameter
                 }
                 _ => panic!("native parameter"),

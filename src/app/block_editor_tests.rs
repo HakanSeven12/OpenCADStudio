@@ -3572,6 +3572,68 @@ fn xy_parameter_prompts_for_grip_count_and_places_an_automatic_label() {
 }
 
 #[test]
+fn xy_parameter_stores_endpoint_distances_and_reads_typed_points_absolutely() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let values = |app: &OpenCADStudio| -> ([f64; 2], Vector3, Vector3) {
+        let parameters = crate::scene::block_distance_parameter::parameters(
+            &app.tabs[i].scene.document,
+            definition,
+        );
+        let placed = parameters.last().unwrap();
+        let codec::objects::ObjectType::DynamicBlock(object) =
+            &app.tabs[i].scene.document.objects[&placed.handle]
+        else {
+            panic!()
+        };
+        let codec::objects::DynamicBlockData::XYParameter(parameter) = &object.data else {
+            panic!()
+        };
+        (
+            [parameter.x_value, parameter.y_value],
+            placed.native.definition_base_point,
+            placed.native.definition_end_point,
+        )
+    };
+
+    let _ = app.dispatch_command("BPARAMETER XY");
+    feed(&mut app, "10,10");
+    feed(&mut app, "60,30");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(
+        values(&app),
+        ([50., 20.], Vector3::new(10., 10., 0.), Vector3::new(60., 30., 0.)),
+        "x_value/y_value carry the endpoint distances"
+    );
+    let placed = crate::scene::block_distance_parameter::parameters(
+        &app.tabs[i].scene.document,
+        definition,
+    )
+    .into_iter()
+    .last()
+    .unwrap();
+    assert_eq!(
+        placed.offsets,
+        [20., 50.],
+        "the automatic labels still sit on the dimension lines"
+    );
+
+    let _ = app.run_command_line("BPARAMETER XY 2,3 22,13");
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "the bare Enter commits the default grip count"
+    );
+    assert_eq!(
+        values(&app),
+        ([20., 10.], Vector3::new(2., 3., 0.), Vector3::new(22., 13., 0.)),
+        "a typed pair is an absolute location on the automation path too"
+    );
+}
+
+#[test]
 fn distance_parameter_cancel_chooser_invalid_endpoint_and_discard_are_safe() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

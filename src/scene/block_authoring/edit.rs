@@ -45,14 +45,17 @@ pub fn items(doc: &Document, definition: Handle) -> Vec<Item> {
             (Part::End, p.native.definition_end_point),
         ];
         // Polar's second label is derived from its angle arc, not an editable offset.
-        grips.extend(
-            graphic
-                .labels
-                .iter()
-                .take(if p.kind == distance::Kind::XY { 2 } else { 1 })
-                .enumerate()
-                .map(|(i, (p, _))| (Part::Label(i), *p)),
-        );
+        // XY labels sit on the dimension lines derived from the endpoint.
+        if p.kind != distance::Kind::XY {
+            grips.extend(
+                graphic
+                    .labels
+                    .iter()
+                    .take(1)
+                    .enumerate()
+                    .map(|(i, (p, _))| (Part::Label(i), *p)),
+            );
+        }
         result.push(Item {
             handle: p.handle,
             name: p.labels.join(" / "),
@@ -270,6 +273,10 @@ pub fn move_part(
                     return Err("Parameter endpoints must remain distinct and finite.");
                 }
             }
+            if let DynamicBlockData::XYParameter(p) = &mut object.data {
+                p.x_value = p.parameter.definition_end_point.x - p.parameter.definition_base_point.x;
+                p.y_value = p.parameter.definition_end_point.y - p.parameter.definition_base_point.y;
+            }
             match &mut object.data {
                 DynamicBlockData::PointParameter(p) => match part {
                     Part::Point => {
@@ -303,13 +310,6 @@ pub fn move_part(
                     }
                 }
                 DynamicBlockData::XYParameter(p) => {
-                    if let Part::Label(index) = part {
-                        if index == 0 {
-                            p.x_value = at.y - p.parameter.definition_base_point.y
-                        } else {
-                            p.y_value = at.x - p.parameter.definition_base_point.x
-                        }
-                    }
                     if (p.parameter.definition_end_point.x - p.parameter.definition_base_point.x)
                         .abs()
                         < 1e-10

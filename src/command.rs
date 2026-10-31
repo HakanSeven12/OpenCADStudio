@@ -1912,7 +1912,8 @@ pub enum CmdResult {
         end: DVec3,
         reference: DVec3,
     },
-    /// Place a native two-point parameter after its base, end and label picks.
+    /// Place a native two-point parameter: Linear and Polar take a base, end and
+    /// label pick; XY takes its grip count and labels itself at the endpoint.
     PlaceBlockDistanceParameter {
         document_id: u64,
         definition: Handle,
@@ -1920,6 +1921,8 @@ pub enum CmdResult {
         base: DVec3,
         end: DVec3,
         label: DVec3,
+        /// XY parameter grip count chosen at authoring time, when asked.
+        grips: Option<usize>,
     },
     /// Place a native Point parameter after both authoring picks complete.
     PlaceBlockPointParameter {

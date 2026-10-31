@@ -87,6 +87,7 @@ impl OpenCADStudio {
             base,
             end,
             label,
+            grips,
         } = result
         else {
             unreachable!()
@@ -125,6 +126,18 @@ impl OpenCADStudio {
             vector(label),
         )
         .expect("validated parameter placement");
+        if let Some(count) = grips
+            .filter(|_| kind == crate::scene::block_distance_parameter::Kind::XY)
+            .filter(|count| *count != 1)
+        {
+            crate::scene::block_grips::config::set(
+                &mut self.tabs[i].scene.document,
+                definition,
+                parameter,
+                Some(count),
+            )
+            .expect("validated XY grip count");
+        }
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;

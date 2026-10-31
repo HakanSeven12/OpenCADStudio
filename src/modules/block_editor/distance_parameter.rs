@@ -1,4 +1,5 @@
-//! Three-pick authoring shared by Linear, Polar and XY parameters.
+//! Authoring shared by Linear, Polar and XY parameters: Linear and Polar take a
+//! label pick, XY asks for its grip count and labels itself at the endpoint.
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::{
     block_distance_parameter::{self, Kind},
@@ -13,6 +14,7 @@ pub struct DistanceParameterCommand {
     kind: Kind,
     base: Option<DVec3>,
     end: Option<DVec3>,
+    grips: Option<usize>,
 }
 
 impl DistanceParameterCommand {
@@ -23,7 +25,26 @@ impl DistanceParameterCommand {
             kind,
             base: None,
             end: None,
+            grips: None,
         }
+    }
+    fn asking_grips(&self) -> bool {
+        self.kind == Kind::XY && self.end.is_some() && self.grips.is_none()
+    }
+    fn finish(&self, label: DVec3, grips: Option<usize>) -> CmdResult {
+        CmdResult::PlaceBlockDistanceParameter {
+            document_id: self.document_id,
+            definition: self.definition,
+            kind: self.kind,
+            base: self.base.unwrap(),
+            end: self.end.unwrap(),
+            label,
+            grips,
+        }
+    }
+    fn commit_grips(&self, grips: usize) -> CmdResult {
+        let end = self.end.unwrap();
+        self.finish(end, Some(grips))
     }
 }
 
@@ -36,6 +57,8 @@ impl CadCommand for DistanceParameterCommand {
             "Specify parameter base point:"
         } else if self.end.is_none() {
             "Specify parameter endpoint:"
+        } else if self.asking_grips() {
+            "Specify number of grips [0/1/2/4] <1>:"
         } else {
             "Specify parameter label location:"
         };
@@ -47,6 +70,11 @@ impl CadCommand for DistanceParameterCommand {
         .into_owned()
     }
     fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if self.asking_grips() {
+            return CmdResult::ReportError(
+                crate::t!("Enter the number of grips: 0, 1, 2 or 4.").into_owned(),
+            );
+        }
         if !point.is_finite() {
             return CmdResult::ReportError(
                 crate::t!("Specify a finite parameter location.").into_owned(),
@@ -65,18 +93,30 @@ impl CadCommand for DistanceParameterCommand {
         ) {
             return CmdResult::ReportError(crate::t!(error).into_owned());
         }
-        let Some(end) = self.end else {
+        if self.end.is_none() {
             self.end = Some(point);
             return CmdResult::NeedPoint;
-        };
-        CmdResult::PlaceBlockDistanceParameter {
-            document_id: self.document_id,
-            definition: self.definition,
-            kind: self.kind,
-            base,
-            end,
-            label: point,
         }
+        self.finish(point, None)
+    }
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if !self.asking_grips() {
+            return None;
+        }
+        let grips = match text.trim() {
+            "" => 1,
+            "0" => 0,
+            "1" => 1,
+            "2" => 2,
+            "4" => 4,
+            _ => {
+                return Some(CmdResult::ReportError(
+                    crate::t!("Enter the number of grips: 0, 1, 2 or 4.").into_owned(),
+                ))
+            }
+        };
+        self.grips = Some(grips);
+        Some(self.commit_grips(grips))
     }
     fn on_preview_wires(&mut self, point: DVec3) -> Vec<WireModel> {
         let Some(base) = self.base.filter(|_| point.is_finite()) else {
@@ -90,7 +130,7 @@ impl CadCommand for DistanceParameterCommand {
                 [base, DVec3::new(base.x, end.y, base.z)],
             ];
         }
-        if self.end.is_some() {
+        if self.end.is_some() && !self.asking_grips() {
             if self.kind == Kind::XY {
                 let x = DVec3::new(base.x, point.y, base.z);
                 let y = DVec3::new(point.x, base.y, base.z);
@@ -124,6 +164,10 @@ impl CadCommand for DistanceParameterCommand {
             .collect()
     }
     fn on_enter(&mut self) -> CmdResult {
+        if self.asking_grips() {
+            self.grips = Some(1);
+            return self.commit_grips(1);
+        }
         CmdResult::Cancel
     }
 }

@@ -3062,7 +3062,11 @@ fn distance_parameter_batch_three_picks_local_undo_redo_and_saved_parent_undo() 
             app.tabs[i].scene.document, before,
             "base and endpoint are preview only"
         );
-        feed(&mut app, "1,8");
+        if *kind == "XY" {
+            feed(&mut app, "1");
+        } else {
+            feed(&mut app, "1,8");
+        }
         assert_eq!(distance_parameter_count(&app), index + 1);
         assert_eq!(app.tabs[i].history.undo_stack.len(), index + 1);
         assert!(app.tabs[i].scene.preview_wires.is_empty());
@@ -3109,6 +3113,71 @@ fn distance_parameter_batch_three_picks_local_undo_redo_and_saved_parent_undo() 
 }
 
 #[test]
+fn xy_parameter_prompts_for_grip_count_and_places_an_automatic_label() {
+    use crate::scene::block_grips::config;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let parameters = |app: &OpenCADStudio| -> Vec<Handle> {
+        crate::scene::block_distance_parameter::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .map(|parameter| parameter.handle)
+            .collect()
+    };
+    let _ = app.dispatch_command("BPARAMETER XY");
+    feed(&mut app, "0,0");
+    feed(&mut app, "6,2");
+    let prompt = app.tabs[i].active_cmd.as_ref().unwrap().prompt().to_string();
+    assert!(
+        prompt.contains("Specify number of grips [0/1/2/4] <1>:"),
+        "{prompt}"
+    );
+    let before = app.tabs[i].scene.document.clone();
+    for invalid in ["3", "-1", "five", "1,8"] {
+        app.command_line.last_error = None;
+        feed(&mut app, invalid);
+        assert_eq!(app.tabs[i].scene.document, before);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Enter the number of grips: 0, 1, 2 or 4."),
+            "{invalid}"
+        );
+        assert!(app.tabs[i].active_cmd.is_some());
+    }
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(distance_parameter_count(&app), 1);
+    let default = parameters(&app)[0];
+    assert_eq!(config::count(&app.tabs[i].scene.document, definition, default), Some(1));
+    let placed = crate::scene::block_distance_parameter::parameters(
+        &app.tabs[i].scene.document,
+        definition,
+    )
+    .into_iter()
+    .next()
+    .unwrap();
+    assert_eq!(placed.offsets, [2.0, 6.0], "the label follows the endpoint");
+    let mut seen = vec![default];
+    for count in ["4", "0", "2"] {
+        let _ = app.dispatch_command("BPARAMETER XY");
+        feed(&mut app, "0,0");
+        feed(&mut app, "6,2");
+        feed(&mut app, count);
+        assert!(app.tabs[i].active_cmd.is_none(), "the grip count commits the parameter");
+        let placed = *parameters(&app)
+            .iter()
+            .find(|handle| !seen.contains(handle))
+            .unwrap();
+        seen.push(placed);
+        assert_eq!(
+            config::count(&app.tabs[i].scene.document, definition, placed),
+            Some(count.parse().unwrap())
+        );
+    }
+}
+
+#[test]
 fn distance_parameter_cancel_chooser_invalid_endpoint_and_discard_are_safe() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -3137,7 +3206,11 @@ fn distance_parameter_cancel_chooser_invalid_endpoint_and_discard_are_safe() {
             "invalid endpoint can be retried"
         );
         feed(&mut app, "6,7");
-        feed(&mut app, "1,8");
+        if kind == "XY" {
+            feed(&mut app, "1");
+        } else {
+            feed(&mut app, "1,8");
+        }
         assert_eq!(distance_parameter_count(&app), 1);
         app.undo_steps(1);
     }
@@ -3173,6 +3246,7 @@ fn distance_parameter_stale_context_and_invalid_result_do_not_start_history() {
                 base: glam::DVec3::ZERO,
                 end,
                 label: glam::DVec3::ZERO,
+                grips: None,
             },
         );
         assert_eq!(app.tabs[i].scene.document, before);

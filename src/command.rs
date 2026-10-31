@@ -3937,6 +3937,10 @@ mod constraint_registry_tests {
             "FXCONSTRAINT",
             "GCFIX",
             "SYCONSTRAINT",
+            "GCPARALLEL",
+            "GCCOLLINEAR",
+            "GCTANGENT",
+            "GCSYMMETRIC",
             "DCONSTRAINT",
             "ACONSTRAINT",
         ] {

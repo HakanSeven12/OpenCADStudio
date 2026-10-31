@@ -388,7 +388,10 @@ fn command_category(name: &str) -> &'static str {
         "GEOMCONSTRAINT",
         "GCCOINCIDENT",
         "GCCOLLINEAR",
+        "GCPARALLEL",
         "GCPERPENDICULAR",
+        "GCTANGENT",
+        "GCSYMMETRIC",
         "QCONSTRAINT",
         "PCONSTRAINT",
         "GCHORIZONTAL",
@@ -3655,6 +3658,78 @@ mod tests {
             })
             .unwrap_or(0);
         assert_eq!(horizontal, 2, "Enter applied the remembered type: {accepted}");
+    }
+
+    /// The dedicated geometric-constraint names run the same handlers as the
+    /// umbrella's tokens, so the two surfaces cannot drift.
+    #[test]
+    fn gc_named_constraints_run_the_umbrella_handlers() {
+        use crate::scene::parametric_constraints::{ConstraintKind, ParametricScope};
+
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,5 16,9"}));
+        let lines: Vec<String> = request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["handle"].as_str().unwrap().to_string())
+            .collect();
+
+        request(&mut app, json!({"op":"select","handles":[&lines[0], &lines[1]]}));
+        let parallel = request(&mut app, json!({"op":"run","cmd":"GCPARALLEL"}));
+        assert_eq!(parallel["ok"], true, "{parallel}");
+        let parallel_count = app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .map(|set| {
+                set.constraints
+                    .iter()
+                    .filter(|constraint| constraint.kind == ConstraintKind::Parallel)
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(
+            parallel_count, 1,
+            "GCPARALLEL must add the parallel relation: {parallel}"
+        );
+
+        // A fresh drawing keeps the second pair clear of the first relation.
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,5 16,9"}));
+        let lines: Vec<String> = request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["handle"].as_str().unwrap().to_string())
+            .collect();
+        request(&mut app, json!({"op":"select","handles":[&lines[0], &lines[1]]}));
+        let collinear = request(&mut app, json!({"op":"run","cmd":"GCCOLLINEAR"}));
+        assert_eq!(collinear["ok"], true, "{collinear}");
+        let collinear_count = app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .map(|set| {
+                set.constraints
+                    .iter()
+                    .filter(|constraint| constraint.kind == ConstraintKind::Colinear)
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(
+            collinear_count, 1,
+            "GCCOLLINEAR must add the collinear relation: {collinear}"
+        );
+
+        // With nothing selected the pick-driven names wait for their objects.
+        request(&mut app, json!({"op":"select","handles":[]}));
+        for cmd in ["GCTANGENT", "GCSYMMETRIC"] {
+            let waiting = request(&mut app, json!({"op":"run","cmd":cmd}));
+            assert_eq!(waiting["status"], "waiting_input", "{cmd}: {waiting}");
+            request(&mut app, json!({"op":"cancel"}));
+        }
     }
 
     #[test]

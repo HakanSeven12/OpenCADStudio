@@ -1959,7 +1959,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "TCONSTRAINT" => {
+            "TCONSTRAINT" | "GCTANGENT" => {
                 use crate::command::CmdResult;
                 use crate::modules::parametric::TangentConstraintCommand;
 
@@ -2035,10 +2035,10 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
-            "PCONSTRAINT" | "LCONSTRAINT" | "NRCONSTRAINT" => {
+            "PCONSTRAINT" | "LCONSTRAINT" | "NRCONSTRAINT" | "GCPARALLEL" | "GCCOLLINEAR" => {
                 match cmd {
-                    "PCONSTRAINT" => self.geom_constraint_last = "Parallel",
-                    "LCONSTRAINT" => self.geom_constraint_last = "Collinear",
+                    "PCONSTRAINT" | "GCPARALLEL" => self.geom_constraint_last = "Parallel",
+                    "LCONSTRAINT" | "GCCOLLINEAR" => self.geom_constraint_last = "Collinear",
                     _ => {}
                 }
                 let handles = self.tabs[i].scene.selected_handles_in_order();
@@ -2056,8 +2056,12 @@ impl OpenCADStudio {
                     use crate::command::CmdResult;
                     use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
                     let (kind, label) = match cmd {
-                        "PCONSTRAINT" => (ConstraintKind::Parallel, "Parallel constraint"),
-                        "LCONSTRAINT" => (ConstraintKind::Colinear, "Colinear constraint"),
+                        "PCONSTRAINT" | "GCPARALLEL" => {
+                            (ConstraintKind::Parallel, "Parallel constraint")
+                        }
+                        "LCONSTRAINT" | "GCCOLLINEAR" => {
+                            (ConstraintKind::Colinear, "Colinear constraint")
+                        }
                         _ => (ConstraintKind::Normal, "Normal constraint"),
                     };
                     return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
@@ -2111,7 +2115,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "SYCONSTRAINT" => {
+            "SYCONSTRAINT" | "GCSYMMETRIC" => {
                 self.geom_constraint_last = "Symmetric";
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {

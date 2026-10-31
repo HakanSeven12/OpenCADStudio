@@ -1701,9 +1701,16 @@ impl OpenCADStudio {
             .into_iter()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect::<Vec<_>>();
+        // The prompt names the first object as the reference; a tangent solve
+        // from scratch is free to turn the moving line and carry it across
+        // the plane. Seed the smallest move before solving.
+        let pre_move: Vec<(Handle, EntityType)> = self
+            .slide_second_line_onto_tangent(first, second)
+            .into_iter()
+            .collect();
         self.tabs[i]
             .scene
-            .bump_entities_with_initial_parametric_policy(&changes, &[first], true, &[]);
+            .bump_entities_with_initial_parametric_policy(&changes, &[first], true, &pre_move);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
@@ -1713,6 +1720,72 @@ impl OpenCADStudio {
             self.commit_undo_delta(i, pd);
         }
         None
+    }
+
+    /// Slide the second-picked line along its own normal until the datum
+    /// circle touches it. The direction and length stay put, so the seeded
+    /// state is exactly tangent and the solve has nothing left to project.
+    fn slide_second_line_onto_tangent(
+        &mut self,
+        datum: crate::scene::parametric_constraints::ParametricRef,
+        moving: crate::scene::parametric_constraints::ParametricRef,
+    ) -> Option<(Handle, EntityType)> {
+        let i = self.active_tab;
+        if datum.marker.is_some() || moving.marker.is_some() {
+            return None;
+        }
+        let (cx, cy, radius) = {
+            let document = &self.tabs[i].scene.document;
+            match document.get_entity(datum.entity)? {
+                codec::EntityType::Circle(circle) => {
+                    (circle.center.x, circle.center.y, circle.radius)
+                }
+                codec::EntityType::Arc(arc) => (arc.center.x, arc.center.y, arc.radius),
+                _ => return None,
+            }
+        };
+        let before = self.tabs[i].scene.document.get_entity_arc(moving.entity)?;
+        let codec::EntityType::Line(line) = before.as_ref() else {
+            return None;
+        };
+        let (dx, dy) = (line.end.x - line.start.x, line.end.y - line.start.y);
+        let length = dx.hypot(dy);
+        if length <= 1.0e-12 {
+            return None;
+        }
+        let (mut nx, mut ny) = (-dy / length, dx / length);
+        let side = (cx - line.start.x) * nx + (cy - line.start.y) * ny;
+        // The normal points at the centre, and the slide is the distance the
+        // line still has to cover to reach the radius.
+        if side < 0.0 {
+            nx = -nx;
+            ny = -ny;
+        }
+        let shift = side.abs() - radius;
+        if shift.abs() <= 1.0e-12 {
+            return None;
+        }
+        let start = codec::types::Vector3::new(
+            line.start.x + nx * shift,
+            line.start.y + ny * shift,
+            line.start.z,
+        );
+        let end = codec::types::Vector3::new(
+            line.end.x + nx * shift,
+            line.end.y + ny * shift,
+            line.end.z,
+        );
+        self.tabs[i].scene.record_undo_before(moving.entity, Some(before.clone()));
+        if let Some(codec::EntityType::Line(line)) = self.tabs[i]
+            .scene
+            .document
+            .get_entity_mut(moving.entity)
+        {
+            line.start = start;
+            line.end = end;
+        }
+        self.tabs[i].scene.mark_entity_dirty(moving.entity);
+        Some((moving.entity, before.as_ref().clone()))
     }
 
     pub(super) fn handle_add_concentric_constraint(

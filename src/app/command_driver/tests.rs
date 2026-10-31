@@ -233,6 +233,24 @@ mod parametric_constraint_undo_tests {
             )))
     }
 
+    fn add_circle(app: &mut OpenCADStudio, cx: f64, cy: f64, radius: f64) -> Handle {
+        let mut circle = codec::entities::Circle::new();
+        circle.center = codec::types::Vector3::new(cx, cy, 0.0);
+        circle.radius = radius;
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(codec::EntityType::Circle(circle))
+    }
+
+    fn circle_center_radius(app: &OpenCADStudio, handle: Handle) -> ([f64; 2], f64) {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(codec::EntityType::Circle(circle)) => {
+                ([circle.center.x, circle.center.y], circle.radius)
+            }
+            other => panic!("expected a Circle, got {other:?}"),
+        }
+    }
+
     fn line_angle_deg(app: &OpenCADStudio, handle: Handle) -> f64 {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
             Some(codec::EntityType::Line(l)) => (l.end.y - l.start.y)
@@ -403,6 +421,56 @@ mod parametric_constraint_undo_tests {
         assert_segment_unmoved(&app, vertical, [0.0, 0.0], [0.0, 100.0]);
         app.redo_steps(1);
         assert_eq!(line_segment(&app, vertical), turned);
+    }
+
+    /// A tangent constraint holds the first-picked circle and slides the
+    /// second-picked line straight onto it. A solve from scratch is free to
+    /// turn the line and drift it off the exact tangent.
+    #[test]
+    fn tangent_constraint_slides_the_second_line_onto_the_first_circle() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let circle = add_circle(&mut app, 0.0, 0.0, 20.0);
+        let line = add_line(&mut app, -100.0, 221.0, 100.0, 221.0);
+        let _ = app.apply_cmd_result(CmdResult::AddTangentConstraint {
+            first: ParametricRef::whole(circle),
+            second: ParametricRef::whole(line),
+            label: "Tangent constraint",
+        });
+        let (center, radius) = circle_center_radius(&app, circle);
+        assert!(
+            center[0].abs() < 1e-9 && center[1].abs() < 1e-9 && (radius - 20.0).abs() < 1e-9,
+            "the datum circle should not move: {center:?} r {radius}"
+        );
+        let (start, end) = line_segment(&app, line);
+        assert!(
+            (start[0] + 100.0).abs() < 1e-6
+                && (start[1] - 20.0).abs() < 1e-6
+                && (end[0] - 100.0).abs() < 1e-6
+                && (end[1] - 20.0).abs() < 1e-6,
+            "the line should keep its direction and slide down onto the circle: {start:?} -> {end:?}"
+        );
+    }
+
+    /// The pick order decides which entity gives way: a line picked first
+    /// stays put and the circle slides onto it.
+    #[test]
+    fn tangent_constraint_holds_the_first_line_and_moves_the_circle() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let line = add_line(&mut app, -100.0, 0.0, 100.0, 0.0);
+        let circle = add_circle(&mut app, 0.0, 50.0, 20.0);
+        let _ = app.apply_cmd_result(CmdResult::AddTangentConstraint {
+            first: ParametricRef::whole(line),
+            second: ParametricRef::whole(circle),
+            label: "Tangent constraint",
+        });
+        assert_segment_unmoved(&app, line, [-100.0, 0.0], [100.0, 0.0]);
+        let (center, radius) = circle_center_radius(&app, circle);
+        assert!(
+            center[0].abs() < 1e-9 && (center[1] - 20.0).abs() < 1e-9 && (radius - 20.0).abs() < 1e-9,
+            "the circle should slide onto the line along the normal: {center:?} r {radius}"
+        );
     }
 
     /// Constraint state and solved geometry share one undo/redo transaction.

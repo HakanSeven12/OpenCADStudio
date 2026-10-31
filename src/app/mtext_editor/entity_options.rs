@@ -15,7 +15,7 @@ const WINDOW: i32 = 0x02;
 #[derive(Clone, Debug, PartialEq)]
 pub struct MaskDraft {
     pub on: bool,
-    /// Drawing background colour (AutoCAD's flags 3) or `color` (flags 1).
+    /// Drawing background colour (flags 3) or `color` (flags 1).
     pub window: bool,
     pub color: Color,
     /// The border offset factor field, as typed.

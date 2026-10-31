@@ -60,15 +60,6 @@ pub(super) fn format_row(ed: &MTextEditorState) -> Element<'static, Message> {
             hint,
         )
     };
-    let glyph = |glyph: &'static str, message: Message, hint: String| {
-        tip(
-            button(text(glyph).size(13))
-                .on_press(message)
-                .padding([2, 6])
-                .style(button_style),
-            hint,
-        )
-    };
     // A format button shows whether the selection (or what is typed next)
     // has it: highlighted when on, a warning border when mixed, inert when
     // the text or selection cannot take it. The hint says which.
@@ -124,8 +115,16 @@ pub(super) fn format_row(ed: &MTextEditorState) -> Element<'static, Message> {
             label!("strike")
         ),
         separator(),
-        glyph("↶", Message::MTextUndo, label!("undo")),
-        glyph("↷", Message::MTextRedo, label!("redo")),
+        icon(
+            include_bytes!("../../../../assets/icons/ui/undo.svg"),
+            Message::MTextUndo,
+            label!("undo")
+        ),
+        icon(
+            include_bytes!("../../../../assets/icons/ui/redo.svg"),
+            Message::MTextRedo,
+            label!("redo")
+        ),
         separator(),
         icon(
             include_bytes!("../../../../assets/icons/mt_align_left.svg"),

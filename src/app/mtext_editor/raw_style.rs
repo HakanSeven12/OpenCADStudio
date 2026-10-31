@@ -22,7 +22,7 @@ pub(in crate::app) struct ObjectStyle {
 
 /// The `code` controls ahead of the first character that apply to the whole
 /// text: the object defaults. That is a top-level control, or one inside
-/// groups that hold all of the text, as AutoCAD writes a whole-text font
+/// groups that hold all of the text, as other writers store a whole-text font
 /// (`{\fArial|b0|i0;...}`). A control in a group that ends before the last
 /// character, or after any character, formats only part of it.
 pub(super) fn leading_controls(raw: &str, code: char) -> Vec<Range<usize>> {
@@ -69,7 +69,9 @@ pub(super) fn leading_controls(raw: &str, code: char) -> Vec<Range<usize>> {
 }
 
 fn width_code(raw: &str, range: &Range<usize>) -> Result<f64, EditError> {
-    raw[range.start + 2..range.end - 1]
+    // `\W<value>;`: a code cut short (no `;`, no value) names no width.
+    raw.get(range.start + 2..range.end.saturating_sub(1))
+        .ok_or(EditError::ObjectDefault)?
         .parse::<f64>()
         .ok()
         .filter(|v| v.is_finite() && *v > 0.)
@@ -189,7 +191,7 @@ fn uniform_font(cells: &[Cell]) -> Option<MTextFont> {
 }
 
 /// The font the whole text is written in: the object font, or else the one
-/// font every character shares, however the codes group them (AutoCAD can
+/// font every character shares, however the codes group them (other writers can
 /// write a font group per paragraph, and text typed later can sit outside
 /// the first one).
 fn text_font(raw: &str) -> Option<MTextFont> {
@@ -557,8 +559,8 @@ mod tests {
     }
 
     #[test]
-    fn an_autocad_whole_text_font_group_is_the_object_font() {
-        // AutoCAD wraps a whole-text font in one group around all the text.
+    fn a_whole_text_font_group_is_the_object_font() {
+        // A writer may wrap a whole-text font in one group around all the text.
         let mut app = app(r"{\fISOCTEUR|b0|i0|c238|p34;asd\Pqwe}");
         assert_eq!(ed(&app).font, "ISOCTEUR");
         assert_eq!(ed(&app).value_origin("font"), ValueOrigin::Custom);
@@ -573,7 +575,7 @@ mod tests {
 
     #[test]
     fn a_font_every_character_shares_is_changed_whatever_groups_hold_it() {
-        // AutoCAD may write a font group per paragraph or per run: the text
+        // A writer may write a font group per paragraph or per run: the text
         // is still in one font.
         for source in [
             r"{\fISOCTEUR|b0|i0|c238|p34;asd}\P{\fISOCTEUR|b0|i0|c238|p34;qwe}",

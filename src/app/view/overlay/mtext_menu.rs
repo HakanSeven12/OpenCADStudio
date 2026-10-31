@@ -50,11 +50,46 @@ fn item_style(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// A menu row: check/glyph column, then the label.
-fn row_button(mark: &str, name: String, on_press: Message) -> Element<'static, Message> {
+/// What a menu row shows before its label: nothing, the check, an icon, or
+/// the character the row inserts or names (`½`, `1.`, `•`).
+#[derive(Clone, Copy)]
+enum Mark {
+    Check,
+    Svg(&'static [u8]),
+    Text(&'static str),
+}
+
+impl From<&'static str> for Mark {
+    fn from(text: &'static str) -> Self {
+        Mark::Text(text)
+    }
+}
+
+const SUPERSCRIPT: &[u8] = include_bytes!("../../../../assets/icons/mt_superscript.svg");
+const SUBSCRIPT: &[u8] = include_bytes!("../../../../assets/icons/mt_subscript.svg");
+const UPPERCASE: &[u8] = include_bytes!("../../../../assets/icons/mt_upper.svg");
+const LOWERCASE: &[u8] = include_bytes!("../../../../assets/icons/mt_lower.svg");
+const TAB: &[u8] = include_bytes!("../../../../assets/icons/ui/arrow_long_right.svg");
+const DOWN: &[u8] = include_bytes!("../../../../assets/icons/ui/tri_down.svg");
+
+fn mark_cell(mark: Mark) -> Element<'static, Message> {
+    let cell: Element<'static, Message> = match mark {
+        Mark::Check => crate::ui::icons::themed_check_cell(true),
+        Mark::Svg(bytes) => crate::ui::icons::themed(bytes, 12.0),
+        Mark::Text(text_mark) => text(text_mark).size(12).into(),
+    };
+    iced::widget::container(cell).width(22).into()
+}
+
+/// A menu row: check/icon column, then the label.
+fn row_button(
+    mark: impl Into<Mark>,
+    name: String,
+    on_press: Message,
+) -> Element<'static, Message> {
     button(
         row![
-            text(mark.to_string()).size(12).width(22),
+            mark_cell(mark.into()),
             text(name)
                 .size(11)
                 .width(Fill)
@@ -73,15 +108,15 @@ fn row_button(mark: &str, name: String, on_press: Message) -> Element<'static, M
 }
 
 /// An action: the menu closes, then `message` runs.
-fn item(mark: &str, name: String, message: Message) -> Element<'static, Message> {
+fn item(mark: impl Into<Mark>, name: String, message: Message) -> Element<'static, Message> {
     row_button(mark, name, Message::MTextMenuPick(Box::new(message)))
 }
 
-fn check(on: bool) -> &'static str {
+fn check(on: bool) -> Mark {
     if on {
-        "✓"
+        Mark::Check
     } else {
-        ""
+        Mark::Text("")
     }
 }
 
@@ -199,7 +234,7 @@ pub(super) fn toolbar_menu(ed: &MTextEditorState, menu: EditorMenu) -> Element<'
     });
     let open = shown == Some(menu);
     let base = button(
-        row![text(title(menu)).size(11), text("▾").size(11)]
+        row![text(title(menu)).size(11), crate::ui::icons::themed_arrow_down(9.0)]
             .spacing(5)
             .align_y(iced::Alignment::Center),
     )
@@ -225,18 +260,18 @@ fn more_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     Panel::new(title(EditorMenu::More), 240.0)
         .push(item(
             if ed.script_active(Script::Super) {
-                "✓"
+                Mark::Check
             } else {
-                "x²"
+                Mark::Svg(SUPERSCRIPT)
             },
             label!("superscript"),
             Message::MTextScript(true),
         ))
         .push(item(
             if ed.script_active(Script::Sub) {
-                "✓"
+                Mark::Check
             } else {
-                "x₂"
+                Mark::Svg(SUBSCRIPT)
             },
             label!("subscript"),
             Message::MTextScript(false),
@@ -260,12 +295,12 @@ fn more_panel(ed: &MTextEditorState) -> Element<'static, Message> {
         ))
         .separator()
         .push(item(
-            "AA",
+            Mark::Svg(UPPERCASE),
             label!("uppercase"),
             Message::MTextFmt(MTextFmt::Uppercase),
         ))
         .push(item(
-            "aa",
+            Mark::Svg(LOWERCASE),
             label!("lowercase"),
             Message::MTextFmt(MTextFmt::Lowercase),
         ))
@@ -284,18 +319,18 @@ fn paragraph_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     let mut panel = Panel::new(title(EditorMenu::Paragraph), 260.0)
         .push(item(
             if list == Some(ListKind::Bullet) {
-                "✓"
+                Mark::Check
             } else {
-                "•"
+                Mark::Text("•")
             },
             label!("bullets"),
             Message::MTextList(Some(ListKind::Bullet)),
         ))
         .push(item(
             if list == Some(ListKind::Number) {
-                "✓"
+                Mark::Check
             } else {
-                "1."
+                Mark::Text("1.")
             },
             label!("numbering"),
             Message::MTextList(Some(ListKind::Number)),
@@ -305,7 +340,7 @@ fn paragraph_panel(ed: &MTextEditorState) -> Element<'static, Message> {
             label!("no-list"),
             Message::MTextList(None),
         ))
-        .push(item("⇥", label!("tab"), Message::MTextTab))
+        .push(item(Mark::Svg(TAB), label!("tab"), Message::MTextTab))
         .separator();
     for (factor, name) in [(1.0, "1"), (1.5, "1.5"), (2.0, "2")] {
         panel = panel.push(item(
@@ -571,11 +606,15 @@ fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 }
 
 /// A row that cannot act here, with the reason as its hint.
-fn inert(mark: &str, name: String, reason: String) -> Element<'static, Message> {
+fn inert(
+    mark: impl Into<Mark>,
+    name: String,
+    reason: String,
+) -> Element<'static, Message> {
     iced::widget::tooltip(
         button(
             row![
-                text(mark.to_string()).size(12).width(22),
+                mark_cell(mark.into()),
                 text(name).size(11).width(Fill),
             ]
             .spacing(2)
@@ -606,7 +645,7 @@ fn background_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     }
     let mask = ed.mask();
     let panel = panel.push(row_button(
-        if mask.on { "☑" } else { "☐" },
+        check(mask.on),
         label!("use-mask"),
         Message::MTextMaskToggle,
     ));
@@ -647,15 +686,15 @@ fn position_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     let panel = Panel::new(title(EditorMenu::Position), 240.0);
     let current = ed.direction_value();
     [
-        ("", label!("direction-style"), D::ByStyle),
-        ("A", label!("normal"), D::LeftToRight),
-        ("↓", label!("vertical"), D::TopToBottom),
+        (Mark::Text(""), label!("direction-style"), D::ByStyle),
+        (Mark::Text("A"), label!("normal"), D::LeftToRight),
+        (Mark::Svg(DOWN), label!("vertical"), D::TopToBottom),
     ]
     .into_iter()
     .fold(panel, |panel, (mark, name, value)| {
         panel.push(if ed.entity_options_supported() {
             item(
-                if current == value { "✓" } else { mark },
+                if current == value { Mark::Check } else { mark },
                 name,
                 Message::MTextDirection(value),
             )

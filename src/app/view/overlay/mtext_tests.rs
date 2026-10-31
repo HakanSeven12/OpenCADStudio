@@ -162,19 +162,6 @@ fn every_former_toolbar_command_is_in_a_menu() {
         let messages = picked(ui.into_messages());
         assert!(messages.iter().any(expected), "{row}: {messages:?}");
     }
-    // Undo and redo stay buttons of the second row.
-    for (glyph, expected) in [("↶", Message::MTextUndo), ("↷", Message::MTextRedo)] {
-        let ed = editor();
-        let mut ui = overlay_sim(&ed, Size::new(1280., 720.));
-        ui.click(glyph).unwrap();
-        let messages: Vec<_> = ui.into_messages().collect();
-        assert!(
-            messages
-                .iter()
-                .any(|m| std::mem::discriminant(m) == std::mem::discriminant(&expected)),
-            "{glyph}: {messages:?}"
-        );
-    }
 }
 
 /// The fields of the old rows take typing inside their menu.

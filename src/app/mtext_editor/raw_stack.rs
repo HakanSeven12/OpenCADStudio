@@ -65,7 +65,7 @@ fn storable(part: &str) -> bool {
 }
 
 /// The `\S` code of a stack. The `^` carries no space: in a DXF file a bare
-/// caret is written as `^ ` (AutoCAD's on-disk `\S2^ ;`) and read back as `^`,
+/// caret is written as `^ ` (on disk `\S2^ ;`) and read back as `^`,
 /// so only this form reads back byte-identical from both DWG and DXF.
 fn stack_code(data: &StackingData) -> Result<String, EditError> {
     // After `^` the readers skip one space, so a lower part cannot start

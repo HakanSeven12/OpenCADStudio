@@ -20,7 +20,7 @@ The editor holds the raw value (`content`). The preview, the caret positions and
 | `raw_clear.rs` | Clear formatting: removes or splits only the codes that format the selection; the object font and width stay. |
 | `raw_span.rs` | Values for a selection (height, oblique, width factor, tracking, font, colour), paragraph alignment, indents and spacing, and replace-all. Each patch is certified to change exactly that value. |
 | `raw_stack.rs` | Superscript, subscript, Stack and the Fraction panel, all as one standard `\S` stack. |
-| `raw_list.rs` | Bullets and numbering as AutoCAD stores them (a hanging indent plus marker and tab), Enter in a list item. |
+| `raw_list.rs` | Bullets and numbering as the format stores them (a hanging indent plus marker and tab), Enter in a list item. |
 | `raw_style.rs` | Object values: the object font and width are the `\f`/`\W` that open the source; text style changes keep the width the text draws with. |
 | `raw_geometry.rs` | Object rotation. |
 | `entity_options.rs` | Background mask and drawing direction, stored on the entity. |
@@ -69,7 +69,7 @@ Saving to a DWG or DXF version that cannot hold an MTEXT feature (columns, a def
 ## Open items
 
 - **Rotation on a tilted text plane.** The codec writes the DWG x direction as `(cos r, sin r, 0)`, which leaves the text plane for any normal but Z. The editor therefore offers rotation on the XY plane only. The ignored test `rotation_tests::tilted_plane_text_keeps_its_in_plane_x_direction_through_dwg` describes the needed codec change: write and read the in-plane direction from the arbitrary-axis OCS axes.
-- **Bold and italic on stroke fonts.** AutoCAD stores bold and italic only for TrueType faces; this editor keeps its own rule (bold names the face, italic is the oblique) so stroke-font text behaves as before. Adopting the AutoCAD rule would be a separate decision.
+- **Bold and italic on stroke fonts.** The format stores bold and italic only for TrueType faces; this editor keeps its own rule (bold names the face, italic is the oblique) so stroke-font text behaves as before. Adopting the format's rule would be a separate decision.
 - **Style, Font and Color lists** are the standard drop-down lists; a font the text uses but the machine lacks is shown but not marked as missing.
 
 ## Tests

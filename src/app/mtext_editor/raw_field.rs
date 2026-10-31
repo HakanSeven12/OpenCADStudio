@@ -170,7 +170,7 @@ impl FieldHost {
     }
 }
 
-/// The FIELD container's checksum of its displayed text (AutoCAD's: each
+/// The FIELD container's checksum of its displayed text (as stored: each
 /// UTF-16 unit weighted by its 1-based position).
 fn checksum(text: &str) -> f64 {
     text.encode_utf16()

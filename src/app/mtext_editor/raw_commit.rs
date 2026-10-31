@@ -154,7 +154,7 @@ impl crate::app::OpenCADStudio {
     }
 
     /// The spacing factor typed in the Paragraph menu: kept as typed; a
-    /// factor from 0.25 to 4 applies at once, as AutoCAD accepts.
+    /// factor from 0.25 to 4 applies at once, the accepted range.
     pub(in crate::app) fn mtext_line_spacing_input(&mut self, value: String) {
         let Some(ed) = self.mtext_editor.as_mut() else {
             return;

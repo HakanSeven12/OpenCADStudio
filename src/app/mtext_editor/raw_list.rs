@@ -1,4 +1,4 @@
-//! Bullets and numbering as AutoCAD stores them: a hanging-indent paragraph
+//! Bullets and numbering as the format stores them: a hanging-indent paragraph
 //! (`\pxi-1.5,l1.5,t1.5;`, appended so it wins in its paragraph) whose text
 //! starts with its marker and a tab: `•\tText`, `1.\tText`. A list item is
 //! recognised by both, never by marker text alone.

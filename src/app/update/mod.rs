@@ -7833,6 +7833,22 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::MTextFractionOpen => {
+                self.mtext_fraction_open();
+                Task::none()
+            }
+            Message::MTextFractionPart(part, value) => {
+                self.mtext_fraction_part(part, value);
+                Task::none()
+            }
+            Message::MTextFractionKind(kind) => {
+                self.mtext_fraction_kind(kind);
+                Task::none()
+            }
+            Message::MTextFractionInsert => {
+                self.mtext_fraction_insert();
+                Task::none()
+            }
             Message::MTextRectWidthField(value) => {
                 self.mtext_rect_width_field(value);
                 Task::none()

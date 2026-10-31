@@ -27,7 +27,9 @@ mod raw_geometry;
 #[allow(dead_code)]
 mod raw_operations;
 mod raw_span;
+mod raw_stack;
 mod raw_style;
+pub(in crate::app) use raw_stack::{FractionPart, Script};
 pub(in crate::app) use raw_edit::FormatState;
 pub(in crate::app) use raw_style::ValueOrigin;
 
@@ -72,6 +74,8 @@ pub enum EditorMenu {
     Justify,
     Symbols,
     Find,
+    /// The Fraction panel, opened from More formatting.
+    Fraction,
 }
 
 /// `pick_list`-friendly wrapper for the 9 attachment points.
@@ -190,6 +194,8 @@ pub struct MTextEditorState {
     pub color_picker_open: bool,
     /// The open toolbar menu.
     pub menu: Option<EditorMenu>,
+    /// The Fraction panel's parts while it is open.
+    pub fraction: Option<raw_stack::FractionDraft>,
     /// B / I / U / overline / S switched with nothing selected, for the
     /// next typed text. Any caret move or new selection drops it.
     pub(super) typing_format: raw_edit::TypingFormat,
@@ -243,6 +249,7 @@ impl MTextEditorState {
             show_preview: true,
             color_picker_open: false,
             menu: None,
+            fraction: None,
             typing_format: Default::default(),
             glyph_boxes: Vec::new(),
             sel: None,
@@ -532,6 +539,7 @@ fn doc_to_cells(doc: &MTextDocument) -> Vec<Cell> {
 
 /// The first paragraph's properties (the para-0 default not carried by any
 /// `Break`), or the default for an empty document.
+#[cfg(test)]
 fn doc_para0(doc: &MTextDocument) -> ParagraphProperties {
     doc.paragraphs
         .first()
@@ -964,84 +972,16 @@ impl super::OpenCADStudio {
     }
 
     pub(super) fn mtext_stack_selection(&mut self) {
-        self.mtext_stack_selection_with(|plain| {
-            let (split, separator) = plain
-                .char_indices()
-                .find(|(_, ch)| matches!(ch, '/' | '#' | '^'))?;
-            let data = StackingData {
-                numerator: plain[..split].to_string(),
-                denominator: plain[split + separator.len_utf8()..].to_string(),
-                stacking_type: StackingType::from_char(separator),
-            };
-            // A `^` stack may leave one half empty: "2^" stacks as a
-            // superscript and "^2" as a subscript (#2236).
-            let one_sided = separator == '^'
-                && !(data.numerator.is_empty() && data.denominator.is_empty());
-            (one_sided || !(data.numerator.is_empty() || data.denominator.is_empty()))
-                .then_some(data)
-        });
+        self.mtext_stack();
     }
 
     /// Superscript (or subscript) the selection: a one-sided `^` stack.
     pub(super) fn mtext_script_selection(&mut self, superscript: bool) {
-        self.mtext_stack_selection_with(|plain| {
-            if plain.is_empty() || plain.contains(['\n', '^']) {
-                return None;
-            }
-            let (numerator, denominator) = if superscript {
-                (plain.to_string(), String::new())
-            } else {
-                (String::new(), plain.to_string())
-            };
-            Some(StackingData {
-                numerator,
-                denominator,
-                stacking_type: StackingType::from_char('^'),
-            })
+        self.mtext_script(if superscript {
+            Script::Super
+        } else {
+            Script::Sub
         });
-    }
-
-    /// Replace the selection with the stack `stack` makes of its plain text.
-    fn mtext_stack_selection_with(&mut self, stack: impl FnOnce(&str) -> Option<StackingData>) {
-        if let Some(ed) = self.mtext_editor.as_mut() {
-            let Some((start, end)) = ed.sel.filter(|(start, end)| start < end) else {
-                return;
-            };
-            let para0 = doc_para0(&ed.doc);
-            let mut cells = doc_to_cells(&ed.doc);
-            let end = end.min(cells.len());
-            let plain =
-                cells_to_doc(&ParagraphProperties::default(), &cells[start..end]).to_plain_text();
-            let Some(data) = stack(&plain) else {
-                return;
-            };
-            let props = cells[start..end]
-                .iter()
-                .find_map(|cell| match cell {
-                    Cell::Char(_, props) | Cell::Stack { props, .. } => Some(props.clone()),
-                    Cell::Break(..) => None,
-                })
-                .unwrap_or_default();
-            ed.record_undo();
-            let replacement = flatten_stack(&data)
-                .chars()
-                .enumerate()
-                .map(|(index, _)| Cell::Stack {
-                    data: data.clone(),
-                    props: props.clone(),
-                    head: index == 0,
-                })
-                .collect::<Vec<_>>();
-            let replacement_len = replacement.len();
-            cells.splice(start..end, replacement);
-            let new_end = start + replacement_len;
-            ed.content =
-                text_editor::Content::with_text(&cells_to_doc(&para0, &cells).to_mtext_string());
-            ed.sel = Some((start, new_end));
-            ed.caret = new_end;
-            ed.sel_anchor = start;
-        }
-        self.rebuild_mtext_preview();
     }
 
     /// Remove the character formatting of the selection, or of the whole
@@ -1350,6 +1290,8 @@ impl super::OpenCADStudio {
 mod data_tests;
 #[cfg(test)]
 mod rotation_tests;
+#[cfg(test)]
+mod stack_tests;
 
 #[cfg(test)]
 mod cell_tests {

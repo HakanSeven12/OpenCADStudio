@@ -4796,6 +4796,14 @@ pub enum Message {
     MTextMenu(Option<mtext_editor::EditorMenu>),
     /// A menu action: the menu closes, then the message runs.
     MTextMenuPick(Box<Message>),
+    /// Open (or, from its own row, close) the Fraction panel.
+    MTextFractionOpen,
+    /// A Fraction panel field, as typed.
+    MTextFractionPart(mtext_editor::FractionPart, String),
+    /// The Fraction panel's stacking form.
+    MTextFractionKind(codec::entities::mtext_format::StackingType),
+    /// Insert the Fraction panel's fraction.
+    MTextFractionInsert,
     /// The status bar's box-width field, as typed.
     MTextRectWidthField(String),
     /// A ruler drag: the width while it moves, `None` when it ends.

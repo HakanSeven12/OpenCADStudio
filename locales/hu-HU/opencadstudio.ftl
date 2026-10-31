@@ -34,6 +34,9 @@ mtext-source-errors = MTEXT
     .input = MTEXT: a beszúrandó szöveg nem támogatott vezérlőkaraktert tartalmaz.
     .projection = MTEXT: a forrás és a megjelenítés karakterpozíciói eltérnek; a módosítás nem történt meg.
     .object-default = MTEXT: az objektumalap nem választható el biztonságosan a karakterjelzőktől vagy a védett vezérlőktől.
+    .stack-text = MTEXT: az index és a tört csak egyszerű karaktereket tartalmazhat: sortörést, törtet, fordított perjelet, kapcsos zárójelet és / # ^ % ; karaktert nem.
+    .stack-format = MTEXT: az index és a tört egyetlen formázást kap; a kijelölés vegyes formázású.
+    .fraction-parts = MTEXT: a törthöz számláló és nevező is kell.
     .rotation-unsupported = MTEXT: a forgatás ezen a szövegsíkon vagy szerkesztési célon nem igazolt; az állapot változatlan maradt.
 
 mtext-object-origin = MTEXT
@@ -111,6 +114,15 @@ mtext-toolbar = MTEXT
     .counts = { $characters } karakter · { $paragraphs } bekezdés
     .box-width = Dobozszélesség
     .tip-box = A szöveg tördelési szélessége; a szöveg feletti vonalzó húzásával is állítható
+    .fraction = Tört…
+    .panel-fraction = Tört
+    .numerator = Számláló
+    .denominator = Nevező
+    .stack-horizontal = Vízszintes (vonallal)
+    .stack-diagonal = Ferde
+    .stack-tolerance = Egymás alatt, vonal nélkül
+    .insert = Beszúrás
+    .cancel = Mégse
 
 action =
     .close = Bezárás

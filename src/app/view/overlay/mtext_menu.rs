@@ -3,7 +3,10 @@
 //! one of its fields or a redraw never closes it. An action row closes the
 //! menu and then acts; a field or a toggle leaves it open.
 use super::*;
-use crate::app::mtext_editor::{EditorMenu, JustifyChoice, MTextEditorState, MTextFmt, ParaNumber};
+use crate::app::mtext_editor::{
+    EditorMenu, FractionPart, JustifyChoice, MTextEditorState, MTextFmt, ParaNumber, Script,
+};
+use codec::entities::mtext_format::StackingType;
 use iced::widget::column;
 pub(super) mod popup;
 
@@ -177,12 +180,21 @@ fn title(menu: EditorMenu) -> String {
         EditorMenu::Justify => label!("justification"),
         EditorMenu::Symbols => label!("symbols"),
         EditorMenu::Find => label!("find"),
+        EditorMenu::Fraction => label!("panel-fraction"),
     }
 }
 
 /// A second-row menu: its trigger, and its panel while it is open.
 pub(super) fn toolbar_menu(ed: &MTextEditorState, menu: EditorMenu) -> Element<'static, Message> {
-    let open = ed.menu == Some(menu);
+    // The Fraction panel opens from More formatting, under its trigger.
+    let shown = ed.menu.map(|m| {
+        if m == EditorMenu::Fraction {
+            EditorMenu::More
+        } else {
+            m
+        }
+    });
+    let open = shown == Some(menu);
     let base = button(
         row![text(title(menu)).size(11), text("▾").size(11)]
             .spacing(5)
@@ -191,7 +203,8 @@ pub(super) fn toolbar_menu(ed: &MTextEditorState, menu: EditorMenu) -> Element<'
     .on_press(Message::MTextMenu(Some(menu)))
     .padding([4, 8])
     .style(trigger_style(open));
-    let panel = open.then(|| match menu {
+    let panel = open.then(|| match ed.menu.unwrap_or(menu) {
+        EditorMenu::Fraction => fraction_panel(ed),
         EditorMenu::More => more_panel(ed),
         EditorMenu::Paragraph => paragraph_panel(ed),
         EditorMenu::Columns => columns_panel(ed),
@@ -206,12 +219,29 @@ pub(super) fn toolbar_menu(ed: &MTextEditorState, menu: EditorMenu) -> Element<'
 fn more_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     Panel::new(title(EditorMenu::More), 240.0)
         .push(item(
-            "x²",
+            if ed.script_active(Script::Super) {
+                "✓"
+            } else {
+                "x²"
+            },
             label!("superscript"),
             Message::MTextScript(true),
         ))
-        .push(item("x₂", label!("subscript"), Message::MTextScript(false)))
+        .push(item(
+            if ed.script_active(Script::Sub) {
+                "✓"
+            } else {
+                "x₂"
+            },
+            label!("subscript"),
+            Message::MTextScript(false),
+        ))
         .push(item("½", label!("stack"), Message::MTextStack))
+        .push(row_button(
+            "",
+            label!("fraction"),
+            Message::MTextFractionOpen,
+        ))
         .separator()
         .push(field(
             label!("oblique"),
@@ -423,5 +453,67 @@ fn find_panel(ed: &MTextEditorState) -> Element<'static, Message> {
             .height(ROW_H + 6.0)
             .into(),
         )
+        .build()
+}
+
+/// Numerator, denominator and stacking form; Insert writes one `\S` stack
+/// over the selection (or at the caret), or replaces the selected one.
+fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
+    let draft = ed.fraction.clone().unwrap_or_else(|| ed.fraction_draft());
+    let part = |name: String, part: FractionPart, value: String| -> Element<'static, Message> {
+        row![
+            text(name).size(11).width(Fill),
+            text_input("", &value)
+                .on_input(move |v| Message::MTextFractionPart(part, v))
+                .on_submit(Message::MTextFractionInsert)
+                .size(12)
+                .padding(2)
+                .width(96),
+        ]
+        .spacing(6)
+        .padding([0, 6])
+        .align_y(iced::Alignment::Center)
+        .height(ROW_H)
+        .into()
+    };
+    let kind = |kind: StackingType, name: String| {
+        row_button(
+            check(draft.kind == kind),
+            name,
+            Message::MTextFractionKind(kind),
+        )
+    };
+    let buttons = row![
+        Space::new().width(Fill),
+        button(text(label!("cancel")).size(11))
+            .on_press(Message::MTextFractionOpen)
+            .padding([3, 10])
+            .style(button::secondary),
+        button(text(label!("insert")).size(11))
+            .on_press(Message::MTextFractionInsert)
+            .padding([3, 10])
+            .style(button::primary),
+    ]
+    .spacing(6)
+    .padding([0, 6])
+    .align_y(iced::Alignment::Center)
+    .height(ROW_H + 6.0);
+    Panel::new(title(EditorMenu::Fraction), 240.0)
+        .push(part(
+            label!("numerator"),
+            FractionPart::Numerator,
+            draft.numerator.clone(),
+        ))
+        .push(part(
+            label!("denominator"),
+            FractionPart::Denominator,
+            draft.denominator.clone(),
+        ))
+        .separator()
+        .push(kind(StackingType::Horizontal, label!("stack-horizontal")))
+        .push(kind(StackingType::Diagonal, label!("stack-diagonal")))
+        .push(kind(StackingType::Limit, label!("stack-tolerance")))
+        .separator()
+        .push(buttons.into())
         .build()
 }

@@ -34,6 +34,9 @@ mtext-source-errors = MTEXT
     .input = MTEXT: the inserted text contains an unsupported control character.
     .projection = MTEXT: the source and rendered character positions do not agree; the edit was not applied.
     .object-default = MTEXT: the object default cannot be safely separated from character flags or protected controls.
+    .stack-text = MTEXT: an index or fraction holds plain characters only: no line break, fraction, backslash, brace or / # ^ % ; character.
+    .stack-format = MTEXT: an index or fraction takes one formatting; the selection mixes formats.
+    .fraction-parts = MTEXT: a fraction needs both a numerator and a denominator.
     .rotation-unsupported = MTEXT: rotation is not verified for this text plane or editor target; the state was left unchanged.
 
 mtext-object-origin = MTEXT
@@ -111,6 +114,15 @@ mtext-toolbar = MTEXT
     .counts = { $characters } characters · { $paragraphs } paragraphs
     .box-width = Box width
     .tip-box = The width the text wraps at; drag the ruler above the text to change it
+    .fraction = Fraction…
+    .panel-fraction = Fraction
+    .numerator = Numerator
+    .denominator = Denominator
+    .stack-horizontal = Horizontal (with line)
+    .stack-diagonal = Diagonal
+    .stack-tolerance = Stacked, no line
+    .insert = Insert
+    .cancel = Cancel
 
 action =
     .close = Κλείσιμο

@@ -831,12 +831,15 @@ pub fn search_entries() -> Vec<SearchEntry> {
     fn walk(entries: &'static [Entry], path: &str, out: &mut Vec<SearchEntry>) {
         for entry_def in entries {
             match *entry_def {
-                Cmd(label, line, _) => out.push(SearchEntry {
+                // The menu greys out what has no command yet; search leaves
+                // it out rather than offer it as runnable.
+                Cmd(label, line, _) if implemented(line) => out.push(SearchEntry {
                     label: crate::t!(label).into_owned(),
                     path: path.to_string(),
                     line,
                     icon: command_icon(line),
                 }),
+                Cmd(..) => {}
                 Sep => {}
                 Sub(label, entries) => {
                     walk(entries, &format!("{path} › {}", crate::t!(label)), out);

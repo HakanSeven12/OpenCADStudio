@@ -3406,6 +3406,100 @@ fn visibility_state_created_with_show_or_hide_sets_the_new_states_visibility() {
     assert!(parameter.all_blocks.contains(&member));
 }
 
+/// The underscore-prefixed forms create, hide and show through the selection.
+#[test]
+fn underscore_visibility_commands_act_on_states_and_the_selection() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let member = members(&app)[0];
+    let _ = app.run_command_line("BPARAMETER VISIBILITY 0,0");
+    let _ = app.dispatch_command("_BVSTATE\u{1f}NEW\u{1f}Other");
+    assert_eq!(
+        app.block_visibility_context().unwrap().current.as_deref(),
+        Some("Other"),
+        "_BVSTATE NEW switches to the new state like the plain form"
+    );
+    assert!(
+        !app.tabs[i]
+            .scene
+            .document
+            .get_entity(member)
+            .unwrap()
+            .common()
+            .invisible,
+        "the member starts visible"
+    );
+    app.tabs[i].scene.select_entity(member, true);
+    let _ = app.dispatch_command("_BVHIDE");
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(member)
+            .unwrap()
+            .common()
+            .invisible,
+        "_BVHIDE hides the selection like the plain form"
+    );
+    app.tabs[i].scene.select_entity(member, true);
+    let _ = app.dispatch_command("_BVSHOW");
+    assert!(
+        !app.tabs[i]
+            .scene
+            .document
+            .get_entity(member)
+            .unwrap()
+            .common()
+            .invisible,
+        "_BVSHOW restores it"
+    );
+}
+
+/// BVMODE 1 draws state-hidden members dimmed; BVMODE 0 hides them.
+#[test]
+fn visibility_mode_dims_the_hidden_members_it_reveals() {
+    use crate::ui::window::block_visibility::{Action as A, NewVisibility as V};
+    let (mut app, target) = visibility_editor();
+    let i = app.active_tab;
+    let member = members(&app)[0];
+    visibility_action(&mut app, A::Open(target));
+    visibility_action(&mut app, A::Name("Hidden".into()));
+    visibility_action(&mut app, A::NewVisibility(V::Hide));
+    visibility_action(&mut app, A::New);
+    visibility_action(&mut app, A::Apply);
+    visibility_action(&mut app, A::Current(target, "Hidden".into()));
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(member)
+            .unwrap()
+            .common()
+            .invisible,
+        "the Hidden state hid the member"
+    );
+    let wire_color = |app: &OpenCADStudio| {
+        app.tabs[i]
+            .scene
+            .model_tile_wires_arc(0, &crate::scene::view::camera::Camera::default(), 1.0, 800.0)
+            .iter()
+            .find(|wire| crate::scene::Scene::handle_from_wire_name(&wire.name) == Some(member))
+            .map(|wire| wire.color)
+    };
+    let _ = app.run_command_line("BVMODE 0");
+    assert!(wire_color(&app).is_none(), "hidden geometry is not drawn");
+    let _ = app.run_command_line("BVMODE 1");
+    let dimmed = wire_color(&app).expect("visibility mode draws the hidden member");
+    let _ = app.run_command_line("BVMODE 0");
+    visibility_action(&mut app, A::Current(target, "VisibilityState0".into()));
+    let plain = wire_color(&app).expect("the first state shows the member");
+    assert_ne!(
+        dimmed, plain,
+        "the revealed member is drawn dimmed, not in its usual colour"
+    );
+}
+
 #[test]
 fn visibility_ribbon_new_modes_state_selection_and_native_roundtrip() {
     use crate::ui::window::block_visibility::{Action as A, NewVisibility as V};

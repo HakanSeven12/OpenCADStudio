@@ -1412,7 +1412,7 @@ fn orientation_parameter_batch_starts_from_actual_palette_rows() {
             (
                 "authoring-tool-rotation",
                 "rotation",
-                vec!["0.35,-0.12", "0.65,-0.12", "0.35,0.2"],
+                vec!["0.35,-0.12", "0.65,-0.12", "0.35,0.2", "0.3,0.35", ""],
             ),
             (
                 "authoring-tool-alignment",
@@ -1745,7 +1745,7 @@ fn block_actions_rotate_flip_palette_requires_matching_parameters() {
             authoring_click(&mut app, point);
             assert!(app.tabs[app.active_tab].active_cmd.is_none());
         }
-        let _ = app.run_command_line("BPARAMETER ROTATION 0,0 2 0");
+        let _ = app.run_command_line("BPARAMETER ROTATION 0,0 2 0 5,5");
         let point = authoring_control(&app, "authoring-tool-flip-action");
         authoring_click(&mut app, point);
         assert!(app.tabs[app.active_tab].active_cmd.is_none());

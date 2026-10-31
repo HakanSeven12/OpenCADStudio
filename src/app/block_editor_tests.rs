@@ -975,7 +975,7 @@ fn block_parameters_rotation_only_save_close_reopen_then_flip() {
         begin(&mut app, reference);
         let i = app.active_tab;
         let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
-        let _ = app.run_command_line("BPARAMETER ROTATION 0,0 10 0");
+        let _ = app.run_command_line("BPARAMETER ROTATION 0,0 10 0 5,5");
         assert_eq!(
             actions::parameters(&app.tabs[i].scene.document, def, Kind::Rotate).len(),
             1
@@ -1084,7 +1084,7 @@ fn block_actions_rotate_flip_mouse_grips_authoring_history_and_reopen() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
     let source = app.active_tab;
-    let _ = app.run_command_line("BPARAMETER ROTATION 0,0 10 0");
+    let _ = app.run_command_line("BPARAMETER ROTATION 0,0 10 0 5,5");
     let _ = app.run_command_line("BPARAMETER FLIP 0,0 10,0 -2,2");
     let def = app.tabs[source]
         .active_block_edit_session()
@@ -2916,7 +2916,7 @@ fn orientation_parameter_batch_numeric_rotation_local_history_save_and_parent_un
     begin(&mut app, reference);
     let i = app.active_tab;
     for (index, (kind, inputs)) in [
-        ("ROTATION", vec!["0,0", "2", "90"]),
+        ("ROTATION", vec!["0,0", "2", "90", "5,5", ""]),
         ("ALIGNMENT", vec!["0,0", "0,2"]),
         ("FLIP", vec!["0,0", "0,2", "3,3"]),
     ]
@@ -3008,6 +3008,8 @@ fn orientation_parameter_chooser_cancels_invalid_picks_and_rotation_default_angl
     assert_eq!(app.tabs[i].scene.document, before);
     feed(&mut app, "2");
     feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
     assert_eq!(orientation_parameter_count(&app), 1);
     let _ = app.dispatch_command("BEDIT_DISCARD");
     assert_eq!(orientation_parameter_count(&app), 0);
@@ -3098,6 +3100,13 @@ fn rotation_parameter_accepts_a_base_angle_option() {
         prompt(&app)
     );
     feed(&mut app, "");
+    assert!(
+        prompt(&app).contains("Specify label location:"),
+        "{}",
+        prompt(&app)
+    );
+    feed(&mut app, "1,1");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
     let (_, reference_angle, end) = parameter(&app, 0);
     assert!(near(reference_angle, 2.0 * 30f64.to_radians().cos(), 1.0));
@@ -3109,6 +3118,13 @@ fn rotation_parameter_accepts_a_base_angle_option() {
     feed(&mut app, "B");
     feed(&mut app, "30");
     feed(&mut app, "60");
+    assert!(
+        prompt(&app).contains("Specify label location:"),
+        "{}",
+        prompt(&app)
+    );
+    feed(&mut app, "3,0");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
     let (_, reference_angle, end) = parameter(&app, 1);
     assert!(near(reference_angle, 2.0 * 30f64.to_radians().cos(), 1.0));
@@ -3124,6 +3140,8 @@ fn rotation_parameter_accepts_a_base_angle_option() {
         "a base angle pick returns to the default angle: {}",
         prompt(&app)
     );
+    feed(&mut app, "");
+    feed(&mut app, "7,0");
     feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
     let (base, reference_angle, end) = parameter(&app, 2);
@@ -3147,11 +3165,126 @@ fn rotation_parameter_accepts_a_base_angle_option() {
         prompt(&app)
     );
     feed(&mut app, "45");
+    assert!(
+        prompt(&app).contains("Specify label location:"),
+        "{}",
+        prompt(&app)
+    );
+    feed(&mut app, "13,1");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
     let (_, reference_angle, end) = parameter(&app, 3);
     assert!(near(reference_angle, 13.0, 0.0));
     assert!(near(end, 10.0 + 3.0 * 45f64.to_radians().cos(), 3.0 * 45f64.to_radians().sin()));
     assert_eq!(orientation_parameter_count(&app), 4);
+}
+
+#[test]
+fn rotation_parameter_takes_a_label_location_and_a_grip_count() {
+    use crate::scene::block_grips::config;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let prompt = |app: &OpenCADStudio| {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("command active")
+            .prompt()
+            .to_string()
+    };
+    let placed = |app: &OpenCADStudio| {
+        crate::scene::block_orientation_parameter::parameters(
+            &app.tabs[i].scene.document,
+            definition,
+        )
+        .into_iter()
+        .map(|parameter| {
+            let label = crate::scene::block_orientation_parameter::graphic(&parameter)
+                .labels
+                .first()
+                .map(|(point, _)| *point)
+                .expect("rotation parameter label");
+            (parameter.handle, parameter.offset, label)
+        })
+        .collect::<Vec<_>>()
+    };
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    let before = app.tabs[i].scene.document.clone();
+    feed(&mut app, "");
+    assert_eq!(
+        app.tabs[i].scene.document, before,
+        "the default angle asks for the label"
+    );
+    assert!(
+        prompt(&app).contains("Specify label location:"),
+        "{}",
+        prompt(&app)
+    );
+    feed(&mut app, "-4,0");
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert!(
+        prompt(&app).contains("Enter number of grips [0/1] <1>:"),
+        "{}",
+        prompt(&app)
+    );
+    for invalid in ["2", "-1", "four", "1,8"] {
+        app.command_line.last_error = None;
+        feed(&mut app, invalid);
+        assert_eq!(app.tabs[i].scene.document, before, "{invalid}");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Enter the number of grips: 0 or 1."),
+            "{invalid}"
+        );
+        assert!(app.tabs[i].active_cmd.is_some(), "{invalid}");
+    }
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(orientation_parameter_count(&app), 1);
+    let first = placed(&app)[0];
+    assert_eq!(
+        config::count(&app.tabs[i].scene.document, definition, first.0),
+        Some(1)
+    );
+    assert!(
+        (first.1 - 2.0).abs() < 1e-9,
+        "the label keeps its picked distance from the arc: {}",
+        first.1
+    );
+    assert!(
+        (first.2 - Vector3::new(-4.0, 0.0, 0.0)).length() < 1e-9,
+        "the label sits where it was picked: {}",
+        first.2
+    );
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "5,0");
+    feed(&mut app, "2");
+    feed(&mut app, "90");
+    feed(&mut app, "8.535534,3.535534");
+    feed(&mut app, "0");
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(orientation_parameter_count(&app), 2);
+    let second = placed(&app)[1];
+    assert_eq!(
+        config::count(&app.tabs[i].scene.document, definition, second.0),
+        Some(0)
+    );
+    assert!(
+        (second.1 - 3.0).abs() < 1e-4,
+        "the label keeps its picked distance from the arc: {}",
+        second.1
+    );
+    assert!(
+        (second.2 - Vector3::new(8.535534, 3.535534, 0.0)).length() < 1e-4,
+        "the label sits where it was picked: {}",
+        second.2
+    );
 }
 
 #[test]
@@ -3177,6 +3310,8 @@ fn orientation_parameter_stale_context_and_invalid_result_do_not_start_history()
                 base: glam::DVec3::ZERO,
                 end,
                 reference: glam::DVec3::X,
+                label_offset: None,
+                grips: None,
             },
         );
         assert_eq!(app.tabs[i].scene.document, before);
@@ -4416,7 +4551,7 @@ fn save_as_copies_native_authoring_graphs_and_keeps_reference_values_independent
     for command in [
         "BPARAMETER LINEAR 0,0 10,0 5,2",
         "BPARAMETER POLAR 0,0 10,0 5,2",
-        "BPARAMETER ROTATION 0,0 10,0 10,0",
+        "BPARAMETER ROTATION 0,0 10,0 10,0 5,5",
         "BPARAMETER FLIP 0,0 10,0 -2,2",
     ] {
         let _ = app.run_command_line(command);
@@ -6395,7 +6530,7 @@ fn block_action_base_offset_properties_refresh_references_and_keep_history() {
         let (mut app, reference) = fixture();
         begin(&mut app, reference);
         let i = app.active_tab;
-        let _ = app.run_command_line(if kind == Kind::Scale { "BPARAMETER LINEAR 0,0 10,0 5,2" } else { "BPARAMETER ROTATION 0,0 10 0" });
+        let _ = app.run_command_line(if kind == Kind::Scale { "BPARAMETER LINEAR 0,0 10,0 5,2" } else { "BPARAMETER ROTATION 0,0 10 0 5,5" });
         let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
         let parameter = actions::all_parameters(&app.tabs[i].scene.document, definition)[0].handle;
         let targets = members(&app);

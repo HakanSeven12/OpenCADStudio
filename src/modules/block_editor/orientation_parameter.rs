@@ -1,6 +1,6 @@
 //! Interactive native Rotation, Alignment and Flip placement. Rotation's base
 //! angle sets the line the default angle turns from; the radius pick supplies
-//! the length only.
+//! the length only. Rotation then takes a label location and a grip count.
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::scene::{
     block_orientation_parameter::{self, Kind},
@@ -19,6 +19,9 @@ pub struct OrientationParameterCommand {
     choosing_type: bool,
     base_angle: f64,
     choosing_base_angle: bool,
+    rotation: Option<f64>,
+    label: Option<DVec3>,
+    grips: Option<usize>,
 }
 
 impl OrientationParameterCommand {
@@ -33,12 +36,24 @@ impl OrientationParameterCommand {
             choosing_type: false,
             base_angle: 0.0,
             choosing_base_angle: false,
+            rotation: None,
+            label: None,
+            grips: None,
         }
     }
     fn asking_base_angle(&self) -> bool {
         self.kind == Kind::Rotation && self.second.is_some() && self.choosing_base_angle
     }
+    fn asking_label(&self) -> bool {
+        self.kind == Kind::Rotation && self.rotation.is_some() && self.label.is_none()
+    }
+    fn asking_grips(&self) -> bool {
+        self.kind == Kind::Rotation && self.label.is_some() && self.grips.is_none()
+    }
     fn finish(&self, end: DVec3, reference: DVec3) -> CmdResult {
+        self.place(end, reference, None)
+    }
+    fn place(&self, end: DVec3, reference: DVec3, label_offset: Option<f64>) -> CmdResult {
         let base = self.base.unwrap();
         let vector = |p: DVec3| Vector3::new(p.x, p.y, p.z);
         if let Some(error) = block_orientation_parameter::points_error(
@@ -57,16 +72,39 @@ impl OrientationParameterCommand {
             base,
             end,
             reference,
+            label_offset,
+            grips: self.grips,
         }
     }
-    fn rotation_at(&self, angle: f64) -> CmdResult {
+    fn rotation_geometry(&self, angle: f64) -> (DVec3, DVec3) {
         let base = self.base.unwrap();
         let radius = (self.second.unwrap() - base).length();
         let direction = |angle: f64| DVec3::new(angle.cos(), angle.sin(), 0.0) * radius;
-        self.finish(
+        (
             base + direction(self.base_angle + angle),
             base + direction(self.base_angle),
         )
+    }
+    fn rotation_at(&mut self, angle: f64) -> CmdResult {
+        self.rotation = Some(angle);
+        CmdResult::NeedPoint
+    }
+    fn finish_rotation(&self) -> CmdResult {
+        let angle = self.rotation.unwrap_or(0.0);
+        let (end, reference) = self.rotation_geometry(angle);
+        let label = self.label.unwrap();
+        let vector = |p: DVec3| Vector3::new(p.x, p.y, p.z);
+        let offset = block_orientation_parameter::rotation_label_offset(
+            vector(self.base.unwrap()),
+            vector(end),
+            vector(reference),
+            vector(label),
+        );
+        self.place(end, reference, offset)
+    }
+    fn commit_grips(&mut self, grips: usize) -> CmdResult {
+        self.grips = Some(grips);
+        self.finish_rotation()
     }
     fn set_base_angle(&mut self, angle: f64) {
         self.base_angle = angle.rem_euclid(std::f64::consts::TAU);
@@ -91,6 +129,10 @@ impl CadCommand for OrientationParameterCommand {
             match (self.kind, self.second.is_some()) {
                 (Kind::Rotation, false) => "Specify radius of parameter:",
                 (Kind::Rotation, true) if self.choosing_base_angle => "Specify base angle <0>:",
+                (Kind::Rotation, true) if self.asking_label() => "Specify label location:",
+                (Kind::Rotation, true) if self.asking_grips() => {
+                    "Enter number of grips [0/1] <1>:"
+                }
                 (Kind::Rotation, true) => "Specify default rotation angle or [Base angle] <0>:",
                 (Kind::Alignment, _) => {
                     if self.perpendicular {
@@ -111,7 +153,11 @@ impl CadCommand for OrientationParameterCommand {
         .into_owned()
     }
     fn options(&self) -> Vec<CmdOption> {
-        if self.kind == Kind::Rotation && self.second.is_some() && !self.choosing_base_angle {
+        if self.kind == Kind::Rotation
+            && self.second.is_some()
+            && !self.choosing_base_angle
+            && self.rotation.is_none()
+        {
             return vec![CmdOption::new(crate::t!("Base angle").as_ref(), "B")];
         }
         if self.kind != Kind::Alignment {
@@ -148,6 +194,15 @@ impl CadCommand for OrientationParameterCommand {
         }
         if self.kind == Kind::Flip && self.second.is_some() {
             return self.finish(self.second.unwrap(), point);
+        }
+        if self.asking_grips() {
+            return CmdResult::ReportError(
+                crate::t!("Enter the number of grips: 0 or 1.").into_owned(),
+            );
+        }
+        if self.asking_label() {
+            self.label = Some(point);
+            return CmdResult::NeedPoint;
         }
         let d = point - base;
         let radius = d.x.hypot(d.y);
@@ -221,6 +276,24 @@ impl CadCommand for OrientationParameterCommand {
             self.set_base_angle(value.to_radians());
             return Some(CmdResult::NeedPoint);
         }
+        if self.asking_grips() {
+            let grips = match text {
+                "" => 1,
+                "0" => 0,
+                "1" => 1,
+                _ => {
+                    return Some(CmdResult::ReportError(
+                        crate::t!("Enter the number of grips: 0 or 1.").into_owned(),
+                    ))
+                }
+            };
+            return Some(self.commit_grips(grips));
+        }
+        if self.asking_label() {
+            return Some(CmdResult::ReportError(
+                crate::t!("Specify a label location.").into_owned(),
+            ));
+        }
         if self.second.is_some()
             && matches!(
                 text.to_ascii_uppercase().as_str(),
@@ -257,12 +330,16 @@ impl CadCommand for OrientationParameterCommand {
             if !radius.is_finite() {
                 return vec![];
             }
-            let turn = if self.asking_base_angle() {
-                0.0
+            let angle = if let Some(angle) = self.rotation {
+                self.base_angle + angle
             } else {
-                self.base_angle
+                let turn = if self.asking_base_angle() {
+                    0.0
+                } else {
+                    self.base_angle
+                };
+                turn + (point.y - base.y).atan2(point.x - base.x)
             };
-            let angle = turn + (point.y - base.y).atan2(point.x - base.x);
             let end = base + DVec3::new(angle.cos(), angle.sin(), 0.0) * radius;
             lines.push(vec![base.to_array(), end.to_array()]);
             lines.push(
@@ -302,6 +379,12 @@ impl CadCommand for OrientationParameterCommand {
         if self.asking_base_angle() {
             self.set_base_angle(0.0);
             return CmdResult::NeedPoint;
+        }
+        if self.asking_grips() {
+            return self.commit_grips(1);
+        }
+        if self.asking_label() {
+            return CmdResult::Cancel;
         }
         if self.kind == Kind::Rotation && self.second.is_some() {
             self.rotation_at(0.0)

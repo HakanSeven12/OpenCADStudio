@@ -19,6 +19,8 @@ impl OpenCADStudio {
             base,
             end,
             reference,
+            label_offset,
+            grips,
         } = result
         else {
             unreachable!()
@@ -52,15 +54,28 @@ impl OpenCADStudio {
             return Task::none();
         }
         self.push_undo_snapshot(i, &format!("{} parameter", kind.name()));
-        let parameter = crate::scene::block_orientation_parameter::create(
+        let parameter = crate::scene::block_orientation_parameter::create_with_label(
             &mut self.tabs[i].scene.document,
             definition,
             kind,
             vector(base),
             vector(end),
             vector(reference),
+            label_offset,
         )
         .expect("validated parameter placement");
+        if let Some(count) = grips
+            .filter(|_| kind == crate::scene::block_orientation_parameter::Kind::Rotation)
+            .filter(|count| *count != 1)
+        {
+            crate::scene::block_grips::config::set(
+                &mut self.tabs[i].scene.document,
+                definition,
+                parameter,
+                Some(count),
+            )
+            .expect("validated Rotation grip count");
+        }
         if perpendicular {
             crate::scene::block_orientation_parameter::set_alignment_type(&mut self.tabs[i].scene.document, definition, parameter, true)
                 .expect("validated Alignment parameter placement");

@@ -1902,7 +1902,8 @@ pub enum CmdResult {
         definition: Handle,
         name: String,
     },
-    /// Place a native Rotation, Alignment or Flip parameter.
+    /// Place a native Rotation, Alignment or Flip parameter. Rotation takes a
+    /// label location, which becomes the label's distance from the arc.
     PlaceBlockOrientationParameter {
         document_id: u64,
         definition: Handle,
@@ -1911,6 +1912,8 @@ pub enum CmdResult {
         base: DVec3,
         end: DVec3,
         reference: DVec3,
+        label_offset: Option<f64>,
+        grips: Option<usize>,
     },
     /// Place a native two-point parameter: Linear and Polar take a base, end and
     /// label pick; XY takes its grip count and labels itself at the endpoint.

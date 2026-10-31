@@ -1791,6 +1791,10 @@ fn lookup_basepoint_palette_and_table_dialog_real_controls() {
             );
             let _ = app.update(Message::CommandInput(point_text.into()));
             let _ = app.update(Message::CommandSubmit);
+            if id == "authoring-tool-lookup" {
+                let _ = app.update(Message::CommandInput(String::new()));
+                let _ = app.update(Message::CommandSubmit);
+            }
         }
         let _ = app.run_command_line("BPARAMETER LINEAR 0,0 1,0 0,0.3");
         authoring_capture(&app, "lookup-basepoint-placed");

@@ -1883,12 +1883,14 @@ pub enum CmdResult {
         parameter: Handle,
         value: crate::scene::block_actions::Value,
     },
-    /// Place or relocate a Basepoint, or place a Lookup parameter.
+    /// Place or relocate a Basepoint, or place a Lookup parameter. A Lookup
+    /// takes its grip count, where `None` keeps the default one grip.
     PlaceBlockSingleParameter {
         document_id: u64,
         definition: Handle,
         kind: crate::modules::block_editor::single_parameter::Kind,
         location: DVec3,
+        grips: Option<usize>,
     },
     /// An action type was chosen that has no geometry action of its own:
     /// continue with Lookup parameter selection.

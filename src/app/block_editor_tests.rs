@@ -2665,6 +2665,7 @@ fn lookup_basepoint_placement_history_test_block_and_saved_parent_undo() {
     let _ = app.dispatch_command("BPARAMETER");
     feed(&mut app, "K");
     feed(&mut app, "2,2");
+    feed(&mut app, "");
     assert_eq!(
         block_lookup::parameters(&app.tabs[i].scene.document, definition).len(),
         1
@@ -2909,6 +2910,78 @@ fn action_type_list_appears_when_only_a_lookup_parameter_is_placed() {
     let _ = app.update(Message::CloseModal);
 }
 
+#[test]
+fn lookup_parameter_asks_for_a_grip_count_after_its_location() {
+    use crate::scene::block_grips::config;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let placed = |app: &OpenCADStudio| {
+        crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .map(|(handle, parameter)| (handle, parameter.parameter.definition_point))
+            .collect::<Vec<_>>()
+    };
+    let prompt = |app: &OpenCADStudio| {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("command active")
+            .prompt()
+            .to_string()
+    };
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "1,1");
+    assert!(
+        prompt(&app).contains("Enter number of grips [0/1] <1>:"),
+        "{}",
+        prompt(&app)
+    );
+    assert!(
+        placed(&app).is_empty(),
+        "the parameter waits for the grip count"
+    );
+    let before = app.tabs[i].scene.document.clone();
+    for invalid in ["2", "-1", "four", "5,5"] {
+        app.command_line.last_error = None;
+        feed(&mut app, invalid);
+        assert_eq!(app.tabs[i].scene.document, before, "{invalid}");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Enter the number of grips: 0 or 1."),
+            "{invalid}"
+        );
+        assert!(app.tabs[i].active_cmd.is_some(), "{invalid}");
+    }
+    feed(&mut app, "0");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let (first, location) = placed(&app)[0];
+    assert_eq!(location, Vector3::new(1.0, 1.0, 0.0));
+    assert_eq!(
+        config::count(&app.tabs[i].scene.document, definition, first),
+        Some(0)
+    );
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "3,3");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let (second, location) = placed(&app)[1];
+    assert_eq!(location, Vector3::new(3.0, 3.0, 0.0));
+    assert_eq!(
+        config::count(&app.tabs[i].scene.document, definition, second),
+        Some(1)
+    );
+
+    let _ = app.dispatch_command("BPARAMETER BASEPOINT");
+    feed(&mut app, "2,3");
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "a basepoint is one location"
+    );
+}
 
 #[test]
 fn orientation_parameter_batch_numeric_rotation_local_history_save_and_parent_undo() {

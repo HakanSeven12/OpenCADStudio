@@ -369,10 +369,8 @@ fn export_one(document: &mut Document, handle: Handle) {
     record.explodable = true;
     let record_handle = document.allocate_handle();
     let block_handle = document.allocate_handle();
-    let end_handle = document.allocate_handle();
     record.handle = record_handle;
     record.block_entity_handle = block_handle;
-    record.block_end_handle = end_handle;
     record.insert_handles = vec![handle];
     if document.block_records.add(record).is_err() {
         return;
@@ -382,11 +380,6 @@ fn export_one(document: &mut Document, handle: Handle) {
     block.common.owner_handle = record_handle;
     block.common.layer = line.common.layer.clone();
     let _ = document.add_entity(EntityType::Block(block));
-    let mut block_end = codec::entities::BlockEnd::new();
-    block_end.common.handle = end_handle;
-    block_end.common.owner_handle = record_handle;
-    block_end.common.layer = line.common.layer.clone();
-    let _ = document.add_entity(EntityType::BlockEnd(block_end));
     for (points, patterned, visible) in &picture.lines {
         let mut part = Line::from_points(vector(points[0]), vector(points[1]));
         part.common.owner_handle = record_handle;
@@ -402,6 +395,17 @@ fn export_one(document: &mut Document, handle: Handle) {
         };
         part.common.invisible = !visible;
         let _ = document.add_entity(EntityType::Line(part));
+    }
+    // The terminator is allocated after the picture so handle order matches
+    // record order inside the definition.
+    let end_handle = document.allocate_handle();
+    let mut block_end = codec::entities::BlockEnd::new();
+    block_end.common.handle = end_handle;
+    block_end.common.owner_handle = record_handle;
+    block_end.common.layer = line.common.layer.clone();
+    let _ = document.add_entity(EntityType::BlockEnd(block_end));
+    if let Some(record) = document.block_records.get_mut(&name) {
+        record.block_end_handle = end_handle;
     }
 
     // The block reference takes the carrier's place and handle.

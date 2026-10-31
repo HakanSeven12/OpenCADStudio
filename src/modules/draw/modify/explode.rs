@@ -2515,19 +2515,13 @@ pub fn bake_dimension_blocks(doc: &mut Document) {
         }
 
         let name = next_dimension_block_name(doc, &mut next_block_number);
-        // Reserve three consecutive handles for the record / block / endblk.
-        // Adding the block + endblk (which carry explicit handles) advances the
-        // document's handle counter past them, so the NULL-handle sub-entities
-        // added afterwards get fresh handles without colliding.
         let next = doc.next_handle();
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
-        let end_handle = Handle::new(next + 2);
 
         let mut br = BlockRecord::new(&name);
         br.handle = br_handle;
         br.block_entity_handle = block_handle;
-        br.block_end_handle = end_handle;
         br.flags.anonymous = true;
         if doc.block_records.add(br).is_err() {
             continue;
@@ -2538,15 +2532,21 @@ pub fn bake_dimension_blocks(doc: &mut Document) {
         block.common.owner_handle = br_handle;
         let _ = doc.add_entity(EntityType::Block(block));
 
-        let mut block_end = BlockEnd::new();
-        block_end.common.handle = end_handle;
-        block_end.common.owner_handle = br_handle;
-        let _ = doc.add_entity(EntityType::BlockEnd(block_end));
-
         for mut sub in subs {
             sub.common_mut().handle = Handle::NULL;
             sub.common_mut().owner_handle = br_handle;
             let _ = doc.add_entity(sub);
+        }
+
+        // The terminator is allocated after the body so handle order matches
+        // record order inside the definition.
+        let end_handle = doc.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        let _ = doc.add_entity(EntityType::BlockEnd(block_end));
+        if let Some(record) = doc.block_records.get_mut(&name) {
+            record.block_end_handle = end_handle;
         }
 
         if let Some(EntityType::Dimension(d)) = doc.get_entity_mut(handle) {
@@ -2806,6 +2806,43 @@ mod tests {
             doc.block_records.len(),
             before,
             "a dimension that already owns a block must not be re-baked"
+        );
+    }
+
+    #[test]
+    fn a_baked_dimension_block_ends_after_its_body() {
+        let mut doc = Document::new();
+        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        let handle = doc
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .unwrap();
+
+        bake_dimension_blocks(&mut doc);
+
+        let block_name = match doc.get_entity(handle) {
+            Some(EntityType::Dimension(d)) => d.base().block_name.clone(),
+            _ => panic!("dimension missing"),
+        };
+        let record = doc
+            .block_records
+            .get(&block_name)
+            .expect("the baked block exists");
+        let marker = record.block_entity_handle.value();
+        let end = record.block_end_handle.value();
+        let body: Vec<_> = record
+            .entity_handles
+            .iter()
+            .map(|handle| handle.value())
+            .collect();
+        assert!(
+            body.iter().all(|handle| *handle > marker),
+            "body handles follow the BLOCK marker: {body:?}"
+        );
+        assert!(
+            end > *body.iter().max().expect("the baked block has geometry"),
+            "the ENDBLK handle follows the body: marker {marker}, body {body:?}, end {end}"
         );
     }
 

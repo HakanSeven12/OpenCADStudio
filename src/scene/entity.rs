@@ -999,76 +999,74 @@ impl Scene {
             .get(name)
             .map(|br| (br.handle, br.block_entity_handle));
 
-        let (br_handle, block_handle) = if let Some((existing_br_h, existing_blk_h)) = existing {
-            if !options.redefine {
-                return Err(format!("Block \"{name}\" already exists."));
-            }
-            // Redefining: remove all existing entities owned by this block record (except Block/BlockEnd)
-            let owned: Vec<Handle> = self
-                .document
-                .entities()
-                .filter(|e| {
-                    e.common().owner_handle == existing_br_h
-                        && !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_))
-                })
-                .map(|e| e.common().handle)
-                .collect();
-            for h in owned {
-                self.remove_image_definition_reactor(h);
-                self.document.remove_entity(h);
-            }
-            // Update existing BlockRecord fields
-            if let Some(br) = self.document.block_records.get_mut(name) {
-                br.units = options.unit;
-                br.description = options.description.clone();
-                br.explodable = options.allow_exploding;
-                br.scale_uniformly = options.scale_uniformly || options.annotative;
-            }
-            // Update existing Block entity fields
-            if let Some(EntityType::Block(b)) = self.document.get_entity_mut(existing_blk_h) {
-                b.description = options.description.clone();
-                // The new contents are baked relative to the picked base (see
-                // the contract above), so the definition's base point has to
-                // go back to ZERO. Leaving an imported definition's non-zero
-                // base point here would subtract the picked base twice.
-                b.base_point = codec::types::Vector3::ZERO;
-            }
-            (existing_br_h, existing_blk_h)
-        } else {
-            let next = self.document.next_handle();
-            let br_handle = Handle::new(next);
-            let block_handle = Handle::new(next + 1);
-            let end_handle = Handle::new(next + 2);
+        let (br_handle, block_handle, stale_end) =
+            if let Some((existing_br_h, existing_blk_h)) = existing {
+                if !options.redefine {
+                    return Err(format!("Block \"{name}\" already exists."));
+                }
+                // Redefining: remove all existing entities owned by this block record (except Block/BlockEnd)
+                let owned: Vec<Handle> = self
+                    .document
+                    .entities()
+                    .filter(|e| {
+                        e.common().owner_handle == existing_br_h
+                            && !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_))
+                    })
+                    .map(|e| e.common().handle)
+                    .collect();
+                for h in owned {
+                    self.remove_image_definition_reactor(h);
+                    self.document.remove_entity(h);
+                }
+                // Update existing BlockRecord fields
+                if let Some(br) = self.document.block_records.get_mut(name) {
+                    br.units = options.unit;
+                    br.description = options.description.clone();
+                    br.explodable = options.allow_exploding;
+                    br.scale_uniformly = options.scale_uniformly || options.annotative;
+                }
+                // Update existing Block entity fields
+                if let Some(EntityType::Block(b)) = self.document.get_entity_mut(existing_blk_h) {
+                    b.description = options.description.clone();
+                    // The new contents are baked relative to the picked base (see
+                    // the contract above), so the definition's base point has to
+                    // go back to ZERO. Leaving an imported definition's non-zero
+                    // base point here would subtract the picked base twice.
+                    b.base_point = codec::types::Vector3::ZERO;
+                }
+                let stale_end = self
+                    .document
+                    .block_records
+                    .get(name)
+                    .map(|br| br.block_end_handle)
+                    .filter(|handle| !handle.is_null());
+                (existing_br_h, existing_blk_h, stale_end)
+            } else {
+                let next = self.document.next_handle();
+                let br_handle = Handle::new(next);
+                let block_handle = Handle::new(next + 1);
 
-            let mut block_record = codec::tables::BlockRecord::new(name);
-            block_record.handle = br_handle;
-            block_record.block_entity_handle = block_handle;
-            block_record.block_end_handle = end_handle;
-            block_record.units = options.unit;
-            block_record.description = options.description.clone();
-            block_record.explodable = options.allow_exploding;
-            block_record.scale_uniformly = options.scale_uniformly || options.annotative;
-            self.document
-                .block_records
-                .add(block_record)
-                .map_err(|e| e.to_string())?;
+                let mut block_record = codec::tables::BlockRecord::new(name);
+                block_record.handle = br_handle;
+                block_record.block_entity_handle = block_handle;
+                block_record.units = options.unit;
+                block_record.description = options.description.clone();
+                block_record.explodable = options.allow_exploding;
+                block_record.scale_uniformly = options.scale_uniformly || options.annotative;
+                self.document
+                    .block_records
+                    .add(block_record)
+                    .map_err(|e| e.to_string())?;
 
-            let mut block = Block::new(name, codec::types::Vector3::ZERO);
-            block.common.handle = block_handle;
-            block.common.owner_handle = br_handle;
-            block.description = options.description.clone();
-            self.document
-                .add_entity(EntityType::Block(block))
-                .map_err(|e| e.to_string())?;
-
-            let mut block_end = BlockEnd::new();
-            block_end.common.handle = end_handle;
-            block_end.common.owner_handle = br_handle;
-            self.document
-                .add_entity(EntityType::BlockEnd(block_end))
-                .map_err(|e| e.to_string())?;
-            (br_handle, block_handle)
-        };
+                let mut block = Block::new(name, codec::types::Vector3::ZERO);
+                block.common.handle = block_handle;
+                block.common.owner_handle = br_handle;
+                block.description = options.description.clone();
+                self.document
+                    .add_entity(EntityType::Block(block))
+                    .map_err(|e| e.to_string())?;
+                (br_handle, block_handle, None)
+            };
         self.write_block_definition_xdata(br_handle, block_handle, &options);
 
         let source_entities: Vec<_> = options
@@ -1080,6 +1078,8 @@ impl Scene {
         // "Continue" / an empty selection at -BLOCK); objects that all vanished
         // are an error.
         if source_entities.is_empty() && !options.handles.is_empty() {
+            // A rejected body still leaves a structurally complete definition.
+            let _ = self.close_block_definition(name, br_handle, stale_end);
             return Err("No valid entities selected for block creation.".into());
         }
 
@@ -1093,16 +1093,21 @@ impl Scene {
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
             self.ensure_image_definition(&mut entity);
-            let handle = self
-                .document
-                .add_entity(entity)
-                .map_err(|e| e.to_string())?;
+            let handle = match self.document.add_entity(entity) {
+                Ok(handle) => handle,
+                Err(error) => {
+                    let _ = self.close_block_definition(name, br_handle, stale_end);
+                    return Err(error.to_string());
+                }
+            };
             // An image draws from its cached model, not the entity (#2149).
             self.reseed_derived_caches(handle);
             if options.mode != crate::ui::window::block_definition::BlockObjectMode::Retain {
                 self.erase_entities(&[old_handle]);
             }
         }
+
+        self.close_block_definition(name, br_handle, stale_end)?;
 
         let mut insert_handle = Handle::NULL;
         // An empty definition has nothing to convert into a reference.
@@ -1123,6 +1128,33 @@ impl Scene {
         // Advance the block epoch so all consumers and viewport renderers re-tessellate
         self.bump_geometry();
         Ok(insert_handle)
+    }
+
+    /// Finish the definition `name`: append an ENDBLK whose handle follows
+    /// every body entity, then point the record at it. `stale` — the ENDBLK a
+    /// redefine replaces — is dropped once the fresh terminator exists. A
+    /// definition whose body is rejected still gets its terminator, so the
+    /// record never names a missing object.
+    fn close_block_definition(
+        &mut self,
+        name: &str,
+        br_handle: Handle,
+        stale: Option<Handle>,
+    ) -> Result<(), String> {
+        let end_handle = self.document.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        self.document
+            .add_entity(EntityType::BlockEnd(block_end))
+            .map_err(|e| e.to_string())?;
+        if let Some(stale) = stale {
+            self.document.remove_entity(stale);
+        }
+        if let Some(record) = self.document.block_records.get_mut(name) {
+            record.block_end_handle = end_handle;
+        }
+        Ok(())
     }
 
     /// A 40 × 40, 32-bit bottom-up DIB of the block's geometry: white strokes
@@ -1459,12 +1491,10 @@ impl Scene {
         let next = self.document.next_handle();
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
-        let end_handle = Handle::new(next + 2);
 
         let mut block_record = codec::tables::BlockRecord::new(name);
         block_record.handle = br_handle;
         block_record.block_entity_handle = block_handle;
-        block_record.block_end_handle = end_handle;
         self.document
             .block_records
             .add(block_record)
@@ -1475,13 +1505,6 @@ impl Scene {
         block.common.owner_handle = br_handle;
         self.document
             .add_entity(EntityType::Block(block))
-            .map_err(|e| e.to_string())?;
-
-        let mut block_end = BlockEnd::new();
-        block_end.common.handle = end_handle;
-        block_end.common.owner_handle = br_handle;
-        self.document
-            .add_entity(EntityType::BlockEnd(block_end))
             .map_err(|e| e.to_string())?;
 
         let local = EntityTransform::Translate(-base);
@@ -1498,6 +1521,18 @@ impl Scene {
                 .add_entity(entity)
                 .map_err(|e| e.to_string())?;
             entity_handles.push(handle);
+        }
+        // The terminator is allocated after the body so handle order matches
+        // record order inside the definition.
+        let end_handle = self.document.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        self.document
+            .add_entity(EntityType::BlockEnd(block_end))
+            .map_err(|e| e.to_string())?;
+        if let Some(record) = self.document.block_records.get_mut(name) {
+            record.block_end_handle = end_handle;
         }
         // Solids, surfaces and meshes of a definition draw through their
         // instanced block meshes, which only a tessellation pass creates.
@@ -1524,14 +1559,12 @@ impl Scene {
         let next = self.document.next_handle();
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
-        let end_handle = Handle::new(next + 2);
 
         let mut block_record = codec::tables::BlockRecord::new(name);
         block_record.flags.anonymous = name.starts_with('*')
             && !(block_record.is_model_space() || block_record.is_paper_space());
         block_record.handle = br_handle;
         block_record.block_entity_handle = block_handle;
-        block_record.block_end_handle = end_handle;
         if self.document.block_records.add(block_record).is_err() {
             return;
         }
@@ -1541,11 +1574,6 @@ impl Scene {
         block.common.owner_handle = br_handle;
         let _ = self.document.add_entity(EntityType::Block(block));
 
-        let mut block_end = BlockEnd::new();
-        block_end.common.handle = end_handle;
-        block_end.common.owner_handle = br_handle;
-        let _ = self.document.add_entity(EntityType::BlockEnd(block_end));
-
         let mut added = Vec::new();
         for mut entity in entities {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
@@ -1553,6 +1581,14 @@ impl Scene {
             entity.common_mut().owner_handle = br_handle;
             self.ensure_image_definition(&mut entity);
             added.extend(self.document.add_entity(entity).ok());
+        }
+        let end_handle = self.document.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        let _ = self.document.add_entity(EntityType::BlockEnd(block_end));
+        if let Some(record) = self.document.block_records.get_mut(name) {
+            record.block_end_handle = end_handle;
         }
         self.refresh_meshes_for_handles(&added);
         self.bump_geometry();
@@ -1590,6 +1626,12 @@ impl Scene {
             self.define_block_raw(name, base_point, entities);
             return Ok(());
         };
+        let stale_end = self
+            .document
+            .block_records
+            .get(name)
+            .map(|br| br.block_end_handle)
+            .filter(|handle| !handle.is_null());
         if self.block_edit_block == Some(br_handle) {
             return Err(format!(
                 "block \"{name}\" is open in the Block Editor; close it before redefining"
@@ -1620,6 +1662,7 @@ impl Scene {
             self.ensure_image_definition(&mut entity);
             changed.extend(self.document.add_entity(entity).ok());
         }
+        self.close_block_definition(name, br_handle, stale_end)?;
         self.refresh_meshes_for_handles(&changed);
         self.bump_geometry();
         Ok(())

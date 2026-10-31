@@ -1121,11 +1121,9 @@ impl Scene {
         let next = self.document.next_handle();
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
-        let end_handle = Handle::new(next + 2);
         let mut br = codec::tables::BlockRecord::new(&new_name);
         br.handle = br_handle;
         br.block_entity_handle = block_handle;
-        br.block_end_handle = end_handle;
         // The DWG writer takes the anonymous bit from the flag alone; without
         // it AutoCAD's audit reports `Invalid anonymous block "*D<n>"`.
         br.flags.anonymous = true;
@@ -1134,12 +1132,6 @@ impl Scene {
         block.common.handle = block_handle;
         block.common.owner_handle = br_handle;
         self.document.add_entity(EntityType::Block(block)).ok()?;
-        let mut block_end = BlockEnd::new();
-        block_end.common.handle = end_handle;
-        block_end.common.owner_handle = br_handle;
-        self.document
-            .add_entity(EntityType::BlockEnd(block_end))
-            .ok()?;
         for sub in subs {
             let mut sub = sub.clone();
             transform_dimension_part(&mut sub, t);
@@ -1152,6 +1144,18 @@ impl Scene {
             sub.common_mut().xdictionary_handle = None;
             self.ensure_image_definition(&mut sub);
             let _ = self.document.add_entity(sub);
+        }
+        // The terminator is allocated after the body so handle order matches
+        // record order inside the definition.
+        let end_handle = self.document.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        self.document
+            .add_entity(EntityType::BlockEnd(block_end))
+            .ok()?;
+        if let Some(record) = self.document.block_records.get_mut(&new_name) {
+            record.block_end_handle = end_handle;
         }
         Some(new_name)
     }

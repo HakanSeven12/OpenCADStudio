@@ -1245,13 +1245,11 @@ pub(crate) fn define_block_raw_doc(
     let next = doc.next_handle();
     let br_handle = Handle::new(next);
     let block_handle = Handle::new(next + 1);
-    let end_handle = Handle::new(next + 2);
     let mut block_record = codec::tables::BlockRecord::new(name);
     block_record.flags.anonymous =
         name.starts_with('*') && !(block_record.is_model_space() || block_record.is_paper_space());
     block_record.handle = br_handle;
     block_record.block_entity_handle = block_handle;
-    block_record.block_end_handle = end_handle;
     if doc.block_records.add(block_record).is_err() {
         return;
     }
@@ -1259,13 +1257,19 @@ pub(crate) fn define_block_raw_doc(
     block.common.handle = block_handle;
     block.common.owner_handle = br_handle;
     let _ = doc.add_entity(codec::EntityType::Block(block));
+    for mut entity in entities.iter().cloned() {
+        add_entity_clone_doc_inner(doc, &mut entity, br_handle);
+        let _ = doc.add_entity(entity);
+    }
+    // The terminator is allocated after the body so handle order matches
+    // record order inside the definition.
+    let end_handle = doc.allocate_handle();
     let mut block_end = codec::entities::BlockEnd::new();
     block_end.common.handle = end_handle;
     block_end.common.owner_handle = br_handle;
     let _ = doc.add_entity(codec::EntityType::BlockEnd(block_end));
-    for mut entity in entities.iter().cloned() {
-        add_entity_clone_doc_inner(doc, &mut entity, br_handle);
-        let _ = doc.add_entity(entity);
+    if let Some(record) = doc.block_records.get_mut(name) {
+        record.block_end_handle = end_handle;
     }
 }
 
@@ -1308,11 +1312,9 @@ fn define_transformed_block_doc(
     let next = doc.next_handle();
     let br_handle = Handle::new(next);
     let block_handle = Handle::new(next + 1);
-    let end_handle = Handle::new(next + 2);
     let mut br = codec::tables::BlockRecord::new(&new_name);
     br.handle = br_handle;
     br.block_entity_handle = block_handle;
-    br.block_end_handle = end_handle;
     // See `Scene::define_transformed_block`.
     br.flags.anonymous = true;
     doc.block_records.add(br).ok()?;
@@ -1320,16 +1322,20 @@ fn define_transformed_block_doc(
     block.common.handle = block_handle;
     block.common.owner_handle = br_handle;
     doc.add_entity(codec::EntityType::Block(block)).ok()?;
-    let mut block_end = codec::entities::BlockEnd::new();
-    block_end.common.handle = end_handle;
-    block_end.common.owner_handle = br_handle;
-    doc.add_entity(codec::EntityType::BlockEnd(block_end))
-        .ok()?;
     for sub in subs {
         let mut sub = sub.clone();
         crate::scene::view::dispatch::apply_transform(&mut sub, t);
         add_entity_clone_doc_inner(doc, &mut sub, br_handle);
         let _ = doc.add_entity(sub);
+    }
+    let end_handle = doc.allocate_handle();
+    let mut block_end = codec::entities::BlockEnd::new();
+    block_end.common.handle = end_handle;
+    block_end.common.owner_handle = br_handle;
+    doc.add_entity(codec::EntityType::BlockEnd(block_end))
+        .ok()?;
+    if let Some(record) = doc.block_records.get_mut(&new_name) {
+        record.block_end_handle = end_handle;
     }
     Some(new_name)
 }
@@ -1663,6 +1669,40 @@ mod clipboard_xdict_clone_tests {
             }
             other => panic!("expected recreated XRecord leaf, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_pasted_block_definition_ends_after_its_body() {
+        let mut doc = codec::Document::new();
+        let line = codec::entities::Line::from_points(
+            codec::types::Vector3::ZERO,
+            codec::types::Vector3::new(1.0, 0.0, 0.0),
+        );
+        super::define_block_raw_doc(
+            &mut doc,
+            "PASTED_IN",
+            codec::types::Vector3::ZERO,
+            &[codec::EntityType::Line(line)],
+        );
+        let record = doc
+            .block_records
+            .get("PASTED_IN")
+            .expect("the record is added");
+        let marker = record.block_entity_handle.value();
+        let end = record.block_end_handle.value();
+        let body: Vec<_> = record
+            .entity_handles
+            .iter()
+            .map(|handle| handle.value())
+            .collect();
+        assert!(
+            body.iter().all(|handle| *handle > marker),
+            "body handles follow the BLOCK marker: {body:?}"
+        );
+        assert!(
+            end > *body.iter().max().expect("the body is not empty"),
+            "the ENDBLK handle follows the body: marker {marker}, body {body:?}, end {end}"
+        );
     }
 
     /// PASTEBLOCK-style two-phase clone: recreate without a host entity, then

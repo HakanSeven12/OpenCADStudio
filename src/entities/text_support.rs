@@ -2772,11 +2772,23 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
 
                     let slot_w = atom_width(atom, entity_h, base_wf, &base_font_name);
 
-                    let mut emit = |text: &str, ly: f32| {
+                    // A fraction (`/`, with its rule) centres each half over
+                    // the slot; a `^` stack (tolerance, index) stays left.
+                    let indent = |text: &str| {
+                        if *bar {
+                            let w =
+                                measure_word(text, &half_state, entity_h, base_wf, &base_font_name);
+                            ((slot_w - w) * 0.5).max(0.0)
+                        } else {
+                            0.0
+                        }
+                    };
+                    let (num_dx, den_dx) = (indent(numerator), indent(denominator));
+                    let mut emit = |text: &str, ly: f32, dx: f32| {
                         if text.is_empty() {
                             return;
                         }
-                        let lx = cursor_x;
+                        let lx = cursor_x + dx;
                         let world_dx = lx * cos_r - ly * sin_r;
                         let world_dy = lx * sin_r + ly * cos_r;
                         let origin: [f64; 2] = [
@@ -2819,8 +2831,8 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     } else {
                         valign_dy
                     };
-                    emit(denominator, bottom_dy);
-                    emit(numerator, valign_dy + run_h * STACK_RAISE);
+                    emit(denominator, bottom_dy, den_dx);
+                    emit(numerator, valign_dy + run_h * STACK_RAISE, num_dx);
 
                     if opts.want_glyph_boxes {
                         let slots = numerator.chars().count()
@@ -3410,6 +3422,35 @@ mod v_anchor_tests {
             vertical_text: false,
             want_glyph_boxes: true,
         })
+    }
+
+    #[test]
+    fn a_fraction_centres_its_halves_but_a_tolerance_stays_left() {
+        // (x, width) of the run that draws `text`, at the stack half height.
+        let at = |layout: &MTextLayout, text: &str| {
+            let stroke = layout
+                .strokes
+                .iter()
+                .find(|s| s.run.as_ref().is_some_and(|r| r.text == text))
+                .unwrap();
+            let run = stroke.run.as_ref().unwrap();
+            let state = RunState {
+                height_mul: STACK_HALF_SCALE,
+                ..Default::default()
+            };
+            let w = measure_word(text, &state, 2.5, 1.0, &run.font);
+            (stroke.origin[0] as f32, w)
+        };
+        let layout = layout_at_top(r"\S12/axbxc;", 2.5);
+        let ((nx, nw), (dx, dw)) = (at(&layout, "12"), at(&layout, "axbxc"));
+        assert!(nx > dx, "the narrower numerator is indented");
+        assert!(
+            ((nx + nw * 0.5) - (dx + dw * 0.5)).abs() < 1e-3,
+            "both halves share one centre"
+        );
+        let layout = layout_at_top(r"\S+0.1^-0.25;", 2.5);
+        let ((tx, _), (bx, _)) = (at(&layout, "+0.1"), at(&layout, "-0.25"));
+        assert!((tx - bx).abs() < 1e-6, "a tolerance stack stays left");
     }
 
     /// The top of what a line draws sits at the insertion point.

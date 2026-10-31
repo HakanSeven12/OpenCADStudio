@@ -582,9 +582,9 @@ impl Ribbon {
         )
     }
 
-    /// The peek of panel `title` of the tab on show: the panel without its
-    /// title strip, the extra tools while they are open, and a footer with
-    /// "More tools" and the dialog launcher.
+    /// The peek of panel `title` of the tab on show: the panel with the thin
+    /// strip it has without panel titles, whose click shows its extra tools
+    /// under it with their footer, as a slide-out does on the ribbon.
     fn panel_popup(
         &self,
         title: &str,
@@ -596,6 +596,10 @@ impl Ribbon {
             .groups_for(self.active)
             .find(|group| group.title == title)?;
         let key = extras::panel_key(module.id(), group.title);
+        let extras = draw_panel::panel_for_group(&key);
+        // Its extra tools show under the panel in place of its strip, as a
+        // slide-out does on the ribbon.
+        let more = self.min.more && extras.is_some();
         let body = if module.id() == "block_editor" && group.title == "Visibility" {
             visibility_panel::panel(visibility, false, true).full()
         } else {
@@ -604,7 +608,7 @@ impl Ribbon {
                 false,
                 group,
                 &key,
-                Strip::Peek,
+                if more { Strip::Bare } else { Strip::Peek },
                 draw_panel::SlideLook::Closed,
                 Vec::new(),
                 self.lit_tool(),
@@ -620,68 +624,25 @@ impl Ribbon {
             )
         };
         let mut popup = column![PosReport::new(PEEK_BODY_ID, body)];
-        let extras = draw_panel::panel_for_group(&key);
-        let mut footer = row![].align_y(iced::Center);
-        if let Some(extras) = extras {
-            if self.min.more {
-                let width = recent_bounds(PEEK_BODY_ID).map_or(0.0, |body| body.width);
-                popup = popup.push(draw_panel::extra_tools(self, extras, width));
-            }
-            let more = self.min.more;
-            let label = if more {
-                crate::tr!("ribbon-menu", "fewer-tools")
-            } else {
-                crate::tr!("ribbon-menu", "more-tools")
-            };
-            let toggle = button(
-                row![
-                    text(label).size(PANEL_TITLE_SIZE),
-                    if more {
-                        icons::dropup_arrow()
-                    } else {
-                        icons::dropdown_arrow()
-                    },
-                ]
-                .spacing(4)
-                .align_y(iced::Center),
-            )
-            .on_press(Message::ToggleRibbonDropdown(extras.id.to_string()))
-            .style(|theme: &Theme, status| button::Style {
-                text_color: chrome::title_text(theme),
-                ..tool_btn_style(theme, false, status)
-            })
-            .padding([0, 4]);
-            footer = footer.push(keytips::anchor(
-                extras.id,
-                PosReport::new(extras.id, toggle),
-            ));
+        if let Some(extras) = extras.filter(|_| more) {
+            let width = recent_bounds(PEEK_BODY_ID).map_or(0.0, |body| body.width);
+            popup = popup
+                .push(draw_panel::extra_tools(self, extras, width))
+                .push(draw_panel::peek_footer(extras));
         }
-        footer = footer.push(Space::new().width(Fill));
-        // A panel may have a launcher without extra tools.
-        if let Some(launcher) = extras::for_panel(&key).and_then(draw_panel::launcher) {
-            footer = footer.push(launcher);
-        }
-        // The footer stands for the title strip: its colour and the line
-        // over it.
-        let line =
-            container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::page(theme))),
-                ..Default::default()
-            });
-        let bar = container(footer.padding([0, 2]))
-            .center_y(draw_panel::FOOTER_H - 1.0)
-            .width(Fill)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::title_bar(theme))),
-                ..Default::default()
-            });
-        popup = popup.push(column![line, bar].width(Fill));
         // As wide as the panel: the footer and extra tools fill that width,
         // not the window's.
+        // While the extra tools show, the peek is lit like an open slide-out.
         Some(
             container(popup.width(Length::Shrink))
                 .width(Length::Shrink)
-                .style(popup_panel_style)
+                .style(move |theme: &Theme| {
+                    let mut style = popup_panel_style(theme);
+                    if more {
+                        style.background = Some(Background::Color(chrome::open_panel(theme)));
+                    }
+                    style
+                })
                 .into(),
         )
     }

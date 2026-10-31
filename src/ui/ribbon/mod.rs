@@ -243,10 +243,9 @@ fn tab_outline(tab: Element<'_, Message>) -> Element<'_, Message> {
     .into()
 }
 
-/// The Start tab has no drawing context: a theme-aware shield fades the
-/// tabs and the tool area, the active tab included, toward `colour` (the
-/// colour behind them) and takes their clicks. The application menu and
-/// Quick Access stay outside it.
+/// The Start tab has no drawing context: a theme-aware shield fades a tab,
+/// the minimize button or the tool area toward `colour` and takes their
+/// clicks. The application menu and Quick Access stay outside it.
 fn start_shield<'a>(colour: fn(&Theme) -> Color) -> Element<'a, Message> {
     let shield = mouse_area(
         container(iced::widget::Space::new())
@@ -1098,7 +1097,11 @@ impl Ribbon {
                         .size(TAB_TEXT_SIZE)
                         .wrapping(iced::widget::text::Wrapping::None),
                     )
-                    .center_y(Fill),
+                    .center_y(Fill)
+                    .padding(Padding {
+                        bottom: metrics::TAB_TEXT_RAISE,
+                        ..Padding::ZERO
+                    }),
                 )
                 .on_press(Message::RibbonSelectTab(i))
                 .style(move |theme: &Theme, status| {
@@ -1132,6 +1135,16 @@ impl Ribbon {
                 } else {
                     tab.into()
                 };
+                // On the Start tab each tab fades like the tool area: the
+                // active one toward the colour the tool area fades to, the
+                // others toward the tab row's.
+                let tab: Element<'_, Message> = if is_start {
+                    let colour: fn(&Theme) -> Color =
+                        if is_active { chrome::page } else { chrome::bar };
+                    iced::widget::stack![tab, start_shield(colour)].into()
+                } else {
+                    tab
+                };
                 // Tabs stand on the bottom of the tab row, on the tool area.
                 let btn = container(tab).height(TAB_ROW_H).align_bottom(TAB_ROW_H);
                 // Minimized to tabs, resting on a tab opens its tool area.
@@ -1156,7 +1169,12 @@ impl Ribbon {
         if self.layout.minimize != RibbonMinimize::Off
             || !self.collapse_tight.load(Ordering::Relaxed)
         {
-            tab_items.push(self.minimize_button());
+            let minimize = self.minimize_button();
+            tab_items.push(if is_start {
+                iced::widget::stack![minimize, start_shield(chrome::bar)].into()
+            } else {
+                minimize
+            });
         }
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
@@ -1182,17 +1200,10 @@ impl Ribbon {
         }
         tab_row = tab_row.push(
             container(
-                WrapBar::new(
-                    lead.into(),
-                    if is_start {
-                        iced::widget::stack![tabs, start_shield(chrome::bar)].into()
-                    } else {
-                        tabs.into()
-                    },
-                )
-                .spacing(6.0)
-                .min_row_h(TAB_ROW_H)
-                .report_height(self.tab_bar_h.clone()),
+                WrapBar::new(lead.into(), tabs.into())
+                    .spacing(6.0)
+                    .min_row_h(TAB_ROW_H)
+                    .report_height(self.tab_bar_h.clone()),
             )
             .width(Length::Fill),
         );
@@ -2087,9 +2098,11 @@ enum Strip {
     Titled,
     /// Panel titles are off: a thin strip without text.
     Thin,
-    /// No strip: the body of a collapsed or minimized panel's peek, whose
-    /// footer stands for the strip.
+    /// A collapsed or minimized panel's peek: the thin strip, whose click
+    /// shows the extra tools inside the peek.
     Peek,
+    /// No strip: a peek's panel while its extra tools show under it.
+    Bare,
 }
 
 /// Render a single ribbon panel (tools + group label), fixed `TOOL_BAR_H` tall.
@@ -2196,11 +2209,11 @@ fn render_group<'a>(
     let body = body.height(metrics::CONTENT_H);
     let strip_h = match strip {
         Strip::Titled => PANEL_TITLE_H,
-        Strip::Thin => metrics::THIN_STRIP_H,
-        Strip::Peek => 0.0,
+        Strip::Thin | Strip::Peek => metrics::THIN_STRIP_H,
+        Strip::Bare => 0.0,
     };
     let (title, launcher, press) = if strip_h > 0.0 {
-        let title = draw_panel::group_title(group.title, key, look, strip == Strip::Thin);
+        let title = draw_panel::group_title(group.title, key, look, strip != Strip::Titled);
         (Some(title.row), title.launcher, title.press)
     } else {
         (None, None, None)
@@ -2210,7 +2223,7 @@ fn render_group<'a>(
         .lit(look == draw_panel::SlideLook::Open)
         .on_press(press);
     // A peek shows the extra tools inside itself.
-    if strip == Strip::Peek {
+    if matches!(strip, Strip::Peek | Strip::Bare) {
         return panel.into();
     }
     let Some(extras) = draw_panel::panel_for_group(key) else {

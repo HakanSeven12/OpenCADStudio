@@ -35,7 +35,8 @@ const RESULTS_SCROLL_ID: &str = "ribbon_search_scroll";
 const BOX_W: f32 = 190.0;
 const BOX_H: f32 = 20.0;
 const BOX_PAD_LEFT: f32 = 6.0;
-const BOX_PAD_RIGHT: f32 = 5.0;
+/// The last button meets the box's border, so its hover fills to the edge.
+const BOX_PAD_RIGHT: f32 = 1.0;
 const BOX_GAP: f32 = 5.0;
 /// The clear, collapse and keep-expanded buttons in the box.
 const BOX_BUTTON: f32 = 18.0;

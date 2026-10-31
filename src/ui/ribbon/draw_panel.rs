@@ -453,9 +453,11 @@ fn slide_out_place(ribbon: &Ribbon, panel: &PanelExtras) -> Option<(f32, f32, f3
         metrics::SLIDE_OUT_TOP_THIN
     };
     let top = body.y + body.height - strip;
+    // One pixel wider than the panel: its right border lies on the line
+    // between this panel and the next.
     let width = match panel.layout {
-        Layout::TextLayer | Layout::CenterLayer => body.width.max(LIST_MIN_W),
-        Layout::Grid | Layout::Reference => body.width,
+        Layout::TextLayer | Layout::CenterLayer => (body.width + 1.0).max(LIST_MIN_W),
+        Layout::Grid | Layout::Reference => body.width + 1.0,
     };
     Some((body.x, top, width))
 }
@@ -764,9 +766,24 @@ fn fade_row<'a>(fade: i32, panel_id: &'static str) -> Element<'a, Message> {
 /// title with an up arrow that folds the slide-out away, and its dialog
 /// launcher.
 fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Element<'a, Message> {
+    footer_bar(hovered, panel, pinned, false)
+}
+
+/// [`footer`] of the extra tools in a peek: no pin, and its title folds
+/// them back into the peek's strip.
+pub(super) fn peek_footer<'a>(panel: &'static PanelExtras) -> Element<'a, Message> {
+    footer_bar(false, panel, false, true)
+}
+
+fn footer_bar<'a>(
+    hovered: bool,
+    panel: &'static PanelExtras,
+    pinned: bool,
+    peek: bool,
+) -> Element<'a, Message> {
     const SIDE: f32 = 20.0;
     let key = panel.key;
-    let pin: Element<'a, Message> = if hovered {
+    let pin: Element<'a, Message> = if hovered && !peek {
         button(icons::chrome(
             if pinned {
                 icons::PIN
@@ -789,7 +806,11 @@ fn footer<'a>(hovered: bool, panel: &'static PanelExtras, pinned: bool) -> Eleme
             .spacing(4)
             .align_y(iced::Center),
     )
-    .on_press(Message::RibbonSlideOut(SlideOutMsg::Collapse(key)))
+    .on_press(if peek {
+        Message::ToggleRibbonDropdown(panel.id.to_string())
+    } else {
+        Message::RibbonSlideOut(SlideOutMsg::Collapse(key))
+    })
     .style(move |theme: &Theme, status| button::Style {
         text_color: if pinned {
             chrome::title_text(theme)

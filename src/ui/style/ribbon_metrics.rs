@@ -6,8 +6,10 @@
 
 /// Height of the tab row; the tabs stand at its bottom.
 pub const TAB_ROW_H: f32 = 27.0;
-/// Height of a tab.
-pub const TAB_H: f32 = 25.0;
+/// Height of a tab, and the room under its text: the text stands where it
+/// did in a 25 px tab, with less of the tab above it.
+pub const TAB_H: f32 = 23.0;
+pub const TAB_TEXT_RAISE: f32 = 2.0;
 
 /// A Quick Access button, square, and the gap between buttons.
 pub const QAT_BUTTON: f32 = 22.0;
@@ -18,8 +20,8 @@ pub const QAT_SPLIT_ARROW_W: f32 = 11.0;
 /// `SEARCH_BUTTON_PAD` from each side.
 pub const SEARCH_BUTTON: f32 = SMALL_ICON + 2.0 * SEARCH_BUTTON_PAD;
 pub const SEARCH_BUTTON_PAD: f32 = 2.0;
-/// Gap between two tabs.
-pub const TAB_GAP: f32 = 2.0;
+/// Gap between two tabs: none, so a hovered tab meets the active one.
+pub const TAB_GAP: f32 = 0.0;
 /// The minimize split button after the last tab: this far from the tab,
 /// its face this wide with a small icon in it, its arrow part
 /// `SPLIT_ARROW_W` wide, both `QAT_BUTTON` high and standing this far above

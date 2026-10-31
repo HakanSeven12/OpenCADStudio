@@ -3094,6 +3094,12 @@ bg={bg_ms:.1}ms n={view_count}"
         // Frame padding is 10 px per side; title + body spacing is 30 px.
         Some((size.width + 20.0, size.height + 50.0))
     }
+
+    pub fn is_any_window_dragging(&self) -> bool {
+        self.modal_dragging
+            || self.modal_resizing
+            || self.layer_col_dragging
+    }
 }
 
 impl OpenCADStudio {
@@ -3476,6 +3482,19 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         let control = iced::time::every(std::time::Duration::from_millis(50))
             .map(|_| Message::PollWebControl);
+        let window_drag_events = if self.is_any_window_dragging() {
+            event::listen_with(|ev, _status, _win_id| match ev {
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::GlobalCursorMoved(position))
+                }
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::GlobalPointerReleased),
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
         iced::Subscription::batch([
             if self.spacemouse.moving() && self.spacemouse_focused && !self.spacemouse_paused {
                 window::frames().map(Message::SpaceMouseFrame)
@@ -3516,6 +3535,7 @@ impl OpenCADStudio {
             single_instance,
             hatch_pattern_keys,
             keyboard_events,
+            window_drag_events,
             ui_font_changes(),
         ])
     }

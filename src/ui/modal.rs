@@ -398,22 +398,16 @@ pub fn modal<'a>(
         left: offset.x.max(0.0) * 2.0,
     };
 
-    // The backdrop fills the screen so dragging keeps tracking the cursor even
-    // when it leaves the title bar; release anywhere ends the drag.
-    let backdrop = mouse_area(
-        container(framed)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .padding(pad)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.strongest.color.scale_alpha(0.55),
-                )),
-                ..Default::default()
-            }),
-    )
-    .on_move(Message::ModalDragMove)
-    .on_release(Message::ModalDragRelease);
+    let backdrop = container(framed)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .padding(pad)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.palette().background.strongest.color.scale_alpha(0.55),
+            )),
+            ..Default::default()
+        });
 
     stack![
         base.into(),

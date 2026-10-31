@@ -11340,8 +11340,51 @@ impl OpenCADStudio {
             Message::LayerNameColGrab => {
                 // Start a Name-column divider drag; the dock's pointer capture
                 // feeds it (see `on_dock`).
+                self.layer_col_dragging = true;
+                self.modal_drag_last = None;
                 self.dock_drag = Some(crate::ui::dock::DockDrag::LayerColumn);
                 self.dock_drag_last = None;
+                Task::none()
+            }
+            Message::GlobalCursorMoved(pos) => {
+                if self.modal_dragging || self.modal_resizing || self.layer_col_dragging {
+                    if let Some(last) = self.modal_drag_last {
+                        let dx = pos.x - last.x;
+                        let dy = pos.y - last.y;
+                        if self.layer_col_dragging {
+                            self.layer_name_col_w = (self.layer_name_col_w + dx).clamp(60.0, 640.0);
+                        } else if self.modal_resizing {
+                            let nx = (self.modal_resize.x + dx).max(0.0);
+                            let ny = (self.modal_resize.y + dy).max(0.0);
+                            let (rx, ry) = (nx - self.modal_resize.x, ny - self.modal_resize.y);
+                            self.modal_resize.x = nx;
+                            self.modal_resize.y = ny;
+                            self.modal_offset.x += rx * 0.5;
+                            self.modal_offset.y += ry * 0.5;
+                        } else if self.modal_dragging {
+                            self.modal_offset.x += dx;
+                            self.modal_offset.y += dy;
+                            let (ww, wh) = if self.mtext_editor.is_some() {
+                                self.vp_size
+                            } else {
+                                self.win_size
+                            };
+                            let (cw, ch) = self.modal_outer_size().unwrap_or((640.0, 520.0));
+                            let max_x = ((ww - cw) * 0.5 - 20.0).max(0.0);
+                            let max_y = ((wh - ch) * 0.5 - 20.0).max(0.0);
+                            self.modal_offset.x = self.modal_offset.x.clamp(-max_x, max_x);
+                            self.modal_offset.y = self.modal_offset.y.clamp(-max_y, max_y);
+                        }
+                    }
+                    self.modal_drag_last = Some(pos);
+                }
+                Task::none()
+            }
+            Message::GlobalPointerReleased => {
+                self.modal_dragging = false;
+                self.modal_resizing = false;
+                self.layer_col_dragging = false;
+                self.modal_drag_last = None;
                 Task::none()
             }
             Message::ModalDragMove(p) => {
@@ -11389,6 +11432,7 @@ impl OpenCADStudio {
             Message::ModalDragRelease => {
                 self.modal_dragging = false;
                 self.modal_resizing = false;
+                self.layer_col_dragging = false;
                 self.modal_drag_last = None;
                 Task::none()
             }

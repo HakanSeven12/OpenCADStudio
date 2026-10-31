@@ -1406,6 +1406,7 @@ pub(super) struct OpenCADStudio {
     modal_dragging: bool,
     /// Layer Manager Name column width in px, adjusted by the divider drag.
     layer_name_col_w: f32,
+    layer_col_dragging: bool,
     /// How far the user has dragged the modal's corner resize grip from the
     /// dialog's natural size (added to its measured width/height). Reset
     /// with `modal_offset` so every dialog opens at its own size.
@@ -4695,6 +4696,8 @@ pub enum Message {
     ModalDragMove(Point),
     /// Title-bar released: stop dragging.
     ModalDragRelease,
+    GlobalCursorMoved(Point),
+    GlobalPointerReleased,
     AboutCopyInfo,
     // ── Plugin Manager window ───────────────────────────────────────────
     PluginManagerOpen,
@@ -5798,6 +5801,7 @@ impl OpenCADStudio {
             modal_drag_last: None,
             modal_dragging: false,
             layer_name_col_w: 130.0,
+            layer_col_dragging: false,
             modal_resize: iced::Vector::ZERO,
             modal_content_size: None,
             modal_resizing: false,

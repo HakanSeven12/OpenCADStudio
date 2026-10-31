@@ -6238,17 +6238,20 @@ impl Scene {
     }
 
     /// Model-space annotation multiplier from the header's CANNOSCALEVALUE
-    /// (paper/drawing factor), converted from paper units into the drawing's
-    /// INSUNITS, so a metre drawing uses 0.001 model units per paper
-    /// millimetre at 1:1. Every path that starts or loads a drawing, or
+    /// (paper/drawing factor). Every path that starts or loads a drawing, or
     /// changes its units, goes through here so it agrees with CANNOSCALE.
+    ///
+    /// Annotation sizes (text heights, DIMTXT, arrow sizes) are in drawing
+    /// units, so the multiplier is the scale's own ratio whatever INSUNITS
+    /// says: 0.2 text at 1:30 is 6 drawing units in a centimetre drawing
+    /// (#2354). A template whose scales are stored already converted (a
+    /// metre drawing's 1:50 as 1 = 0.05) gets its conversion from them.
     pub(crate) fn sync_annotation_scale_from_header(&mut self) {
         let cannoscale_value = self.document.header.annotation_scale_value;
-        let unit_factor = self.annotation_scale_unit_factor();
         self.annotation_scale = if cannoscale_value > 1e-9 {
-            ((1.0 / cannoscale_value) / unit_factor) as f32
+            (1.0 / cannoscale_value) as f32
         } else {
-            (1.0 / unit_factor) as f32
+            1.0
         };
     }
 
@@ -6630,18 +6633,13 @@ impl Scene {
 
     pub fn set_annotation_scale_named(&mut self, name: &str) -> Option<Handle> {
         let handle = self.scale_handle_ensuring(name)?;
-        let unit_factor = self.annotation_scale_unit_factor();
 
         let (scale_name, scale_factor, multiplier) = {
             let ObjectType::Scale(scale) = self.document.objects.get(&handle)? else {
                 return None;
             };
 
-            (
-                scale.name.clone(),
-                scale.factor(),
-                scale.inverse_factor() / unit_factor,
-            )
+            (scale.name.clone(), scale.factor(), scale.inverse_factor())
         };
 
         self.annotation_scale = multiplier as f32;
@@ -6792,9 +6790,7 @@ impl Scene {
         let scale = self.displayed_annotation_scale_handle();
         let model_per_paper = scale
             .and_then(|scale| match self.document.objects.get(&scale) {
-                Some(ObjectType::Scale(scale)) => {
-                    Some(scale.inverse_factor() / self.annotation_scale_unit_factor())
-                }
+                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale as f64);
@@ -7492,13 +7488,9 @@ impl Scene {
     }
 
     fn viewport_annotation_multiplier(&self, viewport: Handle) -> f32 {
-        let unit_factor = self.annotation_scale_unit_factor();
-
         self.viewport_scale_handle(viewport)
             .and_then(|handle| match self.document.objects.get(&handle) {
-                Some(ObjectType::Scale(scale)) => {
-                    Some((scale.inverse_factor() / unit_factor) as f32)
-                }
+                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor() as f32),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale)

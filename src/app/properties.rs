@@ -3324,10 +3324,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 let anno_scale = annotation_scale_handle
                     .and_then(
                         |handle| match self.tabs[i].scene.document.objects.get(&handle) {
-                            Some(codec::objects::ObjectType::Scale(scale)) => Some(
-                                scale.inverse_factor()
-                                    / self.tabs[i].scene.annotation_scale_unit_factor(),
-                            ),
+                            Some(codec::objects::ObjectType::Scale(scale)) => {
+                                Some(scale.inverse_factor())
+                            }
                             _ => None,
                         },
                     )

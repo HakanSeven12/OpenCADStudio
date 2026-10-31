@@ -371,6 +371,20 @@ impl OpenCADStudio {
                     self.command_line.input.push_str(&s);
                 }
             } else {
+                // A letter after digits typed into a field makes the whole
+                // entry an option keyword such as `2P` or `3P` (#2312).
+                if s.starts_with(|c: char| c.is_alphabetic())
+                    && self.command_line.input.is_empty()
+                    && self.dyn_input
+                    && !self.tabs[i].dyn_fields.is_empty()
+                {
+                    let a = self.tabs[i]
+                        .dyn_active
+                        .min(self.tabs[i].dyn_fields.len() - 1);
+                    if let Some(typed) = self.tabs[i].dyn_fields[a].buffer.take() {
+                        self.command_line.input = typed;
+                    }
+                }
                 // Preserve case while entering a command or literal/free-text
                 // value. Active single-token prompt keywords keep their
                 // established uppercase normalization.

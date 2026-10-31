@@ -33,6 +33,12 @@ mtext-source-errors = MTEXT
     .paragraph = MTEXT: this change could alter paragraph or tab-stop settings.
     .input = MTEXT: the inserted text contains an unsupported control character.
     .projection = MTEXT: the source and rendered character positions do not agree; the edit was not applied.
+    .object-default = MTEXT: the object default cannot be safely separated from character flags or protected controls.
+
+mtext-object-origin = MTEXT
+    .style = By style
+    .custom = Custom
+    .mixed = Mixed
 
 action =
     .close = Κλείσιμο

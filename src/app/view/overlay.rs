@@ -469,12 +469,37 @@ fn mtext_editor_content<'a>(
             .into()
     };
 
-    // ── Row 1: style / font / height · format icons · colour ──────────────
-    let style_opts: Vec<String> = if styles.is_empty() {
+    // ── Row 1: the object's own values, each labelled, · format icons ─────
+    // A label above its control; font and width also say where their value
+    // comes from (the style, the text's own, or the style with overrides).
+    let labelled = |name: std::borrow::Cow<'static, str>,
+                    origin: Option<super::super::mtext_editor::ValueOrigin>,
+                    control: Element<'static, Message>|
+     -> Element<'static, Message> {
+        use super::super::mtext_editor::ValueOrigin;
+        let mut caption = row![text(name).size(11)].spacing(4);
+        if let Some(origin) = origin {
+            let origin = match origin {
+                ValueOrigin::Style => crate::tr!("mtext-object-origin", "style"),
+                ValueOrigin::Custom => crate::tr!("mtext-object-origin", "custom"),
+                ValueOrigin::Mixed => crate::tr!("mtext-object-origin", "mixed"),
+            };
+            caption = caption.push(text(format!("· {origin}")).size(11).style(|theme: &Theme| {
+                text::Style {
+                    color: Some(theme.palette().background.strong.color),
+                }
+            }));
+        }
+        iced::widget::column![caption, control].spacing(2).into()
+    };
+    let mut style_opts: Vec<String> = if styles.is_empty() {
         vec!["Standard".to_string()]
     } else {
         styles.to_vec()
     };
+    if !style_opts.contains(&ed.style) {
+        style_opts.push(ed.style.clone());
+    }
     let style_pl = iced::widget::pick_list(Some(ed.style.clone()), style_opts, |value| {
         value.to_string()
     })
@@ -489,17 +514,16 @@ fn mtext_editor_content<'a>(
     } else {
         ed.font.clone()
     };
-    let font_pl = iced::widget::pick_list(
-        Some(font_sel),
-        MTEXT_FONTS
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
-        |value| t!(value).into_owned(),
-    )
-    .on_select(Message::MTextFont)
-    .text_size(11)
-    .width(iced::Length::Fixed(120.0));
+    let mut font_opts: Vec<String> = MTEXT_FONTS.iter().map(|s| s.to_string()).collect();
+    // The text's own font stays listed when it is not one of the bundled ones.
+    if !font_opts.contains(&font_sel) {
+        font_opts.push(font_sel.clone());
+    }
+    let font_pl =
+        iced::widget::pick_list(Some(font_sel), font_opts, |value| t!(value).into_owned())
+            .on_select(Message::MTextFont)
+            .text_size(11)
+            .width(iced::Length::Fixed(120.0));
     // Same colour picker as the Properties panel (named swatches + "More…" full
     // palette), applied to the selection or the whole text.
     let color_pl = iced::widget::container(crate::ui::color_select::color_selector(
@@ -520,12 +544,32 @@ fn mtext_editor_content<'a>(
     .width(iced::Length::Fixed(150.0));
 
     let row1 = row![
-        style_pl,
+        labelled(t!("Style"), None, style_pl.into()),
+        labelled(t!("Font"), Some(ed.value_origin("font")), font_pl.into()),
+        labelled(
+            t!("Height"),
+            None,
+            small_input(
+                "2.5",
+                ed.span_field("height", &ed.height),
+                Message::MTextHeight,
+                64.0
+            )
+        ),
+        labelled(
+            t!("Width factor"),
+            Some(ed.value_origin("width")),
+            small_input(
+                "1",
+                ed.span_field("width", &ed.width),
+                Message::MTextWidth,
+                64.0
+            )
+        ),
+        labelled(t!("Color"), None, color_pl.into()),
         row![annotative, text(t!("Annotative")).size(11)]
             .spacing(3)
             .align_y(iced::Alignment::Center),
-        font_pl,
-        small_input("2.5", ed.span_field("height", &ed.height), Message::MTextHeight, 64.0),
         iced::widget::Space::new().width(6),
         icon_btn(
             include_bytes!("../../../assets/icons/mt_bold.svg"),
@@ -555,14 +599,12 @@ fn mtext_editor_content<'a>(
             include_bytes!("../../../assets/icons/mt_lower.svg"),
             Message::MTextFmt(MTextFmt::Lowercase)
         ),
-        iced::widget::Space::new().width(width),
-        color_pl,
     ]
     .spacing(4)
-    .align_y(iced::Alignment::Center)
+    .align_y(iced::Alignment::End)
     .width(width);
 
-    // ── Row 2: oblique / width / char-spacing · align · line spacing · OK ─
+    // ── Row 2: oblique / char-spacing · align · line spacing · OK ─────────
     let justify = iced::widget::pick_list(
         Some(JustifyChoice(ed.attachment)),
         JustifyChoice::ALL,
@@ -582,8 +624,6 @@ fn mtext_editor_content<'a>(
             .style(btn_style),
         lbl("O"),
         small_input("0", ed.span_field("oblique", &ed.oblique), Message::MTextOblique, 48.0),
-        lbl("W"),
-        small_input("1", ed.span_field("width", &ed.width), Message::MTextWidth, 48.0),
         lbl("◊"),
         small_input("0", ed.span_field("tracking", &ed.char_space), Message::MTextCharSpace, 48.0),
         iced::widget::Space::new().width(6),

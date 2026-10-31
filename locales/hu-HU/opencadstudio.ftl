@@ -33,6 +33,12 @@ mtext-source-errors = MTEXT
     .paragraph = MTEXT: a művelet megváltoztathatná a bekezdés- vagy tabulátorbeállításokat.
     .input = MTEXT: a beszúrandó szöveg nem támogatott vezérlőkaraktert tartalmaz.
     .projection = MTEXT: a forrás és a megjelenítés karakterpozíciói eltérnek; a módosítás nem történt meg.
+    .object-default = MTEXT: az objektumalap nem választható el biztonságosan a karakterjelzőktől vagy a védett vezérlőktől.
+
+mtext-object-origin = MTEXT
+    .style = Stílus szerint
+    .custom = Egyedi
+    .mixed = Vegyes
 
 action =
     .close = Bezárás

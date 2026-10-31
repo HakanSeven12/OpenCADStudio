@@ -7790,10 +7790,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextStyle(s) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.style = s;
-                }
-                self.rebuild_mtext_preview();
+                self.mtext_object_style(s);
                 Task::none()
             }
             Message::MTextFont(f) => {

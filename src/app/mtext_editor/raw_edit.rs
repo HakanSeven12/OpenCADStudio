@@ -403,8 +403,10 @@ impl crate::app::OpenCADStudio {
             return;
         }
         self.edit_raw(|_, index| {
+            // The object font and width stay: they are not the selection's.
+            let keep = super::raw_style::object_controls(index.raw);
             Ok(TextEdit {
-                raw: index.cleared_selection(range.clone(), &[])?,
+                raw: index.cleared_selection(range.clone(), &keep)?,
                 caret: range.end,
             })
         });

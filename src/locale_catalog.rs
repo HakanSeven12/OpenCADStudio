@@ -6561,6 +6561,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MTEXT: this change could alter paragraph or tab-stop settings." => Some(("mtext-source-errors", "paragraph")),
         "MTEXT: the inserted text contains an unsupported control character." => Some(("mtext-source-errors", "input")),
         "MTEXT: the source and rendered character positions do not agree; the edit was not applied." => Some(("mtext-source-errors", "projection")),
+        "MTEXT: the object default cannot be safely separated from character flags or protected controls." => Some(("mtext-source-errors", "object-default")),
         _ => None,
     }
 }

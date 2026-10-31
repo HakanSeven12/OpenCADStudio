@@ -24,6 +24,8 @@ mod raw_clear;
 mod raw_edit;
 #[allow(dead_code)]
 mod raw_operations;
+mod raw_style;
+pub(in crate::app) use raw_style::ValueOrigin;
 
 /// Character-level format toggles applied to the current selection by the
 /// toolbar. Each maps to a DXF MTEXT inline code understood by the renderer
@@ -107,14 +109,18 @@ pub struct MTextEditorState {
     pub height: String,
     /// Text style name (entity field).
     pub style: String,
-    /// Global font family applied via a leading `\f<font>;` run ("" = style default).
+    /// The object font: the `\f`/`\F` that opens the source ("" = the style's).
     pub font: String,
     /// Global colour ACI (256 = ByLayer) applied via a leading `\C<aci>;`.
     pub color_aci: u16,
-    /// Global oblique angle, width factor, char spacing — leading `\Q`/`\W`/`\T`.
+    /// Global oblique angle and char spacing — leading `\Q`/`\T`.
     pub oblique: String,
-    pub width: String,
     pub char_space: String,
+    /// The width the text draws with: the style's width times the `\W` that
+    /// opens the source. Kept as typed, so partial input is allowed.
+    pub width: String,
+    /// What the current text style supplies where the source sets nothing.
+    pub object_style: raw_style::ObjectStyle,
     /// Tessellated strokes of the current text, drawn in the editor's own
     /// preview area (NOT on the drawing canvas).
     pub preview_wires: Vec<WireModel>,
@@ -197,6 +203,7 @@ impl MTextEditorState {
             oblique: "0".to_string(),
             width: "1".to_string(),
             char_space: "0".to_string(),
+            object_style: Default::default(),
             preview_wires: Vec::new(),
             show_preview: true,
             color_picker_open: false,
@@ -285,23 +292,17 @@ impl MTextEditorState {
         (super::view::overlay::MTEXT_PREVIEW_EM_PX / unit.max(1e-6)).clamp(1e-4, 1e6)
     }
 
-    /// Fold the toolbar's global defaults (font / colour / oblique / width /
-    /// char-spacing) onto every span that does not already override them. This
-    /// replaces the old hand-built `\f;\C;…` prefix so the value is produced
-    /// purely by opencadcodec's `to_mtext_string`.
+    /// Fold the toolbar's global defaults (colour / oblique / char-spacing)
+    /// onto every span that does not already override them. The object font
+    /// and width are in the source itself.
     fn apply_globals(&self, doc: &mut MTextDocument) {
-        let font = self.font.trim();
         let color = (self.color_aci != 256 && self.color_aci != 0)
             .then(|| MTextColor::Index(self.color_aci));
         let oblique = parse_non_default(&self.oblique, 0.0);
-        let width = parse_non_default(&self.width, 1.0);
         let tracking = parse_non_default(&self.char_space, 0.0);
         for para in &mut doc.paragraphs {
             for span in &mut para.spans {
                 let p = &mut span.properties;
-                if !font.is_empty() && p.font.is_none() {
-                    p.font = Some(MTextFont::from_name(font));
-                }
                 if p.color.is_none() && p.color_rgb.is_none() {
                     if let Some(ref c) = color {
                         p.color = Some(c.clone());
@@ -309,9 +310,6 @@ impl MTextEditorState {
                 }
                 if p.oblique_angle.is_none() {
                     p.oblique_angle = oblique;
-                }
-                if p.width_factor.is_none() {
-                    p.width_factor = width;
                 }
                 if p.tracking.is_none() {
                     p.tracking = tracking;
@@ -326,10 +324,8 @@ impl MTextEditorState {
         let raw = self.content.text();
         // Without a toolbar default to fold in, the value is the source as
         // edited, byte for byte: nothing the user did not touch is rewritten.
-        if self.font.trim().is_empty()
-            && matches!(self.color_aci, 0 | 256)
+        if matches!(self.color_aci, 0 | 256)
             && parse_non_default(&self.oblique, 0.0).is_none()
-            && parse_non_default(&self.width, 1.0).is_none()
             && parse_non_default(&self.char_space, 0.0).is_none()
         {
             return raw;
@@ -792,6 +788,7 @@ impl super::OpenCADStudio {
                 state.style = cur_style;
             }
         }
+        state.seed_object_values(&self.tabs[self.active_tab].scene.document);
         self.mtext_editor = Some(state);
         // Open centred at the editor's natural size: it renders through the
         // shared modal frame, which `modal_offset` positions and `modal_resize`
@@ -936,6 +933,10 @@ impl super::OpenCADStudio {
             .as_ref()
             .and_then(|editor| editor.sel)
             .is_some_and(|(start, end)| start < end);
+        if field == "width" && !has_selection {
+            self.mtext_object_width(value);
+            return;
+        }
         if let Some(ed) = self.mtext_editor.as_mut() {
             // The field shows what is typed, an empty or half-typed value
             // included, with or without a selection (#2194).
@@ -945,7 +946,6 @@ impl super::OpenCADStudio {
                 match field {
                     "height" => ed.height = value,
                     "oblique" => ed.oblique = value,
-                    "width" => ed.width = value,
                     "tracking" => ed.char_space = value,
                     _ => {}
                 }
@@ -1422,13 +1422,9 @@ impl super::OpenCADStudio {
                     ed.caret_blink_on = true;
                 }
             }
-        } else if let Some(ed) = self.mtext_editor.as_mut() {
-            // No selection: the global font applies to the whole text.
-            ed.font = if default {
-                String::new()
-            } else {
-                font.to_string()
-            };
+        } else {
+            self.mtext_object_font(font);
+            return;
         }
         self.rebuild_mtext_preview();
     }
@@ -1935,21 +1931,18 @@ mod cell_tests {
     }
 
     // The global toolbar defaults fold onto the text as real span properties
-    // (replacing the old hand-built `\f;\C;…` prefix), and survive serialization.
+    // (replacing the old hand-built `\C;\Q;…` prefix), and survive
+    // serialization. The object font and width are in the source instead.
     #[test]
     fn global_defaults_fold_into_spans() {
         let mut ed = MTextEditorState::new(DVec3::ZERO, "hello world", 2.5, None);
-        ed.font = "Arial".to_string();
         ed.color_aci = 1; // red
         ed.oblique = "15".to_string();
-        ed.width = "2".to_string();
         let doc = parse_mtext(&ed.folded_value(), true);
         assert_eq!(doc.to_plain_text(), "hello world");
         let p = &doc.paragraphs[0].spans[0].properties;
-        assert_eq!(p.font.as_ref().map(|f| f.name.as_str()), Some("Arial"));
         assert_eq!(p.color, Some(MTextColor::Index(1)));
         assert_eq!(p.oblique_angle, Some(15.0));
-        assert_eq!(p.width_factor, Some(2.0));
     }
 
     #[test]

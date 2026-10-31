@@ -542,6 +542,9 @@ pub(super) enum EditError {
     FractionParts,
     /// An edit that would change or split a native field's text.
     FieldText,
+    /// An object default that cannot be separated from the characters'
+    /// own formatting.
+    ObjectDefault,
 }
 
 impl std::fmt::Display for EditError {
@@ -561,6 +564,7 @@ impl std::fmt::Display for EditError {
             Self::StackFormat => "MTEXT: an index or fraction takes one formatting; the selection mixes formats.",
             Self::FractionParts => "MTEXT: a fraction needs both a numerator and a denominator.",
             Self::FieldText => "MTEXT: a field's text cannot be changed or split; edit the text around it.",
+            Self::ObjectDefault => "MTEXT: the object default cannot be safely separated from character flags or protected controls.",
         })
     }
 }

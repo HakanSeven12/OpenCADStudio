@@ -182,7 +182,9 @@ impl Ribbon {
             },
             None => QatLook::Plain {
                 face: self.command_face(cmd),
-                runs: crate::ui::menu_bar::implemented(cmd),
+                // A ribbon button's command works even when it is not a
+                // registered command (`_SSMTOGGLE`, `DIMEDIT;O`, plugins').
+                runs: crate::ui::menu_bar::implemented(cmd) || self.ribbon_face(cmd).is_some(),
             },
         };
         self.qat_cache.borrow_mut().looks.insert(key, look.clone());
@@ -200,6 +202,13 @@ impl Ribbon {
             },
             QatItem::Builtin(_) | QatItem::Separator => true,
         }
+    }
+
+    /// Whether the customize menu lets `item` be ticked or unticked: a
+    /// command OCS does not have yet is greyed out, as the menu bar has it,
+    /// and cannot be added, but one already on the toolbar can come off.
+    pub(super) fn can_toggle(&self, item: &QatItem) -> bool {
+        self.layout.qat_has(item) || self.item_runs(item)
     }
 
     /// Forget the command items' looks: the tabs changed.
@@ -324,10 +333,8 @@ impl Ribbon {
         let mut items: Vec<Element<'_, Message>> = vec![menu_header(title)];
         items.extend(standard.into_iter().map(|(label, item)| {
             let checked = self.layout.qat_has(&item);
-            // A command OCS does not have yet is greyed out, as the menu bar
-            // has it.
             let on_press = self
-                .item_runs(&item)
+                .can_toggle(&item)
                 .then(|| Message::RibbonQat(QatMsg::Toggle(item)));
             check_row(label, checked, on_press).into()
         }));
@@ -1165,7 +1172,15 @@ mod tests {
             QatLook::Plain { runs: false, .. }
         ));
 
-        ribbon.layout.qat = vec![QatItem::Command("SAVE".into()), preview];
+        // A ribbon button's command runs although it is not registered.
+        assert!(!crate::ui::menu_bar::implemented("_SSMTOGGLE"));
+        assert!(ribbon.item_runs(&QatItem::Command("_SSMTOGGLE".into())));
+        assert!(!ribbon.item_runs(&QatItem::Command("NOSUCHCOMMAND".into())));
+
+        // The customize menu cannot add it, but can take it off again.
+        assert!(!ribbon.can_toggle(&preview));
+        ribbon.layout.qat = vec![QatItem::Command("SAVE".into()), preview.clone()];
+        assert!(ribbon.can_toggle(&preview));
         let tips = ribbon.qat_tips();
         assert_eq!(tips.len(), 1);
         assert_eq!(tips[0].target, "SAVE");

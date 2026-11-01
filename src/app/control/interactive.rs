@@ -193,6 +193,7 @@ impl OpenCADStudio {
                     .get_entity(*handle)
                     .map(|entity| {
                         let mut json = entity_json(
+                            &self.tabs[i].scene.document,
                             entity,
                             &session.detail,
                             crate::plugin::entity_labels::custom_entity_class_label(
@@ -392,6 +393,7 @@ impl OpenCADStudio {
             .filter_map(|handle| {
                 scene.document.get_entity(*handle).map(|entity| {
                     let full = entity_json(
+                        &scene.document,
                         entity,
                         "full",
                         crate::plugin::entity_labels::custom_entity_class_label(

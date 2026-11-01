@@ -328,13 +328,16 @@ pub(crate) fn entity_type_matches(entity: &codec::EntityType, requested: &str) -
 }
 
 /// One entity as JSON. Summary mode carries identity only, geometry adds the
-/// entity's defining values, and full also includes its world bounds.
+/// entity's defining values, and full also includes its world bounds, measured
+/// through a block definition so a reference reports what it draws rather than
+/// where it was placed.
 ///
 /// `custom_label` is the plugin-declared class label for the entity's XDATA
 /// class identity, if a live declaring plugin provides one; it surfaces as
 /// `display_type` ("`<Label>` (`<Native>`)"), while `type` stays the raw
 /// native name so existing scripts and filters keep working.
 pub(crate) fn entity_json(
+    document: &codec::Document,
     e: &codec::EntityType,
     detail: &str,
     custom_label: Option<String>,
@@ -464,7 +467,7 @@ pub(crate) fn entity_json(
         }
     }
     if detail == "full" {
-        let (mut min, mut max) = crate::scene::convert::tess::entity_bounds(e);
+        let (mut min, mut max) = crate::scene::convert::tess::entity_bounds_in(document, e);
         // Text bounds come from the shaped glyphs, and some paths leave the
         // width degenerate (a vertical segment at the insertion point).
         // Widen with the same heuristic the clients fall back to, so
@@ -1559,6 +1562,7 @@ impl OpenCADStudio {
                 continue;
             }
             let mut entity = entity_json(
+                &tab.scene.document,
                 e,
                 detail,
                 crate::plugin::entity_labels::custom_entity_class_label(&self.disabled_plugins, e),
@@ -5363,7 +5367,7 @@ mod tests {
     #[test]
     fn entity_json_display_type_is_native_without_a_label() {
         let entity = codec::EntityType::Point(codec::entities::Point::new());
-        let json = super::entity_json(&entity, "summary", None);
+        let json = super::entity_json(&codec::Document::new(), &entity, "summary", None);
         assert_eq!(json["type"], "Point");
         assert_eq!(json["display_type"], "Point");
     }
@@ -5371,7 +5375,12 @@ mod tests {
     #[test]
     fn entity_json_display_type_qualifies_the_label() {
         let entity = codec::EntityType::Point(codec::entities::Point::new());
-        let json = super::entity_json(&entity, "summary", Some("Survey Point".to_string()));
+        let json = super::entity_json(
+            &codec::Document::new(),
+            &entity,
+            "summary",
+            Some("Survey Point".to_string()),
+        );
         assert_eq!(json["type"], "Point");
         assert_eq!(json["display_type"], "Survey Point (Point)");
     }

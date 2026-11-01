@@ -1959,7 +1959,9 @@ pub(crate) fn entity_bounds(e: &codec::EntityType) -> ([f64; 3], [f64; 3]) {
 }
 
 /// [`entity_bounds`] with the document, for entities whose extent is not
-/// stored on the entity: an underlay spans its page (or its clip).
+/// stored on the entity: an underlay spans its page (or its clip), and a block
+/// reference spans what its definition draws once the reference transform is
+/// applied to it.
 pub(crate) fn entity_bounds_in(
     document: &codec::Document,
     e: &codec::EntityType,
@@ -1967,6 +1969,14 @@ pub(crate) fn entity_bounds_in(
     if let codec::EntityType::Underlay(underlay) = e {
         if let Some(bounds) = crate::entities::underlay::world_bounds(underlay, document) {
             return bounds;
+        }
+    }
+    if let codec::EntityType::Insert(insert) = e {
+        if let Some(bounds) = crate::app::helpers::insert_world_bounds(document, insert) {
+            return (
+                [bounds.min.x, bounds.min.y, bounds.min.z],
+                [bounds.max.x, bounds.max.y, bounds.max.z],
+            );
         }
     }
     entity_bounds(e)

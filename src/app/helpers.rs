@@ -581,6 +581,14 @@ fn insert_bounds(
     out
 }
 
+/// World box of one block reference, measured through its definition.
+pub(crate) fn insert_world_bounds(
+    doc: &codec::Document,
+    insert: &codec::entities::Insert,
+) -> Option<codec::types::BoundingBox3D> {
+    insert_bounds(doc, insert, &mut BlockBounds::default(), 0)
+}
+
 /// Box of the named block definition's contents, relative to its base point.
 pub(crate) fn block_definition_bounds(
     doc: &codec::Document,

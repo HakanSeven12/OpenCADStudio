@@ -46,6 +46,118 @@ fn edit(app: &mut OpenCADStudio, field: &str, value: &str) {
     app.finish_pending_history(app.active_tab);
 }
 
+/// The `Allow exploding` row is a switch, not a label: a definition answered
+/// `No` has to survive `EXPLODE` once the editor closes.
+#[test]
+fn block_properties_allow_exploding_refuses_the_explode_command() {
+    let mut app = fixture();
+    let i = app.active_tab;
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .find(|entity| matches!(entity, EntityType::Insert(_)))
+        .unwrap()
+        .common()
+        .handle;
+    edit(&mut app, "bedit_allow_exploding", "No");
+    let _ = app.dispatch_command("BEDIT_SAVE");
+    app.tabs[i].scene.selected.insert(insert);
+    let _ = app.dispatch_command("EXPLODE");
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(insert)
+            .is_some(),
+        "EXPLODE disassembled a definition the row says cannot be exploded"
+    );
+}
+
+/// The switch has to outlive the drawing session: a file written with `No`
+/// reloads as a definition `EXPLODE` still refuses.
+#[test]
+fn block_properties_allow_exploding_survives_the_saved_file() {
+    for ext in ["dxf", "dwg"] {
+        let mut app = fixture();
+        let i = app.active_tab;
+        edit(&mut app, "bedit_allow_exploding", "No");
+        let _ = app.dispatch_command("BEDIT_SAVE");
+        let bytes = crate::io::save_to_bytes(
+            &app.tabs[i].scene.document,
+            ext,
+            app.tabs[i].scene.document.version,
+        )
+        .unwrap_or_else(|error| panic!("save {ext}: {error}"));
+        let read = crate::io::load_bytes(&format!("properties.{ext}"), bytes)
+            .unwrap_or_else(|error| panic!("load {ext}: {error}"));
+        assert!(
+            !read
+                .block_records
+                .get("PROPERTIES")
+                .unwrap_or_else(|| panic!("{ext}: the definition is gone"))
+                .explodable,
+            "{ext}: `Allow exploding = No` did not survive the save"
+        );
+        let reloaded = read
+            .entities()
+            .find(|entity| matches!(entity, EntityType::Insert(_)))
+            .unwrap()
+            .common()
+            .handle;
+        app.tabs[i].scene.document = read;
+        app.tabs[i].scene.selected.insert(reloaded);
+        let _ = app.dispatch_command("EXPLODE");
+        assert!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(reloaded)
+                .is_some(),
+            "{ext}: EXPLODE disassembled a definition reloaded as not explodable"
+        );
+    }
+}
+
+/// A definition that carries a parameter is drawn from a representation copy,
+/// so the switch has to reach that record as well or it is inert exactly where
+/// the block editor is used.
+#[test]
+fn block_properties_allow_exploding_refuses_explode_on_a_parametric_block() {
+    let mut app = fixture();
+    let i = app.active_tab;
+    let definition = app.tabs[i]
+        .active_block_edit_session()
+        .expect("the fixture opens an editor session")
+        .br_handle;
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .find(|entity| matches!(entity, EntityType::Insert(_)))
+        .unwrap()
+        .common()
+        .handle;
+    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 6,2 3,2");
+    assert!(
+        app.tabs[i].scene.document.is_dynamic_block(definition),
+        "the test block has to be parametric for this to mean anything"
+    );
+    app.refresh_properties();
+    edit(&mut app, "bedit_allow_exploding", "No");
+    let _ = app.dispatch_command("BEDIT_SAVE");
+    app.tabs[i].scene.selected.insert(insert);
+    let _ = app.dispatch_command("EXPLODE");
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(insert)
+            .is_some(),
+        "EXPLODE disassembled a parametric definition the row says cannot be exploded"
+    );
+}
+
 #[test]
 fn block_properties_extend_the_existing_panel_only_for_empty_editor_selection() {
     let mut app = fixture();

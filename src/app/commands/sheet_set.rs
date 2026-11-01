@@ -2278,9 +2278,7 @@ impl OpenCADStudio {
                 br.entity_handles
                     .iter()
                     .filter_map(|h| match doc.get_entity(*h) {
-                        Some(codec::EntityType::AttributeDefinition(d)) if !d.flags.constant => {
-                            Some(d.clone())
-                        }
+                        Some(codec::EntityType::AttributeDefinition(d)) => Some(d.clone()),
                         _ => None,
                     })
                     .collect()

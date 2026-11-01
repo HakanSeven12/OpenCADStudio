@@ -873,6 +873,12 @@ fn block_test_attributes_use_defaults_and_the_stored_base_point() {
     let definition = doc
         .add_entity(EntityType::AttributeDefinition(attribute))
         .unwrap();
+    let mut fixed = AttributeDefinition::new("FIXED".into(), "Fixed".into(), "always".into());
+    fixed.insertion_point = Vector3::new(12.0, 24.0, 0.0);
+    fixed.common.owner_handle = owner;
+    fixed.flags.constant = true;
+    doc.add_entity(EntityType::AttributeDefinition(fixed))
+        .unwrap();
     let _ = app.open_block_test(source);
     let doc = &app.tabs[app.active_tab].scene.document;
     let model = doc.header.model_space_block_handle;
@@ -883,13 +889,27 @@ fn block_test_attributes_use_defaults_and_the_stored_base_point() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(insert.attributes.len(), 1);
-    let attribute = &insert.attributes[0];
+    assert_eq!(
+        insert.attributes.len(),
+        2,
+        "a constant attribute is never asked for, but it still belongs to the reference"
+    );
+    let attribute = insert
+        .attributes
+        .iter()
+        .find(|attribute| attribute.tag == "TAG")
+        .expect("the ordinary attribute");
     assert_eq!(attribute.value, "default");
     assert_eq!(attribute.insertion_point, Vector3::new(2.0, 3.0, 0.0));
     assert_eq!(attribute.attdef_handle, definition);
     assert!(!attribute.common.handle.is_null());
     assert_eq!(attribute.common.owner_handle, insert.common.handle);
+    let fixed = insert
+        .attributes
+        .iter()
+        .find(|attribute| attribute.tag == "FIXED")
+        .expect("the constant attribute");
+    assert_eq!(fixed.value, "always");
 }
 
 #[test]

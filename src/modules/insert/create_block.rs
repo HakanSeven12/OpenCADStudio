@@ -213,6 +213,106 @@ mod tests {
         assert_eq!(br.description, "Convert test");
     }
 
+    /// An attribute definition converted into a block belongs to the reference
+    /// that replaces it: one attribute per definition, holding the default the
+    /// definition carries, placed where the definition draws it. The written
+    /// file has to show the same shape, so it is read back from bytes.
+    #[test]
+    fn convert_mode_gives_the_reference_an_attribute_per_definition() {
+        use codec::entities::AttributeDefinition;
+        use codec::EntityType;
+        let (mut scene, line_h) = make_test_scene();
+        let mut attdef =
+            AttributeDefinition::new("WIDTH".to_string(), "Width:".to_string(), "100".to_string());
+        attdef.insertion_point = Vector3::new(2.0, 3.0, 0.0);
+        attdef.height = 1.0;
+        let attdef_h = scene.add_entity(EntityType::AttributeDefinition(attdef));
+        let options = CreateBlockOptions {
+            name: "BLK_ATTRIB".to_string(),
+            handles: vec![line_h, attdef_h],
+            // A base point away from the attribute, so an attribute that does
+            // not follow the reference's own transform shows up as wrong.
+            base_point: DVec3::new(10.0, 10.0, 0.0),
+            world_to_block: Transform::from_translation(Vector3::new(-10.0, -10.0, 0.0)),
+            block_to_world: Transform::from_translation(Vector3::new(10.0, 10.0, 0.0)),
+            mode: BlockObjectMode::Convert,
+            annotative: false,
+            match_orientation: false,
+            scale_uniformly: false,
+            allow_exploding: true,
+            unit: 0,
+            description: "".to_string(),
+            hyperlink_url: "".to_string(),
+            hyperlink_desc: "".to_string(),
+            redefine: false,
+        };
+        let insert_h = scene.create_block_with_options(options).unwrap();
+
+        let definition_h = scene
+            .document
+            .entities_in_block("BLK_ATTRIB")
+            .find_map(|entity| match entity {
+                EntityType::AttributeDefinition(definition) => Some(definition.common.handle),
+                _ => None,
+            })
+            .expect("the attribute definition belongs to the new definition");
+        let record = scene.document.block_records.get("BLK_ATTRIB").unwrap();
+        assert!(
+            record.flags.has_attributes,
+            "a definition holding an attribute definition is an attributed block"
+        );
+        let insert = match scene.document.get_entity(insert_h) {
+            Some(EntityType::Insert(insert)) => insert.clone(),
+            other => panic!("expected the converted insert, got {other:?}"),
+        };
+        assert_eq!(
+            insert.attributes.len(),
+            1,
+            "the reference carries no attribute, so nothing of the definition shows on it"
+        );
+        let attribute = &insert.attributes[0];
+        assert_eq!(insert.insert_point, Vector3::new(10.0, 10.0, 0.0));
+        assert_eq!(attribute.tag, "WIDTH");
+        assert_eq!(
+            attribute.value, "100",
+            "the attribute starts at the default"
+        );
+        assert_eq!(attribute.attdef_handle, definition_h);
+        assert_eq!(
+            attribute.insertion_point,
+            Vector3::new(2.0, 3.0, 0.0),
+            "the attribute stays on the object it was converted from"
+        );
+        assert!(!attribute.common.handle.is_null());
+        assert_eq!(attribute.common.owner_handle, insert_h);
+        assert!(
+            insert.seqend_handle.is_some(),
+            "the attributes need a terminator"
+        );
+
+        for ext in ["dxf", "dwg"] {
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
+                .unwrap_or_else(|error| panic!("save {ext}: {error}"));
+            let read = crate::io::load_bytes(&format!("attrib.{ext}"), bytes)
+                .unwrap_or_else(|error| panic!("load {ext}: {error}"));
+            let reloaded = read
+                .entities()
+                .find_map(|entity| match entity {
+                    EntityType::Insert(candidate) if candidate.block_name == "BLK_ATTRIB" => {
+                        Some(candidate.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{ext}: the converted block was not written"));
+            assert_eq!(
+                reloaded.attributes.len(),
+                1,
+                "{ext}: the reference was written without its attribute"
+            );
+            assert_eq!(reloaded.attributes[0].value, "100", "{ext}: the value");
+        }
+    }
+
     #[test]
     fn test_create_block_delete_mode() {
         let (mut scene, line_h) = make_test_scene();

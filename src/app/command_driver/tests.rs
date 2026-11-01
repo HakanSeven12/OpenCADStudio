@@ -2179,6 +2179,178 @@ mod block_base_point_tests {
         );
     }
 
+    /// An attribute placed through the command line is an object in its own
+    /// right: a handle of its own, the reference as its owner and a terminator,
+    /// so that the saved file carries it and the reference stays attributed.
+    #[test]
+    fn locked_attreq_attributes_are_written_as_objects_of_their_own() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "ATTREQ_ID",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(codec::entities::Line::from_points(
+                    Vector3::new(0.0, 0.0, 0.0),
+                    Vector3::new(20.0, 0.0, 0.0),
+                )),
+                EntityType::AttributeDefinition(AttributeDefinition {
+                    insertion_point: Vector3::new(1.0, 2.0, 0.0),
+                    height: 1.0,
+                    ..AttributeDefinition::new(
+                        "TAG1".to_string(),
+                        "Tag one".to_string(),
+                        "100".to_string(),
+                    )
+                }),
+            ],
+        );
+
+        let mut cmd = InsertBlockCommand::classic_for_block(
+            "ATTREQ_ID".to_string(),
+            Vec::new(),
+            String::new(),
+        );
+        let _ = cmd.on_point(glam::DVec3::new(0.0, 0.0, 0.0));
+        let _ = cmd.on_text_input("2");
+        let _ = cmd.on_text_input("2");
+        assert!(matches!(
+            cmd.on_text_input("0"),
+            Some(CmdResult::AttreqNeeded { .. })
+        ));
+        app.tabs[i].active_cmd = Some(Box::new(cmd));
+        let _ = app.apply_cmd_result(CmdResult::AttreqNeeded {
+            block_name: "ATTREQ_ID".to_string(),
+        });
+        let result = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .expect("the INSERT command waits for the attribute value")
+            .on_text_input("VALUE1")
+            .expect("the value finishes the INSERT");
+        let _ = app.apply_cmd_result(result);
+
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Insert(candidate) if candidate.block_name == "ATTREQ_ID" => {
+                    Some(candidate.clone())
+                }
+                _ => None,
+            })
+            .expect("the placed reference");
+        assert_eq!(insert.attributes.len(), 1);
+        let attribute = &insert.attributes[0];
+        assert!(
+            !attribute.common.handle.is_null(),
+            "the attribute is an object of its own, so it needs a handle"
+        );
+        assert_eq!(
+            attribute.common.owner_handle, insert.common.handle,
+            "the attribute belongs to the reference it was placed on"
+        );
+        assert!(
+            insert.seqend_handle.is_some(),
+            "the attributes need a terminator"
+        );
+
+        for ext in ["dxf", "dwg"] {
+            let bytes = crate::io::save_to_bytes(
+                &app.tabs[i].scene.document,
+                ext,
+                app.tabs[i].scene.document.version,
+            )
+            .unwrap_or_else(|error| panic!("save {ext}: {error}"));
+            let read = crate::io::load_bytes(&format!("attreq.{ext}"), bytes)
+                .unwrap_or_else(|error| panic!("load {ext}: {error}"));
+            let reloaded = read
+                .entities()
+                .find_map(|entity| match entity {
+                    EntityType::Insert(candidate) if candidate.block_name == "ATTREQ_ID" => {
+                        Some(candidate.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{ext}: the reference was not written"));
+            assert_eq!(
+                reloaded.attributes.len(),
+                1,
+                "{ext}: the reference was written without its attribute"
+            );
+            assert_eq!(reloaded.attributes[0].tag, "TAG1", "{ext}: the tag");
+            assert_eq!(
+                reloaded.attributes[0].value, "VALUE1",
+                "{ext}: the value entered at placement"
+            );
+        }
+    }
+
+    /// A constant attribute is never asked for, but it still belongs to the
+    /// reference: the value the definition carries is the value the reference
+    /// shows.
+    #[test]
+    fn locked_attreq_places_a_constant_attribute_without_asking() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut attdef =
+            AttributeDefinition::new("TAG1".to_string(), "Tag one".to_string(), "42".to_string());
+        attdef.flags.constant = true;
+        app.tabs[i].scene.define_block_raw(
+            "ATTREQ_CONST",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(codec::entities::Line::from_points(
+                    Vector3::new(0.0, 0.0, 0.0),
+                    Vector3::new(20.0, 0.0, 0.0),
+                )),
+                EntityType::AttributeDefinition(attdef),
+            ],
+        );
+
+        let mut cmd = InsertBlockCommand::classic_for_block(
+            "ATTREQ_CONST".to_string(),
+            Vec::new(),
+            String::new(),
+        );
+        let _ = cmd.on_point(glam::DVec3::new(0.0, 0.0, 0.0));
+        let _ = cmd.on_text_input("2");
+        let _ = cmd.on_text_input("2");
+        assert!(matches!(
+            cmd.on_text_input("0"),
+            Some(CmdResult::AttreqNeeded { .. })
+        ));
+        app.tabs[i].active_cmd = Some(Box::new(cmd));
+        let _ = app.apply_cmd_result(CmdResult::AttreqNeeded {
+            block_name: "ATTREQ_CONST".to_string(),
+        });
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "a constant attribute asks nothing, so the placement is finished"
+        );
+
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Insert(candidate) if candidate.block_name == "ATTREQ_CONST" => {
+                    Some(candidate.clone())
+                }
+                _ => None,
+            })
+            .expect("the placed reference");
+        assert_eq!(
+            insert.attributes.len(),
+            1,
+            "the constant attribute belongs to the reference even though nothing was asked"
+        );
+        assert_eq!(insert.attributes[0].value, "42");
+    }
+
     /// base-point fix (D), host side: picking an existing block in the Block
     /// Definition dialog prefills the base point from that definition.
     #[test]

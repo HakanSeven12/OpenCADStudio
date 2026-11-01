@@ -365,6 +365,10 @@ pub(crate) fn insert_attribute_entities(
     insert
         .attributes
         .iter()
+        // A constant attribute is text the definition itself carries: it is the
+        // same for every reference, so the definition draws it and the
+        // reference must not draw it again underneath.
+        .filter(|attribute| !attribute.flags.constant)
         .filter(|attribute| attribute_is_render_visible(document, visibility, attribute))
         .map(|attribute| {
             let mut attribute = attribute.clone();
@@ -593,6 +597,36 @@ mod tests {
         assert_eq!(
             ins.attributes[0].insertion_point,
             Vector3::new(1.0, 1.0, 0.0)
+        );
+    }
+
+    /// A constant attribute is drawn by the definition it belongs to, which is
+    /// why it gets no grip; the reference must not draw the same text a second
+    /// time under it.
+    #[test]
+    fn a_constant_attribute_is_painted_by_the_definition_only() {
+        use codec::EntityType;
+        let mut document = document_with_layers(Vec::new());
+        document.header.attribute_visibility = 1;
+        let mut constant = attribute("TAG_CONST", 1.0, 1.0);
+        constant.flags.constant = true;
+        let ins = block_with(vec![constant, attribute("TAG_VALUE", 2.0, 2.0)]);
+        let painted: Vec<String> = insert_attribute_entities(
+            &document,
+            &ins,
+            1.0,
+            crate::scene::BlockScalePolicy::FromInsert,
+        )
+        .into_iter()
+        .map(|entity| match entity {
+            EntityType::AttributeEntity(attribute) => attribute.tag.clone(),
+            other => panic!("expected an attribute, got {other:?}"),
+        })
+        .collect();
+        assert_eq!(
+            painted,
+            vec!["TAG_VALUE".to_string()],
+            "the definition already draws the constant, so the reference adds nothing"
         );
     }
 

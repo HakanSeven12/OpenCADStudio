@@ -1042,10 +1042,10 @@ impl InsertBlockCommand {
             if !constant && !preset {
                 return None;
             }
+            // Constant and preset both carry their own value: skipping the
+            // question is not the same as skipping the attribute.
             if let Step::FillAttr { idx, values, .. } = &mut self.step {
-                if !constant {
-                    values.push((attdef_idx, default));
-                }
+                values.push((attdef_idx, default));
                 *idx += 1;
             }
         }

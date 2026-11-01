@@ -297,6 +297,69 @@ impl Scene {
         handles
     }
 
+    /// Give the attributes a reference arrives with their own identity. Whoever
+    /// builds a reference cannot know its handle yet, so the attributes are
+    /// adopted here: one already carrying a handle keeps it, one without gets a
+    /// fresh handle and the reference as its owner, and the set is terminated
+    /// once there is something to terminate.
+    fn adopt_attributes(document: &mut codec::Document, insert_handle: Handle) {
+        let Some(EntityType::Insert(insert)) = document.get_entity(insert_handle) else {
+            return;
+        };
+        let unhandled: Vec<bool> = insert
+            .attributes
+            .iter()
+            .map(|attribute| attribute.common.handle.is_null())
+            .collect();
+        let text_count = insert
+            .attributes
+            .iter()
+            .filter(|attribute| attribute.common.handle.is_null())
+            .filter(|attribute| attribute.embedded_mtext.is_some())
+            .count();
+        let needs_end = !insert.attributes.is_empty() && insert.seqend_handle.is_none();
+        if unhandled.iter().all(|null| !*null) && !needs_end {
+            return;
+        }
+        let handles: Vec<Handle> = (0..unhandled.iter().filter(|null| **null).count())
+            .map(|_| document.allocate_handle())
+            .collect();
+        let text_handles: Vec<Handle> = (0..text_count)
+            .map(|_| document.allocate_handle())
+            .collect();
+        let end = if needs_end {
+            Some(document.allocate_handle())
+        } else {
+            None
+        };
+        let Some(EntityType::Insert(insert)) = document.get_entity_mut(insert_handle) else {
+            return;
+        };
+        let mut handles = handles.into_iter();
+        let mut text_handles = text_handles.into_iter();
+        for (attribute, was_null) in insert.attributes.iter_mut().zip(&unhandled) {
+            if !*was_null {
+                continue;
+            }
+            attribute.common.handle = handles.next().unwrap_or(Handle::NULL);
+            attribute.common.owner_handle = insert_handle;
+            // A multiline attribute brings its text object along, and two
+            // objects cannot share one handle.
+            if let Some(model) = &mut attribute.embedded_mtext {
+                if let Some(handle) = text_handles.next() {
+                    model.common.handle = handle;
+                }
+                model.common.owner_handle = attribute.common.handle;
+                model.common.raw_record = None;
+                model.common.xdictionary_handle = None;
+                model.common.reactors.clear();
+            }
+        }
+        if let Some(end) = end {
+            insert.seqend_handle = Some(end);
+        }
+    }
+
     fn add_entity_internal(&mut self, mut entity: EntityType, bump: bool) -> Handle {
         // Only block sentinels mutate a block definition and require rebuilding
         // the block cache. A top-level INSERT merely references an existing
@@ -393,6 +456,7 @@ impl Scene {
         };
 
         if !handle.is_null() {
+            Self::adopt_attributes(&mut self.document, handle);
             if let Some(keep) = self.refedit_keep.as_mut() {
                 keep.insert(handle);
             }
@@ -1109,6 +1173,24 @@ impl Scene {
 
         self.close_block_definition(name, br_handle, stale_end)?;
 
+        // The record advertises an attributed block whenever its body holds
+        // attribute definitions, and those definitions are what the reference
+        // below is built from.
+        let definitions: Vec<codec::entities::AttributeDefinition> = {
+            let cloned: Vec<codec::entities::AttributeDefinition> = self
+                .document
+                .entities_in_block(name)
+                .filter_map(|entity| match entity {
+                    EntityType::AttributeDefinition(definition) => Some(definition.clone()),
+                    _ => None,
+                })
+                .collect();
+            if let Some(record) = self.document.block_records.get_mut(name) {
+                record.flags.has_attributes = !cloned.is_empty();
+            }
+            cloned
+        };
+
         let mut insert_handle = Handle::NULL;
         // An empty definition has nothing to convert into a reference.
         if options.mode == crate::ui::window::block_definition::BlockObjectMode::Convert
@@ -1116,6 +1198,17 @@ impl Scene {
         {
             let mut insert = DxfInsert::new(name, codec::types::Vector3::ZERO);
             codec::Entity::apply_transform(&mut insert, &options.block_to_world);
+            // Each definition contributes a reference of its own, seeded from
+            // its default and placed where the definition draws it, so the
+            // converted objects read as the attributed block they became.
+            let base = crate::scene::render_graph::block_base_point(&self.document, name);
+            let place = crate::scene::render_graph::insert_transform_with_base(&insert, base);
+            for definition in &definitions {
+                let mut attribute =
+                    codec::entities::AttributeEntity::from_definition(definition, None);
+                codec::Entity::apply_transform(&mut attribute, &place);
+                insert.attributes.push(attribute);
+            }
             insert_handle = self.add_entity(EntityType::Insert(insert));
         }
 

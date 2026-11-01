@@ -108,6 +108,11 @@ mod tests {
         app.automation_op(r#"{"op":"new"}"#);
         assert!(!app.tabs[app.active_tab].is_start);
         let _ = app.on_keytip(KeyTipInput::Open { refocus: false });
-        assert!(app.ribbon.keytips_active());
+        let opened = app.ribbon.keytips_active();
+        // Key tips are process-wide: close them before asserting, or other
+        // tests' keys go to them.
+        let _ = app.on_keytip(KeyTipInput::Hide);
+        assert!(opened);
+        assert!(!app.ribbon.keytips_active());
     }
 }

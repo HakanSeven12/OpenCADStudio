@@ -566,6 +566,10 @@ impl OpenCADStudio {
         for entity in edited {
             let _ = self.tabs[i].scene.document.add_entity(entity);
         }
+        crate::scene::Scene::sync_attribute_flag(
+            &mut self.tabs[i].scene.document,
+            &session.block_name,
+        );
         let instances = self.tabs[i]
             .scene
             .document

@@ -322,9 +322,7 @@ impl Scene {
         if definitions.is_empty() {
             return;
         }
-        if let Some(record) = document.block_records.get_mut(&name) {
-            record.flags.has_attributes = true;
-        }
+        Self::sync_attribute_flag(document, &name);
         let attributes: Vec<codec::entities::AttributeEntity> = definitions
             .iter()
             .map(|definition| {
@@ -405,6 +403,21 @@ impl Scene {
         }
         if let Some(end) = end {
             insert.seqend_handle = Some(end);
+        }
+    }
+
+    /// Say on the record whether its own body declares attribute definitions.
+    /// A DXF file writes the definition's "has attribute definitions" marker
+    /// from the record flag alone, so the record has to state what its body
+    /// actually holds: read back from the body every time a body is written —
+    /// by the block editor, by a definition replace, by a pasted definition's
+    /// twin — rather than left to whichever command set it first.
+    pub(crate) fn sync_attribute_flag(document: &mut codec::Document, name: &str) {
+        let holds_definitions = document
+            .entities_in_block(name)
+            .any(|entity| matches!(entity, EntityType::AttributeDefinition(_)));
+        if let Some(record) = document.block_records.get_mut(name) {
+            record.flags.has_attributes = holds_definitions;
         }
     }
 
@@ -493,7 +506,22 @@ impl Scene {
         //   - MSPACE or model layout: model space (document default).
         let handle = if let Some(br) = self.block_edit_block {
             entity.common_mut().owner_handle = br;
-            self.document.add_entity(entity).unwrap_or(Handle::NULL)
+            let authored_definition = matches!(&entity, EntityType::AttributeDefinition(_));
+            let handle = self.document.add_entity(entity).unwrap_or(Handle::NULL);
+            // The definition is attributed from the moment it holds one, not
+            // only once the editor saves: a file writes the marker for the
+            // definition from this flag.
+            if authored_definition && !handle.is_null() {
+                if let Some(record) = self
+                    .document
+                    .block_records
+                    .iter_mut()
+                    .find(|entry| entry.handle == br)
+                {
+                    record.flags.has_attributes = true;
+                }
+            }
+            handle
         } else if self.current_layout != "Model" && self.active_viewport.is_none() {
             let layout_name = self.current_layout.clone();
             self.document
@@ -1233,9 +1261,7 @@ impl Scene {
                     _ => None,
                 })
                 .collect();
-            if let Some(record) = self.document.block_records.get_mut(name) {
-                record.flags.has_attributes = !cloned.is_empty();
-            }
+            Self::sync_attribute_flag(&mut self.document, name);
             cloned
         };
 
@@ -1714,6 +1740,7 @@ impl Scene {
         if let Some(record) = self.document.block_records.get_mut(name) {
             record.block_end_handle = end_handle;
         }
+        Self::sync_attribute_flag(&mut self.document, name);
         // Solids, surfaces and meshes of a definition draw through their
         // instanced block meshes, which only a tessellation pass creates.
         self.refresh_meshes_for_handles(&entity_handles);
@@ -1770,6 +1797,7 @@ impl Scene {
         if let Some(record) = self.document.block_records.get_mut(name) {
             record.block_end_handle = end_handle;
         }
+        Self::sync_attribute_flag(&mut self.document, name);
         self.refresh_meshes_for_handles(&added);
         self.bump_geometry();
     }
@@ -1843,6 +1871,7 @@ impl Scene {
             changed.extend(self.document.add_entity(entity).ok());
         }
         self.close_block_definition(name, br_handle, stale_end)?;
+        Self::sync_attribute_flag(&mut self.document, name);
         self.refresh_meshes_for_handles(&changed);
         self.bump_geometry();
         Ok(())
@@ -4286,6 +4315,52 @@ mod attribute_instantiation_tests {
         let insert = insert(&scene, handle);
         assert!(insert.attributes.is_empty());
         assert!(insert.seqend_handle.is_none());
+    }
+
+    /// A definition is attributed because of what its body holds, not because
+    /// a reference of it was placed. Writing the body out — from the editor,
+    /// from a paste, or from a file — has to say so on the record, and a body
+    /// that no longer holds a definition has to unsay it.
+    #[test]
+    fn a_written_definition_is_attributed_because_of_its_body() {
+        let mut scene = Scene::new();
+        scene.define_block_raw(
+            "WRITTEN",
+            codec::types::Vector3::ZERO,
+            vec![EntityType::AttributeDefinition(definition(
+                "TAG",
+                "value",
+                codec::types::Vector3::ZERO,
+            ))],
+        );
+        assert_eq!(
+            scene
+                .document
+                .block_records
+                .get("WRITTEN")
+                .map(|record| record.flags.has_attributes),
+            Some(true),
+            "a body that declares an attribute marks the record"
+        );
+        scene
+            .redefine_block_raw(
+                "WRITTEN",
+                codec::types::Vector3::ZERO,
+                vec![EntityType::Line(codec::entities::Line::from_points(
+                    codec::types::Vector3::ZERO,
+                    codec::types::Vector3::new(4.0, 0.0, 0.0),
+                ))],
+            )
+            .unwrap();
+        assert_eq!(
+            scene
+                .document
+                .block_records
+                .get("WRITTEN")
+                .map(|record| record.flags.has_attributes),
+            Some(false),
+            "a body without one leaves the record unmarked"
+        );
     }
 }
 

@@ -1275,6 +1275,7 @@ pub(crate) fn define_block_raw_doc(
     if let Some(record) = doc.block_records.get_mut(name) {
         record.block_end_handle = end_handle;
     }
+    crate::scene::Scene::sync_attribute_flag(doc, name);
 }
 
 /// Shared sub-handle reset + owner stamp for block-definition members.

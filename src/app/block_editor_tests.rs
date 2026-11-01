@@ -95,6 +95,131 @@ fn feed(app: &mut OpenCADStudio, text: &str) {
     let _ = app.update(Message::CommandSubmit);
 }
 
+/// Author one attribute definition through the command line, the way an
+/// operator in the block editor does: modes, tag, prompt, default, then the
+/// place, height and rotation it is put at. The command keeps its session —
+/// the modes and the last definition placed — in process-wide state, so the
+/// run starts from the defaults a fresh drawing has and puts that state back
+/// as it found it; otherwise whichever test ran last would write the prompts
+/// this one answers.
+fn author_attribute(app: &mut OpenCADStudio, tag: &str) {
+    use crate::modules::draw::draw::attdef::{session, AttdefSession, AFLAG_LOCK};
+    let remembered = {
+        let mut live = session();
+        let remembered = AttdefSession {
+            aflags: live.aflags,
+            annotative: live.annotative,
+            last: live.last.clone(),
+            on_screen: live.on_screen,
+            editor_value: live.editor_value.clone(),
+        };
+        *live = AttdefSession {
+            aflags: AFLAG_LOCK,
+            annotative: false,
+            last: None,
+            on_screen: true,
+            editor_value: None,
+        };
+        remembered
+    };
+    let i = app.active_tab;
+    let _ = app.dispatch_command("-ATTDEF");
+    feed(app, ""); // modes: done
+    feed(app, tag);
+    feed(app, "prompt text");
+    feed(app, ""); // default value
+    feed(app, ""); // single line
+    feed(app, "0,5");
+    feed(app, "2");
+    feed(app, "0");
+    app.finish_pending_history(i);
+    *session() = remembered;
+}
+
+fn definition_is_attributed(app: &OpenCADStudio) -> Option<bool> {
+    app.tabs[app.active_tab]
+        .scene
+        .document
+        .block_records
+        .get("EDIT_ME")
+        .map(|record| record.flags.has_attributes)
+}
+
+/// What the written file says about the edited definition, read back from it.
+fn written_attribute_marker(app: &OpenCADStudio, extension: &str) -> Option<bool> {
+    let document = &app.tabs[app.active_tab].scene.document;
+    let bytes = crate::io::save_to_bytes(document, extension, document.version)
+        .unwrap_or_else(|error| panic!("save {extension}: {error}"));
+    let reloaded = crate::io::load_bytes(&format!("editor.{extension}"), bytes)
+        .unwrap_or_else(|error| panic!("load {extension}: {error}"));
+    reloaded
+        .block_records
+        .get("EDIT_ME")
+        .map(|record| record.flags.has_attributes)
+}
+
+#[test]
+fn an_attribute_authored_in_the_editor_marks_the_definition_attributed() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    assert_eq!(
+        definition_is_attributed(&app),
+        Some(false),
+        "a definition with no attribute says so"
+    );
+    author_attribute(&mut app, "TAG1");
+    assert_eq!(
+        definition_is_attributed(&app),
+        Some(true),
+        "the record advertises the attribute its body now holds"
+    );
+    let _ = app.dispatch_command("BSAVE");
+    assert_eq!(
+        definition_is_attributed(&app),
+        Some(true),
+        "saving keeps the definition attributed"
+    );
+    for extension in ["dxf", "dwg"] {
+        assert_eq!(
+            written_attribute_marker(&app, extension),
+            Some(true),
+            "{extension}: the written record does not advertise the authored attribute"
+        );
+    }
+    let _ = app.dispatch_command("BCLOSE");
+}
+
+#[test]
+fn saving_after_the_authored_attribute_is_erased_unmarks_the_definition() {
+    let (mut app, reference) = fixture();
+    let i = app.active_tab;
+    begin(&mut app, reference);
+    author_attribute(&mut app, "TAG1");
+    assert_eq!(
+        definition_is_attributed(&app),
+        Some(true),
+        "the attribute is on the record before it is erased"
+    );
+    let attribute = *members(&app).last().unwrap();
+    app.push_undo_snapshot(i, "Erase attribute");
+    app.tabs[i].scene.erase_entities(&[attribute]);
+    app.finish_pending_history(i);
+    let _ = app.dispatch_command("BSAVE");
+    assert_eq!(
+        definition_is_attributed(&app),
+        Some(false),
+        "the body holds no attribute, so neither does the record"
+    );
+    for extension in ["dxf", "dwg"] {
+        assert_eq!(
+            written_attribute_marker(&app, extension),
+            Some(false),
+            "{extension}: the written record still advertises an attribute the body lost"
+        );
+    }
+    let _ = app.dispatch_command("BCLOSE");
+}
+
 fn edit_action_set(app: &mut OpenCADStudio, action: Handle, mode: &str, targets: Vec<Handle>) {
     let _ = app.dispatch_command("BACTIONBARMODE 0");
     app.tabs[app.active_tab].selected_authoring = Some(action);
@@ -5677,16 +5802,7 @@ fn attdef_inside_session_lands_in_the_definition_and_undo_stays_local() {
     let depth = main_depth(&app);
     begin(&mut app, reference);
     assert_eq!(members(&app).len(), 1);
-    let _ = app.dispatch_command("-ATTDEF");
-    feed(&mut app, ""); // modes: done
-    feed(&mut app, "TAG1");
-    feed(&mut app, "prompt text");
-    feed(&mut app, ""); // default value
-    feed(&mut app, ""); // single line
-    feed(&mut app, "0,5");
-    feed(&mut app, "2");
-    feed(&mut app, "0");
-    app.finish_pending_history(i);
+    author_attribute(&mut app, "TAG1");
     let after = members(&app);
     assert_eq!(after.len(), 2, "the ATTDEF joins the definition");
     assert!(

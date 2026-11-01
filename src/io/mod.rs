@@ -2605,11 +2605,48 @@ pub fn prepare_document_for_save(mut doc: Document, version: codec::DxfVersion) 
     let dimensions_started = perf.then(iced::time::Instant::now);
     crate::modules::draw::modify::explode::bake_dimension_blocks(&mut doc);
     let dimensions_ms = crate::perf::elapsed_ms(dimensions_started);
+    let attributes_started = perf.then(iced::time::Instant::now);
+    // The "block has attribute definitions" marker a DXF file writes for a
+    // definition comes from this record flag alone, so every definition says
+    // what its body actually holds before the copy is handed to the writers —
+    // whichever route wrote the body: an editor session, a paste, an importer,
+    // a programmatic add. An external reference is the exception: its body is
+    // not in this drawing (the save copy strips what resolving it merged in,
+    // and the writer never emits it), so its marker describes the file it came
+    // from and has to be left as that file said it.
+    let attributed: Vec<(String, bool)> = doc
+        .block_records
+        .iter()
+        .filter(|record| {
+            !(record.is_model_space()
+                || record.is_paper_space()
+                || record.flags.is_xref
+                || record.flags.is_xref_overlay)
+        })
+        .map(|record| {
+            (
+                record.name.clone(),
+                record.entity_handles.iter().any(|handle| {
+                    matches!(
+                        doc.get_entity(*handle),
+                        Some(codec::EntityType::AttributeDefinition(_))
+                    )
+                }),
+            )
+        })
+        .collect();
+    for (name, holds_definitions) in attributed {
+        if let Some(record) = doc.block_records.get_mut(&name) {
+            record.flags.has_attributes = holds_definitions;
+        }
+    }
+    let attributes_ms = crate::perf::elapsed_ms(attributes_started);
     if perf {
         crate::perf_record!(
-            "[perf] save-prepare styles={:.1} dimensions={:.1} entities={} objects={}",
+            "[perf] save-prepare styles={:.1} dimensions={:.1} attributes={:.1} entities={} objects={}",
             styles_ms,
             dimensions_ms,
+            attributes_ms,
             doc.entities().count(),
             doc.objects.len(),
         );
@@ -3466,6 +3503,95 @@ mod prepare_save_tests {
         };
         assert!(live.base.block_name.is_empty());
         assert_eq!(live.base.definition_point, Vector3::ZERO);
+    }
+
+    /// One definition with no body members, or with an ATTDEF in its body.
+    fn define(doc: &mut Document, name: &str, attribute_tag: Option<&str>) {
+        let mut record = codec::tables::BlockRecord::new(name);
+        record.handle = doc.allocate_handle();
+        doc.block_records.add(record).unwrap();
+        let owner = doc.block_records.get(name).unwrap().handle;
+        let mut marker = codec::entities::Block::new(name, Vector3::ZERO);
+        marker.common.handle = doc.allocate_handle();
+        marker.common.owner_handle = owner;
+        doc.add_entity(EntityType::Block(marker)).unwrap();
+        if let Some(tag) = attribute_tag {
+            let mut attdef =
+                codec::entities::AttributeDefinition::new(tag.into(), "Prompt".into(), "".into());
+            attdef.common.handle = doc.allocate_handle();
+            attdef.common.owner_handle = owner;
+            doc.add_entity(EntityType::AttributeDefinition(attdef))
+                .unwrap();
+        }
+        let mut end = codec::entities::BlockEnd::new();
+        end.common.handle = doc.allocate_handle();
+        end.common.owner_handle = owner;
+        doc.add_entity(EntityType::BlockEnd(end)).unwrap();
+    }
+
+    fn marker(prepared: &Document, name: &str) -> bool {
+        prepared
+            .block_records
+            .get(name)
+            .unwrap()
+            .flags
+            .has_attributes
+    }
+
+    // The marker a DXF file writes for a definition comes from the record, so
+    // preparation puts each record in line with its own body — in both
+    // directions — and leaves the live document as it found it.
+    #[test]
+    fn prepare_takes_the_attribute_marker_from_each_definition_body() {
+        let mut doc = Document::new();
+        crate::io::linetypes::populate_document(&mut doc);
+        define(&mut doc, "TAGGED", Some("TAG"));
+        define(&mut doc, "PLAIN", None);
+        doc.block_records.get_mut("TAGGED").unwrap().flags.has_attributes = false;
+        doc.block_records.get_mut("PLAIN").unwrap().flags.has_attributes = true;
+        let version = doc.version;
+        let prepared = prepare_document_for_save(doc.clone(), version);
+        assert!(
+            marker(&prepared, "TAGGED"),
+            "a body that declares an attribute marks the record"
+        );
+        assert!(
+            !marker(&prepared, "PLAIN"),
+            "a body without one leaves the record unmarked"
+        );
+        assert!(
+            doc.block_records.get("PLAIN").unwrap().flags.has_attributes,
+            "the live document keeps the marker it had"
+        );
+    }
+
+    // An external reference's body is not this drawing's to describe: the save
+    // copy strips what resolving it merged in, so the marker its own file said
+    // has to survive preparation rather than be read off an empty body.
+    #[test]
+    fn prepare_leaves_an_external_reference_marker_alone() {
+        let mut doc = Document::new();
+        crate::io::linetypes::populate_document(&mut doc);
+        let mut record = codec::tables::BlockRecord::new("XREFED");
+        record.handle = doc.allocate_handle();
+        record.flags.is_xref = true;
+        record.flags.has_attributes = true;
+        doc.block_records.add(record).unwrap();
+        let mut overlay = codec::tables::BlockRecord::new("OVERLAYED");
+        overlay.handle = doc.allocate_handle();
+        overlay.flags.is_xref_overlay = true;
+        overlay.flags.has_attributes = true;
+        doc.block_records.add(overlay).unwrap();
+        let version = doc.version;
+        let prepared = prepare_document_for_save(doc, version);
+        assert!(
+            marker(&prepared, "XREFED"),
+            "the reference keeps the marker its file declared"
+        );
+        assert!(
+            marker(&prepared, "OVERLAYED"),
+            "the overlay keeps the marker its file declared"
+        );
     }
 
     // The whole point of the split: the inline fallback (`save_to_bytes`) and

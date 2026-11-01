@@ -756,6 +756,10 @@ impl OpenCADStudio {
             }
             self.tabs[i].scene.visibility_states.remove(&definition);
         }
+        // The saved definition advertises attributes because its body holds
+        // them, so an attribute authored here marks the record and erasing the
+        // last one takes the mark off again.
+        crate::scene::Scene::sync_attribute_flag(&mut self.tabs[i].scene.document, &name);
         // The saved definition's terminator belongs after its body. The undo
         // entry below is taken afterwards, so it carries the swap.
         if let Err(error) = self.tabs[i].scene.reterminate_block_definition(&name) {

@@ -527,15 +527,7 @@ pub(super) fn copy_definition(
         target.objects.insert(new, object);
     }
     for (_, name) in &records {
-        let has_attributes = target
-            .entities_in_block(name)
-            .any(|entity| matches!(entity, EntityType::AttributeDefinition(_)));
-        target
-            .block_records
-            .get_mut(name)
-            .unwrap()
-            .flags
-            .has_attributes = has_attributes;
+        crate::scene::Scene::sync_attribute_flag(&mut target, name);
         for entity in target.entities_in_block(name) {
             if let EntityType::Insert(insert) = entity {
                 if crate::scene::block_service::would_create_cycle(

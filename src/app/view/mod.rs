@@ -1409,10 +1409,15 @@ bg={bg_ms:.1}ms n={view_count}"
                             ))
                         })
                         .map(|(handle, point)| {
-                            let mut g = crate::scene::block_distance_parameter::Graphic::default();
-                            g.base_grips.push(point);
-                            g.labels.push((point, "Basepoint".into()));
-                            (handle, g, point)
+                            (
+                                handle,
+                                crate::scene::block_basepoint::marker_graphic(
+                                    &tab.scene.document,
+                                    session.br_handle,
+                                    point,
+                                ),
+                                point,
+                            )
                         }),
                     )
                     .chain(

@@ -103,6 +103,7 @@ pub fn items(doc: &Document, definition: Handle) -> Vec<Item> {
                 handle,
                 p.parameter.definition_point,
                 p.parameter.parameter.element.name.clone(),
+                true,
             )
         })
         .or_else(|| {
@@ -116,13 +117,18 @@ pub fn items(doc: &Document, definition: Handle) -> Vec<Item> {
                 definition,
                 crate::scene::render_graph::block_base_point(doc, name),
                 "Basepoint".to_string(),
+                false,
             ))
         });
-    if let Some((handle, point, name)) = basepoint {
-        let label = point + Vector3::new(0.25, 0.25, 0.0);
+    if let Some((handle, point, name, captioned)) = basepoint {
+        // The leader and its caption are a pick target as much as a drawing: a
+        // definition without a basepoint parameter gets the grip alone.
         let mut graphic = Graphic::default();
-        graphic.lines.push([point, label]);
-        graphic.labels.push((label, name.clone()));
+        if captioned {
+            let label = point + Vector3::new(0.25, 0.25, 0.0);
+            graphic.lines.push([point, label]);
+            graphic.labels.push((label, name.clone()));
+        }
         result.push(Item {
             handle,
             name,

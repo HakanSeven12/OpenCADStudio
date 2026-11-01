@@ -2970,6 +2970,52 @@ fn lookup_basepoint_placement_history_test_block_and_saved_parent_undo() {
     assert!(block_basepoint::parameter(&app.tabs[i].scene.document, definition).is_some());
 }
 
+/// The insertion grip is the marker on its own until the definition carries a
+/// basepoint parameter; only then does it earn the `Basepoint` caption, because
+/// a permanent caption on the origin marker reads as a parameter nobody authored.
+#[test]
+fn the_basepoint_caption_appears_only_with_a_basepoint_parameter() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let origin = Vector3::new(0.0, 0.0, 0.0);
+    let marker = crate::scene::block_basepoint::marker_graphic(
+        &app.tabs[i].scene.document,
+        definition,
+        origin,
+    );
+    assert_eq!(
+        marker.base_grips,
+        vec![origin],
+        "the insertion grip is drawn either way"
+    );
+    assert!(
+        marker.labels.is_empty(),
+        "the plain insertion grip carries no caption"
+    );
+    let _ = app.run_command_line("BPARAMETER BASEPOINT 3,4");
+    let anchor = crate::scene::block_basepoint::parameter(&app.tabs[i].scene.document, definition)
+        .unwrap()
+        .1
+        .point;
+    let marker = crate::scene::block_basepoint::marker_graphic(
+        &app.tabs[i].scene.document,
+        definition,
+        anchor,
+    );
+    assert_eq!(
+        marker.base_grips,
+        vec![anchor],
+        "a definition with a basepoint parameter still draws its grip"
+    );
+    assert_eq!(
+        marker.labels,
+        vec![(anchor, "Basepoint".to_string())],
+        "a definition that carries a basepoint parameter captions its grip"
+    );
+}
+
 fn lookup_editor_fixture() -> (OpenCADStudio, Handle, Handle) {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

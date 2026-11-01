@@ -672,8 +672,6 @@ const ROW_SPACING: f32 = 8.0;
 const ROW_PAD: f32 = 8.0;
 const TAIL_GAP: f32 = 8.0;
 const ARROW: f32 = 8.0;
-/// The menu's own padding above and below its rows.
-const MENU_PAD: f32 = 2.0;
 /// The menus the Start tab keeps: it has no drawing for the others.
 const START_MENUS: [&str; 3] = ["File", "Window", "Help"];
 
@@ -714,7 +712,7 @@ pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
                         .center_y(TITLE_H)
                         .padding([0, 9]),
                 ),
-                menu(&rows),
+                menu(&rows, 0.0),
             )
         })
         .collect();
@@ -901,8 +899,9 @@ impl Row {
     }
 }
 
-/// A menu as wide as its widest row.
-fn menu<'a>(rows: &[&Row]) -> Menu<'a, Message, Theme, Renderer> {
+/// A menu as wide as its widest row, `offset` from its title or item: a
+/// submenu overlaps its parent by their border, so the two share one line.
+fn menu<'a>(rows: &[&Row], offset: f32) -> Menu<'a, Message, Theme, Renderer> {
     let width = rows.iter().map(|row| row.width()).fold(0.0, f32::max) + 2.0;
     let items = rows
         .iter()
@@ -922,19 +921,19 @@ fn menu<'a>(rows: &[&Row]) -> Menu<'a, Message, Theme, Renderer> {
             Row::Sep => Item::new(idle(separator())),
             Row::Sub(label, rows) => Item::with_menu(
                 entry(None, label.clone(), String::new(), None, true),
-                menu(&rows.iter().collect::<Vec<_>>()),
+                menu(
+                    &rows.iter().collect::<Vec<_>>(),
+                    -crate::ui::icons::hairline(),
+                ),
             ),
         })
         .collect();
-    // No side padding: the menu's edge lines up with its title.
+    // The rows sit just inside the one-pixel border, with no room above the
+    // first or below the last; the menu's edge lines up with its title.
     Menu::new(items)
         .width(width)
-        .padding(iced::Padding {
-            top: MENU_PAD,
-            bottom: MENU_PAD,
-            ..iced::Padding::ZERO
-        })
-        .offset(0.0)
+        .padding(crate::ui::icons::hairline())
+        .offset(offset)
 }
 
 fn rows(
@@ -1049,10 +1048,17 @@ fn entry_style(theme: &Theme, status: button::Status, submenu: bool) -> button::
     }
 }
 
-/// A 1 px line with 2 px above and below and 4 px at the sides.
+/// A line one physical pixel high, with 2 px above and below and 4 px at
+/// the sides: a logical pixel would draw one or two pixels high at a
+/// fractional scale.
 fn separator<'a>() -> Element<'a, Message> {
     container(
-        container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
+        container(
+            Space::new()
+                .width(Fill)
+                .height(crate::ui::icons::hairline()),
+        )
+        .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(chrome::border(theme))),
             ..Default::default()
         }),

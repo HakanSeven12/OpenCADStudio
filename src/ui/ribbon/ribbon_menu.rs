@@ -21,15 +21,13 @@ use super::widgets::{make_tip, popup_panel_style, tip_style};
 use super::{extras, Ribbon};
 use crate::app::Message;
 use crate::ui::icons;
-use crate::ui::popup::context_menu::{MENU_PAD_TOP, MENU_ROW_H, MENU_SEP_H};
+use crate::ui::popup::context_menu::{MENU_ROW_H, MENU_SEP_H};
 use crate::ui::style::{chrome, text_metrics};
 
 /// Size of the check mark at the end of a checked row, as in the viewport
 /// menu.
 const CHECK_SIZE: f32 = 10.0;
 const CARET_SIZE: f32 = 9.0;
-/// How far a list overlaps the menu it opens from.
-const SUBMENU_OVERLAP: f32 = 2.0;
 /// Size of a row's label.
 const LABEL_SIZE: f32 = 12.0;
 /// Least gap between a label and the check or caret at the row's end.
@@ -459,7 +457,7 @@ impl Ribbon {
 
         // Where the open list's row sits, for placing the list beside it.
         let mut open_row_y = None;
-        let mut y = MENU_PAD_TOP;
+        let mut y = frame();
         let mut items: Vec<Element<'_, Message>> = Vec::new();
         for entry in rows {
             let Some((row, opens)) = entry else {
@@ -497,13 +495,15 @@ impl Ribbon {
             let height = list_height(rows.iter().map(|_| true));
             // Beside the menu on the right, or on the left when the right
             // has no room; its first row level with the row that opened it.
-            let right = left + menu_w - SUBMENU_OVERLAP;
+            // A list overlaps the menu by its border, so the two share one
+            // line, and its first row is level with the row that opened it.
+            let right = left + menu_w - frame();
             let x = if right + width <= win.0 {
                 right
             } else {
-                (left - width + SUBMENU_OVERLAP).max(0.0)
+                (left - width + frame()).max(0.0)
             };
-            let y = (top + row_y - MENU_PAD_TOP).min((win.1 - height).max(0.0));
+            let y = (top + row_y - frame()).min((win.1 - height).max(0.0));
             let items = rows.into_iter().map(item_row).collect();
             layers.push(placed(panel_of_width(items, width), x, y));
         }
@@ -521,7 +521,7 @@ fn place(at: Point, size: (f32, f32), win: (f32, f32)) -> (f32, f32) {
 
 /// Height of a menu panel whose rows are items (`true`) or separators.
 fn list_height(rows: impl Iterator<Item = bool>) -> f32 {
-    2.0 * MENU_PAD_TOP
+    2.0 * frame()
         + rows
             .map(|item| if item { MENU_ROW_H } else { MENU_SEP_H })
             .sum::<f32>()
@@ -548,26 +548,35 @@ fn placed<'a>(panel: Element<'a, Message>, left: f32, top: f32) -> Element<'a, M
         .into()
 }
 
+/// The width of a menu's border: one physical pixel. The rows sit just
+/// inside it, with no room above the first or below the last.
+fn frame() -> f32 {
+    icons::hairline()
+}
+
 /// The menu's frame: a ribbon popup, with the viewport menu's metrics.
 pub(super) fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, Message> {
     container(column(items).width(Fill))
         .style(popup_panel_style)
-        .padding([MENU_PAD_TOP as u16, 0])
+        .padding(frame())
         .width(Length::Fixed(width))
         .into()
 }
 
-/// A 1 px line across the menu, inset at the sides.
+/// A line one physical pixel high across the menu, inset at the sides: a
+/// logical pixel would draw one or two pixels high at a fractional scale.
 fn separator<'a>() -> Element<'a, Message> {
     let line =
-        container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::border(theme))),
-            ..Default::default()
+        container(Space::new().width(Fill).height(icons::hairline())).style(|theme: &Theme| {
+            container::Style {
+                background: Some(Background::Color(chrome::border(theme))),
+                ..Default::default()
+            }
         });
     container(line)
         .padding(Padding {
-            top: (MENU_SEP_H - 1.0) / 2.0,
-            bottom: (MENU_SEP_H - 1.0) / 2.0,
+            top: (MENU_SEP_H - icons::hairline()) / 2.0,
+            bottom: (MENU_SEP_H - icons::hairline()) / 2.0,
             left: 6.0,
             right: 6.0,
         })

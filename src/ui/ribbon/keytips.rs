@@ -833,7 +833,7 @@ impl Ribbon {
 
     /// The Quick Access items: the built-in buttons keep the reference's
     /// codes, every other item takes the next free one (`qat_codes`).
-    fn qat_tips(&self) -> Vec<Tip> {
+    pub(super) fn qat_tips(&self) -> Vec<Tip> {
         use super::layout::{QatBuiltin, QatItem};
         use super::qat::{QAT_LAYER_COMBO_ID, QAT_SWITCH_ID, QAT_UI_ID};
         let open = |id: &str| Action::Open(Message::ToggleRibbonDropdown(id.to_string()));
@@ -854,7 +854,9 @@ impl Ribbon {
                                 self.qat_face_command(id, &items, default).to_string(),
                             )),
                         ),
-                        super::qat::QatLook::Plain(_) => (
+                        // A command OCS does not have yet gets no key tip.
+                        super::qat::QatLook::Plain { runs: false, .. } => return None,
+                        super::qat::QatLook::Plain { .. } => (
                             cmd.clone().into(),
                             Action::Run(Message::MenuCommand(cmd.clone())),
                         ),

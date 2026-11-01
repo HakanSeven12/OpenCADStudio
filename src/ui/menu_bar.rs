@@ -804,7 +804,7 @@ fn group_aliases(
 }
 
 /// Whether OCS has the command a menu line starts.
-fn implemented(line: &str) -> bool {
+pub(crate) fn implemented(line: &str) -> bool {
     thread_local! {
         static KNOWN: rustc_hash::FxHashSet<&'static str> =
             crate::command::all_registered_command_names().into_iter().collect();

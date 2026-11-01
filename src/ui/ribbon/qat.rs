@@ -68,8 +68,9 @@ pub(super) enum QatLook {
         items: Rc<[DropdownItem]>,
         default: &'static str,
     },
-    /// A plain button.
-    Plain(Face),
+    /// A plain button; greyed out and inert unless OCS has its command
+    /// (`runs`).
+    Plain { face: Face, runs: bool },
 }
 
 /// The command items' looks, for the language they were worked out in.
@@ -89,6 +90,9 @@ pub(super) struct Face {
     pub label: String,
     pub icon: FaceIcon,
 }
+
+/// Batch Plot's icon: the Layout tools' plot icon, as no ribbon button runs it.
+static PLOT_ICON: &[u8] = include_bytes!("../../../assets/icons/plot.svg");
 
 /// The toolbar's own file buttons keep the icons and labels they always had.
 static FILE_FACES: [(&str, &[u8], &str); 6] = [
@@ -113,6 +117,19 @@ impl Ribbon {
             return Face {
                 label: crate::t!(label).into_owned(),
                 icon: FaceIcon::Chrome(icon),
+            };
+        }
+        // Commands with no ribbon button take a fitting icon of their own.
+        if cmd.eq_ignore_ascii_case("PUBLISH") {
+            return Face {
+                label: crate::tr!("ribbon-menu", "qat-batch-plot"),
+                icon: FaceIcon::Tool(IconKind::Svg(PLOT_ICON)),
+            };
+        }
+        if cmd.eq_ignore_ascii_case("PREVIEW") {
+            return Face {
+                label: crate::tr!("ribbon-menu", "qat-plot-preview"),
+                icon: FaceIcon::Chrome(icons::PREVIEW),
             };
         }
         if let Some((label, icon)) = self.ribbon_face(cmd) {
@@ -163,10 +180,26 @@ impl Ribbon {
                 items: items.into(),
                 default,
             },
-            None => QatLook::Plain(self.command_face(cmd)),
+            None => QatLook::Plain {
+                face: self.command_face(cmd),
+                runs: crate::ui::menu_bar::implemented(cmd),
+            },
         };
         self.qat_cache.borrow_mut().looks.insert(key, look.clone());
         look
+    }
+
+    /// Whether OCS runs what the Quick Access `item` stands for: a built-in
+    /// control or a split item (a ribbon dropdown) always, a command when
+    /// OCS has it.
+    pub(super) fn item_runs(&self, item: &QatItem) -> bool {
+        match item {
+            QatItem::Command(cmd) => match self.qat_look(cmd) {
+                QatLook::Split { .. } => true,
+                QatLook::Plain { runs, .. } => runs,
+            },
+            QatItem::Builtin(_) | QatItem::Separator => true,
+        }
     }
 
     /// Forget the command items' looks: the tabs changed.
@@ -188,7 +221,7 @@ impl Ribbon {
                     items,
                     default,
                 } => self.qat_split(id, label, &items, default),
-                QatLook::Plain(face) => quick_access_btn(face, cmd.clone()),
+                QatLook::Plain { face, runs } => quick_access_btn(face, cmd.clone(), runs),
             },
             QatItem::Builtin(QatBuiltin::Undo) => {
                 render_history_control("Undo", UNDO_HISTORY_ID, undo_count, &self.open_dropdown)
@@ -291,12 +324,12 @@ impl Ribbon {
         let mut items: Vec<Element<'_, Message>> = vec![menu_header(title)];
         items.extend(standard.into_iter().map(|(label, item)| {
             let checked = self.layout.qat_has(&item);
-            check_row(
-                label,
-                checked,
-                Some(Message::RibbonQat(QatMsg::Toggle(item))),
-            )
-            .into()
+            // A command OCS does not have yet is greyed out, as the menu bar
+            // has it.
+            let on_press = self
+                .item_runs(&item)
+                .then(|| Message::RibbonQat(QatMsg::Toggle(item)));
+            check_row(label, checked, on_press).into()
         }));
         items.push(menu_separator());
         items.push(check_row(more, false, Some(Message::RibbonQat(QatMsg::OpenPicker))).into());
@@ -488,7 +521,7 @@ impl Ribbon {
             icon: face_icon_kind.map_or(FaceIcon::Text, FaceIcon::Tool),
         };
         let face_btn = button(
-            container(face_icon(&face, SMALL_ICON))
+            container(face_icon(&face, SMALL_ICON, true))
                 .center_x(Fill)
                 .center_y(Fill),
         )
@@ -615,8 +648,7 @@ impl Ribbon {
                         "LAYOUTTAB",
                         self.show_layout_tabs,
                     ),
-                    // OCS has no switch for these yet; the command line
-                    // says so when they are picked.
+                    // OCS has no switch for these yet: greyed out.
                     (
                         crate::tr!("ribbon-menu", "command-line"),
                         "COMMANDLINE",
@@ -625,7 +657,11 @@ impl Ribbon {
                     (crate::tr!("ribbon-menu", "status-bar"), "STATUSBAR", false),
                 ]
                 .into_iter()
-                .map(|(label, cmd, on)| (label, on, Some(Message::MenuCommand(cmd.to_string()))))
+                .map(|(label, cmd, on)| {
+                    let on_press = crate::ui::menu_bar::implemented(cmd)
+                        .then(|| Message::MenuCommand(cmd.to_string()));
+                    (label, on, on_press)
+                })
                 .collect();
                 Some(self.qat_menu(QAT_UI_ID, rows, win))
             }
@@ -777,15 +813,11 @@ fn standard_items() -> Vec<(String, QatItem)> {
             QatItem::Builtin(QatBuiltin::UserInterface),
         ),
         (
-            crate::tr!("ribbon-menu", "qat-zoom-extents"),
-            command("ZOOM E"),
-        ),
-        (
             crate::tr!("ribbon-menu", "qat-batch-plot"),
             command("PUBLISH"),
         ),
         (
-            crate::tr!("ribbon-menu", "qat-layer-control"),
+            crate::t!("Layer").into_owned(),
             QatItem::Builtin(QatBuiltin::LayerCombo),
         ),
         (
@@ -799,6 +831,10 @@ fn standard_items() -> Vec<(String, QatItem)> {
         (
             crate::tr!("ribbon-menu", "qat-properties"),
             command("PROPERTIES"),
+        ),
+        (
+            crate::t!("Sheet Set Manager").into_owned(),
+            command("SHEETSET"),
         ),
     ]
 }
@@ -907,15 +943,21 @@ fn separator<'a>() -> Element<'a, Message> {
     .into()
 }
 
-/// The icon of a command item; a command with no icon shows its name.
-pub(super) fn face_icon<'a>(face: &Face, size: f32) -> Element<'a, Message> {
+/// The icon of a command item, greyed out unless `enabled`; a command with
+/// no icon shows its name.
+pub(super) fn face_icon<'a>(face: &Face, size: f32, enabled: bool) -> Element<'a, Message> {
     match face.icon {
-        FaceIcon::Chrome(bytes) => icons::chrome(bytes, size),
-        FaceIcon::Tool(IconKind::Svg(bytes)) => icons::tool(bytes, size),
+        FaceIcon::Chrome(bytes) if enabled => icons::chrome(bytes, size),
+        FaceIcon::Chrome(bytes) => icons::chrome_disabled(bytes, size),
+        FaceIcon::Tool(IconKind::Svg(bytes)) if enabled => icons::tool(bytes, size),
+        FaceIcon::Tool(IconKind::Svg(bytes)) => icons::tool_disabled(bytes, size),
         FaceIcon::Tool(IconKind::Glyph(glyph)) => text(glyph).size(size * 0.7).into(),
         FaceIcon::Text => row![text(face.label.clone())
             .size(metrics::QAT_TEXT_SIZE)
-            .wrapping(iced::widget::text::Wrapping::None)]
+            .wrapping(iced::widget::text::Wrapping::None)
+            .style(move |theme: &Theme| text::Style {
+                color: (!enabled).then(|| chrome::muted(theme)),
+            })]
         .into(),
     }
 }
@@ -1067,7 +1109,10 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(ribbon.qat_look("LINE"), QatLook::Plain(_)));
+        assert!(matches!(
+            ribbon.qat_look("LINE"),
+            QatLook::Plain { runs: true, .. }
+        ));
         assert_eq!(ribbon.qat_cache.borrow().looks.len(), 2);
         // The same command in other case is the same entry.
         ribbon.qat_look("line");
@@ -1085,5 +1130,56 @@ mod tests {
         assert!(!ribbon.qat_found.is_empty());
         ribbon.on_qat(QatMsg::PickerInput(String::new()));
         assert!(ribbon.qat_found.is_empty());
+    }
+
+    #[test]
+    fn the_customize_list_has_layer_and_sheet_sets_and_no_zoom_extents() {
+        let items = standard_items();
+        let commands: Vec<String> = items
+            .iter()
+            .filter_map(|(_, item)| match item {
+                QatItem::Command(cmd) => Some(cmd.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!commands.iter().any(|cmd| cmd.starts_with("ZOOM")));
+        // Sheet Set Manager comes right after Properties, last.
+        assert_eq!(&commands[commands.len() - 2..], ["PROPERTIES", "SHEETSET"]);
+        let layer = items
+            .iter()
+            .find(|(_, item)| *item == QatItem::Builtin(QatBuiltin::LayerCombo))
+            .unwrap();
+        assert_eq!(layer.0, crate::t!("Layer"));
+    }
+
+    #[test]
+    fn a_command_ocs_lacks_is_greyed_out_and_has_no_key_tip() {
+        let mut ribbon = Ribbon::default();
+        let preview = QatItem::Command("PREVIEW".into());
+        assert!(!ribbon.item_runs(&preview));
+        assert!(ribbon.item_runs(&QatItem::Command("SHEETSET".into())));
+        assert!(ribbon.item_runs(&QatItem::Command("MEASURE_MENU".into())));
+        assert!(ribbon.item_runs(&QatItem::Builtin(QatBuiltin::UserInterface)));
+        assert!(matches!(
+            ribbon.qat_look("PREVIEW"),
+            QatLook::Plain { runs: false, .. }
+        ));
+
+        ribbon.layout.qat = vec![QatItem::Command("SAVE".into()), preview];
+        let tips = ribbon.qat_tips();
+        assert_eq!(tips.len(), 1);
+        assert_eq!(tips[0].target, "SAVE");
+    }
+
+    #[test]
+    fn batch_plot_and_plot_preview_have_icons() {
+        let ribbon = Ribbon::default();
+        let publish = ribbon.command_face("PUBLISH");
+        assert!(matches!(publish.icon, FaceIcon::Tool(IconKind::Svg(_))));
+        assert_eq!(publish.label, crate::tr!("ribbon-menu", "qat-batch-plot"));
+        assert!(matches!(
+            ribbon.command_face("PREVIEW").icon,
+            FaceIcon::Chrome(_)
+        ));
     }
 }

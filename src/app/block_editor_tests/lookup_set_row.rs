@@ -98,3 +98,44 @@ fn actions_tab_lookup_tool_opens_the_table_with_the_action_bars_on() {
         "the palette's Lookup tool opens the table editor"
     );
 }
+
+/// Two lookup parameters put two rows on the action bars and each row names a
+/// table of its own, so the row that was clicked has to be the one that opens.
+#[test]
+fn action_bar_lookup_rows_open_the_table_of_the_row_clicked() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.dispatch_command("BACTIONBARMODE 1");
+    let _ = app.run_command_line("BPARAMETER LOOKUP 0,0");
+    let _ = app.run_command_line("BPARAMETER LOOKUP 4,0");
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let handles = crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+        .into_iter()
+        .map(|(handle, _)| handle)
+        .collect::<Vec<_>>();
+    assert_eq!(handles.len(), 2, "the fixture places two lookup parameters");
+    for clicked in handles {
+        let _ = app.update(Message::CloseModal);
+        let _ = app.update(Message::BlockActionBarEdit(clicked));
+        let state = app
+            .block_lookup
+            .as_ref()
+            .expect("the lookup row opens the table editor");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::BlockLookup),
+            "the row's table opens over the editor"
+        );
+        assert_eq!(state.drafts.len(), 2, "both tables are listed");
+        assert_eq!(
+            state.drafts[state.selected].parameter, clicked,
+            "the table of the row that was clicked"
+        );
+        assert_eq!(
+            app.tabs[i].selected_authoring,
+            Some(clicked),
+            "the same row is what that tab now reports as selected"
+        );
+    }
+}

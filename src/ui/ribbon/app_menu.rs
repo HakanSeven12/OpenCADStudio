@@ -30,7 +30,7 @@ const RECENT_LIMIT: usize = 9;
 /// Whether the dropdown `id` belongs to the window chrome and so works
 /// without a drawing, on the Start tab.
 pub fn works_without_drawing(id: &str) -> bool {
-    id == APP_MENU_ID || id == MINIMIZE_MENU_ID || super::qat::works_without_drawing(id)
+    id == APP_MENU_ID || id == MINIMIZE_MENU_ID
 }
 
 impl Ribbon {

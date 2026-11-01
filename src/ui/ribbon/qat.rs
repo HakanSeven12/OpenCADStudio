@@ -44,15 +44,6 @@ const SWITCH_WINDOWS_ICON: &str = "M3 5h12v10H3z M9 9h12v10H9z";
 /// A window with a bar along its top and a side bar.
 const USER_INTERFACE_ICON: &str = "M3 4h18v16H3z M3 9h18 M8 9v11";
 
-/// Whether the Quick Access menu `id` works on the Start tab, which has no
-/// drawing.
-pub(crate) fn works_without_drawing(id: &str) -> bool {
-    matches!(
-        id,
-        QAT_SWITCH_ID | QAT_UI_ID | QAT_CUSTOMIZE_ID | QAT_PICKER_ID
-    )
-}
-
 /// What a command item shows.
 #[derive(Clone, Copy)]
 pub(super) enum FaceIcon {
@@ -419,12 +410,20 @@ impl Ribbon {
         undo_count: usize,
         redo_count: usize,
     ) -> Element<'_, Message> {
-        iced::widget::Row::with_children(self.qat_items(is_start, undo_count, redo_count))
-            .spacing(TOP_HIST_GAP)
-            .align_y(iced::Center)
-            .wrap()
-            .vertical_spacing(0.0)
-            .into()
+        let row: Element<'_, Message> =
+            iced::widget::Row::with_children(self.qat_items(is_start, undo_count, redo_count))
+                .spacing(TOP_HIST_GAP)
+                .align_y(iced::Center)
+                .wrap()
+                .vertical_spacing(0.0)
+                .into();
+        // The Start tab has no drawing: the whole toolbar fades, as the
+        // tabs do, and takes no clicks.
+        if is_start {
+            iced::widget::stack![row, super::start_shield(chrome::bar)].into()
+        } else {
+            row
+        }
     }
 
     /// The toolbar in its own row below the ribbon: `bar` coloured, its
@@ -565,8 +564,7 @@ impl Ribbon {
 
     /// The open Quick Access list or menu `open_id`, if it is one: a split
     /// item's variants, the layer list, the open drawings or the user
-    /// interface switches. They work without a drawing, except the variants
-    /// and the layers.
+    /// interface switches. None of them opens on the Start tab.
     pub(super) fn qat_overlay(
         &self,
         open_id: &str,
@@ -574,10 +572,11 @@ impl Ribbon {
         is_start: bool,
         drawings: &[(usize, String, bool)],
     ) -> Option<Element<'_, Message>> {
+        // The Start tab has no drawing: none of them opens there.
+        if is_start {
+            return None;
+        }
         if let Some(id) = open_id.strip_prefix(SPLIT_PREFIX) {
-            if is_start {
-                return None;
-            }
             let (id, _, items, default) = self.ribbon_dropdown(id)?;
             let current = self.qat_face_command(id, items, default);
             let (panel, width) = super::dropdown_list(id, items, current, None, |cmd| {
@@ -589,7 +588,7 @@ impl Ribbon {
             return Some(self.place_dropdown(open_id, panel, width, win.0));
         }
         match open_id {
-            QAT_LAYER_COMBO_ID if !is_start => self.layer_combo_overlay(QAT_LAYER_COMBO_ID, win),
+            QAT_LAYER_COMBO_ID => self.layer_combo_overlay(QAT_LAYER_COMBO_ID, win),
             QAT_SWITCH_ID => {
                 let rows: Vec<(String, bool, Option<Message>)> = drawings
                     .iter()
@@ -1014,13 +1013,21 @@ mod tests {
     }
 
     #[test]
-    fn the_window_menus_work_without_a_drawing_and_the_lists_need_one() {
-        assert!(super::super::works_without_drawing(QAT_SWITCH_ID));
-        assert!(super::super::works_without_drawing(QAT_UI_ID));
-        assert!(!super::super::works_without_drawing(QAT_LAYER_COMBO_ID));
-        assert!(!super::super::works_without_drawing(&split_dropdown_id(
-            "MEASURE_MENU"
-        )));
+    fn no_quick_access_menu_opens_without_a_drawing() {
+        for id in [
+            QAT_SWITCH_ID,
+            QAT_UI_ID,
+            QAT_CUSTOMIZE_ID,
+            QAT_PICKER_ID,
+            QAT_LAYER_COMBO_ID,
+            &split_dropdown_id("MEASURE_MENU"),
+        ] {
+            assert!(!super::super::works_without_drawing(id), "{id}");
+        }
+        let ribbon = Ribbon::default();
+        assert!(ribbon
+            .qat_overlay(QAT_SWITCH_ID, (800.0, 600.0), true, &[])
+            .is_none());
     }
 
     #[test]

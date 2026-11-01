@@ -2942,6 +2942,10 @@ bg={bg_ms:.1}ms n={view_count}"
                     &self.open_drawing_names(),
                 )
                 .or_else(|| {
+                    // The Start tab has no drawing for the toolbar.
+                    if self.tabs[self.active_tab].is_start {
+                        return None;
+                    }
                     self.ribbon.qat_customize_overlay(
                         self.win_size,
                         self.show_menu_bar,

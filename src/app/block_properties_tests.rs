@@ -852,3 +852,162 @@ fn a_rebuild_without_a_dynamic_row_drops_the_list() {
     app.refresh_properties();
     assert_eq!(app.tabs[i].properties.open_block_picker, None);
 }
+
+/// A distance row read from the automation surface has to answer to the `id` it
+/// comes back with, and the value written by that `property` operation has to
+/// reach the geometry instead of resting in a record: the reference draws
+/// through the copy its insert names, so that copy moves while the definition it
+/// came from stays as it was. The editor-session panel messages are pinned
+/// elsewhere; this is the outside-editor route an automation client takes.
+#[test]
+fn a_parameter_value_written_through_the_control_surface_moves_the_reference() {
+    use crate::scene::{block_actions as actions, block_distance_parameter as distance};
+
+    fn control(app: &mut OpenCADStudio, mut req: serde_json::Value) -> serde_json::Value {
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        req["client_id"] = serde_json::json!("test");
+        req["request_id"] =
+            serde_json::json!(format!("req-{}", state["revision"].as_u64().unwrap_or(0)));
+        let (response, task) = app.control_request(req.clone());
+        app.drive_headless_task(task).unwrap();
+        if matches!(response["status"].as_str(), Some("accepted" | "running")) {
+            return app
+                .control_request(serde_json::json!({
+                    "op": "operation",
+                    "request_id": req["request_id"]
+                }))
+                .0;
+        }
+        response
+    }
+
+    fn rows(app: &mut OpenCADStudio) -> Vec<serde_json::Value> {
+        let answer = control(app, serde_json::json!({"op":"properties"}));
+        assert_eq!(answer["ok"], serde_json::json!(true), "{answer}");
+        let mut rows = Vec::new();
+        if let Some(sections) = answer.get("sections").and_then(|v| v.as_array()) {
+            for section in sections {
+                if let Some(props) = section.get("properties").and_then(|v| v.as_array()) {
+                    rows.extend(props.iter().cloned());
+                }
+            }
+        }
+        rows
+    }
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.define_block_raw(
+        "AUTOMATED",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        ))],
+    );
+    let record = app.tabs[i]
+        .scene
+        .document
+        .block_records
+        .get("AUTOMATED")
+        .unwrap();
+    let definition = record.handle;
+    let target = record.entity_handles[0];
+    let parameter = distance::create(
+        &mut app.tabs[i].scene.document,
+        definition,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    actions::create(
+        &mut app.tabs[i].scene.document,
+        definition,
+        actions::Kind::Move,
+        parameter,
+        &[target],
+        glam::DVec3::ZERO,
+    )
+    .unwrap();
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(Insert::new("AUTOMATED", Vector3::ZERO)))
+        .unwrap();
+    app.tabs[i].scene.select_entity(insert, true);
+    app.tabs[i].selected_handle = Some(insert);
+    let id = format!("dyn_{:X}_distance", parameter.value());
+    let printed = |app: &mut OpenCADStudio| -> f64 {
+        rows(app)
+            .into_iter()
+            .find(|row| row["id"].as_str() == Some(id.as_str()))
+            .unwrap_or_else(|| panic!("the properties answer holds no row addressed by {id}"))
+            .get("value")
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| panic!("the {id} row does not print text"))
+            .parse::<f64>()
+            .unwrap_or_else(|error| panic!("the {id} row does not parse: {error}"))
+    };
+    assert_eq!(
+        printed(&mut app),
+        10.,
+        "the reference reads back the distance its parameter was created with"
+    );
+    let written = control(
+        &mut app,
+        serde_json::json!({"op":"property","field":id,"value":"15"}),
+    );
+    assert_eq!(written["ok"], serde_json::json!(true), "{written}");
+    assert_eq!(
+        printed(&mut app),
+        15.,
+        "the row reports the value written through the same address"
+    );
+    // The written value has to land in the copy the insert names; the
+    // definition it came from is the one thing that must stay as it was.
+    let EntityType::Insert(reference) = app.tabs[i]
+        .scene
+        .document
+        .get_entity(insert)
+        .unwrap()
+        .clone()
+    else {
+        panic!("the placed entity is no longer a reference")
+    };
+    assert_ne!(
+        reference.block_name, "AUTOMATED",
+        "a parametric reference draws through its own copy, not the definition"
+    );
+    let lines = |name: &str| -> Vec<(Vector3, Vector3)> {
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get(name)
+            .unwrap_or_else(|| panic!("no block named {name}"));
+        record
+            .entity_handles
+            .iter()
+            .filter_map(|handle| match app.tabs[i].scene.document.get_entity(*handle) {
+                Some(EntityType::Line(line)) => Some((line.start, line.end)),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        lines(&reference.block_name),
+        vec![(Vector3::new(5., 0., 0.), Vector3::new(6., 0., 0.))],
+        "a value of 15 on a ten-unit parameter moves the one line the action acts on by five"
+    );
+    assert_eq!(
+        lines("AUTOMATED"),
+        vec![(Vector3::ZERO, Vector3::UNIT_X)],
+        "writing one reference's value leaves the definition alone"
+    );
+}

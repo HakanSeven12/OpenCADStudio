@@ -150,6 +150,20 @@ pub fn create(document: &mut Document, definition: Handle, location: Vector3) ->
     let (graph, slots) = super::block_authoring::prepare(document, definition).ok()?;
     register_classes(document, CLASSES);
     let [parameter, grip, x, y] = [(); 4].map(|_| document.allocate_handle());
+    // The copy matches governed objects by their representation tag and drops
+    // the untagged ones, and preparing only tags when the graph is new, so a
+    // definition that already carries a graph is tagged here.
+    super::block_authoring::tag_members(document, definition);
+    // The state set governs the objects the definition itself leaves on screen.
+    // A member hidden at the definition level stays outside the set: a state
+    // hides what the set governs and does not name, so admitting it would put
+    // an object the definition owns under the state's rule, and the reveal
+    // display would offer it as a state-hidden object.
+    let members: Vec<Handle> = definition_members(document, definition)
+        .into_iter()
+        .filter(|(_, shown)| *shown)
+        .map(|(handle, _)| handle)
+        .collect();
 
     store(
         document,
@@ -178,9 +192,10 @@ pub fn create(document: &mut Document, definition: Handle, location: Vector3) ->
             property_info_count: slots.eval + 1,
             is_initialized: true,
             unknown_bool: false,
-            all_blocks: Vec::new(),
+            all_blocks: members.clone(),
             states: vec![BlockVisibilityState {
                 name: "VisibilityState0".to_string(),
+                visible_blocks: members,
                 ..Default::default()
             }],
         },
@@ -809,6 +824,60 @@ mod tests {
         assert!(!scene.visibility_revealed(controlled));
     }
 
+    /// The first state describes the definition as it stands: every object the
+    /// definition leaves on screen is governed and shown, and an object the
+    /// definition itself hides is governed by no state.
+    #[test]
+    fn create_seeds_the_state_with_the_members_the_definition_shows() {
+        let mut scene = Scene::new();
+        scene.define_block_raw(
+            "cabinet",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(Line::from_coords(0.0, 0.0, 0.0, 4.0, 0.0, 0.0)),
+                EntityType::Line(Line::from_coords(0.0, 1.0, 0.0, 4.0, 1.0, 0.0)),
+                EntityType::Circle(Circle::from_center_radius(
+                    Vector3::new(1.0, 2.0, 0.0),
+                    0.5,
+                )),
+            ],
+        );
+        let definition = scene.document.block_records.get("cabinet").unwrap().handle;
+        let hidden = members(&scene.document, definition)[2];
+        scene
+            .document
+            .get_entity_mut(hidden)
+            .unwrap()
+            .common_mut()
+            .invisible = true;
+        create(&mut scene.document, definition, Vector3::ZERO).unwrap();
+        let parameter = parameter(&scene.document, definition).unwrap();
+        let shown: Vec<Handle> = members(&scene.document, definition)
+            .into_iter()
+            .filter(|handle| *handle != hidden)
+            .collect();
+        assert_eq!(shown.len(), 2, "two members stay on screen");
+        for handle in &shown {
+            assert!(
+                parameter.all_blocks.contains(handle),
+                "a member the definition shows has to be governed"
+            );
+            assert!(
+                parameter.states[0].visible_blocks.contains(handle),
+                "and shown by the first state"
+            );
+        }
+        assert!(
+            !parameter.all_blocks.contains(&hidden),
+            "a member the definition hides stays outside the state set"
+        );
+        assert_eq!(
+            parameter.states[0].visible_blocks,
+            parameter.all_blocks,
+            "the first state shows the governed set and nothing else"
+        );
+    }
+
     /// A member the parameter does not control stays visible in every state;
     /// only the objects a state names are hidden when it does not list them.
     #[test]
@@ -904,7 +973,23 @@ mod tests {
             assert_eq!(record.name, "door", "{ext}");
             let names: Vec<&str> = parameter.states.iter().map(|s| s.name.as_str()).collect();
             assert_eq!(names, ["VisibilityState0", "Open"], "{ext}");
-            assert_eq!(parameter.states[1].visible_blocks.len(), 0, "{ext}");
+            assert_eq!(
+                parameter.states[0].visible_blocks.len(),
+                2,
+                "{ext}: the first state keeps every member the definition shows"
+            );
+            assert_eq!(
+                parameter.states[1].visible_blocks.len(),
+                1,
+                "{ext}: Open keeps one member and hides the other"
+            );
+            assert!(
+                matches!(
+                    read.get_entity(parameter.states[1].visible_blocks[0]),
+                    Some(EntityType::Line(_))
+                ),
+                "{ext}: the member Open keeps is the line, not the circle"
+            );
         }
     }
 }

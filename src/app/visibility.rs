@@ -239,7 +239,17 @@ impl OpenCADStudio {
     pub(super) fn refresh_table_grip(&mut self, wo: [f64; 3]) {
         let i = self.active_tab;
         self.tabs[i].table_grip = None;
-        let Some(handle) = self.tabs[i].selected_handle else {
+        // The list belongs to the grip on one selected reference, so it has
+        // nothing to hang from the moment that reference is not the selection.
+        let owner = self.tabs[i].selected_handle;
+        let stale = self
+            .table_popup
+            .as_ref()
+            .is_some_and(|popup| Some(popup.insert_handle) != owner);
+        if stale {
+            self.table_popup = None;
+        }
+        let Some(handle) = owner else {
             return;
         };
         if self.tabs[i].active_block_edit_session().is_some()

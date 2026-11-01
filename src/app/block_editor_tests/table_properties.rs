@@ -607,6 +607,30 @@ fn block_table_properties_preserve_both_polar_components_in_either_column_order(
 }
 
 #[test]
+fn the_value_list_closes_with_the_reference_it_belongs_to() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let i = app.active_tab;
+    crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup(iced::Point::new(100., 100.));
+    assert!(
+        app.table_popup.is_some(),
+        "the list opens for the lone selected reference"
+    );
+    let _ = app.automation_op(r#"{"op":"select","clear":true}"#);
+    app.refresh_properties();
+    assert!(
+        app.tabs[i].table_grip.is_none(),
+        "the grip is gone with the selection"
+    );
+    assert!(
+        app.table_popup.is_none(),
+        "the list has nothing to hang from once that reference is not selected"
+    );
+}
+
+#[test]
 fn block_table_properties_and_grip_popup_refresh_the_same_indexed_row() {
     for testing in [false, true] {
         let (mut app, _, def, _, _, table) = table_fixture(testing);

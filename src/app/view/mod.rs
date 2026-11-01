@@ -2421,7 +2421,10 @@ bg={bg_ms:.1}ms n={view_count}"
             }
             if let Some(popup) = self.table_popup.as_ref() {
                 if !tab.is_start {
-                    let mut col = column![text(popup.header.clone()).size(12)].spacing(2);
+                    let mut col = column![text(popup.header.clone())
+                        .size(12)
+                        .wrapping(iced::widget::text::Wrapping::None)]
+                    .spacing(2);
                     for (idx, name) in popup.rows.iter().enumerate() {
                         let mark: Element<'_, Message> = if popup.current == Some(idx) {
                             crate::ui::icons::themed_check_cell(true)
@@ -2430,7 +2433,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         };
                         col = col.push(
                             button(
-                                row![container(mark).width(16), text(name).size(12)]
+                                row![container(mark).width(16), text(name).size(12).wrapping(iced::widget::text::Wrapping::None)]
                                     .spacing(2)
                                     .align_y(iced::Center),
                             )
@@ -2439,12 +2442,20 @@ bg={bg_ms:.1}ms n={view_count}"
                             .width(Fill),
                         );
                     }
-                    let panel =
-                        container(iced::widget::scrollable(col).height(iced::Length::Shrink))
-                            .padding(2);
-                    let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
-                    viewport_stack =
-                        viewport_stack.push(position_canvas_overlay(anchor, panel.into()));
+                    let panel = container(
+                        iced::widget::scrollable(col)
+                            .height(iced::Length::Shrink)
+                            .width(iced::Length::Fixed(table_popup_width(
+                                &popup.header,
+                                &popup.rows,
+                            ))),
+                    )
+                    .padding(2);
+                    viewport_stack = viewport_stack.push(position_canvas_overlay_near_cursor(
+                        popup.anchor,
+                        command_line_inset(self),
+                        panel.into(),
+                    ));
                 }
             }
 
@@ -5150,9 +5161,46 @@ pub(super) fn recent_files_panel<'a>(
     .into()
 }
 
+/// The value list is as wide as the widest line it shows, plus the marker
+/// column and the padding around it, and it has no opinion about the canvas.
+fn table_popup_width(header: &str, rows: &[String]) -> f32 {
+    let widest = rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(header.chars().count());
+    (widest as f32 + 2.0) * 7.0 + 24.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A two-value list is a few characters wide, however large the canvas it
+    /// is painted over, and a longer line is what widens it — not the viewport.
+    #[test]
+    fn the_value_list_width_follows_the_lines_it_shows() {
+        let narrow = super::table_popup_width("Distance1", &["5.0000".into(), "25.0000".into()]);
+        assert!(
+            narrow < 120.0,
+            "a short list is not sized to the canvas: {narrow}"
+        );
+        let wide =
+            super::table_popup_width("Distance1", &["5.0000, 25.0000, 45.0000, 65.0000".into()]);
+        assert!(
+            wide > narrow * 2.0,
+            "a longer line widens the list: {narrow} → {wide}"
+        );
+        let headered = super::table_popup_width(
+            "Distance1, Distance2, Distance3, Distance4",
+            &["5.0".into()],
+        );
+        assert!(
+            headered > narrow,
+            "the header is one of the lines it shows: {narrow} → {headered}"
+        );
+    }
 
     /// The visibility dropdown draws its entries in one left-aligned column,
     /// with a fixed leading slot for the tick of the state in use.

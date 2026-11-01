@@ -8959,6 +8959,9 @@ impl OpenCADStudio {
                 if field == "authoring_action_base_dependent" {
                     return self.commit_authoring_action_base(field);
                 }
+                if field == "authoring_chain_actions" {
+                    return self.toggle_authoring_chain_actions();
+                }
                 if field.starts_with("authoring_set_") && field.ends_with("_enabled") {
                     return self.toggle_authoring_value_set_flag(field);
                 }

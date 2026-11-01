@@ -2766,12 +2766,11 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                             title: crate::t!("Behavior").into_owned(),
                             props: vec![Property {
                                 label: crate::t!("Chain actions").into_owned(),
-                                field: "authoring_chain_actions_state",
-                                value: PropValue::ReadOnly(if chain_actions {
-                                    crate::t!("Enabled (unsupported)").into_owned()
-                                } else {
-                                    crate::t!("Disabled").into_owned()
-                                }),
+                                field: "authoring_chain_actions",
+                                value: PropValue::BoolToggle {
+                                    field: "authoring_chain_actions",
+                                    value: chain_actions,
+                                },
                             }],
                         });
                         if !value_sets.is_empty() {

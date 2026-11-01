@@ -2631,3 +2631,217 @@ fn block_parameters_without_grips_remain_evaluable_and_roundtrip() {
         }
     }
 }
+
+fn add_action(
+    doc: &mut Document,
+    def: Handle,
+    parameter: Handle,
+    target: Handle,
+    kind: Kind,
+) -> Handle {
+    create(doc, def, kind, parameter, &[target], DVec3::ZERO).unwrap()
+}
+
+fn mark_chained(doc: &mut Document, parameter: Handle) {
+    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&parameter).unwrap() else {
+        panic!("the parameter is a dynamic block object")
+    };
+    let DynamicBlockData::LinearParameter(linear) = &mut object.data else {
+        panic!("the parameter is a linear parameter")
+    };
+    linear.parameter.parameter.chain_actions = true;
+}
+
+/// Name the action whose effect this follow-up action works on.
+fn chain_after(doc: &mut Document, action: Handle, follow_up: Handle) {
+    chain_names(doc, action, &[follow_up]);
+}
+
+fn chain_names(doc: &mut Document, action: Handle, follow_ups: &[Handle]) {
+    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else {
+        panic!("the action is a dynamic block object")
+    };
+    let ids = follow_ups.iter().map(|h| h.value() as i32).collect();
+    match &mut object.data {
+        DynamicBlockData::MoveAction(m) => m.action.action_ids = ids,
+        DynamicBlockData::ScaleAction(s) => s.action.action.action_ids = ids,
+        DynamicBlockData::ArrayAction(a) => a.action.action_ids = ids,
+        _ => panic!("the action is a move, a scale or an array"),
+    }
+}
+
+/// The member starts at centre (4,3) with radius 2; the parameter is ten units
+/// long and is driven to twenty, so the move shifts ten and the scale doubles.
+fn chained_outcome(move_names_scale: bool, scale_names_move: bool) -> (DVec3, f64) {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let move_action = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let scale_action = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
+    mark_chained(&mut doc, parameter);
+    if move_names_scale {
+        chain_after(&mut doc, move_action, scale_action);
+    }
+    if scale_names_move {
+        chain_after(&mut doc, scale_action, move_action);
+    }
+    let baseline = doc.clone();
+    evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap();
+    let EntityType::Circle(circle) = doc.get_entity(handles[1]).unwrap() else {
+        panic!("the acted-on member is still a circle")
+    };
+    (v(circle.center), circle.radius)
+}
+
+/// An action that names a follow-up action is a chain, and the chain says which
+/// action's effect the next one works on: running them the other way round gives
+/// different geometry. A parameter that declares its actions chained has to
+/// evaluate rather than be refused, because that declaration is the only record
+/// of the order the operator chose.
+#[test]
+fn a_chained_parameter_runs_its_actions_in_the_order_the_chain_names() {
+    let chained = chained_outcome(true, false);
+    let built_in_order = chained_outcome(false, false);
+    let reversed = chained_outcome(false, true);
+    assert_eq!(
+        built_in_order,
+        (DVec3::new(28., 6., 0.), 4.),
+        "move then scale doubles the member where the move left it"
+    );
+    assert_eq!(
+        chained, built_in_order,
+        "a chain that names the order the actions were built in asks for nothing else"
+    );
+    assert_eq!(
+        reversed,
+        (DVec3::new(18., 6., 0.), 4.),
+        "chained the other way round, the scale runs first and the move carries the doubled member"
+    );
+}
+
+/// Two actions that chain each other have no first action, so there is no order
+/// for the chains to decide. Evaluating them is still well defined: the pair
+/// keeps the order the evaluation graph lists instead of hanging on a loop.
+#[test]
+fn actions_that_chain_each_other_keep_the_order_the_graph_lists() {
+    assert_eq!(
+        chained_outcome(true, true),
+        chained_outcome(false, false),
+        "a chain that loops back on itself has no head, so nothing is reordered"
+    );
+}
+
+/// Two chains that both claim the same follow-up cannot both come first, so the
+/// ordering refuses rather than picking one of the two orders.
+#[test]
+fn two_chains_that_claim_one_follow_up_action_are_refused() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let first_move = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let second_move = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let scale_action = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
+    mark_chained(&mut doc, parameter);
+    chain_after(&mut doc, first_move, scale_action);
+    chain_after(&mut doc, second_move, scale_action);
+    let baseline = doc.clone();
+    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
+    assert_eq!(error, "An action chain joins two sequences.");
+}
+
+/// An array action replaces the member with a grid of copies, so a chain that
+/// runs into one has no step defined for what it leaves behind. Ordering the
+/// chain cannot make that work, so it stays refused instead of dropping the link.
+#[test]
+fn a_chain_that_runs_into_an_array_action_is_refused() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let move_action = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let array_action =
+        create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 2., 1.).unwrap();
+    mark_chained(&mut doc, parameter);
+    chain_after(&mut doc, move_action, array_action);
+    let baseline = doc.clone();
+    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
+    assert_eq!(
+        error,
+        "An Array action cannot be the follow-up of a chain yet."
+    );
+}
+
+/// A chain that names two follow-ups says the member is in two places at once,
+/// because each action works on what the previous one left. There is no order
+/// that makes that true, so the fork is refused instead of picking one of the
+/// two follow-ups to run first.
+#[test]
+fn a_chain_that_names_two_follow_up_actions_is_refused() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let head = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let first = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let second = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
+    mark_chained(&mut doc, parameter);
+    chain_names(&mut doc, head, &[first, second]);
+    let baseline = doc.clone();
+    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
+    assert_eq!(
+        error,
+        "An action chain cannot name more than one follow-up action yet."
+    );
+    assert_eq!(doc, baseline, "a refused chain leaves the definition alone");
+}
+
+/// An array action replaces the member with a grid of copies, so nothing is left
+/// for a follow-up action to work on. Naming one says what is missing rather
+/// than dropping the link or building the grid anyway.
+#[test]
+fn an_array_action_that_names_a_follow_up_action_is_refused() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let follow_up = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let array_action =
+        create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 2., 1.).unwrap();
+    mark_chained(&mut doc, parameter);
+    chain_names(&mut doc, array_action, &[follow_up]);
+    let baseline = doc.clone();
+    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
+    assert_eq!(error, "An Array action cannot chain follow-up actions yet.");
+    assert_eq!(doc, baseline, "a refused chain leaves the definition alone");
+}
+
+/// The Stretch actions are put together from their parameter bindings, so a
+/// chain hanging off one is reported as the chain it is instead of as an
+/// unsupported option, which is the message the operator can act on.
+#[test]
+fn a_chained_stretch_action_names_the_chain_as_what_is_unsupported() {
+    fn ids(follow_up: Handle) -> Vec<i32> {
+        vec![follow_up.value() as i32]
+    }
+    let (mut doc, def, targets, parameter, action) = stretch_fixture();
+    let follow_up = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
+    let ObjectType::DynamicBlock(object) = &doc.objects[&action] else {
+        panic!("the action is a dynamic block object")
+    };
+    let DynamicBlockData::StretchAction(stretch) = &object.data else {
+        panic!("the action is a stretch")
+    };
+    let mut chained = stretch.clone();
+    chained.action.action_ids = ids(follow_up);
+    assert_eq!(
+        super::stretch::validate_options(&chained).unwrap_err(),
+        "This Stretch action cannot chain follow-up actions yet."
+    );
+
+    let (mut doc, def, targets, parameter, action) = polar_stretch_fixture();
+    let follow_up = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
+    let ObjectType::DynamicBlock(object) = &doc.objects[&action] else {
+        panic!("the action is a dynamic block object")
+    };
+    let DynamicBlockData::PolarStretchAction(polar) = &object.data else {
+        panic!("the action is a polar stretch")
+    };
+    let mut chained = polar.clone();
+    chained.action.action_ids = ids(follow_up);
+    assert_eq!(
+        super::stretch::validate_polar(&doc, def, &chained).unwrap_err(),
+        "This Polar Stretch action cannot chain follow-up actions yet."
+    );
+}

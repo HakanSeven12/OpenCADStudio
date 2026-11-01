@@ -320,6 +320,53 @@ impl OpenCADStudio {
         Some((chain_actions, value_sets))
     }
 
+    /// Flip the bit that says a parameter's actions run one after the other,
+    /// each acting on the member as the previous action left it.
+    fn set_chain_actions(document: &mut codec::Document, handle: Handle, value: bool) -> bool {
+        use codec::objects::{DynamicBlockData, ObjectType};
+        let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle) else {
+            return false;
+        };
+        let bit = match &mut object.data {
+            DynamicBlockData::LinearParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::PolarParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::XYParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::RotationParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::PointParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::FlipParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::LookupParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::AlignmentParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::BasePointParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::UserParameter(p) => &mut p.parameter.parameter.chain_actions,
+            _ => return false,
+        };
+        if *bit == value {
+            return false;
+        }
+        *bit = value;
+        true
+    }
+
+    pub(super) fn toggle_authoring_chain_actions(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(handle) = self.tabs[i].selected_authoring else {
+            return Task::none();
+        };
+        let Some((chain_actions, _)) = self.authoring_parameter_properties(handle) else {
+            return Task::none();
+        };
+        let mut document = self.tabs[i].scene.document.clone();
+        if !Self::set_chain_actions(&mut document, handle, !chain_actions) {
+            return Task::none();
+        }
+        self.push_undo_snapshot(i, "BEDIT Chain parameter actions");
+        self.tabs[i].scene.document = document;
+        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        Task::none()
+    }
+
     pub(super) fn toggle_authoring_value_set_flag(&mut self, field: &'static str) -> Task<Message> {
         let i = self.active_tab;
         let Some(handle) = self.tabs[i].selected_authoring else {

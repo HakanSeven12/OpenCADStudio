@@ -1986,7 +1986,7 @@ fn linear_parameter_value_set_is_editable_and_undoable_in_properties() {
         .flat_map(|section| section.props.iter())
         .map(|property| property.field)
         .collect::<Vec<_>>();
-    assert!(fields.contains(&"authoring_chain_actions_state"));
+    assert!(fields.contains(&"authoring_chain_actions"));
     assert!(fields.contains(&"authoring_set_linear_distance_minimum"));
     assert!(fields.contains(&"authoring_set_linear_distance_maximum"));
     assert!(fields.contains(&"authoring_set_linear_distance_increment"));
@@ -2014,6 +2014,117 @@ fn linear_parameter_value_set_is_editable_and_undoable_in_properties() {
     assert_eq!(parameter_data.value_set.values, vec![2.0, 4.0, 8.0]);
     assert_eq!(parameter_data.value_set.flags, 11);
     assert_eq!(app.tabs[i].history.undo_stack.len(), undo_depth + 4);
+}
+
+/// The flag that says a parameter's actions run one after the other is the only
+/// record of the order the operator chose, so the panel has to answer to it both
+/// ways: the row reads the bit off the record, clicking it writes the record, and
+/// undoing puts the bit back without disturbing anything else the parameter holds.
+#[test]
+fn the_chain_actions_row_toggles_the_parameter_and_undoes() {
+    use crate::scene::block_actions::{self as actions, Kind};
+    use crate::scene::model::object::PropValue;
+    use codec::objects::{DynamicBlockData, ObjectType};
+
+    fn linear(
+        app: &OpenCADStudio,
+        tab: usize,
+        parameter: Handle,
+    ) -> &codec::objects::BlockLinearParameter {
+        let ObjectType::DynamicBlock(object) = &app.tabs[tab].scene.document.objects[&parameter]
+        else {
+            panic!("expected a dynamic parameter")
+        };
+        let DynamicBlockData::LinearParameter(data) = &object.data else {
+            panic!("expected a Linear parameter")
+        };
+        data
+    }
+    fn chained(app: &OpenCADStudio, tab: usize, parameter: Handle) -> bool {
+        linear(app, tab, parameter)
+            .parameter
+            .parameter
+            .chain_actions
+    }
+    // The distance limits are the part of the record the toggle must not disturb.
+    fn limits(app: &OpenCADStudio, tab: usize, parameter: Handle) -> (f64, f64) {
+        let set = &linear(app, tab, parameter).value_set;
+        (set.minimum, set.maximum)
+    }
+    let row = |app: &mut OpenCADStudio| {
+        app.refresh_properties();
+        app.tabs[app.active_tab]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| section.props.iter())
+            .find(|property| property.field == "authoring_chain_actions")
+            .cloned()
+            .expect("the parameter has a Chain actions row")
+    };
+
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 6,0 3,2");
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let parameter =
+        actions::parameters(&app.tabs[i].scene.document, definition, Kind::Move)[0].handle;
+    app.tabs[i].selected_authoring = Some(parameter);
+    let _ = app.update(Message::PropGeomInput {
+        field: "authoring_set_linear_distance_maximum",
+        value: "20".into(),
+    });
+    let _ = app.update(Message::PropGeomCommit(
+        "authoring_set_linear_distance_maximum",
+    ));
+    let limits_before = limits(&app, i, parameter);
+    let graph_before = actions::actions(&app.tabs[i].scene.document, definition).len();
+    let depth = app.tabs[i].history.undo_stack.len();
+
+    assert_eq!(
+        chained(&app, i, parameter),
+        false,
+        "a fresh parameter is not chained"
+    );
+    let PropValue::BoolToggle { value, .. } = row(&mut app).value else {
+        panic!("the Chain actions row is not a toggle")
+    };
+    assert_eq!(value, false, "the row reads the bit off the record");
+
+    let _ = app.update(Message::PropBoolToggle("authoring_chain_actions"));
+    assert_eq!(
+        chained(&app, i, parameter),
+        true,
+        "clicking the row writes the chaining bit into the record"
+    );
+    let PropValue::BoolToggle { value, .. } = row(&mut app).value else {
+        panic!("the Chain actions row is not a toggle")
+    };
+    assert_eq!(value, true, "the row reads back what was written");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    assert_eq!(
+        limits(&app, i, parameter),
+        limits_before,
+        "only the bit moves"
+    );
+
+    let _ = app.update(Message::Undo);
+    assert_eq!(
+        chained(&app, i, parameter),
+        false,
+        "undoing the toggle leaves the parameter unchained"
+    );
+    assert_eq!(
+        limits(&app, i, parameter),
+        limits_before,
+        "undo moves the bit alone"
+    );
+    assert_eq!(
+        actions::actions(&app.tabs[i].scene.document, definition).len(),
+        graph_before,
+        "the evaluation graph is unchanged by a chaining toggle"
+    );
 }
 
 #[test]

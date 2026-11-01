@@ -1379,6 +1379,7 @@ fn evaluate_impl(
         });
     }
     let all = actions(baseline, definition);
+    let order = chain_order(&all)?;
     let mut affected = std::collections::BTreeSet::new();
     let mut geometric_targets = std::collections::BTreeMap::new();
     let mut prepared = std::collections::BTreeMap::new();
@@ -1413,7 +1414,7 @@ fn evaluate_impl(
                 .into_iter().find(|p| p.id == *id)
                 .ok_or("An action has an unsupported parameter binding.")?;
             if !supported_parameter(baseline, q.handle) {
-                return Err("This parameter uses value constraints or chaining not supported yet.");
+                return Err("This parameter uses value constraints not supported yet.");
             }
             if arr.column_offset <= 1e-6 || !arr.column_offset.is_finite()
                 || (q.xy && (arr.row_offset <= 1e-6 || !arr.row_offset.is_finite()))
@@ -1422,7 +1423,7 @@ fn evaluate_impl(
                 return Err("This Array action uses options not supported yet.");
             }
             if !a.action_ids.is_empty() {
-                return Err("Chained actions are not supported yet.");
+                return Err("An Array action cannot chain follow-up actions yet.");
             }
             array_plans.insert(*action_handle, array::Plan::new(
                 &q, base_for(&q), current(&staged, &q), arr, target_count,
@@ -1436,7 +1437,7 @@ fn evaluate_impl(
             .find(|p| p.id == *id)
             .ok_or("An action has an unsupported parameter binding.")?;
         if !supported_parameter(baseline, q.handle) {
-            return Err("This parameter uses value constraints or chaining not supported yet.");
+            return Err("This parameter uses value constraints not supported yet.");
         }
         let end = current(&staged, &q);
         let base = base_for(&q);
@@ -1495,10 +1496,6 @@ fn evaluate_impl(
             }
             Kind::Array => unreachable!(),
         };
-        // Do not silently ignore retained native action chains.
-        if !a.action_ids.is_empty() {
-            return Err("Chained actions are not supported yet.");
-        }
         let o = action_object;
         match &o.data {
             DynamicBlockData::MoveAction(m)
@@ -1539,7 +1536,8 @@ fn evaluate_impl(
         if let Some(e) = staged.get_entity(h) {
             entity.common_mut().invisible = e.common().invisible;
         }
-        for (action_handle, a, kind, _id) in &all {
+        for index in &order {
+            let (action_handle, a, kind, _id) = &all[*index];
             if !a.dependencies.contains(&h) || *kind == Kind::Array {
                 continue;
             }
@@ -1637,26 +1635,78 @@ fn supported_parameter(doc: &Document, handle: Handle) -> bool {
             && !(s.flags & 3 == 3 && s.minimum > s.maximum)
     };
     match &o.data {
-        DynamicBlockData::FlipParameter(p) => !p.parameter.parameter.chain_actions,
-        DynamicBlockData::RotationParameter(p) => {
-            !p.parameter.parameter.chain_actions && valid_value_set(&p.value_set)
-        }
-        DynamicBlockData::PointParameter(p) => !p.parameter.parameter.chain_actions,
-        DynamicBlockData::LinearParameter(p) => {
-            !p.parameter.parameter.chain_actions && valid_value_set(&p.value_set)
-        }
+        DynamicBlockData::FlipParameter(_) | DynamicBlockData::PointParameter(_) => true,
+        DynamicBlockData::RotationParameter(p) => valid_value_set(&p.value_set),
+        DynamicBlockData::LinearParameter(p) => valid_value_set(&p.value_set),
         DynamicBlockData::XYParameter(p) => {
-            !p.parameter.parameter.chain_actions
-                && valid_value_set(&p.x_value_set)
-                && valid_value_set(&p.y_value_set)
+            valid_value_set(&p.x_value_set) && valid_value_set(&p.y_value_set)
         }
         DynamicBlockData::PolarParameter(p) => {
-            !p.parameter.parameter.chain_actions
-                && valid_value_set(&p.distance_value_set)
-                && valid_value_set(&p.angle_value_set)
+            valid_value_set(&p.distance_value_set) && valid_value_set(&p.angle_value_set)
         }
         _ => false,
     }
+}
+
+/// The order the actions of one definition run in.
+///
+/// An action that names follow-up actions chains them: the follow-up works on the
+/// member as the first action left it, so the chain is the only record of the
+/// order the operator chose and has to decide the sequence. Actions no chain
+/// points at keep the order the evaluation graph lists. Every name is checked
+/// against this definition's actions before any ordering happens, so a chain that
+/// resolves to nothing, that names more than one follow-up, that joins two
+/// sequences, or that runs into an array action is refused. A chain that loops
+/// back on itself has no first action, so the loop is left in the order the graph
+/// lists rather than guessed at.
+fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, &'static str> {
+    let mut by_chain_id = std::collections::BTreeMap::new();
+    for (index, (handle, _, _, _)) in all.iter().enumerate() {
+        if by_chain_id.insert(handle.value() as i64, index).is_some() {
+            return Err("The evaluation graph lists one action twice.");
+        }
+    }
+    let mut followed_by = std::collections::BTreeMap::new();
+    for (index, (_, action, _, _)) in all.iter().enumerate() {
+        if action.action_ids.len() > 1 {
+            return Err("An action chain cannot name more than one follow-up action yet.");
+        }
+        for id in &action.action_ids {
+            let Some(&next) = by_chain_id.get(&(*id as i64)) else {
+                return Err("An action chain names an object outside this block.");
+            };
+            if all[next].2 == Kind::Array {
+                return Err("An Array action cannot be the follow-up of a chain yet.");
+            }
+            if followed_by.insert(next, index).is_some() {
+                return Err("An action chain joins two sequences.");
+            }
+        }
+    }
+    let mut order = Vec::with_capacity(all.len());
+    let mut placed = std::collections::BTreeSet::new();
+    for head in 0..all.len() {
+        if followed_by.contains_key(&head) {
+            continue;
+        }
+        let mut queue = std::collections::VecDeque::from([head]);
+        while let Some(index) = queue.pop_front() {
+            if !placed.insert(index) {
+                continue;
+            }
+            order.push(index);
+            for id in &all[index].1.action_ids {
+                queue.push_back(by_chain_id[&(*id as i64)]);
+            }
+        }
+    }
+    // A cycle has no head, so whatever is left keeps the graph's own order.
+    for index in 0..all.len() {
+        if placed.insert(index) {
+            order.push(index);
+        }
+    }
+    Ok(order)
 }
 
 pub(crate) fn constrain_value_set(value: f64, set: &codec::objects::BlockParameterValueSet) -> f64 {

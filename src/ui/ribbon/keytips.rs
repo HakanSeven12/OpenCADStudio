@@ -844,15 +844,17 @@ impl Ribbon {
             .zip(codes)
             .filter_map(|(item, code)| {
                 let (target, action): (std::borrow::Cow<'static, str>, Action) = match item {
-                    QatItem::Command(cmd) => match self.ribbon_dropdown(cmd) {
+                    QatItem::Command(cmd) => match self.qat_look(cmd) {
                         // A split item runs its face, as a click on it does.
-                        Some((id, _, items, default)) => (
+                        super::qat::QatLook::Split {
+                            id, items, default, ..
+                        } => (
                             id.into(),
                             Action::Run(Message::MenuCommand(
-                                self.qat_face_command(id, items, default).to_string(),
+                                self.qat_face_command(id, &items, default).to_string(),
                             )),
                         ),
-                        None => (
+                        super::qat::QatLook::Plain(_) => (
                             cmd.clone().into(),
                             Action::Run(Message::MenuCommand(cmd.clone())),
                         ),

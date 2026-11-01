@@ -176,6 +176,7 @@ pub(super) struct SearchState {
 const QAT_CANDIDATES: usize = 30;
 
 /// A command More Commands can add to the Quick Access Toolbar.
+#[derive(Clone)]
 pub(super) struct QatCandidate {
     pub label: String,
     /// Where the search found it.

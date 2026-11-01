@@ -2821,6 +2821,12 @@ impl OpenCADStudio {
             Message::MenuCommand(line) => {
                 let sweep = self.sync_active_field_if_any();
                 self.ribbon.close_dropdown();
+                // As a typed command does: the application menu, the
+                // drawing's context menu and the Isolate menu close.
+                self.ribbon.close_app_menu();
+                let i = self.active_tab;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.isolate_popup_open = false;
                 // A single word dispatches as a ribbon button does; a line
                 // with answers runs its command and feeds them to its
                 // prompts, leaving the command at its next one.

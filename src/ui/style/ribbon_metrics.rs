@@ -37,6 +37,28 @@ pub const QAT_ROW_PAD: f32 = 6.0;
 pub const QAT_CUSTOMIZE_W: f32 = 20.0;
 /// The title of a Quick Access menu.
 pub const QAT_MENU_TITLE_SIZE: f32 = 11.5;
+/// The Quick Access menus: the title's room, a separator's room, the
+/// size of a check mark, the size of plain menu text (and of a command
+/// shown by its name), and the gap between an icon and its ▾.
+pub const QAT_MENU_TITLE_PAD: [f32; 2] = [4.0, 12.0];
+pub const QAT_MENU_SEP_PAD: [f32; 2] = [3.0, 6.0];
+pub const QAT_MENU_CHECK: f32 = 10.0;
+pub const QAT_TEXT_SIZE: f32 = 11.0;
+pub const QAT_ARROW_GAP: f32 = 2.0;
+/// More Commands: its width, the most its result list grows to, a result
+/// row's height and room, the gap after a result's icon, its name and
+/// place sizes, the search field's text size and room, and the room
+/// around "no matches".
+pub const QAT_PICKER_W: f32 = 340.0;
+pub const QAT_PICKER_LIST_H: f32 = 320.0;
+pub const QAT_PICKER_ROW_H: f32 = 34.0;
+pub const QAT_PICKER_ROW_PAD: [f32; 2] = [3.0, 10.0];
+pub const QAT_PICKER_ICON_GAP: f32 = 8.0;
+pub const QAT_PICKER_LABEL_SIZE: f32 = 12.0;
+pub const QAT_PICKER_PATH_SIZE: f32 = 10.0;
+pub const QAT_PICKER_INPUT_SIZE: f32 = 11.5;
+pub const QAT_PICKER_INPUT_PAD: [f32; 2] = [4.0, 6.0];
+pub const QAT_PICKER_EMPTY_PAD: [f32; 2] = [6.0, 10.0];
 /// Gap between two tabs: none, so a hovered tab meets the active one.
 pub const TAB_GAP: f32 = 0.0;
 /// The minimize split button after the last tab: this far from the tab,
@@ -113,6 +135,11 @@ pub const FLOAT_HOVER_HIT: f32 = 16.0;
 pub const FLOAT_HOVER_GAP: f32 = 2.0;
 pub const FLOAT_HOVER_INSET: f32 = 3.0;
 pub const FLOAT_TAB_PAD: f32 = 2.0;
+/// The footer of a floating panel's extra tools: the room around its pin,
+/// at its ends, and between its title and ▴.
+pub const FLOAT_FOOTER_PIN_PAD: [f32; 2] = [1.0, 4.0];
+pub const FLOAT_FOOTER_PAD: [f32; 2] = [0.0, 3.0];
+pub const FLOAT_TITLE_GAP: f32 = 4.0;
 /// Width of a floating panel's title strip at its side, and of the footer
 /// at the end of its extra tools band.
 pub const FLOAT_SIDE_STRIP_W: f32 = 20.0;

@@ -1,7 +1,11 @@
 //! The Quick Access Toolbar: the items the user chose (`RibbonLayout::qat`),
 //! each drawn by its kind, with the customize button at the end.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
+
+use rustc_hash::FxHashMap as HashMap;
 
 use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{button, container, row, text, tooltip, Space};
@@ -30,11 +34,6 @@ pub(crate) const QAT_CUSTOMIZE_ID: &str = "QAT_CUSTOMIZE";
 pub(crate) const QAT_PICKER_ID: &str = "QAT_MORE_COMMANDS";
 /// More Commands' search field.
 pub const QAT_PICKER_INPUT: &str = "qat_more_commands_input";
-const PICKER_W: f32 = 340.0;
-const PICKER_LIST_H: f32 = 320.0;
-/// A result row: its name over where it was found.
-const PICKER_ROW_H: f32 = 34.0;
-const CHECK_SIZE: f32 = 10.0;
 /// A bar with a ▾ under it.
 const CUSTOMIZE_ICON: &str = "M6 7h12 M8.5 11.5L12 15l3.5-3.5";
 /// Starts the dropdown id of a split item's list.
@@ -64,6 +63,33 @@ pub(super) enum FaceIcon {
     /// No icon anywhere: the button shows the command name.
     Text,
 }
+
+/// A ribbon dropdown's item: command, label, icon.
+pub(super) type DropdownItem = (&'static str, &'static str, IconKind);
+
+/// What a command item of the toolbar is.
+#[derive(Clone)]
+pub(super) enum QatLook {
+    /// A ribbon dropdown: its face runs the variant last chosen.
+    Split {
+        id: &'static str,
+        label: &'static str,
+        items: Rc<[DropdownItem]>,
+        default: &'static str,
+    },
+    /// A plain button.
+    Plain(Face),
+}
+
+/// The command items' looks, for the language they were worked out in.
+#[derive(Default)]
+pub(super) struct QatCache {
+    generation: Option<u64>,
+    looks: HashMap<String, QatLook>,
+}
+
+/// The cache, as the ribbon holds it.
+pub(super) type QatLooks = RefCell<QatCache>;
 
 /// The icon and label of a command item.
 #[derive(Clone)]
@@ -122,6 +148,41 @@ impl Ribbon {
         }
     }
 
+    /// What the command item `cmd` is: a split item for a ribbon dropdown,
+    /// else a button with its face. Worked out once per command and kept
+    /// until the language or the tabs change, as it searches every tab and
+    /// the menu bar.
+    pub(super) fn qat_look(&self, cmd: &str) -> QatLook {
+        let generation = crate::i18n::language_generation();
+        let key = cmd.trim().to_ascii_uppercase();
+        {
+            let mut cache = self.qat_cache.borrow_mut();
+            if cache.generation != Some(generation) {
+                cache.looks.clear();
+                cache.generation = Some(generation);
+            }
+            if let Some(look) = cache.looks.get(&key) {
+                return look.clone();
+            }
+        }
+        let look = match self.ribbon_dropdown(cmd) {
+            Some((id, label, items, default)) => QatLook::Split {
+                id,
+                label,
+                items: items.into(),
+                default,
+            },
+            None => QatLook::Plain(self.command_face(cmd)),
+        };
+        self.qat_cache.borrow_mut().looks.insert(key, look.clone());
+        look
+    }
+
+    /// Forget the command items' looks: the tabs changed.
+    pub(super) fn forget_qat_looks(&mut self) {
+        self.qat_cache.get_mut().looks.clear();
+    }
+
     /// The toolbar's items, left to right. Greyed out and inert on the Start
     /// tab, which has no drawing for them.
     pub(super) fn qat_items(
@@ -132,11 +193,14 @@ impl Ribbon {
     ) -> Vec<Element<'_, Message>> {
         let enabled = !is_start;
         let items = self.layout.qat.iter().map(|item| match item {
-            QatItem::Command(cmd) => match self.ribbon_dropdown(cmd) {
-                Some((id, label, items, default)) => {
-                    self.qat_split(id, label, items, default, enabled)
-                }
-                None => quick_access_btn(self.command_face(cmd), cmd.clone(), enabled),
+            QatItem::Command(cmd) => match self.qat_look(cmd) {
+                QatLook::Split {
+                    id,
+                    label,
+                    items,
+                    default,
+                } => self.qat_split(id, label, &items, default, enabled),
+                QatLook::Plain(face) => quick_access_btn(face, cmd.clone(), enabled),
             },
             QatItem::Builtin(QatBuiltin::Undo) => render_history_control(
                 "Undo",
@@ -278,24 +342,26 @@ impl Ribbon {
         .id(iced::widget::Id::new(QAT_PICKER_INPUT))
         .on_input(|query| Message::RibbonQat(QatMsg::PickerInput(query)))
         .on_submit(Message::RibbonQat(QatMsg::PickerSubmit))
-        .size(11.5)
-        .padding([4, 6]);
-        let candidates = self.qat_candidates(&self.qat_query);
-        let list_h = (candidates.len().max(1) as f32 * PICKER_ROW_H).min(PICKER_LIST_H);
+        .size(metrics::QAT_PICKER_INPUT_SIZE)
+        .padding(metrics::QAT_PICKER_INPUT_PAD);
+        // Worked out when the query changes, not on every frame.
+        let candidates = &self.qat_found;
+        let list_h = (candidates.len().max(1) as f32 * metrics::QAT_PICKER_ROW_H)
+            .min(metrics::QAT_PICKER_LIST_H);
         let rows: Vec<Element<'_, Message>> =
             if candidates.is_empty() && !self.qat_query.trim().is_empty() {
                 vec![container(
                     text(crate::tr!("ribbon-menu", "no-matches"))
-                        .size(11)
+                        .size(metrics::QAT_TEXT_SIZE)
                         .style(|theme: &Theme| text::Style {
                             color: Some(chrome::muted(theme)),
                         }),
                 )
-                .padding([6, 10])
+                .padding(metrics::QAT_PICKER_EMPTY_PAD)
                 .into()]
             } else {
                 candidates
-                    .into_iter()
+                    .iter()
                     .map(|candidate| {
                         let held = self.layout.qat_has(&candidate.item);
                         let icon: Element<'_, Message> = match candidate.icon {
@@ -303,26 +369,30 @@ impl Ribbon {
                             None => Space::new().width(SMALL_ICON).height(SMALL_ICON).into(),
                         };
                         let label = iced::widget::column![
-                            text(candidate.label).size(12),
-                            text(candidate.path)
-                                .size(10)
+                            text(candidate.label.clone()).size(metrics::QAT_PICKER_LABEL_SIZE),
+                            text(candidate.path.clone())
+                                .size(metrics::QAT_PICKER_PATH_SIZE)
                                 .style(|theme: &Theme| text::Style {
                                     color: Some(chrome::muted(theme)),
                                 }),
                         ];
-                        let mut content = row![icon, label].spacing(8).align_y(iced::Center);
+                        let mut content = row![icon, label]
+                            .spacing(metrics::QAT_PICKER_ICON_GAP)
+                            .align_y(iced::Center);
                         if held {
-                            content = content
-                                .push(Space::new().width(Fill))
-                                .push(icons::themed_disabled(icons::CHECK, CHECK_SIZE));
+                            content = content.push(Space::new().width(Fill)).push(
+                                icons::themed_disabled(icons::CHECK, metrics::QAT_MENU_CHECK),
+                            );
                         }
                         button(content)
                             .on_press_maybe(
-                                (!held).then(|| Message::RibbonQat(QatMsg::Add(candidate.item))),
+                                (!held).then(|| {
+                                    Message::RibbonQat(QatMsg::Add(candidate.item.clone()))
+                                }),
                             )
                             .style(super::widgets::popup_row_style)
                             .width(Fill)
-                            .padding([3, 10])
+                            .padding(metrics::QAT_PICKER_ROW_PAD)
                             .into()
                     })
                     .collect()
@@ -332,14 +402,14 @@ impl Ribbon {
         let panel = container(
             iced::widget::column![
                 menu_header(crate::tr!("ribbon-menu", "more-commands-title")),
-                container(input).padding([4, 6]),
+                container(input).padding(metrics::QAT_PICKER_INPUT_PAD),
                 list
             ]
-            .spacing(2),
+            .spacing(metrics::GAP),
         )
         .style(super::widgets::popup_panel_style)
-        .width(Length::Fixed(PICKER_W));
-        self.place_dropdown(QAT_CUSTOMIZE_ID, panel.into(), PICKER_W, win.0)
+        .width(Length::Fixed(metrics::QAT_PICKER_W));
+        self.place_dropdown(QAT_CUSTOMIZE_ID, panel.into(), metrics::QAT_PICKER_W, win.0)
     }
 
     /// The toolbar as one flow that wraps.
@@ -480,7 +550,7 @@ impl Ribbon {
         let open = self.open_dropdown.as_deref() == Some(id);
         let btn = button(
             row![icons::line_icon(icon, SMALL_ICON), icons::dropdown_arrow()]
-                .spacing(2)
+                .spacing(metrics::QAT_ARROW_GAP)
                 .align_y(iced::Center),
         )
         .on_press(Message::ToggleRibbonDropdown(id.to_string()))
@@ -619,6 +689,7 @@ impl Ribbon {
             }
             QatMsg::OpenPicker => {
                 self.qat_query.clear();
+                self.qat_found.clear();
                 self.open_dropdown = Some(QAT_PICKER_ID.to_string());
                 QatOutcome {
                     focus: true,
@@ -626,16 +697,18 @@ impl Ribbon {
                 }
             }
             QatMsg::PickerInput(query) => {
+                self.qat_found = self.qat_candidates(&query);
                 self.qat_query = query;
                 QatOutcome::default()
             }
             QatMsg::PickerSubmit => {
                 let first = self
-                    .qat_candidates(&self.qat_query)
-                    .into_iter()
-                    .find(|candidate| !self.layout.qat_has(&candidate.item));
+                    .qat_found
+                    .iter()
+                    .find(|candidate| !self.layout.qat_has(&candidate.item))
+                    .map(|candidate| candidate.item.clone());
                 match first {
-                    Some(candidate) => self.on_qat(QatMsg::Add(candidate.item)),
+                    Some(item) => self.on_qat(QatMsg::Add(item)),
                     None => QatOutcome::default(),
                 }
             }
@@ -643,6 +716,7 @@ impl Ribbon {
                 let save = self.layout.qat_add(item);
                 self.close_dropdown();
                 self.qat_query.clear();
+                self.qat_found.clear();
                 QatOutcome {
                     save,
                     ..QatOutcome::default()
@@ -758,7 +832,7 @@ fn menu_header<'a>(title: String) -> Element<'a, Message> {
                     color: Some(chrome::strong(theme)),
                 }),
         )
-        .padding([4, 12]),
+        .padding(metrics::QAT_MENU_TITLE_PAD),
         line,
     ]
     .width(Fill)
@@ -775,7 +849,7 @@ fn menu_separator<'a>() -> Element<'a, Message> {
             }
         }),
     )
-    .padding([3, 6])
+    .padding(metrics::QAT_MENU_SEP_PAD)
     .into()
 }
 
@@ -856,7 +930,7 @@ pub(super) fn face_icon<'a>(face: &Face, size: f32, enabled: bool) -> Element<'a
         FaceIcon::Text => {
             let label = face.label.clone();
             row![text(label)
-                .size(11)
+                .size(metrics::QAT_TEXT_SIZE)
                 .wrapping(iced::widget::text::Wrapping::None)
                 .style(move |theme: &Theme| text::Style {
                     color: (!enabled).then(|| crate::ui::style::chrome::muted(theme)),
@@ -993,5 +1067,35 @@ mod tests {
         let mut ribbon = Ribbon::default();
         assert!(ribbon.on_qat(QatMsg::SetBelow(true)).save);
         assert!(ribbon.layout.qat_below);
+    }
+
+    #[test]
+    fn a_command_items_look_is_worked_out_once_and_forgotten_with_the_tabs() {
+        let mut ribbon = Ribbon::default();
+        assert!(matches!(
+            ribbon.qat_look("measure_menu"),
+            QatLook::Split {
+                id: "MEASURE_MENU",
+                ..
+            }
+        ));
+        assert!(matches!(ribbon.qat_look("LINE"), QatLook::Plain(_)));
+        assert_eq!(ribbon.qat_cache.borrow().looks.len(), 2);
+        // The same command in other case is the same entry.
+        ribbon.qat_look("line");
+        assert_eq!(ribbon.qat_cache.borrow().looks.len(), 2);
+        ribbon.set_modules(crate::plugin::all_ribbon_modules());
+        assert!(ribbon.qat_cache.borrow().looks.is_empty());
+    }
+
+    #[test]
+    fn more_commands_finds_on_input_not_on_every_frame() {
+        let mut ribbon = Ribbon::default();
+        ribbon.on_qat(QatMsg::OpenPicker);
+        assert!(ribbon.qat_found.is_empty());
+        ribbon.on_qat(QatMsg::PickerInput("hatch".into()));
+        assert!(!ribbon.qat_found.is_empty());
+        ribbon.on_qat(QatMsg::PickerInput(String::new()));
+        assert!(ribbon.qat_found.is_empty());
     }
 }

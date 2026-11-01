@@ -488,7 +488,7 @@ impl Ribbon {
             .on_press(Message::RibbonFloat(FloatMsg::TogglePin(key.to_string())))
             .style(|theme: &Theme, status| super::widgets::tool_btn_style(theme, false, status))
             .width(side)
-            .padding([1, 4])
+            .padding(metrics::FLOAT_FOOTER_PIN_PAD)
             .into()
         } else {
             iced::widget::Space::new().width(side).into()
@@ -505,7 +505,7 @@ impl Ribbon {
                 }),
             crate::ui::icons::dropup_arrow()
         ]
-        .spacing(4)
+        .spacing(metrics::FLOAT_TITLE_GAP)
         .align_y(iced::Center);
         let launcher = draw_panel::launcher(panel)
             .unwrap_or_else(|| iced::widget::Space::new().width(side).into());
@@ -518,7 +518,7 @@ impl Ribbon {
                 launcher
             ]
             .align_y(iced::Center)
-            .padding([0, 3]),
+            .padding(metrics::FLOAT_FOOTER_PAD),
         )
         .center_y(draw_panel::FOOTER_H)
         .width(width)
@@ -565,7 +565,6 @@ impl Ribbon {
                     self.float_ui.open = None;
                 } else if draw_panel::panel_for_group(&key).is_some() {
                     self.float_ui.open = Some(key);
-                    self.float_ui.over = true;
                 }
                 self.float_ui.closing = None;
                 false
@@ -588,7 +587,6 @@ impl Ribbon {
             }
             FloatMsg::Hover { key, over } => {
                 if self.float_ui.open.as_deref() == Some(key.as_str()) {
-                    self.float_ui.over = over;
                     self.float_ui.closing =
                         (!over).then(|| now + std::time::Duration::from_millis(EXTRAS_CLOSE_MS));
                 }
@@ -630,14 +628,30 @@ impl Ribbon {
             }
             FloatMsg::Raise(key) => {
                 let top = self.top_float_z();
-                match self.layout.floating.iter_mut().find(|p| p.key == key) {
-                    Some(panel) if panel.z < top || top == 0 => {
+                // On top already only when no other panel is as high: a
+                // hand-edited layout may give two the same order.
+                let below = |panel: &FloatingPanel| {
+                    self.layout
+                        .floating
+                        .iter()
+                        .any(|other| other.key != panel.key && other.z >= panel.z)
+                };
+                let raise = self
+                    .layout
+                    .floating
+                    .iter()
+                    .find(|p| p.key == key)
+                    .is_some_and(below);
+                if raise {
+                    if let Some(panel) = self.layout.floating.iter_mut().find(|p| p.key == key) {
                         panel.z = top + 1;
-                        true
                     }
-                    _ => false,
+                    // Saved when the press lets go, not on every press.
+                    self.float_ui.unsaved = true;
                 }
+                false
             }
+            FloatMsg::Settle => std::mem::take(&mut self.float_ui.unsaved),
             FloatMsg::Press { key, at } => {
                 self.float_ui.drag = self
                     .layout
@@ -694,14 +708,17 @@ impl Ribbon {
                 }
                 false
             }
-            FloatMsg::Release { moved } => match self.float_ui.drag.take() {
-                // Dropped on the tool area: back into the ribbon.
-                Some(drag) if moved && drag.over_ribbon => {
-                    self.dock_floating_at(&drag.key, drag.at.x)
-                }
-                Some(_) => moved,
-                None => false,
-            },
+            FloatMsg::Release { moved } => {
+                let changed = match self.float_ui.drag.take() {
+                    // Dropped on the tool area: back into the ribbon.
+                    Some(drag) if moved && drag.over_ribbon => {
+                        self.dock_floating_at(&drag.key, drag.at.x)
+                    }
+                    Some(_) => moved,
+                    None => false,
+                };
+                changed | std::mem::take(&mut self.float_ui.unsaved)
+            }
         }
     }
 
@@ -790,6 +807,8 @@ pub enum FloatMsg {
     Move { at: Point, free: bool },
     /// The press let go; `moved` once it had moved the panel.
     Release { moved: bool },
+    /// A press over a panel let go: save a raise it made.
+    Settle,
     /// A click on the title strip: open or close the extra tools.
     ToggleExtras(String),
     /// A click on the extra tools' footer title: close and unpin them.
@@ -820,8 +839,6 @@ pub(super) struct FloatUi {
     pub drag: Option<FloatDrag>,
     /// The panel whose extra tools are open and not pinned.
     pub open: Option<String>,
-    /// The pointer is on that panel.
-    pub over: bool,
     /// The panel whose footer the pointer is on: its pin shows.
     pub footer: Option<String>,
     /// When the open extra tools close, the pointer having left them.
@@ -830,6 +847,8 @@ pub(super) struct FloatUi {
     pub strip_hover: Option<String>,
     /// The panel whose corner tab the pointer is on.
     pub tab_hover: Option<String>,
+    /// A panel was raised since the layout was last saved.
+    pub unsaved: bool,
 }
 
 /// Where a floating panel moved to `moving` lands: each axis snaps on its
@@ -896,12 +915,15 @@ fn title_shift(hovered: bool, title: &str, chevron: bool, width: Option<f32>) ->
         + 2.0 * metrics::FLOAT_HOVER_HIT
         + metrics::FLOAT_HOVER_GAP
         + metrics::FLOAT_HOVER_GAP;
-    let text = crate::ui::style::text_metrics::width(&crate::t!(title), 11.5, false)
-        + if chevron {
-            metrics::DROPDOWN_ARROW_W + 4.0
-        } else {
-            0.0
-        };
+    let text = crate::ui::style::text_metrics::width(
+        &crate::t!(title),
+        super::widgets::PANEL_TITLE_SIZE,
+        false,
+    ) + if chevron {
+        metrics::DROPDOWN_ARROW_W + metrics::FLOAT_TITLE_GAP
+    } else {
+        0.0
+    };
     let start = (width - text) / 2.0;
     // Centred with a spacer before it, the title starts half the spacer
     // further right.
@@ -965,7 +987,7 @@ fn hover_button_style(
             chrome::muted(theme)
         },
         border: Border {
-            radius: 2.0.into(),
+            radius: super::widgets::BUTTON_RADIUS.into(),
             ..Border::default()
         },
         ..Default::default()
@@ -1432,8 +1454,32 @@ impl<'a> FloatLayer<'a> {
     }
 }
 
+/// The layer's tree state: the panels its children were built for.
+#[derive(Default)]
+struct LayerState {
+    keys: Vec<String>,
+}
+
 impl<'a> Widget<Message, Theme, Renderer> for FloatLayer<'a> {
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::of::<LayerState>()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        widget::tree::State::new(LayerState {
+            keys: self.keys.clone(),
+        })
+    }
+
     fn diff(&mut self, tree: &mut widget::Tree) {
+        // The children follow the panels by position: when a panel comes or
+        // goes, the ones after it would take over its hover and press
+        // state, so the children start afresh.
+        let state = tree.state.downcast_mut::<LayerState>();
+        if state.keys != self.keys {
+            state.keys.clone_from(&self.keys);
+            tree.children.clear();
+        }
         let mut parts = self.parts_mut();
         tree.diff_children_custom(
             &mut parts,
@@ -1486,9 +1532,14 @@ impl<'a> Widget<Message, Theme, Renderer> for FloatLayer<'a> {
         viewport: &Rectangle,
     ) {
         let hit = self.hit(layout, cursor);
+        // A release over a panel saves a raise its press made.
+        if hit.is_some() && matches!(event, Event::Mouse(mouse::Event::ButtonReleased(_))) {
+            shell.publish(Message::RibbonFloat(FloatMsg::Settle));
+        }
         if let Event::Mouse(mouse::Event::ButtonPressed(_)) = event {
-            // Any press on a panel brings it to the front.
-            if let Some(i) = hit.filter(|i| self.order.last() != Some(i)) {
+            // Any press on a panel brings it to the front (the ribbon knows
+            // whether it already is).
+            if let Some(i) = hit {
                 shell.publish(Message::RibbonFloat(FloatMsg::Raise(self.keys[i].clone())));
             }
             // A press anywhere else closes unpinned extra tools.
@@ -1497,9 +1548,9 @@ impl<'a> Widget<Message, Theme, Renderer> for FloatLayer<'a> {
             }
         }
         let layouts: Vec<Layout<'_>> = layout.children().collect();
-        let order = self.order.clone();
         // Front to back; a panel under another sees no pointer there.
-        for i in order.into_iter().rev() {
+        for slot in (0..self.order.len()).rev() {
+            let i = self.order[slot];
             let panel_cursor = match hit {
                 Some(top) if top != i => mouse::Cursor::Unavailable,
                 _ => cursor,
@@ -1526,15 +1577,13 @@ impl<'a> Widget<Message, Theme, Renderer> for FloatLayer<'a> {
                 }
             }
         }
-        // A panel is opaque: what is under it gets no presses or wheel.
+        // A panel is opaque: what is under it gets no presses or wheel. A
+        // release still goes through, so a drag that began elsewhere (a
+        // ribbon panel, a pan of the drawing) ends where it is let go.
         if hit.is_some()
             && matches!(
                 event,
-                Event::Mouse(
-                    mouse::Event::ButtonPressed(_)
-                        | mouse::Event::ButtonReleased(_)
-                        | mouse::Event::WheelScrolled { .. }
-                )
+                Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::WheelScrolled { .. })
             )
         {
             shell.capture_event();
@@ -1708,10 +1757,14 @@ mod tests {
             floating: vec![draw, floating("draw/Modify", 2)],
             ..RibbonLayout::default()
         });
-        // Raising the one on top changes nothing; the other goes above it.
-        assert!(!ribbon.on_float_now(FloatMsg::Raise("draw/Modify".into())));
-        assert!(ribbon.on_float_now(FloatMsg::Raise("draw/Draw".into())));
+        // Raising the one on top changes nothing; the other goes above it,
+        // saved when the press lets go rather than at once.
+        ribbon.on_float_now(FloatMsg::Raise("draw/Modify".into()));
+        assert!(!ribbon.float_ui.unsaved);
+        assert!(!ribbon.on_float_now(FloatMsg::Raise("draw/Draw".into())));
         assert_eq!(ribbon.layout.floating[0].z, 3);
+        assert!(ribbon.on_float_now(FloatMsg::Release { moved: false }));
+        assert!(!ribbon.float_ui.unsaved);
 
         // The press point keeps its place on the panel while it moves.
         ribbon.on_float_now(FloatMsg::Press {
@@ -1788,7 +1841,13 @@ mod tests {
         assert_eq!(VerticalTitle::fitted("Draw", 60.0), "Draw");
         let cut = VerticalTitle::fitted("Block Definition", 50.0);
         assert!(cut.ends_with('…'), "{cut}");
-        assert!(crate::ui::style::text_metrics::width(&cut, 11.5, false) <= 50.0);
+        assert!(
+            crate::ui::style::text_metrics::width(
+                &cut,
+                crate::ui::style::ribbon_metrics::FLOAT_TITLE_SIZE,
+                false
+            ) <= 50.0
+        );
         assert_eq!(VerticalTitle::fitted("Block Definition", 1.0), "…");
 
         let mut ribbon = Ribbon::default();
@@ -1919,6 +1978,71 @@ mod tests {
             8.0,
         );
         assert_eq!(at.y, 154.0);
+    }
+
+    #[test]
+    fn a_drop_on_the_tool_area_docks_on_its_own_tab_or_goes_back_to_its_slot() {
+        use super::FloatMsg;
+        use iced::Point;
+        let mut ribbon = Ribbon::default();
+        let index = |ribbon: &Ribbon, id: &str| {
+            ribbon
+                .modules
+                .iter()
+                .position(|module| module.id() == id)
+                .unwrap()
+        };
+        let draw = index(&ribbon, "draw");
+        let insert = index(&ribbon, "insert");
+        ribbon.select(draw);
+        assert!(ribbon.float_panel("draw", "Modify", 400.0, 300.0));
+        assert!(ribbon.float_panel("insert", "Block Definition", 600.0, 300.0));
+
+        // On its own tab, dropped left of every panel: it goes first.
+        let drop = |ribbon: &mut Ribbon, key: &str| {
+            ribbon.float_ui.drag = Some(super::FloatDrag {
+                key: key.into(),
+                grab: iced::Vector::ZERO,
+                over_ribbon: true,
+                at: Point::new(-100.0, 50.0),
+            });
+            ribbon.on_float_now(FloatMsg::Release { moved: true })
+        };
+        assert!(drop(&mut ribbon, "draw/Modify"));
+        assert_eq!(
+            ribbon.groups_for(draw).next().map(|g| g.title),
+            Some("Modify")
+        );
+
+        // Another tab's panel goes back to its old place there.
+        let before: Vec<_> = ribbon
+            .ordered_groups(insert)
+            .iter()
+            .map(|g| g.title)
+            .collect();
+        assert!(drop(&mut ribbon, "insert/Block Definition"));
+        assert!(ribbon.layout.floating.is_empty());
+        let after: Vec<_> = ribbon.groups_for(insert).map(|g| g.title).collect();
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn a_raise_is_saved_when_the_press_lets_go_even_off_the_title_strip() {
+        use super::FloatMsg;
+        let mut ribbon = Ribbon::default();
+        // Two at the same order, as a hand-edited layout may have them.
+        ribbon.set_layout(RibbonLayout {
+            floating: vec![floating("draw/Draw", 2), floating("draw/Modify", 2)],
+            ..RibbonLayout::default()
+        });
+        assert!(!ribbon.on_float_now(FloatMsg::Raise("draw/Draw".into())));
+        assert_eq!(ribbon.layout.floating[0].z, 3);
+        // A click on a button sends no grip release; the layer settles it.
+        assert!(ribbon.on_float_now(FloatMsg::Settle));
+        assert!(!ribbon.on_float_now(FloatMsg::Settle));
+        // On top alone, a press changes nothing.
+        ribbon.on_float_now(FloatMsg::Raise("draw/Draw".into()));
+        assert!(!ribbon.on_float_now(FloatMsg::Settle));
     }
 
     #[test]

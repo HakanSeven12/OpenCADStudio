@@ -287,7 +287,7 @@ impl RibbonLayout {
     }
 
     /// Drop separators at the ends of the toolbar and doubled ones.
-    fn tidy_qat_separators(&mut self) {
+    pub(super) fn tidy_qat_separators(&mut self) {
         let mut tidy: Vec<QatItem> = Vec::with_capacity(self.qat.len());
         for item in self.qat.drain(..) {
             let is_separator = item == QatItem::Separator;

@@ -435,8 +435,11 @@ pub struct Ribbon {
     pub center_layer: String,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
-    /// What More Commands searches for.
+    /// What More Commands searches for, and what it found.
     qat_query: String,
+    qat_found: Vec<search::QatCandidate>,
+    /// What each Quick Access command item is, worked out once.
+    qat_cache: qat::QatLooks,
     /// The floating panels' moves and extra tools.
     float_ui: floating::FloatUi,
 }
@@ -582,6 +585,8 @@ impl Ribbon {
             mleader_layer: String::new(),
             keytips: None,
             qat_query: String::new(),
+            qat_found: Vec::new(),
+            qat_cache: qat::QatLooks::default(),
             float_ui: floating::FloatUi::default(),
         }
     }
@@ -850,6 +855,7 @@ impl Ribbon {
     /// Plugin Manager). Clamps the active tab so it stays in range.
     pub fn set_modules(&mut self, modules: Vec<Box<dyn CadModule>>) {
         self.modules = modules;
+        self.forget_qat_looks();
         if self.active >= self.modules.len() {
             self.active = self.modules.len().saturating_sub(1);
         }

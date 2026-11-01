@@ -149,6 +149,9 @@ impl Ribbon {
                 } else if index < self.layout.qat.len() {
                     self.layout.qat.insert(next, QatItem::Separator);
                 }
+                // What a reload would drop (one at an end, two in a row)
+                // goes now, so the toolbar shows what is saved.
+                self.layout.tidy_qat_separators();
                 true
             }
             RibbonMenuMsg::QatBelow(below) => {
@@ -261,15 +264,14 @@ impl Ribbon {
             .collect()
     }
 
-    /// The menu and its open list over the whole window, with a backdrop
-    /// that closes it on any click outside.
-    pub fn menu_overlay(
+    /// The rows of the open menu `menu`, as it shows for what was
+    /// right-clicked; `None` is a separator.
+    fn menu_rows(
         &self,
-        win: (f32, f32),
+        menu: &MenuState,
         show_menu_bar: bool,
         ribbon_closed: bool,
-    ) -> Option<Element<'_, Message>> {
-        let menu = self.menu.as_ref()?;
+    ) -> Vec<Option<(Row, Option<Submenu>)>> {
         let is_default = self.is_default_layout();
         let plain = |label: String, action: RibbonMenuMsg| {
             Some((
@@ -402,20 +404,30 @@ impl Ribbon {
                 rows
             }
             MenuTarget::Qat(index) => {
-                let separator_after = self.layout.qat.get(index + 1) == Some(&QatItem::Separator);
-                vec![
-                    plain(
-                        crate::tr!("ribbon-menu", "remove-from-qat"),
-                        RibbonMenuMsg::QatRemove(*index),
-                    ),
-                    plain(
-                        if separator_after {
-                            crate::tr!("ribbon-menu", "remove-separator")
-                        } else {
-                            crate::tr!("ribbon-menu", "add-separator")
-                        },
+                let qat = &self.layout.qat;
+                let separator_after = qat.get(index + 1) == Some(&QatItem::Separator);
+                // A separator goes only between two items: not after the
+                // last one, nor after a separator.
+                let separable = qat
+                    .get(*index)
+                    .is_some_and(|item| *item != QatItem::Separator)
+                    && index + 1 < qat.len();
+                let mut rows = vec![plain(
+                    crate::tr!("ribbon-menu", "remove-from-qat"),
+                    RibbonMenuMsg::QatRemove(*index),
+                )];
+                if separator_after {
+                    rows.push(plain(
+                        crate::tr!("ribbon-menu", "remove-separator"),
                         RibbonMenuMsg::QatSeparatorAfter(*index),
-                    ),
+                    ));
+                } else if separable {
+                    rows.push(plain(
+                        crate::tr!("ribbon-menu", "add-separator"),
+                        RibbonMenuMsg::QatSeparatorAfter(*index),
+                    ));
+                }
+                rows.extend([
                     None,
                     place_row(if below {
                         crate::tr!("ribbon-menu", "show-above")
@@ -423,9 +435,23 @@ impl Ribbon {
                         crate::tr!("ribbon-menu", "show-below")
                     }),
                     menu_bar_row,
-                ]
+                ]);
+                rows
             }
         };
+        rows
+    }
+
+    /// The menu and its open list over the whole window, with a backdrop
+    /// that closes it on any click outside.
+    pub fn menu_overlay(
+        &self,
+        win: (f32, f32),
+        show_menu_bar: bool,
+        ribbon_closed: bool,
+    ) -> Option<Element<'_, Message>> {
+        let menu = self.menu.as_ref()?;
+        let rows = self.menu_rows(menu, show_menu_bar, ribbon_closed);
 
         let height = list_height(rows.iter().map(Option::is_some));
         let menu_w = fit_width(rows.iter().flatten().map(|(row, _)| row.label.as_str()));
@@ -930,6 +956,50 @@ mod tests {
         assert!(ribbon.layout.qat_has(&hatch));
         assert!(ribbon.on_menu(RibbonMenuMsg::QatToggle(hatch.clone())));
         assert!(!ribbon.layout.qat_has(&hatch));
+    }
+
+    impl Ribbon {
+        /// The labels of the open menu's rows.
+        fn qat_menu_labels(&self) -> Vec<String> {
+            let menu = self.menu.as_ref().expect("open menu");
+            self.menu_rows(menu, false, false)
+                .into_iter()
+                .flatten()
+                .map(|(row, _)| row.label)
+                .collect()
+        }
+    }
+
+    #[test]
+    fn a_separator_is_offered_only_between_two_items_and_never_doubled() {
+        let mut ribbon = Ribbon::default();
+        let last = ribbon.layout.qat.len() - 1;
+        let labels = |ribbon: &Ribbon, index: usize| -> Vec<String> {
+            let mut ribbon_at = Ribbon {
+                layout: ribbon.layout.clone(),
+                ..Ribbon::default()
+            };
+            ribbon_at.on_menu(RibbonMenuMsg::Open(Point::ORIGIN, MenuTarget::Qat(index)));
+            ribbon_at.qat_menu_labels()
+        };
+        let add = crate::tr!("ribbon-menu", "add-separator");
+        assert!(labels(&ribbon, 0).contains(&add));
+        assert!(!labels(&ribbon, last).contains(&add));
+        // On a separator itself it offers none.
+        ribbon.on_menu(RibbonMenuMsg::QatSeparatorAfter(0));
+        assert_eq!(ribbon.layout.qat[1], QatItem::Separator);
+        assert!(!labels(&ribbon, 1).contains(&add));
+
+        // Even sent anyway, the toolbar never ends on or doubles one.
+        let len = ribbon.layout.qat.len();
+        ribbon.on_menu(RibbonMenuMsg::QatSeparatorAfter(len - 1));
+        assert_ne!(ribbon.layout.qat.last(), Some(&QatItem::Separator));
+        ribbon.on_menu(RibbonMenuMsg::QatSeparatorAfter(1));
+        assert!(ribbon
+            .layout
+            .qat
+            .windows(2)
+            .all(|pair| pair != [QatItem::Separator, QatItem::Separator]));
     }
 
     #[test]

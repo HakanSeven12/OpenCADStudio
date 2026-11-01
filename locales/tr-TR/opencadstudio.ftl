@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Şerit Sekmesi
     .no-matches = Eşleşen komut yok
     .switch-windows = Pencereleri değiştir
+    .center-layer = Merkez çizgisi katmanı
     .user-interface = Kullanıcı arayüzü
     .no-open-drawings = Açık çizim yok
     .viewcube = ViewCube

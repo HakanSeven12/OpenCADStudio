@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = रिबन टैब
     .no-matches = कोई मिलती-जुलती कमांड नहीं
     .switch-windows = विंडो बदलें
+    .center-layer = केंद्र रेखा परत
     .user-interface = यूज़र इंटरफ़ेस
     .no-open-drawings = कोई ड्रॉइंग खुली नहीं है
     .viewcube = ViewCube

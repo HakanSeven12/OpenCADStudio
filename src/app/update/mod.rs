@@ -7706,7 +7706,9 @@ impl OpenCADStudio {
                         task = self.block_palette.open_gallery();
                     }
                     // The per-viewport freeze column follows the active viewport.
-                    if id == crate::ui::ribbon::widgets::LAYER_COMBO_ID {
+                    if crate::ui::ribbon::qat_list_source(&id).unwrap_or(&id)
+                        == crate::ui::ribbon::widgets::LAYER_COMBO_ID
+                    {
                         self.refresh_layer_panel();
                     }
                     self.ribbon.toggle_dropdown(&id);

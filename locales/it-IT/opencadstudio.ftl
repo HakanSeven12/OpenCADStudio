@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Scheda della barra multifunzione
     .no-matches = Nessun comando corrispondente
     .switch-windows = Cambia finestra
+    .center-layer = Layer assi
     .user-interface = Interfaccia utente
     .no-open-drawings = Nessun disegno aperto
     .viewcube = ViewCube

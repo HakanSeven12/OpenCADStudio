@@ -788,6 +788,7 @@ mod tests {
             QatItem::Separator,
             QatItem::Builtin(QatBuiltin::LayerCombo),
             QatItem::Command("ZOOM E".into()),
+            QatItem::Builtin(QatBuiltin::DimStyle),
         ];
         layout.qat_below = true;
         layout
@@ -798,6 +799,7 @@ mod tests {
         assert_eq!(value["ribbon"]["qat"][0]["Command"], "QSAVE");
         assert_eq!(value["ribbon"]["qat"][1], "Separator");
         assert_eq!(value["ribbon"]["qat"][2]["Builtin"], "LayerCombo");
+        assert_eq!(value["ribbon"]["qat"][4]["Builtin"], "DimStyle");
         assert_eq!(value["ribbon"]["qat_below"], true);
         let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
         assert!(restored.ribbon == original.ribbon);

@@ -62,7 +62,7 @@ pub use layout::{
     default_qat, FloatingPanel, MinimizePref, QatBuiltin, QatItem, RibbonLayout, RibbonMinimize,
 };
 pub use minimize::{MinimizeMsg, Opener};
-pub(crate) use qat::QAT_SWITCH_ID;
+pub(crate) use qat::{list_source as qat_list_source, QAT_SWITCH_ID};
 pub use qat::{QatMsg, QatOutcome, QAT_PICKER_INPUT};
 pub use ribbon_menu::{MenuTarget, RibbonMenuMsg, Submenu};
 pub use search::{results_scroll_id, SearchMsg, SearchOutcome, SEARCH_INPUT_ID};
@@ -1620,49 +1620,53 @@ impl Ribbon {
             return Some(dropdown_backdrop(positioned));
         }
 
-        if open_id == LAYER_COMBO_ID {
-            return self.layer_combo_overlay(LAYER_COMBO_ID, win);
+        // A list on the Quick Access Toolbar opens its ribbon list's
+        // dropdown, under itself.
+        let list = qat::list_source(open_id).unwrap_or(open_id);
+
+        if list == LAYER_COMBO_ID {
+            return self.layer_combo_overlay(open_id, win);
         }
 
-        if open_id == widgets::DIM_LAYER_COMBO {
+        if list == widgets::DIM_LAYER_COMBO {
             return Some(self.annotation_layer_overlay(
-                widgets::DIM_LAYER_COMBO,
+                open_id,
                 &self.dim_layer,
                 Message::RibbonDimLayer,
                 win,
             ));
         }
-        if open_id == widgets::CENTER_LAYER_COMBO {
+        if list == widgets::CENTER_LAYER_COMBO {
             return Some(self.annotation_layer_overlay(
-                widgets::CENTER_LAYER_COMBO,
+                open_id,
                 &self.center_layer,
                 Message::RibbonCenterLayer,
                 win,
             ));
         }
-        if open_id == widgets::MLEADER_LAYER_COMBO {
+        if list == widgets::MLEADER_LAYER_COMBO {
             return Some(self.annotation_layer_overlay(
-                widgets::MLEADER_LAYER_COMBO,
+                open_id,
                 &self.mleader_layer,
                 Message::RibbonMLeaderLayer,
                 win,
             ));
         }
 
-        if open_id == PROP_COLOR_ID {
-            return self.prop_color_overlay(win, recent_colors);
+        if list == PROP_COLOR_ID {
+            return self.prop_color_overlay(open_id, win, recent_colors);
         }
-        if open_id == PROP_LINETYPE_ID {
-            return self.prop_linetype_overlay(win);
+        if list == PROP_LINETYPE_ID {
+            return self.prop_linetype_overlay(open_id, win);
         }
-        if open_id == PROP_LW_ID {
-            return self.prop_lw_overlay(win);
+        if list == PROP_LW_ID {
+            return self.prop_lw_overlay(open_id, win);
         }
 
         // Style combo dropdowns (annotate tab) float as overlays so the list
         // isn't clipped by the fixed ribbon-row height, the way the Draw-tab
         // dropdowns already are. (#153)
-        if let Some(ov) = self.style_combo_overlay(open_id, win) {
+        if let Some(ov) = self.style_combo_overlay(list, open_id, win) {
             return Some(ov);
         }
 
@@ -1721,7 +1725,7 @@ impl Ribbon {
     }
 
     /// The colour of the DIMLAYER layer, `None` for Use Current.
-    fn dim_layer_color(&self) -> Option<iced::Color> {
+    pub(super) fn dim_layer_color(&self) -> Option<iced::Color> {
         self.layer_color(&self.dim_layer)
     }
 
@@ -1731,7 +1735,7 @@ impl Ribbon {
     }
 
     /// The colour of layer `name`, `None` for Use Current (empty).
-    fn layer_color(&self, name: &str) -> Option<iced::Color> {
+    pub(super) fn layer_color(&self, name: &str) -> Option<iced::Color> {
         if name.is_empty() {
             return None;
         }
@@ -1745,7 +1749,7 @@ impl Ribbon {
     /// then the drawing's layers; a pick sends `pick`.
     fn annotation_layer_overlay(
         &self,
-        id: &'static str,
+        id: &str,
         current: &str,
         pick: fn(String) -> Message,
         win: (f32, f32),
@@ -1952,12 +1956,18 @@ impl Ribbon {
     /// style combo. Built as an overlay — like the layer combo and the
     /// Draw-tab dropdowns — so the list grows to fit its entries instead of
     /// being clipped to the ribbon-row height. (#153)
-    fn style_combo_overlay(&self, open_id: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
-        // The tab's panels, and the floating ones, whose dropdowns open from
-        // any tab.
+    /// `anchor` is the combo it opens under: the ribbon's, or its copy on
+    /// the Quick Access Toolbar, which opens it from any tab.
+    fn style_combo_overlay(
+        &self,
+        open_id: &str,
+        anchor: &str,
+        win: (f32, f32),
+    ) -> Option<Element<'_, Message>> {
+        // Every tab's panels, and the floating ones.
         let floating = self.floating_groups();
-        let groups = self
-            .groups_for(self.active)
+        let groups = (0..self.modules.len())
+            .flat_map(|index| self.groups_for(index))
             .chain(floating.iter().map(|(_, group, _)| *group));
 
         // Locate the open style combo; capture its style key + manager command.
@@ -2036,7 +2046,7 @@ impl Ribbon {
             .style(popup_panel_style)
             .width(Length::Fixed(LARGE_W * 2.3));
 
-        let (align_right, h_pad, top) = self.dd_anchor(open_id, LARGE_W * 2.3, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(anchor, LARGE_W * 2.3, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             panel.into(),
             align_right,
@@ -2047,6 +2057,7 @@ impl Ribbon {
 
     fn prop_color_overlay(
         &self,
+        anchor: &str,
         win: (f32, f32),
         recent_colors: &[AcadColor],
     ) -> Option<Element<'_, Message>> {
@@ -2056,8 +2067,7 @@ impl Ribbon {
             self.active_layer_color(),
         );
 
-        let (align_right, h_pad, top) =
-            self.dd_anchor(PROP_COLOR_ID, color_dropdown::PANEL_W, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(anchor, color_dropdown::PANEL_W, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             panel,
             align_right,
@@ -2066,7 +2076,7 @@ impl Ribbon {
         )))
     }
 
-    fn prop_linetype_overlay(&self, win: (f32, f32)) -> Option<Element<'_, Message>> {
+    fn prop_linetype_overlay(&self, anchor: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
         let active_lt = &self.active_linetype;
 
         let mut items: Vec<LinetypeItem> = vec![
@@ -2112,7 +2122,7 @@ impl Ribbon {
             .style(popup_panel_style)
             .width(Length::Fixed(220.0));
 
-        let (align_right, h_pad, top) = self.dd_anchor(PROP_LINETYPE_ID, 220.0, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(anchor, 220.0, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             list.into(),
             align_right,
@@ -2121,7 +2131,7 @@ impl Ribbon {
         )))
     }
 
-    fn prop_lw_overlay(&self, win: (f32, f32)) -> Option<Element<'_, Message>> {
+    fn prop_lw_overlay(&self, anchor: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
         let active_lw = self.active_lineweight;
         let rows: Vec<Element<Message>> = lw_options()
             .into_iter()
@@ -2142,7 +2152,7 @@ impl Ribbon {
             })
             .collect();
 
-        self.prop_overlay_positioned(rows, PROP_LW_ID, 140.0, win)
+        self.prop_overlay_positioned(rows, anchor, 140.0, win)
     }
 
     fn prop_overlay_positioned<'a>(

@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = علامة تبويب الشريط
     .no-matches = لا توجد أوامر مطابقة
     .switch-windows = تبديل النوافذ
+    .center-layer = طبقة خطوط المركز
     .user-interface = واجهة المستخدم
     .no-open-drawings = لا توجد رسومات مفتوحة
     .viewcube = ViewCube

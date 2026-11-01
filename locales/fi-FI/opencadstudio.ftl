@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Valintanauhan välilehti
     .no-matches = Ei vastaavia komentoja
     .switch-windows = Vaihda ikkunaa
+    .center-layer = Keskiviivataso
     .user-interface = Käyttöliittymä
     .no-open-drawings = Ei avoimia piirustuksia
     .viewcube = ViewCube

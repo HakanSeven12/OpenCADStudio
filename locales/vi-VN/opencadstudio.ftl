@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Thẻ ruy-băng
     .no-matches = Không có lệnh phù hợp
     .switch-windows = Chuyển cửa sổ
+    .center-layer = Lớp đường tâm
     .user-interface = Giao diện người dùng
     .no-open-drawings = Không có bản vẽ nào đang mở
     .viewcube = ViewCube

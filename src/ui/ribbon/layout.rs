@@ -65,6 +65,18 @@ pub enum QatBuiltin {
     LayerCombo,
     SwitchWindows,
     UserInterface,
+    /// The ribbon's other lists (Home > Properties, the Annotate styles
+    /// and layers), each opening the same list as on the ribbon.
+    Color,
+    Linetype,
+    Lineweight,
+    TextStyle,
+    DimStyle,
+    MleaderStyle,
+    TableStyle,
+    DimLayer,
+    MleaderLayer,
+    CenterLayer,
 }
 
 /// The toolbar a user with no saved one sees: the file commands, then Undo

@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = 功能区选项卡
     .no-matches = 没有匹配的命令
     .switch-windows = 切换窗口
+    .center-layer = 中心线图层
     .user-interface = 用户界面
     .no-open-drawings = 没有打开的图形
     .viewcube = ViewCube

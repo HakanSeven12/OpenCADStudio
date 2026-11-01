@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Guia da faixa de opções
     .no-matches = Nenhum comando correspondente
     .switch-windows = Alternar janelas
+    .center-layer = Camada de linhas de centro
     .user-interface = Interface do usuário
     .no-open-drawings = Nenhum desenho aberto
     .viewcube = ViewCube

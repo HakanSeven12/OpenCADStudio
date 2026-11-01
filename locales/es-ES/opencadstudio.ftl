@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Ficha de la cinta
     .no-matches = No hay comandos coincidentes
     .switch-windows = Cambiar ventanas
+    .center-layer = Capa de ejes
     .user-interface = Interfaz de usuario
     .no-open-drawings = No hay dibujos abiertos
     .viewcube = ViewCube

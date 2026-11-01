@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Multifunktionsleisten-Register
     .no-matches = Keine passenden Befehle
     .switch-windows = Fenster wechseln
+    .center-layer = Mittellinienlayer
     .user-interface = Benutzeroberfläche
     .no-open-drawings = Keine Zeichnungen geöffnet
     .viewcube = ViewCube

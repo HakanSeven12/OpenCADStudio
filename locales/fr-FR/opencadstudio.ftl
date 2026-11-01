@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Onglet du ruban
     .no-matches = Aucune commande correspondante
     .switch-windows = Changer de fenêtre
+    .center-layer = Calque d'axes
     .user-interface = Interface utilisateur
     .no-open-drawings = Aucun dessin ouvert
     .viewcube = ViewCube

@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Вкладка ленты
     .no-matches = Нет подходящих команд
     .switch-windows = Переключить окна
+    .center-layer = Слой осевых линий
     .user-interface = Пользовательский интерфейс
     .no-open-drawings = Нет открытых чертежей
     .viewcube = ViewCube

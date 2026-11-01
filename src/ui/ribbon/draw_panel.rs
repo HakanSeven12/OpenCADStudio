@@ -567,7 +567,11 @@ pub(super) fn extra_special<'a>(
             &ribbon.center_layer,
             ribbon.center_layer_color(),
             false,
-            format!("{}\n{} CENTERLAYER", t!("Center Layer"), t!("Command:")),
+            format!(
+                "{}\n{} CENTERLAYER",
+                crate::tr!("ribbon-menu", "center-layer"),
+                t!("Command:")
+            ),
         )),
     }
 }

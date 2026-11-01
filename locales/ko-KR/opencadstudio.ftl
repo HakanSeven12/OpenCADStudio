@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = 리본 탭
     .no-matches = 일치하는 명령이 없습니다
     .switch-windows = 창 전환
+    .center-layer = 중심선 도면층
     .user-interface = 사용자 인터페이스
     .no-open-drawings = 열린 도면 없음
     .viewcube = ViewCube

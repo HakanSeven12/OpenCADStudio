@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Karta pásu
     .no-matches = Žádné odpovídající příkazy
     .switch-windows = Přepnout okna
+    .center-layer = Hladina os
     .user-interface = Uživatelské rozhraní
     .no-open-drawings = Žádné otevřené výkresy
     .viewcube = ViewCube

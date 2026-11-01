@@ -631,6 +631,7 @@ mod tests {
     fn quick_access_and_floating_panel_texts_are_translated_in_every_locale() {
         const KEYS: &[&str] = &[
             "switch-windows",
+            "center-layer",
             "user-interface",
             "no-open-drawings",
             "ucs-icon",

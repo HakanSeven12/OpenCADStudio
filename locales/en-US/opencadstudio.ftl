@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Ribbon Tab
     .no-matches = No matching commands
     .switch-windows = Switch Windows
+    .center-layer = Center Layer
     .user-interface = User Interface
     .no-open-drawings = No open drawings
     .viewcube = ViewCube

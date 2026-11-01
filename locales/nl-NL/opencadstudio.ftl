@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Linttabblad
     .no-matches = Geen overeenkomende opdrachten
     .switch-windows = Vensters wisselen
+    .center-layer = Hartlijnlaag
     .user-interface = Gebruikersinterface
     .no-open-drawings = Geen tekeningen geopend
     .viewcube = ViewCube

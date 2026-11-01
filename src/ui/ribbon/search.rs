@@ -412,20 +412,24 @@ impl Ribbon {
         if query.is_empty() {
             return Vec::new();
         }
-        let hits = self.search_index();
+        // The commands, then the ribbon's lists.
+        let hits: Vec<(Hit, QatItem)> = self
+            .search_index()
+            .into_iter()
+            .filter_map(|hit| qat_item_of(&hit.run).map(|item| (hit, item)))
+            .chain(self.list_hits())
+            .collect();
         let mut ranked: Vec<(u8, usize)> = hits
             .iter()
             .enumerate()
-            .filter_map(|(i, hit)| hit.rank(&query).map(|rank| (rank, i)))
+            .filter_map(|(i, (hit, _))| hit.rank(&query).map(|rank| (rank, i)))
             .collect();
-        ranked.sort_by_key(|&(rank, i)| (rank, hits[i].group != Group::Ribbon, i));
+        ranked.sort_by_key(|&(rank, i)| (rank, hits[i].0.group != Group::Ribbon, i));
         let mut seen: Vec<QatItem> = Vec::new();
         let mut out = Vec::new();
         for (_, i) in ranked {
-            let hit = &hits[i];
-            let Some(item) = qat_item_of(&hit.run) else {
-                continue;
-            };
+            let (hit, item) = &hits[i];
+            let item = item.clone();
             if seen.iter().any(|known| known.same(&item)) {
                 continue;
             }
@@ -441,6 +445,80 @@ impl Ribbon {
             }
         }
         out
+    }
+
+    /// The ribbon's lists the Quick Access Toolbar can hold, each found by
+    /// its name or the system variable it sets, under the panel it is on.
+    fn list_hits(&self) -> Vec<(Hit, QatItem)> {
+        let ribbon_tab = crate::tr!("ribbon-menu", "ribbon-tab");
+        // Where each list is: the first panel holding it.
+        let mut paths: Vec<(QatBuiltin, String)> = Vec::new();
+        for (index, module) in self.modules.iter().enumerate() {
+            let tab = crate::i18n::ribbon_module_title(module.id(), module.title());
+            for group in self.groups_for(index) {
+                let path = format!("{ribbon_tab}: {tab} › {}", crate::t!(group.title));
+                let key = extras::panel_key(module.id(), group.title);
+                let mut held: Vec<QatBuiltin> = Vec::new();
+                for item in &group.tools {
+                    match item {
+                        RibbonItem::LayerComboGroup { .. } => held.push(QatBuiltin::LayerCombo),
+                        RibbonItem::PropertiesGroup { .. } => held.extend([
+                            QatBuiltin::Color,
+                            QatBuiltin::Linetype,
+                            QatBuiltin::Lineweight,
+                        ]),
+                        RibbonItem::StyleComboGroup {
+                            style_key,
+                            combo_id,
+                            ..
+                        } => {
+                            held.extend(super::qat::list_control(combo_id));
+                            match style_key {
+                                crate::modules::StyleKey::DimStyle => {
+                                    held.push(QatBuiltin::DimLayer)
+                                }
+                                crate::modules::StyleKey::MLeaderStyle => {
+                                    held.push(QatBuiltin::MleaderLayer)
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if draw_panel::panel_for_group(&key)
+                    .is_some_and(|panel| panel.layout == extras::Layout::CenterLayer)
+                {
+                    held.push(QatBuiltin::CenterLayer);
+                }
+                for control in held {
+                    if !paths.iter().any(|(known, _)| *known == control) {
+                        paths.push((control, path.clone()));
+                    }
+                }
+            }
+        }
+        super::qat::list_controls()
+            .map(|(control, variable)| {
+                let path = paths
+                    .iter()
+                    .find(|(known, _)| *known == control)
+                    .map_or_else(|| ribbon_tab.clone(), |(_, path)| path.clone());
+                let open = super::qat::list_ids(control)
+                    .map(|(_, source)| source)
+                    .unwrap_or_default();
+                let hit = Hit {
+                    group: Group::Ribbon,
+                    label: super::qat::list_name(control),
+                    path,
+                    command: Some(variable.to_string()),
+                    icon: None,
+                    run: Message::ToggleRibbonDropdown(open.to_string()),
+                    place: None,
+                };
+                (hit, QatItem::Builtin(control))
+            })
+            .collect()
     }
 
     /// Match the query against a fresh index.

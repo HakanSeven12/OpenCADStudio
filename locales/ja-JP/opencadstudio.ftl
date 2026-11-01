@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = リボン タブ
     .no-matches = 一致するコマンドはありません
     .switch-windows = ウィンドウを切り替え
+    .center-layer = 中心線画層
     .user-interface = ユーザー インタフェース
     .no-open-drawings = 開いている図面はありません
     .viewcube = ViewCube

@@ -22,6 +22,13 @@ pub const QAT_SPLIT_ARROW_W: f32 = 11.0;
 /// wide, with this margin on each side.
 pub const QAT_COMBO_W: f32 = 210.0;
 pub const QAT_COMBO_MARGIN: f32 = 3.0;
+/// The toolbar's copies of Home > Properties' lists (colour, linetype,
+/// lineweight), as wide as on the ribbon.
+pub const QAT_PROP_COMBO_W: f32 = 130.0;
+/// The toolbar's copies of the Annotate style and layer lists.
+pub const QAT_STYLE_COMBO_W: f32 = 150.0;
+/// A toolbar list's colour swatch.
+pub const QAT_COMBO_SWATCH: f32 = 12.0;
 /// A Quick Access separator: a line this high, with this margin on each
 /// side.
 pub const QAT_SEPARATOR_H: f32 = 16.0;

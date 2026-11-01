@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Καρτέλα κορδέλας
     .no-matches = Δεν βρέθηκαν εντολές
     .switch-windows = Εναλλαγή παραθύρων
+    .center-layer = Επίπεδο αξόνων
     .user-interface = Περιβάλλον χρήστη
     .no-open-drawings = Δεν υπάρχουν ανοιχτά σχέδια
     .viewcube = ViewCube

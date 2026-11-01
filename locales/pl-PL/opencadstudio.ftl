@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Karta wstążki
     .no-matches = Brak pasujących poleceń
     .switch-windows = Przełącz okna
+    .center-layer = Warstwa osi
     .user-interface = Interfejs użytkownika
     .no-open-drawings = Brak otwartych rysunków
     .viewcube = ViewCube

@@ -835,7 +835,7 @@ impl Ribbon {
     /// codes, every other item takes the next free one (`qat_codes`).
     pub(super) fn qat_tips(&self) -> Vec<Tip> {
         use super::layout::{QatBuiltin, QatItem};
-        use super::qat::{QAT_LAYER_COMBO_ID, QAT_SWITCH_ID, QAT_UI_ID};
+        use super::qat::{QAT_SWITCH_ID, QAT_UI_ID};
         let open = |id: &str| Action::Open(Message::ToggleRibbonDropdown(id.to_string()));
         let codes = qat_codes(&self.layout.qat);
         self.layout
@@ -869,14 +869,16 @@ impl Ribbon {
                         super::widgets::REDO_HISTORY_ID.into(),
                         Action::Run(Message::Redo),
                     ),
-                    QatItem::Builtin(QatBuiltin::LayerCombo) => {
-                        (QAT_LAYER_COMBO_ID.into(), open(QAT_LAYER_COMBO_ID))
-                    }
                     QatItem::Builtin(QatBuiltin::SwitchWindows) => {
                         (QAT_SWITCH_ID.into(), open(QAT_SWITCH_ID))
                     }
                     QatItem::Builtin(QatBuiltin::UserInterface) => {
                         (QAT_UI_ID.into(), open(QAT_UI_ID))
+                    }
+                    // A list opens its dropdown.
+                    QatItem::Builtin(control) => {
+                        let (id, _) = super::qat::list_ids(*control)?;
+                        (id.into(), open(id))
                     }
                     QatItem::Separator => return None,
                 };

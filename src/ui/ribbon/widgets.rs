@@ -1384,6 +1384,8 @@ fn large_item<'a>(
                 combo_w,
                 true,
             );
+            // Right-clicked, it offers to go on the Quick Access Toolbar.
+            let combo_btn = super::qat::list_target(LAYER_COMBO_ID, combo_btn);
 
             combo_panel_col(
                 combo_w,
@@ -1478,9 +1480,15 @@ fn large_item<'a>(
             // the same baseline as the Layers / style selectors.
             let combos = container(
                 column![
-                    PosReport::new(PROP_COLOR_ID, color_row),
-                    PosReport::new(PROP_LINETYPE_ID, lt_row),
-                    PosReport::new(PROP_LW_ID, lw_row),
+                    super::qat::list_target(
+                        PROP_COLOR_ID,
+                        PosReport::new(PROP_COLOR_ID, color_row)
+                    ),
+                    super::qat::list_target(
+                        PROP_LINETYPE_ID,
+                        PosReport::new(PROP_LINETYPE_ID, lt_row)
+                    ),
+                    super::qat::list_target(PROP_LW_ID, PosReport::new(PROP_LW_ID, lw_row)),
                 ]
                 .spacing(2)
                 .align_x(iced::Left),
@@ -1537,12 +1545,15 @@ fn large_item<'a>(
             let items_panel: Element<Message> =
                 iced::widget::Space::new().width(0).height(0).into();
 
-            let mut col_items: Vec<Element<Message>> =
-                vec![
-                    container(row![PosReport::new(*combo_id, combo_btn), items_panel].spacing(0))
-                        .width(Fill)
-                        .into(),
-                ];
+            let mut col_items: Vec<Element<Message>> = vec![container(
+                row![
+                    super::qat::list_target(combo_id, PosReport::new(combo_id, combo_btn)),
+                    items_panel
+                ]
+                .spacing(0),
+            )
+            .width(Fill)
+            .into()];
             // Dimensions: the style list and the dimension layer list each
             // lead a row of small tools.
             if *style_key == StyleKey::DimStyle && rows.len() == 2 {
@@ -1696,7 +1707,7 @@ pub(super) fn layer_combo<'a>(
     let combo = tooltip(PosReport::new(id, combo), make_tip(tip), TipPos::Bottom)
         .delay(Duration::from_millis(400))
         .style(tip_style);
-    super::keytips::anchor(id, combo)
+    super::keytips::anchor(id, super::qat::list_target(id, combo))
 }
 
 /// Annotate > Text find box id, and its text height box.

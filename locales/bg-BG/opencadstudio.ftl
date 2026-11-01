@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = Раздел на лентата
     .no-matches = Няма съвпадащи команди
     .switch-windows = Превключване на прозорци
+    .center-layer = Слой на центровите линии
     .user-interface = Потребителски интерфейс
     .no-open-drawings = Няма отворени чертежи
     .viewcube = ViewCube

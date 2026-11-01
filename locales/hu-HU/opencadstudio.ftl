@@ -191,6 +191,7 @@ ribbon-menu =
     .ribbon-tab = Szalaglap
     .no-matches = Nincs egyező parancs
     .switch-windows = Ablakváltás
+    .center-layer = Középvonal-fólia
     .user-interface = Felhasználói felület
     .no-open-drawings = Nincs megnyitott rajz
     .viewcube = ViewCube

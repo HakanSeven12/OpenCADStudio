@@ -197,6 +197,7 @@ ribbon-menu =
     .ribbon-tab = ແຖບໂບ
     .no-matches = ບໍ່ມີຄຳສັ່ງທີ່ກົງກັນ
     .switch-windows = ສະຫຼັບໜ້າຕ່າງ
+    .center-layer = ຊັ້ນເສັ້ນກາງ
     .user-interface = ສ່ວນຕິດຕໍ່ຜູ້ໃຊ້
     .no-open-drawings = ບໍ່ມີແບບແຕ້ມທີ່ເປີດຢູ່
     .viewcube = ViewCube

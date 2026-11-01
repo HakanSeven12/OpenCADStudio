@@ -1652,18 +1652,28 @@ fn supported_parameter(doc: &Document, handle: Handle) -> bool {
 ///
 /// An action that names follow-up actions chains them: the follow-up works on the
 /// member as the first action left it, so the chain is the only record of the
-/// order the operator chose and has to decide the sequence. Actions no chain
-/// points at keep the order the evaluation graph lists. Every name is checked
-/// against this definition's actions before any ordering happens, so a chain that
-/// resolves to nothing, that names more than one follow-up, that joins two
-/// sequences, or that runs into an array action is refused. A chain that loops
-/// back on itself has no first action, so the loop is left in the order the graph
-/// lists rather than guessed at.
+/// order the operator chose and has to decide the sequence. A chain names its
+/// follow-up by the node the evaluation graph gives that action, the same id
+/// space the parameter's own element lists are read in. Actions no chain points
+/// at keep the order the evaluation graph lists. Every name is checked against
+/// this definition's actions before any ordering happens, so a chain that
+/// resolves to nothing, that two actions answer to, that names more than one
+/// follow-up, that joins two sequences, or that runs into an array action is
+/// refused. A chain that loops back on itself has no first action, so the loop is
+/// left in the order the graph lists rather than guessed at.
 fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, &'static str> {
     let mut by_chain_id = std::collections::BTreeMap::new();
-    for (index, (handle, _, _, _)) in all.iter().enumerate() {
-        if by_chain_id.insert(handle.value() as i64, index).is_some() {
+    let mut shared_chain_ids = std::collections::BTreeSet::new();
+    let mut listed = std::collections::BTreeSet::new();
+    for (index, (handle, action, _, _)) in all.iter().enumerate() {
+        if !listed.insert(*handle) {
             return Err("The evaluation graph lists one action twice.");
+        }
+        // A file that carries no evaluation expression leaves every action at
+        // node 0, the id for "no node", so only a named node can be chained to.
+        let node = action.element.eval.node_id;
+        if node > 0 && by_chain_id.insert(node, index).is_some() {
+            shared_chain_ids.insert(node);
         }
     }
     let mut followed_by = std::collections::BTreeMap::new();
@@ -1672,7 +1682,10 @@ fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, 
             return Err("An action chain cannot name more than one follow-up action yet.");
         }
         for id in &action.action_ids {
-            let Some(&next) = by_chain_id.get(&(*id as i64)) else {
+            if shared_chain_ids.contains(id) {
+                return Err("An action chain names more than one action.");
+            }
+            let Some(&next) = by_chain_id.get(id) else {
                 return Err("An action chain names an object outside this block.");
             };
             if all[next].2 == Kind::Array {
@@ -1696,7 +1709,7 @@ fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, 
             }
             order.push(index);
             for id in &all[index].1.action_ids {
-                queue.push_back(by_chain_id[&(*id as i64)]);
+                queue.push_back(by_chain_id[id]);
             }
         }
     }

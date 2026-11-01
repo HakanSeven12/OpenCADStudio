@@ -2652,44 +2652,88 @@ fn mark_chained(doc: &mut Document, parameter: Handle) {
     linear.parameter.parameter.chain_actions = true;
 }
 
-/// Name the action whose effect this follow-up action works on.
+/// The action stored under a handle, whichever kind the definition gave it.
+fn action_object(doc: &Document, action: Handle) -> &BlockAction {
+    let ObjectType::DynamicBlock(object) = &doc.objects[&action] else {
+        panic!("the action is a dynamic block object")
+    };
+    match &object.data {
+        DynamicBlockData::MoveAction(a) => &a.action,
+        DynamicBlockData::ScaleAction(a) => &a.action.action,
+        DynamicBlockData::ArrayAction(a) => &a.action,
+        _ => panic!("the action is a move, a scale or an array"),
+    }
+}
+
+fn action_object_mut(doc: &mut Document, action: Handle) -> &mut BlockAction {
+    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else {
+        panic!("the action is a dynamic block object")
+    };
+    match &mut object.data {
+        DynamicBlockData::MoveAction(a) => &mut a.action,
+        DynamicBlockData::ScaleAction(a) => &mut a.action.action,
+        DynamicBlockData::ArrayAction(a) => &mut a.action,
+        _ => panic!("the action is a move, a scale or an array"),
+    }
+}
+
+/// The id a chain uses to name an action: the node the evaluation graph gives it,
+/// which is what a saved file carries.
+fn chain_id(doc: &Document, action: Handle) -> i32 {
+    action_object(doc, action).element.eval.node_id
+}
+
+/// Give an action the node a file would name it by.
+fn set_chain_id(doc: &mut Document, action: Handle, node_id: i32) {
+    action_object_mut(doc, action).element.eval.node_id = node_id;
+}
+
+/// Chain an action into the action whose effect it works on next.
 fn chain_after(doc: &mut Document, action: Handle, follow_up: Handle) {
     chain_names(doc, action, &[follow_up]);
 }
 
 fn chain_names(doc: &mut Document, action: Handle, follow_ups: &[Handle]) {
-    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else {
-        panic!("the action is a dynamic block object")
+    let ids = follow_ups
+        .iter()
+        .map(|handle| chain_id(doc, *handle))
+        .collect::<Vec<i32>>();
+    action_object_mut(doc, action).action_ids = ids;
+}
+
+/// A chained linear parameter with a move and a scale both acting on the circle
+/// of the fixture, built in that order.
+fn chained_pair() -> (Document, Handle, Handle, Handle, Handle, Handle) {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let member = handles[1];
+    let move_action = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let scale_action = add_action(&mut doc, def, parameter, member, Kind::Scale);
+    mark_chained(&mut doc, parameter);
+    (doc, def, parameter, member, move_action, scale_action)
+}
+
+/// Drive the parameter to twenty and report where the member it acts on ends up.
+fn drive(doc: &mut Document, def: Handle, parameter: Handle, member: Handle) -> (DVec3, f64) {
+    let baseline = doc.clone();
+    evaluate(doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap();
+    let EntityType::Circle(circle) = doc.get_entity(member).unwrap() else {
+        panic!("the acted-on member is still a circle")
     };
-    let ids = follow_ups.iter().map(|h| h.value() as i32).collect();
-    match &mut object.data {
-        DynamicBlockData::MoveAction(m) => m.action.action_ids = ids,
-        DynamicBlockData::ScaleAction(s) => s.action.action.action_ids = ids,
-        DynamicBlockData::ArrayAction(a) => a.action.action_ids = ids,
-        _ => panic!("the action is a move, a scale or an array"),
-    }
+    (v(circle.center), circle.radius)
 }
 
 /// The member starts at centre (4,3) with radius 2; the parameter is ten units
 /// long and is driven to twenty, so the move shifts ten and the scale doubles.
 fn chained_outcome(move_names_scale: bool, scale_names_move: bool) -> (DVec3, f64) {
-    let (mut doc, def, handles) = fixture();
-    let parameter = linear(&mut doc, def);
-    let move_action = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
-    let scale_action = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
-    mark_chained(&mut doc, parameter);
+    let (mut doc, def, parameter, member, move_action, scale_action) = chained_pair();
     if move_names_scale {
         chain_after(&mut doc, move_action, scale_action);
     }
     if scale_names_move {
         chain_after(&mut doc, scale_action, move_action);
     }
-    let baseline = doc.clone();
-    evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap();
-    let EntityType::Circle(circle) = doc.get_entity(handles[1]).unwrap() else {
-        panic!("the acted-on member is still a circle")
-    };
-    (v(circle.center), circle.radius)
+    drive(&mut doc, def, parameter, member)
 }
 
 /// An action that names a follow-up action is a chain, and the chain says which
@@ -2716,6 +2760,90 @@ fn a_chained_parameter_runs_its_actions_in_the_order_the_chain_names() {
         (DVec3::new(18., 6., 0.), 4.),
         "chained the other way round, the scale runs first and the move carries the doubled member"
     );
+}
+
+/// A chain names its follow-up by the node the evaluation graph gives that action,
+/// which is the identity a saved file carries, rather than by the object's address
+/// in this document. A name that is only an address is a chain this definition
+/// cannot resolve, so it says which.
+#[test]
+fn a_chain_names_the_graph_node_rather_than_the_object_address() {
+    let (mut doc, def, parameter, _member, move_action, scale_action) = chained_pair();
+    let address = scale_action.value() as i32;
+    assert_ne!(
+        address,
+        chain_id(&doc, scale_action),
+        "the graph gives this action a node of its own"
+    );
+    action_object_mut(&mut doc, move_action).action_ids = vec![address];
+    let baseline = doc.clone();
+    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
+    assert_eq!(error, "An action chain names an object outside this block.");
+}
+
+/// A chain is a record in the file rather than a fact about the document that
+/// wrote it: written to both formats and read back, the same two actions still run
+/// in the order the chain names, because the graph node each action is known by
+/// comes back with it.
+#[test]
+fn a_chain_keeps_its_order_through_the_saved_file() {
+    let (mut doc, def, parameter, member, move_action, scale_action) = chained_pair();
+    chain_after(&mut doc, scale_action, move_action);
+    let files = [
+        DxfReader::from_reader(Cursor::new(DxfWriter::new(&doc).write_to_vec().unwrap()))
+            .unwrap()
+            .read()
+            .unwrap(),
+        DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+            .read()
+            .unwrap(),
+    ];
+    for mut reopened in files {
+        let saved = actions(&reopened, def)
+            .into_iter()
+            .find(|(handle, _, _, _)| *handle == scale_action)
+            .map(|(_, action, _, _)| action.action_ids.clone())
+            .expect("the scale action came back with the definition");
+        assert_eq!(
+            saved,
+            vec![chain_id(&reopened, move_action)],
+            "the saved chain names the follow-up by the node it keeps"
+        );
+        assert_eq!(
+            drive(&mut reopened, def, parameter, member),
+            (DVec3::new(18., 6., 0.), 4.),
+            "the chain read back from the file still runs the scale before the move"
+        );
+    }
+}
+
+/// A file that carries no evaluation expression leaves every action at node 0,
+/// which is the id for "no node" rather than one two chains could both answer to.
+/// With nothing to name, the actions keep the order the graph lists; a chain is
+/// not the only thing a definition has to evaluate.
+#[test]
+fn actions_that_carry_no_evaluation_node_still_run_in_the_graph_order() {
+    let (mut doc, def, parameter, member, move_action, scale_action) = chained_pair();
+    set_chain_id(&mut doc, move_action, 0);
+    set_chain_id(&mut doc, scale_action, 0);
+    assert_eq!(
+        drive(&mut doc, def, parameter, member),
+        (DVec3::new(28., 6., 0.), 4.),
+        "the move still runs before the scale, in the order the graph lists them"
+    );
+}
+
+/// Two actions that answer to the same node make the chain ambiguous: naming that
+/// node does not say which action runs next, so it says which rather than picking.
+#[test]
+fn a_chain_that_two_actions_answer_to_is_refused() {
+    let (mut doc, def, parameter, _member, move_action, scale_action) = chained_pair();
+    let shared = chain_id(&doc, move_action);
+    set_chain_id(&mut doc, scale_action, shared);
+    chain_after(&mut doc, move_action, scale_action);
+    let baseline = doc.clone();
+    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
+    assert_eq!(error, "An action chain names more than one action.");
 }
 
 /// Two actions that chain each other have no first action, so there is no order
@@ -2812,9 +2940,6 @@ fn an_array_action_that_names_a_follow_up_action_is_refused() {
 /// unsupported option, which is the message the operator can act on.
 #[test]
 fn a_chained_stretch_action_names_the_chain_as_what_is_unsupported() {
-    fn ids(follow_up: Handle) -> Vec<i32> {
-        vec![follow_up.value() as i32]
-    }
     let (mut doc, def, targets, parameter, action) = stretch_fixture();
     let follow_up = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
     let ObjectType::DynamicBlock(object) = &doc.objects[&action] else {
@@ -2824,7 +2949,7 @@ fn a_chained_stretch_action_names_the_chain_as_what_is_unsupported() {
         panic!("the action is a stretch")
     };
     let mut chained = stretch.clone();
-    chained.action.action_ids = ids(follow_up);
+    chained.action.action_ids = vec![chain_id(&doc, follow_up)];
     assert_eq!(
         super::stretch::validate_options(&chained).unwrap_err(),
         "This Stretch action cannot chain follow-up actions yet."
@@ -2839,7 +2964,7 @@ fn a_chained_stretch_action_names_the_chain_as_what_is_unsupported() {
         panic!("the action is a polar stretch")
     };
     let mut chained = polar.clone();
-    chained.action.action_ids = ids(follow_up);
+    chained.action.action_ids = vec![chain_id(&doc, follow_up)];
     assert_eq!(
         super::stretch::validate_polar(&doc, def, &chained).unwrap_err(),
         "This Polar Stretch action cannot chain follow-up actions yet."

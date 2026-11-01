@@ -297,12 +297,56 @@ impl Scene {
         handles
     }
 
+    /// Give a reference that arrived without attributes the ones its definition
+    /// declares. The routes that ask the operator for values build their own
+    /// list and keep it; an array copy or a scripted add commits the bare
+    /// reference, so the declaration is filled in here rather than by every
+    /// builder that could place one.
+    fn instantiate_attributes(document: &mut codec::Document, insert_handle: Handle) {
+        let Some(EntityType::Insert(insert)) = document.get_entity(insert_handle) else {
+            return;
+        };
+        if !insert.attributes.is_empty() {
+            return;
+        }
+        let name = insert.block_name.clone();
+        let base = crate::scene::render_graph::block_base_point(document, &name);
+        let place = crate::scene::render_graph::insert_transform_with_base(insert, base);
+        let definitions: Vec<codec::entities::AttributeDefinition> = document
+            .entities_in_block(&name)
+            .filter_map(|entity| match entity {
+                EntityType::AttributeDefinition(definition) => Some(definition.clone()),
+                _ => None,
+            })
+            .collect();
+        if definitions.is_empty() {
+            return;
+        }
+        if let Some(record) = document.block_records.get_mut(&name) {
+            record.flags.has_attributes = true;
+        }
+        let attributes: Vec<codec::entities::AttributeEntity> = definitions
+            .iter()
+            .map(|definition| {
+                let mut attribute =
+                    codec::entities::AttributeEntity::from_definition(definition, None);
+                codec::Entity::apply_transform(&mut attribute, &place);
+                attribute
+            })
+            .collect();
+        let Some(EntityType::Insert(insert)) = document.get_entity_mut(insert_handle) else {
+            return;
+        };
+        insert.attributes = attributes;
+    }
+
     /// Give the attributes a reference arrives with their own identity. Whoever
     /// builds a reference cannot know its handle yet, so the attributes are
     /// adopted here: one already carrying a handle keeps it, one without gets a
     /// fresh handle and the reference as its owner, and the set is terminated
     /// once there is something to terminate.
     fn adopt_attributes(document: &mut codec::Document, insert_handle: Handle) {
+        Self::instantiate_attributes(document, insert_handle);
         let Some(EntityType::Insert(insert)) = document.get_entity(insert_handle) else {
             return;
         };
@@ -4062,5 +4106,181 @@ mod image_definition_graph_tests {
                 usize::from(undo)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod attribute_instantiation_tests {
+    use super::*;
+    use codec::entities::{AttributeDefinition, AttributeEntity, Insert};
+
+    fn definition(tag: &str, value: &str, at: codec::types::Vector3) -> AttributeDefinition {
+        let mut definition =
+            AttributeDefinition::new(tag.to_string(), format!("{tag}:"), value.to_string());
+        definition.insertion_point = at;
+        definition.height = 1.0;
+        definition
+    }
+
+    fn insert(scene: &Scene, handle: Handle) -> Insert {
+        let Some(EntityType::Insert(insert)) = scene.document.get_entity(handle) else {
+            panic!("expected the inserted reference {handle:?}");
+        };
+        insert.clone()
+    }
+
+    /// A reference placed without attributes of its own still has to show the
+    /// ones its definition declares: an array copy and a scripted add both
+    /// commit the bare reference, and the attributes belong to it.
+    #[test]
+    fn a_reference_placed_without_attributes_takes_them_from_its_definition() {
+        let mut scene = Scene::new();
+        scene.define_block_raw(
+            "ATTRIB_PLAIN",
+            codec::types::Vector3::ZERO,
+            vec![EntityType::AttributeDefinition(definition(
+                "WIDTH",
+                "100",
+                codec::types::Vector3::new(2.0, 3.0, 0.0),
+            ))],
+        );
+
+        let handle = scene.add_entity(EntityType::Insert(Insert::new(
+            "ATTRIB_PLAIN".to_string(),
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        )));
+        let insert = insert(&scene, handle);
+        assert_eq!(
+            insert.attributes.len(),
+            1,
+            "the reference carries the attribute its definition declares"
+        );
+        let attribute = &insert.attributes[0];
+        assert_eq!(attribute.tag, "WIDTH");
+        assert_eq!(attribute.value, "100");
+        assert_eq!(
+            attribute.insertion_point,
+            codec::types::Vector3::new(12.0, 3.0, 0.0),
+            "the definition's place travels with the reference"
+        );
+        assert!(!attribute.common.handle.is_null());
+        assert_eq!(attribute.common.owner_handle, handle);
+        assert!(
+            insert.seqend_handle.is_some(),
+            "the attributes need a terminator"
+        );
+        assert_eq!(
+            scene
+                .document
+                .block_records
+                .get("ATTRIB_PLAIN")
+                .map(|record| record.flags.has_attributes),
+            Some(true),
+            "the definition is marked attributed"
+        );
+    }
+
+    /// A constant attribute belongs to the definition it is painted from, but
+    /// it is still part of the reference: a preset or constant value has to
+    /// exist on the instance so that saving the drawing writes it back.
+    #[test]
+    fn the_fill_carries_every_declared_attribute_in_definition_order() {
+        let mut scene = Scene::new();
+        let mut constant = definition("CONST", "fixed", codec::types::Vector3::new(0.0, 5.0, 0.0));
+        constant.flags.constant = true;
+        scene.define_block_raw(
+            "ATTRIB_MIXED",
+            codec::types::Vector3::ZERO,
+            vec![
+                EntityType::AttributeDefinition(definition(
+                    "WIDTH",
+                    "100",
+                    codec::types::Vector3::new(2.0, 3.0, 0.0),
+                )),
+                EntityType::AttributeDefinition(constant),
+            ],
+        );
+
+        let handle = scene.add_entity(EntityType::Insert(Insert::new(
+            "ATTRIB_MIXED".to_string(),
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        )));
+        let tags: Vec<String> = insert(&scene, handle)
+            .attributes
+            .iter()
+            .map(|attribute| attribute.tag.clone())
+            .collect();
+        assert_eq!(tags, vec!["WIDTH".to_string(), "CONST".to_string()]);
+        let handles: Vec<Handle> = insert(&scene, handle)
+            .attributes
+            .iter()
+            .map(|attribute| attribute.common.handle)
+            .collect();
+        assert!(
+            handles.iter().all(|h| !h.is_null()),
+            "each carried attribute is its own object"
+        );
+        assert_ne!(handles[0], handles[1], "each attribute is its own");
+        assert_ne!(handles[0], handle, "not the reference's own handle");
+    }
+
+    /// The fill is a fallback for a bare reference. A route that asked the
+    /// operator for values commits a filled list, and that list is the
+    /// answer — replacing it would lose what was typed.
+    #[test]
+    fn a_reference_that_arrives_with_attributes_keeps_them() {
+        let mut scene = Scene::new();
+        scene.define_block_raw(
+            "ATTRIB_ASKED",
+            codec::types::Vector3::ZERO,
+            vec![EntityType::AttributeDefinition(definition(
+                "WIDTH",
+                "100",
+                codec::types::Vector3::new(2.0, 3.0, 0.0),
+            ))],
+        );
+        let mut answer = AttributeEntity::from_definition(
+            &definition("WIDTH", "100", codec::types::Vector3::new(2.0, 3.0, 0.0)),
+            Some("250".to_string()),
+        );
+        answer.common.handle = Handle::new(0x1234);
+        answer.insertion_point = codec::types::Vector3::new(12.0, 3.0, 0.0);
+        let mut bare = Insert::new(
+            "ATTRIB_ASKED".to_string(),
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        );
+        bare.attributes = vec![answer];
+
+        let handle = scene.add_entity(EntityType::Insert(bare));
+        let insert = insert(&scene, handle);
+        assert_eq!(insert.attributes.len(), 1, "nothing was invented");
+        assert_eq!(insert.attributes[0].value, "250");
+        assert_eq!(
+            insert.attributes[0].common.handle,
+            Handle::new(0x1234),
+            "the placed attribute keeps its identity"
+        );
+    }
+
+    /// A definition with nothing to declare must not gain an attribute list or
+    /// a terminator, so the fill cannot invent records for every insert.
+    #[test]
+    fn a_reference_of_a_plain_definition_stays_without_attributes() {
+        let mut scene = Scene::new();
+        scene.define_block_raw(
+            "PLAIN_ONLY",
+            codec::types::Vector3::ZERO,
+            vec![EntityType::Line(codec::entities::Line::from_points(
+                codec::types::Vector3::ZERO,
+                codec::types::Vector3::new(4.0, 0.0, 0.0),
+            ))],
+        );
+        let handle = scene.add_entity(EntityType::Insert(Insert::new(
+            "PLAIN_ONLY".to_string(),
+            codec::types::Vector3::new(20.0, 0.0, 0.0),
+        )));
+        let insert = insert(&scene, handle);
+        assert!(insert.attributes.is_empty());
+        assert!(insert.seqend_handle.is_none());
     }
 }

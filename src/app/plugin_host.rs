@@ -406,6 +406,9 @@ impl<'a> HostSession<'a> {
                 return Handle::NULL;
             }
             insert.attributes.push(attribute);
+            if insert.seqend_handle.is_none() {
+                insert.seqend_handle = Some(self.document_mut().allocate_handle());
+            }
             if !self.app.tabs[self.tab]
                 .scene
                 .update_entity_plugin(EntityType::Insert(insert))

@@ -687,6 +687,14 @@ impl Scene {
             EntityType::Insert(ins) => {
                 for att in ins.attributes.iter_mut() {
                     att.common.handle = doc.allocate_handle();
+                    // The text of a multiline attribute is an object of its
+                    // own inside the reference, so the copy needs a fresh
+                    // handle for it and its new attribute as owner.
+                    let owner = att.common.handle;
+                    if let Some(model) = &mut att.embedded_mtext {
+                        model.common.handle = doc.allocate_handle();
+                        model.common.owner_handle = owner;
+                    }
                 }
                 if ins.seqend_handle.is_some() {
                     ins.seqend_handle = Some(doc.allocate_handle());
@@ -1276,6 +1284,7 @@ impl Scene {
             self.ensure_image_definition(&mut entity);
             let h = self.document.add_entity(entity).unwrap_or(Handle::NULL);
             if !h.is_null() {
+                Self::adopt_attributes(&mut self.document, h);
                 // Deep-clone the extension-dictionary tree so edits on the
                 // copy never touch the source. A dangling or missing root
                 // leaves the copy without one — never shared.

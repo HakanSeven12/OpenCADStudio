@@ -343,9 +343,9 @@ impl Scene {
     /// Give the attributes a reference arrives with their own identity. Whoever
     /// builds a reference cannot know its handle yet, so the attributes are
     /// adopted here: one already carrying a handle keeps it, one without gets a
-    /// fresh handle and the reference as its owner, and the set is terminated
-    /// once there is something to terminate.
-    fn adopt_attributes(document: &mut codec::Document, insert_handle: Handle) {
+    /// fresh handle, the reference always becomes their owner, and the set is
+    /// terminated once there is something to terminate.
+    pub(crate) fn adopt_attributes(document: &mut codec::Document, insert_handle: Handle) {
         Self::instantiate_attributes(document, insert_handle);
         let Some(EntityType::Insert(insert)) = document.get_entity(insert_handle) else {
             return;
@@ -359,10 +359,15 @@ impl Scene {
             .attributes
             .iter()
             .filter(|attribute| attribute.common.handle.is_null())
-            .filter(|attribute| attribute.embedded_mtext.is_some())
+            .filter_map(|attribute| attribute.embedded_mtext.as_ref())
+            .filter(|model| model.common.handle.is_null())
             .count();
+        let needs_owner = insert
+            .attributes
+            .iter()
+            .any(|attribute| attribute.common.owner_handle != insert_handle);
         let needs_end = !insert.attributes.is_empty() && insert.seqend_handle.is_none();
-        if unhandled.iter().all(|null| !*null) && !needs_end {
+        if unhandled.iter().all(|null| !*null) && !needs_owner && !needs_end {
             return;
         }
         let handles: Vec<Handle> = (0..unhandled.iter().filter(|null| **null).count())
@@ -382,22 +387,21 @@ impl Scene {
         let mut handles = handles.into_iter();
         let mut text_handles = text_handles.into_iter();
         for (attribute, was_null) in insert.attributes.iter_mut().zip(&unhandled) {
-            if !*was_null {
-                continue;
-            }
-            attribute.common.handle = handles.next().unwrap_or(Handle::NULL);
-            attribute.common.owner_handle = insert_handle;
-            // A multiline attribute brings its text object along, and two
-            // objects cannot share one handle.
-            if let Some(model) = &mut attribute.embedded_mtext {
-                if let Some(handle) = text_handles.next() {
-                    model.common.handle = handle;
+            if *was_null {
+                attribute.common.handle = handles.next().unwrap_or(Handle::NULL);
+                // A multiline attribute brings its text object along, and two
+                // objects cannot share one handle.
+                if let Some(model) = &mut attribute.embedded_mtext {
+                    if model.common.handle.is_null() {
+                        model.common.handle = text_handles.next().unwrap_or(Handle::NULL);
+                    }
+                    model.common.owner_handle = attribute.common.handle;
+                    model.common.raw_record = None;
+                    model.common.xdictionary_handle = None;
+                    model.common.reactors.clear();
                 }
-                model.common.owner_handle = attribute.common.handle;
-                model.common.raw_record = None;
-                model.common.xdictionary_handle = None;
-                model.common.reactors.clear();
             }
+            attribute.common.owner_handle = insert_handle;
         }
         if let Some(end) = end {
             insert.seqend_handle = Some(end);
@@ -4282,5 +4286,99 @@ mod attribute_instantiation_tests {
         let insert = insert(&scene, handle);
         assert!(insert.attributes.is_empty());
         assert!(insert.seqend_handle.is_none());
+    }
+}
+
+#[cfg(test)]
+mod attribute_identity_tests {
+    use super::*;
+    use codec::entities::{AttributeDefinition, AttributeEntity, Insert, MText};
+
+    fn attributed_scene() -> (Scene, Handle) {
+        let mut scene = Scene::new();
+        let mut definition =
+            AttributeDefinition::new("WIDTH".to_string(), "Width:".to_string(), "100".to_string());
+        definition.insertion_point = codec::types::Vector3::new(2.0, 3.0, 0.0);
+        definition.height = 1.0;
+        scene.define_block_raw(
+            "ATTRIB_ID",
+            codec::types::Vector3::ZERO,
+            vec![EntityType::AttributeDefinition(definition)],
+        );
+        let source = scene.add_entity(EntityType::Insert(Insert::new(
+            "ATTRIB_ID".to_string(),
+            codec::types::Vector3::ZERO,
+        )));
+        (scene, source)
+    }
+
+    fn copied(scene: &mut Scene, source: Handle) -> Handle {
+        scene.begin_undo_recording();
+        let copies = scene.copy_entities(
+            &[source],
+            &crate::command::EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+        );
+        assert_eq!(copies.len(), 1);
+        copies[0]
+    }
+
+    fn attributes(scene: &Scene, handle: Handle) -> Vec<AttributeEntity> {
+        let Some(EntityType::Insert(insert)) = scene.document.get_entity(handle) else {
+            panic!("expected the reference {handle:?}");
+        };
+        insert.attributes.clone()
+    }
+
+    /// The reference is the owner of its attribute children, so a copy that
+    /// still names its source as owner writes two children under one owner.
+    #[test]
+    fn a_copied_reference_owns_its_attribute_children() {
+        let (mut scene, source) = attributed_scene();
+        let copy = copied(&mut scene, source);
+        let children = attributes(&scene, copy);
+        assert_eq!(children.len(), 1);
+        assert_ne!(
+            children[0].common.handle,
+            attributes(&scene, source)[0].common.handle
+        );
+        assert_eq!(
+            children[0].common.owner_handle, copy,
+            "the copy owns the attribute it was cloned with"
+        );
+    }
+
+    /// A multiline attribute carries its text object inside the reference. The
+    /// clone deep-copies it, so the text has to come out with a handle of its
+    /// own and the attribute as its owner — two objects cannot share one handle.
+    #[test]
+    fn a_copied_reference_rehandles_its_embedded_text() {
+        let (mut scene, source) = attributed_scene();
+        let mut text = MText::new();
+        text.value = "100".to_string();
+        text.common.handle = scene.document.allocate_handle();
+        let Some(EntityType::Insert(insert)) = scene.document.get_entity_mut(source) else {
+            panic!("expected the source reference");
+        };
+        insert.attributes[0].embedded_mtext = Some(Box::new(text));
+        let copy = copied(&mut scene, source);
+        let source_text = attributes(&scene, source)[0]
+            .embedded_mtext
+            .as_ref()
+            .expect("source text")
+            .common
+            .handle;
+        let child = &attributes(&scene, copy)[0];
+        let copy_text = child
+            .embedded_mtext
+            .as_ref()
+            .expect("the copy keeps its text");
+        assert_ne!(
+            copy_text.common.handle, source_text,
+            "the copy's text is a separate object"
+        );
+        assert_eq!(
+            copy_text.common.owner_handle, child.common.handle,
+            "and its attribute owns it"
+        );
     }
 }

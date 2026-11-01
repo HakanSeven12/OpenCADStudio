@@ -1219,7 +1219,7 @@ fn add_entity_clone_doc(
     crate::scene::Scene::reset_clone_subhandles(doc, &mut entity);
     entity.common_mut().handle = Handle::NULL;
     entity.common_mut().owner_handle = Handle::NULL;
-    match space {
+    let handle = match space {
         PasteSpace::Model => doc.add_entity(entity),
         PasteSpace::Layout(layout) => doc.add_entity_to_layout(entity, layout),
         PasteSpace::Block(block) => {
@@ -1227,7 +1227,11 @@ fn add_entity_clone_doc(
             doc.add_entity(entity)
         }
     }
-    .unwrap_or(Handle::NULL)
+    .unwrap_or(Handle::NULL);
+    if !handle.is_null() {
+        crate::scene::Scene::adopt_attributes(doc, handle);
+    }
+    handle
 }
 
 /// Document-level verbatim block-definition recreate: the `&mut Document`

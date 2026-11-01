@@ -1907,4 +1907,94 @@ mod xdict_tests {
             .entities()
             .all(|entity| entity.common().xdictionary_handle != Some(root)));
     }
+
+    /// An array draws its items from one copy of the source, and that copy is
+    /// an object of its own. Across the whole drawing, no two references may
+    /// claim the same attribute child or the same terminator, and each child
+    /// names the reference that carries it as its owner.
+    #[test]
+    fn an_array_leaves_one_reference_claiming_the_attribute_child() {
+        let mut scene = Scene::new();
+        scene.define_block_raw("B", Vector3::ZERO, vec![]);
+        let source = scene.add_entity(EntityType::Insert(Insert::new("B", Vector3::ZERO)));
+        let attribute = scene.document.allocate_handle();
+        let end = scene.document.allocate_handle();
+        let mut att = AttributeEntity::new("TAG".into(), "value".into());
+        att.common.handle = attribute;
+        att.common.owner_handle = source;
+        let Some(EntityType::Insert(insert)) = scene.document.get_entity_mut(source) else {
+            unreachable!();
+        };
+        insert.attributes.push(att);
+        insert.seqend_handle = Some(end);
+        let array = create_from_spec(
+            &mut scene,
+            &[source],
+            DVec3::ZERO,
+            &AssocArraySpec::Rectangular {
+                columns: 2,
+                rows: 2,
+                column_spacing: 20.0,
+                row_spacing: 20.0,
+            },
+        )
+        .unwrap();
+        assert!(!array.is_null());
+        let mut handles: Vec<Handle> = Vec::new();
+        for record in scene.document.block_records.iter() {
+            for handle in record.entity_handles.iter() {
+                if !handles.contains(handle) {
+                    handles.push(*handle);
+                }
+            }
+        }
+        for entity in scene.document.entities() {
+            let handle = entity.common().handle;
+            if !handles.contains(&handle) {
+                handles.push(handle);
+            }
+        }
+        let mut children: Vec<(Handle, Handle)> = Vec::new();
+        let mut terminators: Vec<(Handle, Handle)> = Vec::new();
+        for handle in &handles {
+            let Some(EntityType::Insert(reference)) = scene.document.get_entity(*handle) else {
+                continue;
+            };
+            for child in &reference.attributes {
+                assert_eq!(
+                    child.common.owner_handle, reference.common.handle,
+                    "the reference carries its attribute, so it owns it"
+                );
+                children.push((child.common.handle, reference.common.handle));
+            }
+            if let Some(seqend) = reference.seqend_handle {
+                terminators.push((seqend, reference.common.handle));
+            }
+        }
+        assert!(
+            !children.is_empty(),
+            "the attributed reference survived being arrayed"
+        );
+        for (child, _) in &children {
+            assert_eq!(
+                children.iter().filter(|(other, _)| other == child).count(),
+                1,
+                "one attribute cannot belong to two references"
+            );
+        }
+        for (seqend, _) in &terminators {
+            assert_eq!(
+                terminators
+                    .iter()
+                    .filter(|(other, _)| other == seqend)
+                    .count(),
+                1,
+                "one terminator cannot belong to two references"
+            );
+            assert!(
+                !children.iter().any(|(child, _)| child == seqend),
+                "a terminator and an attribute are different objects"
+            );
+        }
+    }
 }

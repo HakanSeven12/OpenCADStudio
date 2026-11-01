@@ -549,10 +549,10 @@ pub fn apply_state(document: &mut Document, parameter: Handle, index: usize) {
     }
 }
 
-/// Per-member visibility of state `index`, in definition member order. A
-/// member the parameter does not control stays visible in every state: a
-/// state only hides objects the parameter governs and it does not name.
-pub fn state_visibility(document: &Document, parameter: Handle, index: usize) -> Vec<bool> {
+/// Per-member rule of state `index`, in definition member order. A member the
+/// parameter does not govern is `None`: a state decides only what its set
+/// controls, so everything else stays as the definition shows it.
+pub fn state_visibility(document: &Document, parameter: Handle, index: usize) -> Vec<Option<bool>> {
     let Some(ObjectType::BlockVisibilityParameter(parameter)) = document.objects.get(&parameter)
     else {
         return Vec::new();
@@ -566,8 +566,10 @@ pub fn state_visibility(document: &Document, parameter: Handle, index: usize) ->
     members(document, definition)
         .into_iter()
         .map(|handle| {
-            !parameter.all_blocks.contains(&handle)
-                || state.visible_blocks.contains(&handle)
+            parameter
+                .all_blocks
+                .contains(&handle)
+                .then(|| state.visible_blocks.contains(&handle))
         })
         .collect()
 }
@@ -878,8 +880,8 @@ mod tests {
         );
     }
 
-    /// A member the parameter does not control stays visible in every state;
-    /// only the objects a state names are hidden when it does not list them.
+    /// A state hides only what its set governs and does not list, so the other
+    /// members of the definition keep showing.
     #[test]
     fn a_state_hides_only_the_members_the_parameter_controls() {
         let mut scene = Scene::new();
@@ -902,10 +904,14 @@ mod tests {
         let shown = state_visibility(&scene.document, parameter, hidden);
         assert_eq!(
             shown,
-            vec![true, false, true],
-            "the door and cat are not controlled, so the state leaves them visible"
+            vec![Some(true), Some(false), Some(true)],
+            "the frame is the only object the state does not list"
         );
-        assert_eq!(state_visibility(&scene.document, parameter, 0), vec![true; 3]);
+        assert_eq!(
+            state_visibility(&scene.document, parameter, 0),
+            vec![Some(true); 3],
+            "the first state shows everything the set governs"
+        );
 
         apply_state(&mut scene.document, parameter, hidden);
         let visible = |handle: Handle| {

@@ -81,6 +81,9 @@ struct StateMapping {
     anon_handles: Vec<Handle>,
     /// Indices (into `anon_handles`) that the state makes visible.
     visible_idx: HashSet<usize>,
+    /// Indices the state rules on at all. What the set does not govern keeps
+    /// the flag the definition gave it.
+    governed_idx: HashSet<usize>,
 }
 
 impl OpenCADStudio {
@@ -303,12 +306,14 @@ impl OpenCADStudio {
         param: &BlockVisibilityParameter,
     ) -> Option<StateMapping> {
         let def_handles = crate::scene::block_authoring::members(doc, def_block);
-        let anon_handles: Vec<Handle> = doc
+        let anon_block = doc
             .block_records
             .iter()
             .find(|b| b.name == anon_name)?
-            .entity_handles
-            .clone();
+            .handle;
+        // Both sides through the same reader, or a member one of them drops
+        // shifts every index the state is read by.
+        let anon_handles = crate::scene::block_authoring::members(doc, anon_block);
         if def_handles.len() != anon_handles.len() {
             return None;
         }
@@ -316,20 +321,29 @@ impl OpenCADStudio {
         if shown.len() != def_handles.len() {
             return None;
         }
+        let governed_idx: HashSet<usize> = shown
+            .iter()
+            .enumerate()
+            .filter(|(_, rule)| rule.is_some())
+            .map(|(index, _)| index)
+            .collect();
         let visible_idx: HashSet<usize> = shown
             .iter()
             .enumerate()
-            .filter(|(_, visible)| **visible)
+            .filter(|(_, rule)| **rule == Some(true))
             .map(|(index, _)| index)
             .collect();
         Some(StateMapping {
             anon_handles,
             visible_idx,
+            governed_idx,
         })
     }
 
-    /// Which state (if any) matches the anonymous block's current per-member
-    /// invisibility flags.
+    /// Which state matches the anonymous block's current per-member
+    /// invisibility flags, over the members its set governs. States that
+    /// cannot be told apart there are the same state as far as the reference
+    /// is concerned, and the lowest index wins.
     fn current_visibility_state(
         doc: &codec::Document,
         def_block: Handle,
@@ -350,9 +364,13 @@ impl OpenCADStudio {
             .map(|(i, _)| i)
             .collect();
         (0..param.states.len()).find(|&si| {
-            Self::state_mapping(doc, def_block, anon_name, si, param)
-                .map(|m| m.visible_idx == cur_visible)
-                .unwrap_or(false)
+            Self::state_mapping(doc, def_block, anon_name, si, param).is_some_and(|m| {
+                m.visible_idx
+                    == cur_visible
+                        .intersection(&m.governed_idx)
+                        .cloned()
+                        .collect::<HashSet<usize>>()
+            })
         })
     }
 
@@ -482,8 +500,8 @@ impl OpenCADStudio {
         }
     }
 
-    /// Apply visibility `state_idx` to the dynamic-block reference: set each
-    /// anonymous-block member visible/invisible per the state, then rebuild.
+    /// Apply visibility `state_idx` to the dynamic-block reference: set the
+    /// members its set governs visible or invisible, then rebuild.
     pub(super) fn apply_visibility_state(&mut self, insert_handle: Handle, state_idx: usize) {
         let i = self.active_tab;
         if self.reject_locked_edit(i, insert_handle) {
@@ -500,26 +518,34 @@ impl OpenCADStudio {
         // Resolve everything against an immutable borrow first.
         let mapping = {
             let doc = &self.tabs[i].scene.document;
-            let Some(EntityType::Insert(ins)) = doc.get_entity(insert_handle) else {
-                return;
-            };
-            let anon_name = ins.block_name.clone();
-            let Some((def_block, param)) = doc.dynamic_visibility_for_insert(insert_handle) else {
-                return;
-            };
-            Self::state_mapping(doc, def_block, &anon_name, state_idx, param)
+            (|| {
+                let Some(EntityType::Insert(ins)) = doc.get_entity(insert_handle) else {
+                    return None;
+                };
+                let anon_name = ins.block_name.clone();
+                let (def_block, param) = doc.dynamic_visibility_for_insert(insert_handle)?;
+                Self::state_mapping(doc, def_block, &anon_name, state_idx, param)
+            })()
         };
         let Some(mapping) = mapping else {
+            // Nothing was applied, so do not leave the list the operator
+            // picked from hanging over the drawing.
+            self.visibility_popup = None;
             return;
         };
 
-        // Apply invisibility flags to the anonymous block's members.
+        // Apply the state's rule to the members it governs. The copy keeps the
+        // flag the definition gave anything outside the set.
         {
             let doc = &mut self.tabs[i].scene.document;
             for (idx, h) in mapping.anon_handles.iter().enumerate() {
+                if !mapping.governed_idx.contains(&idx) {
+                    continue;
+                }
                 let visible = mapping.visible_idx.contains(&idx);
                 if let Some(e) = doc.get_entity_mut(*h) {
-                    e.common_mut().invisible = !visible;
+                    e.common_mut().invisible =
+                        !visible || crate::scene::block_construction::is_construction(e.common());
                 }
             }
         }

@@ -478,6 +478,28 @@ pub(crate) fn create_array(
     )
 }
 
+/// What an action is called: its kind on its own, and once that name is taken
+/// in this definition the lowest number above 1 still free. The name is what
+/// the Actions tab lists and what a chain names an action by, so it has to read
+/// as the action the operator made, not as a slot in the evaluation graph.
+fn next_action_name(doc: &Document, definition: Handle, kind: Kind) -> String {
+    let kind = kind.name();
+    let taken = actions(doc, definition)
+        .into_iter()
+        .map(|(_, action, _, _)| action.element.name.clone())
+        .collect::<Vec<_>>();
+    (1..)
+        .map(|number| {
+            if number == 1 {
+                kind.to_string()
+            } else {
+                format!("{kind}{number}")
+            }
+        })
+        .find(|name| !taken.iter().any(|old| old.eq_ignore_ascii_case(name)))
+        .unwrap()
+}
+
 #[cfg(test)]
 pub(crate) fn create_with_frame(
     doc: &mut Document,
@@ -615,7 +637,7 @@ pub(crate) fn create_with_frame_points(
     let action = BlockAction {
         element: BlockElement {
             eval: expression(slots.eval, NO_VALUE, BlockEvalValue::None),
-            name: format!("{}{}", kind.name(), slots.eval),
+            name: next_action_name(&staged, definition, kind),
             major: MAJOR,
             minor: MINOR,
             eed_1071: 0,

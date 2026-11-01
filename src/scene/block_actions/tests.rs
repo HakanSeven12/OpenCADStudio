@@ -3182,3 +3182,44 @@ fn a_chain_that_loops_back_to_the_action_that_started_it_is_refused() {
         "the row reads the cleared chain back as no chain"
     );
 }
+
+/// An action's name says what the action does. The definition's first Move is
+/// `Move`, a second one of the same kind takes the lowest number above 1 still
+/// free, and the count runs per kind rather than off a record slot.
+#[test]
+fn actions_are_named_for_their_kind_and_numbered_within_the_definition() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let member = handles[1];
+    let first = add_action(&mut doc, def, parameter, member, Kind::Move);
+    assert_eq!(
+        action_object(&doc, first).element.name,
+        "Move",
+        "the first action of a kind carries the kind's own name"
+    );
+    let second = add_action(&mut doc, def, parameter, member, Kind::Move);
+    assert_eq!(
+        action_object(&doc, second).element.name,
+        "Move2",
+        "a second action of that kind is numbered within the definition"
+    );
+    let other = add_action(&mut doc, def, parameter, member, Kind::Scale);
+    assert_eq!(
+        action_object(&doc, other).element.name,
+        "Scale",
+        "the count runs per kind"
+    );
+    action_object_mut(&mut doc, first).element.name = "Move9".into();
+    let third = add_action(&mut doc, def, parameter, member, Kind::Move);
+    assert_eq!(
+        action_object(&doc, third).element.name,
+        "Move",
+        "the kind's own name is used again once it is free"
+    );
+    let fourth = add_action(&mut doc, def, parameter, member, Kind::Move);
+    assert_eq!(
+        action_object(&doc, fourth).element.name,
+        "Move3",
+        "a number another action already carries is skipped"
+    );
+}

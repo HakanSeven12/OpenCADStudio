@@ -230,26 +230,30 @@ impl Ribbon {
                     )
                 }
             };
-        // Over the tool area, where a release docks it, it is outlined in
+        // Outlined all round, extra tools included: the content sits inside
+        // the 1 px line, which it would otherwise cover on every side it
+        // fills. Over the tool area, where a release docks it, the line is
         // `accent`.
         let docking = self
             .float_ui
             .drag
             .as_ref()
             .is_some_and(|drag| drag.key == key && drag.over_ribbon);
-        let framed = container(content).style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::panel(theme))),
-            border: Border {
-                color: if docking {
-                    chrome::accent(theme)
-                } else {
-                    chrome::border(theme)
+        let framed = container(content)
+            .padding(crate::ui::icons::hairline())
+            .style(move |theme: &Theme| container::Style {
+                background: Some(Background::Color(chrome::panel(theme))),
+                border: Border {
+                    color: if docking {
+                        chrome::accent(theme)
+                    } else {
+                        chrome::border(theme)
+                    },
+                    width: crate::ui::icons::hairline(),
+                    radius: 0.0.into(),
                 },
-                width: crate::ui::icons::hairline(),
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+                ..Default::default()
+            });
         // The pointer on the panel or its extra tools keeps them open.
         let watched = iced::widget::mouse_area(framed)
             .on_enter(Message::RibbonFloat(FloatMsg::Hover {

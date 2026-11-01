@@ -17,6 +17,7 @@ mod stretch;
 mod targets;
 mod array;
 pub(crate) mod options;
+pub(crate) mod chain;
 
 /// Smallest signed distance between two angles in radians, accounting for the
 /// wrap at ±π. Used for BPT rotation snapping and current-row detection.

@@ -2659,9 +2659,13 @@ fn action_object(doc: &Document, action: Handle) -> &BlockAction {
     };
     match &object.data {
         DynamicBlockData::MoveAction(a) => &a.action,
+        DynamicBlockData::StretchAction(a) => &a.action,
+        DynamicBlockData::PolarStretchAction(a) => &a.action,
+        DynamicBlockData::FlipAction(a) => &a.action,
+        DynamicBlockData::RotateAction(a) => &a.action.action,
         DynamicBlockData::ScaleAction(a) => &a.action.action,
         DynamicBlockData::ArrayAction(a) => &a.action,
-        _ => panic!("the action is a move, a scale or an array"),
+        _ => panic!("the action is one the definition can chain"),
     }
 }
 
@@ -2671,9 +2675,13 @@ fn action_object_mut(doc: &mut Document, action: Handle) -> &mut BlockAction {
     };
     match &mut object.data {
         DynamicBlockData::MoveAction(a) => &mut a.action,
+        DynamicBlockData::StretchAction(a) => &mut a.action,
+        DynamicBlockData::PolarStretchAction(a) => &mut a.action,
+        DynamicBlockData::FlipAction(a) => &mut a.action,
+        DynamicBlockData::RotateAction(a) => &mut a.action.action,
         DynamicBlockData::ScaleAction(a) => &mut a.action.action,
         DynamicBlockData::ArrayAction(a) => &mut a.action,
-        _ => panic!("the action is a move, a scale or an array"),
+        _ => panic!("the action is one the definition can chain"),
     }
 }
 
@@ -2844,6 +2852,144 @@ fn a_chain_that_two_actions_answer_to_is_refused() {
     let baseline = doc.clone();
     let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
     assert_eq!(error, "An action chain names more than one action.");
+}
+
+/// An Array action is the one kind a chain cannot carry in either direction, so
+/// authoring says which end of the link is the problem.
+#[test]
+fn an_array_action_stays_out_of_a_chain_written_from_authoring() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let move_action = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
+    let array_action =
+        create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 2., 1.).unwrap();
+    assert_eq!(
+        super::chain::set(&mut doc, def, move_action, Some(array_action)).unwrap_err(),
+        "An Array action cannot be the follow-up of a chain yet."
+    );
+    assert_eq!(
+        super::chain::set(&mut doc, def, array_action, Some(move_action)).unwrap_err(),
+        "An Array action cannot chain a follow-up action yet."
+    );
+    chain_after(&mut doc, array_action, move_action);
+    assert!(
+        super::chain::set(&mut doc, def, array_action, None).unwrap(),
+        "clearing a chain an authored file left on an Array action still works"
+    );
+}
+
+/// A chain the evaluator could not run is not a chain the operator can write, so
+/// the shapes the order refuses are refused here too, and the record is left as it
+/// was: an action with no node is not a name, and two chains cannot share a
+/// follow-up.
+#[test]
+fn a_chain_is_refused_when_it_would_leave_the_definition_unrunnable() {
+    let (mut doc, def, parameter, member, move_action, scale_action) = chained_pair();
+    let scale_node = chain_id(&doc, scale_action);
+    set_chain_id(&mut doc, scale_action, 0);
+    assert_eq!(
+        super::chain::set(&mut doc, def, move_action, Some(scale_action)).unwrap_err(),
+        "Select a follow-up action the evaluation graph names."
+    );
+    set_chain_id(&mut doc, scale_action, scale_node);
+    assert!(super::chain::set(&mut doc, def, move_action, Some(scale_action)).unwrap());
+    let extra = add_action(&mut doc, def, parameter, member, Kind::Move);
+    assert_eq!(
+        super::chain::set(&mut doc, def, extra, Some(scale_action)).unwrap_err(),
+        "An action chain joins two sequences."
+    );
+    assert!(
+        actions(&doc, def)
+            .into_iter()
+            .find(|(handle, ..)| *handle == extra)
+            .unwrap()
+            .1
+            .action_ids
+            .is_empty(),
+        "a refused chain is not half written"
+    );
+}
+
+/// A Stretch is the other kind the order cannot take a chain from, and writing one
+/// would stop the whole parameter evaluating, so the chain is refused at authoring.
+#[test]
+fn a_stretch_action_refuses_to_chain_from_the_authoring_route() {
+    let (mut doc, def, targets, parameter, action) = stretch_fixture();
+    let follow_up = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
+    assert_eq!(
+        super::chain::set(&mut doc, def, action, Some(follow_up)).unwrap_err(),
+        "This Stretch action cannot chain follow-up actions yet."
+    );
+    assert!(
+        !super::chain::set(&mut doc, def, action, None).unwrap(),
+        "a stretch with no chain has nothing to clear"
+    );
+    action_object_mut(&mut doc, action).action_ids = vec![chain_id(&doc, follow_up)];
+    assert!(
+        super::chain::set(&mut doc, def, action, None).unwrap(),
+        "clearing a chain left on a stretch is not refused for being a stretch"
+    );
+}
+
+/// Naming a follow-up action is the authoring route to the order: what it writes
+/// is the same chain a saved file carries, so it has to give the same geometry.
+#[test]
+fn naming_a_follow_up_action_reorders_the_actions_the_way_the_operator_chose() {
+    let (mut doc, def, parameter, member, move_action, scale_action) = chained_pair();
+    assert!(super::chain::set(&mut doc, def, scale_action, Some(move_action)).unwrap());
+    assert_eq!(
+        actions(&doc, def)
+            .into_iter()
+            .find(|(handle, ..)| *handle == scale_action)
+            .unwrap()
+            .1
+            .action_ids,
+        vec![chain_id(&doc, move_action)],
+        "the chain names the follow-up by the node the graph gives it"
+    );
+    let staged = doc.clone();
+    assert_eq!(
+        drive(&mut doc, def, parameter, member),
+        (DVec3::new(18., 6., 0.), 4.),
+        "the chained scale runs before the move it hands its result to"
+    );
+    let mut cleared = staged;
+    assert!(super::chain::set(&mut cleared, def, scale_action, None).unwrap());
+    assert_eq!(
+        drive(&mut cleared, def, parameter, member),
+        (DVec3::new(28., 6., 0.), 4.),
+        "clearing the chain hands the order back to the graph"
+    );
+}
+
+/// A chain is a name inside one definition, so the shapes that could not be
+/// resolved are refused where the operator writes them rather than at evaluation,
+/// and a refusal leaves the action's own chain list alone.
+#[test]
+fn an_action_chains_only_to_another_action_of_the_same_definition() {
+    let (mut doc, def, _parameter, _member, move_action, scale_action) = chained_pair();
+    assert_eq!(
+        super::chain::set(&mut doc, def, move_action, Some(Handle::NULL)).unwrap_err(),
+        "Select a follow-up action belonging to the active block definition."
+    );
+    assert_eq!(
+        super::chain::set(&mut doc, def, move_action, Some(move_action)).unwrap_err(),
+        "An action cannot chain to itself."
+    );
+    assert_eq!(
+        super::chain::set(&mut doc, def, Handle::NULL, Some(scale_action)).unwrap_err(),
+        "Select an action belonging to the active block definition."
+    );
+    assert!(
+        actions(&doc, def)
+            .into_iter()
+            .find(|(handle, ..)| *handle == move_action)
+            .unwrap()
+            .1
+            .action_ids
+            .is_empty(),
+        "a refused chain leaves nothing half written"
+    );
 }
 
 /// Two actions that chain each other have no first action, so there is no order

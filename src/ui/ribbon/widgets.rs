@@ -1778,14 +1778,10 @@ pub fn module_event_to_message(event: ModuleEvent) -> Message {
 // ── History control ────────────────────────────────────────────────────────
 
 /// A Quick Access command button: the command's icon (its name when it has
-/// none), running it as a ribbon button does. Greyed out and inert unless
-/// `enabled` (the Start tab has no drawing for it).
-pub(super) fn quick_access_btn<'a>(
-    face: super::qat::Face,
-    cmd: String,
-    enabled: bool,
-) -> Element<'a, Message> {
-    let icon = super::qat::face_icon(&face, SMALL_ICON, enabled);
+/// none), running it as a ribbon button does. On the Start tab the whole
+/// toolbar is covered and greyed out (`Ribbon::qat_row`).
+pub(super) fn quick_access_btn<'a>(face: super::qat::Face, cmd: String) -> Element<'a, Message> {
+    let icon = super::qat::face_icon(&face, SMALL_ICON);
     let text_face = matches!(face.icon, super::qat::FaceIcon::Text);
     let btn = button(
         container(icon)
@@ -1794,8 +1790,8 @@ pub(super) fn quick_access_btn<'a>(
             .align_x(iced::Center)
             .align_y(iced::Center),
     )
-    .on_press_maybe(enabled.then(|| Message::MenuCommand(cmd.clone())))
-    .style(move |theme: &Theme, status| top_hist_btn_style(theme, enabled, false, status))
+    .on_press(Message::MenuCommand(cmd.clone()))
+    .style(|theme: &Theme, status| top_hist_btn_style(theme, true, false, status))
     .width(if text_face {
         Length::Shrink
     } else {

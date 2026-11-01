@@ -174,15 +174,12 @@ impl Ribbon {
         self.qat_cache.get_mut().looks.clear();
     }
 
-    /// The toolbar's items, left to right. Greyed out and inert on the Start
-    /// tab, which has no drawing for them.
+    /// The toolbar's items, left to right.
     pub(super) fn qat_items(
         &self,
-        is_start: bool,
         undo_count: usize,
         redo_count: usize,
     ) -> Vec<Element<'_, Message>> {
-        let enabled = !is_start;
         let items = self.layout.qat.iter().map(|item| match item {
             QatItem::Command(cmd) => match self.qat_look(cmd) {
                 QatLook::Split {
@@ -190,21 +187,15 @@ impl Ribbon {
                     label,
                     items,
                     default,
-                } => self.qat_split(id, label, &items, default, enabled),
-                QatLook::Plain(face) => quick_access_btn(face, cmd.clone(), enabled),
+                } => self.qat_split(id, label, &items, default),
+                QatLook::Plain(face) => quick_access_btn(face, cmd.clone()),
             },
-            QatItem::Builtin(QatBuiltin::Undo) => render_history_control(
-                "Undo",
-                UNDO_HISTORY_ID,
-                if is_start { 0 } else { undo_count },
-                &self.open_dropdown,
-            ),
-            QatItem::Builtin(QatBuiltin::Redo) => render_history_control(
-                "Redo",
-                REDO_HISTORY_ID,
-                if is_start { 0 } else { redo_count },
-                &self.open_dropdown,
-            ),
+            QatItem::Builtin(QatBuiltin::Undo) => {
+                render_history_control("Undo", UNDO_HISTORY_ID, undo_count, &self.open_dropdown)
+            }
+            QatItem::Builtin(QatBuiltin::Redo) => {
+                render_history_control("Redo", REDO_HISTORY_ID, redo_count, &self.open_dropdown)
+            }
             QatItem::Builtin(QatBuiltin::LayerCombo) => super::keytips::anchor_with(
                 || super::keytips::quick_access_anchor(QAT_LAYER_COMBO_ID),
                 container(layer_combo_face(
@@ -411,7 +402,7 @@ impl Ribbon {
         redo_count: usize,
     ) -> Element<'_, Message> {
         let row: Element<'_, Message> =
-            iced::widget::Row::with_children(self.qat_items(is_start, undo_count, redo_count))
+            iced::widget::Row::with_children(self.qat_items(undo_count, redo_count))
                 .spacing(TOP_HIST_GAP)
                 .align_y(iced::Center)
                 .wrap()
@@ -484,7 +475,6 @@ impl Ribbon {
         label: &'static str,
         items: &[(&'static str, &'static str, IconKind)],
         default: &'static str,
-        enabled: bool,
     ) -> Element<'_, Message> {
         let face_cmd = self.qat_face_command(id, items, default);
         let (face_label, face_icon_kind) = items
@@ -498,12 +488,12 @@ impl Ribbon {
             icon: face_icon_kind.map_or(FaceIcon::Text, FaceIcon::Tool),
         };
         let face_btn = button(
-            container(face_icon(&face, SMALL_ICON, enabled))
+            container(face_icon(&face, SMALL_ICON))
                 .center_x(Fill)
                 .center_y(Fill),
         )
-        .on_press_maybe(enabled.then(|| Message::MenuCommand(face_cmd.to_string())))
-        .style(move |theme: &Theme, status| qat_split_part_style(theme, enabled, open, status))
+        .on_press(Message::MenuCommand(face_cmd.to_string()))
+        .style(move |theme: &Theme, status| qat_split_part_style(theme, true, open, status))
         .width(Length::Fixed(metrics::QAT_BUTTON))
         .height(metrics::QAT_BUTTON)
         .padding(0);
@@ -520,8 +510,8 @@ impl Ribbon {
                 .center_x(Fill)
                 .center_y(Fill),
         )
-        .on_press_maybe(enabled.then(|| Message::ToggleRibbonDropdown(open_id.clone())))
-        .style(move |theme: &Theme, status| qat_split_part_style(theme, enabled, open, status))
+        .on_press(Message::ToggleRibbonDropdown(open_id.clone()))
+        .style(move |theme: &Theme, status| qat_split_part_style(theme, true, open, status))
         .width(Length::Fixed(metrics::QAT_SPLIT_ARROW_W))
         .height(metrics::QAT_BUTTON)
         .padding(0);
@@ -534,7 +524,7 @@ impl Ribbon {
         .delay(TIP_DELAY)
         .style(tip_style);
         let parts: Element<'_, Message> = row![face_btn, arrow].into();
-        let parts = if enabled { split_outline(parts) } else { parts };
+        let parts = split_outline(parts);
         let anchor = super::keytips::quick_access_anchor(id);
         super::keytips::anchor_with(move || anchor, PosReport::owned(open_id, parts))
     }
@@ -917,25 +907,16 @@ fn separator<'a>() -> Element<'a, Message> {
     .into()
 }
 
-/// The icon of a command item, greyed out unless `enabled`; a command with
-/// no icon shows its name.
-pub(super) fn face_icon<'a>(face: &Face, size: f32, enabled: bool) -> Element<'a, Message> {
+/// The icon of a command item; a command with no icon shows its name.
+pub(super) fn face_icon<'a>(face: &Face, size: f32) -> Element<'a, Message> {
     match face.icon {
-        FaceIcon::Chrome(bytes) if enabled => icons::chrome(bytes, size),
-        FaceIcon::Chrome(bytes) => icons::chrome_disabled(bytes, size),
-        FaceIcon::Tool(IconKind::Svg(bytes)) if enabled => icons::tool(bytes, size),
-        FaceIcon::Tool(IconKind::Svg(bytes)) => icons::tool_disabled(bytes, size),
+        FaceIcon::Chrome(bytes) => icons::chrome(bytes, size),
+        FaceIcon::Tool(IconKind::Svg(bytes)) => icons::tool(bytes, size),
         FaceIcon::Tool(IconKind::Glyph(glyph)) => text(glyph).size(size * 0.7).into(),
-        FaceIcon::Text => {
-            let label = face.label.clone();
-            row![text(label)
-                .size(metrics::QAT_TEXT_SIZE)
-                .wrapping(iced::widget::text::Wrapping::None)
-                .style(move |theme: &Theme| text::Style {
-                    color: (!enabled).then(|| crate::ui::style::chrome::muted(theme)),
-                })]
-            .into()
-        }
+        FaceIcon::Text => row![text(face.label.clone())
+            .size(metrics::QAT_TEXT_SIZE)
+            .wrapping(iced::widget::text::Wrapping::None)]
+        .into(),
     }
 }
 

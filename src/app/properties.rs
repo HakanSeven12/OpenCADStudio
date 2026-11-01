@@ -2759,6 +2759,19 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                             ],
                         });
                     }
+                    if let Some(definition) = self.tabs[i].active_block_edit_session().map(|session| session.br_handle) {
+                        if let Some(current) = crate::scene::block_actions::chain::label(
+                            &self.tabs[i].scene.document, definition, item.handle) {
+                            panel.sections.push(PropSection {
+                                title: crate::t!("Action chain").into_owned(),
+                                props: vec![Property {
+                                    label: crate::t!("Chain to").into_owned(),
+                                    field: "authoring_action_chain",
+                                    value: PropValue::EditText(current),
+                                }],
+                            });
+                        }
+                    }
                     if let Some((chain_actions, value_sets)) =
                         self.authoring_parameter_properties(item.handle)
                     {

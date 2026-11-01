@@ -1,8 +1,25 @@
 //! The chain that records the order one definition's actions run in.
-// The row and the prompt that reach this write land next; the order itself is
-// already honoured by evaluation and tested here.
-#![allow(dead_code)]
 use super::*;
+
+/// The follow-up this action names, spelled the way the Actions tab lists it.
+/// `None` is for a handle that is not one of the definition's actions; an action
+/// that names nothing, or names a node the definition does not carry, reads back
+/// as the empty string the row shows.
+pub(crate) fn label(doc: &Document, definition: Handle, action: Handle) -> Option<String> {
+    let all = actions(doc, definition);
+    let (_, head, _, _) = all.iter().find(|(handle, ..)| *handle == action)?;
+    Some(
+        head.action_ids
+            .first()
+            .filter(|id| **id > 0)
+            .and_then(|id| {
+                all.iter()
+                    .find(|(_, other, _, _)| &other.element.eval.node_id == id)
+            })
+            .map(|(_, other, _, _)| other.element.name.clone())
+            .unwrap_or_default(),
+    )
+}
 
 /// The action record inside a dynamic block object, whichever kind it is.
 fn action_of(data: &mut DynamicBlockData) -> Option<&mut BlockAction> {
@@ -83,4 +100,31 @@ pub(crate) fn set(
     }
     *doc = staged;
     Ok(true)
+}
+
+/// Name the follow-up the way the Actions tab shows it. An empty name hands the
+/// order back to the evaluation graph, which is what clearing the row means.
+pub(crate) fn set_by_name(
+    doc: &mut Document,
+    definition: Handle,
+    action: Handle,
+    name: &str,
+) -> Result<bool, &'static str> {
+    let name = name.trim();
+    let follow_up = if name.is_empty() {
+        None
+    } else {
+        let mut named = actions(doc, definition)
+            .into_iter()
+            .filter(|(_, other, _, _)| other.element.name.eq_ignore_ascii_case(name))
+            .map(|(handle, ..)| handle);
+        let Some(handle) = named.next() else {
+            return Err("Select a follow-up action belonging to the active block definition.");
+        };
+        if named.next().is_some() {
+            return Err("Two actions in this block share that name.");
+        }
+        Some(handle)
+    };
+    set(doc, definition, action, follow_up)
 }

@@ -3116,3 +3116,40 @@ fn a_chained_stretch_action_names_the_chain_as_what_is_unsupported() {
         "This Polar Stretch action cannot chain follow-up actions yet."
     );
 }
+
+/// Nought is the id a file leaves on an action that carries no evaluation
+/// expression, so a row reading a chain back cannot treat it as a node: several
+/// actions of such a definition sit on that same default, and naming one of them
+/// would show the operator a chain the definition never recorded.
+#[test]
+fn a_chain_that_names_no_node_reads_back_as_no_chain() {
+    let (mut doc, def, parameter, _member, move_action, scale_action) = chained_pair();
+    set_chain_id(&mut doc, scale_action, 0);
+    action_object_mut(&mut doc, move_action).action_ids = vec![0];
+    assert_eq!(
+        super::chain::label(&doc, def, move_action),
+        Some(String::new()),
+        "the row shows no chain rather than the action left on the default node"
+    );
+    assert_eq!(
+        super::chain::label(&doc, def, parameter),
+        None,
+        "a parameter has no chain of its own to show"
+    );
+}
+
+/// The row is the only place the operator spells the follow-up out, so two actions
+/// that carry one name cannot be told apart: the write refuses instead of chaining
+/// to whichever one the evaluation graph happens to list first.
+#[test]
+fn a_name_that_two_actions_carry_cannot_be_chained_to() {
+    let (mut doc, def, _parameter, _member, move_action, scale_action) = chained_pair();
+    let name = action_object(&doc, move_action).element.name.clone();
+    action_object_mut(&mut doc, scale_action).element.name = name.clone();
+    let baseline = doc.clone();
+    assert_eq!(
+        super::chain::set_by_name(&mut doc, def, move_action, &name),
+        Err("Two actions in this block share that name.")
+    );
+    assert_eq!(doc, baseline, "an ambiguous name chains nothing");
+}

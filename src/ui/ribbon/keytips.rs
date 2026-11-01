@@ -1677,4 +1677,25 @@ mod tests {
         anchors.dedup();
         assert_eq!(anchors.len(), tips.len());
     }
+
+    #[test]
+    fn a_toolbar_list_gets_a_key_tip_that_opens_its_list() {
+        let mut ribbon = Ribbon::default();
+        ribbon.set_layout(RibbonLayout {
+            qat: vec![
+                QatItem::Builtin(QatBuiltin::Color),
+                QatItem::Builtin(QatBuiltin::CenterLayer),
+            ],
+            ..RibbonLayout::default()
+        });
+        let tips = ribbon.qat_tips();
+        assert_eq!(tips.len(), 2);
+        for (tip, id) in tips.iter().zip(["QAT_COLOR", "QAT_CENTER_LAYER"]) {
+            assert_eq!(tip.target, id);
+            assert!(matches!(
+                &tip.action,
+                super::Action::Open(crate::app::Message::ToggleRibbonDropdown(open)) if open == id
+            ));
+        }
+    }
 }

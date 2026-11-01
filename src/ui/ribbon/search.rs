@@ -455,7 +455,8 @@ impl Ribbon {
         let mut paths: Vec<(QatBuiltin, String)> = Vec::new();
         for (index, module) in self.modules.iter().enumerate() {
             let tab = crate::i18n::ribbon_module_title(module.id(), module.title());
-            for group in self.groups_for(index) {
+            // Hidden panels too: their lists still work on the toolbar.
+            for group in self.ordered_groups(index) {
                 let path = format!("{ribbon_tab}: {tab} › {}", crate::t!(group.title));
                 let key = extras::panel_key(module.id(), group.title);
                 let mut held: Vec<QatBuiltin> = Vec::new();
@@ -513,6 +514,7 @@ impl Ribbon {
                     path,
                     command: Some(variable.to_string()),
                     icon: None,
+                    // Never run: More Commands adds the list instead.
                     run: Message::ToggleRibbonDropdown(open.to_string()),
                     place: None,
                 };

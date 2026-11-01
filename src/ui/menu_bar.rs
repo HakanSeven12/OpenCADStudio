@@ -727,7 +727,9 @@ pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
             menu_background: Background::Color(chrome::panel(theme)),
             menu_border: Border {
                 color: chrome::border(theme),
-                width: 1.0,
+                // One physical pixel, as the padding and the submenu
+                // overlap it lines up with.
+                width: crate::ui::icons::hairline(),
                 radius: 0.0.into(),
             },
             menu_shadow: Default::default(),

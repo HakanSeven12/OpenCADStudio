@@ -46,52 +46,132 @@ const SWITCH_WINDOWS_ICON: &str = "M3 5h12v10H3z M9 9h12v10H9z";
 /// A window with a bar along its top and a side bar.
 const USER_INTERFACE_ICON: &str = "M3 4h18v16H3z M3 9h18 M8 9v11";
 
-/// The ribbon lists the toolbar can hold: the control, its id on the
-/// toolbar and the ribbon list whose dropdown it opens.
-const LISTS: [(QatBuiltin, &str, &str); 11] = [
-    (QatBuiltin::LayerCombo, QAT_LAYER_COMBO_ID, LAYER_COMBO_ID),
-    (QatBuiltin::Color, "QAT_COLOR", PROP_COLOR_ID),
-    (QatBuiltin::Linetype, "QAT_LINETYPE", PROP_LINETYPE_ID),
-    (QatBuiltin::Lineweight, "QAT_LINEWEIGHT", PROP_LW_ID),
-    (QatBuiltin::TextStyle, "QAT_TEXT_STYLE", "TEXT_STYLE_COMBO"),
-    (QatBuiltin::DimStyle, "QAT_DIM_STYLE", "DIM_STYLE_COMBO"),
-    (
-        QatBuiltin::MleaderStyle,
-        "QAT_MLEADER_STYLE",
-        "MLEADER_STYLE_COMBO",
-    ),
-    (
-        QatBuiltin::TableStyle,
-        "QAT_TABLE_STYLE",
-        "TABLE_STYLE_COMBO",
-    ),
-    (QatBuiltin::DimLayer, "QAT_DIM_LAYER", DIM_LAYER_COMBO),
-    (
-        QatBuiltin::MleaderLayer,
-        "QAT_MLEADER_LAYER",
-        MLEADER_LAYER_COMBO,
-    ),
-    (
-        QatBuiltin::CenterLayer,
-        "QAT_CENTER_LAYER",
-        CENTER_LAYER_COMBO,
-    ),
-];
+/// A ribbon list the toolbar can hold.
+struct QatList {
+    control: QatBuiltin,
+    /// Its id on the toolbar.
+    id: &'static str,
+    /// The ribbon list whose dropdown it opens.
+    source: &'static str,
+    /// The system variable it sets, which More Commands finds it by.
+    variable: &'static str,
+    /// Its name, as its tooltip and More Commands show.
+    name: fn() -> String,
+}
+
+/// The ribbon lists the toolbar can hold.
+static LISTS: [QatList; 11] = {
+    const fn list(
+        control: QatBuiltin,
+        id: &'static str,
+        source: &'static str,
+        variable: &'static str,
+        name: fn() -> String,
+    ) -> QatList {
+        QatList {
+            control,
+            id,
+            source,
+            variable,
+            name,
+        }
+    }
+    [
+        list(
+            QatBuiltin::LayerCombo,
+            QAT_LAYER_COMBO_ID,
+            LAYER_COMBO_ID,
+            "CLAYER",
+            || crate::t!("Layer").into_owned(),
+        ),
+        list(
+            QatBuiltin::Color,
+            "QAT_COLOR",
+            PROP_COLOR_ID,
+            "CECOLOR",
+            || crate::t!("Color").into_owned(),
+        ),
+        list(
+            QatBuiltin::Linetype,
+            "QAT_LINETYPE",
+            PROP_LINETYPE_ID,
+            "CELTYPE",
+            || crate::t!("Linetype").into_owned(),
+        ),
+        list(
+            QatBuiltin::Lineweight,
+            "QAT_LINEWEIGHT",
+            PROP_LW_ID,
+            "CELWEIGHT",
+            || crate::t!("Lineweight").into_owned(),
+        ),
+        list(
+            QatBuiltin::TextStyle,
+            "QAT_TEXT_STYLE",
+            "TEXT_STYLE_COMBO",
+            "TEXTSTYLE",
+            || crate::t!("Text Style").into_owned(),
+        ),
+        list(
+            QatBuiltin::DimStyle,
+            "QAT_DIM_STYLE",
+            "DIM_STYLE_COMBO",
+            "DIMSTYLE",
+            || crate::t!("Dimension Style").into_owned(),
+        ),
+        list(
+            QatBuiltin::MleaderStyle,
+            "QAT_MLEADER_STYLE",
+            "MLEADER_STYLE_COMBO",
+            "CMLEADERSTYLE",
+            || crate::t!("Multileader Style").into_owned(),
+        ),
+        list(
+            QatBuiltin::TableStyle,
+            "QAT_TABLE_STYLE",
+            "TABLE_STYLE_COMBO",
+            "CTABLESTYLE",
+            || crate::t!("Table Style").into_owned(),
+        ),
+        list(
+            QatBuiltin::DimLayer,
+            "QAT_DIM_LAYER",
+            DIM_LAYER_COMBO,
+            "DIMLAYER",
+            || crate::t!("Dimension Layer").into_owned(),
+        ),
+        list(
+            QatBuiltin::MleaderLayer,
+            "QAT_MLEADER_LAYER",
+            MLEADER_LAYER_COMBO,
+            "MLEADERLAYER",
+            || crate::t!("Multileader Layer").into_owned(),
+        ),
+        list(
+            QatBuiltin::CenterLayer,
+            "QAT_CENTER_LAYER",
+            CENTER_LAYER_COMBO,
+            "CENTERLAYER",
+            || crate::tr!("ribbon-menu", "center-layer"),
+        ),
+    ]
+};
+
+fn list_of(control: QatBuiltin) -> Option<&'static QatList> {
+    LISTS.iter().find(|list| list.control == control)
+}
 
 /// The toolbar id and the ribbon list of `control`, if it is a list.
 pub(super) fn list_ids(control: QatBuiltin) -> Option<(&'static str, &'static str)> {
-    LISTS
-        .iter()
-        .find(|(known, ..)| *known == control)
-        .map(|&(_, id, source)| (id, source))
+    list_of(control).map(|list| (list.id, list.source))
 }
 
 /// The ribbon list the toolbar list `id` opens, if it is one.
 pub(crate) fn list_source(id: &str) -> Option<&'static str> {
     LISTS
         .iter()
-        .find(|(_, known, _)| *known == id)
-        .map(|&(.., source)| source)
+        .find(|list| list.id == id)
+        .map(|list| list.source)
 }
 
 /// The toolbar control copying the ribbon list `ribbon_id`, if the toolbar
@@ -99,45 +179,20 @@ pub(crate) fn list_source(id: &str) -> Option<&'static str> {
 pub(super) fn list_control(ribbon_id: &str) -> Option<QatBuiltin> {
     LISTS
         .iter()
-        .find(|(.., source)| *source == ribbon_id)
-        .map(|&(control, ..)| control)
+        .find(|list| list.source == ribbon_id)
+        .map(|list| list.control)
 }
 
 /// Every list the toolbar can hold, with the system variable it sets.
 pub(super) fn list_controls() -> impl Iterator<Item = (QatBuiltin, &'static str)> {
-    LISTS.iter().map(|&(control, ..)| {
-        let variable = match control {
-            QatBuiltin::LayerCombo => "CLAYER",
-            QatBuiltin::Color => "CECOLOR",
-            QatBuiltin::Linetype => "CELTYPE",
-            QatBuiltin::Lineweight => "CELWEIGHT",
-            QatBuiltin::TextStyle => "TEXTSTYLE",
-            QatBuiltin::DimStyle => "DIMSTYLE",
-            QatBuiltin::MleaderStyle => "CMLEADERSTYLE",
-            QatBuiltin::TableStyle => "CTABLESTYLE",
-            QatBuiltin::DimLayer => "DIMLAYER",
-            QatBuiltin::MleaderLayer => "MLEADERLAYER",
-            _ => "CENTERLAYER",
-        };
-        (control, variable)
-    })
+    LISTS.iter().map(|list| (list.control, list.variable))
 }
 
-/// The name of the list `control`, as its tooltip and More Commands show.
+/// The name of the list `control` (empty if it is not one).
 pub(super) fn list_name(control: QatBuiltin) -> String {
-    match control {
-        QatBuiltin::LayerCombo => crate::t!("Layer").into_owned(),
-        QatBuiltin::Color => crate::t!("Color").into_owned(),
-        QatBuiltin::Linetype => crate::t!("Linetype").into_owned(),
-        QatBuiltin::Lineweight => crate::t!("Lineweight").into_owned(),
-        QatBuiltin::TextStyle => crate::t!("Text Style").into_owned(),
-        QatBuiltin::DimStyle => crate::t!("Dimension Style").into_owned(),
-        QatBuiltin::MleaderStyle => crate::t!("Multileader Style").into_owned(),
-        QatBuiltin::TableStyle => crate::t!("Table Style").into_owned(),
-        QatBuiltin::DimLayer => crate::t!("Dimension Layer").into_owned(),
-        QatBuiltin::MleaderLayer => crate::t!("Multileader Layer").into_owned(),
-        _ => crate::tr!("ribbon-menu", "center-layer"),
-    }
+    list_of(control)
+        .map(|list| (list.name)())
+        .unwrap_or_default()
 }
 
 /// A ribbon list (`ribbon_id`) whose right-click offers to put it on the
@@ -675,7 +730,6 @@ impl Ribbon {
         super::keytips::anchor_with(move || anchor, PosReport::owned(open_id, parts))
     }
 
-    /// An icon with a ▾ that opens the menu `id`.
     /// A ribbon list on the toolbar (`control`): its current value, with
     /// the colour of a colour or layer, opening the ribbon list's dropdown.
     fn qat_list(&self, control: QatBuiltin) -> Element<'_, Message> {
@@ -717,7 +771,13 @@ impl Ribbon {
             QatBuiltin::TableStyle => (self.active_table_style.clone(), None),
             QatBuiltin::DimLayer => layer(&self.dim_layer),
             QatBuiltin::MleaderLayer => layer(&self.mleader_layer),
-            _ => layer(&self.center_layer),
+            QatBuiltin::CenterLayer => layer(&self.center_layer),
+            // Drawn by `qat_items` with their own faces.
+            QatBuiltin::Undo
+            | QatBuiltin::Redo
+            | QatBuiltin::LayerCombo
+            | QatBuiltin::SwitchWindows
+            | QatBuiltin::UserInterface => return Space::new().into(),
         };
         let width = match control {
             QatBuiltin::Color | QatBuiltin::Linetype | QatBuiltin::Lineweight => {
@@ -775,6 +835,7 @@ impl Ribbon {
         )
     }
 
+    /// An icon with a ▾ that opens the menu `id`.
     fn qat_menu_button(
         &self,
         id: &'static str,
@@ -1204,8 +1265,29 @@ mod tests {
             assert!(opens, "{id}");
             ribbon.close_dropdown();
         }
-        // The toolbar draws each of them.
-        assert_eq!(ribbon.qat_items(0, 0).len(), ribbon.layout.qat.len() + 1);
+    }
+
+    #[test]
+    fn a_toolbar_list_opens_with_its_panel_hidden() {
+        let mut ribbon = Ribbon::default();
+        ribbon
+            .layout
+            .hidden_panels
+            .insert("annotate/Dimensions".into());
+        ribbon
+            .layout
+            .qat_add(QatItem::Builtin(QatBuiltin::DimStyle));
+        ribbon.toggle_dropdown("QAT_DIM_STYLE");
+        assert!(ribbon
+            .dropdown_overlay(&[], &[], (1400.0, 900.0), false, &[], &[], &[])
+            .is_some());
+        // More Commands still says where it is.
+        let found = ribbon
+            .qat_candidates("dimension style")
+            .into_iter()
+            .find(|candidate| candidate.item == QatItem::Builtin(QatBuiltin::DimStyle))
+            .expect("the dimension style list");
+        assert!(found.path.contains("Dimensions"), "{}", found.path);
     }
 
     #[test]

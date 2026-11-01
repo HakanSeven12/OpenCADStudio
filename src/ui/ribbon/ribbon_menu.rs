@@ -554,7 +554,8 @@ fn frame() -> f32 {
     icons::hairline()
 }
 
-/// The menu's frame: a ribbon popup, with the viewport menu's metrics.
+/// The menu's frame: a ribbon popup whose rows sit just inside its
+/// one-pixel border, as the menu bar's do.
 pub(super) fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, Message> {
     container(column(items).width(Fill))
         .style(popup_panel_style)

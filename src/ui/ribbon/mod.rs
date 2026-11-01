@@ -1725,7 +1725,7 @@ impl Ribbon {
     }
 
     /// The colour of the DIMLAYER layer, `None` for Use Current.
-    pub(super) fn dim_layer_color(&self) -> Option<iced::Color> {
+    fn dim_layer_color(&self) -> Option<iced::Color> {
         self.layer_color(&self.dim_layer)
     }
 
@@ -1964,11 +1964,19 @@ impl Ribbon {
         anchor: &str,
         win: (f32, f32),
     ) -> Option<Element<'_, Message>> {
-        // Every tab's panels, and the floating ones.
+        // The tab's panels, and the floating ones, whose dropdowns open from
+        // any tab. A toolbar copy opens from any tab, even with its panel
+        // hidden: every tab's panels.
         let floating = self.floating_groups();
-        let groups = (0..self.modules.len())
-            .flat_map(|index| self.groups_for(index))
-            .chain(floating.iter().map(|(_, group, _)| *group));
+        let groups: Vec<&RibbonGroup> = if anchor == open_id {
+            self.groups_for(self.active)
+                .chain(floating.iter().map(|(_, group, _)| *group))
+                .collect()
+        } else {
+            (0..self.modules.len())
+                .flat_map(|index| self.ordered_groups(index))
+                .collect()
+        };
 
         // Locate the open style combo; capture its style key + manager command.
         let mut found: Option<(crate::modules::StyleKey, Option<&'static str>)> = None;

@@ -158,6 +158,89 @@ fn block_properties_allow_exploding_refuses_explode_on_a_parametric_block() {
     );
 }
 
+/// A reloaded insert can name a record other than the one the row edited, so
+/// the refusal has to follow the record the insert actually names — and a
+/// record that is empty would refuse for the wrong reason.
+#[test]
+fn block_properties_allow_exploding_refuses_explode_on_a_saved_parametric_block() {
+    for ext in ["dxf", "dwg"] {
+        let mut app = fixture();
+        let i = app.active_tab;
+        let definition = app.tabs[i]
+            .active_block_edit_session()
+            .expect("the fixture opens an editor session")
+            .br_handle;
+        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 6,2 3,2");
+        assert!(
+            app.tabs[i].scene.document.is_dynamic_block(definition),
+            "{ext}: the test block has to be parametric for this to mean anything"
+        );
+        app.refresh_properties();
+        edit(&mut app, "bedit_allow_exploding", "No");
+        let _ = app.dispatch_command("BEDIT_SAVE");
+        let bytes = crate::io::save_to_bytes(
+            &app.tabs[i].scene.document,
+            ext,
+            app.tabs[i].scene.document.version,
+        )
+        .unwrap_or_else(|error| panic!("save {ext}: {error}"));
+        let read = crate::io::load_bytes(&format!("properties.{ext}"), bytes)
+            .unwrap_or_else(|error| panic!("load {ext}: {error}"));
+        let (reloaded, named, governed) = read
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Insert(insert) => Some((
+                    insert.common.handle,
+                    insert.block_name.clone(),
+                    read.block_records
+                        .get(&insert.block_name)
+                        .map(|record| record.entity_handles.len())
+                        .unwrap_or(usize::MAX),
+                )),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{ext}: the reloaded drawing has no insert"));
+        assert!(
+            governed > 0,
+            "{ext}: the record `{named}` holds no objects, so there would be nothing to explode"
+        );
+        let record = read.block_records.get(&named).unwrap_or_else(|| {
+            panic!("{ext}: the reloaded insert names `{named}`, which has no record")
+        });
+        assert!(
+            !record.explodable,
+            "{ext}: the reloaded insert names `{named}`, and that record still allows exploding"
+        );
+        app.tabs[i].scene.document = read;
+        app.tabs[i].scene.selected.insert(reloaded);
+        let _ = app.dispatch_command("EXPLODE");
+        assert!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(reloaded)
+                .is_some(),
+            "{ext}: EXPLODE disassembled a parametric definition reloaded from a file that says it cannot be exploded"
+        );
+        // The same reference, the same document, only the flag flipped: what
+        // stopped the explosion was the flag and nothing else about this file.
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get_mut(&named)
+            .unwrap()
+            .explodable = true;
+        app.tabs[i].scene.deselect_all();
+        app.tabs[i].scene.selected.insert(reloaded);
+        let _ = app.dispatch_command("EXPLODE");
+        assert!(
+            app.tabs[i].scene.document.get_entity(reloaded).is_none(),
+            "{ext}: the flag was the only difference, yet the reference still refuses to come apart"
+        );
+    }
+}
+
 #[test]
 fn block_properties_extend_the_existing_panel_only_for_empty_editor_selection() {
     let mut app = fixture();

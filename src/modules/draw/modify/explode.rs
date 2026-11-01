@@ -2759,16 +2759,38 @@ mod tests {
         );
     }
 
+    /// The flag, not an empty definition, decides: the same block with one
+    /// line inside explodes when `explodable` is set and stays whole when it
+    /// is cleared.
     #[test]
     fn unexplodable_block_is_not_exploded() {
-        let mut doc = Document::new();
-        let mut block = codec::tables::BlockRecord::new("NO_EXPLODE");
-        block.handle = doc.allocate_handle();
-        block.explodable = false;
-        doc.block_records.add(block).unwrap();
+        fn explode_once(explodable: bool) -> Vec<EntityType> {
+            let mut doc = Document::new();
+            let mut block = codec::tables::BlockRecord::new("NO_EXPLODE");
+            block.handle = doc.allocate_handle();
+            block.explodable = explodable;
+            let child = doc
+                .add_entity(EntityType::Line(codec::entities::Line::from_points(
+                    Vector3::new(0.0, 0.0, 0.0),
+                    Vector3::new(10.0, 0.0, 0.0),
+                )))
+                .unwrap();
+            block.entity_handles.push(child);
+            doc.block_records.add(block).unwrap();
 
-        let insert = codec::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
-        assert!(explode_entity(&EntityType::Insert(insert), &doc).is_empty());
+            let insert = codec::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
+            explode_entity(&EntityType::Insert(insert), &doc)
+        }
+
+        assert_eq!(
+            explode_once(true).len(),
+            1,
+            "the definition holds one line, so an explodable block has something to give"
+        );
+        assert!(
+            explode_once(false).is_empty(),
+            "clearing the flag is what stops the explosion"
+        );
     }
 
     /// A dimension created without a geometry block gets a real `*D` block on

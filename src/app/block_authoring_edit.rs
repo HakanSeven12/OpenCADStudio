@@ -290,11 +290,14 @@ impl OpenCADStudio {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, index, g)| (index, g.id, g.is_midpoint, g.world))
     }
+    /// The chaining bit and the value sets a parameter's row offers. A `None` chaining
+    /// means this kind's actions never run, so the bit would store a promise the
+    /// definition cannot keep.
     pub(super) fn authoring_parameter_properties(
         &self,
         handle: Handle,
     ) -> Option<(
-        bool,
+        Option<bool>,
         Vec<(
             &'static str,
             &'static str,
@@ -311,52 +314,45 @@ impl OpenCADStudio {
         };
         let (chain_actions, value_sets) = match &object.data {
             codec::objects::DynamicBlockData::LinearParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![("linear_distance", "Distance", &parameter.value_set)],
             ),
             codec::objects::DynamicBlockData::PolarParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![
                     ("polar_distance", "Distance", &parameter.distance_value_set),
                     ("polar_angle", "Angle", &parameter.angle_value_set),
                 ],
             ),
             codec::objects::DynamicBlockData::XYParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![
                     ("xy_x", "X Distance", &parameter.x_value_set),
                     ("xy_y", "Y Distance", &parameter.y_value_set),
                 ],
             ),
             codec::objects::DynamicBlockData::RotationParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![("rotation_angle", "Angle", &parameter.value_set)],
             ),
             codec::objects::DynamicBlockData::PointParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
-            codec::objects::DynamicBlockData::AlignmentParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
+                (Some(parameter.parameter.parameter.chain_actions), vec![])
             }
             codec::objects::DynamicBlockData::FlipParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
+                (Some(parameter.parameter.parameter.chain_actions), vec![])
             }
-            codec::objects::DynamicBlockData::BasePointParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
-            codec::objects::DynamicBlockData::LookupParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
-            codec::objects::DynamicBlockData::UserParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
+            codec::objects::DynamicBlockData::AlignmentParameter(_)
+            | codec::objects::DynamicBlockData::BasePointParameter(_)
+            | codec::objects::DynamicBlockData::LookupParameter(_)
+            | codec::objects::DynamicBlockData::UserParameter(_) => (None, vec![]),
             _ => return None,
         };
         Some((chain_actions, value_sets))
     }
 
     /// Flip the bit that says a parameter's actions run one after the other,
-    /// each acting on the member as the previous action left it.
+    /// each acting on the member as the previous action left it. Only a parameter
+    /// whose actions the evaluator runs has such an order to declare.
     fn set_chain_actions(document: &mut codec::Document, handle: Handle, value: bool) -> bool {
         use codec::objects::{DynamicBlockData, ObjectType};
         let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle) else {
@@ -369,10 +365,6 @@ impl OpenCADStudio {
             DynamicBlockData::RotationParameter(p) => &mut p.parameter.parameter.chain_actions,
             DynamicBlockData::PointParameter(p) => &mut p.parameter.parameter.chain_actions,
             DynamicBlockData::FlipParameter(p) => &mut p.parameter.parameter.chain_actions,
-            DynamicBlockData::LookupParameter(p) => &mut p.parameter.parameter.chain_actions,
-            DynamicBlockData::AlignmentParameter(p) => &mut p.parameter.parameter.chain_actions,
-            DynamicBlockData::BasePointParameter(p) => &mut p.parameter.parameter.chain_actions,
-            DynamicBlockData::UserParameter(p) => &mut p.parameter.parameter.chain_actions,
             _ => return false,
         };
         if *bit == value {
@@ -387,7 +379,7 @@ impl OpenCADStudio {
         let Some(handle) = self.tabs[i].selected_authoring else {
             return Task::none();
         };
-        let Some((chain_actions, _)) = self.authoring_parameter_properties(handle) else {
+        let Some((Some(chain_actions), _)) = self.authoring_parameter_properties(handle) else {
             return Task::none();
         };
         let mut document = self.tabs[i].scene.document.clone();

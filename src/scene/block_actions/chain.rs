@@ -35,6 +35,40 @@ fn action_of(data: &mut DynamicBlockData) -> Option<&mut BlockAction> {
     }
 }
 
+/// Walk the chain from one action. A chain that arrives back where the walk started
+/// has no first action, so the order it names is one nothing can run.
+fn loops(doc: &Document, definition: Handle, action: Handle) -> bool {
+    let all = actions(doc, definition);
+    let follow_up = |handle: Handle| {
+        let id = *all
+            .iter()
+            .find(|(other, ..)| *other == handle)?
+            .1
+            .action_ids
+            .first()?;
+        if id <= 0 {
+            return None;
+        }
+        all.iter()
+            .find(|(_, other, _, _)| other.element.eval.node_id == id)
+            .map(|(other, ..)| *other)
+    };
+    let mut visited = std::collections::BTreeSet::new();
+    let mut current = action;
+    while let Some(next) = follow_up(current) {
+        if next == action {
+            return true;
+        }
+        // A loop further along the chain is one the file already carried; the walk
+        // has nowhere to go from it, so this write is not what closed it.
+        if !visited.insert(next) {
+            return false;
+        }
+        current = next;
+    }
+    false
+}
+
 /// Name the action whose effect this one works on next. That is the only record
 /// of the order the operator chose, because the follow-up sees the member as this
 /// action left it; an action that names nothing runs whenever the graph lists it,
@@ -97,6 +131,9 @@ pub(crate) fn set(
         // A chain the order cannot run is not one the operator can write. Clearing
         // one only ever shortens a sequence, so the order has nothing to refuse.
         chain_order(&actions(&staged, definition))?;
+        if loops(&staged, definition, action) {
+            return Err("An action chain cannot loop back to the action that started it.");
+        }
     }
     *doc = staged;
     Ok(true)

@@ -2772,20 +2772,22 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                             });
                         }
                     }
-                    if let Some((chain_actions, value_sets)) =
+                    if let Some((chaining, value_sets)) =
                         self.authoring_parameter_properties(item.handle)
                     {
-                        panel.sections.push(PropSection {
-                            title: crate::t!("Behavior").into_owned(),
-                            props: vec![Property {
-                                label: crate::t!("Chain actions").into_owned(),
-                                field: "authoring_chain_actions",
-                                value: PropValue::BoolToggle {
+                        if let Some(chain_actions) = chaining {
+                            panel.sections.push(PropSection {
+                                title: crate::t!("Behavior").into_owned(),
+                                props: vec![Property {
+                                    label: crate::t!("Chain actions").into_owned(),
                                     field: "authoring_chain_actions",
-                                    value: chain_actions,
-                                },
-                            }],
-                        });
+                                    value: PropValue::BoolToggle {
+                                        field: "authoring_chain_actions",
+                                        value: chain_actions,
+                                    },
+                                }],
+                            });
+                        }
                         if !value_sets.is_empty() {
                             let mut props = Vec::new();
                             for (key, label, value_set) in value_sets {

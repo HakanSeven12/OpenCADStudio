@@ -3153,3 +3153,32 @@ fn a_name_that_two_actions_carry_cannot_be_chained_to() {
     );
     assert_eq!(doc, baseline, "an ambiguous name chains nothing");
 }
+
+/// Two actions that name each other have no first action, so the order they record is
+/// one nothing runs: the chain that would close the loop is refused where it is written
+/// rather than stored inert, which the row would otherwise show as a chosen order.
+#[test]
+fn a_chain_that_loops_back_to_the_action_that_started_it_is_refused() {
+    let (mut doc, def, _parameter, _member, move_action, scale_action) = chained_pair();
+    assert!(super::chain::set(&mut doc, def, move_action, Some(scale_action)).unwrap());
+    let baseline = doc.clone();
+    assert_eq!(
+        super::chain::set(&mut doc, def, scale_action, Some(move_action)),
+        Err("An action chain cannot loop back to the action that started it.")
+    );
+    assert_eq!(
+        doc, baseline,
+        "the refused link is not left half written on the second action"
+    );
+    assert_eq!(
+        super::chain::set(&mut doc, def, scale_action, None),
+        Ok(false),
+        "an action that names nothing still has nothing to clear"
+    );
+    assert!(super::chain::set(&mut doc, def, move_action, None).unwrap());
+    assert_eq!(
+        super::chain::label(&doc, def, move_action),
+        Some(String::new()),
+        "the row reads the cleared chain back as no chain"
+    );
+}

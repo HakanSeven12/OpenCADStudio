@@ -6862,6 +6862,53 @@ fn block_action_overrides_properties_are_atomic_and_locally_undoable() {
 }
 
 #[test]
+fn the_chain_actions_row_is_offered_only_where_the_actions_run() {
+    use crate::scene::block_actions::{self as actions, Kind};
+    use crate::scene::block_orientation_parameter::{self as orientation, Kind as OrientationKind};
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,2");
+    let linear = actions::parameters(&app.tabs[i].scene.document, definition, Kind::Move)[0].handle;
+    let _ = app.run_command_line("BPARAMETER ALIGNMENT 0,0 TYPE P 10,0");
+    let alignment = orientation::parameters(&app.tabs[i].scene.document, definition)
+        .into_iter()
+        .find(|p| p.kind == OrientationKind::Alignment)
+        .unwrap()
+        .handle;
+    let chained_row = |app: &OpenCADStudio| {
+        app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|s| &s.props)
+            .any(|p| p.field == "authoring_chain_actions")
+    };
+    let show = |app: &mut OpenCADStudio, handle| {
+        app.tabs[i].selected_authoring = Some(handle);
+        app.refresh_properties();
+    };
+    show(&mut app, linear);
+    assert!(
+        chained_row(&app),
+        "a parameter whose actions run can chain them"
+    );
+    show(&mut app, alignment);
+    assert!(
+        !chained_row(&app),
+        "a parameter whose actions never run has no order to declare"
+    );
+    let before = app.tabs[i].scene.document.clone();
+    let _ = app.update(Message::PropBoolToggle("authoring_chain_actions"));
+    assert_eq!(
+        app.tabs[i].scene.document, before,
+        "the same click on that parameter writes nothing"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
 fn the_chain_row_records_the_action_whose_effect_runs_next() {
     use crate::scene::block_actions::{self as actions, chain, Kind};
     let (mut app, reference) = fixture();

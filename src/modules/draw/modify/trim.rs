@@ -236,6 +236,46 @@ fn geo_overlaps_aabb(geo: &Geo, target: [f64; 4]) -> bool {
         && bounds[3] >= target[1]
 }
 
+/// A conservative XY envelope for bounded cutter targets. Arc and ellipse
+/// sweeps use their entire supporting circle, deliberately over-including
+/// candidates so tangent and near-endpoint contacts are never lost.
+fn trim_target_bounds(curve: &Curve) -> Option<[f64; 4]> {
+    let bounds = match curve {
+        Curve::Line(line) => [
+            line.start[0].min(line.end[0]),
+            line.start[1].min(line.end[1]),
+            line.start[0].max(line.end[0]),
+            line.start[1].max(line.end[1]),
+        ],
+        Curve::Arc(arc) => {
+            let r = arc.radius.abs();
+            [arc.centre[0] - r, arc.centre[1] - r, arc.centre[0] + r, arc.centre[1] + r]
+        }
+        Curve::Circle(circle) => {
+            let r = circle.radius.abs();
+            [circle.centre[0] - r, circle.centre[1] - r,
+             circle.centre[0] + r, circle.centre[1] + r]
+        }
+        Curve::Ellipse(arc) => {
+            let ellipse = &arc.ellipse;
+            let r = ellipse.major_radius.abs().max(ellipse.minor_radius.abs());
+            [ellipse.centre[0] - r, ellipse.centre[1] - r,
+             ellipse.centre[0] + r, ellipse.centre[1] + r]
+        }
+        // Rays/XLines must find distant intersections. NURBS do not have
+        // a cheap guaranteed conservative envelope at this call site.
+        _ => return None,
+    };
+    if !bounds.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let slack = CUT_TOLERANCE * 8.0;
+    Some([
+        bounds[0] - slack, bounds[1] - slack,
+        bounds[2] + slack, bounds[3] + slack,
+    ])
+}
+
 pub fn is_trim_boundary_entity(entity: &EntityType) -> bool {
     matches!(
         entity,
@@ -467,6 +507,7 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
     // nearest boundary — has to keep whatever it comes back with, since the
     // whole point is how far away the crossing is.
     let bounded = matches!(target.extent(), KernelExtent::Bounded);
+    let target_bounds = bounded.then(|| trim_target_bounds(target)).flatten();
     // In imported CAD drawings several LINE entities can coincide exactly.
     // Intersecting every duplicate has no geometric benefit, and repeated
     // intersection allocations become especially costly during TRIM hover.
@@ -476,6 +517,17 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
     let candidates: Vec<&Geo> = geos
         .iter()
         .filter(|geo| geo_handle(geo) != handle)
+        .filter(|geo| {
+            // The input may contain tens of thousands of low-poly INSERT
+            // segments. Do the cheap conservative broad phase before kernel
+            // intersection and endpoint-contact tests, for every LWPOLY
+            // segment as well as LINE/ARC/CIRCLE hover paths.
+            // Do not cull splines using their sampled AABB: a NURBS can
+            // leave a sparse sample envelope between knot values.
+            target_bounds.is_none_or(|bbox| {
+                matches!(geo, Geo::Spline { .. }) || geo_overlaps_aabb(geo, bbox)
+            })
+        })
         .filter(|geo| match geo {
             Geo::Line { p1, p2, .. } => {
                 let a = (p1[0].to_bits(), p1[1].to_bits());
@@ -5783,6 +5835,34 @@ mod tests {
             points.into_iter().map(|p| Vector2::new(p[0], p[1])).collect(), true,
         )));
         hatch.paths.push(hole);
+    }
+
+    #[test]
+    fn broadphase_trim_keeps_real_crossings_and_discards_distant_lines() {
+        let target = Curve::Line(KernelLine {
+            start: [0.0, 0.0],
+            end: [10.0, 0.0],
+        });
+        let mut geos = vec![Geo::Line {
+            handle: Handle::new(2),
+            p1: [5.0, -3.0],
+            p2: [5.0, 3.0],
+        }];
+        for n in 0..1000 {
+            let x = 100.0 + n as f64;
+            geos.push(Geo::Line {
+                handle: Handle::new(n + 3),
+                p1: [x, -1.0],
+                p2: [x, 1.0],
+            });
+        }
+        let cuts = cut_params(&target, Handle::new(1), &geos);
+        assert_eq!(cuts.len(), 1);
+        assert!((cuts[0] - 0.5).abs() < 1e-8);
+        assert_eq!(trim_target_bounds(&Curve::Ray(KernelRay {
+            origin: [0.0, 0.0],
+            direction: [1.0, 0.0],
+        })), None);
     }
 
     #[test]

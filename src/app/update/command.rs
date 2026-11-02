@@ -5928,6 +5928,49 @@ mod tab_close_tests {
         );
     }
 
+    /// Discarding through the unsaved prompt is a close as much as clicking
+    /// the × is: the discarded drawing's remembered place goes with it, and a
+    /// drawing that stayed open keeps its own.
+    #[test]
+    fn discarding_a_dirty_tab_drops_the_place_it_remembered() {
+        let mut app = three_tabs();
+        let kept_id = app.tabs[1].id;
+        let closed_id = app.tabs[2].id;
+        crate::modules::draw::draw::attdef::session().set_place(kept_id, &Default::default());
+        crate::modules::draw::draw::attdef::session().set_place(closed_id, &Default::default());
+        assert!(
+            crate::modules::draw::draw::attdef::session()
+                .last_in(closed_id)
+                .is_some(),
+            "the drawing remembered a place"
+        );
+        app.tabs[2].dirty = true;
+
+        let _ = app.update(Message::TabClose(closed_id));
+        assert!(
+            app.pending_close.is_some(),
+            "closing a dirty drawing opens the unsaved prompt"
+        );
+        let _ = app.update(Message::UnsavedDialogDiscard);
+
+        assert!(
+            app.tabs.iter().all(|t| t.id != closed_id),
+            "the discarded drawing is gone"
+        );
+        assert!(
+            crate::modules::draw::draw::attdef::session()
+                .last_in(closed_id)
+                .is_none(),
+            "and the place it remembered went with it"
+        );
+        assert!(
+            crate::modules::draw::draw::attdef::session()
+                .last_in(kept_id)
+                .is_some(),
+            "the drawing still open keeps its own place"
+        );
+    }
+
     /// Double-clicking one tab's × in a single batch must close that tab
     /// exactly once; the second message must not slide onto the tab that
     /// shifted into its place.

@@ -5,7 +5,9 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-const MAX_LINES: usize = 2_000;
+// Keep a useful editing-session trace instead of evicting it after a few seconds.
+// The live UI still reads only the bounded tail of the deque.
+const MAX_LINES: usize = 20_000;
 
 static UI_ENABLED: AtomicBool = AtomicBool::new(false);
 static ENV_ENABLED: OnceLock<bool> = OnceLock::new();

@@ -236,16 +236,25 @@ impl OpenCADStudio {
                 );
             }
 
-            // LAYMRG <source> <target> — move every object from <source> onto
-            // <target>, then delete the emptied <source> layer.
+            // Interactive LAYMRG gathers source layers and confirms a target.
+            // LAYMRG <source> <target> keeps the immediate form for scripts.
             "LAYMRG" => {
-                use crate::command::TwoValuePromptCommand;
-                let c = TwoValuePromptCommand::new(
-                    "LAYMRG",
-                    "LAYMRG  source layer (merged away):",
-                    "LAYMRG  target layer (kept):",
+                let selected = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                let (c, message) = crate::modules::draw::layers::laymrg::LayMrgCommand::new(
+                    &self.tabs[i].scene,
+                    &self.tabs[i].active_layer,
+                    selected,
                 );
+                if let Some(message) = message {
+                    self.command_line.push_info(&message);
+                }
                 self.command_line.push_info(&c.prompt());
+                self.command_line.set_step_options(c.options());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("LAYMRG ") => {
@@ -296,24 +305,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                self.push_undo_snapshot(i, "LAYMRG");
-                // The same move a translation makes for each of its pairs.
-                let moved = crate::modules::draw::layers::laytrans::merge_layer(
-                    &mut self.tabs[i].scene,
-                    &src,
-                    &dst,
-                    false,
-                );
-                self.tabs[i].scene.invalidate_dependency_index();
-                self.tabs[i]
-                    .scene
-                    .invalidate_layer_dependencies(std::slice::from_ref(&dst));
-                self.tabs[i].dirty = true;
-                self.refresh_layer_panel();
-                self.command_line.push_output(
-                    crate::tf!("LAYMRG: merged \"{src}\" into \"{dst}\" ({moved} object(s)).")
-                        .as_ref(),
-                );
+                self.merge_layers(i, vec![src], dst);
             }
 
             // LAYERSTATE — save / restore named snapshots of all layer states
@@ -1660,3 +1652,52 @@ impl OpenCADStudio {
     }
 }
 
+impl OpenCADStudio {
+    pub(in crate::app) fn handle_merge_layers(&mut self, sources: Vec<String>, target: String) {
+        let i = self.active_tab;
+        self.merge_layers(i, sources, target);
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        self.command_line.set_step_options(Vec::new());
+        self.restore_pre_cmd_tangent();
+    }
+
+    pub(in crate::app) fn merge_layers(&mut self, i: usize, sources: Vec<String>, target: String) {
+        // Validate the whole operation before the one snapshot or any mutation.
+        if sources.is_empty()
+            || !self.tabs[i].scene.document.layers.contains(&target)
+            || sources.iter().any(|src| {
+                src == "0"
+                    || src == &target
+                    || src.eq_ignore_ascii_case(&self.tabs[i].active_layer)
+                    || !self.tabs[i].scene.document.layers.contains(src)
+            })
+        {
+            return;
+        }
+        self.push_undo_snapshot(i, "LAYMRG");
+        for src in sources {
+            let moved = crate::modules::draw::layers::laytrans::merge_layer(
+                &mut self.tabs[i].scene,
+                &src,
+                &target,
+                false,
+            );
+            let dst = &target;
+            self.command_line.push_output(
+                crate::tf!("LAYMRG: merged \"{src}\" into \"{dst}\" ({moved} object(s)).").as_ref(),
+            );
+        }
+        self.tabs[i].scene.invalidate_dependency_index();
+        self.tabs[i]
+            .scene
+            .invalidate_layer_dependencies(std::slice::from_ref(&target));
+        self.tabs[i].dirty = true;
+        self.refresh_layer_panel();
+    }
+}
+
+#[cfg(test)]
+#[path = "laymrg_tests.rs"]
+mod laymrg_tests;

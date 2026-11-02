@@ -2427,6 +2427,11 @@ pub enum CmdResult {
     /// command calls of a script). A plugin command's script starts from an
     /// empty selection.
     Script(String),
+    /// Merge several layers in a single undo step; end command.
+    MergeLayers {
+        sources: Vec<String>,
+        target: String,
+    },
     /// Move `dest` entities to the layer of the `src` entity, or put copies
     /// of them there when `copy` is set and offer placement of those copies.
     MatchEntityLayer {

@@ -1096,6 +1096,9 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::MergeLayers { sources, target } => {
+                self.handle_merge_layers(sources, target);
+            }
             CmdResult::MatchEntityLayer { dest, src, copy } => {
                 self.handle_match_entity_layer(dest, src, copy);
             }
@@ -1789,9 +1792,9 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.refresh_area_preview(i);
         self.command_line.push_output(&msg);
-        if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
-            self.command_line.push_info(&prompt);
-        }
+        // Reports can advance a step (LAYMRG's warning or Name input), so
+        // refresh its options and dynamic input along with the prompt.
+        let _ = self.handle_need_point();
     }
 
     fn handle_report_error(&mut self, msg: String) {
@@ -1799,9 +1802,9 @@ impl OpenCADStudio {
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
         self.command_line.push_error(&msg);
-        if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
-            self.command_line.push_info(&prompt);
-        }
+        // Reports can advance a step (LAYMRG's warning or Name input), so
+        // refresh its options and dynamic input along with the prompt.
+        let _ = self.handle_need_point();
     }
 
     fn handle_report_measurement_and_deselect(&mut self, msg: String) {

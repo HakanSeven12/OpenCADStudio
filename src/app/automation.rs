@@ -2925,6 +2925,44 @@ mod tests {
         );
     }
 
+    /// The third ask of the same reading: a block reference had to be picked
+    /// with a viewport click because a scripted box found nothing in it.
+    #[test]
+    fn select_takes_a_block_reference_by_what_it_draws() {
+        use codec::entities::{EntityType, Insert, Line};
+        use codec::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "SELECT_REF",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::new(10.0, 5.0, 0.0),
+                Vector3::new(20.0, 10.0, 0.0),
+            ))],
+        );
+        app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "SELECT_REF".to_string(),
+            Vector3::new(-40.0, 0.0, 0.0),
+        )));
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        app.tabs[i].scene.fit_all();
+
+        let r = app.automation_op(r#"{"op":"select","clear":true,"window":[-31,4,-19,11]}"#);
+        assert_eq!(
+            r["selected"], 1,
+            "a window over what the reference draws: {r}"
+        );
+
+        let r = app.automation_op(r#"{"op":"select","clear":true,"window":[-45,-6,-35,4]}"#);
+        assert_eq!(
+            r["selected"], 0,
+            "a window around the insertion point alone, where nothing paints: {r}"
+        );
+    }
+
     #[test]
     fn block_reference_query_exposes_instance_attributes() {
         use codec::entities::{AttributeEntity, EntityType, Insert};

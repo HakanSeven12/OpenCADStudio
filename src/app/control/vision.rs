@@ -737,4 +737,58 @@ mod tests {
         assert_eq!(point_to_tile(wb, 1, 25.0, 25.0), (0, 1));
         assert_eq!(point_to_tile(wb, 1, 175.0, 25.0), (1, 1));
     }
+
+    /// A capture annotated a block reference as a single pixel at its
+    /// insertion point, so a block drawn forty units away from that point was
+    /// described as sitting where nothing of it paints.
+    #[test]
+    fn the_capture_annotation_covers_where_a_reference_draws() {
+        use codec::entities::{EntityType, Insert, Line};
+        use codec::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "GROUND_REF",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::new(10.0, 5.0, 0.0),
+                Vector3::new(20.0, 10.0, 0.0),
+            ))],
+        );
+        app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "GROUND_REF".to_string(),
+            Vector3::new(-40.0, 0.0, 0.0),
+        )));
+
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        app.tabs[i].scene.fit_all();
+        let grounding = compute_grounding(&app, 800.0, 600.0, 800, 600);
+        let annotated = grounding
+            .visible_entities
+            .iter()
+            .find(|entity| entity["type"] == "Block Reference")
+            .expect("the reference is annotated");
+
+        let center = annotated["world_center"]
+            .as_array()
+            .expect("the annotated centre");
+        let [x, y]: [f64; 2] = [center[0].as_f64().unwrap(), center[1].as_f64().unwrap()];
+        assert!(
+            (x + 25.0).abs() < 1e-6 && (y - 7.5).abs() < 1e-6,
+            "the reference is described where it draws, not at its \
+             insertion point (-40, 0): {annotated}"
+        );
+
+        let bounds = annotated["screen_bounds"]
+            .as_array()
+            .expect("the annotated screen box");
+        let corners: Vec<i64> = bounds.iter().map(|v| v.as_i64().unwrap()).collect();
+        assert!(
+            corners[2] - corners[0] > 1 && corners[3] - corners[1] > 1,
+            "a reference with painted extent is annotated as a box, \
+             not a pixel: {annotated}"
+        );
+    }
 }

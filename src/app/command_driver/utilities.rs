@@ -1053,6 +1053,9 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("CAL")
             || tokens[0].eq_ignore_ascii_case("QUICKCALC")
             || tokens[0].eq_ignore_ascii_case("QC")
+            // Bare TABLE opens the Insert Table window; `TABLE INSERTROW 2`
+            // edits the selected table.
+            || tokens[0].eq_ignore_ascii_case("TABLE")
         {
             return self.dispatch_command(cmd);
         }

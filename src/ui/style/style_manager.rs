@@ -195,22 +195,27 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         column![
             text(t!("Styles")).size(10).style(muted_text_style),
             filter,
-            container(scrollable(column(rows).spacing(1)).height(height))
-                .style(|theme: &Theme| {
-                    let palette = theme.palette();
-                    container::Style {
-                        background: Some(Background::Color(palette.background.weak.color)),
-                        border: Border {
-                            color: palette.background.neutral.color,
-                            width: 1.0,
-                            radius: 3.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                })
-                .width(width)
-                .height(height)
-                .padding(2),
+            // The scrollbar gets its own gutter instead of covering the counts.
+            container(
+                scrollable(column(rows).spacing(1))
+                    .spacing(2)
+                    .height(height)
+            )
+            .style(|theme: &Theme| {
+                let palette = theme.palette();
+                container::Style {
+                    background: Some(Background::Color(palette.background.weak.color)),
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+            .width(width)
+            .height(height)
+            .padding(2),
             text(t!("Double-click a name to rename it."))
                 .size(10)
                 .style(muted_text_style),
@@ -218,7 +223,8 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         .spacing(4)
         .height(height),
     )
-    .width(if s.rows.is_some() { 200 } else { 170 })
+    // A list with counts needs room for a name and the count beside it.
+    .width(if s.rows.is_some() { 240 } else { 170 })
     .height(height)
     .padding(iced::Padding {
         top: 12.0,

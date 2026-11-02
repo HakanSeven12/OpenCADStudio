@@ -856,23 +856,24 @@ impl OpenCADStudio {
                 let styles: Vec<String> = self.style_names(super::super::StyleKind::Text);
                 let draft = &self.textstyle_draft;
                 let edited = draft.resolved();
-                let apply_summary = self
-                    .text_style_baseline(edited.handle)
-                    .map(|old| {
-                        crate::app::text_style_users::summary_lines(
-                            &crate::app::text_style_users::value_changes(
-                                &self.textstyle_users,
-                                old,
-                                &edited,
-                            ),
-                        )
-                    })
-                    .unwrap_or_default();
                 let read_only = self.selected_textstyle_is_read_only();
+                let pending = self.textstyle_pending_changes();
+                let apply_summary = crate::ui::style::textstyle::ApplySummary {
+                    properties: pending.iter().map(|c| c.properties.len()).sum(),
+                    styles: pending
+                        .iter()
+                        .map(|change| {
+                            (
+                                change.name.clone(),
+                                crate::app::text_style_users::summary_lines(change),
+                            )
+                        })
+                        .collect(),
+                };
                 let ttf_flags = draft.style.true_type_font_flags;
                 let (listed, rows) = self.textstyle_list();
                 let preview = self.textstyle_preview(&edited);
-                let usage = crate::app::text_style_users::Usage::of(&self.textstyle_users);
+                let usage = crate::app::text_style_users::Usage::of(self.selected_textstyle_users());
                 let compare_opts: Vec<String> = styles
                     .iter()
                     .filter(|name| !name.eq_ignore_ascii_case(&self.textstyle_selected))

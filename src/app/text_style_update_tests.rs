@@ -117,7 +117,7 @@ fn a_new_width_reaches_text_at_the_old_width_and_mtext_without_its_own() {
     let own_mtext = add_mtext(&mut app, "\\W1.2;B", 2.5);
 
     edit(&mut app, "width", "0.8");
-    let users = &app.textstyle_users;
+    let users = app.selected_textstyle_users();
     let old = app
         .text_style_baseline(stored_handle(&app))
         .unwrap()

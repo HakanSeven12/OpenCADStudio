@@ -4615,18 +4615,18 @@ mod ext_tests {
         assert!(!same_discrete_snap(make(8.0, SnapType::Nearest), previous.world, SnapType::Nearest));
 
         let challenger = make(10.0, SnapType::Midpoint);
-        let held = keep_stable_snap(Some(challenger), Some((previous, 8.0 * 8.0)), Point::ORIGIN);
+        let held = keep_stable_snap(Some(challenger), Some((previous, 8.0 * 8.0)), Point::new(0.0, 0.0));
         assert_eq!(held.unwrap().snap_type, SnapType::Endpoint);
-        let released = keep_stable_snap(Some(challenger), Some((previous, 20.0 * 20.0)), Point::ORIGIN);
+        let released = keep_stable_snap(Some(challenger), Some((previous, 20.0 * 20.0)), Point::new(0.0, 0.0));
         assert_eq!(released.unwrap().snap_type, SnapType::Midpoint);
         assert_eq!(
-            keep_stable_snap(Some(challenger), None, Point::ORIGIN).unwrap().snap_type,
+            keep_stable_snap(Some(challenger), None, Point::new(0.0, 0.0)).unwrap().snap_type,
             SnapType::Midpoint,
         );
     }
 
     #[test]
-        fn tracking_active_covers_otrack_and_extension() {
+    fn tracking_active_covers_otrack_and_extension() {
         let mut s = Snapper::default();
         // OTRACK off, Extension not enabled → no acquisition.
         s.snap_enabled = true;

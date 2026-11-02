@@ -3276,15 +3276,21 @@ fn entity_point_in_window(e: &EntityType, window: CrossingWindow) -> Option<[f64
 /// keeps entities that intersect the rectangle boundary.
 fn drag_selected_handles(
     entities: &[EntityType],
+    index: &ModifyEntityIndex,
     fence: &[[f64; 2]],
     window: Option<CrossingWindow>,
     crossing: bool,
 ) -> Vec<Handle> {
+    let candidates = trim_fence_candidates(index, fence, window);
     let fence_geos = build_fence_geos(fence);
     let lasso: Vec<Curve> = fence_geos.iter().filter_map(geo_to_curve).collect();
     entities
         .iter()
-        .filter(|entity| !entity.common().handle.is_null())
+        .filter(|entity| {
+            let handle = entity.common().handle;
+            !handle.is_null()
+                && candidates.as_ref().is_none_or(|hits| hits.contains(&handle))
+        })
         .filter(|entity| {
             let Some(window) = window else {
                 // Lasso: edges crossing it or lying wholly inside it.
@@ -3313,6 +3319,22 @@ fn drag_selected_handles(
         })
         .map(|entity| entity.common().handle)
         .collect()
+}
+
+/// Update cutting-edge membership in linear expected time.  An ordinary
+/// Vec::contains for each selected handle made large drag selections quadratic.
+fn update_trim_edge_set(edges: &mut Vec<Handle>, handles: Vec<Handle>, remove: bool) {
+    if remove {
+        let removing: rustc_hash::FxHashSet<_> = handles.into_iter().collect();
+        edges.retain(|handle| !removing.contains(handle));
+    } else {
+        let mut existing: rustc_hash::FxHashSet<_> = edges.iter().copied().collect();
+        for handle in handles {
+            if existing.insert(handle) {
+                edges.push(handle);
+            }
+        }
+    }
 }
 
 fn trim_edge_glow(entity: &EntityType, candidate: bool) -> Vec<WireModel> {
@@ -3560,13 +3582,14 @@ fn fence_pass(
 /// boundary-edge geometry (`geos`).
 fn extend_box_pass(
     all: &[EntityType],
+    index: &ModifyEntityIndex,
     geos: &[Geo],
     boundary_handles: &[Handle],
     fence: &[[f64; 2]],
     window: Option<CrossingWindow>,
     crossing: bool,
 ) -> Vec<(Handle, Vec<EntityType>)> {
-    let selected = drag_selected_handles(all, fence, window, crossing);
+    let selected = drag_selected_handles(all, index, fence, window, crossing);
     if selected.is_empty() {
         return Vec::new();
     }
@@ -4308,16 +4331,8 @@ impl CadCommand for TrimCommand {
         }
         let window = window.map(|(min, max)| CrossingWindow { min, max });
         if matches!(self.mode, TrimMode::SelectEdges) {
-            let handles = drag_selected_handles(&self.all_entities, fence, window, crossing);
-            if self.shift {
-                self.edge_set.retain(|handle| !handles.contains(handle));
-            } else {
-                for handle in handles {
-                    if !self.edge_set.contains(&handle) {
-                        self.edge_set.push(handle);
-                    }
-                }
-            }
+            let handles = drag_selected_handles(&self.all_entities, &self.entity_index, fence, window, crossing);
+            update_trim_edge_set(&mut self.edge_set, handles, self.shift);
             return Some(CmdResult::NeedPoint);
         }
         if !matches!(self.mode, TrimMode::Pick) {
@@ -5105,7 +5120,7 @@ impl CadCommand for ExtendCommand {
             .filter_map(|&handle| self.entity_index.get(&self.all_entities, handle).cloned())
             .collect();
         let replacements = extend_box_pass(
-            &entities, &self.geos, &self.edge_set, fence, window, crossing,
+            &entities, &self.entity_index, &self.geos, &self.edge_set, fence, window, crossing,
         );
         let mut preview = Vec::new();
         for (handle, extended) in replacements {
@@ -5138,16 +5153,8 @@ impl CadCommand for ExtendCommand {
         let window = window.map(|(min, max)| CrossingWindow { min, max });
         match self.mode {
             TrimMode::SelectEdges => {
-                let handles = drag_selected_handles(&self.all_entities, fence, window, crossing);
-                if self.shift {
-                    self.edge_set.retain(|handle| !handles.contains(handle));
-                } else {
-                    for handle in handles {
-                        if !self.edge_set.contains(&handle) {
-                            self.edge_set.push(handle);
-                        }
-                    }
-                }
+                let handles = drag_selected_handles(&self.all_entities, &self.entity_index, fence, window, crossing);
+                update_trim_edge_set(&mut self.edge_set, handles, self.shift);
                 Some(CmdResult::NeedPoint)
             }
             TrimMode::Pick => {
@@ -5157,6 +5164,7 @@ impl CadCommand for ExtendCommand {
                 }
                 let replacements = extend_box_pass(
                     &self.all_entities,
+                    &self.entity_index,
                     &self.geos,
                     &self.edge_set,
                     fence,
@@ -5843,7 +5851,7 @@ mod tests {
         let rectangle = [[1.0, 1.0], [5.0, 1.0], [5.0, 4.0], [1.0, 4.0], [1.0, 1.0]];
 
         assert_eq!(
-            drag_selected_handles(&entities, &rectangle, Some(window), false),
+            drag_selected_handles(&entities, &ModifyEntityIndex::build(&entities), &rectangle, Some(window), false),
             vec![Handle::new(1)]
         );
     }
@@ -5862,7 +5870,7 @@ mod tests {
         let rectangle = [[1.0, 1.0], [5.0, 1.0], [5.0, 4.0], [1.0, 4.0], [1.0, 1.0]];
 
         assert_eq!(
-            drag_selected_handles(&entities, &rectangle, Some(window), true),
+            drag_selected_handles(&entities, &ModifyEntityIndex::build(&entities), &rectangle, Some(window), true),
             vec![Handle::new(1), Handle::new(2)]
         );
     }

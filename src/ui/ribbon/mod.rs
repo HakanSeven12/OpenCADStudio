@@ -451,7 +451,8 @@ pub struct Ribbon {
 pub struct LayerInfo {
     pub name: String,
     pub color: Color,
-    pub acad_color: AcadColor,
+    /// The colour as the layer stores it (index, true colour or book colour).
+    pub stored_color: AcadColor,
     pub visible: bool,
     pub frozen: bool,
     pub locked: bool,
@@ -1640,7 +1641,7 @@ impl Ribbon {
                 .layer_infos
                 .iter()
                 .find(|l| l.name == layer_name)?;
-            let color = layer.acad_color;
+            let color = layer.stored_color;
             let panel = color_dropdown::layer_color_dropdown_panel(
                 color,
                 recent_colors,
@@ -2581,7 +2582,7 @@ mod tests {
                     .map(|name| super::LayerInfo {
                         name: name.into(),
                         color: iced::Color::WHITE,
-                        acad_color: if name == "0" {
+                        stored_color: if name == "0" {
                             AcadColor::Index(7)
                         } else {
                             AcadColor::Index(3)

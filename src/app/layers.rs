@@ -129,7 +129,7 @@ impl OpenCADStudio {
             // The reference's hidden system layers (`*ADSK_CONSTRAINTS`) stay out.
             .filter(|l| !l.name.starts_with('*'))
             .map(|l| crate::ui::ribbon::LayerInfo {
-                acad_color: l.color,
+                stored_color: l.color,
                 name: l.name.clone(),
                 color: crate::ui::window::layers::iced_color_from_acad(&l.color),
                 visible: l.visible,

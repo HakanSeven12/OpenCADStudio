@@ -1281,10 +1281,14 @@ impl OpenCADStudio {
                         let pieces = insert
                             .explode(&children)
                             .into_iter()
+                            // Only what can cut (and nested blocks): text,
+                            // fills and dimensions would only cost memory.
                             .filter(|child| {
-                                !crate::scene::block_construction::is_construction(
-                                    child.common(),
-                                )
+                                (is_trim_boundary_entity(child)
+                                    || matches!(child, codec::EntityType::Insert(_)))
+                                    && !crate::scene::block_construction::is_construction(
+                                        child.common(),
+                                    )
                             })
                             .collect();
                         Some((handle, pieces))

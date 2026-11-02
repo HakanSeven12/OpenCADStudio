@@ -1416,7 +1416,7 @@ fn lwpoly_self_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
 /// the surviving piece(s). Bulges on surviving arc segments are preserved
 /// with proportionally scaled curvature.
 fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
-    let started = std::time::Instant::now();
+    let started = crate::perf::enabled().then(iced::time::Instant::now);
     let handle = poly.common.handle;
     let n = poly.vertices.len();
     if n < 2 {
@@ -1450,7 +1450,7 @@ fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
         }
     }
 
-    let external_ms = crate::perf::elapsed_ms(Some(started));
+    let external_ms = crate::perf::elapsed_ms(started);
 
     // A polyline can also cut itself. These are intersections between
     // non-adjacent segments belonging to this same LwPolyline. Its vertices
@@ -1460,7 +1460,7 @@ fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
 
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-    let total_ms = crate::perf::elapsed_ms(Some(started));
+    let total_ms = crate::perf::elapsed_ms(started);
     if total_ms >= 8.0 {
         crate::perf_record!(
             "[perf] trim-lwpoly-cuts {total_ms:.2}ms segments={seg_count} boundaries={} external={external_ms:.2}ms self={:.2}ms cuts={}",
@@ -3558,7 +3558,8 @@ fn fence_result_preview(
         {
             continue;
         }
-        if let Some(pieces) = fence_pieces(e, geos, &fence_geos, window, extend) {
+        let cutters = cutters_near(e, geos, !extend && !implied_edges);
+        if let Some(pieces) = fence_pieces(e, &cutters, &fence_geos, window, extend) {
             out.push(WireModel::solid(
                 "trim_rm".into(),
                 entity_pts(e),
@@ -3595,6 +3596,39 @@ fn fence_pass(
     window: Option<CrossingWindow>,
     extend: bool,
 ) -> Vec<(Handle, Vec<EntityType>)> {
+    fence_pass_with(all, index, geos, fence, window, extend, false)
+}
+
+/// The cutters that can touch `target`'s pieces. A trimmed object's pieces
+/// stay inside its own box, so a cutter outside the box cannot cut them:
+/// with `local`, only the cutters reaching the box are kept, instead of
+/// intersecting every object with every cutter (#2461). Splines keep their
+/// place, as their sampled box can miss a bulge.
+fn cutters_near<'a>(target: &EntityType, geos: &'a [Geo], local: bool) -> std::borrow::Cow<'a, [Geo]> {
+    let Some(bounds) = local.then(|| entity_world_aabb_f64(target)).flatten() else {
+        return std::borrow::Cow::Borrowed(geos);
+    };
+    let pad = 1e-6 * (bounds[2] - bounds[0]).abs().max((bounds[3] - bounds[1]).abs()).max(1.0);
+    let bounds = [bounds[0] - pad, bounds[1] - pad, bounds[2] + pad, bounds[3] + pad];
+    std::borrow::Cow::Owned(
+        geos.iter()
+            .filter(|geo| matches!(geo, Geo::Spline { .. }) || geo_overlaps_aabb(geo, bounds))
+            .cloned()
+            .collect(),
+    )
+}
+
+/// [`fence_pass`], cutting each object only with the cutters near it when
+/// `local` (TRIM without extension, where nothing reaches past an object).
+fn fence_pass_with(
+    all: &[EntityType],
+    index: &ModifyEntityIndex,
+    geos: &[Geo],
+    fence: &[[f64; 2]],
+    window: Option<CrossingWindow>,
+    extend: bool,
+    local: bool,
+) -> Vec<(Handle, Vec<EntityType>)> {
     let candidates = trim_fence_candidates(index, fence, window);
     let fence_geos: Vec<Geo> = build_fence_geos(fence);
     let mut out = Vec::new();
@@ -3605,7 +3639,8 @@ fn fence_pass(
         {
             continue;
         }
-        if let Some(pieces) = fence_pieces(e, geos, &fence_geos, window, extend) {
+        let cutters = cutters_near(e, geos, local && !extend);
+        if let Some(pieces) = fence_pieces(e, &cutters, &fence_geos, window, extend) {
             out.push((h, pieces));
         }
     }
@@ -4135,9 +4170,9 @@ impl TrimCommand {
         if let Some(cuts) = self.hover_cut_cache.get(&handle) {
             return Some(cuts.clone());
         }
-        let solve_started = std::time::Instant::now();
+        let solve_started = crate::perf::enabled().then(iced::time::Instant::now);
         let nearby = self.nearby_geos(handle);
-        let nearby_ms = crate::perf::elapsed_ms(Some(solve_started));
+        let nearby_ms = crate::perf::elapsed_ms(solve_started);
         let entity = self.entity_index.get(&self.all_entities, handle)?;
         let cuts = match entity {
             EntityType::Line(l) => {
@@ -4172,7 +4207,7 @@ impl TrimCommand {
             EntityType::LwPolyline(p) => lwpoly_cut_params(p, &nearby),
             _ => return None,
         };
-        let solve_ms = crate::perf::elapsed_ms(Some(solve_started));
+        let solve_ms = crate::perf::elapsed_ms(solve_started);
         if solve_ms >= 8.0 {
             crate::perf_record!(
                 "[perf] trim-hover-cuts {solve_ms:.2}ms search={nearby_ms:.2}ms intersection={:.2}ms boundaries={} cuts={}",
@@ -4212,13 +4247,14 @@ impl TrimCommand {
     }
 
     fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
-        let replacements = fence_pass(
+        let replacements = fence_pass_with(
             &self.all_entities,
             &self.entity_index,
             &self.geos,
             fence,
             window,
             self.shift,
+            !self.implied_edges,
         );
         if replacements.is_empty() {
             return CmdResult::NeedPoint;
@@ -4607,7 +4643,7 @@ impl CadCommand for TrimCommand {
             return vec![];
         }
 
-        let hover_started = std::time::Instant::now();
+        let hover_started = crate::perf::enabled().then(iced::time::Instant::now);
         let hover_cuts = if self.implied_edges {
             None
         } else {
@@ -4877,25 +4913,25 @@ impl CadCommand for TrimCommand {
                         ))
                     }).collect();
                 }
-                let started = std::time::Instant::now();
+                let started = crate::perf::enabled().then(iced::time::Instant::now);
                 let preview = self
                     .hatch_trim_at(handle, pt)
                     .map(|trim| trim.preview_wires())
                     .unwrap_or_default();
-                let ms = crate::perf::elapsed_ms(Some(started));
+                let ms = crate::perf::elapsed_ms(started);
                 if ms >= 8.0 {
                     crate::perf_record!("[perf] trim-hover-hatch {ms:.2}ms");
                 }
                 preview
             }
             Some(EntityType::LwPolyline(p)) => {
-                let started = std::time::Instant::now();
+                let started = crate::perf::enabled().then(iced::time::Instant::now);
                 let result = if let Some(cuts) = hover_cuts.as_ref() {
                     trim_lwpolyline_with_cuts(p, pt.x as f64, pt.y as f64, cuts)
                 } else {
                     trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos)
                 };
-                let ms = crate::perf::elapsed_ms(Some(started));
+                let ms = crate::perf::elapsed_ms(started);
                 if ms >= 8.0 {
                     crate::perf_record!("[perf] trim-hover-polyline {ms:.2}ms");
                 }
@@ -4932,7 +4968,7 @@ impl CadCommand for TrimCommand {
                 hover_wires.extend(implied_cut_guides(&self.all_entities, handle, &cuts));
             }
         }
-        let hover_ms = crate::perf::elapsed_ms(Some(hover_started));
+        let hover_ms = crate::perf::elapsed_ms(hover_started);
         if hover_ms >= 8.0 {
             crate::perf_record!(
                 "[perf] trim-hover-total {hover_ms:.2}ms cached_cuts={} wires={}",
@@ -5803,7 +5839,7 @@ mod tests {
     #[test]
     fn crowded_crossing_preview_is_skipped_but_does_not_affect_final_cut() {
         let mut all: Vec<_> = (0..70)
-            .map(|i| xline_at(-2.0, i as f64 * 0.1, 12.0, i as f64 * 0.1, i + 1))
+            .map(|i| xline_at(-2.0, 1.0 + i as f64 * 0.1, 12.0, 1.0 + i as f64 * 0.1, i + 1))
             .collect();
         all.push(xline_at(5.0, -2.0, 5.0, 12.0, 100));
         let index = ModifyEntityIndex::build(&all);

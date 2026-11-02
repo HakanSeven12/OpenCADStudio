@@ -51,12 +51,15 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
         .read_to_string()
         .ok()?;
     let metadata: serde_json::Value = serde_json::from_str(&body).ok()?;
-    let suffix = if cfg!(target_os = "windows") {
-        "-windows-x86_64-portable.exe"
-    } else if cfg!(target_os = "macos") {
-        "-macos-arm64.dmg"
-    } else {
-        "-linux-x86_64.AppImage"
+    // This build's own platform and processor.
+    let arm = cfg!(target_arch = "aarch64");
+    let suffix = match (cfg!(target_os = "windows"), cfg!(target_os = "macos"), arm) {
+        (true, _, false) => "-windows-x86_64-portable.exe",
+        (true, _, true) => "-windows-arm64-portable.exe",
+        (_, true, true) => "-macos-arm64.dmg",
+        (_, true, false) => "-macos-x86_64.dmg",
+        (_, _, false) => "-linux-x86_64.AppImage",
+        (_, _, true) => "-linux-aarch64.AppImage",
     };
     if !metadata.get("assets")?.as_array()?.iter().any(|asset| {
         asset

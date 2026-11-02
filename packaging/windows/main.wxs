@@ -14,7 +14,7 @@
       Keywords='!(loc.Installer)'
       Description='!(loc.InstallerDescription)'
       Manufacturer='Hakan Seven'
-      InstallerVersion='450'
+      InstallerVersion='500'
       Languages='1033'
       Compressed='yes'
       InstallScope='perMachine'
@@ -62,7 +62,7 @@
               Id='DwgThumbDll'
               Name='dwg_thumbnailer_win.dll'
               DiskId='1'
-              Source='target\release\dwg_thumbnailer_win.dll' />
+              Source='$(var.ThumbDll)' />
             <ProgId
               Id='OpenCADStudio.DWG'
               Description='!(loc.DwgDrawing)'

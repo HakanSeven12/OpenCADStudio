@@ -2309,7 +2309,7 @@ impl OpenCADStudio {
             // The frozen grip-reference geometry deliberately stays out, so it cannot
             // pull the edited point back onto its old shape.
             self.sync_osnap_z_plane(i);
-            let snap_hit = self.snapper.snap(
+            let snap_hit = self.snapper.snap_stable(
                 raw,
                 p,
                 &snap_candidates,
@@ -2319,6 +2319,7 @@ impl OpenCADStudio {
                 go,
                 gr,
                 construction_ray,
+                self.tabs[i].snap_result,
             );
 
             // The frozen pre-drag geometry gets a SECOND snap pass, limited to
@@ -2911,7 +2912,7 @@ impl OpenCADStudio {
             );
             let (go, gr) = self.drafting_grid_basis(i);
             self.sync_osnap_z_plane(i);
-            let snap_hit = self.snapper.snap(
+            let snap_hit = self.snapper.snap_stable(
                 cursor_world,
                 p,
                 &snap_candidates,
@@ -2921,6 +2922,7 @@ impl OpenCADStudio {
                 go,
                 gr,
                 None,
+                self.tabs[i].snap_result,
             );
             self.tabs[i].snap_result = snap_hit;
             self.tabs[i].last_cursor_world = snap_hit.map(|hit| hit.world).unwrap_or(cursor_world);
@@ -3052,7 +3054,10 @@ impl OpenCADStudio {
                 let evaluation_started = crate::perf::enabled().then(Instant::now);
                 let snap =
                     self.snapper
-                        .snap_discrete_preview(p, &snap_candidates, view_rot, eye, bounds);
+                        .snap_discrete_preview_stable(
+                            p, &snap_candidates, view_rot, eye, bounds,
+                            self.tabs[i].snap_result,
+                        );
                 if crate::perf::enabled() {
                     let evaluation_ms = crate::perf::elapsed_ms(evaluation_started);
                     let feature_count = snap_candidates
@@ -3380,7 +3385,7 @@ impl OpenCADStudio {
                 let additional_rays =
                     tracking_probe.map(|track| [(track.base, track.base + track.dir)]);
 
-                self.snapper.snap_with_additional_construction_rays(
+                self.snapper.snap_with_additional_construction_rays_stable(
                     snap_cursor,
                     p,
                     &snap_candidates,
@@ -3391,6 +3396,7 @@ impl OpenCADStudio {
                     gr,
                     construction_ray,
                     additional_rays.as_ref().map_or(&[], |rays| rays.as_slice()),
+                    self.tabs[i].snap_result,
                 )
             };
             // Restore discrete snap targets from STRETCH's original snapshot
@@ -5999,7 +6005,7 @@ impl OpenCADStudio {
                     let additional_rays =
                         tracking_probe.map(|track| [(track.base, track.base + track.dir)]);
 
-                    self.snapper.snap_with_additional_construction_rays(
+                    self.snapper.snap_with_additional_construction_rays_stable(
                         snap_cursor,
                         p,
                         &snap_candidates,
@@ -6010,6 +6016,7 @@ impl OpenCADStudio {
                         gr,
                         construction_ray,
                         additional_rays.as_ref().map_or(&[], |rays| rays.as_slice()),
+                        self.tabs[i].snap_result,
                     )
                 };
                 // Paper-space snapping through layout viewports. Mirrors

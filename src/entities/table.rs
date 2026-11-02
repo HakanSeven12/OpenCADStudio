@@ -1085,17 +1085,27 @@ pub(crate) fn block_cell_inserts(
                         has_block_bounds = true;
                     }
                 }
+                // A cell's margin: its style override, else the table's.
+                let (table_h_margin, table_v_margin) = resolved_table_margins(
+                    table,
+                    table.table_style_handle.and_then(|handle| {
+                        match document.objects.get(&handle) {
+                            Some(codec::objects::ObjectType::TableStyle(style)) => Some(style),
+                            _ => None,
+                        }
+                    }),
+                );
                 let margin = |property| {
-                    style_for_property(table, row, column_index, cell, property).map(|style| {
-                        use codec::entities::table::CellStylePropertyFlags as P;
-                        match property {
+                    use codec::entities::table::CellStylePropertyFlags as P;
+                    let horizontal = matches!(property, P::MARGIN_LEFT | P::MARGIN_RIGHT);
+                    style_for_property(table, row, column_index, cell, property)
+                        .map(|style| match property {
                             P::MARGIN_LEFT => style.margin_left,
                             P::MARGIN_RIGHT => style.margin_right,
                             P::MARGIN_TOP => style.margin_top,
                             _ => style.margin_bottom,
-                        }
-                    })
-                    .unwrap_or(0.0)
+                        })
+                        .unwrap_or(if horizontal { table_h_margin } else { table_v_margin })
                         * anno_scale as f64
                 };
                 let margin_left = margin(codec::entities::table::CellStylePropertyFlags::MARGIN_LEFT);

@@ -1445,6 +1445,22 @@ impl OpenCADStudio {
             }
         }
         let size = (max - min).max(glam::DVec2::ZERO);
+        // The table's own vertical margin where a cell does not override it.
+        let table_v_margin = self.tabs[i].scene.table_cells.and_then(|cells| {
+            match document.get_entity(cells.table) {
+                Some(codec::EntityType::Table(table)) => {
+                    let style = table.table_style_handle.and_then(|handle| {
+                        match document.objects.get(&handle) {
+                            Some(codec::objects::ObjectType::TableStyle(style)) => Some(style),
+                            _ => None,
+                        }
+                    });
+                    Some(crate::entities::table::resolved_table_margins(table, style).1)
+                }
+                _ => None,
+            }
+        });
+        let table_v_margin = table_v_margin.unwrap_or(0.0);
         let scale = crate::entities::common::parse_f64(&state.scale)
             .filter(|v| *v > 0.0)
             .unwrap_or(1.0);
@@ -1478,7 +1494,7 @@ impl OpenCADStudio {
                                     style.margin_bottom
                                 }
                             })
-                            .unwrap_or(0.0)
+                            .unwrap_or(table_v_margin)
                     };
                     margin(P::MARGIN_TOP) + margin(P::MARGIN_BOTTOM)
                 });

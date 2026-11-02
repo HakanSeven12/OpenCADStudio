@@ -534,17 +534,9 @@ impl OpenCADStudio {
                     changed
                 });
             }
-            "_TCELLFORMAT" if rest.is_empty() => {
-                let command = KeywordCommand::new(
-                    "_TCELLFORMAT",
-                    "Enter data format [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:",
-                    FORMATS
-                        .iter()
-                        .map(|(label, keyword)| (*label, *keyword, None))
-                        .collect(),
-                );
-                start(self, Box::new(command));
-            }
+            // Data Format and Insert Block open their windows; the keyword
+            // forms stay for scripts.
+            "_TCELLFORMAT" if rest.is_empty() => self.open_cell_format(i),
             "_TCELLFORMAT" => {
                 let name = FORMATS
                     .iter()
@@ -573,15 +565,7 @@ impl OpenCADStudio {
             }
             // Insert Block: the named block becomes the content of the picked
             // cells; `?` lists the blocks.
-            "_TCELLBLOCK" if rest.is_empty() => {
-                start(
-                    self,
-                    Box::new(crate::command::FreeTextValuePromptCommand::new(
-                        "_TCELLBLOCK",
-                        "Enter block name or [?]:",
-                    )),
-                );
-            }
+            "_TCELLBLOCK" if rest.is_empty() => self.open_cell_block(i),
             "_TCELLBLOCK" => {
                 let document = &self.tabs[i].scene.document;
                 if rest == "?" {
@@ -803,13 +787,15 @@ impl OpenCADStudio {
             return;
         };
         let document = &self.tabs[i].scene.document;
-        let (r0, c0, r1, c1) = match document.get_entity(cells.table) {
-            Some(codec::EntityType::Table(table)) => {
-                crate::entities::table::widen_to_merged(table, cells.range())
-            }
+        let ((r0, c0, r1, c1), spacing) = match document.get_entity(cells.table) {
+            Some(codec::EntityType::Table(table)) => (
+                crate::entities::table::widen_to_merged(table, cells.range()),
+                // A quarter of the data text height, as the reference opens it.
+                0.25 * crate::entities::table::data_text_height(table, document),
+            ),
             _ => return,
         };
-        let mut lineweights = vec!["ByLayer".to_string(), "ByBlock".into(), "Default".into()];
+        let mut lineweights = vec!["ByLayer".to_string(), "ByBlock".into()];
         lineweights.extend(
             LINEWEIGHTS
                 .iter()
@@ -829,14 +815,14 @@ impl OpenCADStudio {
             lineweights,
             lineweight: "ByBlock".into(),
             linetypes,
-            linetype: "ByBlock".into(),
+            linetype: "ByLayer".into(),
             colors: crate::entities::table::CELL_COLOR_NAMES
                 .iter()
                 .map(|name| name.to_string())
                 .collect(),
             color: "ByBlock".into(),
             double: false,
-            spacing: crate::entities::common::format_length(0.18),
+            spacing: crate::entities::common::format_length(spacing),
             sets: vec![BorderSet::All],
             rows: r1 + 1 - r0,
             columns: c1 + 1 - c0,
@@ -870,11 +856,7 @@ impl OpenCADStudio {
                         .unwrap_or_default();
                     crate::tr!("table-cells", "block-item", name = name)
                 }
-                None => crate::tr!(
-                    "table-cells",
-                    "text-item",
-                    text = content.value.display().replace("\\P", " ")
-                ),
+                None => crate::tr!("table-cells", "text-content"),
             })
             .collect();
         let style = cell.style.as_ref().filter(|style| {
@@ -894,7 +876,7 @@ impl OpenCADStudio {
                     style.horizontal_spacing
                 }
             })
-            .unwrap_or(0.0);
+            .unwrap_or_else(|| crate::entities::table::data_text_height(table, document));
         self.table_cell_contents = Some(CellContentsState {
             order: (0..items.len()).collect(),
             items,
@@ -941,6 +923,101 @@ impl OpenCADStudio {
                     self.apply_cell_borders(i, &state);
                 }
                 _ => {}
+            }
+            return Task::none();
+        }
+        if let Some(state) = self.table_cell_block.as_mut().filter(|_| {
+            self.active_modal == Some(crate::app::ModalKind::TableCellBlock)
+        }) {
+            match message {
+                M::BlockName(name) => {
+                    state.name = name;
+                    state.path.clear();
+                }
+                M::BlockPath(path) => {
+                    state.name = std::path::Path::new(&path)
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    state.path = path;
+                }
+                M::BlockBrowse => {
+                    return Task::perform(
+                        async {
+                            rfd::AsyncFileDialog::new()
+                                .add_filter("Drawing", &["dwg", "dxf"])
+                                .pick_file()
+                                .await
+                                .map(|h| crate::sys::handle_path(&h))
+                        },
+                        |path| match path {
+                            Some(path) => Message::TableCellDialog(M::BlockPath(
+                                path.to_string_lossy().into_owned(),
+                            )),
+                            None => Message::Noop,
+                        },
+                    );
+                }
+                M::Align(alignment) => state.alignment = alignment.clamp(1, 9),
+                M::BlockScale(value) => state.scale = value,
+                M::AutoFit(on) => state.autofit = on,
+                M::BlockRotation(value) => state.rotation = value,
+                M::Help => self
+                    .command_line
+                    .push_info(crate::tr!("table-cells", "block-help").as_str()),
+                M::Ok => {
+                    let state = self.table_cell_block.take().expect("open");
+                    self.close_active_modal();
+                    self.apply_cell_block(i, state);
+                }
+                _ => {}
+            }
+            return Task::none();
+        }
+        if let Some(state) = self.table_cell_format.as_mut().filter(|_| {
+            self.active_modal == Some(crate::app::ModalKind::TableCellFormat)
+        }) {
+            match message {
+                M::FormatKind(kind) => {
+                    state.kind = kind.min(8);
+                    state.unit = 0;
+                    state.precision = if matches!(state.kind, 1 | 5) { 3 } else { 0 };
+                    state.append = state.kind == 5;
+                }
+                M::FormatUnit(unit) => state.unit = unit,
+                M::Precision(value) => {
+                    state.precision = if value.contains('.') {
+                        value.len() - 1
+                    } else if value == "0" {
+                        1
+                    } else {
+                        0
+                    };
+                }
+                M::Symbol(value) => state.symbol = value,
+                M::Append(on) => state.append = on,
+                M::Negative(on) => state.negative_parens = on,
+                M::Separator(index) => state.separator = index.min(2),
+                M::Axis(axis) => {
+                    if let Some(on) = state.axes.get_mut(axis) {
+                        *on = !*on;
+                    }
+                }
+                M::DateFormat(value) => state.date = value,
+                M::Help => self
+                    .command_line
+                    .push_info(crate::tr!("table-cells", "format-help").as_str()),
+                M::Ok => {
+                    let state = self.table_cell_format.take().expect("open");
+                    self.close_active_modal();
+                    self.apply_cell_format(i, &state);
+                    return Task::none();
+                }
+                _ => {}
+            }
+            let preview = format_preview(&self.tabs[i].scene.document, state);
+            if let Some(state) = self.table_cell_format.as_mut() {
+                state.preview = preview;
             }
             return Task::none();
         }
@@ -1134,4 +1211,368 @@ fn parse_points(text: &str) -> Vec<glam::DVec3> {
         .chunks_exact(3)
         .map(|v| glam::DVec3::new(v[0], v[1], v[2]))
         .collect()
+}
+
+/// The preview of the Cell Data Format settings: a sample of the chosen data
+/// type, formatted as the cells will read.
+fn format_preview(
+    document: &codec::Document,
+    state: &crate::ui::window::table_cell_dialog::CellFormatState,
+) -> String {
+    let picture = state.picture();
+    match state.kind {
+        0 => document.format_with_picture(2.103, if picture.is_empty() { "%au5" } else { &picture }),
+        1 | 3 | 5 => {
+            let sample = match state.kind {
+                1 => -1234.1,
+                3 => 845.34786,
+                _ => 12.34,
+            };
+            if picture.is_empty() {
+                sample.to_string()
+            } else {
+                document.format_with_picture(sample, &picture)
+            }
+        }
+        2 => {
+            let picture = if picture.is_empty() { "M/d/yyyy" } else { &picture };
+            codec::fields::format_dt((2026, 11, 2, 14, 30, 0), picture)
+        }
+        6 => document.format_point_with_picture([2.58, 5.37, 0.0], &picture),
+        8 => "1234".to_string(),
+        _ => crate::tr!("table-cells", "sample-text"),
+    }
+}
+
+/// A cell value read as the chosen data type and formatted by `picture`, as
+/// the reference converts it: typed numbers become numbers, angles typed in
+/// degrees are kept in radians, whole numbers drop their fraction. `None`
+/// keeps the value (dates, points from text, empty cells).
+fn formatted_cell_value(
+    document: &codec::Document,
+    value: &codec::entities::table::CellValue,
+    kind: usize,
+    picture: &str,
+) -> Option<codec::entities::table::CellValue> {
+    use codec::entities::table::{CellValueType as V, ValueUnitType as U};
+    let number = match value.value_type {
+        V::Long | V::Double => Some(value.numeric_value),
+        _ => value.display().trim().replace(',', "").parse::<f64>().ok(),
+    };
+    let mut next = value.clone();
+    next.format = picture.to_string();
+    let (value_type, unit, numeric, text) = match kind {
+        0 => {
+            let radians = if value.value_type == V::Double && value.unit_type == U::Angle {
+                number?
+            } else {
+                number?.to_radians()
+            };
+            let picture = if picture.is_empty() { "%au5" } else { picture };
+            (V::Double, U::Angle, radians, document.format_with_picture(radians, picture))
+        }
+        1 | 3 | 5 => {
+            let number = number?;
+            let unit = match kind {
+                1 => U::Currency,
+                5 => U::Percentage,
+                _ => U::NoUnits,
+            };
+            let text = if picture.is_empty() {
+                value.display().trim().to_string()
+            } else {
+                document.format_with_picture(number, picture)
+            };
+            (V::Double, unit, number, text)
+        }
+        6 => match value.value_type {
+            V::Point2D | V::Point3D => {
+                let p = value.point_value;
+                let text = document.format_point_with_picture([p.x, p.y, p.z], picture);
+                (value.value_type, U::NoUnits, 0.0, text)
+            }
+            _ => return None,
+        },
+        7 => {
+            let text = value.display().to_string();
+            (V::String, U::NoUnits, 0.0, text)
+        }
+        8 => {
+            let whole = number?.trunc();
+            (V::Long, U::NoUnits, whole, format!("{}", whole as i64))
+        }
+        _ => return None,
+    };
+    next.value_type = value_type;
+    next.raw_type_code = value_type as i32;
+    next.unit_type = unit;
+    next.raw_unit_type_code = unit as i32;
+    next.numeric_value = numeric;
+    next.formatted_value = if value_type == V::String { String::new() } else { text.clone() };
+    next.text = text;
+    Some(next)
+}
+
+impl OpenCADStudio {
+    fn open_cell_block(&mut self, i: usize) {
+        use crate::ui::window::table_cell_dialog::CellBlockState;
+        let Some(cells) = self.tabs[i].scene.table_cells else {
+            return;
+        };
+        let document = &self.tabs[i].scene.document;
+        let mut names: Vec<String> = document
+            .block_records
+            .iter()
+            .filter(|record| !record.name.starts_with('*'))
+            .filter(|record| {
+                !record.name.eq_ignore_ascii_case("Model_Space")
+                    && !record.name.to_ascii_lowercase().starts_with("paper_space")
+            })
+            .map(|record| record.name.clone())
+            .collect();
+        names.sort_by_key(|name| name.to_ascii_lowercase());
+        // The picked cell's block, when it already holds one.
+        let current = match document.get_entity(cells.table) {
+            Some(codec::EntityType::Table(table)) => {
+                let (r0, c0, _, _) = crate::entities::table::widen_to_merged(table, cells.range());
+                table.cell(r0, c0).and_then(|cell| {
+                    let content = cell.contents.iter().find(|c| c.block_handle.is_some())?;
+                    let name = document
+                        .block_records
+                        .iter()
+                        .find(|record| Some(record.handle) == content.block_handle)?
+                        .name
+                        .clone();
+                    Some((name, content.scale, content.rotation, cell.auto_fit))
+                })
+            }
+            _ => None,
+        };
+        let (name, scale, rotation, autofit) = current.unwrap_or_else(|| {
+            (names.first().cloned().unwrap_or_default(), 1.0, 0.0, true)
+        });
+        self.table_cell_block = Some(CellBlockState {
+            names,
+            name,
+            path: String::new(),
+            alignment: 1,
+            scale: crate::entities::common::format_length(if scale > 0.0 { scale } else { 1.0 }),
+            autofit,
+            rotation: crate::entities::common::format_length(rotation.to_degrees()),
+        });
+        self.active_modal = Some(crate::app::ModalKind::TableCellBlock);
+        self.reset_modal_geometry();
+    }
+
+    fn open_cell_format(&mut self, i: usize) {
+        use crate::ui::window::table_cell_dialog::{CellFormatState, FORMAT_KINDS};
+        let Some(cells) = self.tabs[i].scene.table_cells else {
+            return;
+        };
+        let document = &self.tabs[i].scene.document;
+        let Some(codec::EntityType::Table(table)) = document.get_entity(cells.table) else {
+            return;
+        };
+        let (r0, c0, _, _) = crate::entities::table::widen_to_merged(table, cells.range());
+        let category = table
+            .cell(r0, c0)
+            .and_then(|cell| cell.style.as_ref())
+            .filter(|style| {
+                style
+                    .property_flags
+                    .contains(codec::entities::table::CellStylePropertyFlags::DATA_TYPE)
+            })
+            .map(|style| {
+                crate::entities::table::cell_data_category(
+                    style.value_data_type,
+                    style.value_unit_type,
+                )
+            })
+            .unwrap_or("General");
+        let kind = FORMAT_KINDS.iter().position(|name| *name == category).unwrap_or(4);
+        let mut state = CellFormatState {
+            kind,
+            unit: 0,
+            precision: if matches!(kind, 1 | 5) { 3 } else { 0 },
+            symbol: "$".into(),
+            append: kind == 5,
+            negative_parens: false,
+            separator: 0,
+            axes: [true; 3],
+            date: String::new(),
+            preview: String::new(),
+        };
+        state.preview = format_preview(document, &state);
+        self.table_cell_format = Some(state);
+        self.active_modal = Some(crate::app::ModalKind::TableCellFormat);
+        self.reset_modal_geometry();
+    }
+
+    /// The Cell Block settings on the picked cells: the block as their
+    /// content, the cell alignment, and the scale (or fitted to the cell)
+    /// and rotation. A block that does not fit grows its row.
+    fn apply_cell_block(&mut self, i: usize, state: crate::ui::window::table_cell_dialog::CellBlockState) {
+        let name = if state.path.is_empty() {
+            state.name.clone()
+        } else {
+            match self.import_file_as_block(std::path::PathBuf::from(&state.path)) {
+                Ok(name) => name,
+                Err(error) => {
+                    self.command_line.push_error(&error);
+                    return;
+                }
+            }
+        };
+        let document = &self.tabs[i].scene.document;
+        let Some(record) = document
+            .block_records
+            .iter()
+            .find(|record| record.name.eq_ignore_ascii_case(&name))
+        else {
+            self.command_line
+                .push_error(crate::tf!("Block \"{}\" not found.", name).as_ref());
+            return;
+        };
+        let block = record.handle;
+        let (mut min, mut max) = (glam::DVec2::splat(f64::MAX), glam::DVec2::splat(f64::MIN));
+        for handle in &record.entity_handles {
+            if let Some(entity) = document.get_entity(*handle) {
+                let bounds = entity.as_entity().bounding_box();
+                if bounds.min.x.is_finite() && bounds.max.x.is_finite() {
+                    min = min.min(glam::DVec2::new(bounds.min.x, bounds.min.y));
+                    max = max.max(glam::DVec2::new(bounds.max.x, bounds.max.y));
+                }
+            }
+        }
+        let size = (max - min).max(glam::DVec2::ZERO);
+        let scale = crate::entities::common::parse_f64(&state.scale)
+            .filter(|v| *v > 0.0)
+            .unwrap_or(1.0);
+        let rotation = crate::entities::common::parse_f64(&state.rotation)
+            .unwrap_or(0.0)
+            .to_radians();
+        let (sin, cos) = rotation.sin_cos();
+        let rotated_height = (size.x * sin).abs() + (size.y * cos).abs();
+        let picked = self.picked_cell_positions(i);
+        let autofit = state.autofit;
+        let alignment = state.alignment;
+        self.edit_picked_table(i, "TABLE CELL BLOCK", |table| {
+            use codec::entities::table::CellStylePropertyFlags as P;
+            let mut changed = false;
+            for &(row, column) in &picked {
+                let editable = table.cell(row, column).is_some_and(|cell| {
+                    !cell
+                        .state
+                        .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
+                });
+                if !editable {
+                    continue;
+                }
+                let margins = table.rows.get(row).zip(table.cell(row, column)).map(|(r, cell)| {
+                    let margin = |property: P| {
+                        crate::entities::table::style_for_property(table, r, column, cell, property)
+                            .map(|style| {
+                                if property == P::MARGIN_TOP {
+                                    style.margin_top
+                                } else {
+                                    style.margin_bottom
+                                }
+                            })
+                            .unwrap_or(0.0)
+                    };
+                    margin(P::MARGIN_TOP) + margin(P::MARGIN_BOTTOM)
+                });
+                let Some(cell) = table.cell_mut(row, column) else {
+                    continue;
+                };
+                let mut content = codec::entities::table::CellContent::block(block);
+                content.scale = scale;
+                content.rotation = rotation;
+                content.format_property_flags |= (P::BLOCK_SCALE | P::ROTATION).bits() as i32;
+                cell.contents = vec![content];
+                cell.cell_type = codec::entities::table::CellType::Block;
+                cell.auto_fit = autofit;
+                let style = cell.style.get_or_insert_with(Default::default);
+                style.alignment = alignment;
+                style.property_flags.insert(P::ALIGNMENT);
+                if !autofit {
+                    let needed = rotated_height * scale + margins.unwrap_or(0.0);
+                    if let Some(r) = table.rows.get_mut(row) {
+                        if r.height < needed {
+                            r.height = needed;
+                        }
+                    }
+                }
+                changed = true;
+            }
+            changed
+        });
+    }
+
+    /// The Cell Data Format settings on the picked cells: the data type and
+    /// format go into each cell's style, and its value is converted and
+    /// shown in the format.
+    fn apply_cell_format(
+        &mut self,
+        i: usize,
+        state: &crate::ui::window::table_cell_dialog::CellFormatState,
+    ) {
+        use crate::ui::window::table_cell_dialog::FORMAT_KINDS;
+        let picture = state.picture();
+        let Some(&(_, data_type, unit_type)) = crate::entities::table::CELL_DATA_CATEGORIES
+            .iter()
+            .find(|(name, _, _)| *name == FORMAT_KINDS[state.kind.min(8)])
+        else {
+            return;
+        };
+        let picked = self.picked_cell_positions(i);
+        let Some(cells) = self.tabs[i].scene.table_cells else {
+            return;
+        };
+        let document = &self.tabs[i].scene.document;
+        let values: Vec<((usize, usize), Option<codec::entities::table::CellValue>)> =
+            match document.get_entity(cells.table) {
+                Some(codec::EntityType::Table(table)) => picked
+                    .iter()
+                    .map(|&(row, column)| {
+                        let value = table
+                            .cell(row, column)
+                            .and_then(|cell| cell.contents.first())
+                            .filter(|content| {
+                                content.block_handle.is_none() && content.field_handle.is_none()
+                            })
+                            .and_then(|content| {
+                                formatted_cell_value(document, &content.value, state.kind, &picture)
+                            });
+                        ((row, column), value)
+                    })
+                    .collect(),
+                _ => return,
+            };
+        self.edit_picked_table(i, "TABLE CELL FORMAT", |table| {
+            use codec::entities::table::CellStylePropertyFlags as P;
+            let mut changed = false;
+            for ((row, column), value) in values {
+                let Some(cell) = table.cell_mut(row, column) else {
+                    continue;
+                };
+                if cell
+                    .state
+                    .intersects(CellStateFlags::FORMAT_LOCKED | CellStateFlags::FORMAT_READ_ONLY)
+                {
+                    continue;
+                }
+                let style = cell.style.get_or_insert_with(Default::default);
+                style.value_data_type = data_type;
+                style.value_unit_type = unit_type;
+                style.value_format = picture.clone();
+                style.property_flags.insert(P::DATA_TYPE | P::DATA_FORMAT);
+                if let (Some(value), Some(content)) = (value, cell.contents.first_mut()) {
+                    content.value = value;
+                }
+                changed = true;
+            }
+            changed
+        });
+    }
 }

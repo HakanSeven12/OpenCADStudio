@@ -172,7 +172,7 @@ fn merged_owner_and_span(
 }
 
 /// The cell style a cell draws with (0 Title, 1 Header, 2 Data): its own
-/// cell style, else its row's, else its column's (ids 1/2/3 as the file
+/// cell style, else its column's, else its row's (ids 1/2/3 as the file
 /// stores them), else the role of its row — title, header, then data.
 pub fn cell_role_kind(
     table: &Table,
@@ -185,8 +185,8 @@ pub fn cell_role_kind(
     table
         .cell(row, column)
         .and_then(|cell| explicit(cell.style_id))
-        .or_else(|| table.rows.get(row).and_then(|r| explicit(r.style_id)))
         .or_else(|| table.columns.get(column).and_then(|c| explicit(c.style_id)))
+        .or_else(|| table.rows.get(row).and_then(|r| explicit(r.style_id)))
         .unwrap_or(match (title_suppressed, header_suppressed, row) {
             (false, _, 0) => 0,
             (false, false, 1) | (true, false, 0) => 1,
@@ -222,7 +222,9 @@ pub(crate) fn style_for_property<'a>(
         .columns
         .get(column)
         .and_then(|column| column.style.as_ref());
-    for style in [row.style.as_ref(), column_style, table.base_style.as_ref()]
+    // A column's style wins over its row's (measured with named cell styles
+    // on both: the column's applies where they cross).
+    for style in [column_style, row.style.as_ref(), table.base_style.as_ref()]
         .into_iter()
         .flatten()
     {
@@ -414,15 +416,19 @@ pub(crate) fn resolved_break_spacing(table: &Table, document: &codec::Document) 
     if table.break_spacing > 0.0 {
         return table.break_spacing;
     }
-    let data_height = table
+    let data_height = if table.rows.len() > 2 { data_text_height(table, document) } else { 0.18 };
+    5.5 * data_height
+}
+
+/// The text height of the table style's data cells (0.18 without a style).
+pub(crate) fn data_text_height(table: &Table, document: &codec::Document) -> f64 {
+    table
         .table_style_handle
         .and_then(|handle| match document.objects.get(&handle) {
             Some(codec::objects::ObjectType::TableStyle(style)) => Some(style),
             _ => None,
         })
-        .filter(|_| table.rows.len() > 2)
-        .map_or(0.18, |style| style.data_row_style.text_height);
-    5.5 * data_height
+        .map_or(0.18, |style| style.data_row_style.text_height)
 }
 
 fn table_break_segments(
@@ -1010,7 +1016,7 @@ pub(crate) fn block_cell_inserts(
                         x = column_left + (index + 0.5) * (column_right - column_left) / count;
                     }
                 }
-                let position =
+                let mut position =
                     origin + h * x + flow * y + v3(&table.normal).normalize_or(Vec3::Z) * z;
                 let scale_style = style_for_property(
                     table,
@@ -1077,53 +1083,31 @@ pub(crate) fn block_cell_inserts(
                         has_block_bounds = true;
                     }
                 }
+                let margin = |property| {
+                    style_for_property(table, row, column_index, cell, property).map(|style| {
+                        use codec::entities::table::CellStylePropertyFlags as P;
+                        match property {
+                            P::MARGIN_LEFT => style.margin_left,
+                            P::MARGIN_RIGHT => style.margin_right,
+                            P::MARGIN_TOP => style.margin_top,
+                            _ => style.margin_bottom,
+                        }
+                    })
+                    .unwrap_or(0.0)
+                        * anno_scale as f64
+                };
+                let margin_left = margin(codec::entities::table::CellStylePropertyFlags::MARGIN_LEFT);
+                let margin_right = margin(codec::entities::table::CellStylePropertyFlags::MARGIN_RIGHT);
+                let margin_top = margin(codec::entities::table::CellStylePropertyFlags::MARGIN_TOP);
+                let margin_bottom =
+                    margin(codec::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM);
                 if auto_scale && has_block_bounds {
-                    let min = block_min;
-                    let max = block_max;
-                    let width = (max.x - min.x).abs();
-                    let height = (max.y - min.y).abs();
-                    let margin_left = style_for_property(
-                        table,
-                        row,
-                        column_index,
-                        cell,
-                        codec::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
-                    )
-                    .map(|style| style.margin_left)
-                    .unwrap_or(0.0);
-                    let margin_right = style_for_property(
-                        table,
-                        row,
-                        column_index,
-                        cell,
-                        codec::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
-                    )
-                    .map(|style| style.margin_right)
-                    .unwrap_or(0.0);
-                    let margin_top = style_for_property(
-                        table,
-                        row,
-                        column_index,
-                        cell,
-                        codec::entities::table::CellStylePropertyFlags::MARGIN_TOP,
-                    )
-                    .map(|style| style.margin_top)
-                    .unwrap_or(0.0);
-                    let margin_bottom = style_for_property(
-                        table,
-                        row,
-                        column_index,
-                        cell,
-                        codec::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
-                    )
-                    .map(|style| style.margin_bottom)
-                    .unwrap_or(0.0);
-                    let fit_x = ((column_right - column_left) as f64
-                        - (margin_left + margin_right) * anno_scale as f64)
+                    let width = (block_max.x - block_min.x).abs();
+                    let height = (block_max.y - block_min.y).abs();
+                    let fit_x = ((column_right - column_left) as f64 - margin_left - margin_right)
                         .max(0.0)
                         / width.max(1e-9);
-                    let fit_y = ((row_bottom - row_top) as f64
-                        - (margin_top + margin_bottom) * anno_scale as f64)
+                    let fit_y = ((row_bottom - row_top) as f64 - margin_top - margin_bottom)
                         .max(0.0)
                         / height.max(1e-9);
                     scale *= fit_x.min(fit_y);
@@ -1146,6 +1130,45 @@ pub(crate) fn block_cell_inserts(
                         .unwrap_or(cell.rotation)
                 };
                 let rotation = table_rotation + content_rotation;
+                // A lone block sits where the cell's alignment puts it: its
+                // rotated, scaled extents against the cell's margins.
+                if has_block_bounds && count <= 1.0 && resolved_content_geometry(
+                    document,
+                    table,
+                    row_index,
+                    column_index,
+                    cell,
+                    content_index,
+                )
+                .is_none()
+                {
+                    let alignment = style_for_property(
+                        table,
+                        row,
+                        column_index,
+                        cell,
+                        codec::entities::table::CellStylePropertyFlags::ALIGNMENT,
+                    )
+                    .map(|style| style.alignment)
+                    .unwrap_or(5);
+                    let (sin, cos) = content_rotation.sin_cos();
+                    let width = (block_max.x - block_min.x).abs() * scale;
+                    let height = (block_max.y - block_min.y).abs() * scale;
+                    let half_x = ((width * cos).abs() + (height * sin).abs()) * 0.5;
+                    let half_y = ((width * sin).abs() + (height * cos).abs()) * 0.5;
+                    let cell_x = match (alignment - 1).rem_euclid(3) {
+                        0 => column_left as f64 + margin_left + half_x,
+                        2 => column_right as f64 - margin_right - half_x,
+                        _ => (column_left + column_right) as f64 * 0.5,
+                    };
+                    let cell_y = match (alignment - 1).div_euclid(3) {
+                        0 => row_top as f64 + margin_top + half_y,
+                        2 => row_bottom as f64 - margin_bottom - half_y,
+                        _ => (row_top + row_bottom) as f64 * 0.5,
+                    };
+                    let shift = h * (cell_x as f32 - x) + flow * (cell_y as f32 - y);
+                    position = position + shift;
+                }
                 let mut insert = Insert::new(
                     record.name.clone(),
                     Vector3::new(position.x as f64, position.y as f64, position.z as f64),
@@ -4117,7 +4140,19 @@ pub fn table_indicator(
         .map_or_else(|| "Standard".to_string(), |s| s.name.clone());
     let style = crate::entities::text_support::resolve_text_style(&style_name, document);
     let text_h = text_height as f32;
-    let digits = layout_mtext(&MTextRenderOpts {
+    // The row numbers' column: three of the font's widest digits, out to
+    // the last one's ink (measured: txt 12, romans 12.21, Arial ~10.2 at
+    // height 4.5), plus the cell margins.
+    let ink = crate::entities::text_support::text_local_bounds(
+        &style.font_name,
+        "888",
+        text_h,
+        style.width_factor,
+        0.0,
+    )
+    .map(|bounds| bounds.ink_max[0])
+    .filter(|right| *right > 0.0);
+    let digits = ink.unwrap_or_else(|| layout_mtext(&MTextRenderOpts {
         columns: Default::default(),
         value: "000",
         insertion: [0.0; 3],
@@ -4136,7 +4171,7 @@ pub fn table_indicator(
     .line_widths
     .first()
     .copied()
-    .unwrap_or(text_h * 3.0);
+    .unwrap_or(text_h * 3.0));
     let band_h = text_h + 2.0 * vm as f32;
     let band_w = digits + 2.0 * hm as f32;
     let range = range.map(|r| widen_to_merged(tab, r));

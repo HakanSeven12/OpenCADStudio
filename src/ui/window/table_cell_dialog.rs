@@ -1,6 +1,8 @@
 //! Picked table cell windows: Cell Borders (line properties and the edges of
-//! the picked range they go on) and Cell Contents (the contents of a cell,
-//! their order and how they are laid out).
+//! the picked range they go on), Cell Contents (the contents of a cell,
+//! their order and how they are laid out), Cell Block (a block as the
+//! content of the picked cells) and Cell Data Format (how their values
+//! read).
 
 use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
 use iced::{Element, Fill, Length};
@@ -39,6 +41,22 @@ pub enum TableCellDialogMsg {
     Delete,
     Layout(u32),
     ContentSpacing(String),
+    BlockName(String),
+    BlockBrowse,
+    BlockPath(String),
+    Align(i32),
+    BlockScale(String),
+    AutoFit(bool),
+    BlockRotation(String),
+    FormatKind(usize),
+    FormatUnit(usize),
+    Precision(String),
+    Symbol(String),
+    Append(bool),
+    Negative(bool),
+    Separator(usize),
+    Axis(usize),
+    DateFormat(String),
     Help,
     Ok,
 }
@@ -350,6 +368,401 @@ pub fn view_contents<'a>(
         .spacing(8),
     );
     column![contents, layout, footer()]
+        .spacing(10)
+        .padding([10, 12])
+        .width(sizing.width)
+        .into()
+}
+
+pub struct CellBlockState {
+    pub names: Vec<String>,
+    pub name: String,
+    /// A drawing file picked with Browse: it comes in as a block.
+    pub path: String,
+    /// Cell alignment 1–9 (top left … bottom right).
+    pub alignment: i32,
+    pub scale: String,
+    pub autofit: bool,
+    pub rotation: String,
+}
+
+/// The data types a cell can read as, in the window's order.
+pub const FORMAT_KINDS: [&str; 9] = [
+    "Angle",
+    "Currency",
+    "Date",
+    "Decimal Number",
+    "General",
+    "Percentage",
+    "Point",
+    "Text",
+    "Whole Number",
+];
+pub const ANGLE_FORMATS: [(&str, &str); 7] = [
+    ("(none)", ""),
+    ("Current units", "%au5"),
+    ("Decimal degrees", "%au0"),
+    ("Deg/min/sec", "%au1"),
+    ("Grads", "%au2"),
+    ("Radians", "%au3"),
+    ("Surveyor's units", "%au4"),
+];
+pub const SEPARATORS: [char; 3] = [',', ';', '/'];
+
+/// Date pictures offered as examples.
+pub const DATE_EXAMPLES: [&str; 8] = [
+    "M/d/yyyy",
+    "MMMM d, yyyy",
+    "yyyy-MM-dd",
+    "dd.MM.yyyy",
+    "d MMMM yyyy",
+    "MMM-yy",
+    "h:mm tt",
+    "HH:mm:ss",
+];
+
+pub struct CellFormatState {
+    pub kind: usize,
+    pub unit: usize,
+    /// 0 current precision, n + 1 for n decimals.
+    pub precision: usize,
+    pub symbol: String,
+    pub append: bool,
+    pub negative_parens: bool,
+    pub separator: usize,
+    pub axes: [bool; 3],
+    pub date: String,
+    /// The preview of a sample value in the settings.
+    pub preview: String,
+}
+
+impl CellFormatState {
+    fn units(&self) -> Vec<&'static str> {
+        match self.kind {
+            0 => ANGLE_FORMATS.iter().map(|(name, _)| *name).collect(),
+            3 | 6 => codec::fields::FORMULA_FORMATS.iter().map(|(name, _)| *name).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn precision_code(&self) -> String {
+        if self.precision == 0 {
+            String::new()
+        } else {
+            format!("%pr{}", self.precision - 1)
+        }
+    }
+
+    /// The field picture the settings make (`%lu2%pr2%nn1%ps[$,]`).
+    pub fn picture(&self) -> String {
+        match self.kind {
+            0 => {
+                let code = ANGLE_FORMATS[self.unit.min(6)].1;
+                if code.is_empty() {
+                    String::new()
+                } else {
+                    format!("{code}{}", self.precision_code())
+                }
+            }
+            1 => {
+                let symbol = if self.append {
+                    format!("%ps[,{}]", self.symbol)
+                } else {
+                    format!("%ps[{},]", self.symbol)
+                };
+                format!(
+                    "%lu2{}{}{symbol}",
+                    self.precision_code(),
+                    if self.negative_parens { "%nn1" } else { "" }
+                )
+            }
+            2 => self.date.clone(),
+            3 => {
+                let code = codec::fields::FORMULA_FORMATS[self.unit.min(6)].1;
+                if code.is_empty() {
+                    String::new()
+                } else {
+                    format!("{code}{}", self.precision_code())
+                }
+            }
+            5 => format!(
+                "%lu2{}{}",
+                self.precision_code(),
+                if self.append { "%ps[,%]" } else { "" }
+            ),
+            6 => {
+                let code = codec::fields::FORMULA_FORMATS[self.unit.min(6)].1;
+                let bits = self
+                    .axes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, on)| **on)
+                    .fold(0, |acc, (axis, _)| acc | (1 << axis));
+                let mut picture = format!("{code}{}", self.precision_code());
+                if bits != 7 {
+                    picture.push_str(&format!("%pt{bits}"));
+                }
+                let separator = SEPARATORS[self.separator.min(2)];
+                if separator != ',' {
+                    picture.push_str(&format!("%ls{}", separator as u32));
+                }
+                picture
+            }
+            _ => String::new(),
+        }
+    }
+}
+
+fn input<'a>(value: &str, on: Option<fn(String) -> TableCellDialogMsg>) -> Element<'a, Message> {
+    let mut field = text_input("", value).size(11).padding([4, 8]).width(Fill).style(field_style);
+    if let Some(on) = on {
+        field = field.on_input(move |v| msg(on(v)));
+    }
+    field.into()
+}
+
+pub fn view_block<'a>(
+    state: &'a CellBlockState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    use TableCellDialogMsg as M;
+    let block = card(
+        crate::tr!("table-cells", "block"),
+        column![
+            labelled(
+                crate::tr!("table-cells", "block-name"),
+                row![
+                    list(&state.names, &state.name, M::BlockName),
+                    button(text(crate::tr!("table-cells", "browse")).size(11))
+                        .on_press(msg(M::BlockBrowse))
+                        .style(button_style(false))
+                        .padding([4, 10]),
+                ]
+                .spacing(6)
+                .align_y(iced::Center)
+            ),
+            labelled(
+                crate::tr!("table-cells", "block-path"),
+                text(state.path.clone()).size(11).style(muted_style)
+            ),
+        ]
+        .spacing(8),
+    );
+    // A 3×3 pad: where in the cell the block sits.
+    let mut pad = column![].spacing(3);
+    for r in 0..3 {
+        let mut line = row![].spacing(3);
+        for c in 0..3 {
+            let alignment = r * 3 + c + 1;
+            let on = state.alignment == alignment;
+            line = line.push(
+                button(
+                    container(
+                        container(Space::new())
+                            .width(Length::Fixed(8.0))
+                            .height(Length::Fixed(8.0))
+                            .style(move |theme: &iced::Theme| container::Style {
+                                background: Some(iced::Background::Color(if on {
+                                    theme.palette().primary.base.text
+                                } else {
+                                    theme.palette().background.strong.color
+                                })),
+                                ..Default::default()
+                            }),
+                    )
+                    .center_x(Fill)
+                    .center_y(Fill),
+                )
+                .on_press(msg(M::Align(alignment)))
+                .style(button_style(on))
+                .width(Length::Fixed(34.0))
+                .height(Length::Fixed(24.0))
+                .padding(0),
+            );
+        }
+        pad = pad.push(line);
+    }
+    let scale_input: Option<fn(String) -> TableCellDialogMsg> =
+        (!state.autofit).then_some(M::BlockScale);
+    let rotation_input: Option<fn(String) -> TableCellDialogMsg> = Some(M::BlockRotation);
+    let place = card(
+        crate::tr!("table-cells", "placement"),
+        row![
+            column![text(crate::tr!("table-cells", "alignment")).size(11), pad].spacing(6),
+            column![
+                labelled(crate::tr!("table-cells", "scale"), input(&state.scale, scale_input)),
+                row![
+                    Space::new().width(Length::Fixed(118.0)),
+                    chip(
+                        crate::tr!("table-cells", "autofit"),
+                        state.autofit,
+                        msg(M::AutoFit(!state.autofit))
+                    ),
+                ],
+                labelled(
+                    crate::tr!("table-cells", "rotation"),
+                    input(&state.rotation, rotation_input)
+                ),
+            ]
+            .spacing(8)
+            .width(Fill),
+        ]
+        .spacing(14),
+    );
+    column![block, place, footer()]
+        .spacing(10)
+        .padding([10, 12])
+        .width(sizing.width)
+        .into()
+}
+
+fn choice_list<'a>(
+    names: &[&'static str],
+    selected: usize,
+    on: fn(usize) -> TableCellDialogMsg,
+) -> Element<'a, Message> {
+    let mut list = column![].spacing(2);
+    for (index, name) in names.iter().enumerate() {
+        list = list.push(
+            button(text(crate::t!(*name).to_string()).size(11))
+                .on_press(msg(on(index)))
+                .style(button_style(selected == index))
+                .padding([3, 8])
+                .width(Fill),
+        );
+    }
+    list.into()
+}
+
+pub fn view_format<'a>(
+    state: &'a CellFormatState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    use TableCellDialogMsg as M;
+    let preview = container(text(state.preview.clone()).size(15))
+        .padding([8, 10])
+        .width(Fill)
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(theme.palette().background.weak.color)),
+            border: iced::Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    let mut settings = column![preview].spacing(8);
+    let units = state.units();
+    if !units.is_empty() {
+        settings = settings.push(labelled(
+            crate::tr!("table-cells", "format"),
+            choice_list(&units, state.unit, M::FormatUnit),
+        ));
+    }
+    if matches!(state.kind, 0 | 1 | 3 | 5 | 6) {
+        let mut precisions = vec![crate::tr!("table-cells", "current-precision")];
+        precisions.extend((0..=8).map(|n| {
+            if n == 0 {
+                "0".to_string()
+            } else {
+                format!("0.{}", "0".repeat(n))
+            }
+        }));
+        let selected = precisions[state.precision.min(9)].clone();
+        let enabled = !(matches!(state.kind, 0 | 3 | 6) && state.unit == 0);
+        let precision: Element<'a, Message> = if enabled {
+            pick_list(Some(selected), precisions, |value| value.clone())
+                .on_select(|value| msg(M::Precision(value)))
+                .text_size(11)
+                .padding([3, 6])
+                .width(Fill)
+                .into()
+        } else {
+            text(selected).size(11).style(muted_style).into()
+        };
+        settings = settings.push(labelled(crate::tr!("table-cells", "precision"), precision));
+    }
+    if state.kind == 1 {
+        let symbol_input: Option<fn(String) -> TableCellDialogMsg> = Some(M::Symbol);
+        settings = settings.push(labelled(
+            crate::tr!("table-cells", "symbol"),
+            input(&state.symbol, symbol_input),
+        ));
+        settings = settings.push(
+            row![
+                chip(
+                    crate::tr!("table-cells", "append-symbol"),
+                    state.append,
+                    msg(M::Append(!state.append))
+                ),
+                chip(
+                    crate::tr!("table-cells", "negative-parens"),
+                    state.negative_parens,
+                    msg(M::Negative(!state.negative_parens))
+                ),
+            ]
+            .spacing(6),
+        );
+    }
+    if state.kind == 5 {
+        settings = settings.push(chip(
+            crate::tr!("table-cells", "append-symbol"),
+            state.append,
+            msg(M::Append(!state.append)),
+        ));
+    }
+    if state.kind == 6 {
+        let mut separators = row![].spacing(4);
+        for (index, separator) in SEPARATORS.iter().enumerate() {
+            separators = separators.push(
+                button(text(separator.to_string()).size(11))
+                    .on_press(msg(M::Separator(index)))
+                    .style(button_style(state.separator == index))
+                    .padding([4, 12]),
+            );
+        }
+        settings = settings.push(labelled(crate::tr!("table-cells", "list-separator"), separators));
+        settings = settings.push(
+            row![
+                chip("X".to_string(), state.axes[0], msg(M::Axis(0))),
+                chip("Y".to_string(), state.axes[1], msg(M::Axis(1))),
+                chip("Z".to_string(), state.axes[2], msg(M::Axis(2))),
+            ]
+            .spacing(6),
+        );
+    }
+    if state.kind == 2 {
+        let date_input: Option<fn(String) -> TableCellDialogMsg> = Some(M::DateFormat);
+        settings = settings.push(labelled(
+            crate::tr!("table-cells", "date-format"),
+            input(&state.date, date_input),
+        ));
+        let mut examples = column![].spacing(2);
+        for example in DATE_EXAMPLES {
+            examples = examples.push(
+                button(text(example).size(11))
+                    .on_press(msg(M::DateFormat(example.to_string())))
+                    .style(button_style(state.date == example))
+                    .padding([3, 8])
+                    .width(Fill),
+            );
+        }
+        settings = settings.push(examples);
+    }
+    if matches!(state.kind, 4 | 7 | 8) {
+        settings = settings.push(
+            text(crate::tr!("table-cells", "no-format-settings")).size(11).style(muted_style),
+        );
+    }
+    let body = row![
+        container(card(
+            crate::tr!("table-cells", "data-type"),
+            choice_list(&FORMAT_KINDS, state.kind, M::FormatKind)
+        ))
+        .width(Length::Fixed(160.0)),
+        container(card(crate::tr!("table-cells", "format-settings"), settings)).width(Fill),
+    ]
+    .spacing(10);
+    column![body, footer()]
         .spacing(10)
         .padding([10, 12])
         .width(sizing.width)

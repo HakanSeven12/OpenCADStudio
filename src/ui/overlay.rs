@@ -1452,6 +1452,10 @@ fn draw_grip_marker(
             // it never reads as a built-in selection grip. Hot and hover
             // treatments stay identical to built-ins.
             palette.success.base.color
+        } else if matches!(grip.shape, GripShape::Diamond) {
+            // The table-cell fill grip is light cyan, apart from the cell
+            // range's square grips.
+            Color::from_rgb8(0, 191, 255)
         } else if visual.grip_color > 0 {
             if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_color) {
                 Color::from_rgb8(r, g, b)
@@ -1463,7 +1467,7 @@ fn draw_grip_marker(
         };
         let fill = if grip.is_dynamic || matches!(
             grip.shape,
-            GripShape::Dropdown | GripShape::DropdownAdjacent
+            GripShape::Dropdown | GripShape::DropdownAdjacent | GripShape::Diamond
         ) {
             color
         } else {

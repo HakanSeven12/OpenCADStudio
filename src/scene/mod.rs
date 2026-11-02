@@ -4096,6 +4096,39 @@ impl Scene {
         any
     }
 
+    /// Removes the fields a changed table lists but no cell shows any more,
+    /// recording the removed objects for undo.
+    fn prune_table_fields(&mut self, changes: &[(Handle, ChangeKind)]) {
+        for (table, kind) in changes {
+            if !matches!(kind, ChangeKind::Modified)
+                || !matches!(self.document.get_entity(*table), Some(EntityType::Table(_)))
+            {
+                continue;
+            }
+            let doomed = self.document.orphan_table_fields(*table);
+            if doomed.is_empty() {
+                continue;
+            }
+            if self.is_recording_undo() {
+                for handle in &doomed {
+                    let before = self.document.objects.get(handle).cloned();
+                    self.record_undo_object_before(*handle, before);
+                }
+                let lists: Vec<(Handle, codec::objects::ObjectType)> = self
+                    .document
+                    .objects
+                    .iter()
+                    .filter(|(_, object)| matches!(object, codec::objects::ObjectType::FieldList(_)))
+                    .map(|(handle, object)| (*handle, object.clone()))
+                    .collect();
+                for (handle, before) in lists {
+                    self.record_undo_object_before(handle, Some(before));
+                }
+            }
+            self.document.prune_table_fields(*table);
+        }
+    }
+
     pub fn bump_entities(&mut self, changes: &[(Handle, ChangeKind)]) {
         self.bump_entities_with_parametric_policy(changes, &[], false);
     }
@@ -4362,6 +4395,9 @@ impl Scene {
                 .collect(),
             None => Vec::new(),
         };
+        // A cell rewritten over a field (typed text, a copied cell, a removed
+        // row or column) no longer shows it; the field objects go with it.
+        self.prune_table_fields(changes);
         if changes.iter().any(|(handle, kind)| {
             matches!(kind, ChangeKind::Removed)
                 || self

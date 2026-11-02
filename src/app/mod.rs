@@ -771,6 +771,10 @@ pub(super) struct OpenCADStudio {
     table_cell_borders: Option<crate::ui::window::table_cell_dialog::CellBordersState>,
     /// The picked table cell's Cell Contents window.
     table_cell_contents: Option<crate::ui::window::table_cell_dialog::CellContentsState>,
+    /// The picked table cells' Cell Block window.
+    table_cell_block: Option<crate::ui::window::table_cell_dialog::CellBlockState>,
+    /// The picked table cells' Cell Data Format window.
+    table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
     /// The Data Link Manager was opened by Link Cell: its link feeds the
     /// picked cells when it closes.
     data_link_cell_target: bool,
@@ -2867,6 +2871,8 @@ pub enum ModalKind {
     DimInspect,
     TableCellBorders,
     TableCellContents,
+    TableCellBlock,
+    TableCellFormat,
     PdfShxSettings,
     UnderlayLayers,
     PdfImportSettings,
@@ -5649,6 +5655,8 @@ impl OpenCADStudio {
             dim_inspect_dialog: None,
             table_cell_borders: None,
             table_cell_contents: None,
+            table_cell_block: None,
+            table_cell_format: None,
             data_link_cell_target: false,
             pdf_shx_dialog: None,
             underlay_layers: None,

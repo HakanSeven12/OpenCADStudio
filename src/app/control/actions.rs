@@ -2383,14 +2383,20 @@ impl OpenCADStudio {
             // "lineweight=<name>", "linetype=<name>", "color=<name>",
             // "double=0|1", "spacing=<n>", "edges=all|outside|inside|none|
             // top|bottom|left|right|inside_h|inside_v", "pick=<n>", "up",
-            // "down", "delete", "layout=1|2|4", "content_spacing=<n>", "ok"
-            // or "cancel".
+            // "down", "delete", "layout=1|2|4", "content_spacing=<n>"; the
+            // Cell Block window: "block=<name>", "align=1..9",
+            // "scale=<n>", "autofit=0|1", "rotation=<deg>"; the Cell Data
+            // Format window: "kind=0..8", "unit=<n>", "precision=<text>",
+            // "symbol=<s>", "append=0|1", "negative=0|1", "separator=0..2",
+            // "axis=0..2", "date=<picture>"; "ok" or "cancel".
             "table_cell_dialog" => {
                 use crate::ui::window::table_cell_dialog::{BorderSet as B, TableCellDialogMsg as T};
                 if !matches!(
                     self.active_modal,
                     Some(crate::app::ModalKind::TableCellBorders)
                         | Some(crate::app::ModalKind::TableCellContents)
+                        | Some(crate::app::ModalKind::TableCellBlock)
+                        | Some(crate::app::ModalKind::TableCellFormat)
                 ) {
                     return Err(failure("no_dialog", "No table cell window is open"));
                 }
@@ -2425,6 +2431,20 @@ impl OpenCADStudio {
                         "delete" => T::Delete,
                         "layout" => T::Layout(value.parse().map_err(|_| bad())?),
                         "content_spacing" => T::ContentSpacing(value.to_string()),
+                        "block" => T::BlockName(value.to_string()),
+                        "align" => T::Align(value.parse().map_err(|_| bad())?),
+                        "scale" => T::BlockScale(value.to_string()),
+                        "autofit" => T::AutoFit(value == "1"),
+                        "rotation" => T::BlockRotation(value.to_string()),
+                        "kind" => T::FormatKind(value.parse().map_err(|_| bad())?),
+                        "unit" => T::FormatUnit(value.parse().map_err(|_| bad())?),
+                        "precision" => T::Precision(value.to_string()),
+                        "symbol" => T::Symbol(value.to_string()),
+                        "append" => T::Append(value == "1"),
+                        "negative" => T::Negative(value == "1"),
+                        "separator" => T::Separator(value.parse().map_err(|_| bad())?),
+                        "axis" => T::Axis(value.parse().map_err(|_| bad())?),
+                        "date" => T::DateFormat(value.to_string()),
                         "ok" => T::Ok,
                         _ => return Err(bad()),
                     })

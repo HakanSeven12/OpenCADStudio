@@ -69,11 +69,10 @@ impl OpenCADStudio {
     }
 
     /// Tooltip of an array arrow.
-    pub(in crate::app) fn array_grip_tip(&self, handle: Handle, id: usize) -> Option<&'static str> {
+    pub(in crate::app) fn array_grip_tip(&self, handle: Handle, id: usize) -> Option<String> {
         let kind = Kind::from_id(id)?;
-        let array =
-            assoc_array::array_of_insert(&self.tabs[self.active_tab].scene.document, handle)?;
-        Some(kind.label(array.kind))
+        assoc_array::array_of_insert(&self.tabs[self.active_tab].scene.document, handle)?;
+        Some(kind.label())
     }
 }
 

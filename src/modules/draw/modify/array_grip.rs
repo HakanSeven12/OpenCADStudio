@@ -45,7 +45,7 @@ impl CadCommand for ArrayGripCommand {
     }
 
     fn prompt(&self) -> String {
-        self.kind.prompt().to_string()
+        self.kind.prompt()
     }
 
     fn set_ctrl(&mut self, ctrl: bool) {

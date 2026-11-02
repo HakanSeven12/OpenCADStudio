@@ -62,32 +62,32 @@ impl Kind {
     }
 
     /// What the grip changes, for its tooltip.
-    pub fn label(self, array: ArrayKind) -> &'static str {
-        match (self, array) {
-            (Kind::ColumnCount, _) => "Column count",
-            (Kind::ColumnSpacing, _) => "Column spacing",
-            (Kind::RowCount, _) => "Row count",
-            (Kind::RowSpacing, _) => "Row spacing",
-            (Kind::RowAndColumnCount, _) => "Row and column count",
-            (Kind::ItemCount, _) => "Item count",
-            (Kind::ItemSpacing, _) => "Item spacing",
-            (Kind::ItemAngle, _) => "Angle between items",
-            (Kind::Radius, _) => "Radius",
+    pub fn label(self) -> String {
+        match self {
+            Kind::ColumnCount => crate::t!("Column count").into_owned(),
+            Kind::ColumnSpacing => crate::t!("Column spacing").into_owned(),
+            Kind::RowCount => crate::tr!("array-grips", "row-count"),
+            Kind::RowSpacing => crate::t!("Row spacing").into_owned(),
+            Kind::RowAndColumnCount => crate::tr!("array-grips", "row-and-column-count"),
+            Kind::ItemCount => crate::tr!("array-grips", "item-count"),
+            Kind::ItemSpacing => crate::t!("Item spacing").into_owned(),
+            Kind::ItemAngle => crate::tr!("array-grips", "angle-between-items"),
+            Kind::Radius => crate::t!("Radius").into_owned(),
         }
     }
 
     /// The command-line prompt while the grip is dragged.
-    pub fn prompt(self) -> &'static str {
+    pub fn prompt(self) -> String {
         match self {
-            Kind::ColumnCount => "Specify number of columns (Ctrl: total column spacing):",
-            Kind::RowCount => "Specify number of rows (Ctrl: total row spacing):",
-            Kind::RowAndColumnCount => "Specify number of rows and columns:",
-            Kind::ItemCount => "Specify number of items (Ctrl: fill angle or total spacing):",
-            Kind::ColumnSpacing => "Specify the distance between columns:",
-            Kind::RowSpacing => "Specify the distance between rows:",
-            Kind::ItemSpacing => "Specify the distance between items:",
-            Kind::ItemAngle => "Specify the angle between items:",
-            Kind::Radius => "Specify radius:",
+            Kind::ColumnCount => crate::tr!("array-grips", "prompt-columns"),
+            Kind::RowCount => crate::tr!("array-grips", "prompt-rows"),
+            Kind::RowAndColumnCount => crate::tr!("array-grips", "prompt-rows-columns"),
+            Kind::ItemCount => crate::tr!("array-grips", "prompt-items"),
+            Kind::ColumnSpacing => crate::tr!("array-grips", "prompt-column-spacing"),
+            Kind::RowSpacing => crate::tr!("array-grips", "prompt-row-spacing"),
+            Kind::ItemSpacing => crate::tr!("array-grips", "prompt-item-spacing"),
+            Kind::ItemAngle => crate::tr!("array-grips", "prompt-item-angle"),
+            Kind::Radius => crate::tr!("array-grips", "prompt-radius"),
         }
     }
 }

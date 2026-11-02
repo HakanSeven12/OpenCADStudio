@@ -121,36 +121,77 @@ pub fn expand_stub_near_into(
     near: Option<[f64; 4]>,
     out: &mut Vec<WireModel>,
 ) {
-    let Some(stub) = stub_wire.stub.as_ref() else {
+    let Some(_) = stub_wire.stub.as_ref() else {
         out.push(stub_wire.clone());
         return;
     };
-    let meets = |wire: &WireModel| {
-        let Some(query) = near else {
-            return true;
-        };
-        let [x0, y0, x1, y1] = wire.aabb.map(f64::from);
-        let (dx, dy) = (stub.delta[0], stub.delta[1]);
-        !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite())
-            || (x1 + dx >= query[0]
-                && x0 + dx <= query[2]
-                && y1 + dy >= query[1]
-                && y0 + dy <= query[3])
-    };
-    for wire in stub.prototype.iter().filter(|wire| meets(wire)) {
+    // Expand nested instances with a *single* translation and allocation per
+    // visible leaf. Previously each nesting level cloned and translated every
+    // intermediate WireModel (including its vertex arrays), only to discard
+    // that intermediate copy on the next recursive call. Tree drawings with
+    // many repeated low-poly parts paid the cost at every nesting depth.
+    expand_stub_near_recursive(
+        stub_wire,
+        &stub_wire.name,
+        [0.0; 3],
+        0.0,
+        stub_wire.selected,
+        stub_wire.display_visible,
+        near,
+        out,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expand_stub_near_recursive(
+    wire: &WireModel,
+    owner_name: &str,
+    offset: [f64; 3],
+    depth_offset: f32,
+    owner_selected: bool,
+    parent_visible: bool,
+    near: Option<[f64; 4]>,
+    out: &mut Vec<WireModel>,
+) {
+    let Some(stub) = wire.stub.as_ref() else {
         let mut copy = crate::scene::cache::block_cache::translated_prototype_wire(
-            wire,
-            &stub_wire.name,
-            stub.delta,
+            wire, owner_name, offset,
         );
-        shift_depth(&mut copy, stub.depth_delta);
-        copy.selected = stub_wire.selected;
-        copy.display_visible &= stub_wire.display_visible;
-        if copy.stub.is_some() {
-            expand_stub_near_into(&copy, near, out);
-        } else {
-            out.push(copy);
+        shift_depth(&mut copy, depth_offset);
+        copy.selected = owner_selected;
+        copy.display_visible &= parent_visible;
+        out.push(copy);
+        return;
+    };
+    let offset = [
+        offset[0] + stub.delta[0],
+        offset[1] + stub.delta[1],
+        offset[2] + stub.delta[2],
+    ];
+    let depth_offset = depth_offset + stub.depth_delta;
+    let parent_visible = parent_visible && wire.display_visible;
+    for child in stub.prototype.iter() {
+        if let Some(query) = near {
+            let [x0, y0, x1, y1] = child.aabb.map(f64::from);
+            if x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()
+                && (x1 + offset[0] < query[0]
+                    || x0 + offset[0] > query[2]
+                    || y1 + offset[1] < query[1]
+                    || y0 + offset[1] > query[3])
+            {
+                continue;
+            }
         }
+        expand_stub_near_recursive(
+            child,
+            owner_name,
+            offset,
+            depth_offset,
+            owner_selected,
+            parent_visible,
+            near,
+            out,
+        );
     }
 }
 
@@ -165,5 +206,69 @@ pub fn shift_depth(wire: &mut WireModel, delta: f32) {
             delta: stub.delta,
             depth_delta: stub.depth_delta + delta,
         });
+    }
+}
+
+#[cfg(test)]
+mod nested_stub_perf_tests {
+    use super::*;
+
+    #[test]
+    fn nested_stub_expands_only_local_leaves_and_combines_transforms() {
+        let mut leaf = WireModel::default();
+        leaf.name = "original".to_string();
+        leaf.aabb = [0.0, 0.0, 1.0, 1.0];
+        leaf.points = vec![[0.5, 0.5, 0.0]];
+        leaf.key_vertices = vec![[0.5, 0.5, 0.0]];
+        leaf.depth_override = Some(4.0);
+        leaf.render_instance = Some(RenderInstance {
+            source_id: 5,
+            translation: [0.0; 3],
+        });
+        let inner = stub_wire(
+            Arc::new(vec![leaf]),
+            [0.0, 0.0, 1.0, 1.0],
+            [100.0, 50.0, 0.0],
+            0.5,
+        );
+        let mut inner = inner;
+        inner.display_visible = false;
+        let mut root = stub_wire(
+            Arc::new(vec![inner]),
+            [100.0, 50.0, 101.0, 51.0],
+            [2.0, -10.0, 0.0],
+            1.25,
+        );
+        root.name = "77".to_string();
+        root.selected = true;
+
+        let near = [101.0, 39.0, 104.0, 42.0];
+        let mut result = Vec::new();
+        expand_stub_near_into(&root, Some(near), &mut result);
+        assert_eq!(result.len(), 1);
+        let got = &result[0];
+        assert_eq!(got.name, "77");
+        assert!(got.selected);
+        assert!(!got.display_visible);
+        assert_eq!(got.render_instance.unwrap().translation, [102.0, 40.0, 0.0]);
+        assert_eq!(got.depth_override, Some(5.75));
+        assert!((got.key_vertices[0][0] - 102.5).abs() < 1e-7);
+        assert!((got.key_vertices[0][1] - 40.5).abs() < 1e-7);
+        assert!((got.points[0][0] - 102.5).abs() < 1e-4);
+        assert!((got.points[0][1] - 40.5).abs() < 1e-4);
+
+        result.clear();
+        expand_stub_near_into(&root, Some([0.0, 0.0, 1.0, 1.0]), &mut result);
+        assert!(result.is_empty(), "a distant nested block must not materialize");
+    }
+
+    #[test]
+    fn nonstub_wire_is_untouched_by_near_query() {
+        let mut wire = WireModel::default();
+        wire.name = "plain".to_string();
+        let mut result = Vec::new();
+        expand_stub_near_into(&wire, Some([100.0, 100.0, 101.0, 101.0]), &mut result);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "plain");
     }
 }

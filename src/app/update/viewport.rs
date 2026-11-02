@@ -1671,6 +1671,8 @@ impl OpenCADStudio {
             return Task::none();
         }
         let i = self.active_tab;
+        let perf_move = crate::perf::enabled();
+        let move_started = Instant::now();
         self.tabs[i].measurement.live_visible = true;
         self.tabs[i].scene.selection.borrow_mut().input.pointer_away = false;
         self.nav_pointer_moved(i, p);
@@ -1700,8 +1702,7 @@ impl OpenCADStudio {
             command.set_ctrl(self.ctrl_down);
             command.set_shift(self.shift_down);
         }
-        let perf_move = crate::perf::enabled();
-        let move_started = Instant::now();
+        let constraint_hover_ms = crate::perf::elapsed_ms(perf_move.then_some(move_started));
 
         // UCS icon grip drag: map the cursor onto the UCS plane and
         // slide the origin / rotate the axis. Short-circuits pan & snap.
@@ -1739,6 +1740,7 @@ impl OpenCADStudio {
             VIEWCUBE_PX,
         ));
 
+        let grip_hover_started = perf_move.then(Instant::now);
         let navigating = self.tabs[i].scene.selection.borrow().input.middle_down;
         if navigating {
             self.clear_navigation_hover(i);
@@ -1757,6 +1759,7 @@ impl OpenCADStudio {
                     .unwrap_or(false);
         }
 
+        let grip_hover_ms = crate::perf::elapsed_ms(grip_hover_started);
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.input.last_move_pos = Some(p);
 
@@ -4245,16 +4248,18 @@ impl OpenCADStudio {
 
         self.sync_dyn_fields();
         let move_ms = move_started.elapsed().as_secs_f64() * 1000.0;
-        if perf_move
-            && (self.tabs[i].active_cmd.is_some() || self.tabs[i].scene.active_viewport.is_some())
-            && move_ms >= 16.7
-        {
+        if perf_move && move_ms >= 10.0 {
             let mode = if self.tabs[i].active_cmd.is_some() {
                 "command"
-            } else {
+            } else if self.tabs[i].scene.active_viewport.is_some() {
                 "MSPACE"
+            } else {
+                "idle"
             };
-            crate::perf_record!("[perf] pointer-move mode={mode:<7} {:>7.1}ms", move_ms,);
+            crate::perf_record!(
+                "[perf] pointer-move mode={mode:<7} {:>7.1}ms pre_grip={constraint_hover_ms:.2}ms grip_hover={grip_hover_ms:.2}ms",
+                move_ms,
+            );
         }
         Task::none()
     }

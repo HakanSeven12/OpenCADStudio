@@ -3537,6 +3537,15 @@ impl super::Scene {
         bar_mode: i16,
         p: iced::Point,
     ) -> Option<ConstraintId> {
+        // On unconstrained drawings there are no glyphs. Skip computing the
+        // cache key: its visibility signature walks all selected and hidden
+        // handles and otherwise repeats on every idle pointer movement.
+        if self
+            .parametric_constraint_set(scope)
+            .is_none_or(|set| set.constraints.is_empty())
+        {
+            return None;
+        }
         let entries =
             self.cached_glyph_placements(scope, vp_size, show_values, display_mode, bar_mode);
         let index = glyph_hit_test_entries(&entries, p)?;

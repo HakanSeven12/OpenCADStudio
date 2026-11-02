@@ -236,6 +236,114 @@ fn geo_overlaps_aabb(geo: &Geo, target: [f64; 4]) -> bool {
         && bounds[3] >= target[1]
 }
 
+/// A conservative XY envelope for bounded cutter targets. Arc and ellipse
+/// sweeps use their entire supporting circle, deliberately over-including
+/// candidates so tangent and near-endpoint contacts are never lost.
+fn trim_target_bounds(curve: &Curve) -> Option<[f64; 4]> {
+    let bounds = match curve {
+        Curve::Line(line) => [
+            line.start[0].min(line.end[0]),
+            line.start[1].min(line.end[1]),
+            line.start[0].max(line.end[0]),
+            line.start[1].max(line.end[1]),
+        ],
+        Curve::Arc(arc) => {
+            let r = arc.radius.abs();
+            [arc.centre[0] - r, arc.centre[1] - r, arc.centre[0] + r, arc.centre[1] + r]
+        }
+        Curve::Circle(circle) => {
+            let r = circle.radius.abs();
+            [circle.centre[0] - r, circle.centre[1] - r,
+             circle.centre[0] + r, circle.centre[1] + r]
+        }
+        Curve::Ellipse(arc) => {
+            let ellipse = &arc.ellipse;
+            let r = ellipse.major_radius.abs().max(ellipse.minor_radius.abs());
+            [ellipse.centre[0] - r, ellipse.centre[1] - r,
+             ellipse.centre[0] + r, ellipse.centre[1] + r]
+        }
+        // Rays/XLines must find distant intersections. NURBS do not have
+        // a cheap guaranteed conservative envelope at this call site.
+        _ => return None,
+    };
+    if !bounds.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let slack = CUT_TOLERANCE * 8.0;
+    Some([
+        bounds[0] - slack, bounds[1] - slack,
+        bounds[2] + slack, bounds[3] + slack,
+    ])
+}
+
+/// A static interval broad phase for the geometry of one TRIM operation.
+/// Sort by minimum X once; the prefix maximum X permits binary-searching
+/// *past* boundaries that finish before the target, not just those that start
+/// after it. Unlike a per-segment full scan, typical queries cost O(log N + K)
+/// when thousands of low-poly segments are spread across the drawing.
+///
+/// Entries without a safe finite box (splines, rays, infinite lines) are
+/// unconditionally retained to preserve exact kernel semantics.
+struct TrimAabbIndex {
+    entries: Vec<(usize, [f64; 4])>,
+    prefix_max_x: Vec<f64>,
+    always: Vec<usize>,
+}
+
+impl TrimAabbIndex {
+    fn new(bounds: impl IntoIterator<Item = Option<[f64; 4]>>) -> Self {
+        let mut entries = Vec::new();
+        let mut always = Vec::new();
+        for (index, bounds) in bounds.into_iter().enumerate() {
+            match bounds.filter(|box_| box_.iter().all(|value| value.is_finite())) {
+                Some(bounds) => entries.push((index, bounds)),
+                None => always.push(index),
+            }
+        }
+        entries.sort_unstable_by(|a, b| a.1[0].total_cmp(&b.1[0]));
+        let mut prefix_max_x = Vec::with_capacity(entries.len());
+        let mut max_x = f64::NEG_INFINITY;
+        for (_, bounds) in &entries {
+            max_x = max_x.max(bounds[2]);
+            prefix_max_x.push(max_x);
+        }
+        Self { entries, prefix_max_x, always }
+    }
+
+    fn overlapping(&self, target: [f64; 4]) -> Vec<usize> {
+        let end = self.entries.partition_point(|(_, aabb)| aabb[0] <= target[2]);
+        let start = self.prefix_max_x[..end].partition_point(|x| *x < target[0]);
+        let mut indices = self.always.clone();
+        for &(index, aabb) in &self.entries[start..end] {
+            if aabb[2] >= target[0] && aabb[1] <= target[3] && aabb[3] >= target[1] {
+                indices.push(index);
+            }
+        }
+        // The kernel/contact logic previously saw entities in document order.
+        // Maintain that ordering for coincident cuts and endpoint priority.
+        indices.sort_unstable();
+        indices
+    }
+}
+
+fn trim_geo_aabb(geo: &Geo) -> Option<[f64; 4]> {
+    Some(match geo {
+        Geo::Line { p1, p2, .. } => [
+            p1[0].min(p2[0]), p1[1].min(p2[1]),
+            p1[0].max(p2[0]), p1[1].max(p2[1]),
+        ],
+        Geo::Arc { cx, cy, r, .. } | Geo::Circle { cx, cy, r, .. } => {
+            [cx - r.abs(), cy - r.abs(), cx + r.abs(), cy + r.abs()]
+        }
+        Geo::Ellipse { cx, cy, a, b, .. } => {
+            // Deliberately overestimate rotated ellipse bounds.
+            let r = a.abs() + b.abs();
+            [cx - r, cy - r, cx + r, cy + r]
+        }
+        Geo::Spline { .. } | Geo::Ray { .. } | Geo::InfLine { .. } => return None,
+    })
+}
+
 pub fn is_trim_boundary_entity(entity: &EntityType) -> bool {
     matches!(
         entity,
@@ -467,6 +575,7 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
     // nearest boundary — has to keep whatever it comes back with, since the
     // whole point is how far away the crossing is.
     let bounded = matches!(target.extent(), KernelExtent::Bounded);
+    let target_bounds = bounded.then(|| trim_target_bounds(target)).flatten();
     // In imported CAD drawings several LINE entities can coincide exactly.
     // Intersecting every duplicate has no geometric benefit, and repeated
     // intersection allocations become especially costly during TRIM hover.
@@ -476,6 +585,17 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
     let candidates: Vec<&Geo> = geos
         .iter()
         .filter(|geo| geo_handle(geo) != handle)
+        .filter(|geo| {
+            // The input may contain tens of thousands of low-poly INSERT
+            // segments. Do the cheap conservative broad phase before kernel
+            // intersection and endpoint-contact tests, for every LWPOLY
+            // segment as well as LINE/ARC/CIRCLE hover paths.
+            // Do not cull splines using their sampled AABB: a NURBS can
+            // leave a sparse sample envelope between knot values.
+            target_bounds.is_none_or(|bbox| {
+                matches!(geo, Geo::Spline { .. }) || geo_overlaps_aabb(geo, bbox)
+            })
+        })
         .filter(|geo| match geo {
             Geo::Line { p1, p2, .. } => {
                 let a = (p1[0].to_bits(), p1[1].to_bits());
@@ -1342,34 +1462,46 @@ fn lwpoly_self_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
     let total = segment_count as f64;
 
     let mut cuts = Vec::new();
-
+    // Self-cuts previously reconstructed the arc/line for segment j inside
+    // the nested O(N²) loop. Precompute every curve and its conservative
+    // envelope once; index the envelopes so only spatially overlapping
+    // non-neighbour pairs reach the exact intersection kernel.
+    let curves: Vec<_> = (0..segment_count)
+        .map(|i| lwpoly_segment_curve(poly, i))
+        .collect();
+    let spatial = TrimAabbIndex::new(curves.iter().map(|entry| {
+        entry.as_ref().and_then(|(curve, _)| trim_target_bounds(curve))
+    }));
     for i in 0..segment_count {
-        let Some((curve_a, reverse_a)) = lwpoly_segment_curve(poly, i) else {
+        let Some((curve_a, reverse_a)) = curves[i].as_ref() else {
             continue;
         };
+        let candidate_segments = trim_target_bounds(curve_a)
+            .map(|bounds| spatial.overlapping(bounds))
+            .unwrap_or_else(|| (0..segment_count).collect());
 
-        for j in (i + 1)..segment_count {
+        for j in candidate_segments {
+            if j <= i {
+                continue;
+            }
             // Ordinary neighbouring segments meet at their common vertex.
             let adjacent = j == i + 1 || (closed && i == 0 && j + 1 == segment_count);
-
             if adjacent {
                 continue;
             }
-
-            let Some((curve_b, reverse_b)) = lwpoly_segment_curve(poly, j) else {
+            let Some((curve_b, reverse_b)) = curves[j].as_ref() else {
                 continue;
             };
-
-            let hits = kernel_intersect(&curve_a, &curve_b, KernelTolerance::new(CUT_TOLERANCE));
+            let hits = kernel_intersect(curve_a, curve_b, KernelTolerance::new(CUT_TOLERANCE));
 
             for hit in hits {
                 let mut ua = hit.t_a;
                 let mut ub = hit.t_b;
 
-                if reverse_a {
+                if *reverse_a {
                     ua = 1.0 - ua;
                 }
-                if reverse_b {
+                if *reverse_b {
                     ub = 1.0 - ub;
                 }
 
@@ -1433,13 +1565,36 @@ fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
 
     // External boundary cuts as global params (segment index + local u).
     let mut cuts: Vec<f64> = Vec::new();
+    // On a large low-poly drawing the same tens of thousands of boundaries
+    // were scanned again for *every* target vertex. Index once per target
+    // and narrow each segment's exact kernel pass to overlapping boundaries.
+    let cutter_index = (seg_count >= 8 && geos.len() >= 256)
+        .then(|| TrimAabbIndex::new(geos.iter().map(trim_geo_aabb)));
+    let mut local_geos = Vec::new();
 
     for i in 0..seg_count {
         let p0 = vx(i);
         let p1 = vx(i + 1);
         let b = seg_bulge(i);
-
-        for u in polyline_seg_ts(p0, p1, b, handle, geos) {
+        let segment_geos = if let Some(index) = cutter_index.as_ref() {
+            // Use the full supporting arc envelope for bulged segments. The
+            // same conservative bounds are applied by cut_params itself.
+            let bounds = lwpoly_segment_curve(poly, i)
+                .as_ref()
+                .and_then(|(curve, _)| trim_target_bounds(curve));
+            if let Some(bounds) = bounds {
+                local_geos.clear();
+                local_geos.extend(
+                    index.overlapping(bounds).into_iter().map(|idx| geos[idx].clone())
+                );
+                local_geos.as_slice()
+            } else {
+                geos
+            }
+        } else {
+            geos
+        };
+        for u in polyline_seg_ts(p0, p1, b, handle, segment_geos) {
             let param = i as f64 + u.clamp(0.0, 1.0);
 
             cuts.push(if closed {
@@ -4000,6 +4155,9 @@ pub struct TrimCommand {
     block_boundary_owners: rustc_hash::FxHashSet<Handle>,
     entity_index: ModifyEntityIndex,
     geos: Vec<Geo>,
+    /// Lazily built for cursor-local cutter scans. Reused across hover
+    /// targets; cleared whenever a committed edit changes the boundaries.
+    geo_spatial: std::cell::RefCell<Option<TrimAabbIndex>>,
     /// Bounded cache of cursor-independent cutting points for hover previews.
     hover_cut_cache: rustc_hash::FxHashMap<Handle, Vec<f64>>,
     hover_cut_order: std::collections::VecDeque<Handle>,
@@ -4076,6 +4234,7 @@ impl TrimCommand {
             block_boundary_owners,
             entity_index: ModifyEntityIndex::empty(),
             geos: Vec::new(),
+            geo_spatial: std::cell::RefCell::new(None),
             hover_cut_cache: rustc_hash::FxHashMap::default(),
             hover_cut_order: std::collections::VecDeque::new(),
             pending: Vec::new(),
@@ -4097,6 +4256,7 @@ impl TrimCommand {
     fn rebuild_geos(&mut self) {
         self.hover_cut_cache.clear();
         self.hover_cut_order.clear();
+        self.geo_spatial.get_mut().take();
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
         let mut geos = if self.edge_set.is_empty() {
             build_geos(&self.all_entities)
@@ -4144,8 +4304,30 @@ impl TrimCommand {
         let Some(target_bounds) = entity_world_aabb_f64(target_entity) else {
             return self.geos.clone();
         };
-        self.geos
-            .iter()
+        if !target_bounds.iter().all(|value| value.is_finite()) {
+            return self.geos.clone();
+        }
+        // Include near-contact tolerance as well as true bounding-box
+        // overlap. Rays and splines have no conservatively bounded index
+        // entry, so they are always included in candidate indices.
+        let slack = CUT_TOLERANCE * 8.0;
+        let target_bounds = [
+            target_bounds[0] - slack,
+            target_bounds[1] - slack,
+            target_bounds[2] + slack,
+            target_bounds[3] + slack,
+        ];
+        let candidate_indices = {
+            let mut cached = self.geo_spatial.borrow_mut();
+            cached
+                .get_or_insert_with(|| {
+                    TrimAabbIndex::new(self.geos.iter().map(trim_geo_aabb))
+                })
+                .overlapping(target_bounds)
+        };
+        candidate_indices
+            .into_iter()
+            .filter_map(|index| self.geos.get(index))
             .filter(|geo| {
                 handles.contains(&geo.handle())
                     || (self.block_boundary_owners.contains(&geo.handle())
@@ -4515,6 +4697,10 @@ impl CadCommand for TrimCommand {
         }
         if rebuild {
             self.rebuild_geos();
+        } else if !replacements.is_empty() {
+            // Non-rebuilding replacement still mutates self.geos in place.
+            // The cached spatial indices must never point at old positions.
+            self.geo_spatial.get_mut().take();
         }
     }
 
@@ -5783,6 +5969,128 @@ mod tests {
             points.into_iter().map(|p| Vector2::new(p[0], p[1])).collect(), true,
         )));
         hatch.paths.push(hole);
+    }
+
+    #[test]
+    fn trim_hover_spatial_index_is_lazily_cached_and_invalidated_on_rebuild() {
+        let target = xline_at(0.0, 0.0, 10.0, 0.0, 1);
+        let cutter = xline_at(5.0, -5.0, 5.0, 5.0, 2);
+        let mut command = TrimCommand::new(vec![target, cutter]);
+        assert!(command.geo_spatial.borrow().is_none());
+        let nearby = command.nearby_geos(Handle::new(1));
+        assert!(!nearby.is_empty());
+        assert!(command.geo_spatial.borrow().is_some());
+        command.rebuild_geos();
+        assert!(command.geo_spatial.borrow().is_none());
+    }
+
+    #[test]
+    fn spatial_cut_index_retains_remote_unbounded_edges_but_omits_distant_lines() {
+        let mut geos = vec![Geo::Line {
+            handle: Handle::new(11),
+            p1: [5.0, -1.0],
+            p2: [5.0, 1.0],
+        }];
+        for index in 0..2_000u64 {
+            let x = 100.0 + index as f64;
+            geos.push(Geo::Line {
+                handle: Handle::new(index + 100),
+                p1: [x, 10.0],
+                p2: [x, 20.0],
+            });
+        }
+        geos.push(Geo::InfLine {
+            handle: Handle::new(20_000),
+            bx: 1000.0,
+            by: 1000.0,
+            dx: 0.0,
+            dy: 1.0,
+        });
+        let index = TrimAabbIndex::new(geos.iter().map(trim_geo_aabb));
+        let nearby = index.overlapping([0.0, -2.0, 10.0, 2.0]);
+        assert_eq!(nearby, vec![0, geos.len() - 1]);
+        let retained: Vec<_> = nearby.into_iter().map(|slot| geos[slot].clone()).collect();
+        assert_eq!(
+            line_seg_ts(0.0, 0.0, 10.0, 0.0, Handle::new(1), &retained),
+            line_seg_ts(0.0, 0.0, 10.0, 0.0, Handle::new(1), &geos),
+        );
+    }
+
+    #[test]
+    fn indexed_lowpoly_cut_matches_crossing_positions_with_thousands_of_edges() {
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(1);
+        poly.vertices = (0..=200)
+            .map(|x| LwVertex::from_coords(x as f64, 0.0))
+            .collect();
+        let mut geos = vec![
+            Geo::Line {
+                handle: Handle::new(2),
+                p1: [35.5, -3.0],
+                p2: [35.5, 3.0],
+            },
+            Geo::Line {
+                handle: Handle::new(3),
+                p1: [155.5, -3.0],
+                p2: [155.5, 3.0],
+            },
+        ];
+        for index in 0..2_000u64 {
+            let x = 400.0 + index as f64;
+            geos.push(Geo::Line {
+                handle: Handle::new(index + 100),
+                p1: [x, -1.0],
+                p2: [x, 1.0],
+            });
+        }
+        let cuts = lwpoly_cut_params(&poly, &geos);
+        assert_eq!(cuts.len(), 2);
+        assert!((cuts[0] - 35.5).abs() < 1e-7);
+        assert!((cuts[1] - 155.5).abs() < 1e-7);
+    }
+
+    #[test]
+    fn indexed_self_intersection_preserves_nonadjacent_bowtie_crossings() {
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(1);
+        poly.vertices = [[0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]]
+            .into_iter()
+            .map(|xy| LwVertex::from_coords(xy[0], xy[1]))
+            .collect();
+        let geos = vec![Geo::Line {
+            handle: poly.common.handle,
+            p1: [0.0, 0.0],
+            p2: [2.0, 2.0],
+        }];
+        assert_eq!(lwpoly_self_cut_params(&poly, &geos), vec![0.5, 2.5]);
+    }
+
+    #[test]
+    fn broadphase_trim_keeps_real_crossings_and_discards_distant_lines() {
+        let target = Curve::Line(KernelLine {
+            start: [0.0, 0.0],
+            end: [10.0, 0.0],
+        });
+        let mut geos = vec![Geo::Line {
+            handle: Handle::new(2),
+            p1: [5.0, -3.0],
+            p2: [5.0, 3.0],
+        }];
+        for n in 0..1000 {
+            let x = 100.0 + n as f64;
+            geos.push(Geo::Line {
+                handle: Handle::new(n + 3),
+                p1: [x, -1.0],
+                p2: [x, 1.0],
+            });
+        }
+        let cuts = cut_params(&target, Handle::new(1), &geos);
+        assert_eq!(cuts.len(), 1);
+        assert!((cuts[0] - 0.5).abs() < 1e-8);
+        assert_eq!(trim_target_bounds(&Curve::Ray(KernelRay {
+            origin: [0.0, 0.0],
+            direction: [1.0, 0.0],
+        })), None);
     }
 
     #[test]

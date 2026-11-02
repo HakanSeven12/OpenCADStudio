@@ -3523,7 +3523,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         clip_h: u32,
     ) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
-        let visible = |aabb: [f32; 4]| {
+        let visible = |aabb: [f64; 4]| {
             !aabb_below_pixel(aabb, view_rot, eye, clip_w, clip_h, 2.0)
                 && !aabb_offscreen(aabb, view_rot, eye, clip_w, clip_h)
         };
@@ -3558,7 +3558,9 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.wipeout_skip_flags = self
             .gpu_wipeouts
             .iter()
-            .map(|h| aabb_offscreen(h.world_aabb, view_rot, eye, clip_w, clip_h))
+            .map(|h| {
+                aabb_offscreen(h.world_aabb.map(f64::from), view_rot, eye, clip_w, clip_h)
+            })
             .collect();
     }
 
@@ -5622,7 +5624,7 @@ fn round_up_tex(n: u32) -> u32 {
 /// the absolute local-space rect from `model.world_origin + boundary
 /// extents` for this reason; meshes already store an absolute rect.
 fn aabb_offscreen(
-    aabb: [f32; 4],
+    aabb: [f64; 4],
     view_rot: glam::Mat4,
     eye: glam::DVec3,
     clip_w: u32,
@@ -5637,10 +5639,10 @@ fn aabb_offscreen(
     // A corner behind the perspective eye mirrors across the screen, so the
     // projected union bounds nothing: never cull in that case (#64).
     let corners = [
-        (x0 as f64, y0 as f64),
-        (x1 as f64, y0 as f64),
-        (x0 as f64, y1 as f64),
-        (x1 as f64, y1 as f64),
+        (x0, y0),
+        (x1, y0),
+        (x0, y1),
+        (x1, y1),
     ]
     .map(|(x, y)| {
         crate::scene::view::projection::project_ndc(
@@ -5683,7 +5685,7 @@ fn aabb_offscreen(
 /// given pixel threshold. Used by LOD passes (hatch skip, etc.) to drop
 /// draw calls that wouldn't contribute a visible pixel.
 fn aabb_below_pixel(
-    aabb: [f32; 4],
+    aabb: [f64; 4],
     view_rot: glam::Mat4,
     eye: glam::DVec3,
     clip_w: u32,
@@ -5699,10 +5701,10 @@ fn aabb_below_pixel(
     // Mirrored corners from behind the eye would fake a tiny or shifted box:
     // keep the draw call when any corner has no real projection (#64).
     let corners = [
-        (x0 as f64, y0 as f64),
-        (x1 as f64, y0 as f64),
-        (x0 as f64, y1 as f64),
-        (x1 as f64, y1 as f64),
+        (x0, y0),
+        (x1, y0),
+        (x0, y1),
+        (x1, y1),
     ]
     .map(|(x, y)| {
         crate::scene::view::projection::project_ndc(

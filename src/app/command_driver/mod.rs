@@ -208,6 +208,8 @@ impl OpenCADStudio {
                 | CmdResult::SolidSubtract { .. }
                 | CmdResult::SliceEntities { .. }
                 | CmdResult::SliceSurfaceEntities { .. }
+                // An array arrow keeps the array selected for the next arrow.
+                | CmdResult::EditAssocArray { .. }
         );
         let task = self.apply_cmd_result_inner(result);
         let i = self.active_tab;
@@ -968,6 +970,9 @@ impl OpenCADStudio {
                 offset,
             } => {
                 self.handle_distribute_dimensions(base, dimensions, offset);
+            }
+            CmdResult::EditAssocArray { insert, changes } => {
+                self.handle_edit_assoc_array(insert, changes);
             }
             CmdResult::ReplaceEntity(handle, new_entities) => {
                 if let Some(task) = self.handle_replace_entity(handle, new_entities) {

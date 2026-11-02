@@ -770,6 +770,87 @@ mod tests {
     }
 
     #[test]
+    fn quick_access_toolbar_defaults_and_round_trips() {
+        use crate::ui::ribbon::{QatBuiltin, QatItem};
+
+        // A config saved before the toolbar was customizable shows today's
+        // toolbar.
+        let old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"search_expanded":false}}"#).expect("old config");
+        assert_eq!(old.ribbon.layout.qat, crate::ui::ribbon::default_qat());
+        assert!(!old.ribbon.layout.qat_below);
+        assert!(old.ribbon.layout.qat_faces.is_empty());
+
+        let mut original = AppConfig::default();
+        let layout = &mut original.ribbon.layout;
+        layout.qat = vec![
+            QatItem::Command("QSAVE".into()),
+            QatItem::Separator,
+            QatItem::Builtin(QatBuiltin::LayerCombo),
+            QatItem::Command("ZOOM E".into()),
+            QatItem::Builtin(QatBuiltin::DimStyle),
+        ];
+        layout.qat_below = true;
+        layout
+            .qat_faces
+            .insert("MEASURE_MENU".into(), "AREA".into());
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
+        assert_eq!(value["ribbon"]["qat"][0]["Command"], "QSAVE");
+        assert_eq!(value["ribbon"]["qat"][1], "Separator");
+        assert_eq!(value["ribbon"]["qat"][2]["Builtin"], "LayerCombo");
+        assert_eq!(value["ribbon"]["qat"][4]["Builtin"], "DimStyle");
+        assert_eq!(value["ribbon"]["qat_below"], true);
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.ribbon == original.ribbon);
+    }
+
+    #[test]
+    fn floating_panels_default_and_round_trip() {
+        use crate::ui::ribbon::FloatingPanel;
+
+        // A config from before floating panels has none, and a saved panel
+        // missing newer fields loads with their defaults.
+        let old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"minimize":"Off"}}"#).expect("old config");
+        assert!(old.ribbon.layout.floating.is_empty());
+        let partial: AppConfig = serde_json::from_str(
+            r#"{"ribbon":{"floating":[{"key":"draw/Draw","module_id":"draw","x":10,"y":20}]}}"#,
+        )
+        .expect("partial panel");
+        let panel = &partial.ribbon.layout.floating[0];
+        assert_eq!((panel.x, panel.y, panel.z), (10.0, 20.0, 0));
+        assert!(!panel.extras_right && !panel.pinned);
+
+        let mut original = AppConfig::default();
+        original.ribbon.layout.floating = vec![
+            FloatingPanel {
+                key: "draw/Draw".into(),
+                module_id: "draw".into(),
+                x: 120.5,
+                y: 300.0,
+                extras_right: true,
+                pinned: true,
+                z: 2,
+            },
+            FloatingPanel {
+                key: "draw/Modify".into(),
+                module_id: "draw".into(),
+                x: 400.0,
+                y: 300.0,
+                z: 1,
+                ..FloatingPanel::default()
+            },
+        ];
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
+        assert_eq!(value["ribbon"]["floating"][0]["key"], "draw/Draw");
+        assert_eq!(value["ribbon"]["floating"][0]["extras_right"], true);
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.ribbon == original.ribbon);
+    }
+
+    #[test]
     fn test_parse_theme_name() {
         assert_eq!(parse_theme_name("light"), Some(iced::Theme::Light));
         assert_eq!(parse_theme_name("DARK"), Some(iced::Theme::Dark));

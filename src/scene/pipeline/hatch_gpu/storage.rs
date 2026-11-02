@@ -49,6 +49,20 @@ fn split_origin_ds(o: [f64; 2]) -> ([f32; 2], [f32; 2]) {
     )
 }
 
+/// Local-space AABB of an instance moved back to its world anchor, in f64.
+fn world_aabb(inst: &HatchInstance, offset: [f64; 2]) -> [f64; 4] {
+    let origin = [
+        inst.world_origin[0] as f64 + inst.world_origin_low[0] as f64 + offset[0],
+        inst.world_origin[1] as f64 + inst.world_origin_low[1] as f64 + offset[1],
+    ];
+    [
+        inst.aabb[0] as f64 + origin[0],
+        inst.aabb[1] as f64 + origin[1],
+        inst.aabb[2] as f64 + origin[0],
+        inst.aabb[3] as f64 + origin[1],
+    ]
+}
+
 /// Mirrors the per-family struct used by the existing per-hatch shader,
 /// but the dash slice lives in a separate concatenated DashBuffer (the
 /// old shader had it embedded). `dash_offset` / `dash_count` index into
@@ -178,13 +192,15 @@ pub(super) struct StorageHatchBatch {
     /// per pan tick. Far cheaper than touching the instance data.
     pub placements: Vec<HatchPlacement>,
     pub source_visibility: Vec<u32>,
-    pub source_aabbs: Vec<[f32; 4]>,
+    pub source_aabbs: Vec<[f64; 4]>,
     pub unique_source_count: usize,
     /// CPU-side mirror of each instance's local-space AABB (world-
     /// offset-subtracted, world_origin already added back). Used by
     /// `compute_hatch_lod` to evaluate the sub-pixel + frustum cull
-    /// without reading back from the GPU.
-    pub instance_aabbs: Vec<[f32; 4]>,
+    /// without reading back from the GPU. Kept in f64: at large drawing
+    /// coordinates an f32 sum collapses a small fill's box to zero size, and
+    /// the cull then skips it as sub-pixel.
+    pub instance_aabbs: Vec<[f64; 4]>,
 }
 
 fn hatch_buffer_cost(hatch: &HatchModel) -> [u64; 7] {
@@ -470,16 +486,17 @@ impl StorageHatchBatch {
                 draws.push((0..end, 0..1));
             }
             let mut union = [
-                f32::INFINITY,
-                f32::INFINITY,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
+                f64::INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
             ];
             for inst in instances.iter().take(unique_source_count) {
-                union[0] = union[0].min(inst.aabb[0] + inst.world_origin[0]);
-                union[1] = union[1].min(inst.aabb[1] + inst.world_origin[1]);
-                union[2] = union[2].max(inst.aabb[2] + inst.world_origin[0]);
-                union[3] = union[3].max(inst.aabb[3] + inst.world_origin[1]);
+                let aabb = world_aabb(inst, [0.0; 2]);
+                union[0] = union[0].min(aabb[0]);
+                union[1] = union[1].min(aabb[1]);
+                union[2] = union[2].max(aabb[2]);
+                union[3] = union[3].max(aabb[3]);
             }
             instance_aabbs.push(union);
         }
@@ -504,13 +521,7 @@ impl StorageHatchBatch {
                     draw_depth: hatch.draw_depth,
                     visible: 1,
                 });
-                let inst = &instances[source_index];
-                instance_aabbs.push([
-                    inst.aabb[0] + inst.world_origin[0] + high[0],
-                    inst.aabb[1] + inst.world_origin[1] + high[1],
-                    inst.aabb[2] + inst.world_origin[0] + high[0],
-                    inst.aabb[3] + inst.world_origin[1] + high[1],
-                ]);
+                instance_aabbs.push(world_aabb(&instances[source_index], delta));
             }
             if !mesh_ranges[source_index].is_empty() {
                 draws.push((
@@ -615,14 +626,7 @@ impl StorageHatchBatch {
         });
         let source_aabbs = instances
             .iter()
-            .map(|inst| {
-                [
-                    inst.aabb[0] + inst.world_origin[0],
-                    inst.aabb[1] + inst.world_origin[1],
-                    inst.aabb[2] + inst.world_origin[0],
-                    inst.aabb[3] + inst.world_origin[1],
-                ]
-            })
+            .map(|inst| world_aabb(inst, [0.0; 2]))
             .collect();
 
         Some(Self {
@@ -704,4 +708,50 @@ impl LineFamilyGpu {
 #[allow(dead_code)]
 fn _assert_patfamily_fields(f: &PatFamily) -> (f32, f32, f32) {
     (f.angle_deg, f.x0, f.y0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fill a few units across, far from the origin. Its cull box must keep
+    /// its real size and place: an f32 sum of anchor and local box rounds it
+    /// to the f32 step there (32 in X, 512 in Y), so the box collapses to zero
+    /// size and the sub-pixel cull hides the fill at every zoom.
+    #[test]
+    fn small_fill_far_from_origin_keeps_its_cull_box() {
+        let origin = [334_050_775.121_066, 6_218_261_561.703_455];
+        let (high, low) = split_origin_ds(origin);
+        let mut instance: HatchInstance = bytemuck::Zeroable::zeroed();
+        instance.world_origin = high;
+        instance.world_origin_low = low;
+        instance.aabb = [-5.596, -2.926, 5.596, 2.926];
+
+        for offset in [[0.0, 0.0], [1_000.25, -2_000.5]] {
+            let aabb = world_aabb(&instance, offset);
+            let expected = [
+                origin[0] + offset[0] - 5.596,
+                origin[1] + offset[1] - 2.926,
+                origin[0] + offset[0] + 5.596,
+                origin[1] + offset[1] + 2.926,
+            ];
+            for (actual, expected) in aabb.iter().zip(expected) {
+                assert!(
+                    (actual - expected).abs() < 1e-3,
+                    "offset {offset:?}: {aabb:?} != {expected:?}"
+                );
+            }
+
+            // 60 units across 512 px, centred on the fill: it covers about
+            // 95 x 50 px, so the cull must draw it.
+            let view_rot = glam::Mat4::from_scale(glam::Vec3::new(2.0 / 60.0, 2.0 / 60.0, 1e-6));
+            let eye = glam::DVec3::new(origin[0] + offset[0], origin[1] + offset[1], 0.0);
+            assert!(!crate::scene::pipeline::aabb_below_pixel(
+                aabb, view_rot, eye, 512, 512, 2.0
+            ));
+            assert!(!crate::scene::pipeline::aabb_offscreen(
+                aabb, view_rot, eye, 512, 512
+            ));
+        }
+    }
 }

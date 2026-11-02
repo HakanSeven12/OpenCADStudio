@@ -853,28 +853,26 @@ impl OpenCADStudio {
             super::super::ModalKind::TextStyle => {
                 let tab = &self.tabs[self.active_tab];
                 let doc = &tab.scene.document;
-                let styles: Vec<String> = tab
-                    .scene
-                    .document
-                    .text_styles
-                    .iter()
-                    .map(|s| s.name.clone())
-                    .collect();
-                let selected_style = doc.text_styles.get(&self.textstyle_selected);
-                let (backward, upside_down, vertical, annotative, read_only) = selected_style
-                    .map(|style| {
-                        (
-                            style.flags.backward,
-                            style.flags.upside_down,
-                            style.is_vertical,
-                            style.annotative,
-                            style.xref_dependent,
+                let styles: Vec<String> = self.style_names(super::super::StyleKind::Text);
+                let draft = &self.textstyle_draft;
+                let edited = draft.resolved();
+                let apply_summary = self
+                    .text_style_baseline(edited.handle)
+                    .map(|old| {
+                        crate::app::text_style_users::summary_lines(
+                            &crate::app::text_style_users::value_changes(
+                                &self.textstyle_users,
+                                old,
+                                &edited,
+                            ),
                         )
                     })
-                    .unwrap_or((false, false, false, false, false));
-                let ttf_flags = selected_style.map_or(0, |style| style.true_type_font_flags);
-                let in_use =
-                    self.style_in_use(crate::app::StyleKind::Text, &self.textstyle_selected);
+                    .unwrap_or_default();
+                let read_only = self.selected_textstyle_is_read_only();
+                let ttf_flags = draft.style.true_type_font_flags;
+                let (listed, rows) = self.textstyle_list();
+                let preview = self.textstyle_preview(&edited);
+                let usage = crate::app::text_style_users::Usage::of(&self.textstyle_users);
                 let compare_opts: Vec<String> = styles
                     .iter()
                     .filter(|name| !name.eq_ignore_ascii_case(&self.textstyle_selected))
@@ -887,7 +885,8 @@ impl OpenCADStudio {
                     .or_else(|| compare_opts.first().cloned())
                     .unwrap_or_default();
                 let mut comparison_sections = Vec::new();
-                if let (Some(a), Some(b)) = (selected_style, doc.text_styles.get(&compare_name)) {
+                if let Some(b) = doc.text_styles.get(&compare_name) {
+                    let a = &edited;
                     if (
                         &a.font_file,
                         &a.big_font_file,
@@ -915,28 +914,42 @@ impl OpenCADStudio {
                 sized_flow(ex, 960, 680, |flow| {
                     crate::ui::style::textstyle::view_window(
                         crate::ui::style::textstyle::TextStyleView {
-                            styles: styles.clone(),
+                            styles: listed.clone(),
+                            rows: rows.clone(),
+                            in_use_only: self.textstyle_in_use_only,
                             selected: &self.textstyle_selected,
                             current: &tab.scene.document.header.current_text_style_name,
-                            tab: self.textstyle_tab,
                             compare_name: compare_name.clone(),
                             compare_opts: compare_opts.clone(),
                             comparison_sections: comparison_sections.clone(),
                             read_only,
-                            in_use,
-                            font_buf: &self.textstyle_font,
-                            width_buf: &self.textstyle_width,
-                            oblique_buf: &self.textstyle_oblique,
-                            height_buf: &self.textstyle_height,
-                            bigfont_buf: &self.textstyle_bigfont,
-                            ttf_buf: &self.textstyle_ttf,
+                            usage: usage.clone(),
+                            font_buf: &draft.style.font_file,
+                            width_buf: &draft.width.text,
+                            oblique_buf: &draft.oblique.text,
+                            height_buf: &draft.height.text,
+                            bigfont_buf: &draft.style.big_font_file,
+                            ttf_buf: &draft.style.true_type_font,
+                            width_error: draft.width.error(),
+                            oblique_error: draft.oblique.error(),
+                            height_error: draft.height.error(),
+                            width_was: draft.width.was(),
+                            oblique_was: draft.oblique.was(),
+                            height_was: draft.height.was(),
+                            invalid_fields: draft.invalid_fields(),
+                            use_big_font: draft.big_font_on,
+                            font_picker: &self.textstyle_font_picker,
+                            turned_off: draft.turned_off.clone(),
+                            apply_summary: apply_summary.clone(),
+                            preview: preview.clone(),
+                            sample: &self.textstyle_sample,
                             bold: ttf_flags & crate::entities::text_support::TTF_FLAG_BOLD != 0,
                             italic: ttf_flags & crate::entities::text_support::TTF_FLAG_ITALIC
                                 != 0,
-                            backward,
-                            upside_down,
-                            vertical,
-                            annotative,
+                            backward: draft.style.flags.backward,
+                            upside_down: draft.style.flags.upside_down,
+                            vertical: draft.style.is_vertical,
+                            annotative: draft.style.annotative,
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
                         },

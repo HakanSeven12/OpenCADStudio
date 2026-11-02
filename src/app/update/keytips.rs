@@ -12,7 +12,10 @@ impl OpenCADStudio {
             KeyTipInput::AltTap if self.ribbon.keytips_active() => self.hide_keytips(),
             KeyTipInput::AltTap => {
                 let i = self.active_tab;
-                if self.active_modal.is_some()
+                // The Start tab has no drawing for the ribbon or the Quick
+                // Access Toolbar, so no key tips either.
+                if self.tabs[i].is_start
+                    || self.active_modal.is_some()
                     || self.clean_screen
                     || self.ribbon_closed
                     || self.tabs[i].active_cmd.is_some()
@@ -42,6 +45,7 @@ impl OpenCADStudio {
                     })
                 })
             }
+            KeyTipInput::Open { .. } if self.tabs[self.active_tab].is_start => Task::none(),
             KeyTipInput::Open { refocus } => {
                 self.ribbon.show_keytips(refocus);
                 // Typed codes must not reach the command line.
@@ -84,5 +88,31 @@ impl OpenCADStudio {
         } else {
             Task::none()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::OpenCADStudio;
+    use crate::ui::ribbon::KeyTipInput;
+
+    #[test]
+    fn no_key_tips_on_the_start_tab() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert!(app.tabs[app.active_tab].is_start);
+        let _ = app.on_keytip(KeyTipInput::AltTap);
+        let _ = app.on_keytip(KeyTipInput::Open { refocus: false });
+        assert!(!app.ribbon.keytips_active());
+
+        // With a drawing they open.
+        app.automation_op(r#"{"op":"new"}"#);
+        assert!(!app.tabs[app.active_tab].is_start);
+        let _ = app.on_keytip(KeyTipInput::Open { refocus: false });
+        let opened = app.ribbon.keytips_active();
+        // Key tips are process-wide: close them before asserting, or other
+        // tests' keys go to them.
+        let _ = app.on_keytip(KeyTipInput::Hide);
+        assert!(opened);
+        assert!(!app.ribbon.keytips_active());
     }
 }

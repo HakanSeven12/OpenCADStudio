@@ -234,7 +234,7 @@ impl HatchGpu {
     pub fn update_visibility(
         &mut self,
         queue: &wgpu::Queue,
-        mut is_visible: impl FnMut([f32; 4]) -> bool,
+        mut is_visible: impl FnMut([f64; 4]) -> bool,
     ) -> usize {
         let HatchBackend::Storage { resident, .. } = &mut self.backend else {
             return 0;

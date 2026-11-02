@@ -545,21 +545,35 @@ pub(super) fn extra_tools<'a>(
         }
         groups = groups.push(tool_rows(&group.tools, panel.id, active, inner));
     }
-    match panel.layout {
-        Layout::Grid => {}
-        Layout::Reference => groups = groups.push(fade_row(ribbon.xref_fade, panel.id)),
-        Layout::TextLayer => groups = groups.push(text_layers(ribbon)),
-        Layout::CenterLayer => {
-            groups = groups.push(super::widgets::layer_combo(
-                super::widgets::CENTER_LAYER_COMBO,
-                &ribbon.center_layer,
-                ribbon.center_layer_color(),
-                false,
-                format!("{}\n{} CENTERLAYER", t!("Center Layer"), t!("Command:")),
-            ))
-        }
+    if let Some(special) = extra_special(ribbon, panel) {
+        groups = groups.push(special);
     }
     container(groups).padding(PAD).width(Fill).into()
+}
+
+/// What `panel`'s extra tools show after their buttons: the xref fading
+/// row on Reference, the text layer list on Text or the center layer list
+/// on Centerlines.
+pub(super) fn extra_special<'a>(
+    ribbon: &Ribbon,
+    panel: &'static PanelExtras,
+) -> Option<Element<'a, Message>> {
+    match panel.layout {
+        Layout::Grid => None,
+        Layout::Reference => Some(fade_row(ribbon.xref_fade, panel.id)),
+        Layout::TextLayer => Some(text_layers(ribbon)),
+        Layout::CenterLayer => Some(super::widgets::layer_combo(
+            super::widgets::CENTER_LAYER_COMBO,
+            &ribbon.center_layer,
+            ribbon.center_layer_color(),
+            false,
+            format!(
+                "{}\n{} CENTERLAYER",
+                crate::tr!("ribbon-menu", "center-layer"),
+                t!("Command:")
+            ),
+        )),
+    }
 }
 
 /// The layer new text goes on (TEXTLAYER): Use Current, or a layer of the
@@ -693,7 +707,32 @@ fn tool_rows<'a>(
     column(rows).spacing(GAP).into()
 }
 
+/// A slide-out tool; right-clicked, it offers to go on the Quick Access
+/// Toolbar.
 fn tool_button(tool: &MoreTool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
+    sized_tool_button(tool, active, panel_id, CELL)
+}
+
+/// [`tool_button`] `cell` px square, as a floating panel's band of extra
+/// tools has them.
+pub(super) fn sized_tool_button(
+    tool: &MoreTool,
+    active: bool,
+    panel_id: &'static str,
+    cell: f32,
+) -> Element<'static, Message> {
+    super::ribbon_menu::tool_target(
+        Some(super::layout::QatItem::Command(tool.command().to_string())),
+        slide_out_button(tool, active, panel_id, cell),
+    )
+}
+
+fn slide_out_button(
+    tool: &MoreTool,
+    active: bool,
+    panel_id: &'static str,
+    cell: f32,
+) -> Element<'static, Message> {
     let command = tool.command();
     let face = button(make_icon(tool.tool.icon, CELL_ICON))
         .on_press(Message::DropdownSelectItem {
@@ -701,9 +740,9 @@ fn tool_button(tool: &MoreTool, active: bool, panel_id: &'static str) -> Element
             cmd: command,
         })
         .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-        .width(CELL)
-        .height(CELL)
-        .padding((CELL - CELL_ICON) / 2.0);
+        .width(cell)
+        .height(cell)
+        .padding((cell - CELL_ICON) / 2.0);
     let tip = format!("{}\n{} {}", t!(tool.tool.label), t!("Command:"), command);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
         .delay(Duration::from_millis(400))
@@ -718,7 +757,7 @@ fn tool_button(tool: &MoreTool, active: bool, panel_id: &'static str) -> Element
         .on_press(Message::ToggleRibbonDropdown(command.to_string()))
         .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
         .width(SPLIT_W)
-        .height(CELL)
+        .height(cell)
         .padding(2);
     row![face, PosReport::new(command, arrow)].into()
 }

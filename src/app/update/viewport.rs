@@ -1233,6 +1233,7 @@ impl OpenCADStudio {
                         && grip.id != crate::app::visibility::TABLE_GRIP_ID
                         && !crate::app::block_actions::is_test_grip(grip.id)
                         && !crate::app::block_authoring_edit::is_editor_grip(grip.id)
+                        && !crate::scene::assoc_array_grips::is_array_grip(grip.id)
                 })
                 .map(|(owner, grip)| GripTarget {
                     handle: owner,
@@ -1260,6 +1261,7 @@ impl OpenCADStudio {
                         && grip.id != crate::app::visibility::TABLE_GRIP_ID
                         && !crate::app::block_actions::is_test_grip(grip.id)
                         && !crate::app::block_authoring_edit::is_editor_grip(grip.id)
+                        && !crate::scene::assoc_array_grips::is_array_grip(grip.id)
                 })
                 .filter(|(_, grip)| (grip.world - world).length_squared() <= epsilon_sq)
                 .map(|(owner, grip)| GripTarget {
@@ -5434,6 +5436,9 @@ impl OpenCADStudio {
                     if self.start_authoring_grip(handle, grip_id) {
                         return Task::none();
                     }
+                    if self.start_array_grip(handle, grip_id) {
+                        return Task::none();
+                    }
                     if self.shift_down {
                         let key = (handle, grip_id);
                         if !self.tabs[i].hot_grips.remove(&key) {
@@ -9083,7 +9088,14 @@ properties={:.1}ms picked={}",
                 if self.tabs[i].scene.update_entity(original.clone()) {
                     restored.push((*handle, crate::scene::ChangeKind::Modified));
                 }
-                self.tabs[i].scene.add_entity_clone(moved);
+                let copy = self.tabs[i].scene.add_entity_clone(moved);
+                // A copied associative array gets its own blocks and action.
+                crate::scene::assoc_array::clone_array_for_copy(
+                    &mut self.tabs[i].scene,
+                    *handle,
+                    copy,
+                    &Default::default(),
+                );
             }
             self.tabs[i]
                 .scene

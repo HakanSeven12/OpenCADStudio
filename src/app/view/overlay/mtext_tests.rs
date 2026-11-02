@@ -170,11 +170,6 @@ fn menu_fields_take_typing_and_keep_the_menu_open() {
     let cases: Vec<(EditorMenu, String, fn(&Message) -> bool)> = vec![
         (
             EditorMenu::More,
-            label!("oblique"),
-            |m| matches!(m, Message::MTextOblique(s) if s.ends_with('7')),
-        ),
-        (
-            EditorMenu::More,
             label!("tracking"),
             |m| matches!(m, Message::MTextCharSpace(s) if s.ends_with('7')),
         ),
@@ -240,8 +235,9 @@ fn every_popup_opens_under_its_own_trigger_inside_the_window() {
                 EditorMenu::Symbols => label!("diameter"),
                 EditorMenu::Find => label!("find-what"),
                 EditorMenu::Fraction => unreachable!("opened from More"),
+                EditorMenu::Style | EditorMenu::NewStyle => unreachable!("beside the Style list"),
                 EditorMenu::Background => label!("use-mask"),
-                EditorMenu::Position => label!("direction-style"),
+                EditorMenu::Position => label!("normal"),
             };
             let item = bounds_of(&mut ui, first);
             assert!(item.y >= trigger.y + trigger.height, "{menu:?} {size:?}");
@@ -562,4 +558,45 @@ fn the_editor_measures_its_own_size_not_the_window() {
     let (narrow, wide) = (width_in(1770.), width_in(2400.));
     assert_eq!(narrow, wide, "the window's width leaked into the editor's");
     assert!(narrow < 1500., "{narrow}");
+}
+
+#[test]
+fn the_style_menu_opens_under_the_style_list_and_picks_its_actions() {
+    for size in [Size::new(1280., 720.), Size::new(1100., 600.)] {
+        let mut ed = editor();
+        ed.menu = Some(EditorMenu::Style);
+        let mut ui = overlay_sim(&ed, size);
+        let new = bounds_of(&mut ui, t!("New style from selection…").into_owned());
+        let manager = bounds_of(&mut ui, t!("Text Style Manager…").into_owned());
+        for item in [new, manager] {
+            assert!(
+                item.x >= 0. && item.x + item.width <= size.width,
+                "{size:?}"
+            );
+            assert!(item.y + item.height <= size.height, "{size:?}");
+        }
+        ui.point_at(manager.center());
+        ui.simulate(simulator::click());
+        let messages = picked(ui.into_messages());
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::MTextStyleManager)),
+            "{messages:?}"
+        );
+    }
+    let mut ed = editor();
+    ed.menu = Some(EditorMenu::NewStyle);
+    ed.new_style_name = "Notes (1)".into();
+    let mut ui = overlay_sim(&ed, Size::new(1280., 720.));
+    let create = bounds_of(&mut ui, t!("Create").into_owned());
+    ui.point_at(create.center());
+    ui.simulate(simulator::click());
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::MTextNewStyleCreate)),
+        "{messages:?}"
+    );
 }

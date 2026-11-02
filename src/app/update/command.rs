@@ -5884,7 +5884,24 @@ mod tab_close_tests {
     /// Two close messages built from the same view snapshot: the first one
     /// removes the tab, the second carries the now-outdated reference. The
     /// close request must degrade to a no-op, not panic.
+
     #[test]
+    fn stale_tab_close_is_a_no_op() {
+        let mut app = three_tabs();
+        let id = app.tabs[app.tabs.len() - 1].id;
+
+        let _ = app.update(Message::TabClose(id));
+        assert_eq!(app.tabs.len(), 2, "first close removed the tab");
+
+        // Same target again, as the batched second message from one snapshot.
+        let _ = app.update(Message::TabClose(id));
+        assert_eq!(
+            app.tabs.len(),
+            2,
+            "stale close must not remove another tab or panic"
+        );
+    }
+
     /// A closing drawing takes its remembered ATTDEF placement with it: the
     /// coordinates belong to the drawing that placed them.
     #[test]
@@ -5910,22 +5927,6 @@ mod tab_close_tests {
                 .last_in(id)
                 .is_none(),
             "the place belonged to the drawing that just closed"
-        );
-    }
-
-    fn stale_tab_close_is_a_no_op() {
-        let mut app = three_tabs();
-        let id = app.tabs[app.tabs.len() - 1].id;
-
-        let _ = app.update(Message::TabClose(id));
-        assert_eq!(app.tabs.len(), 2, "first close removed the tab");
-
-        // Same target again, as the batched second message from one snapshot.
-        let _ = app.update(Message::TabClose(id));
-        assert_eq!(
-            app.tabs.len(),
-            2,
-            "stale close must not remove another tab or panic"
         );
     }
 

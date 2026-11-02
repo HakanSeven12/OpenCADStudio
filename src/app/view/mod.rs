@@ -2557,7 +2557,12 @@ bg={bg_ms:.1}ms n={view_count}"
             // Quick Properties: stay near the selection cursor, flipping around
             // it as needed to remain inside the visible drawing area.
             // Floating (QPLOCATION 1): where it was last dragged.
-            if self.quick_properties && !tab.is_start {
+            // It steps aside once a command runs or something is typed (#2458).
+            if self.quick_properties
+                && !tab.is_start
+                && tab.active_cmd.is_none()
+                && self.command_line.input.is_empty()
+            {
                 if let Some(panel) = tab.properties.quick_view() {
                     viewport_stack = viewport_stack.push(if self.quick_properties_float {
                         overlay::position_canvas_overlay_clamped(

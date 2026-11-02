@@ -5971,6 +5971,78 @@ mod tab_close_tests {
         );
     }
 
+    /// A text line is remembered the same way an attribute placement is: the
+    /// next TEXT in the drawing continues below it, so closing the drawing has
+    /// to take the line with it.
+    #[test]
+    fn closing_a_tab_drops_the_line_it_remembered() {
+        let mut app = three_tabs();
+        let i = app
+            .tabs
+            .iter()
+            .position(|tab| !tab.is_start)
+            .expect("a drawing tab, not the fixed start page");
+        let id = app.tabs[i].id;
+        crate::modules::annotate::text::session().set_place(id, &Default::default());
+        assert!(
+            crate::modules::annotate::text::session()
+                .last_in(id)
+                .is_some(),
+            "the drawing remembered a line"
+        );
+
+        let _ = app.update(Message::TabClose(id));
+
+        assert!(
+            crate::modules::annotate::text::session()
+                .last_in(id)
+                .is_none(),
+            "the line belonged to the drawing that just closed"
+        );
+    }
+
+    /// Discarding a dirty drawing ends it just as closing does, so its line
+    /// goes too — while the drawings still open keep theirs.
+    #[test]
+    fn discarding_a_dirty_tab_drops_the_line_it_remembered() {
+        let mut app = three_tabs();
+        let kept_id = app.tabs[1].id;
+        let closed_id = app.tabs[2].id;
+        crate::modules::annotate::text::session().set_place(kept_id, &Default::default());
+        crate::modules::annotate::text::session().set_place(closed_id, &Default::default());
+        assert!(
+            crate::modules::annotate::text::session()
+                .last_in(closed_id)
+                .is_some(),
+            "the drawing remembered a line"
+        );
+        app.tabs[2].dirty = true;
+
+        let _ = app.update(Message::TabClose(closed_id));
+        assert!(
+            app.pending_close.is_some(),
+            "closing a dirty drawing opens the unsaved prompt"
+        );
+        let _ = app.update(Message::UnsavedDialogDiscard);
+
+        assert!(
+            app.tabs.iter().all(|t| t.id != closed_id),
+            "the discarded drawing is gone"
+        );
+        assert!(
+            crate::modules::annotate::text::session()
+                .last_in(closed_id)
+                .is_none(),
+            "the discarded drawing's line went with it"
+        );
+        assert!(
+            crate::modules::annotate::text::session()
+                .last_in(kept_id)
+                .is_some(),
+            "the drawing still open keeps its own line"
+        );
+    }
+
     /// Double-clicking one tab's × in a single batch must close that tab
     /// exactly once; the second message must not slide onto the tab that
     /// shifted into its place.

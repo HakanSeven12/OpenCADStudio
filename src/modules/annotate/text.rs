@@ -23,7 +23,7 @@ pub fn tool() -> ToolDef {
 /// What the next TEXT starts from: the rotation last typed and, for each
 /// drawing, the last line it wrote — which Enter at the start point continues
 /// below.
-struct Session {
+pub(crate) struct Session {
     rotation: f64,
     /// One line per drawing, kept with the drawing that wrote it, so a
     /// remembered position cannot be read as another drawing's and each
@@ -36,13 +36,13 @@ static SESSION: std::sync::Mutex<Session> = std::sync::Mutex::new(Session {
     last: Vec::new(),
 });
 
-fn session() -> std::sync::MutexGuard<'static, Session> {
+pub(crate) fn session() -> std::sync::MutexGuard<'static, Session> {
     SESSION.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Session {
     /// The line this drawing wrote last, if it has written one.
-    fn last_in(&self, document: u64) -> Option<&Text> {
+    pub(crate) fn last_in(&self, document: u64) -> Option<&Text> {
         self.last
             .iter()
             .find(|(written_in, _)| *written_in == document)
@@ -50,7 +50,7 @@ impl Session {
     }
 
     /// The line this drawing continues below, replacing its old one.
-    fn set_place(&mut self, document: u64, line: &Text) {
+    pub(crate) fn set_place(&mut self, document: u64, line: &Text) {
         self.forget_place_of(document);
         self.last.push((document, line.clone()));
     }

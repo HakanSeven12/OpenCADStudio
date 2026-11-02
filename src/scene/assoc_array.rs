@@ -587,72 +587,8 @@ pub fn update(
 ) -> Result<(), String> {
     use codec::objects::AssocArrayItem;
     let document = &scene.document;
-    let mut params = value_params(document, array).to_vec();
-    let center = match array.kind {
-        ArrayKind::Polar => polar_center(document, array).ok_or("array has no first item")?,
-        _ => DVec3::ZERO,
-    };
-    for (name, value) in changes {
-        set_param_value(&mut params, name, *value);
-    }
-    if array.kind == ArrayKind::Polar
-        && changes
-            .iter()
-            .any(|(name, _)| matches!(*name, "Items" | "FillAngle"))
-    {
-        let fill = param_value(&params, "FillAngle").unwrap_or(std::f64::consts::TAU);
-        let count = param_value(&params, "Items").unwrap_or(1.0).max(1.0);
-        let spacing = if (fill.abs() - std::f64::consts::TAU).abs() < 1e-9 {
-            fill / count
-        } else if count > 1.0 {
-            fill / (count - 1.0)
-        } else {
-            0.0
-        };
-        set_param_value(&mut params, "ItemSpacing", spacing);
-    }
-    let normal = base_normal(document, array);
-    let path = (array.kind == ArrayKind::Path)
-        .then(|| path_entity(document, array))
-        .flatten();
-    let placements: Vec<([i32; 3], DMat4)> = match array.kind {
-        ArrayKind::Rectangular => rectangular_items(&params, column_axis(document, array), normal)
-            .into_iter()
-            .map(|(location, offset)| (location, DMat4::from_translation(offset)))
-            .collect(),
-        ArrayKind::Polar => polar_items(&params, center, normal),
-        ArrayKind::Path => {
-            let (_, path) = path.as_ref().ok_or("the array's path is gone")?;
-            // Divide keeps the count and spreads it over the path.
-            if param_value(&params, "Method") == Some(0.0) {
-                if let Some(curve) = crate::entities::curve::entity_curve(path) {
-                    let gaps = param_value(&params, "Items").unwrap_or(1.0)
-                        - if curve.is_closed() { 0.0 } else { 1.0 };
-                    set_param_value(&mut params, "ItemSpacing", curve.length() / gaps.max(1.0));
-                }
-            }
-            // The path gives world placements; the items live in the array
-            // block, so undo where the array reference puts that block.
-            let to_block = array_block_from_world(document, array.insert);
-            path_items(&params, path)
-                .into_iter()
-                .map(|(location, placement)| (location, to_block * placement))
-                .collect()
-        }
-    };
-    if placements.is_empty() {
-        return Err("the array has no items to place".into());
-    }
-    let current = body(document, array.body).ok_or("array body missing")?;
-    let template = current
-        .items
-        .iter()
-        .filter_map(|item| item.first_handle)
-        .find_map(|handle| match document.get_entity(handle) {
-            Some(EntityType::Insert(insert)) => Some(insert.clone()),
-            _ => None,
-        })
-        .ok_or("array has no item reference")?;
+    let (params, placements, path) = plan(document, array, changes)?;
+    let template = item_template(document, array)?;
     let old_items: Vec<Handle> = document
         .block_records
         .iter()
@@ -670,14 +606,8 @@ pub fn update(
     let mut items = Vec::with_capacity(placements.len());
     let mut new_handles = Vec::with_capacity(placements.len());
     for (location, placement) in placements {
-        let mut insert = template.clone();
-        insert.common.handle = Handle::NULL;
-        insert.common.owner_handle = array.array_block;
-        insert.common.reactors.clear();
-        insert.common.xdictionary_handle = None;
+        let insert = placed_item(&template, array.array_block, placement);
         let position = placement.w_axis.truncate();
-        insert.insert_point = codec::types::Vector3::new(position.x, position.y, position.z);
-        insert.rotation = placement.x_axis.y.atan2(placement.x_axis.x);
         let handle = document
             .add_entity(EntityType::Insert(insert))
             .map_err(|error| error.to_string())?;
@@ -756,6 +686,158 @@ pub fn update(
     }
     scene.bump_geometry();
     Ok(())
+}
+
+/// One item reference of the array, as the items are copied from.
+fn item_template(
+    document: &Document,
+    array: &AssocArray,
+) -> Result<codec::entities::Insert, String> {
+    body(document, array.body)
+        .ok_or("array body missing")?
+        .items
+        .iter()
+        .filter_map(|item| item.first_handle)
+        .find_map(|handle| match document.get_entity(handle) {
+            Some(EntityType::Insert(insert)) => Some(insert.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "array has no item reference".into())
+}
+
+/// An item reference in the array block at `placement`.
+fn placed_item(
+    template: &codec::entities::Insert,
+    owner: Handle,
+    placement: DMat4,
+) -> codec::entities::Insert {
+    let mut insert = template.clone();
+    insert.common.handle = Handle::NULL;
+    insert.common.owner_handle = owner;
+    insert.common.reactors.clear();
+    insert.common.xdictionary_handle = None;
+    let position = placement.w_axis.truncate();
+    insert.insert_point = codec::types::Vector3::new(position.x, position.y, position.z);
+    insert.rotation = placement.x_axis.y.atan2(placement.x_axis.x);
+    insert
+}
+
+/// Array-block to world coordinates: where the array reference puts its block.
+pub fn world_from_array_block(document: &Document, insert: Handle) -> DMat4 {
+    array_block_from_world(document, insert).inverse()
+}
+
+/// The items an edit with `changes` would give, as world-space references
+/// of the source block, without touching the drawing: the live preview of
+/// an array grip drag. Empty when the array cannot be shown that way (a
+/// reference that is not in the plan view).
+pub fn preview_items(
+    document: &Document,
+    array: &AssocArray,
+    changes: &[(&str, f64)],
+) -> Vec<EntityType> {
+    let Some(EntityType::Insert(reference)) = document.get_entity(array.insert) else {
+        return Vec::new();
+    };
+    let normal = DVec3::new(reference.normal.x, reference.normal.y, reference.normal.z);
+    if (normal - DVec3::Z).length() > 1e-9 {
+        return Vec::new();
+    }
+    let (Ok((_, placements, _)), Ok(template)) = (
+        plan(document, array, changes),
+        item_template(document, array),
+    ) else {
+        return Vec::new();
+    };
+    let to_world = world_from_array_block(document, array.insert);
+    placements
+        .into_iter()
+        .map(|(_, placement)| {
+            let mut item = placed_item(&template, Handle::NULL, placement);
+            let at = to_world.transform_point3(placement.w_axis.truncate());
+            item.insert_point = codec::types::Vector3::new(at.x, at.y, at.z);
+            item.rotation += reference.rotation;
+            item.set_x_scale(item.x_scale() * reference.x_scale());
+            item.set_y_scale(item.y_scale() * reference.y_scale());
+            item.set_z_scale(item.z_scale() * reference.z_scale());
+            item.common.layer = reference.common.layer.clone();
+            EntityType::Insert(item)
+        })
+        .collect()
+}
+
+/// The parameters and item placements (array-block coordinates) an edit
+/// with `changes` gives, and the path of a path array.
+#[allow(clippy::type_complexity)]
+pub(crate) fn plan(
+    document: &Document,
+    array: &AssocArray,
+    changes: &[(&str, f64)],
+) -> Result<
+    (
+        Vec<AssocValueParam>,
+        Vec<([i32; 3], DMat4)>,
+        Option<(Handle, EntityType)>,
+    ),
+    String,
+> {
+    let mut params = value_params(document, array).to_vec();
+    let center = match array.kind {
+        ArrayKind::Polar => polar_center(document, array).ok_or("array has no first item")?,
+        _ => DVec3::ZERO,
+    };
+    for (name, value) in changes {
+        set_param_value(&mut params, name, *value);
+    }
+    if array.kind == ArrayKind::Polar
+        && changes
+            .iter()
+            .any(|(name, _)| matches!(*name, "Items" | "FillAngle"))
+    {
+        let fill = param_value(&params, "FillAngle").unwrap_or(std::f64::consts::TAU);
+        let count = param_value(&params, "Items").unwrap_or(1.0).max(1.0);
+        let spacing = if (fill.abs() - std::f64::consts::TAU).abs() < 1e-9 {
+            fill / count
+        } else if count > 1.0 {
+            fill / (count - 1.0)
+        } else {
+            0.0
+        };
+        set_param_value(&mut params, "ItemSpacing", spacing);
+    }
+    let normal = base_normal(document, array);
+    let path = (array.kind == ArrayKind::Path)
+        .then(|| path_entity(document, array))
+        .flatten();
+    let placements: Vec<([i32; 3], DMat4)> = match array.kind {
+        ArrayKind::Rectangular => rectangular_items(&params, column_axis(document, array), normal)
+            .into_iter()
+            .map(|(location, offset)| (location, DMat4::from_translation(offset)))
+            .collect(),
+        ArrayKind::Polar => polar_items(&params, center, normal),
+        ArrayKind::Path => {
+            let (_, path) = path.as_ref().ok_or("the array's path is gone")?;
+            // Divide keeps the count and spreads it over the path.
+            if param_value(&params, "Method") == Some(0.0) {
+                if let Some(curve) = crate::entities::curve::entity_curve(path) {
+                    let gaps = param_value(&params, "Items").unwrap_or(1.0)
+                        - if curve.is_closed() { 0.0 } else { 1.0 };
+                    set_param_value(&mut params, "ItemSpacing", curve.length() / gaps.max(1.0));
+                }
+            }
+            // The path gives world placements; the items live in the array
+            // block, so undo where the array reference puts that block.
+            let to_block = array_block_from_world(document, array.insert);
+            path_items(&params, path)
+                .into_iter()
+                .map(|(location, placement)| (location, to_block * placement))
+                .collect()
+        }
+    };
+    if placements.is_empty() {
+        return Err("the array has no items to place".into());
+    }
+    Ok((params, placements, path))
 }
 
 /// Class records the array objects need, with the values the reference

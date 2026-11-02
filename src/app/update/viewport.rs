@@ -1233,6 +1233,7 @@ impl OpenCADStudio {
                         && grip.id != crate::app::visibility::TABLE_GRIP_ID
                         && !crate::app::block_actions::is_test_grip(grip.id)
                         && !crate::app::block_authoring_edit::is_editor_grip(grip.id)
+                        && !crate::scene::assoc_array_grips::is_array_grip(grip.id)
                 })
                 .map(|(owner, grip)| GripTarget {
                     handle: owner,
@@ -1260,6 +1261,7 @@ impl OpenCADStudio {
                         && grip.id != crate::app::visibility::TABLE_GRIP_ID
                         && !crate::app::block_actions::is_test_grip(grip.id)
                         && !crate::app::block_authoring_edit::is_editor_grip(grip.id)
+                        && !crate::scene::assoc_array_grips::is_array_grip(grip.id)
                 })
                 .filter(|(_, grip)| (grip.world - world).length_squared() <= epsilon_sq)
                 .map(|(owner, grip)| GripTarget {
@@ -5432,6 +5434,9 @@ impl OpenCADStudio {
                         return Task::none();
                     }
                     if self.start_authoring_grip(handle, grip_id) {
+                        return Task::none();
+                    }
+                    if self.start_array_grip(handle, grip_id) {
                         return Task::none();
                     }
                     if self.shift_down {

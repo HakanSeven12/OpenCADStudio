@@ -2217,7 +2217,25 @@ pub fn tessellate_table(
                         value: text,
                         insertion: [to.x as f64, to.y as f64, to.z as f64],
                         height: cell_h,
-                        rect_w: (col_width - margin_left - margin_right).max(0.0),
+                        // Wraps inside the cell's own margins (the table's
+                        // where it sets none), as its row height is fitted.
+                        rect_w: {
+                            use codec::entities::table::CellStylePropertyFlags as P;
+                            let side = |property: P| {
+                                style_for_property(tab, row, ci, cell, property)
+                                    .map(|style| {
+                                        if property == P::MARGIN_LEFT {
+                                            style.margin_left
+                                        } else {
+                                            style.margin_right
+                                        }
+                                    })
+                                    .unwrap_or(horizontal_margin)
+                                    as f32
+                                    * anno_scale
+                            };
+                            (col_width - side(P::MARGIN_LEFT) - side(P::MARGIN_RIGHT)).max(0.0)
+                        },
                         rotation: rot,
                         style: &resolved,
                         attach_h_anchor,

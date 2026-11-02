@@ -8125,3 +8125,9 @@ array-grips = عدد العناصر
 block-chain =
     .label = الإجراءات المتسلسلة
     .cycle = تحتوي سلسلة إجراءات الكتلة على دورة.
+
+block-action-bars =
+    .requires-session = يتطلب BACTIONBAR جلسة نشطة في محرر الكتل.
+    .enable-display = اضبط BACTIONBARMODE على 1 لعرض أشرطة الإجراءات.
+    .parameters-changed = تغيرت قائمة المعلمات؛ أعد تشغيل BACTIONBAR.
+    .display-updated = تم تحديث عرض أشرطة الإجراءات.

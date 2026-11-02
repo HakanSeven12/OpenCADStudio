@@ -8100,3 +8100,9 @@ array-grips = 項目数
 block-chain =
     .label = アクションを連鎖
     .cycle = ブロックのアクション連鎖に循環があります。
+
+block-action-bars =
+    .requires-session = BACTIONBAR にはアクティブなブロックエディターのセッションが必要です。
+    .enable-display = アクションバーを表示するには BACTIONBARMODE を 1 に設定してください。
+    .parameters-changed = パラメーター一覧が変更されました。BACTIONBAR を再実行してください。
+    .display-updated = アクションバーの表示を更新しました。

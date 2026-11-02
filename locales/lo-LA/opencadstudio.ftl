@@ -8113,3 +8113,9 @@ array-grips = ຈຳນວນລາຍການ
 block-chain =
     .label = ການກະທຳຕໍ່ເນື່ອງ
     .cycle = ລຳດັບການກະທຳຂອງບລັອກມີວົງຈອນ.
+
+block-action-bars =
+    .requires-session = BACTIONBAR ຕ້ອງການເຊດຊັນທີ່ເປີດໃຊ້ຢູ່ໃນຕົວແກ້ໄຂບລັອກ.
+    .enable-display = ຕັ້ງ BACTIONBARMODE ເປັນ 1 ເພື່ອສະແດງແຖບການກະທຳ.
+    .parameters-changed = ລາຍການພາຣາມິເຕີປ່ຽນແປງແລ້ວ; ເລີ່ມ BACTIONBAR ໃໝ່.
+    .display-updated = ອັບເດດການສະແດງແຖບການກະທຳແລ້ວ.

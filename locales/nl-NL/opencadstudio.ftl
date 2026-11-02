@@ -8120,3 +8120,9 @@ array-grips = Aantal items
 block-chain =
     .label = Acties koppelen
     .cycle = De actieketen van het blok bevat een cyclus.
+
+block-action-bars =
+    .requires-session = BACTIONBAR vereist een actieve sessie in de blokeditor.
+    .enable-display = Stel BACTIONBARMODE in op 1 om actiebalken weer te geven.
+    .parameters-changed = De parameterlijst is gewijzigd; start BACTIONBAR opnieuw.
+    .display-updated = De weergave van actiebalken is bijgewerkt.

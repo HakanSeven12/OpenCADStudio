@@ -8122,3 +8122,9 @@ array-grips = Πλήθος στοιχείων
 block-chain =
     .label = Αλυσιδωτές ενέργειες
     .cycle = Η αλυσίδα ενεργειών του μπλοκ περιέχει κύκλο.
+
+block-action-bars =
+    .requires-session = Το BACTIONBAR απαιτεί ενεργή συνεδρία στον επεξεργαστή μπλοκ.
+    .enable-display = Ορίστε το BACTIONBARMODE σε 1 για να εμφανίζονται οι γραμμές ενεργειών.
+    .parameters-changed = Η λίστα παραμέτρων άλλαξε· επανεκκινήστε το BACTIONBAR.
+    .display-updated = Η εμφάνιση των γραμμών ενεργειών ενημερώθηκε.

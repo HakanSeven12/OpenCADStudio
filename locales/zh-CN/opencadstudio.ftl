@@ -8095,3 +8095,9 @@ array-grips = 项目数
 block-chain =
     .label = 链式动作
     .cycle = 块的动作链中存在循环。
+
+block-action-bars =
+    .requires-session = BACTIONBAR 需要处于活动状态的块编辑器会话。
+    .enable-display = 将 BACTIONBARMODE 设为 1 以显示动作栏。
+    .parameters-changed = 参数列表已更改；请重新运行 BACTIONBAR。
+    .display-updated = 动作栏显示已更新。

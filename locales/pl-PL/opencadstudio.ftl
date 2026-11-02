@@ -8124,3 +8124,9 @@ array-grips = Liczba elementów
 block-chain =
     .label = Łańcuch działań
     .cycle = Łańcuch działań bloku zawiera cykl.
+
+block-action-bars =
+    .requires-session = BACTIONBAR wymaga aktywnej sesji edytora bloków.
+    .enable-display = Ustaw BACTIONBARMODE na 1, aby wyświetlić paski operacji.
+    .parameters-changed = Lista parametrów uległa zmianie; uruchom ponownie BACTIONBAR.
+    .display-updated = Zaktualizowano wyświetlanie pasków operacji.

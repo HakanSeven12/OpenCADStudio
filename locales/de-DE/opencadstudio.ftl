@@ -8120,3 +8120,9 @@ array-grips = Elementanzahl
 block-chain =
     .label = Aktionen verketten
     .cycle = Die Aktionskette des Blocks enthält einen Zyklus.
+
+block-action-bars =
+    .requires-session = BACTIONBAR erfordert eine aktive Sitzung im Blockeditor.
+    .enable-display = Setzen Sie BACTIONBARMODE auf 1, um Aktionsleisten anzuzeigen.
+    .parameters-changed = Die Parameterliste wurde geändert; starten Sie BACTIONBAR erneut.
+    .display-updated = Die Anzeige der Aktionsleisten wurde aktualisiert.

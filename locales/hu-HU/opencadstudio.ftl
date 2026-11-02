@@ -8100,3 +8100,9 @@ array-grips = Elemek száma
 block-chain =
     .label = Műveletek láncolása
     .cycle = A blokk műveletlánca ciklust tartalmaz.
+
+block-action-bars =
+    .requires-session = A BACTIONBAR aktív blokkszerkesztő-munkamenetet igényel.
+    .enable-display = A műveletsávok megjelenítéséhez állítsa a BACTIONBARMODE értékét 1-re.
+    .parameters-changed = A paraméterlista megváltozott; indítsa újra a BACTIONBAR parancsot.
+    .display-updated = A műveletsávok megjelenítése frissült.

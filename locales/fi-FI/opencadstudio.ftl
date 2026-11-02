@@ -8119,3 +8119,9 @@ array-grips = Kohteiden määrä
 block-chain =
     .label = Ketjuta toiminnot
     .cycle = Lohkon toimintoketjussa on silmukka.
+
+block-action-bars =
+    .requires-session = BACTIONBAR edellyttää aktiivista lohkoeditorin istuntoa.
+    .enable-display = Näytä toimintopalkit asettamalla BACTIONBARMODE arvoksi 1.
+    .parameters-changed = Parametriluettelo on muuttunut; käynnistä BACTIONBAR uudelleen.
+    .display-updated = Toimintopalkkien näyttö on päivitetty.

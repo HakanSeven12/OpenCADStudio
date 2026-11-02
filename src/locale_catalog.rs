@@ -3,6 +3,10 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "BACTIONBAR requires an active Block Editor session." => Some(("block-action-bars", "requires-session")),
+        "Set BACTIONBARMODE to 1 to display action bars." => Some(("block-action-bars", "enable-display")),
+        "The parameter list changed; restart BACTIONBAR." => Some(("block-action-bars", "parameters-changed")),
+        "Action bar display updated." => Some(("block-action-bars", "display-updated")),
         "1 Viewport" => Some(("menu-labels", "n-1-viewport")),
         "2 Points" => Some(("menu-labels", "n-2-points")),
         "2 Viewports" => Some(("menu-labels", "n-2-viewports")),

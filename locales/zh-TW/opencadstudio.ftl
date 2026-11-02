@@ -8107,3 +8107,9 @@ array-grips = 項目數
 block-chain =
     .label = 連鎖動作
     .cycle = 圖塊的動作鏈包含循環。
+
+block-action-bars =
+    .requires-session = BACTIONBAR 需要作用中的圖塊編輯器工作階段。
+    .enable-display = 將 BACTIONBARMODE 設為 1 以顯示動作列。
+    .parameters-changed = 參數清單已變更；請重新執行 BACTIONBAR。
+    .display-updated = 動作列顯示已更新。

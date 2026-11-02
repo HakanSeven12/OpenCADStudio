@@ -8119,3 +8119,9 @@ array-grips = Số mục
 block-chain =
     .label = Hành động nối tiếp
     .cycle = Chuỗi hành động của khối chứa vòng lặp.
+
+block-action-bars =
+    .requires-session = BACTIONBAR yêu cầu một phiên trình chỉnh sửa khối đang hoạt động.
+    .enable-display = Đặt BACTIONBARMODE thành 1 để hiển thị các thanh hành động.
+    .parameters-changed = Danh sách tham số đã thay đổi; hãy khởi động lại BACTIONBAR.
+    .display-updated = Đã cập nhật hiển thị thanh hành động.

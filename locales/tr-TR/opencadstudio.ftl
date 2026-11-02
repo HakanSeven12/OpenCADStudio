@@ -8043,3 +8043,9 @@ array-grips = Öğe sayısı
 block-chain =
     .label = Zincirleme eylemler
     .cycle = Blok eylem zinciri bir döngü içeriyor.
+
+block-action-bars =
+    .requires-session = BACTIONBAR etkin bir blok düzenleyici oturumu gerektirir.
+    .enable-display = Eylem çubuklarını görüntülemek için BACTIONBARMODE değerini 1 yapın.
+    .parameters-changed = Parametre listesi değişti; BACTIONBAR komutunu yeniden başlatın.
+    .display-updated = Eylem çubuklarının görünümü güncellendi.

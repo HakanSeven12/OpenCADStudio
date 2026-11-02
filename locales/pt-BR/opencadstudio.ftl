@@ -8122,3 +8122,9 @@ array-grips = Número de itens
 block-chain =
     .label = Ações encadeadas
     .cycle = A cadeia de ações do bloco contém um ciclo.
+
+block-action-bars =
+    .requires-session = BACTIONBAR requer uma sessão ativa no editor de blocos.
+    .enable-display = Defina BACTIONBARMODE como 1 para exibir as barras de ações.
+    .parameters-changed = A lista de parâmetros mudou; reinicie BACTIONBAR.
+    .display-updated = A exibição das barras de ações foi atualizada.

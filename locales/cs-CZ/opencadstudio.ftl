@@ -8122,3 +8122,9 @@ array-grips = Počet položek
 block-chain =
     .label = Řetězení akcí
     .cycle = Řetězec akcí bloku obsahuje cyklus.
+
+block-action-bars =
+    .requires-session = BACTIONBAR vyžaduje aktivní relaci editoru bloků.
+    .enable-display = Pro zobrazení panelů akcí nastavte BACTIONBARMODE na 1.
+    .parameters-changed = Seznam parametrů se změnil; spusťte BACTIONBAR znovu.
+    .display-updated = Zobrazení panelů akcí bylo aktualizováno.

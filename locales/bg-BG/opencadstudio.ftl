@@ -8122,3 +8122,9 @@ array-grips = Брой елементи
 block-chain =
     .label = Верижни действия
     .cycle = Веригата от действия на блока съдържа цикъл.
+
+block-action-bars =
+    .requires-session = BACTIONBAR изисква активна сесия в редактора на блокове.
+    .enable-display = Задайте BACTIONBARMODE на 1, за да се показват лентите с действия.
+    .parameters-changed = Списъкът с параметри е променен; стартирайте BACTIONBAR отново.
+    .display-updated = Показването на лентите с действия е обновено.

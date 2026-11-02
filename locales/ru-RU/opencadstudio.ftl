@@ -8126,3 +8126,9 @@ array-grips = Число элементов
 block-chain =
     .label = Цепочка действий
     .cycle = Цепочка действий блока содержит цикл.
+
+block-action-bars =
+    .requires-session = Для BACTIONBAR требуется активный сеанс редактора блоков.
+    .enable-display = Установите BACTIONBARMODE в 1 для отображения панелей операций.
+    .parameters-changed = Список параметров изменён; запустите BACTIONBAR заново.
+    .display-updated = Отображение панелей операций обновлено.

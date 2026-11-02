@@ -8123,3 +8123,9 @@ array-grips = Item count
 block-chain =
     .label = Chain actions
     .cycle = The block action chain contains a cycle.
+
+block-action-bars =
+    .requires-session = BACTIONBAR requires an active Block Editor session.
+    .enable-display = Set BACTIONBARMODE to 1 to display action bars.
+    .parameters-changed = The parameter list changed; restart BACTIONBAR.
+    .display-updated = Action bar display updated.

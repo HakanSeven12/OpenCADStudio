@@ -8111,3 +8111,9 @@ array-grips = 항목 수
 block-chain =
     .label = 작업 연계
     .cycle = 블록 작업 연계에 순환이 있습니다.
+
+block-action-bars =
+    .requires-session = BACTIONBAR에는 활성 블록 편집기 세션이 필요합니다.
+    .enable-display = 동작 막대를 표시하려면 BACTIONBARMODE를 1로 설정하십시오.
+    .parameters-changed = 매개변수 목록이 변경되었습니다. BACTIONBAR를 다시 실행하십시오.
+    .display-updated = 동작 막대 표시가 업데이트되었습니다.

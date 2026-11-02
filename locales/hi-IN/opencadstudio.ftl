@@ -8110,3 +8110,9 @@ array-grips = आइटम की संख्या
 block-chain =
     .label = श्रृंखलाबद्ध क्रियाएँ
     .cycle = ब्लॉक की क्रिया श्रृंखला में एक चक्र है।
+
+block-action-bars =
+    .requires-session = BACTIONBAR के लिए ब्लॉक संपादक का सक्रिय सत्र आवश्यक है।
+    .enable-display = क्रिया पट्टियाँ दिखाने के लिए BACTIONBARMODE को 1 पर सेट करें।
+    .parameters-changed = पैरामीटर सूची बदल गई है; BACTIONBAR फिर से शुरू करें।
+    .display-updated = क्रिया पट्टियों का प्रदर्शन अद्यतन किया गया।

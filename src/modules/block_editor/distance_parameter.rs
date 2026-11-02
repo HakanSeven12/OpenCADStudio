@@ -71,9 +71,7 @@ impl CadCommand for DistanceParameterCommand {
     }
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         if self.asking_grips() {
-            return CmdResult::ReportError(
-                crate::t!("Enter the number of grips: 0, 1, 2 or 4.").into_owned(),
-            );
+            return CmdResult::ReportError(crate::t!("Requires an integer value.").into_owned());
         }
         if !point.is_finite() {
             return CmdResult::ReportError(
@@ -103,16 +101,25 @@ impl CadCommand for DistanceParameterCommand {
         if !self.asking_grips() {
             return None;
         }
-        let grips = match text.trim() {
+        let answer = text.trim();
+        let grips = match answer {
             "" => 1,
             "0" => 0,
             "1" => 1,
             "2" => 2,
             "4" => 4,
             _ => {
-                return Some(CmdResult::ReportError(
-                    crate::t!("Enter the number of grips: 0, 1, 2 or 4.").into_owned(),
-                ))
+                // A whole number the list does not offer stays a list problem;
+                // an answer that is no number at all is refused for what it is.
+                // The widest integer type is what a count typed in digits is, so
+                // a long answer is refused for the count it is not rather than
+                // for the digits it happens to overflow.
+                let refusal = if answer.parse::<i128>().is_ok() {
+                    "Enter the number of grips: 0, 1, 2 or 4."
+                } else {
+                    "Requires an integer value."
+                };
+                return Some(CmdResult::ReportError(crate::t!(refusal).into_owned()));
             }
         };
         self.grips = Some(grips);
@@ -169,5 +176,57 @@ impl CadCommand for DistanceParameterCommand {
             return self.commit_grips(1);
         }
         CmdResult::Cancel
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at_grip_count() -> DistanceParameterCommand {
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY);
+        for point in [DVec3::ZERO, DVec3::new(6., 2., 0.)] {
+            assert!(
+                matches!(command.on_point(point), CmdResult::NeedPoint),
+                "the base point and the endpoint are picks"
+            );
+        }
+        assert!(command.asking_grips(), "the XY command now wants a count");
+        command
+    }
+
+    /// A picked point where a count is wanted is not a count at all, so the
+    /// refusal says that rather than reciting the list.
+    #[test]
+    fn a_pick_at_the_grip_count_prompt_is_refused_as_not_an_integer() {
+        let mut command = at_grip_count();
+        assert!(matches!(
+            command.on_point(DVec3::new(9., 6., 0.)),
+            CmdResult::ReportError(reason) if reason == "Requires an integer value."
+        ));
+        assert!(matches!(
+            command.on_text_input("1,8"),
+            Some(CmdResult::ReportError(reason)) if reason == "Requires an integer value."
+        ));
+        assert!(matches!(
+            command.on_text_input("2.5"),
+            Some(CmdResult::ReportError(reason)) if reason == "Requires an integer value."
+        ));
+    }
+
+    /// A whole number the option list does not offer stays a list problem.
+    #[test]
+    fn a_count_outside_the_list_is_refused_with_the_list() {
+        for count in ["3", "-1", "8", "+2", "04", "99999999999999999999"] {
+            let mut command = at_grip_count();
+            assert!(
+                matches!(
+                    command.on_text_input(count),
+                    Some(CmdResult::ReportError(reason))
+                        if reason == "Enter the number of grips: 0, 1, 2 or 4."
+                ),
+                "{count}"
+            );
+        }
     }
 }

@@ -3862,13 +3862,21 @@ fn xy_parameter_prompts_for_grip_count_and_places_an_automatic_label() {
         "{prompt}"
     );
     let before = app.tabs[i].scene.document.clone();
-    for invalid in ["3", "-1", "five", "1,8"] {
+    // An integer the option list does not offer is refused with the list; an
+    // answer that is not an integer at all is refused for what it is.
+    for (invalid, reason) in [
+        ("3", "Enter the number of grips: 0, 1, 2 or 4."),
+        ("-1", "Enter the number of grips: 0, 1, 2 or 4."),
+        ("five", "Requires an integer value."),
+        ("1,8", "Requires an integer value."),
+        ("2.5", "Requires an integer value."),
+    ] {
         app.command_line.last_error = None;
         feed(&mut app, invalid);
         assert_eq!(app.tabs[i].scene.document, before);
         assert_eq!(
             app.command_line.last_error.as_deref(),
-            Some("Enter the number of grips: 0, 1, 2 or 4."),
+            Some(reason),
             "{invalid}"
         );
         assert!(app.tabs[i].active_cmd.is_some());

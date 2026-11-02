@@ -1515,7 +1515,8 @@ impl RenderConvertible for Table {
                     value: text,
                     insertion: [text_origin.x as f64, text_origin.y as f64, origin.z as f64],
                     height: cell_h,
-                    rect_w: 0.0,
+                    // Wraps within the cell like the drawn table does.
+                    rect_w: (col_width - 2.0 * margin).max(0.0),
                     rotation: rot,
                     style: &resolved,
                     attach_h_anchor,
@@ -4827,4 +4828,310 @@ fn fill_series(table: &mut Table, sources: &[(usize, usize)], targets: &[(usize,
         }
         target.set_text(&text);
     }
+}
+
+/// The data type a cell's value reads as, as the Cell Data Format window
+/// lists it (0 Angle, 1 Currency, 2 Date, 3 Decimal Number, 4 General,
+/// 5 Percentage, 6 Point, 7 Text, 8 Whole Number), and its picture; `None`
+/// when no style of the cell sets a data type.
+pub(crate) fn cell_data_kind(
+    table: &Table,
+    row: usize,
+    column: usize,
+) -> Option<(usize, String)> {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    let table_row = table.rows.get(row)?;
+    let cell = table_row.cells.get(column)?;
+    let typed = style_for_property(table, table_row, column, cell, P::DATA_TYPE)?;
+    let kind = crate::ui::window::table_cell_dialog::FORMAT_KINDS
+        .iter()
+        .position(|name| *name == cell_data_category(typed.value_data_type, typed.value_unit_type))?;
+    let picture = style_for_property(table, table_row, column, cell, P::DATA_FORMAT)
+        .map(|style| style.value_format.clone())
+        .unwrap_or_default();
+    Some((kind, picture))
+}
+
+/// A typed date: `y-m-d`, `d.m.y` or `m/d/y`.
+fn parse_cell_date(text: &str) -> Option<(i64, u32, u32)> {
+    let text = text.trim();
+    let parts = |sep: char| -> Option<Vec<i64>> {
+        let parts: Vec<i64> = text.split(sep).map(|p| p.trim().parse().ok()).collect::<Option<_>>()?;
+        (parts.len() == 3).then_some(parts)
+    };
+    let (y, m, d) = if let Some(p) = parts('-') {
+        (p[0], p[1], p[2])
+    } else if let Some(p) = parts('.') {
+        (p[2], p[1], p[0])
+    } else if let Some(p) = parts('/') {
+        (p[2], p[0], p[1])
+    } else {
+        return None;
+    };
+    ((1..=12).contains(&m) && (1..=31).contains(&d) && y > 0).then_some((y, m as u32, d as u32))
+}
+
+/// A typed point: two or three numbers apart by `,` `;` or `/`.
+fn parse_cell_point(text: &str) -> Option<[f64; 3]> {
+    let values: Vec<f64> = text
+        .split([',', ';', '/'])
+        .map(|p| p.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    match values.as_slice() {
+        [x, y] => Some([*x, *y, 0.0]),
+        [x, y, z] => Some([*x, *y, *z]),
+        _ => None,
+    }
+}
+
+/// Outcome of reading a cell value as a data type.
+pub(crate) enum TypedValue {
+    /// The value as the type, formatted by the picture.
+    Converted(codec::entities::table::CellValue),
+    /// The type has nothing to convert (General, an empty cell).
+    Unchanged,
+    /// The text does not read as the type (a date or point that is not one).
+    Invalid,
+}
+
+/// A cell value read as the data type `kind` and formatted by `picture`:
+/// typed numbers become numbers, an angle typed in degrees is kept in
+/// radians, a whole number drops its fraction, a date or point is read
+/// from its text.
+pub(crate) fn typed_cell_value(
+    document: &codec::Document,
+    value: &codec::entities::table::CellValue,
+    kind: usize,
+    picture: &str,
+) -> TypedValue {
+    use codec::entities::table::{CellValueType as V, ValueUnitType as U};
+    let shown = value.display().trim().to_string();
+    if shown.is_empty() && !matches!(value.value_type, V::Long | V::Double | V::Point2D | V::Point3D) {
+        return TypedValue::Unchanged;
+    }
+    let number = match value.value_type {
+        V::Long | V::Double => Some(value.numeric_value),
+        _ => shown.replace(',', "").parse::<f64>().ok(),
+    };
+    let mut next = value.clone();
+    next.format = picture.to_string();
+    let mut point = value.point_value;
+    let (value_type, unit, numeric, text) = match kind {
+        0 => {
+            let Some(number) = number else { return TypedValue::Unchanged };
+            let radians = if value.value_type == V::Double && value.unit_type == U::Angle {
+                number
+            } else {
+                number.to_radians()
+            };
+            let picture = if picture.is_empty() { "%au5" } else { picture };
+            (V::Double, U::Angle, radians, document.format_with_picture(radians, picture))
+        }
+        1 | 3 | 5 => {
+            let Some(number) = number else { return TypedValue::Unchanged };
+            let unit = match kind {
+                1 => U::Currency,
+                5 => U::Percentage,
+                _ => U::NoUnits,
+            };
+            let text = if picture.is_empty() {
+                shown.clone()
+            } else {
+                document.format_with_picture(number, picture)
+            };
+            (V::Double, unit, number, text)
+        }
+        // A date keeps its text (the shown date), so the file needs no
+        // date payload.
+        2 => {
+            let Some((y, m, d)) = parse_cell_date(&shown) else {
+                return TypedValue::Invalid;
+            };
+            let picture = if picture.is_empty() { "M/d/yyyy" } else { picture };
+            let text = codec::fields::format_dt_in(
+                (y, m, d, 0, 0, 0),
+                picture,
+                &crate::entities::field::os_date_locale(),
+            );
+            (V::String, U::NoUnits, 0.0, text)
+        }
+        6 => {
+            let p = match value.value_type {
+                V::Point2D | V::Point3D => [point.x, point.y, point.z],
+                _ => match parse_cell_point(&shown) {
+                    Some(p) => p,
+                    None => return TypedValue::Invalid,
+                },
+            };
+            point = codec::types::Vector3::new(p[0], p[1], p[2]);
+            (V::Point3D, U::NoUnits, 0.0, document.format_point_with_picture(p, picture))
+        }
+        7 => (V::String, U::NoUnits, 0.0, value.display().to_string()),
+        8 => {
+            let Some(number) = number else { return TypedValue::Unchanged };
+            let whole = number.trunc();
+            (V::Long, U::NoUnits, whole, format!("{}", whole as i64))
+        }
+        _ => return TypedValue::Unchanged,
+    };
+    next.value_type = value_type;
+    next.raw_type_code = value_type as i32;
+    next.unit_type = unit;
+    next.raw_unit_type_code = unit as i32;
+    next.numeric_value = numeric;
+    next.point_value = point;
+    next.formatted_value = if value_type == V::String { String::new() } else { text.clone() };
+    next.text = text;
+    TypedValue::Converted(next)
+}
+
+/// After an edit of a table: text typed into a cell that has a data type
+/// is read as that type and shown in its format, and a row lower than the
+/// wrapped text of its cells grows to hold it (rows never shrink — the
+/// stored height is the row's minimum). Returns whether the table changed.
+pub(crate) fn settle_table(table: &mut Table, document: &codec::Document) -> bool {
+    use codec::entities::table::CellValueType as V;
+    let mut changed = false;
+    for row in 0..table.rows.len() {
+        for column in 0..table.columns.len() {
+            let Some((kind, picture)) = cell_data_kind(table, row, column) else {
+                continue;
+            };
+            if matches!(kind, 4 | 7) {
+                continue;
+            }
+            let Some(content) = table
+                .cell(row, column)
+                .and_then(|cell| cell.contents.first())
+                .filter(|c| c.block_handle.is_none() && c.field_handle.is_none())
+                .filter(|c| matches!(c.value.value_type, V::String | V::Unknown))
+            else {
+                continue;
+            };
+            if let TypedValue::Converted(value) =
+                typed_cell_value(document, &content.value, kind, &picture)
+            {
+                if value.display() != content.value.display() || value.value_type != content.value.value_type {
+                    if let Some(content) = table
+                        .cell_mut(row, column)
+                        .and_then(|cell| cell.contents.first_mut())
+                    {
+                        content.value = value;
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    let needed = fitted_row_heights(table, document);
+    for (row, height) in table.rows.iter_mut().zip(needed) {
+        if height > row.height + 1e-9 {
+            row.height = height;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// The height each row needs for the wrapped text of its single-row cells:
+/// the text height, the line spacing for each further line, and the
+/// cell's top and bottom margins (measured: 4.5 text, 1.5 margins — two
+/// lines 15, four 30).
+// ponytail: lays out every text cell; cache per cell if large tables slow edits.
+fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    let table_style = table.table_style_handle.and_then(|handle| {
+        match document.objects.get(&handle) {
+            Some(codec::objects::ObjectType::TableStyle(style)) => Some(style),
+            _ => None,
+        }
+    });
+    let title_suppressed = resolved_title_suppressed(table, table_style);
+    let header_suppressed = resolved_header_suppressed(table, table_style);
+    let (h_margin, v_margin) = resolved_table_margins(table, table_style);
+    let fonts = table_style_fonts(document);
+    let mut needed = vec![0.0f64; table.rows.len()];
+    for (ri, row) in table.rows.iter().enumerate() {
+        for (ci, cell) in row.cells.iter().enumerate() {
+            let Some((r0, c0, r1, c1)) = merged_owner_and_span(table, ri, ci) else {
+                continue;
+            };
+            if r0 != ri || c0 != ci || r1 != ri {
+                continue;
+            }
+            let Some(content) = cell
+                .contents
+                .first()
+                .filter(|content| content.block_handle.is_none())
+            else {
+                continue;
+            };
+            let text = cell.text_value();
+            if text.trim().is_empty() {
+                continue;
+            }
+            let role = table_style.map(|ts| {
+                match cell_role_kind(table, title_suppressed, header_suppressed, ri, ci) {
+                    0 => &ts.title_row_style,
+                    1 => &ts.header_row_style,
+                    _ => &ts.data_row_style,
+                }
+            });
+            let height = cell_text_height(table, row, ci, cell, content, role.map(|s| s.text_height))
+                .unwrap_or(0.18);
+            let style_handle = cell_text_style(document, table, row, ci, cell, Some(content))
+                .or_else(|| role.and_then(|style| style.text_style_handle));
+            let font = style_handle
+                .and_then(|handle| fonts.get(&handle).cloned())
+                .unwrap_or_else(|| "txt".to_string());
+            let record = style_handle.and_then(|h| document.text_styles.iter().find(|s| s.handle == h));
+            let resolved = ResolvedTextStyle {
+                font_name: font,
+                width_factor: record.map(|s| s.width_factor as f32).unwrap_or(1.0),
+                oblique_angle: record.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
+                is_backward: false,
+                is_upside_down: false,
+                is_vertical: false,
+            };
+            let margin = |property: P, fallback: f64| {
+                style_for_property(table, row, ci, cell, property)
+                    .map(|style| match property {
+                        P::MARGIN_LEFT => style.margin_left,
+                        P::MARGIN_RIGHT => style.margin_right,
+                        P::MARGIN_TOP => style.margin_top,
+                        _ => style.margin_bottom,
+                    })
+                    .unwrap_or(fallback)
+            };
+            let width: f64 = table.columns[ci..=c1.min(table.columns.len() - 1)]
+                .iter()
+                .map(|column| column.width)
+                .sum::<f64>()
+                - margin(P::MARGIN_LEFT, h_margin)
+                - margin(P::MARGIN_RIGHT, h_margin);
+            let layout = layout_mtext(&MTextRenderOpts {
+                columns: Default::default(),
+                value: &text,
+                insertion: [0.0; 3],
+                height: height as f32,
+                rect_w: width.max(0.0) as f32,
+                rotation: 0.0,
+                style: &resolved,
+                attach_h_anchor: 0.0,
+                v_anchor: MTextVAnchor::Top,
+                line_spacing_factor: 1.0,
+                exact_line_spacing: false,
+                rectangle_height: 0.0,
+                vertical_text: false,
+                want_glyph_boxes: false,
+            });
+            let lines = layout.line_count.max(1) as f64;
+            let need = height
+                + (lines - 1.0) * layout.line_height as f64
+                + margin(P::MARGIN_TOP, v_margin)
+                + margin(P::MARGIN_BOTTOM, v_margin);
+            needed[ri] = needed[ri].max(need);
+        }
+    }
+    needed
 }

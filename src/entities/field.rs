@@ -398,6 +398,24 @@ pub fn set_text_field(
     }
 }
 
+/// The regional currency symbol (the default a Currency table cell
+/// format starts with); `$` where the system does not tell.
+pub(crate) fn os_currency_symbol() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Globalization::GetLocaleInfoEx;
+        let mut buffer = [0u16; 16];
+        // LOCALE_SCURRENCY of the user's default locale.
+        let len = unsafe {
+            GetLocaleInfoEx(std::ptr::null(), 0x14, buffer.as_mut_ptr(), buffer.len() as i32)
+        };
+        if len > 1 {
+            return String::from_utf16_lossy(&buffer[..len as usize - 1]);
+        }
+    }
+    "$".to_string()
+}
+
 /// Month and day names and the regional date / time pictures, as date
 /// fields show them: the operating system's regional settings.
 pub(crate) fn os_date_locale() -> codec::fields::DateLocale {

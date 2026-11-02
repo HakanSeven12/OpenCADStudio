@@ -1004,6 +1004,12 @@ impl OpenCADStudio {
                     }
                 }
                 M::DateFormat(value) => state.date = value,
+                M::Conversion(value) => state.conversion = value,
+                M::Prefix(value) => state.prefix = value,
+                M::Suffix(value) => state.suffix = value,
+                M::DecimalSeparator(index) => state.decimal = index.min(2),
+                M::ThousandsSeparator(index) => state.thousands = index.min(3),
+                M::Zero(bit) => state.zeros ^= bit,
                 M::Help => self
                     .command_line
                     .push_info(crate::tr!("table-cells", "format-help").as_str()),
@@ -1247,75 +1253,6 @@ fn format_preview(
     }
 }
 
-/// A cell value read as the chosen data type and formatted by `picture`, as
-/// the reference converts it: typed numbers become numbers, angles typed in
-/// degrees are kept in radians, whole numbers drop their fraction. `None`
-/// keeps the value (dates, points from text, empty cells).
-fn formatted_cell_value(
-    document: &codec::Document,
-    value: &codec::entities::table::CellValue,
-    kind: usize,
-    picture: &str,
-) -> Option<codec::entities::table::CellValue> {
-    use codec::entities::table::{CellValueType as V, ValueUnitType as U};
-    let number = match value.value_type {
-        V::Long | V::Double => Some(value.numeric_value),
-        _ => value.display().trim().replace(',', "").parse::<f64>().ok(),
-    };
-    let mut next = value.clone();
-    next.format = picture.to_string();
-    let (value_type, unit, numeric, text) = match kind {
-        0 => {
-            let radians = if value.value_type == V::Double && value.unit_type == U::Angle {
-                number?
-            } else {
-                number?.to_radians()
-            };
-            let picture = if picture.is_empty() { "%au5" } else { picture };
-            (V::Double, U::Angle, radians, document.format_with_picture(radians, picture))
-        }
-        1 | 3 | 5 => {
-            let number = number?;
-            let unit = match kind {
-                1 => U::Currency,
-                5 => U::Percentage,
-                _ => U::NoUnits,
-            };
-            let text = if picture.is_empty() {
-                value.display().trim().to_string()
-            } else {
-                document.format_with_picture(number, picture)
-            };
-            (V::Double, unit, number, text)
-        }
-        6 => match value.value_type {
-            V::Point2D | V::Point3D => {
-                let p = value.point_value;
-                let text = document.format_point_with_picture([p.x, p.y, p.z], picture);
-                (value.value_type, U::NoUnits, 0.0, text)
-            }
-            _ => return None,
-        },
-        7 => {
-            let text = value.display().to_string();
-            (V::String, U::NoUnits, 0.0, text)
-        }
-        8 => {
-            let whole = number?.trunc();
-            (V::Long, U::NoUnits, whole, format!("{}", whole as i64))
-        }
-        _ => return None,
-    };
-    next.value_type = value_type;
-    next.raw_type_code = value_type as i32;
-    next.unit_type = unit;
-    next.raw_unit_type_code = unit as i32;
-    next.numeric_value = numeric;
-    next.formatted_value = if value_type == V::String { String::new() } else { text.clone() };
-    next.text = text;
-    Some(next)
-}
-
 impl OpenCADStudio {
     fn open_cell_block(&mut self, i: usize) {
         use crate::ui::window::table_cell_dialog::CellBlockState;
@@ -1418,7 +1355,7 @@ impl OpenCADStudio {
             kind,
             unit: 0,
             precision: if matches!(kind, 1 | 5) { 3 } else { 0 },
-            symbol: "$".into(),
+            symbol: crate::entities::field::os_currency_symbol(),
             append: kind == 5,
             negative_parens: false,
             separator: 0,
@@ -1426,6 +1363,12 @@ impl OpenCADStudio {
             date: String::new(),
             sample,
             preview: String::new(),
+            conversion: "1".into(),
+            prefix: String::new(),
+            suffix: String::new(),
+            decimal: 0,
+            thousands: 0,
+            zeros: 0,
         };
         state.read_picture(&picture);
         state.preview = format_preview(document, &state);
@@ -1572,7 +1515,8 @@ impl OpenCADStudio {
             return;
         };
         let document = &self.tabs[i].scene.document;
-        let values: Vec<((usize, usize), Option<codec::entities::table::CellValue>)> =
+        use crate::entities::table::TypedValue;
+        let values: Vec<((usize, usize), Option<TypedValue>)> =
             match document.get_entity(cells.table) {
                 Some(codec::EntityType::Table(table)) => picked
                     .iter()
@@ -1583,14 +1527,26 @@ impl OpenCADStudio {
                             .filter(|content| {
                                 content.block_handle.is_none() && content.field_handle.is_none()
                             })
-                            .and_then(|content| {
-                                formatted_cell_value(document, &content.value, state.kind, &picture)
+                            .map(|content| {
+                                crate::entities::table::typed_cell_value(
+                                    document,
+                                    &content.value,
+                                    state.kind,
+                                    &picture,
+                                )
                             });
                         ((row, column), value)
                     })
                     .collect(),
                 _ => return,
             };
+        // A value that does not read as the type (a date or point) is
+        // emptied, with the reference's warning.
+        if values.iter().any(|(_, value)| matches!(value, Some(TypedValue::Invalid))) {
+            self.command_line.push_info(
+                crate::tr!("table-cells", "invalid-datatype").as_str(),
+            );
+        }
         self.edit_picked_table(i, "TABLE CELL FORMAT", |table| {
             use codec::entities::table::CellStylePropertyFlags as P;
             let mut changed = false;
@@ -1609,8 +1565,12 @@ impl OpenCADStudio {
                 style.value_unit_type = unit_type;
                 style.value_format = picture.clone();
                 style.property_flags.insert(P::DATA_TYPE | P::DATA_FORMAT);
-                if let (Some(value), Some(content)) = (value, cell.contents.first_mut()) {
-                    content.value = value;
+                match (value, cell.contents.first_mut()) {
+                    (Some(TypedValue::Converted(value)), Some(content)) => content.value = value,
+                    (Some(TypedValue::Invalid), Some(content)) => {
+                        content.value = codec::entities::table::CellValue::new();
+                    }
+                    _ => {}
                 }
                 changed = true;
             }

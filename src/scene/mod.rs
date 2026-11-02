@@ -4096,14 +4096,26 @@ impl Scene {
         any
     }
 
-    /// Removes the fields a changed table lists but no cell shows any more,
-    /// recording the removed objects for undo.
+    /// Settles a changed table (typed values, row heights) and removes the
+    /// fields it lists but no cell shows any more, recording the removed
+    /// objects for undo.
     fn prune_table_fields(&mut self, changes: &[(Handle, ChangeKind)]) {
         for (table, kind) in changes {
             if !matches!(kind, ChangeKind::Modified)
                 || !matches!(self.document.get_entity(*table), Some(EntityType::Table(_)))
             {
                 continue;
+            }
+            // Typed text read as the cells' data types and rows grown to
+            // their wrapped text, whichever path wrote the cells.
+            if let Some(EntityType::Table(current)) = self.document.get_entity(*table) {
+                let mut next = (**current).clone();
+                if crate::entities::table::settle_table(&mut next, &self.document) {
+                    next.block_record_handle = None;
+                    if let Some(EntityType::Table(target)) = self.document.get_entity_mut(*table) {
+                        **target = next;
+                    }
+                }
             }
             let doomed = self.document.orphan_table_fields(*table);
             if doomed.is_empty() {

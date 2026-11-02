@@ -2472,7 +2472,9 @@ impl OpenCADStudio {
             // "scale=<n>", "autofit=0|1", "rotation=<deg>"; the Cell Data
             // Format window: "kind=0..8", "unit=<n>", "precision=<text>",
             // "symbol=<s>", "append=0|1", "negative=0|1", "separator=0..2",
-            // "axis=0..2", "date=<picture>"; "ok" or "cancel".
+            // "axis=0..2", "date=<picture>", "conversion=<n>", "prefix=<s>",
+            // "suffix=<s>", "decimal=0..2", "thousands=0..3",
+            // "zero=4|8|1|2" (toggles); "ok" or "cancel".
             "table_cell_dialog" => {
                 use crate::ui::window::table_cell_dialog::{BorderSet as B, TableCellDialogMsg as T};
                 if !matches!(
@@ -2529,6 +2531,12 @@ impl OpenCADStudio {
                         "separator" => T::Separator(value.parse().map_err(|_| bad())?),
                         "axis" => T::Axis(value.parse().map_err(|_| bad())?),
                         "date" => T::DateFormat(value.to_string()),
+                        "conversion" => T::Conversion(value.to_string()),
+                        "prefix" => T::Prefix(value.to_string()),
+                        "suffix" => T::Suffix(value.to_string()),
+                        "decimal" => T::DecimalSeparator(value.parse().map_err(|_| bad())?),
+                        "thousands" => T::ThousandsSeparator(value.parse().map_err(|_| bad())?),
+                        "zero" => T::Zero(value.parse().map_err(|_| bad())?),
                         "ok" => T::Ok,
                         _ => return Err(bad()),
                     })

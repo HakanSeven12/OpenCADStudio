@@ -57,6 +57,12 @@ pub enum TableCellDialogMsg {
     Separator(usize),
     Axis(usize),
     DateFormat(String),
+    Conversion(String),
+    Prefix(String),
+    Suffix(String),
+    DecimalSeparator(usize),
+    ThousandsSeparator(usize),
+    Zero(u32),
     Help,
     Ok,
 }
@@ -436,7 +442,20 @@ pub struct CellFormatState {
     /// when it holds none), and the preview.
     pub sample: Option<f64>,
     pub preview: String,
+    /// Additional format: conversion factor, text before and after, the
+    /// decimal (`.` `,` space) and thousands (none `,` `.` `'`) separators
+    /// and zero suppression bits (4 leading, 8 trailing, 1 0 feet, 2 0
+    /// inches).
+    pub conversion: String,
+    pub prefix: String,
+    pub suffix: String,
+    pub decimal: usize,
+    pub thousands: usize,
+    pub zeros: u32,
 }
+
+pub const DECIMAL_SEPARATORS: [char; 3] = ['.', ',', ' '];
+pub const THOUSANDS_SEPARATORS: [Option<char>; 4] = [None, Some(','), Some('.'), Some('\'')];
 
 impl CellFormatState {
     /// Reads a stored picture back into the settings.
@@ -458,11 +477,34 @@ impl CellFormatState {
                     self.append = prefix.is_empty() && !suffix.is_empty();
                     self.symbol = if self.append { suffix } else { prefix }.to_string();
                 } else if self.kind == 5 {
-                    self.append = suffix == "%";
+                    self.append = suffix.starts_with('%');
+                    self.prefix = prefix.to_string();
+                    self.suffix = suffix.trim_start_matches('%').to_string();
+                } else {
+                    self.prefix = prefix.to_string();
+                    self.suffix = suffix.to_string();
                 }
             }
         } else if self.kind == 5 && !picture.is_empty() {
             self.append = false;
+        }
+        if let Some(code) = digits("%ds") {
+            self.decimal = DECIMAL_SEPARATORS.iter().position(|c| *c as usize == code).unwrap_or(0);
+        }
+        if let Some(code) = digits("%th") {
+            self.thousands = THOUSANDS_SEPARATORS
+                .iter()
+                .position(|c| c.is_some_and(|c| c as usize == code))
+                .unwrap_or(0);
+        }
+        if let Some(bits) = digits("%zs") {
+            self.zeros = bits as u32;
+        }
+        if let Some(at) = picture.find("%ct8[") {
+            let inner = &picture[at + 5..];
+            if let Some(end) = inner.find(']') {
+                self.conversion = inner[..end].to_string();
+            }
         }
         match self.kind {
             0 => {
@@ -513,63 +555,76 @@ impl CellFormatState {
         }
     }
 
-    /// The field picture the settings make (`%lu2%pr2%nn1%ps[$,]`).
+    /// Whether the settings have an additional format part.
+    pub fn has_additional(&self) -> bool {
+        matches!(self.kind, 0 | 1 | 3 | 5 | 6)
+    }
+
+    /// Feet and inches zero suppression apply to architectural and
+    /// engineering units only.
+    pub fn feet_inches(&self) -> bool {
+        matches!(self.kind, 3 | 6) && matches!(self.unit, 3 | 4)
+    }
+
+    /// The field picture the settings make (`%lu2%pr2%nn1%ds44%zs12%th46`,
+    /// `%ps[$,]`).
     pub fn picture(&self) -> String {
-        match self.kind {
-            0 => {
-                let code = ANGLE_FORMATS[self.unit.min(6)].1;
-                if code.is_empty() {
-                    String::new()
-                } else {
-                    format!("{code}{}", self.precision_code())
-                }
-            }
-            1 => {
-                let symbol = if self.append {
-                    format!("%ps[,{}]", self.symbol)
-                } else {
-                    format!("%ps[{},]", self.symbol)
-                };
-                format!(
-                    "%lu2{}{}{symbol}",
-                    self.precision_code(),
-                    if self.negative_parens { "%nn1" } else { "" }
-                )
-            }
-            2 => self.date.clone(),
-            3 => {
-                let code = codec::fields::FORMULA_FORMATS[self.unit.min(6)].1;
-                if code.is_empty() {
-                    String::new()
-                } else {
-                    format!("{code}{}", self.precision_code())
-                }
-            }
-            5 => format!(
-                "%lu2{}{}",
-                self.precision_code(),
-                if self.append { "%ps[,%]" } else { "" }
-            ),
-            6 => {
-                let code = codec::fields::FORMULA_FORMATS[self.unit.min(6)].1;
-                let bits = self
-                    .axes
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, on)| **on)
-                    .fold(0, |acc, (axis, _)| acc | (1 << axis));
-                let mut picture = format!("{code}{}", self.precision_code());
-                if bits != 7 {
-                    picture.push_str(&format!("%pt{bits}"));
-                }
-                let separator = SEPARATORS[self.separator.min(2)];
-                if separator != ',' {
-                    picture.push_str(&format!("%ls{}", separator as u32));
-                }
-                picture
-            }
-            _ => String::new(),
+        let base = match self.kind {
+            0 => ANGLE_FORMATS[self.unit.min(6)].1.to_string(),
+            1 | 5 => "%lu2".to_string(),
+            2 => return self.date.clone(),
+            3 | 6 => codec::fields::FORMULA_FORMATS[self.unit.min(6)].1.to_string(),
+            _ => return String::new(),
+        };
+        if base.is_empty() {
+            return String::new();
         }
+        let mut picture = format!("{base}{}", self.precision_code());
+        if self.kind == 1 && self.negative_parens {
+            picture.push_str("%nn1");
+        }
+        if self.kind == 6 {
+            let bits = self
+                .axes
+                .iter()
+                .enumerate()
+                .filter(|(_, on)| **on)
+                .fold(0, |acc, (axis, _)| acc | (1 << axis));
+            if bits != 7 {
+                picture.push_str(&format!("%pt{bits}"));
+            }
+            let separator = SEPARATORS[self.separator.min(2)];
+            if separator != ',' {
+                picture.push_str(&format!("%ls{}", separator as u32));
+            }
+        }
+        let decimal = DECIMAL_SEPARATORS[self.decimal.min(2)];
+        if decimal != '.' {
+            picture.push_str(&format!("%ds{}", decimal as u32));
+        }
+        let zeros = if self.feet_inches() { self.zeros } else { self.zeros & 12 };
+        if zeros != 0 {
+            picture.push_str(&format!("%zs{zeros}"));
+        }
+        if let Some(separator) = THOUSANDS_SEPARATORS[self.thousands.min(3)] {
+            picture.push_str(&format!("%th{}", separator as u32));
+        }
+        let factor = crate::entities::common::parse_f64(&self.conversion).unwrap_or(1.0);
+        if (factor - 1.0).abs() > 1e-12 && factor != 0.0 {
+            picture.push_str(&format!("%ct8[{factor}]"));
+        }
+        let (symbol_before, symbol_after) = match self.kind {
+            1 if self.append => ("", self.symbol.as_str()),
+            1 => (self.symbol.as_str(), ""),
+            5 if self.append => ("", "%"),
+            _ => ("", ""),
+        };
+        let before = format!("{}{symbol_before}", self.prefix);
+        let after = format!("{symbol_after}{}", self.suffix);
+        if !before.is_empty() || !after.is_empty() {
+            picture.push_str(&format!("%ps[{before},{after}]"));
+        }
+        picture
     }
 }
 
@@ -807,6 +862,66 @@ pub fn view_format<'a>(
             );
         }
         settings = settings.push(examples);
+    }
+    if state.has_additional() {
+        let conversion: Option<fn(String) -> TableCellDialogMsg> = Some(M::Conversion);
+        let prefix: Option<fn(String) -> TableCellDialogMsg> = Some(M::Prefix);
+        let suffix: Option<fn(String) -> TableCellDialogMsg> = Some(M::Suffix);
+        let mut decimals = row![].spacing(4);
+        for (index, separator) in DECIMAL_SEPARATORS.iter().enumerate() {
+            let label = if *separator == ' ' {
+                crate::tr!("table-cells", "space")
+            } else {
+                separator.to_string()
+            };
+            decimals = decimals.push(
+                button(text(label).size(11))
+                    .on_press(msg(M::DecimalSeparator(index)))
+                    .style(button_style(state.decimal == index))
+                    .padding([4, 10]),
+            );
+        }
+        let mut thousands = row![].spacing(4);
+        for (index, separator) in THOUSANDS_SEPARATORS.iter().enumerate() {
+            let label = separator
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| crate::tr!("table-cells", "none"));
+            thousands = thousands.push(
+                button(text(label).size(11))
+                    .on_press(msg(M::ThousandsSeparator(index)))
+                    .style(button_style(state.thousands == index))
+                    .padding([4, 10]),
+            );
+        }
+        let zero = |bit: u32, label: String, enabled: bool| -> Element<'a, Message> {
+            if enabled {
+                chip(label, state.zeros & bit != 0, msg(M::Zero(bit)))
+            } else {
+                text(label).size(11).style(muted_style).into()
+            }
+        };
+        settings = settings.push(card(
+            crate::tr!("table-cells", "additional-format"),
+            column![
+                labelled(
+                    crate::tr!("table-cells", "conversion"),
+                    input(&state.conversion, conversion)
+                ),
+                labelled(crate::tr!("table-cells", "prefix"), input(&state.prefix, prefix)),
+                labelled(crate::tr!("table-cells", "suffix"), input(&state.suffix, suffix)),
+                labelled(crate::tr!("table-cells", "decimal-separator"), decimals),
+                labelled(crate::tr!("table-cells", "thousands-separator"), thousands),
+                row![
+                    zero(4, crate::tr!("table-cells", "zero-leading"), true),
+                    zero(8, crate::tr!("table-cells", "zero-trailing"), true),
+                    zero(1, crate::tr!("table-cells", "zero-feet"), state.feet_inches()),
+                    zero(2, crate::tr!("table-cells", "zero-inches"), state.feet_inches()),
+                ]
+                .spacing(6)
+                .align_y(iced::Center),
+            ]
+            .spacing(6),
+        ));
     }
     if matches!(state.kind, 4 | 7 | 8) {
         settings = settings.push(

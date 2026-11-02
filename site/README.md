@@ -1,6 +1,9 @@
 # Website
 
-`index.html` is the template; `site/locales/*.json` supplies all 21 application languages.
+`index.html` and `download.html` are the templates; `site/locales/*.json` supplies all application languages.
+The download page (`/download/` and `/<locale>/download/`) reads the latest release from the GitHub API
+in the browser and links every package to its file there, so it needs no change per release; without the
+API its links open the latest release page.
 Run `sh scripts/assemble-site.sh` after the web build, then
 `python3 scripts/generate-star-history.py --output-dir dist` for the charts.
 Run `python3 scripts/test_site.py` to check translations, links, metadata and language selection.

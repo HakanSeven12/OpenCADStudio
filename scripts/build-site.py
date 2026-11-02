@@ -42,6 +42,7 @@ def load_catalogs():
 def build(output):
     catalogs = load_catalogs()
     template = (ROOT / "index.html").read_text()
+    download_template = (ROOT / "download.html").read_text()
     (output / "assets").mkdir(parents=True, exist_ok=True)
 
     def asset(source):
@@ -69,8 +70,11 @@ def build(output):
     script = "const SITE_LOCALES = " + json.dumps(list(catalogs)) + ";\n" + (ROOT / "site/site.js").read_text()
     (output / "site.js").write_text(script, encoding="utf-8")
     js_version = hashlib.sha256(script.encode()).hexdigest()[:12]
-    alternates = '\n'.join(f'<link rel="alternate" hreflang="{lang}" href="{BASE}{public_path(lang)}" />' for lang in catalogs)
-    alternates += f'\n<link rel="alternate" hreflang="x-default" href="{BASE}/" />'
+    def alternates_for(page=""):
+        links = '\n'.join(f'<link rel="alternate" hreflang="{lang}" href="{BASE}{public_path(lang)}{page}" />' for lang in catalogs)
+        return links + f'\n<link rel="alternate" hreflang="x-default" href="{BASE}/{page}" />'
+
+    alternates = alternates_for()
     for locale, messages in catalogs.items():
         path = public_path(locale)
         destination = output / locale_path(locale).lstrip("/")
@@ -86,7 +90,7 @@ def build(output):
             "description": messages["description"], "applicationCategory": "DesignApplication",
             "operatingSystem": "Windows, Linux, macOS, Web", "isAccessibleForFree": True,
             "license": "https://www.gnu.org/licenses/gpl-3.0.html", "codeRepository": REPO,
-            "downloadUrl": REPO + "/releases/latest", "installUrl": BASE + "/app/",
+            "downloadUrl": BASE + "/download/", "installUrl": BASE + "/app/",
             "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
         }
         website_schema = {
@@ -106,13 +110,29 @@ def build(output):
                       schema=json.dumps(schema, ensure_ascii=False).replace("<", "\\u003c"))
         rendered = re.sub(r"\{\{(\w+)\}\}", lambda match: values[match[1]], template)
         (destination / "index.html").write_text(rendered, encoding="utf-8")
+        # The download page: the same header, footer and language links,
+        # each language pointing at its own download page.
+        download_links = '\n'.join(
+            f'<a href="{public_path(lang)}download/" lang="{lang}" hreflang="{lang}" dir="auto"'
+            + (' aria-current="page"' if lang == locale else '')
+            + f'>{escape(labels["name"])}</a>' for lang, labels in catalogs.items()
+        )
+        download_values = {**values, "path": path + "download/", "url": BASE + path + "download/",
+                           "home": path, "home_label": values["home"],
+                           "alternates": alternates_for("download/"), "language_links": download_links}
+        rendered = re.sub(r"\{\{(\w+)\}\}", lambda match: download_values[match[1]], download_template)
+        (destination / "download").mkdir(exist_ok=True)
+        (destination / "download/index.html").write_text(rendered, encoding="utf-8")
         localized_manifest = {**manifest, "lang": locale, "dir": values["direction"],
                               "description": messages["description"], "start_url": path,
                               "shortcuts": [{"name": messages["launch"], "url": "/app/"}]}
         (destination / "site.webmanifest").write_text(json.dumps(localized_manifest, ensure_ascii=False, indent=2) + '\n', encoding="utf-8")
     for filename in ("index.html", "site.webmanifest"):
         shutil.copyfile(output / "en-US" / filename, output / filename)
-    urls = ''.join(f'<url><loc>{BASE}{public_path(locale)}</loc></url>\n' for locale in catalogs)
+    (output / "download").mkdir(exist_ok=True)
+    shutil.copyfile(output / "en-US/download/index.html", output / "download/index.html")
+    urls = ''.join(f'<url><loc>{BASE}{public_path(locale)}{page}</loc></url>\n'
+                   for locale in catalogs for page in ("", "download/"))
     (output / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls + '</urlset>\n')
 
     app = output / "app/index.html"

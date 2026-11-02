@@ -176,8 +176,10 @@ pub(super) struct DocumentTab {
     pub(super) tab_title: String,
     pub(super) properties: PropertiesPanel,
     pub(super) layers: LayerPanel,
-    /// Which Parameters Manager cell the panel has open, and what has been typed
-    /// into it.
+    /// Which Parameters Manager cell the panel has open, what has been typed
+    /// into it, and what the row list is filtered and searched to. It belongs to
+    /// this tab's session, so another definition's rows are never what a typed
+    /// number lands on.
     pub(super) parameters_panel: crate::ui::window::parameters_manager::Panel,
     /// The LAYWALK pallet session, while a walk is open on this drawing.
     pub(super) layer_walk: Option<crate::ui::window::layer_walk::LayerWalkSession>,

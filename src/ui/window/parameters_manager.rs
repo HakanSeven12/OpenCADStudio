@@ -41,11 +41,27 @@ pub struct Edit {
     pub cell: Cell,
 }
 
-/// Which cell the panel has open and what has been typed into it.
-#[derive(Clone, Debug, Default)]
+/// Which cell the panel has open, what has been typed into it, and what the
+/// list is filtered to. The filter carries the recorded `*`: `*` or empty lists
+/// every row, a pattern with `*` matches the name, and the search field narrows
+/// what is left by case-insensitive substring.
+#[derive(Clone, Debug)]
 pub struct Panel {
     pub editing: Option<Edit>,
     pub edit_buf: String,
+    pub filter: String,
+    pub search: String,
+}
+
+impl Default for Panel {
+    fn default() -> Self {
+        Self {
+            editing: None,
+            edit_buf: String::new(),
+            filter: "*".to_owned(),
+            search: String::new(),
+        }
+    }
 }
 
 impl Panel {
@@ -134,6 +150,32 @@ fn group_line(group: Group) -> Element<'static, Message> {
         .into()
 }
 
+/// The two fields the list is narrowed with. Their effect is on the rows below
+/// and on the count in the footer, not on any parameter. What has been read off
+/// the pane is that the filter field carries `*` and that the search field says
+/// what it searches for; this filter placeholder word and the width it is given
+/// are layout, not measurement.
+fn toolbar(panel: &Panel) -> Element<'static, Message> {
+    row(vec![
+        container(
+            text_input("Name*", &panel.filter)
+                .on_input(Message::ParametersManagerFilter)
+                .size(11),
+        )
+        .width(Length::Fixed(96.0))
+        .into(),
+        container(
+            text_input("Search for parameter", &panel.search)
+                .on_input(Message::ParametersManagerSearch)
+                .size(11),
+        )
+        .width(Fill)
+        .into(),
+    ])
+    .spacing(SPACING)
+    .into()
+}
+
 fn row_line(entry: &Row, panel: &Panel, definition: codec::Handle) -> Element<'static, Message> {
     let name = entry.name.as_str();
     let (expression, value) = if entry.numeric {
@@ -181,7 +223,7 @@ pub fn view(
     width: f32,
     chrome: Chrome,
 ) -> Element<'static, Message> {
-    let listed = manager::displayed(rows, "*", "");
+    let listed = manager::displayed(rows, &panel.filter, &panel.search);
     let mut lines: Vec<Element<'static, Message>> = vec![header_line()];
     for group in Group::ALL {
         let group_rows: Vec<&Row> = listed
@@ -205,6 +247,7 @@ pub fn view(
             chrome,
         ),
         column![
+            container(toolbar(panel)).width(Fill).padding([2, 2]),
             container(
                 scrollable(column(lines.into_iter()).spacing(2))
                     .width(Fill)
@@ -316,6 +359,129 @@ mod tests {
     }
 
     #[test]
+    fn the_filter_starts_at_the_recorded_default() {
+        let rows = sample();
+        let panel = Panel::default();
+        assert_eq!(
+            panel.filter, "*",
+            "the filter field reads * when the pane opens"
+        );
+        assert_eq!(panel.search, "", "and the search field is empty");
+        assert_eq!(
+            manager::displayed(&rows, &panel.filter, &panel.search).len(),
+            rows.len(),
+            "which lists every row"
+        );
+        let filtered = Panel {
+            filter: "*1".to_owned(),
+            search: "point".to_owned(),
+            ..Panel::default()
+        };
+        let shown = manager::displayed(&rows, &filtered.filter, &filtered.search);
+        assert_eq!(
+            shown
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Point1"],
+            "the filter matches the name and the search narrows what is left"
+        );
+        let _ = view(
+            &rows,
+            &filtered,
+            codec::Handle::new(1),
+            PanelId::ParametersManager.default_width(),
+            chrome(),
+        );
+        assert_eq!(
+            manager::footer(rows.len(), shown.len()),
+            "All: 1 of 3 parameters displayed",
+            "which is what the pane's footer prints"
+        );
+    }
+
+    /// Where `label` is drawn in the pane built from `panel`, if anywhere.
+    /// The pane is laid out very tall so no row is scrolled out of view.
+    fn locate(panel: &Panel, label: &str) -> Option<iced::Point> {
+        use iced_test::core::widget;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::Selector;
+        let _one = crate::headless_ui_lock();
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                None,
+            ),
+        )
+        .expect("headless renderer");
+        let width = PanelId::ParametersManager.default_width();
+        let mut ui = UserInterface::build(
+            view(&sample(), panel, codec::Handle::new(1), width, chrome()),
+            iced::Size::new(width, 100_000.0),
+            Cache::default(),
+            &mut renderer,
+        );
+        let mut find = Selector::find(label);
+        ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+        match widget::Operation::finish(&find) {
+            widget::operation::Outcome::Some(Some(target)) => {
+                target.visible_bounds().map(|b| b.center())
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn the_pane_draws_the_two_fields_and_only_the_rows_they_leave() {
+        let both_empty = Panel {
+            filter: String::new(),
+            search: String::new(),
+            ..Panel::default()
+        };
+        assert!(
+            locate(&both_empty, "Name*").is_some(),
+            "the filter field is in the pane"
+        );
+        assert!(
+            locate(&both_empty, "Search for parameter").is_some(),
+            "beside the search field"
+        );
+        for name in ["Angle1", "Point1", "TAG1"] {
+            assert!(
+                locate(&both_empty, name).is_some(),
+                "with both fields empty, {name} is listed"
+            );
+        }
+        assert!(
+            locate(&both_empty, "All: 3 of 3 parameters displayed").is_some(),
+            "and the footer says so"
+        );
+
+        let angle_only = Panel {
+            filter: "Angle*".to_owned(),
+            ..Panel::default()
+        };
+        assert!(
+            locate(&angle_only, "Angle1").is_some(),
+            "the named row stays"
+        );
+        for name in ["Point1", "TAG1"] {
+            assert!(
+                locate(&angle_only, name).is_none(),
+                "{name} is filtered out, so the pane does not draw it at all"
+            );
+        }
+        assert!(
+            locate(&angle_only, "Attributes").is_none(),
+            "and a group with no row left has no header either"
+        );
+        assert!(
+            locate(&angle_only, "All: 1 of 3 parameters displayed").is_some(),
+            "the footer counts what is left out of what there is"
+        );
+    }
+
+    #[test]
     fn the_open_cell_is_the_one_clicked() {
         let definition = codec::Handle::new(7);
         let other = codec::Handle::new(8);
@@ -328,6 +494,7 @@ mod tests {
                 cell: Cell::Value,
             }),
             edit_buf: "90".to_owned(),
+            ..Panel::default()
         };
         assert!(panel.is_open(definition, "Angle1", Cell::Value));
         assert!(

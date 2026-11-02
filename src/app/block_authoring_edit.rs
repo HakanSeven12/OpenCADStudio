@@ -481,6 +481,14 @@ impl OpenCADStudio {
         self.refresh_properties();
     }
 
+    /// The pane loses its open cell and nothing else: what the operator filtered
+    /// the list to stays, so applying a number does not relist every row.
+    pub(super) fn clear_parameters_manager_cell(&mut self, i: usize) {
+        let panel = &mut self.tabs[i].parameters_panel;
+        panel.editing = None;
+        panel.edit_buf.clear();
+    }
+
     /// Apply the number typed in the open cell. `keep_open` is set when the cell
     /// itself asked for the commit (Enter); a commit driven by the field moving
     /// away holds a refused number back, because there is no field left to fix it
@@ -495,20 +503,20 @@ impl OpenCADStudio {
         // Opening a cell and leaving it alone writes nothing; an empty field is
         // the sign that nothing was typed into it.
         if typed.trim().is_empty() {
-            self.tabs[i].parameters_panel = Default::default();
+            self.clear_parameters_manager_cell(i);
             return Task::none();
         }
         let Some(definition) = self.tabs[i]
             .active_block_edit_session()
             .map(|session| session.br_handle)
         else {
-            self.tabs[i].parameters_panel = Default::default();
+            self.clear_parameters_manager_cell(i);
             self.command_line
                 .push_error(crate::t!("The Block Editor session is no longer active.").as_ref());
             return Task::none();
         };
         if edit.definition != definition {
-            self.tabs[i].parameters_panel = Default::default();
+            self.clear_parameters_manager_cell(i);
             self.command_line
                 .push_error(crate::t!("The Block Editor session is no longer active.").as_ref());
             return Task::none();
@@ -523,7 +531,7 @@ impl OpenCADStudio {
             // typed in it, so the number only has to be corrected, not retyped.
             // A refusal after the field has gone away has nothing left to correct.
             if !keep_open {
-                self.tabs[i].parameters_panel = Default::default();
+                self.clear_parameters_manager_cell(i);
             }
             self.command_line
                 .push_error(crate::t!("Specify a finite numeric parameter value.").as_ref());
@@ -547,23 +555,21 @@ impl OpenCADStudio {
                     Ok(staged) => staged,
                     Err(error) => {
                         if !keep_open {
-                            self.tabs[i].parameters_panel = Default::default();
+                            self.clear_parameters_manager_cell(i);
                         }
                         self.command_line.push_error(crate::t!(error).as_ref());
                         return Task::none();
                     }
                 };
                 self.apply_parameters_manager_edit(i, staged);
-                self.tabs[i].parameters_panel.editing = None;
-                self.tabs[i].parameters_panel.edit_buf.clear();
+                self.clear_parameters_manager_cell(i);
             }
             Ok(false) => {
-                self.tabs[i].parameters_panel.editing = None;
-                self.tabs[i].parameters_panel.edit_buf.clear();
+                self.clear_parameters_manager_cell(i);
             }
             Err(error) => {
                 if !keep_open {
-                    self.tabs[i].parameters_panel = Default::default();
+                    self.clear_parameters_manager_cell(i);
                 }
                 self.command_line.push_error(crate::t!(error).as_ref());
             }

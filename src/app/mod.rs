@@ -3669,6 +3669,8 @@ pub enum Message {
     /// The operator clicked a row's numeric cell: the field opens on that row.
     ParametersManagerEdit(String, crate::ui::window::parameters_manager::Cell),
     ParametersManagerInput(String),
+    ParametersManagerFilter(String),
+    ParametersManagerSearch(String),
     ParametersManagerCommit,
     /// The widget focused after a click while a manager cell is open. A click
     /// off the field commits what was typed, as Enter does.

@@ -911,6 +911,85 @@ fn a_cell_the_pane_does_not_own_closes_without_a_refusal() {
 }
 
 #[test]
+fn the_two_fields_narrow_the_list_and_the_count_follows() {
+    let (mut app, tab, definition) = open(
+        &[
+            "BPARAMETER POLAR 0,0 10,0 5,2",
+            "BPARAMETER LINEAR 0,0 3,4 6,6",
+        ],
+        &["TAG1"],
+    );
+    let count = |app: &OpenCADStudio| {
+        let panel = &app.tabs[tab].parameters_panel;
+        let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+        let shown = manager::displayed(&rows, &panel.filter, &panel.search);
+        manager::footer(rows.len(), shown.len())
+    };
+    assert_eq!(
+        app.tabs[tab].parameters_panel.filter, "*",
+        "the filter field carries the recorded default, not an empty one"
+    );
+    assert_eq!(
+        count(&app),
+        "All: 4 of 4 parameters displayed",
+        "and it lists every row"
+    );
+    let _ = app.update(Message::ParametersManagerFilter("*1".to_owned()));
+    assert_eq!(
+        count(&app),
+        "All: 3 of 4 parameters displayed",
+        "Angle1, Distance1 and TAG1 end in 1"
+    );
+    let _ = app.update(Message::ParametersManagerSearch("angle".to_owned()));
+    assert_eq!(
+        count(&app),
+        "All: 1 of 4 parameters displayed",
+        "the search narrows what the filter left"
+    );
+    let _ = app.update(Message::ParametersManagerFilter(String::new()));
+    assert_eq!(
+        count(&app),
+        "All: 1 of 4 parameters displayed",
+        "an empty filter lists everything, so only the search is narrowing"
+    );
+    let _ = app.update(Message::ParametersManagerSearch(String::new()));
+    assert_eq!(
+        count(&app),
+        "All: 4 of 4 parameters displayed",
+        "and clearing both brings the list back whole"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn a_row_named_through_the_filter_is_still_the_row_the_cell_writes() {
+    let (mut app, tab, definition) = open(
+        &[
+            "BPARAMETER LINEAR 0,0 10,0 6,6",
+            "BPARAMETER LINEAR 0,0 3,4 7,7",
+        ],
+        &[],
+    );
+    let _ = app.update(Message::ParametersManagerFilter("Distance1".to_owned()));
+    answer(&mut app, "Distance1", Cell::Value, "20");
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").expression,
+        "20",
+        "the number reaches the row the filter is showing"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance2").expression,
+        "5",
+        "and the row the filter hides keeps its own value"
+    );
+    assert_eq!(
+        app.tabs[tab].parameters_panel.filter, "Distance1",
+        "applying a number leaves the list the operator narrowed"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
 fn closing_the_pane_applies_the_number_typed_in_its_open_cell() {
     use crate::ui::dock::PanelId;
     let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);

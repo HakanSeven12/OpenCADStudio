@@ -12340,7 +12340,7 @@ impl OpenCADStudio {
                     .active_block_edit_session()
                     .map(|session| session.br_handle)
                 else {
-                    self.tabs[i].parameters_panel = Default::default();
+                    self.clear_parameters_manager_cell(i);
                     return Task::none();
                 };
                 let rows = crate::scene::block_parameters_manager::rows(
@@ -12353,7 +12353,7 @@ impl OpenCADStudio {
                 else {
                     // Nothing to open here, so nothing stays open: a cell left on
                     // another row would take whatever is typed next.
-                    self.tabs[i].parameters_panel = Default::default();
+                    self.clear_parameters_manager_cell(i);
                     return Task::none();
                 };
                 let target = crate::scene::block_parameters_manager::target_of(
@@ -12362,7 +12362,7 @@ impl OpenCADStudio {
                     &row.name,
                 );
                 let Some((parameter, Some(component))) = target else {
-                    self.tabs[i].parameters_panel = Default::default();
+                    self.clear_parameters_manager_cell(i);
                     return Task::none();
                 };
                 let name = row.name.clone();
@@ -12384,6 +12384,16 @@ impl OpenCADStudio {
                 if panel.editing.is_some() {
                     panel.edit_buf = value;
                 }
+                Task::none()
+            }
+            // The two fields narrow the list and the footer's count; they write
+            // no parameter.
+            Message::ParametersManagerFilter(value) => {
+                self.tabs[self.active_tab].parameters_panel.filter = value;
+                Task::none()
+            }
+            Message::ParametersManagerSearch(value) => {
+                self.tabs[self.active_tab].parameters_panel.search = value;
                 Task::none()
             }
             Message::ParametersManagerCommit => self.commit_parameters_manager(true),

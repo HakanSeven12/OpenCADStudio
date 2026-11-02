@@ -3059,6 +3059,17 @@ impl OpenCADStudio {
                             p, &snap_candidates, view_rot, eye, bounds,
                             self.tabs[i].snap_result,
                         );
+                // Feed live point candidates into the OTRACK acquisition
+                // timer even while the expensive full snap pass is deferred.
+                // Previously the 250ms clock often started only after the
+                // stationary dwell tick, so a truly still cursor could not
+                // acquire a point without extra mouse movements.
+                if snap.is_some() && self.snapper.tracking_active() {
+                    self.snapper.update_otrack_dwell(
+                        snap, &snap_candidates, view_rot, eye, bounds,
+                        Instant::now(),
+                    );
+                }
                 if crate::perf::enabled() {
                     let evaluation_ms = crate::perf::elapsed_ms(evaluation_started);
                     let feature_count = snap_candidates

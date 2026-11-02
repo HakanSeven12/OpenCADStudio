@@ -548,25 +548,10 @@ fn plot_scene_content(
     render_mode_override: Option<codec::entities::ViewportRenderMode>,
 ) -> PlotContent {
     let (mut paper_wires, mut model_wires) = scene.plot_wire_groups(render_mode_override);
-    let plot_viewport_borders = scene
-        .effective_plot_settings()
-        .is_none_or(|settings| settings.flags.plot_viewport_borders);
-    paper_wires.retain(|wire| {
-        wire.plot_visible
-            && (plot_viewport_borders
-                || !crate::scene::Scene::handle_from_wire_name(&wire.name)
-                    .and_then(|handle| scene.document.get_entity(handle))
-                    .is_some_and(|entity| {
-                        matches!(
-                            entity,
-                            codec::EntityType::Viewport(viewport)
-                                if !crate::scene::Scene::is_sheet_viewport(
-                                    &scene.document,
-                                    viewport,
-                                )
-                        )
-                    }))
-    });
+    // A viewport border plots whenever its layer plots, as in the reference
+    // application: the page setup's plot-viewport-borders flag (off in its
+    // layouts) does not hide it.
+    paper_wires.retain(|wire| wire.plot_visible);
     model_wires.retain(|wire| wire.plot_visible);
     // A text / leader background mask is filled with the canvas colour so it
     // hides what is behind it; on paper that colour is the sheet's, not the
@@ -8348,6 +8333,54 @@ mod plot_paper_tests {
         assert!(ps.flags.update_paper && ps.flags.zoom_to_paper_on_update);
         assert_eq!(ps.flags.unknown_bits, 0x8000);
         assert_eq!(ps.paper_image_origin_x, 3.5);
+    }
+
+    /// `Layout1` with a content viewport on layer `VPB`, plotted with the page
+    /// setup's plot-viewport-borders flag off (the reference default).
+    fn border_plotted(vpb_plots: bool) -> bool {
+        let mut app = app_with_printer_named_sheet();
+        edit_layout_settings(&mut app, |ps| ps.flags.plot_viewport_borders = false);
+        assert!(!layout_settings(&app).flags.plot_viewport_borders);
+        let i = app.active_tab;
+        let scene = &mut app.tabs[i].scene;
+        let mut layer = codec::tables::Layer::new("VPB");
+        layer.is_plottable = vpb_plots;
+        scene.document.layers.add(layer).unwrap();
+        let mut viewport = codec::entities::Viewport::new();
+        viewport.center = codec::types::Vector3::new(150.0, 105.0, 0.0);
+        viewport.width = 100.0;
+        viewport.height = 80.0;
+        viewport.id = 2;
+        viewport.status = codec::entities::ViewportStatusFlags::default_on();
+        viewport.common.layer = "VPB".into();
+        let handle = scene
+            .document
+            .add_entity_to_layout(codec::EntityType::Viewport(Box::new(viewport)), "Layout1")
+            .unwrap();
+        scene.notify_viewport_changed(handle);
+        scene.bump_entities(&[(handle, crate::scene::ChangeKind::Added)]);
+        let content = super::plot_scene_content(scene, false, None);
+        let name = handle.value().to_string();
+        content
+            .wires
+            .iter()
+            .any(|wire| wire.name == name && wire.points.iter().any(|p| p[0].is_finite()))
+    }
+
+    #[test]
+    fn viewport_border_plots_with_the_page_setup_flag_off() {
+        assert!(
+            border_plotted(true),
+            "border of a plotting layer was dropped"
+        );
+    }
+
+    #[test]
+    fn viewport_border_on_a_no_plot_layer_stays_off_the_plot() {
+        assert!(
+            !border_plotted(false),
+            "border of a no-plot layer was plotted"
+        );
     }
 
     /// Open the metric page-setup fixture written by the commercial

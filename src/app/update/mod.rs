@@ -1232,14 +1232,9 @@ impl OpenCADStudio {
                         {
                             continue;
                         }
-                        match line.source {
-                            ocs_plugin_api::process::IoStream::Stderr => {
-                                self.command_line.push_error(&prefixed);
-                            }
-                            _ => {
-                                self.command_line.push_output(&prefixed);
-                            }
-                        }
+                        // A plugin's stderr is its ordinary trace, not an
+                        // error; real failures come through push_error.
+                        self.command_line.push_output(&prefixed);
                     }
                 });
                 Task::none()

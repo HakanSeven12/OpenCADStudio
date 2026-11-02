@@ -295,10 +295,12 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
             super::draw::draw::sketch::tool(),
             super::draw::draw::solid2d::tool(),
             super::draw::draw::trace::tool(),
+            super::draw::draw::wipeout::tool(),
             super::draw::inquiry::measuregeom::tool(),
             super::insert::content_browser::tool(),
             super::insert::design_center::tool(),
             super::insert::minsert::tool(),
+            super::parametric::normal::tool(),
             super::parametric::equal_distance_tool::tool(),
             super::parametric::center_point_tool::tool(),
             super::parametric::midpoint_tool::tool(),
@@ -331,13 +333,95 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
             out.entry(command.to_string())
                 .or_insert((label, IconKind::Svg(icon)));
         }
-        // Panel launcher and standalone tool commands with dedicated tool SVGs.
+        // File, session, drafting-aid, snap-modifier, and dialog-launcher commands
+        // with dedicated SVGs in `assets/icons/`.
         for (command, label, icon) in [
+            // File, session & help
+            ("UNDO", "Undo", crate::ui::icons::undo_icon()),
+            ("REDO", "Redo", crate::ui::icons::redo_icon()),
+            ("NEW", "New", crate::ui::icons::DOC_NEW),
+            ("QNEW", "New", crate::ui::icons::DOC_NEW),
+            ("OPEN", "Open", crate::ui::icons::FOLDER_OPEN),
+            ("SAVE", "Save", crate::ui::icons::SAVE),
+            ("QSAVE", "Save", crate::ui::icons::SAVE),
+            ("SAVEAS", "Save As", crate::ui::icons::FILE_EXPORT),
+            ("EXPORT", "Export", crate::ui::icons::FILE_EXPORT),
+            ("EXPORTPDF", "Export PDF", crate::ui::icons::FILE_EXPORT),
+            ("CLOSE", "Close", crate::ui::icons::CLOSE),
+            ("CLOSEALL", "Close All", crate::ui::icons::CLOSE),
+            ("QUIT", "Exit", crate::ui::icons::CLOSE),
+            ("EXIT", "Exit", crate::ui::icons::CLOSE),
             (
-                "FIND",
-                "Find",
-                include_bytes!("../../assets/icons/find.svg") as &'static [u8],
+                "HELP",
+                "Help",
+                include_bytes!("../../assets/icons/ui/help.svg") as &'static [u8],
             ),
+            (
+                "SELECTALL",
+                "Select All",
+                include_bytes!("../../assets/icons/blocks/select_objects.svg"),
+            ),
+            (
+                "QSELECT",
+                "Quick Select",
+                include_bytes!("../../assets/icons/blocks/quick_select.svg"),
+            ),
+            // Status-bar & drafting aids
+            ("OSNAP", "Object Snap", crate::ui::icons::ST_OSNAP),
+            ("DDOSNAP", "Object Snap", crate::ui::icons::ST_OSNAP),
+            ("OTRACK", "Object Snap Tracking", crate::ui::icons::ST_OTRACK),
+            ("POLAR", "Polar Tracking", crate::ui::icons::ST_POLAR),
+            ("GRID", "Grid", crate::ui::icons::GRID),
+            ("SNAP", "Snap", crate::ui::icons::SNAP),
+            ("LWEIGHT", "Lineweight", crate::ui::icons::ST_LWT),
+            (
+                "QUICKPROPERTIES",
+                "Quick Properties",
+                crate::ui::icons::ST_QUICKPROPS,
+            ),
+            ("QP", "Quick Properties", crate::ui::icons::ST_QUICKPROPS),
+            ("FILTER", "Selection Filter", crate::ui::icons::ST_FILTER),
+            (
+                "CLEANSCREENON",
+                "Clean Screen On",
+                crate::ui::icons::ST_CLEANSCREEN,
+            ),
+            (
+                "CLEANSCREENOFF",
+                "Clean Screen Off",
+                crate::ui::icons::ST_CLEANSCREEN,
+            ),
+            (
+                "ISOLATEOBJECTS",
+                "Isolate Objects",
+                crate::ui::icons::ST_ISOLATE,
+            ),
+            ("HIDEOBJECTS", "Hide Objects", crate::ui::icons::ST_ISOLATE),
+            (
+                "UNISOLATEOBJECTS",
+                "End Object Isolation",
+                crate::ui::icons::ST_ISOLATE,
+            ),
+            // Snap modifiers, calculator, styles & mesh/layout tools
+            ("MTP", "Mid Between 2 Points", crate::ui::icons::mtp_icon()),
+            ("M2P", "Mid Between 2 Points", crate::ui::icons::mtp_icon()),
+            ("FROM", "From", crate::ui::icons::from_icon()),
+            (
+                "QUICKCALC",
+                "QuickCalc",
+                include_bytes!("../../assets/icons/quickcalc/quickcalc.svg"),
+            ),
+            (
+                "QC",
+                "QuickCalc",
+                include_bytes!("../../assets/icons/quickcalc/quickcalc.svg"),
+            ),
+            (
+                "CALC",
+                "QuickCalc",
+                include_bytes!("../../assets/icons/quickcalc/quickcalc.svg"),
+            ),
+            ("FIND", "Find", include_bytes!("../../assets/icons/find.svg")),
             (
                 "STYLE",
                 "Text Style",
@@ -363,6 +447,19 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
                 "Uncrop Point Cloud",
                 include_bytes!("../../assets/icons/xclip_remove.svg"),
             ),
+            ("3DFACE", "3D Face", crate::ui::icons::MESH),
+            ("3DMESH", "3D Mesh", crate::ui::icons::MESH),
+            ("MESH", "Mesh", crate::ui::icons::MESH),
+            (
+                "LAYOUT",
+                "Layout",
+                include_bytes!("../../assets/icons/layout_tabs.svg"),
+            ),
+            (
+                "DGNIMPORT",
+                "DGN Import",
+                include_bytes!("../../assets/icons/cui_import.svg"),
+            ),
         ] {
             out.entry(command.to_string())
                 .or_insert((label, IconKind::Svg(icon)));
@@ -384,10 +481,15 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
 }
 
 /// The ribbon icon of a command line, for surfaces that show the command
-/// outside the ribbon. A leading `'` (transparent use) is ignored.
+/// outside the ribbon. A leading `'` (transparent use) or `-` (command-line
+/// variant) is ignored when looking up the base command's icon.
 pub fn command_icon(command: &str) -> Option<&'static [u8]> {
     let key = command.trim().trim_start_matches('\'').to_ascii_uppercase();
-    match ribbon_commands().get(&key)?.1 {
+    let commands = ribbon_commands();
+    let entry = commands
+        .get(&key)
+        .or_else(|| key.strip_prefix('-').and_then(|base| commands.get(base)))?;
+    match entry.1 {
         IconKind::Svg(bytes) => Some(bytes),
         IconKind::Glyph(_) => None,
     }
@@ -420,6 +522,17 @@ mod tests {
             ("GCVERTICAL", "VCONSTRAINT"),
             ("-BLOCK", "BLOCK"),
             ("-INSERT", "INSERT"),
+            ("-LAYOUT", "LAYOUT"),
+            ("-DGNIMPORT", "DGNIMPORT"),
+            ("-OSNAP", "OSNAP"),
+            ("M2P", "MTP"),
+            ("QC", "QUICKCALC"),
+            ("U", "UNDO"),
+            ("MREDO", "REDO"),
+            ("QNEW", "NEW"),
+            ("QSAVE", "SAVE"),
+            ("QUIT", "CLOSE"),
+            ("EXIT", "CLOSE"),
             ("REC", "RECT"),
             ("L", "LINE"),
         ] {
@@ -433,6 +546,34 @@ mod tests {
                 alias_icon.map(|b| (b.as_ptr(), b.len())),
                 target_icon.map(|b| (b.as_ptr(), b.len())),
                 "expected {alias} to share the icon of {target}"
+            );
+        }
+
+        for cmd in [
+            "UNDO",
+            "REDO",
+            "NEW",
+            "OPEN",
+            "SAVE",
+            "SAVEAS",
+            "CLOSE",
+            "HELP",
+            "MTP",
+            "FROM",
+            "QUICKCALC",
+            "ORTHO",
+            "OSNAP",
+            "POLAR",
+            "GRID",
+            "SNAP",
+            "WIPEOUT",
+            "NRCONSTRAINT",
+            "3DFACE",
+            "3DMESH",
+        ] {
+            assert!(
+                command_icon(cmd).is_some(),
+                "expected command_icon({cmd:?}) to resolve an icon"
             );
         }
 

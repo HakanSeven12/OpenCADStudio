@@ -3871,6 +3871,87 @@ mod tests {
         );
     }
 
+    /// A reference constraint's label is the span its geometry has now, and
+    /// the post-edit path rebuilds it from the constraint's own references
+    /// rather than from the dimension entity's stored points.
+    #[test]
+    fn a_reference_label_shows_the_span_the_geometry_now_has() {
+        let mut scene = super::super::Scene::new();
+        scene.constraint_name_format = 2;
+        // Off-axis, so the span after the move reads 100 only vertically;
+        // across X it is 60.
+        let mut line = codec::entities::Line::from_points(
+            Vector3::new(700.0, 200.0, 0.0),
+            Vector3::new(740.0, 240.0, 0.0),
+        );
+        line.common.handle = h(1);
+        scene
+            .document
+            .add_entity(codec::EntityType::Line(line))
+            .unwrap();
+        let dimension = crate::modules::annotate::linear_dim::linear_dimension_entity(
+            glam::DVec3::new(700.0, 200.0, 0.0),
+            glam::DVec3::new(740.0, 240.0, 0.0),
+            glam::DVec3::new(740.0, 260.0, 0.0),
+            glam::DVec3::Y,
+            None,
+        );
+        let mut dimension = match dimension {
+            codec::EntityType::Dimension(dimension) => dimension,
+            _ => panic!("the builder must return a dimension"),
+        };
+        dimension.base_mut().common.handle = h(2);
+        // The layer the editor puts a dynamic dimension on; anywhere else it
+        // reads as annotational and prints four decimals.
+        dimension.base_mut().common.layer = DYNAMIC_DIMENSION_LAYER.to_string();
+        scene
+            .document
+            .add_entity(codec::EntityType::Dimension(dimension))
+            .unwrap();
+        let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
+        let id = set.add(
+            ConstraintKind::DistanceY,
+            vec![ParametricRef::point(h(1), 0), ParametricRef::point(h(1), 1)],
+            Some(DrivingValue::Named("d1".to_string())),
+        );
+        // A reference (driven) constraint follows the geometry it measures.
+        set.constraints
+            .iter_mut()
+            .find(|constraint| constraint.id == id)
+            .expect("the constraint was just added")
+            .enabled = false;
+        set.dimensions.insert(id, h(2));
+
+        scene.refresh_dynamic_dimension_texts();
+        let label = |scene: &super::super::Scene| {
+            scene
+                .document
+                .get_entity(h(2))
+                .and_then(crate::entities::dimension::as_dimension)
+                .expect("the dimension is still there")
+                .base()
+                .user_text
+                .clone()
+                .expect("the routine writes the label")
+        };
+        let before = label(&scene);
+        assert_eq!(before, "(d1=40)");
+
+        let mut moved = scene
+            .document
+            .get_entity(h(1))
+            .cloned()
+            .expect("the line is there");
+        match &mut moved {
+            codec::EntityType::Line(line) => line.end = Vector3::new(760.0, 300.0, 0.0),
+            other => panic!("the entity under the drag must be the line, found {other:?}"),
+        }
+        // The edit path itself rewrites the label; no second call needed.
+        scene.update_entity(moved);
+        let after = label(&scene);
+        assert_eq!(after, "(d1=100)");
+    }
+
     #[test]
     fn glyph_placement_points_away_from_its_geometry() {
         let mut document = codec::Document::new();

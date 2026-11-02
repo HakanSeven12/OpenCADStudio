@@ -118,14 +118,15 @@ pub(crate) fn style_for_property<'a>(
 }
 
 /// A cell's text height: the content's own format when it overrides it,
-/// else the cell, row, column or table style that sets it, else the
-/// content's value.
+/// else the cell, row, column or table style that sets it, else the row's
+/// cell style (`row_height`), else the content's value.
 fn cell_text_height(
     table: &Table,
     row: &codec::entities::table::TableRow,
     column: usize,
     cell: &codec::entities::table::TableCell,
     content: &codec::entities::table::CellContent,
+    row_height: Option<f64>,
 ) -> Option<f64> {
     use codec::entities::table::CellStylePropertyFlags as P;
     let set = |h: f64| (h > 1e-6).then_some(h);
@@ -136,6 +137,7 @@ fn cell_text_height(
             style_for_property(table, row, column, cell, P::TEXT_HEIGHT)
                 .and_then(|s| set(s.text_height))
         })
+        .or_else(|| row_height.and_then(set))
         .or_else(|| set(content.text_height))
 }
 
@@ -1266,7 +1268,7 @@ impl RenderConvertible for Table {
                 // Resolve text height: content → cell-style → row-style → 0.18.
                 let content = cell.contents.first();
                 let cell_h = content
-                    .and_then(|c| cell_text_height(self, row, ci, cell, c))
+                    .and_then(|c| cell_text_height(self, row, ci, cell, c, row_style.map(|s| s.text_height)))
                     .or_else(|| {
                         cell.style
                             .as_ref()
@@ -1848,7 +1850,7 @@ pub fn tessellate_table(
                 let fallback_sizes: Vec<_> = value_contents
                     .iter()
                     .map(|(_, content, text)| {
-                        let height = cell_text_height(tab, row, ci, cell, content)
+                        let height = cell_text_height(tab, row, ci, cell, content, row_style.map(|s| s.text_height))
                             .map_or(fallback_text_height, |h| h as f32 * anno_scale);
                         let mut max_chars = 0usize;
                         let mut line_count = 0usize;
@@ -1878,7 +1880,7 @@ pub fn tessellate_table(
                 for (slot_index, (content_index, content, text)) in
                     value_contents.iter().enumerate()
                 {
-                    let cell_h = cell_text_height(tab, row, ci, cell, content)
+                    let cell_h = cell_text_height(tab, row, ci, cell, content, row_style.map(|s| s.text_height))
                         .or_else(|| {
                             row_style
                                 .map(|style| style.text_height)

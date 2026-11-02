@@ -1826,6 +1826,19 @@ impl OpenCADStudio {
                     "columns_fixed" => Message::TableInsertField(F::ColumnsFixed(on)),
                     "rows_fixed" => Message::TableInsertField(F::RowsFixed(on)),
                     "preview" => Message::TableInsertField(F::Preview(on)),
+                    "first_row" => Message::TableInsertField(F::FirstRowStyle(v.to_string())),
+                    "second_row" => Message::TableInsertField(F::SecondRowStyle(v.to_string())),
+                    "other_rows" => Message::TableInsertField(F::OtherRowStyle(v.to_string())),
+                    "extra_rows" => Message::TableInsertField(F::ExtraRows(v.to_string())),
+                    "extra_columns" => Message::TableInsertField(F::ExtraColumns(v.to_string())),
+                    // "keep=<option index>:<0|1>", the -TABLE Options order.
+                    "keep" => {
+                        let (index, state) = v.split_once(':').unwrap_or((v, "1"));
+                        Message::TableInsertField(F::TemplateOption(
+                            index.parse().unwrap_or(0),
+                            state == "1",
+                        ))
+                    }
                     "styles" => Message::TableInsertManageStyles,
                     "ok" => Message::TableInsertApply,
                     _ => return Err(failure("invalid_value", "Unknown Insert Table field")),

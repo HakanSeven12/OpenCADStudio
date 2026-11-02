@@ -15,12 +15,13 @@ pub(crate) fn current_table_row(doc: &Document, baseline: Option<&Document>, ins
     table::current_row(doc, baseline, insert, definition, &view).ok().flatten()
 }
 
-struct Descriptor<'a> {
-    component: Component,
-    label: String,
-    description: &'a str,
+pub(crate) struct Descriptor<'a> {
+    pub(crate) component: Component,
+    pub(crate) label: String,
+    pub(crate) description: &'a str,
+    pub(crate) show: bool,
 }
-fn descriptors<'a>(
+pub(crate) fn descriptors<'a>(
     doc: &'a Document,
     definition: Handle,
     p: &Parameter,
@@ -30,49 +31,63 @@ fn descriptors<'a>(
         return Err("The reference parameter is unavailable.");
     };
     let mut result = Vec::new();
-    let mut add = |component, label: &str, description| {
+    let mut add = |component, label: &str, description, show| {
         result.push(Descriptor {
             component,
             label: label.to_owned(),
             description,
+            show,
         })
     };
     match &object.data {
-        Data::PointParameter(p) if p.parameter.parameter.show_properties => {
+        Data::PointParameter(p) => {
+            let show = p.parameter.parameter.show_properties;
             add(
                 Component::X,
                 &format!("{} X", p.position_name),
                 &p.position_description,
+                show,
             );
             add(
                 Component::Y,
                 &format!("{} Y", p.position_name),
                 &p.position_description,
+                show,
             );
         }
-        Data::LinearParameter(p) if p.parameter.parameter.show_properties => add(
+        Data::LinearParameter(p) => add(
             Component::Distance,
             &p.distance_name,
             &p.distance_description,
+            p.parameter.parameter.show_properties,
         ),
-        Data::PolarParameter(p) if p.parameter.parameter.show_properties => {
+        Data::PolarParameter(p) => {
+            let show = p.parameter.parameter.show_properties;
             add(
                 Component::Distance,
                 &p.distance_name,
                 &p.distance_description,
+                show,
             );
-            add(Component::Angle, &p.angle_name, &p.angle_description);
+            add(Component::Angle, &p.angle_name, &p.angle_description, show);
         }
-        Data::XYParameter(p) if p.parameter.parameter.show_properties => {
-            add(Component::X, &p.x_label, &p.x_label_description);
-            add(Component::Y, &p.y_label, &p.y_label_description);
+        Data::XYParameter(p) => {
+            let show = p.parameter.parameter.show_properties;
+            add(Component::X, &p.x_label, &p.x_label_description, show);
+            add(Component::Y, &p.y_label, &p.y_label_description, show);
         }
-        Data::RotationParameter(p) if p.parameter.parameter.show_properties => {
-            add(Component::Angle, &p.angle_name, &p.angle_description)
-        }
-        Data::FlipParameter(p) if p.parameter.parameter.show_properties => {
-            add(Component::Flip, &p.flip_label, &p.flip_label_description)
-        }
+        Data::RotationParameter(p) => add(
+            Component::Angle,
+            &p.angle_name,
+            &p.angle_description,
+            p.parameter.parameter.show_properties,
+        ),
+        Data::FlipParameter(p) => add(
+            Component::Flip,
+            &p.flip_label,
+            &p.flip_label_description,
+            p.parameter.parameter.show_properties,
+        ),
         _ => {}
     }
     Ok(result)
@@ -124,7 +139,7 @@ fn frame(
         instance::frame(doc, insert, p)
     }
 }
-fn number(
+pub(crate) fn number(
     p: &Parameter,
     frame: instance::ParameterFrame,
     component: Component,
@@ -186,6 +201,16 @@ fn display(value: f64, component: Component) -> String {
     crate::entities::common::format_length(value)
 }
 
+/// The row's `Value` cell: the number at the drawing's precision.
+pub(crate) fn rendered(value: f64, component: Component) -> String {
+    display(value, component)
+}
+
+/// The row's `Expression` cell: the number as stored, unrounded.
+pub(crate) fn stored(value: f64) -> String {
+    crate::entities::common::without_negative_zero(format!("{value}"))
+}
+
 /// Values are in definition-plane drawing units, with angles in degrees.
 pub(crate) fn properties(
     doc: &Document,
@@ -207,7 +232,7 @@ pub(crate) fn properties(
         let Ok(fields) = descriptors(source, definition, &p) else {
             continue;
         };
-        for field in fields {
+        for field in fields.into_iter().filter(|field| field.show) {
             let key = Key {
                 document,
                 definition,
@@ -282,7 +307,7 @@ pub(crate) fn evaluate(
         .ok_or("The reference parameter is unavailable.")?;
     if !descriptors(source, key.definition, &p)?
         .iter()
-        .any(|field| field.component == key.component)
+        .any(|field| field.component == key.component && field.show)
     {
         return Err("The reference parameter property is hidden or unavailable.");
     }

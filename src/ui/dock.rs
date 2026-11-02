@@ -107,6 +107,8 @@ pub enum PanelId {
     BlockPalette,
     /// Block Editor authoring tools.
     AuthoringPalettes,
+    /// The Block Editor's Parameters Manager.
+    ParametersManager,
     ExternalReferences,
     /// Outline of the drawing's origin planes, open sketch and solid bodies.
     Browser,
@@ -130,11 +132,12 @@ pub enum PanelId {
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 13] = [
+    pub const ALL: [PanelId; 14] = [
         PanelId::Properties,
         PanelId::GraphicAttributes,
         PanelId::BlockPalette,
         PanelId::AuthoringPalettes,
+        PanelId::ParametersManager,
         PanelId::ExternalReferences,
         PanelId::Browser,
         PanelId::NodeGraph,
@@ -153,6 +156,7 @@ impl PanelId {
             PanelId::GraphicAttributes => "Graphic Attributes",
             PanelId::BlockPalette => "Block Palette",
             PanelId::AuthoringPalettes => "Authoring Palettes",
+            PanelId::ParametersManager => "Parameters Manager",
             PanelId::ExternalReferences => "External References",
             PanelId::Browser => "Browser",
             PanelId::NodeGraph => "Node Graph",
@@ -175,6 +179,7 @@ impl PanelId {
             }
             PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
             PanelId::AuthoringPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
+            PanelId::ParametersManager => include_bytes!("../../assets/icons/table.svg"),
             PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
             PanelId::Browser => include_bytes!("../../assets/icons/content_browser.svg"),
             PanelId::NodeGraph => crate::ui::icons::NODE_GRAPH,
@@ -189,12 +194,13 @@ impl PanelId {
     }
 
     /// Default dock width for a freshly-created panel instance.
-    fn default_width(self) -> f32 {
+    pub(crate) fn default_width(self) -> f32 {
         match self {
             PanelId::Properties => 250.0,
             PanelId::GraphicAttributes => 250.0,
             PanelId::BlockPalette => 260.0,
             PanelId::AuthoringPalettes => 260.0,
+            PanelId::ParametersManager => 420.0,
             PanelId::ExternalReferences => 460.0,
             PanelId::Browser => 230.0,
             PanelId::NodeGraph => 220.0,

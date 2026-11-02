@@ -506,13 +506,17 @@ impl OpenCADStudio {
         use crate::ui::dock::{DockDrag, PanelId};
         let mut task = iced::Task::none();
         if open
-            && id == PanelId::AuthoringPalettes
+            && matches!(id, PanelId::AuthoringPalettes | PanelId::ParametersManager)
             && self.tabs[self.active_tab]
                 .active_block_edit_session()
                 .is_none()
         {
-            self.command_line
-                .push_error(crate::t!("Open the Block Editor to use Authoring Palettes.").as_ref());
+            let tool = if id == PanelId::ParametersManager {
+                "Open the Block Editor to use the Parameters Manager."
+            } else {
+                "Open the Block Editor to use Authoring Palettes."
+            };
+            self.command_line.push_error(crate::t!(tool).as_ref());
             return task;
         }
         if open {
@@ -528,6 +532,11 @@ impl OpenCADStudio {
                         self.save_config();
                     }
                     PanelId::BlockPalette => self.open_blocks_palette(None),
+                    PanelId::ParametersManager => {
+                        self.show_parameters_manager = true;
+                        self.dock_open_at_default(id);
+                        self.save_config();
+                    }
                     PanelId::AuthoringPalettes => {
                         self.show_authoring_palettes = true;
                         self.ribbon.show_authoring_palettes = true;
@@ -578,6 +587,7 @@ impl OpenCADStudio {
                 self.show_authoring_palettes = false;
                 self.ribbon.show_authoring_palettes = false;
             }
+            PanelId::ParametersManager => self.show_parameters_manager = false,
             PanelId::ExternalReferences => self.show_external_references = false,
             PanelId::Browser => self.show_browser = false,
             PanelId::NodeGraph => self.show_node_graph = false,
@@ -679,6 +689,12 @@ impl OpenCADStudio {
         match id {
             PanelId::Properties => self.show_properties,
             PanelId::BlockPalette => self.show_block_palette,
+            PanelId::ParametersManager => {
+                self.show_parameters_manager
+                    && self.tabs[self.active_tab]
+                        .active_block_edit_session()
+                        .is_some()
+            }
             PanelId::AuthoringPalettes => {
                 self.show_authoring_palettes
                     && self.tabs[self.active_tab]

@@ -19,6 +19,7 @@ pub(crate) mod block_lookup;
 pub(crate) mod block_properties_table;
 pub(crate) mod block_actions;
 pub(crate) mod block_parameter_properties;
+pub(crate) mod block_parameters_manager;
 pub(crate) mod block_alignment;
 pub(crate) mod block_grips;
 pub(crate) mod block_action_bars;

@@ -8841,3 +8841,4 @@ mod array_spacing_prompts;
 mod lookup_set_row;
 mod visibility_set_first_state;
 mod parameter_type_prompts;
+mod parameters_manager;

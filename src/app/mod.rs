@@ -1216,6 +1216,7 @@ pub(super) struct OpenCADStudio {
     pub(crate) show_block_palette: bool,
     /// Authoring palette preference, visible only in a Block Editor session.
     show_authoring_palettes: bool,
+    show_parameters_manager: bool,
     authoring_palette_tab: crate::ui::window::authoring_palettes::Tab,
     /// Node graph overlay over the viewport.
     pub(crate) show_node_graph: bool,
@@ -5829,6 +5830,7 @@ impl OpenCADStudio {
             graphic_attributes: Default::default(),
             show_block_palette: false,
             show_authoring_palettes: false,
+            show_parameters_manager: false,
             authoring_palette_tab: Default::default(),
             show_node_graph: false,
             property_target_override: None,

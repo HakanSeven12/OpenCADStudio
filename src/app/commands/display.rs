@@ -636,6 +636,11 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ToggleQuickProperties));
             }
 
+            "BPARAMETERS" | "BPARAMETERSCLOSE" => {
+                let open = cmd == "BPARAMETERS" && !self.show_parameters_manager;
+                return Some(self.dock_set_open(crate::ui::dock::PanelId::ParametersManager, open));
+            }
+
             "BAUTHORPALETTE" | "BAUTHORPALETTECLOSE" => {
                 let open = cmd == "BAUTHORPALETTE" && !self.show_authoring_palettes;
                 return Some(self.dock_set_open(crate::ui::dock::PanelId::AuthoringPalettes, open));

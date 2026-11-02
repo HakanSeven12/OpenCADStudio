@@ -37,6 +37,7 @@ pub mod layers;
 pub mod layout_manager;
 pub mod missing_fonts;
 pub mod named_parameters;
+pub mod parameters_manager;
 pub mod open_progress;
 pub mod options;
 pub mod pc_manager;

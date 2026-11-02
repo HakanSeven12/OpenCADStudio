@@ -1553,13 +1553,36 @@ fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
 
     // External boundary cuts as global params (segment index + local u).
     let mut cuts: Vec<f64> = Vec::new();
+    // On a large low-poly drawing the same tens of thousands of boundaries
+    // were scanned again for *every* target vertex. Index once per target
+    // and narrow each segment's exact kernel pass to overlapping boundaries.
+    let cutter_index = (seg_count >= 8 && geos.len() >= 256)
+        .then(|| TrimAabbIndex::new(geos.iter().map(trim_geo_aabb)));
+    let mut local_geos = Vec::new();
 
     for i in 0..seg_count {
         let p0 = vx(i);
         let p1 = vx(i + 1);
         let b = seg_bulge(i);
-
-        for u in polyline_seg_ts(p0, p1, b, handle, geos) {
+        let segment_geos = if let Some(index) = cutter_index.as_ref() {
+            // Use the full supporting arc envelope for bulged segments. The
+            // same conservative bounds are applied by cut_params itself.
+            let bounds = lwpoly_segment_curve(poly, i)
+                .as_ref()
+                .and_then(|(curve, _)| trim_target_bounds(curve));
+            if let Some(bounds) = bounds {
+                local_geos.clear();
+                local_geos.extend(
+                    index.overlapping(bounds).into_iter().map(|idx| geos[idx].clone())
+                );
+                local_geos.as_slice()
+            } else {
+                geos
+            }
+        } else {
+            geos
+        };
+        for u in polyline_seg_ts(p0, p1, b, handle, segment_geos) {
             let param = i as f64 + u.clamp(0.0, 1.0);
 
             cuts.push(if closed {

@@ -4155,6 +4155,9 @@ pub struct TrimCommand {
     block_boundary_owners: rustc_hash::FxHashSet<Handle>,
     entity_index: ModifyEntityIndex,
     geos: Vec<Geo>,
+    /// Lazily built for cursor-local cutter scans. Reused across hover
+    /// targets; cleared whenever a committed edit changes the boundaries.
+    geo_spatial: std::cell::RefCell<Option<TrimAabbIndex>>,
     /// Bounded cache of cursor-independent cutting points for hover previews.
     hover_cut_cache: rustc_hash::FxHashMap<Handle, Vec<f64>>,
     hover_cut_order: std::collections::VecDeque<Handle>,
@@ -4231,6 +4234,7 @@ impl TrimCommand {
             block_boundary_owners,
             entity_index: ModifyEntityIndex::empty(),
             geos: Vec::new(),
+            geo_spatial: std::cell::RefCell::new(None),
             hover_cut_cache: rustc_hash::FxHashMap::default(),
             hover_cut_order: std::collections::VecDeque::new(),
             pending: Vec::new(),
@@ -4252,6 +4256,7 @@ impl TrimCommand {
     fn rebuild_geos(&mut self) {
         self.hover_cut_cache.clear();
         self.hover_cut_order.clear();
+        self.geo_spatial.get_mut().take();
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
         let mut geos = if self.edge_set.is_empty() {
             build_geos(&self.all_entities)
@@ -4299,8 +4304,30 @@ impl TrimCommand {
         let Some(target_bounds) = entity_world_aabb_f64(target_entity) else {
             return self.geos.clone();
         };
-        self.geos
-            .iter()
+        if !target_bounds.iter().all(|value| value.is_finite()) {
+            return self.geos.clone();
+        }
+        // Include near-contact tolerance as well as true bounding-box
+        // overlap. Rays and splines have no conservatively bounded index
+        // entry, so they are always included in candidate indices.
+        let slack = CUT_TOLERANCE * 8.0;
+        let target_bounds = [
+            target_bounds[0] - slack,
+            target_bounds[1] - slack,
+            target_bounds[2] + slack,
+            target_bounds[3] + slack,
+        ];
+        let candidate_indices = {
+            let mut cached = self.geo_spatial.borrow_mut();
+            cached
+                .get_or_insert_with(|| {
+                    TrimAabbIndex::new(self.geos.iter().map(trim_geo_aabb))
+                })
+                .overlapping(target_bounds)
+        };
+        candidate_indices
+            .into_iter()
+            .filter_map(|index| self.geos.get(index))
             .filter(|geo| {
                 handles.contains(&geo.handle())
                     || (self.block_boundary_owners.contains(&geo.handle())
@@ -4670,6 +4697,10 @@ impl CadCommand for TrimCommand {
         }
         if rebuild {
             self.rebuild_geos();
+        } else if !replacements.is_empty() {
+            // Non-rebuilding replacement still mutates self.geos in place.
+            // The cached spatial indices must never point at old positions.
+            self.geo_spatial.get_mut().take();
         }
     }
 

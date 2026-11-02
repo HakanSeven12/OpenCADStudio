@@ -4269,9 +4269,9 @@ pub fn table_indicator(
         .map_or_else(|| "Standard".to_string(), |s| s.name.clone());
     let style = crate::entities::text_support::resolve_text_style(&style_name, document);
     let text_h = text_height as f32;
-    // The row numbers' column: three of the font's widest digits, out to
-    // the last one's ink (measured: txt 12, romans 12.21, Arial ~10.2 at
-    // height 4.5), plus the cell margins.
+    // The row numbers' column: the ink width of three of the font's widest
+    // digits, plus the cell margins (measured at height 4.5: txt 12, romans
+    // 11.57, Arial 9.95 — twice that at height 9).
     let ink = crate::entities::text_support::text_local_bounds(
         &style.font_name,
         "888",
@@ -4279,8 +4279,8 @@ pub fn table_indicator(
         style.width_factor,
         0.0,
     )
-    .map(|bounds| bounds.ink_max[0])
-    .filter(|right| *right > 0.0);
+    .map(|bounds| bounds.ink_max[0] - bounds.ink_min[0])
+    .filter(|width| *width > 0.0);
     let digits = ink.unwrap_or_else(|| layout_mtext(&MTextRenderOpts {
         columns: Default::default(),
         value: "000",

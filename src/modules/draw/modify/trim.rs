@@ -4091,7 +4091,14 @@ impl TrimCommand {
     }
 
     fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
-        let replacements = fence_pass(&self.all_entities, &self.entity_index, &self.geos, fence, window, self.shift);
+        let replacements = fence_pass(
+            &self.all_entities,
+            &self.entity_index,
+            &self.geos,
+            fence,
+            window,
+            self.shift,
+        );
         if replacements.is_empty() {
             return CmdResult::NeedPoint;
         }
@@ -4331,7 +4338,13 @@ impl CadCommand for TrimCommand {
         }
         let window = window.map(|(min, max)| CrossingWindow { min, max });
         if matches!(self.mode, TrimMode::SelectEdges) {
-            let handles = drag_selected_handles(&self.all_entities, &self.entity_index, fence, window, crossing);
+            let handles = drag_selected_handles(
+                &self.all_entities,
+                &self.entity_index,
+                fence,
+                window,
+                crossing,
+            );
             update_trim_edge_set(&mut self.edge_set, handles, self.shift);
             return Some(CmdResult::NeedPoint);
         }
@@ -4907,7 +4920,14 @@ impl ExtendCommand {
 
     fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
         // EXTEND's fence extends; Shift held at Enter swaps it to trim.
-        let replacements = fence_pass(&self.all_entities, &self.entity_index, &self.geos, fence, window, !self.shift);
+        let replacements = fence_pass(
+            &self.all_entities,
+            &self.entity_index,
+            &self.geos,
+            fence,
+            window,
+            !self.shift,
+        );
         if replacements.is_empty() {
             return CmdResult::NeedPoint;
         }
@@ -5153,7 +5173,13 @@ impl CadCommand for ExtendCommand {
         let window = window.map(|(min, max)| CrossingWindow { min, max });
         match self.mode {
             TrimMode::SelectEdges => {
-                let handles = drag_selected_handles(&self.all_entities, &self.entity_index, fence, window, crossing);
+                let handles = drag_selected_handles(
+                    &self.all_entities,
+                    &self.entity_index,
+                    fence,
+                    window,
+                    crossing,
+                );
                 update_trim_edge_set(&mut self.edge_set, handles, self.shift);
                 Some(CmdResult::NeedPoint)
             }
@@ -5544,7 +5570,10 @@ mod tests {
             max: [9.0, 9.0],
         };
         let fence = [[1.0, 1.0], [9.0, 1.0], [9.0, 9.0], [1.0, 9.0], [1.0, 1.0]];
-        assert!(fence_result_preview(&all, &index, &geos, &fence, Some(window), false, false).is_empty());
+        assert!(
+            fence_result_preview(&all, &index, &geos, &fence, Some(window), false, false)
+                .is_empty()
+        );
         let replacements = fence_pass(&all, &index, &geos, &fence, Some(window), false);
         assert!(!replacements.is_empty(), "actual TRIM must not inherit the preview cap");
     }
@@ -5901,7 +5930,13 @@ mod tests {
         let rectangle = [[1.0, 1.0], [5.0, 1.0], [5.0, 4.0], [1.0, 4.0], [1.0, 1.0]];
 
         assert_eq!(
-            drag_selected_handles(&entities, &ModifyEntityIndex::build(&entities), &rectangle, Some(window), false),
+            drag_selected_handles(
+                &entities,
+                &ModifyEntityIndex::build(&entities),
+                &rectangle,
+                Some(window),
+                false,
+            ),
             vec![Handle::new(1)]
         );
     }
@@ -5920,7 +5955,13 @@ mod tests {
         let rectangle = [[1.0, 1.0], [5.0, 1.0], [5.0, 4.0], [1.0, 4.0], [1.0, 1.0]];
 
         assert_eq!(
-            drag_selected_handles(&entities, &ModifyEntityIndex::build(&entities), &rectangle, Some(window), true),
+            drag_selected_handles(
+                &entities,
+                &ModifyEntityIndex::build(&entities),
+                &rectangle,
+                Some(window),
+                true,
+            ),
             vec![Handle::new(1), Handle::new(2)]
         );
     }
@@ -6457,7 +6498,14 @@ mod tests {
                 targets[0].clone(),
             ],
         ] {
-            let replacements = fence_pass(&all, &ModifyEntityIndex::build(&all), &build_geos(&all), &fence, None, false);
+            let replacements = fence_pass(
+                &all,
+                &ModifyEntityIndex::build(&all),
+                &build_geos(&all),
+                &fence,
+                None,
+                false,
+            );
             let mut actual: Vec<_> = replacements
                 .into_iter()
                 .map(|(handle, pieces)| {
@@ -6508,7 +6556,14 @@ mod tests {
             min: [1.0, 1.0],
             max: [9.0, 9.0],
         };
-        let replacements = fence_pass(&all, &ModifyEntityIndex::build(&all), &build_geos(&all), &[], Some(window), false);
+        let replacements = fence_pass(
+            &all,
+            &ModifyEntityIndex::build(&all),
+            &build_geos(&all),
+            &[],
+            Some(window),
+            false,
+        );
         assert!(replacements
             .iter()
             .any(|(handle, _)| *handle == Handle::new(1)));

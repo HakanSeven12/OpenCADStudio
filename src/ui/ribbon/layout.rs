@@ -79,6 +79,22 @@ pub enum QatBuiltin {
     CenterLayer,
 }
 
+fn lenient_qat<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<QatItem>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Saved {
+        Known(QatItem),
+        Unknown(serde::de::IgnoredAny),
+    }
+    Ok(Vec::<Saved>::deserialize(deserializer)?
+        .into_iter()
+        .filter_map(|item| match item {
+            Saved::Known(item) => Some(item),
+            Saved::Unknown(_) => None,
+        })
+        .collect())
+}
+
 /// The toolbar a user with no saved one sees: the file commands, then Undo
 /// and Redo.
 pub fn default_qat() -> Vec<QatItem> {
@@ -179,7 +195,10 @@ pub struct RibbonLayout {
     /// The command search box is kept open; collapsed it shows as its
     /// magnifier button.
     pub search_expanded: bool,
-    /// The Quick Access Toolbar, left to right.
+    /// The Quick Access Toolbar, left to right. An item this build does not
+    /// know (saved by a newer one) is dropped rather than failing the whole
+    /// settings file.
+    #[serde(deserialize_with = "lenient_qat")]
     pub qat: Vec<QatItem>,
     /// Show the Quick Access Toolbar in its own row below the ribbon.
     pub qat_below: bool,

@@ -1341,6 +1341,23 @@ impl Snapper {
         eye: DVec3,
         bounds: Rectangle,
     ) -> Option<SnapResult> {
+        self.snap_discrete_preview_stable(
+            cursor_screen, wires, view_rot, eye, bounds, None,
+        )
+    }
+
+    /// Keep an acquired discrete point only while it is independently found
+    /// among this frame's *real* candidates. Hysteresis avoids oscillation
+    /// between nearly equidistant block vertices without phantom old snaps.
+    pub fn snap_discrete_preview_stable<W: WireSource + ?Sized>(
+        &self,
+        cursor_screen: Point,
+        wires: &W,
+        view_rot: Mat4,
+        eye: DVec3,
+        bounds: Rectangle,
+        previous: Option<SnapResult>,
+    ) -> Option<SnapResult> {
         // An unindexed source can represent the entire drawing. Avoid turning
         // the fast path into another full-scene scan while its spatial index is
         // being prepared; small drawings can still use the direct fallback.
@@ -1356,6 +1373,7 @@ impl Snapper {
         let mut best_rank = u8::MAX;
         let mut best_sub = u8::MAX;
         let mut best_d2 = f32::MAX;
+        let mut retained: Option<(SnapResult, f32)> = None;
 
         let mut try_pt =
             |world: DVec3, snap_type: SnapType, src: Option<DimensionAssociationSource>| {
@@ -1368,6 +1386,15 @@ impl Snapper {
                     return;
                 }
                 let (tier, sub) = (snap_tier(snap_type), snap_priority(snap_type));
+                if previous.is_some_and(|old| same_discrete_snap(old, world, snap_type)) {
+                    retained = Some((SnapResult {
+                        world, screen, snap_type, tangent_obj: None,
+                        extension_base: None, extension_base2: None,
+                        extension_origin: None, extension_dir: None,
+                        viewport: None, source: src, secondary_source: None,
+                        model_point: None,
+                    }, d2));
+                }
                 if snap_better(tier, d2, sub, (best_rank, best_d2, best_sub)) {
                     best_rank = tier;
                     best_sub = sub;
@@ -1390,7 +1417,7 @@ impl Snapper {
             };
 
         self.for_each_discrete_feature(wires, || wires.iter(), &mut try_pt);
-        best
+        keep_stable_snap(best, retained, cursor_screen)
     }
 
     /// Visit every enabled discrete feature of `wires`: pre-baked hints

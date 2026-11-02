@@ -114,7 +114,9 @@ impl OpenCADStudio {
                 return;
             }
             // Model units per paper unit; the view centre follows the paper
-            // centre so the model does not move on the sheet.
+            // centre so the model does not move on the sheet. The view centre
+            // is in display coordinates, whose axes are the sheet's, so a
+            // twisted view takes the sheet delta as it is.
             let scale = if vp.height.abs() > 1e-12 {
                 vp.view_height / vp.height
             } else {
@@ -122,9 +124,8 @@ impl OpenCADStudio {
             };
             let center = (lo + hi) * 0.5;
             let (dx, dy) = (center.x - vp.center.x, center.y - vp.center.y);
-            let (s, c) = (-vp.twist_angle).sin_cos();
-            vp.view_center.x += (dx * c - dy * s) * scale;
-            vp.view_center.y += (dx * s + dy * c) * scale;
+            vp.view_center.x += dx * scale;
+            vp.view_center.y += dy * scale;
             vp.center.x = center.x;
             vp.center.y = center.y;
             vp.width = hi.x - lo.x;

@@ -5884,7 +5884,6 @@ mod tab_close_tests {
     /// Two close messages built from the same view snapshot: the first one
     /// removes the tab, the second carries the now-outdated reference. The
     /// close request must degrade to a no-op, not panic.
-
     #[test]
     fn stale_tab_close_is_a_no_op() {
         let mut app = three_tabs();
@@ -5919,7 +5918,6 @@ mod tab_close_tests {
             "the drawing remembered a place"
         );
 
-        app.tabs[i].dirty = false;
         let _ = app.update(Message::TabClose(id));
 
         assert!(

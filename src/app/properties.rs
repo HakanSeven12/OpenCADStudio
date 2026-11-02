@@ -1350,13 +1350,12 @@ impl OpenCADStudio {
                 // A spacing the table never stored shows its default: five
                 // and a half data-text heights (0.18 high text without data rows).
                 if table.break_spacing <= 0.0 {
-                    let data_height = selected_style
-                        .filter(|_| table.rows.len() > 2)
-                        .map_or(0.18, |style| style.data_row_style.text_height);
                     update_row_text(
                         &mut sections,
                         "tbl_break_spacing",
-                        crate::entities::common::format_length(5.5 * data_height),
+                        crate::entities::common::format_length(
+                            crate::entities::table::resolved_break_spacing(table, doc),
+                        ),
                     );
                 }
                 update_row_toggle(&mut sections, "tbl_title_suppressed", title_suppressed);

@@ -408,8 +408,26 @@ struct TableBreakSegment {
     origin: Vec3,
 }
 
+/// The space between a broken table's fragments: the table's own, else five
+/// and a half data text heights (what the table shows when it stores none).
+pub(crate) fn resolved_break_spacing(table: &Table, document: &codec::Document) -> f64 {
+    if table.break_spacing > 0.0 {
+        return table.break_spacing;
+    }
+    let data_height = table
+        .table_style_handle
+        .and_then(|handle| match document.objects.get(&handle) {
+            Some(codec::objects::ObjectType::TableStyle(style)) => Some(style),
+            _ => None,
+        })
+        .filter(|_| table.rows.len() > 2)
+        .map_or(0.18, |style| style.data_row_style.text_height);
+    5.5 * data_height
+}
+
 fn table_break_segments(
     table: &Table,
+    document: &codec::Document,
     h: Vec3,
     down: Vec3,
     row_offsets: &[f32],
@@ -494,7 +512,7 @@ fn table_break_segments(
             .map(|data| offset_to_world(&data.position))
             .filter(|position| position.is_finite());
         let origin = manual_origin.unwrap_or_else(|| {
-            let spacing = table.break_spacing as f32 * scale;
+            let spacing = resolved_break_spacing(table, document) as f32 * scale;
             let horizontal_step = table.total_width() as f32 * scale + spacing;
             let vertical_step = if max_height.is_finite() {
                 max_height + spacing
@@ -527,6 +545,7 @@ fn table_break_segments(
 
 fn break_frame_for_row(
     table: &Table,
+    document: &codec::Document,
     row: usize,
     h: Vec3,
     down: Vec3,
@@ -534,7 +553,7 @@ fn break_frame_for_row(
     scale: f32,
 ) -> (Vec3, f32) {
     let insertion = v3(&table.insertion_point);
-    if let Some(segment) = table_break_segments(table, h, down, row_offsets, scale)
+    if let Some(segment) = table_break_segments(table, document, h, down, row_offsets, scale)
         .into_iter()
         .find(|segment| row >= segment.start_row && row <= segment.end_row)
     {
@@ -550,6 +569,7 @@ fn break_frame_for_row(
 
 fn break_frames_for_row(
     table: &Table,
+    document: &codec::Document,
     row: usize,
     h: Vec3,
     down: Vec3,
@@ -560,13 +580,13 @@ fn break_frames_for_row(
 ) -> Vec<(Vec3, f32)> {
     use codec::entities::table::BreakOptionFlags;
 
-    let segments = table_break_segments(table, h, down, row_offsets, scale);
+    let segments = table_break_segments(table, document, h, down, row_offsets, scale);
     let Some((segment_index, segment)) = segments
         .iter()
         .enumerate()
         .find(|(_, segment)| row >= segment.start_row && row <= segment.end_row)
     else {
-        return vec![break_frame_for_row(table, row, h, down, row_offsets, scale)];
+        return vec![break_frame_for_row(table, document, row, h, down, row_offsets, scale)];
     };
     let repeat_top = table
         .break_options
@@ -933,7 +953,7 @@ pub(crate) fn block_cell_inserts(
                 continue;
             }
             let (origin, row_top) =
-                break_frame_for_row(table, row_index, h, flow, &row_offsets, anno_scale);
+                break_frame_for_row(table, document, row_index, h, flow, &row_offsets, anno_scale);
             let row_bottom = row_top
                 + row_offsets
                     .get(row_end + 1)
@@ -1679,6 +1699,7 @@ pub fn tessellate_table(
                 .or(row_style);
             let frames = break_frames_for_row(
                 tab,
+                document,
                 ri,
                 h,
                 v_flow,
@@ -4144,6 +4165,7 @@ pub fn table_indicator(
     for ri in 0..tab.rows.len() {
         for (origin, top) in break_frames_for_row(
             tab,
+            document,
             ri,
             h,
             flow,

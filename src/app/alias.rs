@@ -205,7 +205,7 @@ fn default_map() -> FxHashMap<String, String> {
 }
 
 /// Sorted factory-default rows for the ALIASEDIT reset action.
-pub(super) fn default_alias_rows() -> Vec<(String, String)> {
+pub(crate) fn default_alias_rows() -> Vec<(String, String)> {
     let mut rows: Vec<(String, String)> = default_map().into_iter().collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0));
     rows

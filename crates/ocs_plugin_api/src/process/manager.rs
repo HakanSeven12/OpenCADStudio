@@ -473,9 +473,11 @@ impl PluginManager {
     pub fn drain_io(&self) -> Vec<crate::process::PluginIoLine> {
         let mut out = Vec::new();
         for p in &self.plugins {
-            if !p.process.is_alive() {
-                continue;
-            }
+            // NO is_alive gate: the "dead" flag can be set by a mere call
+            // timeout while the OS runner is alive and its stderr holds the
+            // ONLY trace of the hang (e.g. a plugin's dispatch echo never
+            // printed anywhere else). A dead process's pipes drain EOF
+            // instantly, so the un-gated drain costs nothing.
             out.extend(p.process.drain_io());
         }
         out

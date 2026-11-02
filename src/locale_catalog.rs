@@ -3,6 +3,13 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "BACTIONBAR  [Show/Hide/Reset]:" => Some(("block-action-bars", "prompt-mode")),
+        "BACTIONBAR  Select a parameter, enter its name or [All] <Selected>:" => Some(("block-action-bars", "prompt-selected")),
+        "BACTIONBAR  Select a parameter, enter its name or [All] <All>:" => Some(("block-action-bars", "prompt-all")),
+        "Choose Show, Hide or Reset." => Some(("block-action-bars", "choose-mode")),
+        "Enter a unique parameter name, pick its endpoint, or choose All." => Some(("block-action-bars", "unique-parameter")),
+        "Enter a parameter name or choose All." => Some(("block-action-bars", "enter-parameter")),
+        "Pick a parameter endpoint or choose All." => Some(("block-action-bars", "pick-endpoint")),
         "BACTIONBAR requires an active Block Editor session." => Some(("block-action-bars", "requires-session")),
         "Set BACTIONBARMODE to 1 to display action bars." => Some(("block-action-bars", "enable-display")),
         "The parameter list changed; restart BACTIONBAR." => Some(("block-action-bars", "parameters-changed")),

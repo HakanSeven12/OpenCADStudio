@@ -62,13 +62,13 @@ impl CadCommand for ActionBarCommand {
         }
     }
     fn prompt(&self) -> String {
-        crate::t!(if self.mode.is_none() {
-            "BACTIONBAR  [Show/Hide/Reset]:"
+        if self.mode.is_none() {
+            crate::t!("BACTIONBAR  [Show/Hide/Reset]:")
         } else if self.selected.is_some() {
-            "BACTIONBAR  Select a parameter, enter its name or [All] <Selected>:"
+            crate::t!("BACTIONBAR  Select a parameter, enter its name or [All] <Selected>:")
         } else {
-            "BACTIONBAR  Select a parameter, enter its name or [All] <All>:"
-        })
+            crate::t!("BACTIONBAR  Select a parameter, enter its name or [All] <All>:")
+        }
         .into_owned()
     }
     fn options(&self) -> Vec<CmdOption> {

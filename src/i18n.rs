@@ -523,6 +523,55 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
+    fn action_bar_prompts_preserve_command_keywords_in_every_locale() {
+        let prompts = [
+            ("BACTIONBAR  [Show/Hide/Reset]:", "prompt-mode"),
+            (
+                "BACTIONBAR  Select a parameter, enter its name or [All] <Selected>:",
+                "prompt-selected",
+            ),
+            (
+                "BACTIONBAR  Select a parameter, enter its name or [All] <All>:",
+                "prompt-all",
+            ),
+        ];
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("Fluent resources must parse");
+            for (source, attribute) in prompts {
+                assert_eq!(catalog_ids(source), Some(("block-action-bars", attribute)));
+                let translated = loader.get_attr("block-action-bars", attribute);
+                assert!(translated.starts_with("BACTIONBAR  "), "{language:?}");
+                if attribute == "prompt-mode" {
+                    assert!(translated.contains("[Show/Hide/Reset]"), "{language:?}");
+                } else {
+                    assert!(translated.contains("[All]"), "{language:?}");
+                    if attribute == "prompt-all" {
+                        assert!(translated.contains("<All>"), "{language:?}");
+                    }
+                    if language != Language::EnUs {
+                        assert_ne!(translated, source, "{language:?}/{attribute}");
+                    }
+                }
+            }
+            for (attribute, keywords) in [
+                ("choose-mode", &["Show", "Hide", "Reset"][..]),
+                ("unique-parameter", &["All"][..]),
+                ("enter-parameter", &["All"][..]),
+                ("pick-endpoint", &["All"][..]),
+            ] {
+                let translated = loader.get_attr("block-action-bars", attribute);
+                for keyword in keywords {
+                    assert!(translated.contains(keyword), "{language:?}/{attribute}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn block_grip_messages_render_in_every_locale_without_translating_authored_data() {
         let expected = BTreeSet::from(
             [

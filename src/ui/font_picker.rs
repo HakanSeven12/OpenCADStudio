@@ -391,16 +391,22 @@ fn secondary_text(theme: &Theme, active: bool) -> Color {
     )
 }
 
-/// The kind tag: SHX grey, TT green, a missing font's "!" orange. The
+/// The kind tag: SHX grey, TT green, a missing font's warning orange. The
 /// theme's colour tints the tag and, made readable, writes its letters.
 fn kind_badge<'a>(choice: &FontChoice, missing: bool) -> Element<'a, Message> {
     let (badge, accent): (&str, fn(&Theme) -> Color) = match choice {
-        _ if missing => ("!", |theme| theme.palette().warning.base.color),
+        _ if missing => ("", |theme| theme.palette().warning.base.color),
         FontChoice::StyleDefault => return Space::new().width(26).into(),
         FontChoice::Stroke(_) => ("SHX", |theme| theme.palette().background.base.text),
         FontChoice::TrueType(_) => ("TT", |theme| theme.palette().success.base.color),
     };
-    container(text(badge).size(8).font(BOLD))
+    // The warning is the SVG mark, so it draws where the font has no glyph.
+    let content: Element<'a, Message> = if missing {
+        crate::ui::icons::themed_warning(crate::ui::icons::WARNING, 10.0)
+    } else {
+        text(badge).size(8).font(BOLD).into()
+    };
+    container(content)
         .center_x(26)
         .padding([1, 0])
         .style(move |theme: &Theme| {

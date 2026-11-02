@@ -98,12 +98,13 @@ fn the_font_list_opens_right_under_the_font_field() {
     }
 }
 
-/// B2: SHX, TT and "!" tags, the stand-in in orange, in both themes.
+/// B2: SHX and TT tags, a warning tag and the stand-in in orange, in both
+/// themes.
 #[test]
 fn the_font_list_is_coloured_in_both_themes() {
     let app = font_list_open();
     let mut ui = window(&app, 1280.0);
-    for text in ["SHX", "TT", "!", "missing · drawn with Standard"] {
+    for text in ["SHX", "TT", "missing · drawn with Standard"] {
         shown(&mut ui, text);
     }
     drop(ui);
@@ -148,7 +149,6 @@ fn the_origin_marks_sit_under_their_labels_in_both_themes() {
         assert!((mark.x - label.x).abs() < 1.0, "{label:?} {mark:?}");
     }
     shown(&mut ui, "By style");
-    shown(&mut ui, "!");
     drop(ui);
     snapshots(&app, "mtext-origin-marks", 1280.0);
 }

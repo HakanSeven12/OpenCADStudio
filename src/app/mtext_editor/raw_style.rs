@@ -399,7 +399,13 @@ impl MTextEditorState {
         if style <= 0. {
             return None;
         }
-        let height = self.height.trim().replace(',', ".").parse::<f64>().ok();
+        // The exact opened height until the field is edited: its text is
+        // rounded, and 0.09375 shown as 0.0938 is still the style's height.
+        let height = if !self.height_dirty && self.height_opened > 0. {
+            Some(self.height_opened)
+        } else {
+            self.height.trim().replace(',', ".").parse::<f64>().ok()
+        };
         if height.is_none_or(|h| (h - style).abs() > 1e-9 * style.max(1.)) {
             return Some(ValueOrigin::Custom);
         }
@@ -591,7 +597,8 @@ impl crate::app::OpenCADStudio {
                 // A height that followed the old style follows the new one.
                 if ed.height_origin() == Some(ValueOrigin::Style) && style.height > 0. {
                     ed.height = number_text(style.height);
-                    ed.height_dirty = true;
+                    ed.height_opened = style.height;
+                    ed.height_dirty = false;
                 }
                 let raw = ed.content.text();
                 ed.style = name;
@@ -635,7 +642,8 @@ impl crate::app::OpenCADStudio {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.record_undo();
                     ed.height = number_text(style.height);
-                    ed.height_dirty = true;
+                    ed.height_opened = style.height;
+                    ed.height_dirty = false;
                 }
                 self.rebuild_mtext_preview();
             }

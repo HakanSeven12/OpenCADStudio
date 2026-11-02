@@ -276,6 +276,74 @@ fn trim_target_bounds(curve: &Curve) -> Option<[f64; 4]> {
     ])
 }
 
+/// A static interval broad phase for the geometry of one TRIM operation.
+/// Sort by minimum X once; the prefix maximum X permits binary-searching
+/// *past* boundaries that finish before the target, not just those that start
+/// after it. Unlike a per-segment full scan, typical queries cost O(log N + K)
+/// when thousands of low-poly segments are spread across the drawing.
+///
+/// Entries without a safe finite box (splines, rays, infinite lines) are
+/// unconditionally retained to preserve exact kernel semantics.
+struct TrimAabbIndex {
+    entries: Vec<(usize, [f64; 4])>,
+    prefix_max_x: Vec<f64>,
+    always: Vec<usize>,
+}
+
+impl TrimAabbIndex {
+    fn new(bounds: impl IntoIterator<Item = Option<[f64; 4]>>) -> Self {
+        let mut entries = Vec::new();
+        let mut always = Vec::new();
+        for (index, bounds) in bounds.into_iter().enumerate() {
+            match bounds.filter(|box_| box_.iter().all(|value| value.is_finite())) {
+                Some(bounds) => entries.push((index, bounds)),
+                None => always.push(index),
+            }
+        }
+        entries.sort_unstable_by(|a, b| a.1[0].total_cmp(&b.1[0]));
+        let mut prefix_max_x = Vec::with_capacity(entries.len());
+        let mut max_x = f64::NEG_INFINITY;
+        for (_, bounds) in &entries {
+            max_x = max_x.max(bounds[2]);
+            prefix_max_x.push(max_x);
+        }
+        Self { entries, prefix_max_x, always }
+    }
+
+    fn overlapping(&self, target: [f64; 4]) -> Vec<usize> {
+        let end = self.entries.partition_point(|(_, aabb)| aabb[0] <= target[2]);
+        let start = self.prefix_max_x[..end].partition_point(|x| *x < target[0]);
+        let mut indices = self.always.clone();
+        for &(index, aabb) in &self.entries[start..end] {
+            if aabb[2] >= target[0] && aabb[1] <= target[3] && aabb[3] >= target[1] {
+                indices.push(index);
+            }
+        }
+        // The kernel/contact logic previously saw entities in document order.
+        // Maintain that ordering for coincident cuts and endpoint priority.
+        indices.sort_unstable();
+        indices
+    }
+}
+
+fn trim_geo_aabb(geo: &Geo) -> Option<[f64; 4]> {
+    Some(match geo {
+        Geo::Line { p1, p2, .. } => [
+            p1[0].min(p2[0]), p1[1].min(p2[1]),
+            p1[0].max(p2[0]), p1[1].max(p2[1]),
+        ],
+        Geo::Arc { cx, cy, r, .. } | Geo::Circle { cx, cy, r, .. } => {
+            [cx - r.abs(), cy - r.abs(), cx + r.abs(), cy + r.abs()]
+        }
+        Geo::Ellipse { cx, cy, a, b, .. } => {
+            // Deliberately overestimate rotated ellipse bounds.
+            let r = a.abs() + b.abs();
+            [cx - r, cy - r, cx + r, cy + r]
+        }
+        Geo::Spline { .. } | Geo::Ray { .. } | Geo::InfLine { .. } => return None,
+    })
+}
+
 pub fn is_trim_boundary_entity(entity: &EntityType) -> bool {
     matches!(
         entity,

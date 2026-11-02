@@ -37,6 +37,8 @@ for (const locale of vm.runInNewContext('SITE_LOCALES', context)) {
   assert.equal(context.preferredLocale(locale), locale);
 }
 assert.equal(visit('tr-TR', '/', 'en-US').redirected, undefined);
+assert.equal(visit('tr-TR', '/download/').redirected, '/tr-TR/download/?ref=test#formats');
+assert.equal(visit('en-GB', '/download/').redirected, undefined);
 assert.equal(visit('sv-SE', '/', 'tr-TR').redirected, '/tr-TR/?ref=test#formats');
 assert.equal(visit('tr-TR', '/', '../../unsafe').redirected, '/tr-TR/?ref=test#formats');
 assert.equal(visit('tr-TR', '/en-US/', undefined, true).redirected, undefined);

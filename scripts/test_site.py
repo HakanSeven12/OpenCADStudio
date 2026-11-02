@@ -75,6 +75,25 @@ with tempfile.TemporaryDirectory() as directory:
         assert manifest['lang'] == locale and manifest['start_url'] == expected_path
         for icon in manifest['icons']:
             assert (output / icon['src'].lstrip('/')).exists()
+        # The download page: its own canonical and language links, and every
+        # local link it uses exists.
+        download = (output / locale / 'download/index.html').read_text()
+        assert '{{' not in download, locale
+        page = Page(download)
+        links = [attrs for tag, attrs in page.tags if tag == 'link']
+        assert next(link['href'] for link in links if link.get('rel') == 'canonical') == f'https://www.opencadstudio.com{expected_path}download/'
+        assert {link['href'] for link in links if link.get('rel') == 'alternate'} == {
+            f'https://www.opencadstudio.com{"/" if lang == "en-US" else f"/{lang}/"}download/' for lang in supported
+        } | {'https://www.opencadstudio.com/download/'}
+        choices = [attrs for tag, attrs in page.tags if tag == 'a' and 'hreflang' in attrs]
+        assert {choice['href'] for choice in choices} == {
+            f'{"/" if lang == "en-US" else f"/{lang}/"}download/' for lang in supported
+        }
+        assert sum(1 for tag, attrs in page.tags if 'data-suffix' in attrs) == 9
+        for tag, attrs in page.tags:
+            target = attrs.get('href', '') or attrs.get('src', '')
+            if target.startswith('/'):
+                assert (output / urlsplit(target).path.lstrip('/')).exists(), (locale, target)
         if locale != 'en-US':
             for key, value in messages.items():
                 if len(catalogs['en-US'][key]) > 40:
@@ -86,7 +105,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert (output / icon.lstrip('/')).read_bytes() == (ROOT / 'site/favicon.svg').read_bytes()
     sitemap = ET.parse(output / 'sitemap.xml')
     locations = {url[0].text for url in sitemap.getroot()}
-    assert len(locations) == len(supported)
+    assert len(locations) == 2 * len(supported)
+    assert 'https://www.opencadstudio.com/download/' in locations
+    assert (output / 'download/index.html').read_bytes() == (output / 'en-US/download/index.html').read_bytes()
     assert 'https://www.opencadstudio.com/' in locations
     assert 'https://www.opencadstudio.com/en-US/' not in locations
     assert (output / 'index.html').read_bytes() == (output / 'en-US/index.html').read_bytes()

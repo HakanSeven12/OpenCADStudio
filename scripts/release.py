@@ -159,8 +159,10 @@ def verify_native(tag):
     release = gh("release", "view", tag, "--json", "assets,body,isDraft")
     expected = {
         f"OpenCADStudio-{tag}-{suffix}"
-        for suffix in ("linux-x86_64.AppImage", "linux-x86_64.snap",
-                       "windows-x86_64-portable.exe", "windows-x86_64-installer.msi", "macos-arm64.dmg")
+        for suffix in ("linux-x86_64.AppImage", "linux-aarch64.AppImage", "linux-x86_64.snap",
+                       "windows-x86_64-portable.exe", "windows-x86_64-installer.msi",
+                       "windows-arm64-portable.exe", "windows-arm64-installer.msi",
+                       "macos-arm64.dmg", "macos-x86_64.dmg")
     }
     uploaded = {asset["name"] for asset in release["assets"] if asset["size"] > 0 and asset["state"] == "uploaded"}
     if release["isDraft"] or not release["body"].strip() or not expected <= uploaded:

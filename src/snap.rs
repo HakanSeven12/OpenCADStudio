@@ -3186,6 +3186,42 @@ pub(crate) fn snap_tier(t: SnapType) -> u8 {
     }
 }
 
+/// Maximum distance advantage (screen pixels) a competing point may have
+/// while the user's currently acquired, still-valid point remains selected.
+/// This is *not* an additional capture radius and introduces no dwell delay.
+const SNAP_HOLD_MARGIN_PX: f32 = 5.0;
+
+/// The old point must be rediscovered from this frame's actual geometry.
+/// In particular, a Nearest/Extension (cursor-dependent) point cannot be held.
+fn same_discrete_snap(old: SnapResult, world: DVec3, kind: SnapType) -> bool {
+    snap_tier(kind) == 0
+        && !kind.is_3d()
+        && old.snap_type == kind
+        && (old.world - world).length_squared() <= 1e-12
+}
+
+fn keep_stable_snap(
+    best: Option<SnapResult>,
+    retained: Option<(SnapResult, f32)>,
+    cursor: Point,
+) -> Option<SnapResult> {
+    let (Some(challenger), Some((incumbent, distance2))) = (best, retained) else {
+        return best;
+    };
+    // Higher-priority modes (e.g. any discrete point over Nearest) always
+    // win immediately. A prior point must remain within the normal aperture;
+    // it is never artificially extended by the hold margin.
+    if snap_tier(challenger.snap_type) != snap_tier(incumbent.snap_type) {
+        return Some(challenger);
+    }
+    let challenger_d2 = dist2(challenger.screen, cursor);
+    if distance2.sqrt() <= challenger_d2.sqrt() + SNAP_HOLD_MARGIN_PX {
+        Some(incumbent)
+    } else {
+        Some(challenger)
+    }
+}
+
 /// Merge paper and viewport snaps using the engine's ordering.
 /// Both screen positions must use canvas pixels.
 pub fn merge_snap(
@@ -4493,7 +4529,35 @@ mod ext_tests {
     }
 
     #[test]
-    fn tracking_active_covers_otrack_and_extension() {
+    fn snap_hysteresis_retains_only_verified_discrete_features() {
+        let make = |x: f64, kind| SnapResult {
+            world: DVec3::new(x, 0.0, 0.0),
+            screen: Point::new(x as f32, 0.0),
+            snap_type: kind, tangent_obj: None,
+            extension_base: None, extension_base2: None,
+            extension_origin: None, extension_dir: None,
+            viewport: None, source: None, secondary_source: None,
+            model_point: None,
+        };
+        let previous = make(8.0, SnapType::Endpoint);
+        assert!(same_discrete_snap(previous, previous.world, SnapType::Endpoint));
+        assert!(!same_discrete_snap(previous, previous.world + DVec3::X, SnapType::Endpoint));
+        assert!(!same_discrete_snap(previous, previous.world, SnapType::Midpoint));
+        assert!(!same_discrete_snap(make(8.0, SnapType::Nearest), previous.world, SnapType::Nearest));
+
+        let challenger = make(10.0, SnapType::Midpoint);
+        let held = keep_stable_snap(Some(challenger), Some((previous, 8.0 * 8.0)), Point::ORIGIN);
+        assert_eq!(held.unwrap().snap_type, SnapType::Endpoint);
+        let released = keep_stable_snap(Some(challenger), Some((previous, 20.0 * 20.0)), Point::ORIGIN);
+        assert_eq!(released.unwrap().snap_type, SnapType::Midpoint);
+        assert_eq!(
+            keep_stable_snap(Some(challenger), None, Point::ORIGIN).unwrap().snap_type,
+            SnapType::Midpoint,
+        );
+    }
+
+    #[test]
+        fn tracking_active_covers_otrack_and_extension() {
         let mut s = Snapper::default();
         // OTRACK off, Extension not enabled → no acquisition.
         s.snap_enabled = true;

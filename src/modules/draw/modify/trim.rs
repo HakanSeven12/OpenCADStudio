@@ -3925,6 +3925,9 @@ pub struct TrimCommand {
     block_boundaries: Vec<(Handle, Vec<EntityType>)>,
     entity_index: ModifyEntityIndex,
     geos: Vec<Geo>,
+    /// Bounded cache of cursor-independent cutting points for hover previews.
+    hover_cut_cache: rustc_hash::FxHashMap<Handle, Vec<f64>>,
+    hover_cut_order: std::collections::VecDeque<Handle>,
     /// Replacements sent to the host, applied once their handles are known.
     pending: Vec<(Handle, Vec<EntityType>)>,
     mode: TrimMode,
@@ -3993,6 +3996,8 @@ impl TrimCommand {
             block_boundaries,
             entity_index: ModifyEntityIndex::empty(),
             geos: Vec::new(),
+            hover_cut_cache: rustc_hash::FxHashMap::default(),
+            hover_cut_order: std::collections::VecDeque::new(),
             pending: Vec::new(),
             mode: starting_mode(&initial_edges),
             quick: quick_mode(),
@@ -4010,6 +4015,8 @@ impl TrimCommand {
     /// Boundary geometry from the edge selection (or everything when none),
     /// with the Edge option's implied extrapolation applied on top.
     fn rebuild_geos(&mut self) {
+        self.hover_cut_cache.clear();
+        self.hover_cut_order.clear();
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
         let mut geos = if self.edge_set.is_empty() {
             build_geos(&self.all_entities)
@@ -4069,6 +4076,64 @@ impl TrimCommand {
             })
             .cloned()
             .collect()
+    }
+
+    /// The mouse chooses a span, but the analytic cutting points remain
+    /// constant until an edit changes the geometry. Only cache 32 handles.
+    fn cached_hover_cut_params(&mut self, handle: Handle) -> Option<Vec<f64>> {
+        let entity = self.entity_index.get(&self.all_entities, handle)?;
+        if !matches!(
+            entity,
+            EntityType::Line(_) | EntityType::Arc(_) | EntityType::Circle(_)
+                | EntityType::Ray(_) | EntityType::XLine(_) | EntityType::Ellipse(_)
+                | EntityType::Spline(_)
+        ) {
+            return None;
+        }
+        if let Some(cuts) = self.hover_cut_cache.get(&handle) {
+            return Some(cuts.clone());
+        }
+        let nearby = self.nearby_geos(handle);
+        let entity = self.entity_index.get(&self.all_entities, handle)?;
+        let cuts = match entity {
+            EntityType::Line(l) => line_seg_ts(l.start.x, l.start.y, l.end.x, l.end.y, handle, &nearby),
+            EntityType::Arc(a) => arc_seg_ts(
+                a.center.x, a.center.y, a.radius, a.start_angle, a.end_angle, handle, &nearby,
+            ),
+            EntityType::Circle(c) => arc_seg_ts(
+                c.center.x, c.center.y, c.radius, 0.0, TAU, handle, &nearby,
+            ),
+            EntityType::Ray(r) => cut_params(&ray_curve(r), handle, &nearby),
+            EntityType::XLine(x) => cut_params(&xline_curve(x), handle, &nearby),
+            EntityType::Ellipse(e) => {
+                let a = e.major_axis.x.hypot(e.major_axis.y);
+                let b = a * e.minor_axis_ratio;
+                if a < 1e-9 || b < 1e-9 {
+                    Vec::new()
+                } else {
+                    let (nx, ny) = (e.major_axis.x / a, e.major_axis.y / a);
+                    let t0 = e.start_parameter;
+                    let mut t1 = e.end_parameter;
+                    if t1 <= t0 {
+                        t1 += TAU;
+                    }
+                    ellipse_seg_ts(
+                        e.center.x, e.center.y, a, b, nx, ny, t0, t1, handle, &nearby,
+                    )
+                }
+            }
+            EntityType::Spline(s) => spline_seg_ts(s, handle, &nearby),
+            _ => return None,
+        };
+        const CAP: usize = 32;
+        if self.hover_cut_order.len() >= CAP {
+            if let Some(oldest) = self.hover_cut_order.pop_front() {
+                self.hover_cut_cache.remove(&oldest);
+            }
+        }
+        self.hover_cut_order.push_back(handle);
+        self.hover_cut_cache.insert(handle, cuts.clone());
+        Some(cuts)
     }
 
     fn hatch_trim_at(&self, handle: Handle, point: DVec3) -> Option<hatch_region::HatchTrim> {
@@ -4311,6 +4376,10 @@ impl CadCommand for TrimCommand {
     }
 
     fn on_entities_replaced(&mut self, replacements: &[(Handle, Vec<codec::Handle>)]) {
+        if !replacements.is_empty() {
+            self.hover_cut_cache.clear();
+            self.hover_cut_order.clear();
+        }
         let mut rebuild = false;
         for (old, new_handles) in replacements {
             let snapshot = Snapshot {
@@ -4433,7 +4502,17 @@ impl CadCommand for TrimCommand {
             return vec![];
         }
 
-        let nearby_geos = self.nearby_geos(handle);
+        let hover_cuts = if self.implied_edges {
+            None
+        } else {
+            self.cached_hover_cut_params(handle)
+        };
+        // A cache hit needs neither a spatial query nor another intersection.
+        let nearby_geos = if hover_cuts.is_some() {
+            Vec::new()
+        } else {
+            self.nearby_geos(handle)
+        };
         let geos = nearby_geos.as_slice();
         let entity = self.entity_index.get(&self.all_entities, handle);
 
@@ -4443,7 +4522,9 @@ impl CadCommand for TrimCommand {
                 let ay = l.start.y;
                 let bx = l.end.x;
                 let by = l.end.y;
-                let ts = line_seg_ts(ax, ay, bx, by, handle, geos);
+                let ts = hover_cuts
+                    .clone()
+                    .unwrap_or_else(|| line_seg_ts(ax, ay, bx, by, handle, geos));
                 if ts.is_empty() {
                     if self.quick && (bx - ax).hypot(by - ay) > 1e-9 {
                         return vec![WireModel::solid(
@@ -4485,7 +4566,9 @@ impl CadCommand for TrimCommand {
                 let cy = a.center.y;
                 let a0 = a.start_angle;
                 let a1 = a.end_angle;
-                let ts = arc_seg_ts(cx, cy, a.radius, a0, a1, handle, geos);
+                let ts = hover_cuts
+                    .clone()
+                    .unwrap_or_else(|| arc_seg_ts(cx, cy, a.radius, a0, a1, handle, geos));
                 if ts.is_empty() {
                     return vec![];
                 }
@@ -4509,7 +4592,9 @@ impl CadCommand for TrimCommand {
             Some(EntityType::Circle(c)) => {
                 let cx = c.center.x;
                 let cy = c.center.y;
-                let ts = arc_seg_ts(cx, cy, c.radius, 0.0, TAU, handle, geos);
+                let ts = hover_cuts
+                    .clone()
+                    .unwrap_or_else(|| arc_seg_ts(cx, cy, c.radius, 0.0, TAU, handle, geos));
                 if ts.len() < 2 {
                     return vec![];
                 }
@@ -4537,7 +4622,9 @@ impl CadCommand for TrimCommand {
                 let bx = r.base_point.x;
                 let by = r.base_point.y;
                 let curve = ray_curve(r);
-                let ts = cut_params(&curve, handle, geos);
+                let ts = hover_cuts
+                    .clone()
+                    .unwrap_or_else(|| cut_params(&curve, handle, geos));
                 if ts.is_empty() {
                     return vec![];
                 }
@@ -4568,7 +4655,9 @@ impl CadCommand for TrimCommand {
                 let bx = x.base_point.x;
                 let by = x.base_point.y;
                 let curve = xline_curve(x);
-                let ts = cut_params(&curve, handle, geos);
+                let ts = hover_cuts
+                    .clone()
+                    .unwrap_or_else(|| cut_params(&curve, handle, geos));
                 if ts.is_empty() {
                     return vec![];
                 }
@@ -4613,7 +4702,9 @@ impl CadCommand for TrimCommand {
                 if t1 <= t0 {
                     t1 += TAU;
                 }
-                let ts = ellipse_seg_ts(e.center.x, e.center.y, a, b, nx, ny, t0, t1, handle, geos);
+                let ts = hover_cuts.clone().unwrap_or_else(|| {
+                    ellipse_seg_ts(e.center.x, e.center.y, a, b, nx, ny, t0, t1, handle, geos)
+                });
                 if ts.is_empty() {
                     return vec![];
                 }
@@ -4640,7 +4731,9 @@ impl CadCommand for TrimCommand {
                 out
             }
             Some(EntityType::Spline(s)) => {
-                let ts = spline_seg_ts(s, handle, geos);
+                let ts = hover_cuts
+                    .clone()
+                    .unwrap_or_else(|| spline_seg_ts(s, handle, geos));
                 if ts.is_empty() {
                     return vec![];
                 }
@@ -5523,6 +5616,25 @@ mod tests {
             points.into_iter().map(|p| Vector2::new(p[0], p[1])).collect(), true,
         )));
         hatch.paths.push(hole);
+    }
+
+    #[test]
+    fn hover_cut_cache_reuses_cuts_and_clears_on_boundary_rebuild() {
+        let all = vec![
+            xline_at(0.0, 5.0, 10.0, 5.0, 1),
+            xline_at(5.0, -5.0, 5.0, 15.0, 2),
+        ];
+        let mut cmd = TrimCommand::new(all);
+        let target = Handle::new(1);
+        let first = cmd.cached_hover_cut_params(target).unwrap();
+        assert_eq!(first.len(), 1);
+        assert!(cmd.hover_cut_cache.contains_key(&target));
+        assert_eq!(first, cmd.cached_hover_cut_params(target).unwrap());
+
+        cmd.all_entities[1] = xline_at(50.0, -5.0, 50.0, 15.0, 2);
+        cmd.rebuild_geos();
+        assert!(cmd.hover_cut_cache.is_empty());
+        assert!(cmd.cached_hover_cut_params(target).unwrap().is_empty());
     }
 
     #[test]

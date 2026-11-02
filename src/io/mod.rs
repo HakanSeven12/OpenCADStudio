@@ -1885,8 +1885,8 @@ impl MTextTargetLoss {
     pub fn lost_in(self, version: codec::DxfVersion, is_dxf: bool) -> bool {
         use codec::DxfVersion::*;
         match self {
-            Self::Columns if is_dxf => version < AC1021,
-            Self::Columns => version < AC1032,
+            // R2007 to R2013 DWG keeps them in the text's xdata.
+            Self::Columns => version < AC1021,
             _ if is_dxf => false,
             Self::BoxHeight => version < AC1021,
             Self::Background => version < AC1018,

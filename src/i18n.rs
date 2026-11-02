@@ -627,6 +627,23 @@ mod tests {
         }
     }
 
+    /// The text style windows read in Hungarian: "Styles in use", and the
+    /// MTEXT editor's oblique field named as the style manager names it
+    /// (#2413).
+    #[test]
+    fn the_text_style_labels_are_hungarian() {
+        let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        load_language(&loader, Language::HuHu).expect("Fluent resources must parse");
+        assert_eq!(
+            loader.get_attr("table-cmd", "styles-in-use"),
+            "Használt stílusok"
+        );
+        assert_eq!(
+            loader.get_attr("mtext-object-origin", "oblique"),
+            loader.get_attr("style-manager", "oblique-angle")
+        );
+    }
+
     #[test]
     fn donation_text_is_translated_in_every_locale() {
         for language in Language::ALL

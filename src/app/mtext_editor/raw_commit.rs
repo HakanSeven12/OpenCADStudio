@@ -20,10 +20,10 @@ macro_rules! editor_history {
     }
 }
 editor_history! {
-    height: String, rotation: String, rotation_dirty: bool,
+    height: String, height_dirty: bool, rotation: String, rotation_dirty: bool,
     style: String, font: String, width: String, object_style: super::raw_style::ObjectStyle,
     object_color: Option<codec::types::Color>, color_aci: u16, oblique: String, char_space: String,
-    annotative: bool, attachment: AttachmentPoint, line_spacing: f32, rect_width: f64,
+    annotative: bool, attachment: AttachmentPoint, line_spacing: f64, rect_width: f64,
     line_spacing_style: codec::entities::LineSpacingStyle, line_spacing_draft: Option<String>,
     mask_draft: Option<super::entity_options::MaskDraft>,
     direction: Option<codec::entities::DrawingDirection>,
@@ -162,15 +162,14 @@ impl crate::app::OpenCADStudio {
         match value
             .trim()
             .replace(',', ".")
-            .parse::<f32>()
+            .parse::<f64>()
             .ok()
             .filter(|f| (0.25..=4.0).contains(f))
         {
             Some(factor) => {
                 ed.record_undo();
                 ed.line_spacing = factor;
-                ed.line_spacing_draft =
-                    (super::raw_span::number(f64::from(factor)) != value).then_some(value);
+                ed.line_spacing_draft = (super::raw_span::number(factor) != value).then_some(value);
             }
             None => ed.line_spacing_draft = Some(value),
         }
@@ -439,8 +438,10 @@ impl crate::app::OpenCADStudio {
                     .trim_end_matches('0')
                     .trim_end_matches('.')
                     .to_string();
+                ed.height_opened = original.height;
                 ed.original = Some(original);
             }
+            ed.height_dirty = false;
             ed.rotation_dirty = false;
             ed.object_color = None;
             ed.mask_draft = None;
@@ -505,6 +506,36 @@ mod tests {
         app.mtext_apply();
         assert!(!app.tabs[1].dirty);
         assert_eq!(mt_of(&app, h), &before);
+    }
+
+    #[test]
+    fn an_untouched_height_and_line_spacing_are_saved_exactly() {
+        let mut app = app();
+        let mut mt = MText::with_value("ab", codec::types::Vector3::new(0., 0., 0.));
+        mt.height = 2.123456789;
+        mt.line_spacing_factor = 1.1;
+        let h = app.tabs[1]
+            .scene
+            .document
+            .add_entity(EntityType::MText(Box::new(mt)))
+            .unwrap();
+        app.open_mtext_editor(DVec3::ZERO, Some(h), "ab", 2.123456789, None);
+        // The field shows the rounded height; the drawing keeps the exact one.
+        assert_eq!(app.mtext_editor.as_ref().unwrap().height, "2.1235");
+        let before = mt_of(&app, h).clone();
+        app.tabs[1].dirty = false;
+        app.mtext_apply();
+        assert!(!app.tabs[1].dirty);
+        assert_eq!(mt_of(&app, h), &before);
+        // A typed height is saved as typed, and is then the exact one.
+        let _ = app.update(Message::MTextHeight("3".into()));
+        app.mtext_apply();
+        assert_eq!(mt_of(&app, h).height, 3.0);
+        assert_eq!(mt_of(&app, h).line_spacing_factor, 1.1);
+        // Undo of the typing goes back to the exact opened height.
+        let _ = app.update(Message::MTextHeight("4".into()));
+        app.mtext_undo();
+        assert_eq!(app.mtext_editor.as_ref().unwrap().height_value(), 3.0);
     }
 
     #[test]

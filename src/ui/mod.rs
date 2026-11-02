@@ -6,6 +6,7 @@ pub mod color_select;
 pub mod command_line;
 pub mod dock;
 pub mod drop_down_fit;
+pub mod font_picker;
 pub mod hover_zone;
 pub mod ime_zone;
 pub mod icons;

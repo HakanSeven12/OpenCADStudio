@@ -189,6 +189,8 @@ fn apply_text_defaults(doc: &Document, entity: &mut EntityType) {
     if resolved.annotative {
         resolved.height = 0.0;
     }
+    // Backward and upside down are not copied: the drawn state is the style
+    // flag XOR the entity's own (group 71), so a copy would cancel the style.
     match entity {
         EntityType::Text(text) => {
             if resolved.height > 1.0e-9 {
@@ -216,10 +218,6 @@ fn apply_text_defaults(doc: &Document, entity: &mut EntityType) {
             if attribute.oblique_angle.abs() <= 1.0e-9 {
                 attribute.oblique_angle = resolved.oblique_angle;
             }
-            if attribute.text_generation_flags == 0 {
-                attribute.text_generation_flags = (if resolved.flags.backward { 2 } else { 0 })
-                    | (if resolved.flags.upside_down { 4 } else { 0 });
-            }
         }
         EntityType::AttributeDefinition(attribute) => {
             if resolved.height > 1.0e-9 {
@@ -230,10 +228,6 @@ fn apply_text_defaults(doc: &Document, entity: &mut EntityType) {
             }
             if attribute.oblique_angle.abs() <= 1.0e-9 {
                 attribute.oblique_angle = resolved.oblique_angle;
-            }
-            if attribute.text_generation_flags == 0 {
-                attribute.text_generation_flags = (if resolved.flags.backward { 2 } else { 0 })
-                    | (if resolved.flags.upside_down { 4 } else { 0 });
             }
         }
         _ => {}

@@ -309,7 +309,7 @@ impl OpenCADStudio {
         };
         let kind = draft.kind;
         match kind {
-            StyleKind::Text => self.stage_textstyle_bufs(),
+            StyleKind::Text => self.flush_textstyle_draft(),
             StyleKind::Dim => self.apply_dimstyle_bufs(self.active_tab),
             _ => return,
         }
@@ -337,7 +337,7 @@ impl OpenCADStudio {
             match kind {
                 StyleKind::Text => {
                     self.textstyle_selected = first.clone();
-                    self.load_textstyle_bufs(self.active_tab);
+                    self.load_textstyle_draft(self.active_tab);
                 }
                 StyleKind::Dim => {
                     self.dimstyle_selected = first.clone();

@@ -78,19 +78,6 @@ pub(super) fn text_inline_overlay(
     position_canvas_overlay(anchor, panel.into())
 }
 
-// Stroke-font families bundled with the renderer; see scene/lff.rs.
-const MTEXT_FONTS: [&str; 10] = [
-    "[Style default]",
-    "Standard",
-    "ISO",
-    "Simplex",
-    "RomanS",
-    "RomanD",
-    "ItalicC",
-    "ScriptS",
-    "GothGBT",
-    "RomanC",
-];
 /// (label, ACI). 256 = ByLayer.
 /// Canvas program that renders the tessellated MText strokes inside the
 /// editor's own preview area (never on the drawing). Strokes lie in the
@@ -545,6 +532,21 @@ pub(super) fn mtext_editor_overlay<'a>(
     )
 }
 
+/// The right-click menu of a first-row field with a value of its own. One
+/// `mouse_area` row: a button inside a `ContextMenu` overlay loses its press
+/// state on every rebuild and never publishes (see `xref_manager::menu_row`).
+fn reset_menu(field: &'static str, value: &str) -> Element<'static, Message> {
+    let row = iced::widget::mouse_area(
+        container(text(crate::tf!("Reset to style ({value})")).size(12)).padding([5, 12]),
+    )
+    .on_press(Message::MTextResetToStyle(field))
+    .interaction(iced::mouse::Interaction::Pointer);
+    container(row)
+        .style(container::bordered_box)
+        .padding(2)
+        .into()
+}
+
 fn mtext_editor_content<'a>(
     ed: &'a super::super::mtext_editor::MTextEditorState,
     styles: &[String],
@@ -574,30 +576,60 @@ fn mtext_editor_content<'a>(
     };
 
     // ── Row 1: the object's own values, each labelled ──────────────────────
-    // A label above its control; font and width also say where their value
-    // comes from (the style, the text's own, or the style with overrides).
+    // A label above its control; font, height, width and oblique also say,
+    // on a line of their own under the label, where their value comes from:
+    // the style (green), the text's own (red), or the style with overrides
+    // (orange).
     let labelled = |name: std::borrow::Cow<'static, str>,
                     origin: Option<super::super::mtext_editor::ValueOrigin>,
-                    control: Element<'static, Message>|
-     -> Element<'static, Message> {
+                    control: Element<'a, Message>|
+     -> Element<'a, Message> {
         use super::super::mtext_editor::ValueOrigin;
-        let mut caption = row![text(name).size(11)].spacing(4);
-        if let Some(origin) = origin {
-            let origin = match origin {
-                ValueOrigin::Style => crate::tr!("mtext-object-origin", "style"),
-                ValueOrigin::Custom => crate::tr!("mtext-object-origin", "custom"),
-                ValueOrigin::Mixed => crate::tr!("mtext-object-origin", "mixed"),
-            };
-            caption = caption.push(text(format!("· {origin}")).size(11).style(|theme: &Theme| {
-                text::Style {
-                    color: Some(theme.palette().background.strong.color),
-                }
-            }));
-        }
-        // Every control sits in a band of one height, so the captions and the
-        // controls each share one line whatever the control's own height.
+        let mark: Element<'a, Message> = match origin {
+            Some(origin) => {
+                let (label, accent): (_, fn(&Theme) -> iced::Color) = match origin {
+                    ValueOrigin::Style => (crate::tr!("mtext-object-origin", "style"), |theme| {
+                        theme.palette().success.base.color
+                    }),
+                    ValueOrigin::Custom => {
+                        (crate::tr!("mtext-object-origin", "custom"), |theme| {
+                            theme.palette().danger.base.color
+                        })
+                    }
+                    ValueOrigin::Mixed => (crate::tr!("mtext-object-origin", "mixed"), |theme| {
+                        theme.palette().warning.base.color
+                    }),
+                };
+                text(label)
+                    .size(10)
+                    .font(iced::Font {
+                        style: iced::font::Style::Italic,
+                        ..iced::Font::DEFAULT
+                    })
+                    .style(move |theme: &Theme| {
+                        // Readable on the editor's panel, lighter than the
+                        // base in a dark theme and darker in a light one.
+                        let background = theme.palette().background;
+                        text::Style {
+                            color: Some(crate::ui::style::common::readable_accent(
+                                accent(theme),
+                                background.weak.color,
+                                background.base.text,
+                            )),
+                        }
+                    })
+                    .into()
+            }
+            None => iced::widget::Space::new().into(),
+        };
+        // The mark keeps its line when there is none, and every control sits
+        // in a band of one height: the labels, the marks and the controls
+        // each share one line whatever the control's own height.
+        let mark = container(mark).height(13);
         let control = container(control).height(30).center_y(30);
-        iced::widget::column![caption, control].spacing(2).into()
+        iced::widget::column![text(name).size(11), mark, control]
+            .spacing(0)
+            .into()
     };
     let mut style_opts: Vec<String> = if styles.is_empty() {
         vec!["Standard".to_string()]
@@ -616,20 +648,25 @@ fn mtext_editor_content<'a>(
     let annotative = checkbox(ed.annotative)
         .on_toggle(Message::MTextAnnotative)
         .size(14);
-    let font_sel = match ed.font_field() {
-        font if font.trim().is_empty() => "[Style default]".to_string(),
-        font => font,
+    // Without a font of its own the text draws with the style's, which the
+    // field shows (the mark under the label says "By style").
+    let font = ed.font_field();
+    let selected = match &ed.object_style.font {
+        Some(style_font) if font.trim().is_empty() => style_font.clone(),
+        _ => crate::ui::font_picker::FontChoice::of_name(&font),
     };
-    let mut font_opts: Vec<String> = MTEXT_FONTS.iter().map(|s| s.to_string()).collect();
-    // The text's own font stays listed when it is not one of the bundled ones.
-    if !font_opts.contains(&font_sel) {
-        font_opts.push(font_sel.clone());
-    }
-    let font_pl =
-        iced::widget::pick_list(Some(font_sel), font_opts, |value| t!(value).into_owned())
-            .on_select(Message::MTextFont)
-            .text_size(11)
-            .width(iced::Length::Fixed(120.0));
+    let file = match &selected {
+        crate::ui::font_picker::FontChoice::Stroke(file) => file.clone(),
+        _ => font,
+    };
+    let font_pl = crate::ui::font_picker::view(crate::ui::font_picker::FontPicker {
+        state: &ed.font_picker,
+        selected,
+        file,
+        width: iced::Length::Fixed(150.0),
+        read_only: false,
+        on_event: Message::MTextFontPicker,
+    });
     // Same colour picker as the Properties panel (named swatches + "More…" full
     // palette), applied to the selection or the whole text.
     let color_pl = iced::widget::container(crate::ui::color_select::color_selector(
@@ -646,27 +683,81 @@ fn mtext_editor_content<'a>(
     ))
     .width(iced::Length::Fixed(150.0));
 
+    // A value of the text's own takes "Reset to style" on a right click.
+    let resettable = |field: &'static str,
+                      origin: Option<super::super::mtext_editor::ValueOrigin>,
+                      cell: Element<'a, Message>|
+     -> Element<'a, Message> {
+        if origin != Some(super::super::mtext_editor::ValueOrigin::Custom) {
+            return cell;
+        }
+        let value = ed.style_value(field);
+        iced_aw::ContextMenu::new(cell, move || reset_menu(field, &value)).into()
+    };
+    let font_origin = Some(ed.value_origin("font"));
+    let height_origin = ed.height_origin();
+    let width_origin = Some(ed.value_origin("width"));
+    let oblique_origin = Some(ed.value_origin("oblique"));
     let row1 = row![
-        labelled(t!("Style"), None, style_pl.into()),
-        labelled(t!("Font"), Some(ed.value_origin("font")), font_pl.into()),
         labelled(
-            t!("Height"),
+            t!("Style"),
             None,
-            small_input(
-                "2.5",
-                ed.span_field("height", &ed.height),
-                Message::MTextHeight,
-                64.0
+            row![style_pl, mtext_menu::style_menu(ed)]
+                .spacing(2)
+                .align_y(iced::Alignment::Center)
+                .into()
+        ),
+        resettable(
+            "font",
+            font_origin,
+            labelled(t!("Font"), font_origin, font_pl)
+        ),
+        resettable(
+            "height",
+            height_origin,
+            labelled(
+                t!("Height"),
+                height_origin,
+                small_input(
+                    "2.5",
+                    ed.span_field("height", &ed.height),
+                    Message::MTextHeight,
+                    64.0
+                )
             )
         ),
-        labelled(
-            t!("Width factor"),
-            Some(ed.value_origin("width")),
-            small_input(
-                "1",
-                ed.span_field("width", &ed.width),
-                Message::MTextWidth,
-                64.0
+        resettable(
+            "width",
+            width_origin,
+            labelled(
+                t!("Width factor"),
+                width_origin,
+                small_input(
+                    "1",
+                    ed.span_field("width", &ed.width),
+                    Message::MTextWidth,
+                    64.0
+                )
+            )
+        ),
+        resettable(
+            "oblique",
+            oblique_origin,
+            labelled(
+                crate::tr!("mtext-object-origin", "oblique").into(),
+                oblique_origin,
+                row![
+                    small_input(
+                        "0",
+                        ed.span_field("oblique", &ed.oblique),
+                        Message::MTextOblique,
+                        52.0
+                    ),
+                    text("°").size(12)
+                ]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
             )
         ),
         labelled(

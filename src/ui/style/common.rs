@@ -69,6 +69,16 @@ pub(crate) fn accessible_accent(accent: Color, bg: Color, fallback: Color) -> Co
     accessible_accent_threshold(accent, bg, fallback, 3.0)
 }
 
+/// `accent` as text on `bg`: moved towards `text` only as far as it takes
+/// to reach the 4.5:1 of body text (WCAG 1.4.3), so it keeps its hue in a
+/// light and a dark theme alike.
+pub(crate) fn readable_accent(accent: Color, bg: Color, text: Color) -> Color {
+    (0..=10)
+        .map(|step| crate::ui::style::chrome::mix(accent, text, step as f32 / 10.0))
+        .find(|color| wcag_contrast(*color, bg) >= 4.5)
+        .unwrap_or(text)
+}
+
 /// Returns true if the given canvas background color has a WCAG relative luminance > 0.5 (light surface).
 /// Ignores alpha assuming canvas backgrounds are opaque (or composited against default viewport clear).
 pub(crate) fn canvas_is_light(bg: [f32; 4]) -> bool {

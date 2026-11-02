@@ -54,6 +54,24 @@ pub fn resolve_text_style(style_name: &str, document: &Document) -> ResolvedText
         entry.name.eq_ignore_ascii_case(style_name)
             || (style_name.trim().is_empty() && entry.name.eq_ignore_ascii_case("Standard"))
     });
+    resolve_style(style, style_name, document)
+}
+
+/// [`resolve_text_style`] for a style record that need not be stored yet,
+/// such as the style manager's unapplied draft. Its fonts are looked up next
+/// to `document`.
+pub fn resolve_text_style_record(
+    style: &codec::tables::TextStyle,
+    document: &Document,
+) -> ResolvedTextStyle {
+    resolve_style(Some(style), &style.name, document)
+}
+
+fn resolve_style(
+    style: Option<&codec::tables::TextStyle>,
+    style_name: &str,
+    document: &Document,
+) -> ResolvedTextStyle {
 
     let mut font_name = if let Some(style) = style {
         // A style names a font *file* — `GOST2304_TypeA_italic.ttf`,

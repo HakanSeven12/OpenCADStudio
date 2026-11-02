@@ -47,13 +47,15 @@ use crate::scene::model::wire_model::WireModel;
 
 pub struct LayMatchCommand {
     dest_handles: Vec<Handle>,
-    /// COPYTOLAYER: copies of the objects go to the layer; they stay put.
+    gathering: bool,
+    /// COPYTOLAYER: create copies, then offer COPY's placement step.
     copy: bool,
 }
 
 impl LayMatchCommand {
     pub fn new(dest: Vec<Handle>) -> Self {
         Self {
+            gathering: dest.is_empty(),
             dest_handles: dest,
             copy: false,
         }
@@ -61,6 +63,7 @@ impl LayMatchCommand {
 
     pub fn copy_to_layer(dest: Vec<Handle>) -> Self {
         Self {
+            gathering: dest.is_empty(),
             dest_handles: dest,
             copy: true,
         }
@@ -78,13 +81,13 @@ impl CadCommand for LayMatchCommand {
 
     fn prompt(&self) -> String {
         if self.copy {
-            return if self.dest_handles.is_empty() {
+            return if self.gathering {
                 crate::t!("COPYTOLAYER  Select objects to copy:").into_owned()
             } else {
                 crate::t!("COPYTOLAYER  Select an object on the destination layer:").into_owned()
             };
         }
-        if self.dest_handles.is_empty() {
+        if self.gathering {
             crate::t!("LAYMATCH  Select objects to change layer:").into_owned()
         } else {
             crate::t!("LAYMATCH  Select source object to match layer from:").into_owned()
@@ -96,12 +99,12 @@ impl CadCommand for LayMatchCommand {
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        if handles.is_empty() {
+        if self.gathering {
+            // Each pick / box reports the whole selection, including removals.
+            self.dest_handles = handles;
             return CmdResult::NeedPoint;
         }
-        if self.dest_handles.is_empty() {
-            // Phase 1 complete — store destinations, move to phase 2.
-            self.dest_handles = handles;
+        if handles.is_empty() {
             CmdResult::NeedPoint
         } else {
             // Phase 2 complete — first handle is the source object.
@@ -118,6 +121,11 @@ impl CadCommand for LayMatchCommand {
         CmdResult::NeedPoint
     }
     fn on_enter(&mut self) -> CmdResult {
+        if self.gathering && !self.dest_handles.is_empty() {
+            self.gathering = false;
+            // The next accumulated GUI selection must contain only the layer pick.
+            return CmdResult::DeselectAndContinue;
+        }
         CmdResult::Cancel
     }
     fn on_escape(&mut self) -> CmdResult {

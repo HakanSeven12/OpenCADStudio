@@ -2401,12 +2401,14 @@ pub enum CmdResult {
     /// empty selection.
     Script(String),
     /// Move `dest` entities to the layer of the `src` entity, or put copies
-    /// of them there when `copy` is set; end command.
+    /// of them there when `copy` is set and offer placement of those copies.
     MatchEntityLayer {
         dest: Vec<Handle>,
         src: Handle,
         copy: bool,
     },
+    /// Translate the copies already owned by COPYTOLAYER's undo snapshot; end command.
+    MoveLayerCopies(Vec<Handle>, DVec3),
     /// Copy all visual properties (layer/color/linetype/lineweight) from `src` to `dest`; end command.
     MatchProperties {
         dest: Vec<Handle>,

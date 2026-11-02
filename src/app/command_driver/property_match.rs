@@ -1,4 +1,5 @@
 use super::*;
+use crate::command::CadCommand;
 
 impl OpenCADStudio {
     pub(super) fn handle_match_entity_layer(&mut self, dest: Vec<Handle>, src: Handle, copy: bool) {
@@ -20,7 +21,7 @@ impl OpenCADStudio {
                 .push_info(crate::t!("No editable objects selected.").as_ref());
         } else if let Some(layer) = src_layer {
             self.push_undo_snapshot(i, if copy { "COPYTOLAYER" } else { "LAYMATCH" });
-            // COPYTOLAYER changes the layer of copies left in place.
+            // Create the copies now; placement continues without another undo entry.
             let dest = if copy {
                 self.tabs[i]
                     .scene
@@ -49,6 +50,16 @@ impl OpenCADStudio {
                     .push_info(crate::tf!("Layer matched to \"{layer}\".").as_ref());
             }
             self.sync_ribbon_layers();
+            if copy && !dest.is_empty() {
+                use crate::modules::draw::modify::copy::CopyCommand;
+                let wires = self.tabs[i].scene.wire_models_for(&dest);
+                self.tabs[i].scene.deselect_all();
+                let cmd = CopyCommand::move_layer_copies(dest, wires);
+                self.command_line.push_info(&cmd.prompt());
+                self.command_line.set_step_options(cmd.options());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                self.sync_dyn_fields();
+            }
         } else {
             self.command_line
                 .push_error(crate::t!("Source object not found.").as_ref());

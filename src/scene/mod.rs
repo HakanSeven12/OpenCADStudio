@@ -6114,7 +6114,21 @@ impl Scene {
                                 (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
                             }
                         } else {
-                            (l.min_limits.0.min(0.0), l.min_limits.1.min(0.0))
+                            // Paper (0,0) is the printable area's corner, as in
+                            // the reference application: the sheet starts at
+                            // minus the stored margins (turned with the plot).
+                            // LIMMIN is not used; it goes stale when the device
+                            // or medium changes.
+                            let (left, bottom, ..) = crate::scene::rotated_margins(
+                                (
+                                    l.plot_margin_left,
+                                    l.plot_margin_bottom,
+                                    l.plot_margin_right,
+                                    l.plot_margin_top,
+                                ),
+                                l.plot_rotation,
+                            );
+                            (-left * f, -bottom * f)
                         };
                         return Some(((ox, oy), (ox + pw, oy + ph)));
                     }
@@ -6155,11 +6169,8 @@ impl Scene {
         let Some((left, bottom, right, top, rotation)) = margins else {
             return Some(((x0, y0), (x1, y1)));
         };
-        let (left, bottom, right, top) = match rotation {
-            1 | 3 => (bottom, left, top, right),
-            2 => (right, top, left, bottom),
-            _ => (left, bottom, right, top),
-        };
+        let (left, bottom, right, top) =
+            crate::scene::rotated_margins((left, bottom, right, top), rotation);
         let factor = self.paper_space_unit_factor();
         let printable = (
             (x0 + left * factor, y0 + bottom * factor),

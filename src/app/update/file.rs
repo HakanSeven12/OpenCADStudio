@@ -8383,6 +8383,88 @@ mod plot_paper_tests {
         );
     }
 
+    /// Give `Layout1` these stored margins and rotation, then a LIMMIN that does
+    /// not match them (as after a device change).
+    fn layout_with_margins_and_stale_limmin(
+        margins: (f64, f64, f64, f64),
+        rotation: codec::objects::PlotRotation,
+    ) -> OpenCADStudio {
+        let mut app = app_with_printer_named_sheet();
+        edit_layout_settings(&mut app, |ps| {
+            ps.paper_size = "ISO_A4_(210.00_x_297.00_MM)".into();
+            ps.paper_width = 210.0;
+            ps.paper_height = 297.0;
+            ps.rotation = rotation;
+            ps.margins =
+                codec::objects::PaperMargin::new(margins.0, margins.1, margins.2, margins.3);
+        });
+        let i = app.active_tab;
+        for object in app.tabs[i].scene.document.objects.values_mut() {
+            if let codec::objects::ObjectType::Layout(layout) = object {
+                if layout.name == "Layout1" {
+                    layout.min_limits = (-20.0, -7.5);
+                }
+            }
+        }
+        app.tabs[i].scene.geometry_epoch += 1;
+        app
+    }
+
+    /// Full-bleed sheet (no margins) with a LIMMIN left over from a device
+    /// that had them: paper (0,0) is the sheet corner, so a point at paper
+    /// (50,40) plots at 50,40 mm, as in the reference application.
+    #[test]
+    fn layout_plot_origin_ignores_a_stale_limmin() {
+        use codec::objects::PlotRotation;
+        let mut app =
+            layout_with_margins_and_stale_limmin((0.0, 0.0, 0.0, 0.0), PlotRotation::Degrees90);
+        let ((x0, y0), (x1, y1)) = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        assert!(x0.abs() < 1e-9 && y0.abs() < 1e-9, "sheet origin {x0} {y0}");
+        assert!(
+            (x1 - 297.0).abs() < 1e-9 && (y1 - 210.0).abs() < 1e-9,
+            "{x1} {y1}"
+        );
+        let _ = app.on_plot_dialog_open();
+        let page = app.layout_plot_page_for("Layout");
+        let scale = page.scale as f64;
+        let at = (
+            (50.0 + page.offset_x) * scale,
+            (40.0 + page.offset_y) * scale,
+        );
+        assert!(
+            (at.0 - 50.0).abs() < 1e-6 && (at.1 - 40.0).abs() < 1e-6,
+            "paper (50,40) plots at {at:?}"
+        );
+    }
+
+    /// With margins the sheet starts at minus the margins as they land on the
+    /// turned medium, at every rotation; LIMMIN plays no part.
+    #[test]
+    fn layout_sheet_origin_follows_the_rotated_margins() {
+        use codec::objects::PlotRotation;
+        let margins = (5.0, 10.0, 15.0, 20.0); // left, bottom, right, top of the medium
+        for (rotation, expected) in [
+            (PlotRotation::None, (-5.0, -10.0)),
+            (PlotRotation::Degrees90, (-20.0, -5.0)),
+            (PlotRotation::Degrees180, (-15.0, -20.0)),
+            (PlotRotation::Degrees270, (-10.0, -15.0)),
+        ] {
+            let app = layout_with_margins_and_stale_limmin(margins, rotation);
+            let scene = &app.tabs[app.active_tab].scene;
+            let ((x0, y0), _) = scene.paper_limits().unwrap();
+            assert!(
+                (x0 - expected.0).abs() < 1e-9 && (y0 - expected.1).abs() < 1e-9,
+                "{rotation:?}: sheet origin {x0} {y0}, expected {expected:?}"
+            );
+            // The printable area starts at paper (0,0).
+            let ((px, py), _) = scene.printable_area_limits().unwrap();
+            assert!(
+                px.abs() < 1e-9 && py.abs() < 1e-9,
+                "{rotation:?}: printable {px} {py}"
+            );
+        }
+    }
+
     /// Open the metric page-setup fixture written by the commercial
     /// application (see `tests/fixtures/plot/README.md`).
     #[cfg(not(target_arch = "wasm32"))]

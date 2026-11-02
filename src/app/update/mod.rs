@@ -1176,14 +1176,13 @@ impl OpenCADStudio {
                         // must be reachable in the log or the boot-death
                         // class stays undiagnosable.
                         eprintln!("{prefixed}");
-                        match line.source {
-                            ocs_plugin_api::process::IoStream::Stderr => {
-                                self.command_line.push_error(&prefixed);
-                            }
-                            _ => {
-                                self.command_line.push_output(&prefixed);
-                            }
-                        }
+                        // Plain output styling for ALL drained io: a
+                        // plugin's stderr trace is INFO (eprintln is every
+                        // Rust plugin's informational channel) — the
+                        // error-styled "INVALID" rendering of traces was
+                        // noise. A plugin's real failures name themselves
+                        // through push_error in their own dispatch paths.
+                        self.command_line.push_output(&prefixed);
                     }
                 });
                 Task::none()

@@ -819,6 +819,10 @@ inventory::submit!(crate::command::CommandRegistration {
         // Drafting-aid / display toggles + customization entry points wired in the
         // dispatch families (no interactive command module of their own).
         "ALIASEDIT",
+        // Dispatched commands that the alias file names (#2452).
+        "CTABLESTYLE",
+        "SELHANDLES",
+        "SELH",
         // Implemented command-line block forms must also validate in ALIASEDIT.
         "-BLOCK",
         "-BMAKE",

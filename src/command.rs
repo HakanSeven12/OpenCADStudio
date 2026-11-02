@@ -3935,6 +3935,16 @@ mod constraint_registry_tests {
                 "{target} must validate in ALIASEDIT"
             );
         }
+        // Every command the shipped alias file points at validates too (#2452).
+        let unknown: Vec<&str> = include_str!("../assets/ocad.pgp")
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with(';'))
+            .filter_map(|line| line.split_once(','))
+            .filter_map(|(_, target)| target.trim().strip_prefix('*'))
+            .filter(|target| !names.iter().any(|name| name.eq_ignore_ascii_case(target)))
+            .collect();
+        assert!(unknown.is_empty(), "alias targets missing from the registry: {unknown:?}");
     }
 
     /// Ensures every constraint command remains discoverable by autocomplete

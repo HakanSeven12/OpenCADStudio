@@ -463,6 +463,13 @@ impl OpenCADStudio {
         // creating or closing a tab), the contextual ribbon tab follows that
         // document's selection.
         let before = self.tabs.get(self.active_tab).map(|tab| tab.id);
+        // A cursor position does not change drawing-wide ribbon variables.
+        // Keep FRAME/UOSNAP/ATTMODE sync for edits, input and tab changes,
+        // not for every mouse packet in a dense scene.
+        let pointer_motion = matches!(
+            &msg,
+            Message::ViewportMove(_) | Message::PaneMove(_, _) | Message::CursorMoved(..)
+        );
         // Pickers offer the catalog linetypes the drawing lacks; the one
         // picked is loaded before it is assigned.
         if let Message::LayerLinetypeSet(name)
@@ -519,7 +526,9 @@ impl OpenCADStudio {
         if self.tabs.get(self.active_tab).map(|tab| tab.id) != before {
             self.sync_underlay_tab();
         }
-        self.sync_frame_dropdown();
+        if !pointer_motion {
+            self.sync_frame_dropdown();
+        }
         let block_editing = self
             .tabs
             .get(self.active_tab)
@@ -782,6 +791,7 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         let command_before = active_command(self);
         let task = self.update_inner(msg);
+        let perf_dispatch_ms = crate::perf::elapsed_ms(perf_started);
         #[cfg(not(target_arch = "wasm32"))]
         {
             let command_after = active_command(self);
@@ -907,7 +917,12 @@ impl OpenCADStudio {
             crate::perf::note_update_time(elapsed_us);
             let elapsed_ms = elapsed_us as f64 / 1000.0;
             if elapsed_ms >= 5.0 {
-                crate::perf_record!("[perf] update {:>7.1}ms message={perf_label}", elapsed_ms,);
+                crate::perf_record!(
+                    "[perf] update {:>7.1}ms message={perf_label} dispatch={:.2}ms settle={:.2}ms",
+                    elapsed_ms,
+                    perf_dispatch_ms,
+                    (elapsed_ms - perf_dispatch_ms).max(0.0),
+                );
             }
         }
         #[cfg(target_arch = "wasm32")]

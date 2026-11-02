@@ -8146,3 +8146,6 @@ table-cells =
     .text-item = Metin: { $text }
     .borders-help = Seçili hücrelerin kenarlıklarına çizgi kalınlığı, çizgi tipi ve renk verir; uygulanacak kenarları seçin.
     .contents-help = Seçili hücrenin içeriğini sıralar, kaldırır ve yerleştirir.
+block-chain =
+    .label = Zincirleme eylemler
+    .cycle = Blok eylem zinciri bir döngü içeriyor.

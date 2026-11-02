@@ -129,7 +129,9 @@ impl OpenCADStudio {
         let mut staged = self.tabs[i].scene.document.clone();
         match options::set(&mut staged, definition, handle, multiplier, angle) {
             Ok(true) => {
-                let staged = match crate::scene::block_actions::instance::refresh(&staged, definition) {
+                let staged = match crate::scene::block_actions::instance::refresh_after_edit(
+                    &staged, &self.tabs[i].scene.document, definition,
+                ) {
                     Ok(staged) => staged,
                     Err(error) => {
                         self.command_line.push_error(crate::t!(error).as_ref());
@@ -386,8 +388,30 @@ impl OpenCADStudio {
         if !Self::set_chain_actions(&mut document, handle, !chain_actions) {
             return Task::none();
         }
+        if matches!(document.objects.get(&handle),
+            Some(codec::objects::ObjectType::DynamicBlock(object))
+                if matches!(&object.data, codec::objects::DynamicBlockData::PointParameter(_)))
+        {
+            let Some(definition) = self.tabs[i]
+                .active_block_edit_session()
+                .map(|session| session.br_handle)
+            else {
+                return Task::none();
+            };
+            document = match crate::scene::block_actions::instance::refresh_after_edit(
+                &document,
+                &self.tabs[i].scene.document,
+                definition,
+            ) {
+                Ok(document) => document,
+                Err(error) => {
+                    self.command_line.push_error(crate::t!(error).as_ref());
+                    return Task::none();
+                }
+            };
+        }
         self.push_undo_snapshot(i, "BEDIT Chain parameter actions");
-        self.tabs[i].scene.document = document;
+        self.apply_action_document(i, document);
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
         self.refresh_properties();

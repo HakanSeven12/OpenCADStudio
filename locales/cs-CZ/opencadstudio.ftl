@@ -8119,3 +8119,6 @@ array-grips = Počet položek
     .prompt-item-spacing = Zadejte vzdálenost mezi položkami:
     .prompt-item-angle = Zadejte úhel mezi položkami:
     .prompt-radius = Zadejte poloměr:
+block-chain =
+    .label = Řetězení akcí
+    .cycle = Řetězec akcí bloku obsahuje cyklus.

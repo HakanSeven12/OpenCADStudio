@@ -431,3 +431,220 @@ fn rotation_parameter_preview_draws_the_angle_arc_from_the_base_angle() {
     assert_rotation_arc(&points(&app.tabs[i].scene.preview_wires), 30.0, 60.0);
     assert!(app.tabs[i].active_cmd.is_some());
 }
+
+fn setup_point_transport(
+    testing: bool,
+    chained: bool,
+) -> (
+    OpenCADStudio,
+    Handle,
+    Handle,
+    actions::Parameter,
+    actions::Parameter,
+    Handle,
+) {
+    let (mut app, insert, def, root) = setup(0, testing);
+    let _ = app.update(Message::CommandEscape);
+    let i = app.active_tab;
+    let root_parameter = actions::all_parameters(&app.tabs[i].scene.document, def)
+        .into_iter()
+        .find(|p| p.handle == root)
+        .unwrap();
+    let root_action = actions::actions(&app.tabs[i].scene.document, def)
+        .into_iter()
+        .find(|(_, _, _, id)| *id == root_parameter.id)
+        .unwrap()
+        .0;
+    let doc = &mut app.tabs[i].scene.document;
+    let codec::objects::ObjectType::DynamicBlock(object) = &doc.objects[&root_action] else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::MoveAction(action) = &object.data else {
+        panic!()
+    };
+    let targets = action.action.dependencies.clone();
+    let child = point::create(doc, def, Vector3::UNIT_Y * 5., Vector3::UNIT_Y * 7.).unwrap();
+    let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&child).unwrap()
+    else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+        panic!()
+    };
+    parameter.parameter.parameter.chain_actions = chained;
+    actions::create_with_options(
+        doc,
+        def,
+        actions::Kind::Move,
+        child,
+        None,
+        &targets,
+        DVec3::ZERO,
+        None,
+        None,
+    )
+    .unwrap();
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get_mut(&root_action).unwrap()
+    else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
+        panic!()
+    };
+    action.action.dependencies = vec![child];
+    let child_parameter = actions::all_parameters(doc, def)
+        .into_iter()
+        .find(|p| p.handle == child)
+        .unwrap();
+    if testing {
+        let baseline = app.tabs[i].scene.document.clone();
+        app.tabs[i].block_test.as_mut().unwrap().baseline = std::sync::Arc::new(baseline);
+    }
+    app.tabs[i].scene.bump_geometry();
+    app.tabs[i].scene.select_entity(insert, true);
+    app.tabs[i].selected_handle = Some(insert);
+    app.refresh_properties();
+    let grip = app.tabs[i]
+        .selected_grips
+        .iter()
+        .find(|g| runtime::decode(g.id).is_some_and(|(id, _)| id == root_parameter.id))
+        .unwrap()
+        .id;
+    assert!(app.start_test_action_grip(insert, grip));
+    (
+        app,
+        insert,
+        def,
+        root_parameter,
+        child_parameter,
+        root_action,
+    )
+}
+
+#[test]
+fn block_move_point_chain_preview_events_commit_and_undo_effective_point_caches() {
+    for testing in [false, true] {
+        for chained in [false, true] {
+            let (mut app, insert, _, root_parameter, child_parameter, _) =
+                setup_point_transport(testing, chained);
+            let i = app.active_tab;
+            let before = app.tabs[i].scene.document.clone();
+            let depth = app.tabs[i].history.undo_stack.len();
+            let EntityType::Insert(reference) = before.get_entity(insert).unwrap() else {
+                panic!()
+            };
+            let transform = crate::scene::render_graph::insert_transform(&before, reference);
+            let cursor = actions::v(transform.apply(actions::native(DVec3::new(20., 8., 0.))));
+            app.tabs[i].last_cursor_world = cursor;
+            app.refresh_active_cmd_preview(i);
+            let preview = points(&app.tabs[i].scene.preview_wires);
+            assert!(!preview.is_empty());
+            assert!(app.tabs[i].scene.document == before);
+            assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+            let _ = app.feed_command(crate::command::StepInput::Point(cursor));
+            assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+            let current = &app.tabs[i].scene.document;
+            let parent = actions::instance::frame(current, insert, &root_parameter).unwrap();
+            let child = actions::instance::frame(current, insert, &child_parameter).unwrap();
+            assert!(
+                child
+                    .end
+                    .distance(child_parameter.end + parent.end - root_parameter.end)
+                    < 1e-8
+            );
+            let committed = app.tabs[i]
+                .scene
+                .reference_document_preview(current, insert)
+                .unwrap();
+            assert_eq!(points(&committed.0), preview);
+            app.undo_steps(1);
+            assert_eq!(
+                app.tabs[i].scene.document.get_entity(insert),
+                before.get_entity(insert)
+            );
+            assert_eq!(app.tabs[i].scene.document.objects, before.objects);
+            app.redo_steps(1);
+            assert_eq!(
+                actions::instance::frame(&app.tabs[i].scene.document, insert, &child_parameter)
+                    .unwrap(),
+                child
+            );
+        }
+    }
+}
+
+#[test]
+fn block_move_point_chain_properties_refresh_existing_references_and_preserve_undo() {
+    let (mut app, insert, _, root, child, action) = setup_point_transport(false, false);
+    let i = app.active_tab;
+    let read_line = |doc: &codec::Document| {
+        let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
+            panic!()
+        };
+        doc.block_records
+            .get(&reference.block_name)
+            .unwrap()
+            .entity_handles
+            .iter()
+            .find_map(|h| {
+                if let Some(EntityType::Line(line)) = doc.get_entity(*h) {
+                    Some(actions::v(line.start))
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    };
+    let original = read_line(&app.tabs[i].scene.document);
+    let EntityType::Insert(reference) = app.tabs[i].scene.document.get_entity(insert).unwrap()
+    else {
+        panic!()
+    };
+    let transform =
+        crate::scene::render_graph::insert_transform(&app.tabs[i].scene.document, reference);
+    let cursor = actions::v(transform.apply(actions::native(root.end + DVec3::new(3., 4., 0.))));
+    let _ = app.feed_command(crate::command::StepInput::Point(cursor));
+    let offset = actions::instance::frame(&app.tabs[i].scene.document, insert, &root)
+        .unwrap()
+        .end
+        - root.end;
+    assert!(offset.length() > 1.);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original) < 1e-8);
+    begin(&mut app, insert);
+    let i = app.active_tab;
+    app.tabs[i].selected_authoring = Some(child.handle);
+    app.refresh_properties();
+    assert!(app.tabs[i]
+        .properties
+        .sections
+        .iter()
+        .flat_map(|s| &s.props)
+        .any(|p| p.field == "authoring_chain_actions"
+            && matches!(
+                &p.value,
+                crate::scene::model::object::PropValue::BoolToggle { value: false, .. }
+            )));
+    let depth = app.tabs[i].history.undo_stack.len();
+    let _ = app.update(Message::PropBoolToggle("authoring_chain_actions"));
+    app.finish_pending_history(i);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
+    app.undo_steps(1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original) < 1e-8);
+    app.redo_steps(1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
+    app.tabs[i].selected_authoring = Some(action);
+    app.refresh_properties();
+    let _ = app.update(Message::PropGeomInput {
+        field: "authoring_action_multiplier",
+        value: "2".into(),
+    });
+    let _ = app.update(Message::PropGeomCommit("authoring_action_multiplier"));
+    app.finish_pending_history(i);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset * 2.) < 1e-8);
+    app.undo_steps(1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
+    app.redo_steps(1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset * 2.) < 1e-8);
+}

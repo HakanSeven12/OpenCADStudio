@@ -8226,3 +8226,6 @@ table-cells =
     .text-item = Text: { $text }
     .borders-help = Sets the lineweight, linetype and color of the borders of the picked cells; choose the edges they go on.
     .contents-help = Orders, removes and lays out the contents of the picked cell.
+block-chain =
+    .label = Chain actions
+    .cycle = The block action chain contains a cycle.

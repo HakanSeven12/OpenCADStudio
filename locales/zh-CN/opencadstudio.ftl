@@ -8092,3 +8092,6 @@ array-grips = 项目数
     .prompt-item-spacing = 指定项目之间的距离:
     .prompt-item-angle = 指定项目之间的角度:
     .prompt-radius = 指定半径:
+block-chain =
+    .label = 链式动作
+    .cycle = 块的动作链中存在循环。

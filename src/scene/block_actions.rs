@@ -16,6 +16,7 @@ mod representation;
 mod stretch;
 mod targets;
 mod array;
+mod chains;
 pub(crate) mod options;
 pub(crate) mod chain;
 
@@ -1218,6 +1219,10 @@ struct Evaluation<'a> {
     rebuild: bool,
     bases: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
     base_changed: bool,
+    previous_bases: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
+    previous_graph: Option<&'a Document>,
+    previous_values: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
+    requested: Option<&'a std::collections::BTreeSet<Handle>>,
 }
 
 pub(crate) fn evaluate_framed(
@@ -1228,10 +1233,39 @@ pub(crate) fn evaluate_framed(
     input: Value,
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     base_changed: bool,
+    previous_frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
 ) -> Result<bool, &'static str> {
-    let bases = frames.iter().map(|(handle, frame)| (*handle, frame.base)).collect();
-    evaluate_impl(doc, baseline, definition, parameter, input,
-        Evaluation { bases: Some(&bases), base_changed, rebuild: false })
+    let bases = frames
+        .iter()
+        .map(|(handle, frame)| (*handle, frame.base))
+        .collect();
+    let previous_bases = previous_frames
+        .iter()
+        .map(|(handle, frame)| (*handle, frame.base))
+        .collect();
+    evaluate_impl(
+        doc,
+        baseline,
+        definition,
+        parameter,
+        input,
+        Evaluation {
+            bases: Some(&bases),
+            previous_bases: Some(&previous_bases),
+            base_changed,
+            rebuild: false,
+            ..Evaluation::default()
+        },
+    )
+}
+
+/// Effective input before a bulk update, with the graph that produced it.
+#[derive(Clone, Copy)]
+pub(crate) struct RebuildInputs<'a> {
+    pub document: &'a Document,
+    pub frames: &'a std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    pub values: &'a std::collections::BTreeMap<Handle, DVec3>,
+    pub requested: &'a std::collections::BTreeSet<Handle>,
 }
 
 pub(crate) fn rebuild_framed(
@@ -1239,11 +1273,32 @@ pub(crate) fn rebuild_framed(
     baseline: &Document,
     definition: Handle,
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    previous: Option<RebuildInputs<'_>>,
 ) -> Result<(), &'static str> {
-    let Some(p) = all_parameters(baseline, definition).into_iter().next() else { return Ok(()) };
-    let bases = frames.iter().map(|(handle, frame)| (*handle, frame.base)).collect();
-    evaluate_impl(doc, baseline, definition, p.handle, value(doc, &p)?,
-        Evaluation { bases: Some(&bases), rebuild: true, base_changed: false })?;
+    let Some(p) = all_parameters(baseline, definition).into_iter().next() else {
+        return Ok(());
+    };
+    let bases = frames
+        .iter()
+        .map(|(handle, frame)| (*handle, frame.base))
+        .collect();
+    let previous_bases = previous.map(|p| p.frames.iter().map(|(h, f)| (*h, f.base)).collect());
+    evaluate_impl(
+        doc,
+        baseline,
+        definition,
+        p.handle,
+        value(doc, &p)?,
+        Evaluation {
+            bases: Some(&bases),
+            rebuild: true,
+            base_changed: false,
+            previous_bases: previous_bases.as_ref().or(Some(&bases)),
+            previous_graph: previous.map(|p| p.document),
+            previous_values: previous.map(|p| p.values),
+            requested: previous.map(|p| p.requested),
+        },
+    )?;
     Ok(())
 }
 
@@ -1365,6 +1420,7 @@ fn evaluate_impl(
         }
         value => value,
     };
+    let chain = chains::Graph::new(baseline, definition)?;
     let previous = value(doc, &p)?;
     if !force && !evaluation.base_changed
         && match (previous, input) {
@@ -1377,6 +1433,42 @@ fn evaluate_impl(
     }
     let mut staged = doc.clone();
     set_value(&mut staged, &p, input)?;
+    let previous_chain =
+        chains::Graph::new(evaluation.previous_graph.unwrap_or(baseline), definition)?;
+    let autonomous = previous_chain.autonomous(
+        doc,
+        evaluation.previous_values,
+        evaluation.previous_bases.or(evaluation.bases),
+    )?;
+    let requested = if let Some(requested) = evaluation.requested {
+        requested.clone()
+    } else if force {
+        std::collections::BTreeSet::new()
+    } else {
+        std::collections::BTreeSet::from([parameter])
+    };
+    let mut detached_points = Vec::new();
+    for p in previous_chain
+        .points()
+        .filter(|p| !chain.contains(p.handle))
+    {
+        if let Some(current) = all_parameters(baseline, definition)
+            .into_iter()
+            .find(|q| q.handle == p.handle && q.point)
+        {
+            let end = autonomous[&p.handle];
+            set_value(&mut staged, &current, Value::Point(end))?;
+            detached_points.push((current, end));
+        }
+    }
+    let chain_values = chain.resolve(
+        doc,
+        &mut staged,
+        &requested,
+        &autonomous,
+        evaluation.previous_values,
+        evaluation.bases,
+    )?;
     let baseline_members = authoring::members(baseline, definition)
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -1636,6 +1728,13 @@ fn evaluate_impl(
                 }
             }
         }
+    }
+    for (p, end) in detached_points {
+        set_value(&mut staged, &p, Value::Point(end))?;
+    }
+    for (handle, end) in chain_values {
+        let p = chain.parameter(handle);
+        set_value(&mut staged, p, Value::Point(end))?;
     }
     *doc = staged;
     Ok(true)

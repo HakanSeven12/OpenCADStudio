@@ -1223,10 +1223,22 @@ impl OpenCADStudio {
                             || line.text.starts_with("[plugin] ")
                             || line.text.starts_with("[python-repl]")
                         {
+                            // The runner's own trace still lands in the
+                            // gui.log (the host's stderr redirect) — the
+                            // filter only spares the command line. A
+                            // plugin's CUSTOM prefix (any other tag, e.g.
+                            // "[cvi]") must pass: it is the ONLY trace a
+                            // plugin can emit past this point.
                             continue;
                         }
                         let prefixed =
                             format!("[{} {}] {}", line.plugin_id, line.source, line.text);
+                        // ALSO to the host's own stderr (the gui.log
+                        // redirect): the command line is invisible to a
+                        // headless/automation session — a plugin's trace
+                        // must be reachable in the log or the boot-death
+                        // class stays undiagnosable.
+                        eprintln!("{prefixed}");
                         match line.source {
                             ocs_plugin_api::process::IoStream::Stderr => {
                                 self.command_line.push_error(&prefixed);

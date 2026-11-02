@@ -45,7 +45,7 @@ use std::sync::Arc;
 
 mod manager;
 mod v4;
-pub use manager::{DispatchResult, NotificationHandler, PluginManager};
+pub use manager::{AttachOutcome, DispatchResult, NotificationHandler, PluginManager};
 
 /// A line emitted by a plugin process on stdout or stderr.
 #[derive(Debug, Clone)]
@@ -178,7 +178,14 @@ macro_rules! vlog {
 }
 
 /// Maximum time to wait for the plugin runner to connect back to the host.
-const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
+///
+/// 90 s (was 30): the host spawns *itself* (a 100+ MB executable) and
+/// antivirus scans of a freshly-written or newly-spawned image regularly
+/// exceed 30 s on Windows — the codebase's own history (the hard-link
+/// removal) records exactly this failure class. A scan-slowed runner is
+/// HEALTHY; killing it at 30 s produced silent, unrecoverable boot deaths
+/// ("the plugin never answered") with the runner still alive.
+const SPAWN_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn spawn_timeout() -> Duration {
     std::env::var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS")

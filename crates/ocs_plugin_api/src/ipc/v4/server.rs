@@ -146,7 +146,11 @@ pub fn run_host_reader_thread(
                     break;
                 }
                 Err(e) => {
-                    vlog!("[plugin] V4 host reader error: {e}");
+                    // Unconditional: a reader break here marks the whole
+                    // plugin connection dead while the runner process may
+                    // stay alive — this line is the ONLY trace of why (the
+                    // old vlog! gate hid it in non-verbose boots).
+                    eprintln!("[plugin] V4 host reader FATAL error: {e}");
                     break;
                 }
             }

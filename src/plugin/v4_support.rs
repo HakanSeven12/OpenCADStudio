@@ -182,15 +182,25 @@ pub fn drain_channel_ready_acks() {
     );
     for plugin_id in acks {
         crate::plugin::external::with_manager(|manager| {
-            let flushed = manager.attach_notification_channel(&plugin_id);
-            match flushed {
-                Some(count) => {
+            match manager.attach_notification_channel(&plugin_id) {
+                ocs_plugin_api::process::AttachOutcome::Attached(count) => {
                     eprintln!(
                         "[{plugin_id}] notification channel attached \
                          ({count} deferred flushed)"
                     );
                 }
-                None => {
+                ocs_plugin_api::process::AttachOutcome::AlreadyAttached => {
+                    eprintln!(
+                        "[{plugin_id}] ChannelReady duplicate for a live channel; ignored"
+                    );
+                }
+                ocs_plugin_api::process::AttachOutcome::Ambiguous(waiting) => {
+                    eprintln!(
+                        "[{plugin_id}] ChannelReady ambiguous ({waiting} unattached \
+                         candidates); nothing attached - the boot grace covers it"
+                    );
+                }
+                ocs_plugin_api::process::AttachOutcome::UnknownPlugin => {
                     eprintln!("[{plugin_id}] ChannelReady from an unloaded plugin; ignored");
                 }
             }

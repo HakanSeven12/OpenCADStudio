@@ -87,6 +87,24 @@ pub struct DispatchResult {
     pub errors: Vec<(String, String)>,
 }
 
+/// The outcome of [`PluginManager::attach_notification_channel`] — honest
+/// diagnostics for the ChannelReady drain: the ambiguous case used to be
+/// indistinguishable from a successful attach in the log (both printed as
+/// "attached (0 deferred flushed)"), which masked the boot-death class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachOutcome {
+    /// The plugin's channel attached; N deferred boot notifications flushed.
+    Attached(usize),
+    /// A duplicate ack for an already-live channel; nothing to do.
+    AlreadyAttached,
+    /// An empty-id ack with several unattached candidates: ambiguous — the
+    /// ack cannot name its plugin, nothing attached; the boot grace is the
+    /// fallback (its flush path logs separately).
+    Ambiguous(usize),
+    /// No loaded plugin carries this id (a stale ack after an unload).
+    UnknownPlugin,
+}
+
 impl PluginManager {
     /// Create an empty manager.
     pub fn new() -> Self {
@@ -213,31 +231,46 @@ impl PluginManager {
 
     /// Mark a plugin's notification channel verifiably live and flush every
     /// notification deferred during its boot window (API v13). Called when
-    /// the runner acks `PluginNotification::ChannelReady`. Returns the number
-    /// flushed; `None` when no loaded plugin carries that id.
-    pub fn attach_notification_channel(&self, plugin_id: &str) -> Option<usize> {
+    /// the runner acks `PluginNotification::ChannelReady`.
+    pub fn attach_notification_channel(&self, plugin_id: &str) -> AttachOutcome {
         // A handshake-window ack may reach the reader thread before the spawn
         // thread has pinned the manifest id (the empty placeholder id): the
         // ack itself is what proves the channel is live, so attach by
         // elimination — but only when exactly one plugin waits. With several
         // booting at once the ack is ambiguous; the boot grace covers them.
         if plugin_id.is_empty() {
-            let mut waiting = self
-                .plugins
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| !p.attach.lock().unwrap_or_else(|e| e.into_inner()).attached)
-                .map(|(index, _)| index);
+            let unattached = |p: &&LoadedPlugin| {
+                !p.attach.lock().unwrap_or_else(|e| e.into_inner()).attached
+            };
+            let mut waiting = self.plugins.iter().enumerate().filter(|(_, p)| unattached(p)).map(|(index, _)| index);
             return match (waiting.next(), waiting.next()) {
-                (Some(index), None) => Some(self.attach_by_index(index)),
-                _ => Some(0),
+                (Some(index), None) => {
+                    let flushed = self.attach_by_index(index);
+                    AttachOutcome::Attached(flushed)
+                }
+                (None, _) => AttachOutcome::AlreadyAttached,
+                (_, _) => AttachOutcome::Ambiguous(self.plugins.iter().filter(unattached).count()),
             };
         }
-        let index = self
+        let index = match self
             .plugins
             .iter()
-            .position(|p| p.process.id() == plugin_id)?;
-        Some(self.attach_by_index(index))
+            .position(|p| p.process.id() == plugin_id)
+        {
+            Some(index) => index,
+            None => return AttachOutcome::UnknownPlugin,
+        };
+        let already = self.plugins[index]
+            .attach
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .attached;
+        let flushed = self.attach_by_index(index);
+        if already {
+            AttachOutcome::AlreadyAttached
+        } else {
+            AttachOutcome::Attached(flushed)
+        }
     }
 
     /// Attach one plugin by index (shared helper).
@@ -440,9 +473,11 @@ impl PluginManager {
     pub fn drain_io(&self) -> Vec<crate::process::PluginIoLine> {
         let mut out = Vec::new();
         for p in &self.plugins {
-            if !p.process.is_alive() {
-                continue;
-            }
+            // NO is_alive gate: the "dead" flag can be set by a mere call
+            // timeout while the OS runner is alive and its stderr holds the
+            // ONLY trace of the hang (e.g. a plugin's dispatch echo never
+            // printed anywhere else). A dead process's pipes drain EOF
+            // instantly, so the un-gated drain costs nothing.
             out.extend(p.process.drain_io());
         }
         out

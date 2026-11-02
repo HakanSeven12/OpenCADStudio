@@ -95,24 +95,64 @@ pub fn row_heights(
     data_rows: usize,
     lines: usize,
 ) -> Vec<f64> {
-    let (title_h, header_h, data_h, margin) = style.map_or((0.25, 0.18, 0.18, 0.06), |s| {
-        (
-            s.title_row_style.text_height,
-            s.header_row_style.text_height,
-            s.data_row_style.text_height,
-            s.vertical_margin,
-        )
-    });
-    let height = |text: f64| text * 4.0 / 3.0 * lines.max(1) as f64 + 2.0 * margin;
+    row_heights_for(style, ["Title", "Header", "Data"], title, header, data_rows, lines)
+}
+
+/// Row heights of a table whose first, second and other rows take the
+/// named cell styles (`Title`, `Header`, `Data` or a user cell style): each
+/// row is `lines` lines of its cell style's text plus its top and bottom
+/// margins.
+pub fn row_heights_for(
+    style: Option<&codec::objects::TableStyle>,
+    names: [&str; 3],
+    title: bool,
+    header: bool,
+    data_rows: usize,
+    lines: usize,
+) -> Vec<f64> {
+    let row_height = |slot: usize| {
+        let (text, margin) = match style {
+            None => ([0.25, 0.18, 0.18][slot], 0.06),
+            Some(s) => match s.cell_style(&cell_style_name(names[slot])) {
+                Some(cell) => (
+                    cell.cell_style.content_format.text_height,
+                    cell.cell_style.margins().map_or(s.vertical_margin, |(_, v)| v),
+                ),
+                None => (
+                    [
+                        s.title_row_style.text_height,
+                        s.header_row_style.text_height,
+                        s.data_row_style.text_height,
+                    ][slot],
+                    s.vertical_margin,
+                ),
+            },
+        };
+        text * 4.0 / 3.0 * lines.max(1) as f64 + 2.0 * margin
+    };
     let mut rows = Vec::with_capacity(data_rows + 2);
     if title {
-        rows.push(height(title_h));
+        rows.push(row_height(0));
     }
     if header {
-        rows.push(height(header_h));
+        rows.push(row_height(1));
     }
-    rows.extend(std::iter::repeat_n(height(data_h), data_rows));
+    rows.extend(std::iter::repeat_n(row_height(2), data_rows));
     rows
+}
+
+/// The cell style a row style name picks: `Title`, `Header` and `Data` are
+/// the title, header and data cell styles; others are user cell styles.
+pub fn cell_style_name(name: &str) -> String {
+    if name.eq_ignore_ascii_case("Title") {
+        codec::objects::TITLE_CELL_STYLE.to_string()
+    } else if name.eq_ignore_ascii_case("Header") {
+        codec::objects::HEADER_CELL_STYLE.to_string()
+    } else if name.eq_ignore_ascii_case("Data") {
+        codec::objects::DATA_CELL_STYLE.to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 /// The named table styles -TABLE's Style option may pick.
@@ -121,7 +161,176 @@ pub struct StyleChoice {
     pub name: String,
     pub handle: codec::Handle,
     pub style: codec::objects::TableStyle,
+    /// The style's starting table, if it has one.
+    pub template: Option<codec::entities::Table>,
 }
+
+/// What a table made from a style's starting table takes from it (the
+/// -TABLE Style option's insert options; remembered for the session).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TemplateOptions {
+    pub label_text: bool,
+    pub data_text: bool,
+    pub formulas: bool,
+    pub fields: bool,
+    pub data_links: bool,
+    pub blocks: bool,
+    pub cell_style_overrides: bool,
+}
+
+impl Default for TemplateOptions {
+    fn default() -> Self {
+        Self {
+            label_text: true,
+            data_text: false,
+            formulas: false,
+            fields: false,
+            data_links: false,
+            blocks: false,
+            cell_style_overrides: true,
+        }
+    }
+}
+
+static TEMPLATE_OPTIONS: Mutex<TemplateOptions> = Mutex::new(TemplateOptions {
+    label_text: true,
+    data_text: false,
+    formulas: false,
+    fields: false,
+    data_links: false,
+    blocks: false,
+    cell_style_overrides: true,
+});
+
+pub fn template_options() -> std::sync::MutexGuard<'static, TemplateOptions> {
+    TEMPLATE_OPTIONS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The insert options in prompt order: keyword, option word, question
+/// subject.
+const TEMPLATE_OPTION_KEYS: [(&str, &str, &str); 7] = [
+    ("L", "LABEL", "label text"),
+    ("D", "DATA", "data text"),
+    ("F", "FORMULAS", "formulas"),
+    ("I", "FIELDS", "fields"),
+    ("N", "LINKS", "data links"),
+    ("B", "BLOCKS", "blocks"),
+    ("O", "OVERRIDES", "cell style overrides"),
+];
+
+fn template_option(options: &mut TemplateOptions, index: usize) -> &mut bool {
+    match index {
+        0 => &mut options.label_text,
+        1 => &mut options.data_text,
+        2 => &mut options.formulas,
+        3 => &mut options.fields,
+        4 => &mut options.data_links,
+        5 => &mut options.blocks,
+        _ => &mut options.cell_style_overrides,
+    }
+}
+
+/// An empty, unmerged cell with the cell style of `cell`.
+fn blank_cell_like(cell: &codec::entities::table::TableCell) -> codec::entities::table::TableCell {
+    let mut blank = codec::entities::table::TableCell::new();
+    blank.style_id = cell.style_id;
+    blank.style = cell.style.clone();
+    blank
+}
+
+/// A table made from a style's starting table: its rows, columns, merges
+/// and sizes, the cell contents `options` keep, and `extra_rows` /
+/// `extra_columns` more rows and columns like its last ones.
+pub fn table_from_template(
+    template: &codec::entities::Table,
+    style: &codec::objects::TableStyle,
+    style_handle: codec::Handle,
+    options: TemplateOptions,
+    extra_rows: usize,
+    extra_columns: usize,
+) -> codec::entities::Table {
+    use codec::entities::table::TableCellContentType;
+    let mut table = template.clone();
+    table.common = codec::entities::EntityCommon::default();
+    table.table_style_handle = Some(style_handle);
+    table.block_record_handle = None;
+    table.block_name.clear();
+    let class_of = |id: i32| {
+        style
+            .cell_style_by_id(id)
+            .map_or(codec::objects::CELL_CLASS_DATA, |cell| cell.style_type)
+    };
+    for row in &mut table.rows {
+        let row_class = class_of(row.style_id);
+        if !options.cell_style_overrides {
+            row.style = None;
+        }
+        for cell in &mut row.cells {
+            let class = if cell.style_id != 0 {
+                class_of(cell.style_id)
+            } else {
+                row_class
+            };
+            let keep_text = if class == codec::objects::CELL_CLASS_LABEL {
+                options.label_text
+            } else {
+                options.data_text
+            };
+            cell.contents.retain(|content| match content.content_type {
+                TableCellContentType::Block => options.blocks,
+                _ if content.field_handle.is_some() => options.fields,
+                _ if content.value.text.trim_start().starts_with('=') => options.formulas,
+                _ => keep_text,
+            });
+            if !options.data_links {
+                cell.data_link_handle = None;
+            }
+            if !options.cell_style_overrides {
+                cell.style = None;
+            }
+        }
+    }
+    if !options.cell_style_overrides {
+        for column in &mut table.columns {
+            column.style = None;
+        }
+    }
+    let old_columns = table.columns.len();
+    if extra_columns > 0 {
+        if let Some(last) = table.columns.last().cloned() {
+            table
+                .columns
+                .extend(std::iter::repeat_n(last, extra_columns));
+        }
+        let new_last = table.columns.len().saturating_sub(1);
+        for row in &mut table.rows {
+            if let Some(last) = row.cells.last() {
+                let blank = blank_cell_like(last);
+                row.cells.extend(std::iter::repeat_n(blank, extra_columns));
+            }
+        }
+        // A range across the whole width (the title) keeps spanning it.
+        for range in &mut table.merged_ranges {
+            if range.left_col == 0 && range.right_col + 1 == old_columns {
+                range.right_col = new_last;
+            }
+        }
+    }
+    if extra_rows > 0 {
+        if let Some(last) = table.rows.last().cloned() {
+            let mut blank = last;
+            blank.cells = blank.cells.iter().map(blank_cell_like).collect();
+            table.rows.extend(std::iter::repeat_n(blank, extra_rows));
+        }
+    }
+    // The cells take the merged ranges again (extended ones included).
+    let ranges = std::mem::take(&mut table.merged_ranges);
+    for range in ranges {
+        table.merge_cells(range);
+    }
+    table
+}
+
 
 #[derive(Clone, Copy, PartialEq)]
 enum Step {
@@ -134,6 +343,14 @@ enum Step {
     Width { window: bool },
     Height { window: bool },
     LinkName,
+    /// "from Style": place the style's starting table.
+    FromStyle,
+    FromStyleName,
+    FromStyleRows,
+    FromStyleColumns,
+    FromStyleOptions,
+    /// The Yes/No question of an insert option (index into the options).
+    FromStyleOption(usize),
 }
 
 pub struct TableCommand {
@@ -149,9 +366,15 @@ pub struct TableCommand {
     data_rows: Option<usize>,
     cell_width: f64,
     row_lines: usize,
-    row_style_overrides: Option<[CellStyle; 3]>,
+    /// Cell style names of the first, second and other rows.
+    row_cell_styles: [String; 3],
     preview_enabled: bool,
     plane: WorkingPlane,
+    /// "from Style": the style whose starting table is placed, and the rows
+    /// and columns added to it.
+    template_style: Option<StyleChoice>,
+    extra_rows: usize,
+    extra_columns: usize,
 }
 
 fn cell_style_from_row(style: &codec::objects::RowCellStyle) -> CellStyle {
@@ -217,9 +440,7 @@ impl TableCommand {
         Self {
             step: Step::Columns,
             command,
-            row_style_overrides: style.as_ref().map(|choice| {
-                ["Title", "Header", "Data"].map(|name| selected_row_style(&choice.style, name))
-            }),
+            row_cell_styles: ["Title", "Header", "Data"].map(str::to_string),
             style,
             styles: Vec::new(),
             links: Vec::new(),
@@ -229,7 +450,42 @@ impl TableCommand {
             row_lines: defaults.row_lines.max(1),
             preview_enabled: true,
             plane: WorkingPlane::default(),
+            template_style: None,
+            extra_rows: 0,
+            extra_columns: 0,
         }
+    }
+
+    /// TABLE's "From a table style": place the style's starting table.
+    pub fn from_style(style: StyleChoice, extra_rows: usize, extra_columns: usize) -> Self {
+        let mut command = Self::new("TABLE", Some(style.clone()), TableDefaults::default(), true);
+        command.template_style = Some(style);
+        command.extra_rows = extra_rows;
+        command.extra_columns = extra_columns;
+        command.step = Step::FromStyle;
+        command
+    }
+
+    /// The table "from Style" places at `point`.
+    fn template_table(&self, point: DVec3) -> Option<EntityType> {
+        let choice = self.template_style.as_ref()?;
+        let template = choice.template.as_ref()?;
+        let mut table = table_from_template(
+            template,
+            &choice.style,
+            choice.handle,
+            *template_options(),
+            self.extra_rows,
+            self.extra_columns,
+        );
+        let point = self.plane.to_local(point);
+        table.insertion_point = Vector3::new(point.x, point.y, point.z);
+        Some(self.plane.place_entity(EntityType::Table(Box::new(table))))
+    }
+
+    /// The styles whose starting table "from Style" can place.
+    fn template_styles(&self) -> impl Iterator<Item = &StyleChoice> {
+        self.styles.iter().filter(|choice| choice.template.is_some())
     }
 
     /// -TABLE: every setting on the command line, starting from the ones
@@ -277,15 +533,21 @@ impl TableCommand {
         command.cell_width = column_width;
         command.row_lines = row_lines.max(1);
         command.preview_enabled = preview_enabled;
-        command.row_style_overrides = command.style.as_ref().map(|choice| {
-            row_style_names.map(|name| selected_row_style(&choice.style, name))
-        });
+        command.row_cell_styles = row_style_names.map(str::to_string);
         command.step = if window {
             Step::FirstCorner
         } else {
             Step::Insertion
         };
         command
+    }
+
+    fn row_names(&self) -> [&str; 3] {
+        [
+            self.row_cell_styles[0].as_str(),
+            self.row_cell_styles[1].as_str(),
+            self.row_cell_styles[2].as_str(),
+        ]
     }
 
     fn dash(&self) -> bool {
@@ -309,7 +571,7 @@ impl TableCommand {
         let Some(second) = second else {
             let widths = vec![self.cell_width; self.columns.unwrap_or(1)];
             let heights =
-                row_heights(style, title, header, self.data_rows.unwrap_or(1), self.row_lines);
+                row_heights_for(style, self.row_names(), title, header, self.data_rows.unwrap_or(1), self.row_lines);
             return (first, widths, heights);
         };
         let second = self.plane.to_local(second);
@@ -326,7 +588,7 @@ impl TableCommand {
             // A fixed row count fills the window: one-line rows share what
             // is left of its height.
             Some(count) => {
-                let mut rows = row_heights(style, title, header, count, 1);
+                let mut rows = row_heights_for(style, self.row_names(), title, header, count, 1);
                 let spare = (height - rows.iter().sum::<f64>()) / rows.len() as f64;
                 if spare > 0.0 {
                     rows.iter_mut().for_each(|row| *row += spare);
@@ -335,11 +597,11 @@ impl TableCommand {
             }
             // Else as many data rows as fit, at least one.
             None => {
-                let one = row_heights(style, title, header, 1, self.row_lines);
+                let one = row_heights_for(style, self.row_names(), title, header, 1, self.row_lines);
                 let data = *one.last().unwrap_or(&1.0);
                 let labels: f64 = one[..one.len() - 1].iter().sum();
                 let count = ((height - labels) / data + 1.0e-9).floor().max(1.0) as usize;
-                row_heights(style, title, header, count, self.row_lines)
+                row_heights_for(style, self.row_names(), title, header, count, self.row_lines)
             }
         };
         (first, widths, heights)
@@ -357,14 +619,44 @@ impl TableCommand {
             row.height = *height;
         }
         table.table_style_handle = self.style.as_ref().map(|choice| choice.handle);
-        if let Some(styles) = &self.row_style_overrides {
-            for (row_index, row) in table.rows.iter_mut().enumerate() {
-                row.style = Some(styles[row_index.min(2)].clone());
+        let names = &self.row_cell_styles;
+        let mut merged_rows = Vec::new();
+        match self.style.as_ref().map(|choice| &choice.style) {
+            // Rows name their cell style; the style draws them, so later
+            // edits of the style reach the table.
+            Some(style) if !style.modern_overrides.is_empty() => {
+                for (row_index, row) in table.rows.iter_mut().enumerate() {
+                    let name = cell_style_name(&names[row_index.min(2)]);
+                    if let Some(cell) = style.cell_style(&name) {
+                        row.style_id = cell.id;
+                        row.style = None;
+                        if cell.cell_style.merge_all() {
+                            merged_rows.push(row_index);
+                        }
+                    }
+                }
+            }
+            Some(style) => {
+                for (row_index, row) in table.rows.iter_mut().enumerate() {
+                    row.style = Some(selected_row_style(style, &names[row_index.min(2)]));
+                }
+                // The title spans the table, as the title cell style merges
+                // its row.
+                if self.title_header().0 {
+                    merged_rows.push(0);
+                }
+            }
+            None => {
+                if self.title_header().0 {
+                    merged_rows.push(0);
+                }
             }
         }
-        // The title spans the table, as the title cell style merges its row.
-        if self.title_header().0 && widths.len() > 1 {
-            table.merge_cells(CellRange::new(0, 0, 0, widths.len() - 1));
+        // "Merge cells on row/column creation": the row's cells merge.
+        if widths.len() > 1 {
+            for row in merged_rows {
+                table.merge_cells(CellRange::new(row, 0, row, widths.len() - 1));
+            }
         }
         self.plane.place_entity(EntityType::Table(Box::new(table)))
     }
@@ -391,6 +683,13 @@ impl TableCommand {
 
     fn preview_grid(&self, first: DVec3, second: Option<DVec3>) -> WireModel {
         let (point, widths, heights) = self.layout(first, second);
+        let point = self.plane.to_world(point);
+        self.grid_wire(point, &widths, &heights)
+    }
+
+    /// The outline grid of a table at `point` (world).
+    fn grid_wire(&self, point: DVec3, widths: &[f64], heights: &[f64]) -> WireModel {
+        let point = self.plane.to_local(point);
         let width: f64 = widths.iter().sum();
         let height: f64 = heights.iter().sum();
         let world = |x: f64, y: f64| {
@@ -521,13 +820,56 @@ impl CadCommand for TableCommand {
             Step::LinkName => {
                 t!("%{n}  Enter the name of a data link or [?]:", n = n).into_owned()
             }
+            Step::FromStyle => t!(
+                "%{n}  Specify insertion point or [Style/Rows/Columns/Options]:",
+                n = n
+            )
+            .into_owned(),
+            Step::FromStyleName => t!(
+                "%{n}  Enter the name of a table style or [?] <%{style}>:",
+                n = n,
+                style = self
+                    .template_style
+                    .as_ref()
+                    .map_or("Standard", |s| s.name.as_str())
+            )
+            .into_owned(),
+            Step::FromStyleRows => t!(
+                "%{n}  Enter number of additional rows <%{rows}>:",
+                n = n,
+                rows = self.extra_rows
+            )
+            .into_owned(),
+            Step::FromStyleColumns => t!(
+                "%{n}  Enter number of additional columns <%{columns}>:",
+                n = n,
+                columns = self.extra_columns
+            )
+            .into_owned(),
+            Step::FromStyleOptions => t!(
+                "%{n}  Enter an insert option [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:",
+                n = n
+            )
+            .into_owned(),
+            Step::FromStyleOption(index) => {
+                let on = *template_option(&mut template_options(), index);
+                t!(
+                    "%{n}  Include %{what} in inserted table? [Yes/No] <%{current}>:",
+                    n = n,
+                    what = t!(TEMPLATE_OPTION_KEYS[index].2),
+                    current = if on { t!("Yes") } else { t!("No") }
+                )
+                .into_owned()
+            }
         }
     }
 
     fn input_kind(&self) -> InputKind {
         match self.step {
-            Step::Insertion | Step::FirstCorner | Step::SecondCorner(_) => InputKind::Point,
-            Step::StyleName { .. } | Step::LinkName => InputKind::FreeText,
+            Step::Insertion | Step::FirstCorner | Step::SecondCorner(_) | Step::FromStyle => {
+                InputKind::Point
+            }
+            Step::StyleName { .. } | Step::LinkName | Step::FromStyleName => InputKind::FreeText,
             _ => InputKind::SingleToken,
         }
     }
@@ -547,10 +889,22 @@ impl CadCommand for TableCommand {
                 } else if keyword(input, "AUTO") {
                     None
                 } else if columns && keyword(input, "STYLE") {
-                    // No table style here carries a starting table.
-                    return Some(CmdResult::Measurement(
-                        t!("There are no table styles containing tables.  Add a table to a table style by using the TABLESTYLE command.").into_owned(),
-                    ));
+                    // The current style's starting table, else the first
+                    // style that has one.
+                    let current = self
+                        .style
+                        .as_ref()
+                        .filter(|choice| choice.template.is_some())
+                        .cloned()
+                        .or_else(|| self.template_styles().next().cloned());
+                    let Some(choice) = current else {
+                        return Some(CmdResult::Measurement(
+                            t!("There are no table styles containing tables.  Add a table to a table style by using the TABLESTYLE command.").into_owned(),
+                        ));
+                    };
+                    self.template_style = Some(choice);
+                    self.step = Step::FromStyle;
+                    return Some(CmdResult::NeedPoint);
                 } else if columns && keyword(input, "LINK") {
                     if self.links.is_empty() {
                         return Some(CmdResult::Measurement(format!(
@@ -606,10 +960,6 @@ impl CadCommand for TableCommand {
                     else {
                         return error("Invalid table style name.");
                     };
-                    self.row_style_overrides = Some(
-                        ["Title", "Header", "Data"]
-                            .map(|name| selected_row_style(&choice.style, name)),
-                    );
                     self.style = Some(choice);
                 }
             }
@@ -632,6 +982,85 @@ impl CadCommand for TableCommand {
                     }
                 }
                 self.step = Self::back(window);
+            }
+            Step::FromStyle => {
+                if keyword(input, "STYLE") {
+                    self.step = Step::FromStyleName;
+                } else if keyword(input, "ROWS") {
+                    self.step = Step::FromStyleRows;
+                } else if keyword(input, "COLUMNS") {
+                    self.step = Step::FromStyleColumns;
+                } else if keyword(input, "OPTIONS") {
+                    self.step = Step::FromStyleOptions;
+                } else {
+                    return error("Point or option keyword required.");
+                }
+            }
+            Step::FromStyleName => {
+                if input == "?" {
+                    let names: Vec<&str> =
+                        self.template_styles().map(|choice| choice.name.as_str()).collect();
+                    return Some(CmdResult::ReportMeasurement(format!(
+                        "{}\n-----------------\n{}",
+                        t!("Table Style Name"),
+                        names.join("\n")
+                    )));
+                }
+                if !input.is_empty() {
+                    let Some(choice) = self
+                        .template_styles()
+                        .find(|choice| choice.name.eq_ignore_ascii_case(input))
+                        .cloned()
+                    else {
+                        return error("Table style does not contain a table.");
+                    };
+                    self.template_style = Some(choice);
+                }
+                self.step = Step::FromStyle;
+            }
+            Step::FromStyleRows | Step::FromStyleColumns => {
+                if !input.is_empty() {
+                    let value = match parse_count(input) {
+                        Count::Value(value) => value,
+                        Count::NotPositive => return error("Value must be positive and nonzero."),
+                        Count::Invalid => return error("Requires a positive nonzero integer."),
+                    };
+                    if self.step == Step::FromStyleRows {
+                        self.extra_rows = value;
+                    } else {
+                        self.extra_columns = value;
+                    }
+                }
+                self.step = Step::FromStyle;
+            }
+            Step::FromStyleOptions => {
+                if input.is_empty() {
+                    self.step = Step::FromStyle;
+                    return Some(CmdResult::NeedPoint);
+                }
+                let upper = input.to_ascii_uppercase();
+                let picked = TEMPLATE_OPTION_KEYS.iter().position(|(key, word, _)| {
+                    upper == *key || (upper.len() > 1 && word.starts_with(&upper))
+                });
+                match picked {
+                    Some(index) => self.step = Step::FromStyleOption(index),
+                    None => return error("Invalid option keyword."),
+                }
+            }
+            Step::FromStyleOption(index) => {
+                let value = if input.is_empty() {
+                    None
+                } else if keyword(input, "YES") {
+                    Some(true)
+                } else if keyword(input, "NO") {
+                    Some(false)
+                } else {
+                    return error("Invalid option keyword.");
+                };
+                if let Some(value) = value {
+                    *template_option(&mut template_options(), index) = value;
+                }
+                self.step = Step::FromStyleOptions;
             }
             Step::LinkName => {
                 if input == "?" {
@@ -676,6 +1105,10 @@ impl CadCommand for TableCommand {
                 CmdResult::NeedPoint
             }
             Step::SecondCorner(first) => self.place(first, Some(point)),
+            Step::FromStyle => match self.template_table(point) {
+                Some(table) => CmdResult::CommitAndExit(table),
+                None => CmdResult::NeedPoint,
+            },
             _ => CmdResult::NeedPoint,
         }
     }
@@ -685,10 +1118,60 @@ impl CadCommand for TableCommand {
             return None;
         }
         match self.step {
+            Step::FromStyle => {
+                let EntityType::Table(table) = self.template_table(point)? else {
+                    return None;
+                };
+                let widths: Vec<f64> = table.columns.iter().map(|c| c.width).collect();
+                let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
+                Some(self.grid_wire(point, &widths, &heights))
+            }
             Step::Insertion => Some(self.preview_grid(point, None)),
             Step::SecondCorner(first) => Some(self.preview_grid(first, Some(point))),
             _ => None,
         }
+    }
+}
+
+/// The Table Style editor's "select table to start from": one table is
+/// picked and handed back as `_TABLESTYLE_TEMPLATE <handle>` (no handle when
+/// the pick is cancelled).
+pub struct TableTemplatePickCommand;
+
+impl CadCommand for TableTemplatePickCommand {
+    fn name(&self) -> &'static str {
+        "TABLESTYLE"
+    }
+
+    fn prompt(&self) -> String {
+        t!("Select a table:").into_owned()
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+
+    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        CmdResult::Dispatch(format!("_TABLESTYLE_TEMPLATE {:X}", handle.value()))
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Dispatch("_TABLESTYLE_TEMPLATE".into())
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Dispatch("_TABLESTYLE_TEMPLATE".into())
     }
 }
 

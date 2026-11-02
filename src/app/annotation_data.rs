@@ -744,10 +744,24 @@ fn table_style_choices(doc: &Document) -> Vec<crate::modules::annotate::table_cm
         .iter()
         .filter_map(|(handle, object)| match object {
             ObjectType::TableStyle(style) => {
+                // A style with only its three rows still names its title,
+                // header and data cell styles.
+                let mut style_copy = style.clone();
+                style_copy.ensure_cell_styles(|row| {
+                    row.text_style_handle
+                        .or_else(|| doc.text_styles.get(&row.text_style_name).map(|s| s.handle))
+                        .unwrap_or(codec::Handle::NULL)
+                });
                 Some(crate::modules::annotate::table_cmd::StyleChoice {
                     name: style.name.clone(),
                     handle: *handle,
-                    style: style.clone(),
+                    style: style_copy,
+                    template: style.template().and_then(|template| {
+                        match doc.objects.get(&template) {
+                            Some(ObjectType::TableTemplate(table)) => Some(table.clone()),
+                            _ => None,
+                        }
+                    }),
                 })
             }
             _ => None,
@@ -1705,6 +1719,7 @@ impl OpenCADStudio {
         state.columns_fixed = saved.columns_fixed;
         state.rows_fixed = saved.rows_fixed;
         self.table_insert.error.clear();
+        self.refresh_table_insert_cell_styles();
         self.reset_annotation_modal(ModalKind::InsertTable);
     }
 
@@ -1918,12 +1933,33 @@ impl OpenCADStudio {
 
     pub(super) fn on_table_insert_style(&mut self, style: String) -> Task<Message> {
         self.table_insert.style = style;
+        self.refresh_table_insert_cell_styles();
         Task::none()
+    }
+
+    /// The user cell styles of the Insert Table dialog's style, for its row
+    /// cell style lists.
+    pub(in crate::app) fn refresh_table_insert_cell_styles(&mut self) {
+        let doc = &self.tabs[self.active_tab].scene.document;
+        let style = table_style_choices(doc)
+            .into_iter()
+            .find(|choice| choice.name.eq_ignore_ascii_case(&self.table_insert.style));
+        self.table_insert.cell_styles = style.map_or_else(Vec::new, |choice| {
+            choice
+                .style
+                .cell_styles()
+                .filter(|cell| !codec::objects::is_row_cell_style(&cell.name))
+                .map(|cell| cell.name.clone())
+                .collect()
+        });
     }
 
     pub(super) fn on_table_insert_field(&mut self, field: TableInsertField) -> Task<Message> {
         match field {
-            TableInsertField::Style(value) => self.table_insert.style = value,
+            TableInsertField::Style(value) => {
+                self.table_insert.style = value;
+                self.refresh_table_insert_cell_styles();
+            }
             TableInsertField::Source(value) => self.table_insert.source = value,
             TableInsertField::Link(value) => self.table_insert.link = Some(value),
             TableInsertField::Insertion(value) => self.table_insert.insertion = value,
@@ -2419,6 +2455,7 @@ impl OpenCADStudio {
         let doc = &self.tabs[self.active_tab].scene.document;
         self.table_insert.styles = table_styles(doc);
         self.table_insert.style = doc.header.current_table_style_name.clone();
+        self.refresh_table_insert_cell_styles();
         self.reset_annotation_modal(ModalKind::InsertTable);
     }
 

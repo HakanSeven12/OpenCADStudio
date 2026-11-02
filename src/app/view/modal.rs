@@ -1081,14 +1081,16 @@ impl OpenCADStudio {
                     ) {
                         comparison_sections.push(crate::i18n::translate("General").into_owned());
                     }
-                    for (label, different) in [
-                        ("Data Row", a.data_row_style != b.data_row_style),
-                        ("Header Row", a.header_row_style != b.header_row_style),
-                        ("Title Row", a.title_row_style != b.title_row_style),
-                    ] {
-                        if different {
-                            comparison_sections.push(crate::i18n::translate(label).into_owned());
-                        }
+                    if a.modern_overrides != b.modern_overrides
+                        || a.data_row_style != b.data_row_style
+                        || a.header_row_style != b.header_row_style
+                        || a.title_row_style != b.title_row_style
+                    {
+                        comparison_sections.push(crate::i18n::translate("Cell styles").into_owned());
+                    }
+                    if a.template().is_some() != b.template().is_some() {
+                        comparison_sections
+                            .push(crate::i18n::translate("Starting table").into_owned());
                     }
                 }
                 let in_use =
@@ -1106,19 +1108,36 @@ impl OpenCADStudio {
                             comparison_sections: comparison_sections.clone(),
                             in_use,
                             in_use_only: self.tablestyle_in_use_only,
-                            hmargin: &self.ts_hmargin,
-                            vmargin: &self.ts_vmargin,
                             description: &self.ts_description,
-                            cell_textstyle: &self.ts_cell_textstyle,
+                            cell: &self.ts_cell,
+                            cell_name: &self.ts_cell_name,
                             cell_height: &self.ts_cell_height,
-                            cell_textcolor: &self.ts_cell_textcolor,
-                            cell_fillcolor: &self.ts_cell_fillcolor,
-                            cell_datatype: &self.ts_cell_datatype,
-                            cell_unittype: &self.ts_cell_unittype,
+                            cell_angle: &self.ts_cell_angle,
+                            cell_hmargin: &self.ts_cell_hmargin,
+                            cell_vmargin: &self.ts_cell_vmargin,
                             cell_format: &self.ts_cell_format,
-                            border_lw: &self.ts_border_lw,
-                            border_color: &self.ts_border_color,
-                            border_spacing: &self.ts_border_spacing,
+                            edge_spacing: &self.ts_edge_spacing,
+                            text_styles: tab
+                                .scene
+                                .document
+                                .text_styles
+                                .iter()
+                                .map(|style| (style.name.clone(), style.handle))
+                                .collect(),
+                            linetypes: tab
+                                .scene
+                                .document
+                                .line_types
+                                .iter()
+                                .map(|linetype| (linetype.name.clone(), linetype.handle))
+                                .collect(),
+                            template: selected_style
+                                .and_then(|style| style.template())
+                                .and_then(|handle| tab.scene.document.objects.get(&handle))
+                                .and_then(|object| match object {
+                                    ObjectType::TableTemplate(table) => Some(table),
+                                    _ => None,
+                                }),
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
                             color_open: self.ts_color_open,

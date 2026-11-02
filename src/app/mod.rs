@@ -1632,27 +1632,25 @@ pub(super) struct OpenCADStudio {
     tablestyle_selected: String,
     tablestyle_tab: u8,
     tablestyle_compare: String,
-    /// Edit buffers for the table style's general margins.
-    ts_hmargin: String,
-    ts_vmargin: String,
     /// General table-style description buffer.
     ts_description: String,
-    /// Per-cell edit buffers, indexed 0=Data, 1=Header, 2=Title.
-    /// Table cell colour field (row class, "textcolor"/"fillcolor") whose
-    /// expanded palette is open.
-    ts_color_open: Option<(u8, &'static str)>,
-    ts_cell_textstyle: [String; 3],
-    ts_cell_height: [String; 3],
-    ts_cell_textcolor: [String; 3],
-    ts_cell_fillcolor: [String; 3],
-    ts_cell_datatype: [String; 3],
-    ts_cell_unittype: [String; 3],
-    ts_cell_format: [String; 3],
-    /// Per-cell, per-border numeric buffers ([cell][border], border order:
-    /// 0=left 1=right 2=top 3=bottom 4=horizontal-inside 5=vertical-inside).
-    ts_border_lw: [[String; 6]; 3],
-    ts_border_color: [[String; 6]; 3],
-    ts_border_spacing: [[String; 6]; 3],
+    /// The cell style being edited ("_DATA", "_HEADER", "_TITLE" or a
+    /// user cell style).
+    ts_cell: String,
+    /// Text buffers of the edited cell style: name (new / rename), text
+    /// height, text angle, margins and format.
+    ts_cell_name: String,
+    ts_cell_height: String,
+    ts_cell_angle: String,
+    ts_cell_hmargin: String,
+    ts_cell_vmargin: String,
+    ts_cell_format: String,
+    /// Double-line spacing buffers of its six edges (top, inside
+    /// horizontal, bottom, left, inside vertical, right).
+    ts_edge_spacing: [String; 6],
+    /// Colour field ("textcolor" / "fillcolor") whose expanded palette is
+    /// open.
+    ts_color_open: Option<&'static str>,
 
     // ── Shared style-manager inline rename ────────────────────────────────
     /// Original name of the style currently being renamed inline (double-click
@@ -2163,7 +2161,7 @@ pub enum ColorPickTarget {
     GraphicAttributesSolid,
     DimStyle(DsField),
     MLeader(&'static str),
-    Table(u8, &'static str),
+    Table(&'static str),
     /// Plot-style colour override for the currently selected ACI entry.
     PlotStyle,
     /// Selected entities' colour (left properties panel).
@@ -5027,50 +5025,44 @@ pub enum Message {
     /// Toggle a boolean flag (title_suppressed / header_suppressed / flow) on
     /// the selected table style.
     TableStyleToggle(&'static str),
-    /// Update a general edit buffer (hmargin / vmargin).
+    /// Update a general edit buffer (description).
     TableStyleEdit {
         field: &'static str,
         value: String,
     },
     /// Write the general edit buffers back into the selected table style.
     TableStyleApply,
-    /// Update a per-cell edit buffer (row 0=Data,1=Header,2=Title).
+    /// Edit the named cell style.
+    TableStyleCellSelect(String),
+    /// Add a cell style (named by the name buffer) copying the edited one.
+    TableStyleCellNew,
+    /// Rename the edited user cell style to the name buffer.
+    TableStyleCellRename,
+    /// Delete the edited user cell style.
+    TableStyleCellDelete,
+    /// A field of the edited cell style: a text buffer ("name", "height",
+    /// "angle", "hmargin", "vmargin", "format") or a choice ("align",
+    /// "class", "datatype", "textstyle", "textcolor", "fillcolor",
+    /// "merge").
     TableStyleCellEdit {
-        row: u8,
         field: &'static str,
         value: String,
     },
-    /// Toggle the expanded colour palette for a table cell colour field.
-    TableColorMore(u8, &'static str),
-    /// Toggle background fill on a cell style.
-    TableStyleCellToggleFill(u8),
-    /// Set the alignment of a cell style from the dropdown.
-    TableStyleCellSetAlign {
-        row: u8,
+    /// A field ("visible", "lw", "linetype", "color", "double",
+    /// "spacing") of one edge of the edited cell style.
+    TableStyleEdgeEdit {
+        edge: u8,
+        field: &'static str,
         value: String,
     },
-    /// Write a cell's edit buffers back into the selected table style.
-    TableStyleCellApply(u8),
+    /// Toggle the expanded colour palette of a cell colour field.
+    TableColorMore(&'static str),
     /// Set the table flow direction from the dropdown.
     TableStyleSetFlow(String),
-    /// Update a per-cell, per-border numeric edit buffer.
-    TableStyleBorderEdit {
-        cell: u8,
-        border: u8,
-        field: &'static str,
-        value: String,
-    },
-    /// Set a border's line type (Single / Double).
-    TableStyleBorderSetType {
-        cell: u8,
-        border: u8,
-        value: String,
-    },
-    /// Toggle a border's visibility.
-    TableStyleBorderToggleInvisible {
-        cell: u8,
-        border: u8,
-    },
+    /// Pick a table in the drawing as the style's starting table.
+    TableStyleTemplatePick,
+    /// Drop the style's starting table.
+    TableStyleTemplateRemove,
     // ── MLineStyle Dialog ─────────────────────────────────────────────────
     MlStyleDialogOpen,
     #[allow(dead_code)]
@@ -5951,20 +5943,16 @@ impl OpenCADStudio {
             tablestyle_selected: "Standard".to_string(),
             tablestyle_tab: 0,
             tablestyle_compare: String::new(),
-            ts_hmargin: "1.5".to_string(),
-            ts_vmargin: "1.5".to_string(),
             ts_description: String::new(),
+            ts_cell: codec::objects::DATA_CELL_STYLE.to_string(),
+            ts_cell_name: String::new(),
+            ts_cell_height: String::new(),
+            ts_cell_angle: String::new(),
+            ts_cell_hmargin: String::new(),
+            ts_cell_vmargin: String::new(),
+            ts_cell_format: String::new(),
+            ts_edge_spacing: Default::default(),
             ts_color_open: None,
-            ts_cell_textstyle: Default::default(),
-            ts_cell_height: Default::default(),
-            ts_cell_textcolor: Default::default(),
-            ts_cell_fillcolor: Default::default(),
-            ts_cell_datatype: Default::default(),
-            ts_cell_unittype: Default::default(),
-            ts_cell_format: Default::default(),
-            ts_border_lw: Default::default(),
-            ts_border_color: Default::default(),
-            ts_border_spacing: Default::default(),
             // MLineStyle dialog
             mlstyle_selected: "Standard".to_string(),
             mlstyle_tab: 0,

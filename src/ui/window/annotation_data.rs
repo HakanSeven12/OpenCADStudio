@@ -95,6 +95,8 @@ pub struct TableInsertState {
     pub first_row_style: String,
     pub second_row_style: String,
     pub other_row_style: String,
+    /// The selected table style's own cell styles, offered for the rows.
+    pub cell_styles: Vec<String>,
     pub error: String,
 }
 
@@ -117,6 +119,7 @@ impl Default for TableInsertState {
             first_row_style: "Title".into(),
             second_row_style: "Header".into(),
             other_row_style: "Data".into(),
+            cell_styles: Vec::new(),
             error: String::new(),
         }
     }
@@ -490,15 +493,24 @@ fn cell_style_picker<'a>(
     selected: &'a str,
     msg: fn(String) -> Message,
 ) -> Element<'a, Message> {
+    cell_style_picker_from(label, selected, Vec::new(), msg)
+}
+
+/// The cell style a row takes: Title, Header, Data or one of `extra` (the
+/// table style's own cell styles).
+fn cell_style_picker_from<'a>(
+    label: impl Into<String>,
+    selected: &'a str,
+    extra: Vec<String>,
+    msg: fn(String) -> Message,
+) -> Element<'a, Message> {
+    let mut options = vec!["Title".to_string(), "Header".to_string(), "Data".to_string()];
+    options.extend(extra);
     row![
         text(label.into()).size(11).style(muted).width(118),
         pick_list(
             Some(selected.to_string()),
-            vec![
-                "Title".to_string(),
-                "Header".to_string(),
-                "Data".to_string()
-            ],
+            options,
             |value| value.clone(),
         )
         .on_select(msg)
@@ -736,13 +748,13 @@ pub fn table_insert_view<'a>(
     ]
     .spacing(5);
     let cell_styles = column![
-        cell_style_picker(t!("First row"), &state.first_row_style, |v| {
+        cell_style_picker_from(t!("First row"), &state.first_row_style, state.cell_styles.clone(), |v| {
             Message::TableInsertField(TableInsertField::FirstRowStyle(v))
         }),
-        cell_style_picker(t!("Second row"), &state.second_row_style, |v| {
+        cell_style_picker_from(t!("Second row"), &state.second_row_style, state.cell_styles.clone(), |v| {
             Message::TableInsertField(TableInsertField::SecondRowStyle(v))
         }),
-        cell_style_picker(t!("All other rows"), &state.other_row_style, |v| {
+        cell_style_picker_from(t!("All other rows"), &state.other_row_style, state.cell_styles.clone(), |v| {
             Message::TableInsertField(TableInsertField::OtherRowStyle(v))
         }),
     ]

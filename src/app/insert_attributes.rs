@@ -18,6 +18,7 @@ impl OpenCADStudio {
             rows: attdefs
                 .iter()
                 .map(|ad| InsertAttrRow {
+                    tag: ad.tag.clone(),
                     label: if ad.prompt.is_empty() {
                         ad.tag.clone()
                     } else {

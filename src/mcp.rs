@@ -39,8 +39,10 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// `input` gained `handles`, so a selection prompt can be handed a set
 /// without a round trip through `select`; the dialog actions gained
 /// `dialog_discard` and `dialog_cancel`.
+/// The attribute form an attributed insertion raises is answerable from a
+/// script, so the action list gained `dialog_answer`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "31b9a8521e51fee379efeea3a7471fde1d7a7dea3ce3257b3f6e7fec411a7d2d";
+const TOOL_SCHEMA_DIGEST: &str = "3731d95db83f5342488952e32bd3c8c982ceddc84b63fc758b06c0d220419d95";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

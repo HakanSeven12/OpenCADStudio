@@ -1046,6 +1046,17 @@ impl OpenCADStudio {
             return (response, Task::none());
         }
         let client = req["client_id"].as_str().unwrap_or("default").to_owned();
+        // The attribute form an attributed insertion raises is modal, and the
+        // command it parked waits for those answers, so they reach it through
+        // the action surface while that command is still the active one. The
+        // form covers the whole app, so any client may answer it, as any client
+        // may answer the dialogs the same guard has always let through.
+        let answers_attribute_form = op == "action"
+            && self.active_modal == Some(crate::app::ModalKind::InsertAttributes)
+            && matches!(
+                req["name"].as_str(),
+                Some("dialog_answer") | Some("dialog_ok") | Some("dialog_cancel") | Some("close_modal")
+            );
         if tab.active_cmd.is_some()
             && (self.control.owner.as_ref() != Some(&(tab.id, client.clone()))
                 || matches!(
@@ -1053,6 +1064,7 @@ impl OpenCADStudio {
                     "run" | "start" | "new" | "open" | "activate" | "switch_document"
                 ))
             && op != "cancel"
+            && !answers_attribute_form
         {
             return (
                 failure("command_busy", "An interactive command is already active"),
@@ -5238,6 +5250,79 @@ mod tests {
             after["grips"][0]["point"][0].as_f64(),
             Some(20.0),
             "the grips must belong to the set that is selected now: {after}"
+        );
+    }
+
+    /// An attributed placement that raises the insertion form has no command
+    /// line left to type into, so the form's rows answer through actions.
+    #[test]
+    fn the_attribute_form_is_answerable_through_actions() {
+        use crate::app::insert_attributes_tests::{
+            askable, define, park_insert, placed_attributes,
+        };
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        let i = app.active_tab;
+        define(
+            &mut app,
+            i,
+            "ATTDIA_SCRIPT",
+            vec![askable("WIDTH", "Width", "100"), askable("HEIGHT", "", "20")],
+        );
+        park_insert(&mut app, i, "ATTDIA_SCRIPT");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::InsertAttributes),
+            "the placement is parked on the form"
+        );
+
+        let missed = request(
+            &mut app,
+            json!({"op":"action","request_id":"miss","name":"dialog_answer","tag":"DEPTH","value":"9"}),
+        );
+        assert_eq!(
+            missed["ok"], false,
+            "a row the form never asked for is refused: {missed}"
+        );
+
+        let answered = request(
+            &mut app,
+            json!({"op":"action","request_id":"answer","name":"dialog_answer","tag":"HEIGHT","value":"48"}),
+        );
+        assert_eq!(answered["ok"], true, "{answered}");
+        let ok = request(
+            &mut app,
+            json!({"op":"action","request_id":"ok","name":"dialog_ok"}),
+        );
+        assert_eq!(ok["ok"], true, "{ok}");
+        assert_eq!(
+            placed_attributes(&app, i, "ATTDIA_SCRIPT"),
+            vec![
+                ("WIDTH".to_string(), "100".to_string()),
+                ("HEIGHT".to_string(), "48".to_string()),
+            ],
+            "the answered row takes the script's value, the other keeps its default"
+        );
+    }
+
+    #[test]
+    fn a_declined_attribute_form_drops_the_placement() {
+        use crate::app::insert_attributes_tests::{askable, define, park_insert, placed_attributes};
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        let i = app.active_tab;
+        define(&mut app, i, "ATTDIA_SHRUG", vec![askable("TAG1", "", "7")]);
+        park_insert(&mut app, i, "ATTDIA_SHRUG");
+
+        let declined = request(
+            &mut app,
+            json!({"op":"action","request_id":"decline","name":"dialog_cancel"}),
+        );
+        assert_eq!(declined["ok"], true, "{declined}");
+        assert_eq!(app.active_modal, None, "and the form is gone");
+        assert!(
+            placed_attributes(&app, i, "ATTDIA_SHRUG").is_empty(),
+            "a declined form drops the placement"
         );
     }
 }

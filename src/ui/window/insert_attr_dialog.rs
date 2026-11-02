@@ -11,6 +11,9 @@ use iced::{Element, Fill, Length};
 /// One attribute the operator answers while the block is being placed.
 #[derive(Debug, Clone)]
 pub struct InsertAttrRow {
+    /// What the attribute is called in the definition.
+    pub tag: String,
+    /// What the form shows: the prompt when the definition has one.
     pub label: String,
     pub value: String,
 }

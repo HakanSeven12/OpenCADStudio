@@ -173,6 +173,7 @@ pub(super) const NAMES: &[&str] = &[
     "ribbon_dropdown",
     "keytips",
     "dialog_ok",
+    "dialog_answer",
     "dialog_discard",
     "dialog_cancel",
     "block_def_dialog",
@@ -3136,6 +3137,46 @@ impl OpenCADStudio {
                 }
                 _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
             },
+            // One row of the form an attributed insertion answers in a page:
+            // a script has no command line to type the answer into.
+            "dialog_answer" => {
+                let tag = string(req, "tag")?;
+                let value = string(req, "value")?;
+                let rows = match self.active_modal {
+                    Some(crate::app::ModalKind::InsertAttributes) => match self
+                        .insert_attr_dialog
+                        .as_ref()
+                    {
+                        Some(form) => &form.rows,
+                        None => {
+                            return Err(failure("no_dialog", "The attribute form is not open"))
+                        }
+                    },
+                    _ => return Err(failure("no_dialog", "The attribute form is not open")),
+                };
+                // A tag names a row outright; only when none does is a tag
+                // allowed to stand for the caption a row shows.
+                let Some(index) = rows
+                    .iter()
+                    .position(|row| row.tag == tag)
+                    .or_else(|| {
+                        rows.iter().position(|row| {
+                            row.label == tag
+                                || crate::ui::window::insert_attr_dialog::caption(&row.label) == tag
+                        })
+                    })
+                else {
+                    return Err(failure("unknown_tag", "tag is not a row of the open form"));
+                };
+                Message::InsertAttrDialog(
+                    crate::ui::window::insert_attr_dialog::InsertAttrMsg::Value(index, value.to_string()),
+                )
+            }
+            // The attribute form's Cancel is the plain decline of the parked
+            // placement, so it is the modal closing itself.
+            "dialog_cancel" if self.active_modal == Some(crate::app::ModalKind::InsertAttributes) => {
+                Message::CloseModal
+            }
             "dialog_discard" | "dialog_cancel" => match self.active_modal {
                 Some(crate::app::ModalKind::Unsaved) => {
                     if name == "dialog_discard" {

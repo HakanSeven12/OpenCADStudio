@@ -219,6 +219,12 @@ impl OpenCADStudio {
         // editor holds a document-local handle into one tab, so drop it
         // now rather than risk it applying to a different tab's document.
         self.cancel_attr_editor();
+        // The insertion attribute form parks a placement on the tab it belongs
+        // to, so a closed tab has to take the form — and the placement — with it.
+        if self.active_modal == Some(crate::app::ModalKind::InsertAttributes) {
+            self.cancel_insert_attr_dialog();
+            self.close_active_modal();
+        }
         if self.tabs.get(idx).map_or(false, |t| t.dirty) {
             self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[idx].id));
             return self.open_unsaved_dialog_window();

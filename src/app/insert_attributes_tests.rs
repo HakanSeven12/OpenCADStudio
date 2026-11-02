@@ -9,7 +9,7 @@ use codec::entities::AttributeDefinition;
 use codec::types::Vector3;
 use codec::EntityType;
 
-fn askable(tag: &str, prompt: &str, default: &str) -> AttributeDefinition {
+pub(super) fn askable(tag: &str, prompt: &str, default: &str) -> AttributeDefinition {
     AttributeDefinition::new(tag.to_string(), prompt.to_string(), default.to_string())
 }
 
@@ -20,7 +20,7 @@ fn member_line() -> EntityType {
     ))
 }
 
-fn define(app: &mut OpenCADStudio, tab: usize, name: &str, attdefs: Vec<AttributeDefinition>) {
+pub(super) fn define(app: &mut OpenCADStudio, tab: usize, name: &str, attdefs: Vec<AttributeDefinition>) {
     let mut members = vec![member_line()];
     for (index, attdef) in attdefs.into_iter().enumerate() {
         members.push(EntityType::AttributeDefinition(AttributeDefinition {
@@ -36,7 +36,7 @@ fn define(app: &mut OpenCADStudio, tab: usize, name: &str, attdefs: Vec<Attribut
 
 /// Drive a placement up to the point where it needs the definition's
 /// attributes, then let the host resolve them.
-fn park_insert(app: &mut OpenCADStudio, tab: usize, block: &str) {
+pub(super) fn park_insert(app: &mut OpenCADStudio, tab: usize, block: &str) {
     let mut cmd =
         InsertBlockCommand::classic_for_block(block.to_string(), Vec::new(), String::new());
     let _ = cmd.on_point(glam::DVec3::ZERO);
@@ -52,7 +52,7 @@ fn park_insert(app: &mut OpenCADStudio, tab: usize, block: &str) {
     });
 }
 
-fn placed_attributes(app: &OpenCADStudio, tab: usize, block: &str) -> Vec<(String, String)> {
+pub(super) fn placed_attributes(app: &OpenCADStudio, tab: usize, block: &str) -> Vec<(String, String)> {
     app.tabs[tab]
         .scene
         .document
@@ -246,6 +246,7 @@ fn the_form_shows_the_block_its_prompts_and_its_buttons() {
     let state = InsertAttrState {
         block_name: "ATTR_REF2".to_string(),
         rows: vec![InsertAttrRow {
+            tag: "WIDTH".to_string(),
             label: "Width".to_string(),
             value: "100".to_string(),
         }],
@@ -325,4 +326,23 @@ fn an_attribute_without_a_prompt_is_asked_for_by_its_tag() {
         "with no prompt to show, the row names the attribute by its tag"
     );
     assert_eq!(rows[0].value, "12", "and opens on its default");
+}
+
+#[test]
+fn closing_the_tab_behind_the_form_leaves_no_form_behind() {
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    define(&mut app, i, "ATTDIA_CLOSING", vec![askable("TAG1", "", "7")]);
+    park_insert(&mut app, i, "ATTDIA_CLOSING");
+    assert_eq!(app.active_modal, Some(ModalKind::InsertAttributes));
+
+    let id = app.tabs[i].id;
+    app.tabs[i].dirty = false;
+    let _ = app.update(Message::TabClose(id));
+    assert_ne!(
+        app.active_modal,
+        Some(ModalKind::InsertAttributes),
+        "the placement the form answers belonged to the tab that just closed"
+    );
 }

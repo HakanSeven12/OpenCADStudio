@@ -8208,3 +8208,16 @@ block-parameter-properties =
     .end-grip = Päätekahvan sijainti
     .x-grip = X-kahvan sijainti
     .y-grip = Y-kahvan sijainti
+
+block-value-set =
+    .use-min = Käytä arvolle { $label } minimiä
+    .use-max = Käytä arvolle { $label } maksimia
+    .use-increment = Käytä arvolle { $label } askelta
+    .use-list = Käytä arvolle { $label } sallittujen arvojen luetteloa
+    .min = Arvon { $label } minimi
+    .max = Arvon { $label } maksimi
+    .increment = Arvon { $label } askel
+    .values = Arvon { $label } sallitut arvot
+    .title = Arvojoukko
+    .x-distance = X-etäisyys
+    .y-distance = Y-etäisyys

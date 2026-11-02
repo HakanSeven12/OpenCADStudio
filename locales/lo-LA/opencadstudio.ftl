@@ -8202,3 +8202,16 @@ block-parameter-properties =
     .end-grip = ຕຳແໜ່ງຈຸດຈັບປາຍ
     .x-grip = ຕຳແໜ່ງຈຸດຈັບ X
     .y-grip = ຕຳແໜ່ງຈຸດຈັບ Y
+
+block-value-set =
+    .use-min = ໃຊ້ຄ່າຕ່ຳສຸດຂອງ { $label }
+    .use-max = ໃຊ້ຄ່າສູງສຸດຂອງ { $label }
+    .use-increment = ໃຊ້ຄ່າເພີ່ມຂອງ { $label }
+    .use-list = ໃຊ້ລາຍການຄ່າທີ່ອະນຸຍາດຂອງ { $label }
+    .min = ຄ່າຕ່ຳສຸດຂອງ { $label }
+    .max = ຄ່າສູງສຸດຂອງ { $label }
+    .increment = ຄ່າເພີ່ມຂອງ { $label }
+    .values = ຄ່າທີ່ອະນຸຍາດຂອງ { $label }
+    .title = ຊຸດຄ່າ
+    .x-distance = ໄລຍະຫ່າງ X
+    .y-distance = ໄລຍະຫ່າງ Y

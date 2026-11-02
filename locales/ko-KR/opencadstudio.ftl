@@ -8200,3 +8200,16 @@ block-parameter-properties =
     .end-grip = 끝 그립 위치
     .x-grip = X 그립 위치
     .y-grip = Y 그립 위치
+
+block-value-set =
+    .use-min = { $label } 최소값 사용
+    .use-max = { $label } 최대값 사용
+    .use-increment = { $label } 증분 사용
+    .use-list = { $label } 허용 값 목록 사용
+    .min = { $label } 최소값
+    .max = { $label } 최대값
+    .increment = { $label } 증분
+    .values = { $label } 허용 값
+    .title = 값 세트
+    .x-distance = X 거리
+    .y-distance = Y 거리

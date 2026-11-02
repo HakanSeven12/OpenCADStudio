@@ -8208,3 +8208,16 @@ block-parameter-properties =
     .end-grip = Vị trí điểm nắm cuối
     .x-grip = Vị trí điểm nắm X
     .y-grip = Vị trí điểm nắm Y
+
+block-value-set =
+    .use-min = Dùng giá trị tối thiểu của { $label }
+    .use-max = Dùng giá trị tối đa của { $label }
+    .use-increment = Dùng bước tăng của { $label }
+    .use-list = Dùng danh sách giá trị cho phép của { $label }
+    .min = Giá trị tối thiểu của { $label }
+    .max = Giá trị tối đa của { $label }
+    .increment = Bước tăng của { $label }
+    .values = Giá trị cho phép của { $label }
+    .title = Tập giá trị
+    .x-distance = Khoảng cách X
+    .y-distance = Khoảng cách Y

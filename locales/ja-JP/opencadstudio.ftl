@@ -8189,3 +8189,16 @@ block-parameter-properties =
     .end-grip = 端点グリップの位置
     .x-grip = X グリップの位置
     .y-grip = Y グリップの位置
+
+block-value-set =
+    .use-min = { $label } の最小値を使用
+    .use-max = { $label } の最大値を使用
+    .use-increment = { $label } の増分を使用
+    .use-list = { $label } の許可値リストを使用
+    .min = { $label } の最小値
+    .max = { $label } の最大値
+    .increment = { $label } の増分
+    .values = { $label } の許可値
+    .title = 値セット
+    .x-distance = X 距離
+    .y-distance = Y 距離

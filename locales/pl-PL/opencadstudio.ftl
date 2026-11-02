@@ -8213,3 +8213,16 @@ block-parameter-properties =
     .end-grip = Położenie uchwytu końcowego
     .x-grip = Położenie uchwytu X
     .y-grip = Położenie uchwytu Y
+
+block-value-set =
+    .use-min = Użyj minimum dla { $label }
+    .use-max = Użyj maksimum dla { $label }
+    .use-increment = Użyj kroku dla { $label }
+    .use-list = Użyj listy dozwolonych wartości dla { $label }
+    .min = Minimum dla { $label }
+    .max = Maksimum dla { $label }
+    .increment = Krok dla { $label }
+    .values = Dozwolone wartości dla { $label }
+    .title = Zestaw wartości
+    .x-distance = Odległość X
+    .y-distance = Odległość Y

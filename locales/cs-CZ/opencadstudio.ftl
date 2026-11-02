@@ -8211,3 +8211,16 @@ block-parameter-properties =
     .end-grip = Poloha koncového uzlu
     .x-grip = Poloha uzlu X
     .y-grip = Poloha uzlu Y
+
+block-value-set =
+    .use-min = Použít minimum pro { $label }
+    .use-max = Použít maximum pro { $label }
+    .use-increment = Použít krok pro { $label }
+    .use-list = Použít seznam povolených hodnot pro { $label }
+    .min = Minimum pro { $label }
+    .max = Maximum pro { $label }
+    .increment = Krok pro { $label }
+    .values = Povolené hodnoty pro { $label }
+    .title = Sada hodnot
+    .x-distance = Vzdálenost X
+    .y-distance = Vzdálenost Y

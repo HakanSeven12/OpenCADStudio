@@ -8211,3 +8211,16 @@ block-parameter-properties =
     .end-grip = Θέση τελικής λαβής
     .x-grip = Θέση λαβής X
     .y-grip = Θέση λαβής Y
+
+block-value-set =
+    .use-min = Χρήση ελάχιστου για { $label }
+    .use-max = Χρήση μέγιστου για { $label }
+    .use-increment = Χρήση βήματος για { $label }
+    .use-list = Χρήση λίστας επιτρεπόμενων τιμών για { $label }
+    .min = Ελάχιστο για { $label }
+    .max = Μέγιστο για { $label }
+    .increment = Βήμα για { $label }
+    .values = Επιτρεπόμενες τιμές για { $label }
+    .title = Σύνολο τιμών
+    .x-distance = Απόσταση X
+    .y-distance = Απόσταση Y

@@ -8199,3 +8199,16 @@ block-parameter-properties =
     .end-grip = अंत ग्रिप स्थान
     .x-grip = X ग्रिप स्थान
     .y-grip = Y ग्रिप स्थान
+
+block-value-set =
+    .use-min = { $label } न्यूनतम उपयोग करें
+    .use-max = { $label } अधिकतम उपयोग करें
+    .use-increment = { $label } वृद्धि उपयोग करें
+    .use-list = { $label } अनुमत मान सूची उपयोग करें
+    .min = { $label } न्यूनतम
+    .max = { $label } अधिकतम
+    .increment = { $label } वृद्धि
+    .values = { $label } अनुमत मान
+    .title = मान समूह
+    .x-distance = X दूरी
+    .y-distance = Y दूरी

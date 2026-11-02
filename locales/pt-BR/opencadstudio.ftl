@@ -8211,3 +8211,16 @@ block-parameter-properties =
     .end-grip = Posição da alça final
     .x-grip = Posição da alça X
     .y-grip = Posição da alça Y
+
+block-value-set =
+    .use-min = Usar mínimo de { $label }
+    .use-max = Usar máximo de { $label }
+    .use-increment = Usar incremento de { $label }
+    .use-list = Usar lista de valores permitidos de { $label }
+    .min = Mínimo de { $label }
+    .max = Máximo de { $label }
+    .increment = Incremento de { $label }
+    .values = Valores permitidos de { $label }
+    .title = Conjunto de valores
+    .x-distance = Distância X
+    .y-distance = Distância Y

@@ -8211,3 +8211,16 @@ block-parameter-properties =
     .end-grip = Position de la poignée de fin
     .x-grip = Position de la poignée X
     .y-grip = Position de la poignée Y
+
+block-value-set =
+    .use-min = Utiliser le minimum de { $label }
+    .use-max = Utiliser le maximum de { $label }
+    .use-increment = Utiliser l’incrément de { $label }
+    .use-list = Utiliser la liste des valeurs autorisées de { $label }
+    .min = Minimum de { $label }
+    .max = Maximum de { $label }
+    .increment = Incrément de { $label }
+    .values = Valeurs autorisées de { $label }
+    .title = Ensemble de valeurs
+    .x-distance = Distance X
+    .y-distance = Distance Y

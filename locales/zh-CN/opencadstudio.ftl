@@ -8184,3 +8184,16 @@ block-parameter-properties =
     .end-grip = 端点夹点位置
     .x-grip = X 夹点位置
     .y-grip = Y 夹点位置
+
+block-value-set =
+    .use-min = 使用 { $label } 最小值
+    .use-max = 使用 { $label } 最大值
+    .use-increment = 使用 { $label } 增量
+    .use-list = 使用 { $label } 允许值列表
+    .min = { $label } 最小值
+    .max = { $label } 最大值
+    .increment = { $label } 增量
+    .values = { $label } 允许值
+    .title = 值集
+    .x-distance = X 距离
+    .y-distance = Y 距离

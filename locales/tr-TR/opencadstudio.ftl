@@ -8132,3 +8132,16 @@ block-parameter-properties =
     .end-grip = Bitiş tutamacı konumu
     .x-grip = X tutamacı konumu
     .y-grip = Y tutamacı konumu
+
+block-value-set =
+    .use-min = { $label } minimumunu kullan
+    .use-max = { $label } maksimumunu kullan
+    .use-increment = { $label } artışını kullan
+    .use-list = { $label } izin verilen değerler listesini kullan
+    .min = { $label } minimumu
+    .max = { $label } maksimumu
+    .increment = { $label } artışı
+    .values = { $label } izin verilen değerler
+    .title = Değer kümesi
+    .x-distance = X mesafesi
+    .y-distance = Y mesafesi

@@ -2863,10 +2863,14 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                     ),
                                     _ => continue,
                                 };
+                                let component = match key {
+                                    "xy_x" => crate::tr!("block-value-set", "x-distance"),
+                                    "xy_y" => crate::tr!("block-value-set", "y-distance"),
+                                    _ => crate::t!(label).into_owned(),
+                                };
                                 props.extend([
                                     Property {
-                                        label: crate::tf!("Use {} minimum", crate::t!(label))
-                                            .into_owned(),
+                                        label: crate::tr!("block-value-set", "use-min", label = component.as_str()),
                                         field: minimum_enabled,
                                         value: PropValue::BoolToggle {
                                             field: minimum_enabled,
@@ -2874,8 +2878,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tf!("Use {} maximum", crate::t!(label))
-                                            .into_owned(),
+                                        label: crate::tr!("block-value-set", "use-max", label = component.as_str()),
                                         field: maximum_enabled,
                                         value: PropValue::BoolToggle {
                                             field: maximum_enabled,
@@ -2883,8 +2886,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tf!("Use {} increment", crate::t!(label))
-                                            .into_owned(),
+                                        label: crate::tr!("block-value-set", "use-increment", label = component.as_str()),
                                         field: increment_enabled,
                                         value: PropValue::BoolToggle {
                                             field: increment_enabled,
@@ -2892,11 +2894,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tf!(
-                                            "Use {} allowed-value list",
-                                            crate::t!(label)
-                                        )
-                                        .into_owned(),
+                                        label: crate::tr!("block-value-set", "use-list", label = component.as_str()),
                                         field: values_enabled,
                                         value: PropValue::BoolToggle {
                                             field: values_enabled,
@@ -2904,26 +2902,22 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tf!("{} minimum", crate::t!(label))
-                                            .into_owned(),
+                                        label: crate::tr!("block-value-set", "min", label = component.as_str()),
                                         field: minimum,
                                         value: PropValue::EditText(value_set.minimum.to_string()),
                                     },
                                     Property {
-                                        label: crate::tf!("{} maximum", crate::t!(label))
-                                            .into_owned(),
+                                        label: crate::tr!("block-value-set", "max", label = component.as_str()),
                                         field: maximum,
                                         value: PropValue::EditText(value_set.maximum.to_string()),
                                     },
                                     Property {
-                                        label: crate::tf!("{} increment", crate::t!(label))
-                                            .into_owned(),
+                                        label: crate::tr!("block-value-set", "increment", label = component.as_str()),
                                         field: increment,
                                         value: PropValue::EditText(value_set.increment.to_string()),
                                     },
                                     Property {
-                                        label: crate::tf!("{} allowed values", crate::t!(label))
-                                            .into_owned(),
+                                        label: crate::tr!("block-value-set", "values", label = component.as_str()),
                                         field: values,
                                         value: PropValue::EditText(
                                             value_set
@@ -2937,7 +2931,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                 ]);
                             }
                             panel.sections.push(PropSection {
-                                title: crate::t!("Value Set").into_owned(),
+                                title: crate::tr!("block-value-set", "title"),
                                 props,
                             });
                         }

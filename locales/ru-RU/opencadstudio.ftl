@@ -8215,3 +8215,16 @@ block-parameter-properties =
     .end-grip = Положение конечной ручки
     .x-grip = Положение ручки X
     .y-grip = Положение ручки Y
+
+block-value-set =
+    .use-min = Использовать минимум для { $label }
+    .use-max = Использовать максимум для { $label }
+    .use-increment = Использовать шаг для { $label }
+    .use-list = Использовать список допустимых значений для { $label }
+    .min = Минимум для { $label }
+    .max = Максимум для { $label }
+    .increment = Шаг для { $label }
+    .values = Допустимые значения для { $label }
+    .title = Набор значений
+    .x-distance = Расстояние X
+    .y-distance = Расстояние Y

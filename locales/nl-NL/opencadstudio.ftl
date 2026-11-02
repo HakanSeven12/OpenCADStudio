@@ -8209,3 +8209,16 @@ block-parameter-properties =
     .end-grip = Positie eindgreep
     .x-grip = Positie X-greep
     .y-grip = Positie Y-greep
+
+block-value-set =
+    .use-min = Minimum voor { $label } gebruiken
+    .use-max = Maximum voor { $label } gebruiken
+    .use-increment = Stap voor { $label } gebruiken
+    .use-list = Lijst met toegestane waarden voor { $label } gebruiken
+    .min = Minimum voor { $label }
+    .max = Maximum voor { $label }
+    .increment = Stap voor { $label }
+    .values = Toegestane waarden voor { $label }
+    .title = Waardenset
+    .x-distance = X-afstand
+    .y-distance = Y-afstand

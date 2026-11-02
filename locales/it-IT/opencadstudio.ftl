@@ -8210,3 +8210,16 @@ block-parameter-properties =
     .end-grip = Posizione grip finale
     .x-grip = Posizione grip X
     .y-grip = Posizione grip Y
+
+block-value-set =
+    .use-min = Usa minimo di { $label }
+    .use-max = Usa massimo di { $label }
+    .use-increment = Usa incremento di { $label }
+    .use-list = Usa elenco dei valori consentiti di { $label }
+    .min = Minimo di { $label }
+    .max = Massimo di { $label }
+    .increment = Incremento di { $label }
+    .values = Valori consentiti di { $label }
+    .title = Insieme di valori
+    .x-distance = Distanza X
+    .y-distance = Distanza Y

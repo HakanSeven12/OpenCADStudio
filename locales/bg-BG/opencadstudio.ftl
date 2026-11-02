@@ -8211,3 +8211,16 @@ block-parameter-properties =
     .end-grip = Позиция на краен манипулатор
     .x-grip = Позиция на манипулатор X
     .y-grip = Позиция на манипулатор Y
+
+block-value-set =
+    .use-min = Използване на минимум за { $label }
+    .use-max = Използване на максимум за { $label }
+    .use-increment = Използване на стъпка за { $label }
+    .use-list = Използване на списък с допустими стойности за { $label }
+    .min = Минимум за { $label }
+    .max = Максимум за { $label }
+    .increment = Стъпка за { $label }
+    .values = Допустими стойности за { $label }
+    .title = Набор от стойности
+    .x-distance = Разстояние X
+    .y-distance = Разстояние Y

@@ -8189,3 +8189,16 @@ block-parameter-properties =
     .end-grip = Végfogópont helye
     .x-grip = X fogópont helye
     .y-grip = Y fogópont helye
+
+block-value-set =
+    .use-min = { $label } minimum használata
+    .use-max = { $label } maximum használata
+    .use-increment = { $label } lépésköz használata
+    .use-list = { $label } engedélyezett értéklista használata
+    .min = { $label } minimum
+    .max = { $label } maximum
+    .increment = { $label } lépésköz
+    .values = { $label } engedélyezett értékek
+    .title = Értékkészlet
+    .x-distance = X távolság
+    .y-distance = Y távolság

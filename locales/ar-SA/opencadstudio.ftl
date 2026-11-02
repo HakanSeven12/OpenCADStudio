@@ -8214,3 +8214,16 @@ block-parameter-properties =
     .end-grip = موضع مقبض النهاية
     .x-grip = موضع مقبض X
     .y-grip = موضع مقبض Y
+
+block-value-set =
+    .use-min = استخدام الحد الأدنى لـ { $label }
+    .use-max = استخدام الحد الأقصى لـ { $label }
+    .use-increment = استخدام زيادة { $label }
+    .use-list = استخدام قائمة القيم المسموحة لـ { $label }
+    .min = الحد الأدنى لـ { $label }
+    .max = الحد الأقصى لـ { $label }
+    .increment = زيادة { $label }
+    .values = القيم المسموحة لـ { $label }
+    .title = مجموعة القيم
+    .x-distance = المسافة X
+    .y-distance = المسافة Y

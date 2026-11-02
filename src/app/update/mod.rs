@@ -78,7 +78,8 @@ fn perf_variant_name(msg: &Message) -> String {
     impl std::fmt::Write for VariantPrefix {
         fn write_str(&mut self, part: &str) -> std::fmt::Result {
             for character in part.chars() {
-                if matches!(character, '(' | '{') || character.is_whitespace()
+                if matches!(character, '(' | '{')
+                    || character.is_whitespace()
                     || self.0.len() >= 72
                 {
                     return Err(std::fmt::Error);

@@ -1702,7 +1702,7 @@ impl OpenCADStudio {
             command.set_ctrl(self.ctrl_down);
             command.set_shift(self.shift_down);
         }
-        let constraint_hover_ms = crate::perf::elapsed_ms(perf_move.then_some(move_started));
+        let pre_grip_ms = crate::perf::elapsed_ms(perf_move.then_some(move_started));
 
         // UCS icon grip drag: map the cursor onto the UCS plane and
         // slide the origin / rotate the axis. Short-circuits pan & snap.
@@ -4257,7 +4257,7 @@ impl OpenCADStudio {
                 "idle"
             };
             crate::perf_record!(
-                "[perf] pointer-move mode={mode:<7} {:>7.1}ms pre_grip={constraint_hover_ms:.2}ms grip_hover={grip_hover_ms:.2}ms",
+                "[perf] pointer-move mode={mode:<7} {:>7.1}ms pre_grip={pre_grip_ms:.2}ms grip_hover={grip_hover_ms:.2}ms",
                 move_ms,
             );
         }

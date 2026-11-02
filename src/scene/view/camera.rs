@@ -314,13 +314,22 @@ impl Camera {
     /// coordinates — the CPU equivalent of the GPU's relative-to-eye path.
     /// Returns `None` for points at/behind the perspective eye plane.
     pub fn project(&self, p: glam::DVec3, bounds: Rectangle) -> Option<glam::Vec2> {
-        let screen = crate::scene::view::projection::project_screen(
-            self.view_proj_rte(bounds),
-            self.eye(),
-            bounds,
-            p,
-        )?;
-        Some(glam::vec2(screen.x, screen.y))
+        self.projector(bounds)(p)
+    }
+
+    /// [`Self::project`] with the view matrix built once, for projecting
+    /// many points under one view.
+    pub fn projector(
+        &self,
+        bounds: Rectangle,
+    ) -> impl Fn(glam::DVec3) -> Option<glam::Vec2> + Copy {
+        let view_rot = self.view_proj_rte(bounds);
+        let eye = self.eye();
+        move |p| {
+            let screen =
+                crate::scene::view::projection::project_screen(view_rot, eye, bounds, p)?;
+            Some(glam::vec2(screen.x, screen.y))
+        }
     }
 
     /// Unproject in f64, with the kernel intersection relative to the plane

@@ -198,19 +198,6 @@ impl Geo {
 
 fn geo_overlaps_aabb(geo: &Geo, target: [f64; 4]) -> bool {
     let bounds = match geo {
-        Geo::Line { p1, p2, .. } => [
-            p1[0].min(p2[0]),
-            p1[1].min(p2[1]),
-            p1[0].max(p2[0]),
-            p1[1].max(p2[1]),
-        ],
-        Geo::Arc { cx, cy, r, .. } | Geo::Circle { cx, cy, r, .. } => {
-            [cx - r, cy - r, cx + r, cy + r]
-        }
-        Geo::Ellipse { cx, cy, a, b, .. } => {
-            let radius = a.abs() + b.abs();
-            [cx - radius, cy - radius, cx + radius, cy + radius]
-        }
         Geo::Spline { curve, .. } => {
             let samples = (0..=32).map(|i| curve.point_at(i as f64 / 32.0));
             let mut bounds = [
@@ -228,7 +215,10 @@ fn geo_overlaps_aabb(geo: &Geo, target: [f64; 4]) -> bool {
             bounds
         }
         // Unbounded boundaries are always retained in the nearby set.
-        Geo::Ray { .. } | Geo::InfLine { .. } => return true,
+        _ => match trim_geo_aabb(geo) {
+            Some(bounds) => bounds,
+            None => return true,
+        },
     };
     bounds[0] <= target[2]
         && bounds[2] >= target[0]
@@ -247,20 +237,12 @@ fn trim_target_bounds(curve: &Curve) -> Option<[f64; 4]> {
             line.start[0].max(line.end[0]),
             line.start[1].max(line.end[1]),
         ],
-        Curve::Arc(arc) => {
-            let r = arc.radius.abs();
-            [arc.centre[0] - r, arc.centre[1] - r, arc.centre[0] + r, arc.centre[1] + r]
-        }
-        Curve::Circle(circle) => {
-            let r = circle.radius.abs();
-            [circle.centre[0] - r, circle.centre[1] - r,
-             circle.centre[0] + r, circle.centre[1] + r]
-        }
+        Curve::Arc(arc) => square_around(arc.centre, arc.radius.abs()),
+        Curve::Circle(circle) => square_around(circle.centre, circle.radius.abs()),
         Curve::Ellipse(arc) => {
             let ellipse = &arc.ellipse;
             let r = ellipse.major_radius.abs().max(ellipse.minor_radius.abs());
-            [ellipse.centre[0] - r, ellipse.centre[1] - r,
-             ellipse.centre[0] + r, ellipse.centre[1] + r]
+            square_around(ellipse.centre, r)
         }
         // Rays/XLines must find distant intersections. NURBS do not have
         // a cheap guaranteed conservative envelope at this call site.
@@ -271,9 +253,16 @@ fn trim_target_bounds(curve: &Curve) -> Option<[f64; 4]> {
     }
     let slack = CUT_TOLERANCE * 8.0;
     Some([
-        bounds[0] - slack, bounds[1] - slack,
-        bounds[2] + slack, bounds[3] + slack,
+        bounds[0] - slack,
+        bounds[1] - slack,
+        bounds[2] + slack,
+        bounds[3] + slack,
     ])
+}
+
+/// The XY box of a circle around `centre`.
+fn square_around(centre: [f64; 2], r: f64) -> [f64; 4] {
+    [centre[0] - r, centre[1] - r, centre[0] + r, centre[1] + r]
 }
 
 /// A static interval broad phase for the geometry of one TRIM operation.
@@ -307,7 +296,11 @@ impl TrimAabbIndex {
             max_x = max_x.max(bounds[2]);
             prefix_max_x.push(max_x);
         }
-        Self { entries, prefix_max_x, always }
+        Self {
+            entries,
+            prefix_max_x,
+            always,
+        }
     }
 
     fn overlapping(&self, target: [f64; 4]) -> Vec<usize> {
@@ -329,17 +322,16 @@ impl TrimAabbIndex {
 fn trim_geo_aabb(geo: &Geo) -> Option<[f64; 4]> {
     Some(match geo {
         Geo::Line { p1, p2, .. } => [
-            p1[0].min(p2[0]), p1[1].min(p2[1]),
-            p1[0].max(p2[0]), p1[1].max(p2[1]),
+            p1[0].min(p2[0]),
+            p1[1].min(p2[1]),
+            p1[0].max(p2[0]),
+            p1[1].max(p2[1]),
         ],
         Geo::Arc { cx, cy, r, .. } | Geo::Circle { cx, cy, r, .. } => {
-            [cx - r.abs(), cy - r.abs(), cx + r.abs(), cy + r.abs()]
+            square_around([*cx, *cy], r.abs())
         }
-        Geo::Ellipse { cx, cy, a, b, .. } => {
-            // Deliberately overestimate rotated ellipse bounds.
-            let r = a.abs() + b.abs();
-            [cx - r, cy - r, cx + r, cy + r]
-        }
+        // Deliberately overestimate rotated ellipse bounds.
+        Geo::Ellipse { cx, cy, a, b, .. } => square_around([*cx, *cy], a.abs() + b.abs()),
         Geo::Spline { .. } | Geo::Ray { .. } | Geo::InfLine { .. } => return None,
     })
 }
@@ -1585,7 +1577,10 @@ fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
             if let Some(bounds) = bounds {
                 local_geos.clear();
                 local_geos.extend(
-                    index.overlapping(bounds).into_iter().map(|idx| geos[idx].clone())
+                    index
+                        .overlapping(bounds)
+                        .into_iter()
+                        .map(|idx| geos[idx].clone()),
                 );
                 local_geos.as_slice()
             } else {

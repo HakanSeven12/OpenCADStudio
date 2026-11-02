@@ -173,7 +173,10 @@ fn expand_stub_near_recursive(
     for child in stub.prototype.iter() {
         if let Some(query) = near {
             let [x0, y0, x1, y1] = child.aabb.map(f64::from);
-            if x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()
+            if x0.is_finite()
+                && y0.is_finite()
+                && x1.is_finite()
+                && y1.is_finite()
                 && (x1 + offset[0] < query[0]
                     || x0 + offset[0] > query[2]
                     || y1 + offset[1] < query[1]

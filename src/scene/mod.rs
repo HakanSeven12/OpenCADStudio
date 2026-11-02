@@ -75,6 +75,7 @@ mod hatch_boundary;
 mod layout;
 mod limits;
 mod modify;
+pub(crate) mod table_content;
 pub(crate) use modify::remap_copied_reactors;
 pub(crate) use modify::remap_copied_viewport_clips;
 pub(crate) use modify::inverse_affine;
@@ -4391,6 +4392,13 @@ impl Scene {
                         *handle,
                     )
                     .is_empty();
+                    // AutoCAD rebuilds the table from its TABLECONTENT copy:
+                    // keep the copy in step, with its old value on record.
+                    if let Some((content, before)) =
+                        table_content::sync_table_content_object(&mut self.document, *handle)
+                    {
+                        self.record_undo_object_before(content, Some(before));
+                    }
                 }
             }
             // The block's cached drawing is stale once its texts change.

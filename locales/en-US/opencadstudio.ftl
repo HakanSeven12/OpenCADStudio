@@ -7815,6 +7815,17 @@ table-cmd =
     .styles-in-use = Styles in use
 
 table-style-cells =
+    .tbl-start-from-style = Start from table style
+    .tbl-extra-columns = Additional columns
+    .tbl-extra-rows = Additional rows
+    .tbl-keep-from-template = Keep from the starting table:
+    .tbl-keep-label-text = Label cell text
+    .tbl-keep-data-text = Data cell text
+    .tbl-keep-overrides = Cell style overrides
+    .tbl-keep-links = Data links
+    .tbl-keep-fields = Fields
+    .tbl-keep-formulas = Formulas
+    .tbl-extra-whole = Additional rows and columns must be whole numbers.
     .from-style-insertion = __ocs_arg_n__  Specify insertion point or [Style/Rows/Columns/Options]:
     .from-style-name = __ocs_arg_n__  Enter the name of a table style or [?] <__ocs_arg_style__>:
     .from-style-rows = __ocs_arg_n__  Enter number of additional rows <__ocs_arg_rows__>:

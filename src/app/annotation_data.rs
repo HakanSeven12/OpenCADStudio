@@ -1944,6 +1944,15 @@ impl OpenCADStudio {
         let style = table_style_choices(doc)
             .into_iter()
             .find(|choice| choice.name.eq_ignore_ascii_case(&self.table_insert.style));
+        self.table_insert.template = style.as_ref().and_then(|choice| {
+            let template = choice.template.as_ref()?;
+            let width = template.columns.first().map_or(0.0, |c| c.width);
+            Some((crate::entities::common::format_length(width), "1".to_string()))
+        });
+        if self.table_insert.template.is_some() {
+            self.table_insert.insertion = TableInsertion::Point;
+        }
+        self.table_insert.template_options = *crate::modules::annotate::table_cmd::template_options();
         self.table_insert.cell_styles = style.map_or_else(Vec::new, |choice| {
             choice
                 .style
@@ -1973,6 +1982,20 @@ impl OpenCADStudio {
             TableInsertField::FirstRowStyle(value) => self.table_insert.first_row_style = value,
             TableInsertField::SecondRowStyle(value) => self.table_insert.second_row_style = value,
             TableInsertField::OtherRowStyle(value) => self.table_insert.other_row_style = value,
+            TableInsertField::ExtraColumns(value) => self.table_insert.extra_columns = value,
+            TableInsertField::ExtraRows(value) => self.table_insert.extra_rows = value,
+            TableInsertField::TemplateOption(index, on) => {
+                let o = &mut self.table_insert.template_options;
+                *match index {
+                    0 => &mut o.label_text,
+                    1 => &mut o.data_text,
+                    2 => &mut o.formulas,
+                    3 => &mut o.fields,
+                    4 => &mut o.data_links,
+                    5 => &mut o.blocks,
+                    _ => &mut o.cell_style_overrides,
+                } = on;
+            }
         }
         self.table_insert.error.clear();
         Task::none()
@@ -2010,6 +2033,35 @@ impl OpenCADStudio {
             let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(
                 table,
                 choice.handle,
+            );
+            self.active_modal = None;
+            self.reset_modal_geometry();
+            self.command_line.push_info(&command.prompt());
+            self.tabs[i].active_cmd = Some(Box::new(command));
+            return Task::none();
+        }
+        // A style with a starting table places that table, grown by the
+        // additional rows and columns.
+        let template_style = self.table_insert.template.is_some().then(|| {
+            table_style_choices(&self.tabs[i].scene.document)
+                .into_iter()
+                .find(|choice| choice.name.eq_ignore_ascii_case(&self.table_insert.style))
+        });
+        if let Some(Some(style)) = template_style {
+            let (Ok(extra_columns), Ok(extra_rows)) = (
+                self.table_insert.extra_columns.trim().parse::<usize>(),
+                self.table_insert.extra_rows.trim().parse::<usize>(),
+            ) else {
+                self.table_insert.error =
+                    crate::t!("Additional rows and columns must be whole numbers.").into_owned();
+                return Task::none();
+            };
+            *crate::modules::annotate::table_cmd::template_options() =
+                self.table_insert.template_options;
+            let command = crate::modules::annotate::table_cmd::TableCommand::from_style(
+                style,
+                extra_rows,
+                extra_columns,
             );
             self.active_modal = None;
             self.reset_modal_geometry();

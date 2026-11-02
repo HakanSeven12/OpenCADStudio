@@ -7735,6 +7735,17 @@ table-cmd =
     .styles-in-use = Kullanılan stiller
 
 table-style-cells =
+    .tbl-start-from-style = Tablo stilinden başla
+    .tbl-extra-columns = Ek sütun
+    .tbl-extra-rows = Ek satır
+    .tbl-keep-from-template = Başlangıç tablosundan korunacaklar:
+    .tbl-keep-label-text = Etiket hücresi metni
+    .tbl-keep-data-text = Veri hücresi metni
+    .tbl-keep-overrides = Hücre stili geçersiz kılmaları
+    .tbl-keep-links = Veri bağlantıları
+    .tbl-keep-fields = Alanlar
+    .tbl-keep-formulas = Formüller
+    .tbl-extra-whole = Ek satır ve sütun sayısı tam sayı olmalıdır.
     .from-style-insertion = __ocs_arg_n__  Ekleme noktasını belirtin veya [Style/Rows/Columns/Options]:
     .from-style-name = __ocs_arg_n__  Tablo stilinin adını girin veya [?] <__ocs_arg_style__>:
     .from-style-rows = __ocs_arg_n__  Ek satır sayısını girin <__ocs_arg_rows__>:

@@ -239,49 +239,39 @@ impl PluginManager {
         // elimination — but only when exactly one plugin waits. With several
         // booting at once the ack is ambiguous; the boot grace covers them.
         if plugin_id.is_empty() {
-            let unattached = |p: &&LoadedPlugin| {
-                !p.attach.lock().unwrap_or_else(|e| e.into_inner()).attached
-            };
-            let mut waiting = self.plugins.iter().enumerate().filter(|(_, p)| unattached(p)).map(|(index, _)| index);
+            let unattached =
+                |p: &&LoadedPlugin| !p.attach.lock().unwrap_or_else(|e| e.into_inner()).attached;
+            let mut waiting = self
+                .plugins
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| unattached(p))
+                .map(|(index, _)| index);
             return match (waiting.next(), waiting.next()) {
-                (Some(index), None) => {
-                    let flushed = self.attach_by_index(index);
-                    AttachOutcome::Attached(flushed)
-                }
+                (Some(index), None) => self.attach_by_index(index),
                 (None, _) => AttachOutcome::AlreadyAttached,
                 (_, _) => AttachOutcome::Ambiguous(self.plugins.iter().filter(unattached).count()),
             };
         }
-        let index = match self
+        match self
             .plugins
             .iter()
             .position(|p| p.process.id() == plugin_id)
         {
-            Some(index) => index,
-            None => return AttachOutcome::UnknownPlugin,
-        };
-        let already = self.plugins[index]
-            .attach
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .attached;
-        let flushed = self.attach_by_index(index);
-        if already {
-            AttachOutcome::AlreadyAttached
-        } else {
-            AttachOutcome::Attached(flushed)
+            Some(index) => self.attach_by_index(index),
+            None => AttachOutcome::UnknownPlugin,
         }
     }
 
     /// Attach one plugin by index (shared helper).
-    fn attach_by_index(&self, index: usize) -> usize {
+    fn attach_by_index(&self, index: usize) -> AttachOutcome {
         let p = &self.plugins[index];
         let pending = {
             let mut attach = p.attach.lock().unwrap_or_else(|e| e.into_inner());
             if attach.attached {
                 // A second ack (runner restart on the same process, a
                 // duplicate frame): idempotent, nothing deferred.
-                return 0;
+                return AttachOutcome::AlreadyAttached;
             }
             attach.attached = true;
             attach.grace_deadline = None;
@@ -303,7 +293,7 @@ impl PluginManager {
                 );
             }
         }
-        flushed
+        AttachOutcome::Attached(flushed)
     }
 
     /// Whether a plugin's notification channel has been acked live (or the

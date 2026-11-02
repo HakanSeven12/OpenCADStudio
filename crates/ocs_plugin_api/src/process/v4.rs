@@ -161,9 +161,8 @@ impl V4Connection {
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                // Unconditional: marking the connection dead while the OS
-                // process may be alive is the boot-death class — this line
-                // is the only trace of the first failure.
+                // Always logged: the process may still run after the
+                // connection is marked dead, and this is the only record.
                 eprintln!(
                     "[plugin] V4 call deadline expired: request={kind} timeout={timeout:?} \
                      (marking the connection dead)"

@@ -506,11 +506,9 @@ mod loader {
             match manager.load(&path, &mut host) {
                 Ok(id) => out.push((id, Ok(()))),
                 Err(e) => {
-                    // LOUD on stderr too (v14): the command-line error never
-                    // reaches an automation/headless session (no user reads
-                    // it there) — a spawn-timeout load failure then looked
-                    // like a healthy boot whose plugin simply never
-                    // answered. This line is the trace.
+                    // Also on stderr: a headless or automation session never
+                    // sees the command-line error, and a failed load would
+                    // otherwise look like a plugin that never answered.
                     eprintln!("[plugin] {} FAILED to load: {e}", d.id);
                     out.push((d.id.clone(), Err(e.to_string())));
                 }

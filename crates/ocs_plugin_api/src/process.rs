@@ -179,12 +179,10 @@ macro_rules! vlog {
 
 /// Maximum time to wait for the plugin runner to connect back to the host.
 ///
-/// 90 s (was 30): the host spawns *itself* (a 100+ MB executable) and
-/// antivirus scans of a freshly-written or newly-spawned image regularly
-/// exceed 30 s on Windows — the codebase's own history (the hard-link
-/// removal) records exactly this failure class. A scan-slowed runner is
-/// HEALTHY; killing it at 30 s produced silent, unrecoverable boot deaths
-/// ("the plugin never answered") with the runner still alive.
+/// The host spawns itself (a 100+ MB executable) as the runner, and an
+/// antivirus scan of that image can take longer than 30 s on Windows. A
+/// runner slowed that way is healthy, so the wait is 90 s;
+/// `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` overrides it.
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn spawn_timeout() -> Duration {

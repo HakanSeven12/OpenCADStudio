@@ -146,11 +146,10 @@ pub fn run_host_reader_thread(
                     break;
                 }
                 Err(e) => {
-                    // Unconditional: a reader break here marks the whole
-                    // plugin connection dead while the runner process may
-                    // stay alive — this line is the ONLY trace of why (the
-                    // old vlog! gate hid it in non-verbose boots).
-                    eprintln!("[plugin] V4 host reader FATAL error: {e}");
+                    // Always logged: the break marks the connection dead
+                    // while the runner may still run, and this line is the
+                    // only record of why.
+                    eprintln!("[plugin] V4 host reader error: {e}");
                     break;
                 }
             }

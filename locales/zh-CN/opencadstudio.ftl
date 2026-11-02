@@ -8151,3 +8151,16 @@ block-operation-history =
     .properties-table = 块特性表
     .visibility-state = 可见性状态
     .visibility-states = 可见性状态列表
+
+block-formatted-history =
+    .action = { $label } 动作
+    .parameter = { $label } 参数
+    .edit-block = 编辑块 { $label }
+    .save-block = 将块另存为 { $label }
+    .delete-block = 删除块 { $label }
+
+block-history-kinds =
+    .flip = 翻转
+    .polar-stretch = 极轴拉伸
+    .basepoint = 基点
+    .lookup = 查寻

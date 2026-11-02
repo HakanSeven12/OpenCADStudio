@@ -312,6 +312,29 @@ pub fn translate(source: impl AsRef<str>) -> Cow<'static, str> {
     }
 }
 
+pub(crate) fn format_attribute(
+    message: &str,
+    attribute: &str,
+    arguments: &[(&str, &str)],
+) -> Option<String> {
+    format_attribute_with(loader(), message, attribute, arguments)
+}
+
+fn format_attribute_with(
+    loader: &FluentLanguageLoader,
+    message: &str,
+    attribute: &str,
+    arguments: &[(&str, &str)],
+) -> Option<String> {
+    let arguments = arguments.iter().copied().collect();
+    loader.with_fluent_message_and_bundle(message, |message, bundle| {
+        let pattern = message.get_attribute(attribute)?;
+        let mut errors = Vec::new();
+        let rendered = bundle.format_pattern(pattern.value(), Some(&arguments), &mut errors);
+        errors.is_empty().then(|| rendered.into_owned())
+    }).flatten()
+}
+
 /// Translate a catalog message and replace the named values used by legacy
 /// command prompts. Markers preserve values through Fluent parsing.
 pub fn translate_args(source: impl AsRef<str>, args: &[(&str, String)]) -> Cow<'static, str> {
@@ -521,6 +544,27 @@ macro_rules! tf {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn formatted_history_preserves_authored_values_in_every_locale() {
+        for language in Language::ALL.into_iter().filter(|language| *language != Language::System) {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).unwrap();
+            for attribute in ["action", "parameter", "edit-block", "save-block", "delete-block"] {
+                for authored in ["Revert", "  Door { $label } \\ literal __ocs_fmt_0__ \n", "باب — 扉"] {
+                    let rendered = format_attribute_with(
+                        &loader, "block-formatted-history", attribute, &[("label", authored)],
+                    ).expect("history template must format without errors");
+                    assert!(rendered.contains(authored), "{language:?}/{attribute}: {rendered:?}");
+                }
+            }
+            for source in ["Move", "Scale", "Rotate", "Flip", "Stretch", "Polar Stretch", "Array", "Basepoint", "Lookup"] {
+                let (message, attribute) = catalog_ids(source).expect("kind must have a Fluent key");
+                assert!(!loader.get_attr(message, attribute).is_empty());
+            }
+            assert!(format_attribute_with(&loader, "block-formatted-history", "edit-block", &[]).is_none());
+        }
+    }
 
     #[test]
     fn construction_prompts_preserve_operation_keywords_in_every_locale() {

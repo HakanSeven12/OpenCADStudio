@@ -54,7 +54,7 @@ impl OpenCADStudio {
             self.tabs[i].scene.clear_preview_wire();
             return Task::none();
         }
-        self.push_undo_snapshot(i, &format!("{} parameter", kind.name()));
+        self.push_undo_snapshot(i, super::document::HistoryLabel::formatted(format!("{} parameter", kind.name()), "parameter", super::document::HistoryLabel::Message(kind.name())));
         let parameter = match kind {
             Kind::Basepoint => {
                 block_basepoint::create(&mut self.tabs[i].scene.document, definition, location)

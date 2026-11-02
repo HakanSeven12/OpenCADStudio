@@ -8099,3 +8099,16 @@ block-operation-history =
     .properties-table = Blok özellikleri tablosu
     .visibility-state = Görünürlük durumu
     .visibility-states = Görünürlük durumları
+
+block-formatted-history =
+    .action = { $label } eylemi
+    .parameter = { $label } parametresi
+    .edit-block = { $label } bloğunu düzenle
+    .save-block = Bloğu { $label } olarak kaydet
+    .delete-block = { $label } bloğunu sil
+
+block-history-kinds =
+    .flip = Çevir
+    .polar-stretch = Kutupsal germe
+    .basepoint = Temel nokta
+    .lookup = Arama

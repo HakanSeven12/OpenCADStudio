@@ -3,6 +3,10 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Flip" => Some(("block-history-kinds", "flip")),
+        "Polar Stretch" => Some(("block-history-kinds", "polar-stretch")),
+        "Basepoint" => Some(("block-history-kinds", "basepoint")),
+        "Lookup" => Some(("block-history-kinds", "lookup")),
         "Reset block references" => Some(("block-operation-history", "reset-references")),
         "Associate block action" => Some(("block-operation-history", "associate-action")),
         "Action selection set" => Some(("block-operation-history", "action-selection")),

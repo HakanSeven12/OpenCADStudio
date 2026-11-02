@@ -304,7 +304,7 @@ impl OpenCADStudio {
             parametric_constraints,
             reference_designations: Vec::new(),
             named_parameters,
-            label: format!("Edit block {}", session.block_name).into(),
+            label: super::document::HistoryLabel::formatted(format!("Edit block {}", session.block_name), "edit-block", session.block_name.to_owned().into()),
         })
     }
 
@@ -604,7 +604,7 @@ impl OpenCADStudio {
         let mut delta = self
             .block_edit_delta(i, true)
             .expect("a new definition changes the document");
-        delta.label = format!("Save block as {name}").into();
+        delta.label = super::document::HistoryLabel::formatted(format!("Save block as {name}"), "save-block", name.to_owned().into());
         let mut history = self.tabs[i].block_edit_history.take().unwrap();
         std::mem::swap(&mut self.tabs[i].history, &mut history.main);
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));

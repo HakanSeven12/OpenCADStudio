@@ -8169,3 +8169,16 @@ block-operation-history =
     .properties-table = ຕາຕະລາງຄຸນສົມບັດບລັອກ
     .visibility-state = ສະຖານະການເບິ່ງເຫັນ
     .visibility-states = ລາຍການສະຖານະການເບິ່ງເຫັນ
+
+block-formatted-history =
+    .action = ການກະທຳ { $label }
+    .parameter = ພາຣາມິເຕີ { $label }
+    .edit-block = ແກ້ໄຂບລັອກ { $label }
+    .save-block = ບັນທຶກບລັອກເປັນ { $label }
+    .delete-block = ລຶບບລັອກ { $label }
+
+block-history-kinds =
+    .flip = ປີ້ນ
+    .polar-stretch = ຍືດແບບຂົ້ວ
+    .basepoint = ຈຸດຖານ
+    .lookup = ຄົ້ນຫາ

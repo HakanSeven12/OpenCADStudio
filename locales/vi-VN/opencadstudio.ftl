@@ -8175,3 +8175,16 @@ block-operation-history =
     .properties-table = Bảng thuộc tính khối
     .visibility-state = Trạng thái hiển thị
     .visibility-states = Các trạng thái hiển thị
+
+block-formatted-history =
+    .action = Hành động { $label }
+    .parameter = Tham số { $label }
+    .edit-block = Chỉnh sửa khối { $label }
+    .save-block = Lưu khối thành { $label }
+    .delete-block = Xóa khối { $label }
+
+block-history-kinds =
+    .flip = Lật
+    .polar-stretch = Kéo giãn cực
+    .basepoint = Điểm gốc
+    .lookup = Tra cứu

@@ -8178,3 +8178,16 @@ block-operation-history =
     .properties-table = Tabulka vlastností bloku
     .visibility-state = Stav viditelnosti
     .visibility-states = Stavy viditelnosti
+
+block-formatted-history =
+    .action = Akce { $label }
+    .parameter = Parametr { $label }
+    .edit-block = Upravit blok { $label }
+    .save-block = Uložit blok jako { $label }
+    .delete-block = Odstranit blok { $label }
+
+block-history-kinds =
+    .flip = Překlopení
+    .polar-stretch = Polární protažení
+    .basepoint = Základní bod
+    .lookup = Vyhledávání

@@ -8176,3 +8176,16 @@ block-operation-history =
     .properties-table = Blokeigenschappentabel
     .visibility-state = Zichtbaarheidsstatus
     .visibility-states = Zichtbaarheidsstatussen
+
+block-formatted-history =
+    .action = Actie { $label }
+    .parameter = Parameter { $label }
+    .edit-block = Blok { $label } bewerken
+    .save-block = Blok opslaan als { $label }
+    .delete-block = Blok { $label } verwijderen
+
+block-history-kinds =
+    .flip = Omkeren
+    .polar-stretch = Polair uitrekken
+    .basepoint = Basispunt
+    .lookup = Opzoeken

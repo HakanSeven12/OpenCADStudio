@@ -8156,3 +8156,16 @@ block-operation-history =
     .properties-table = Blokktulajdonság-táblázat
     .visibility-state = Láthatósági állapot
     .visibility-states = Láthatósági állapotok
+
+block-formatted-history =
+    .action = { $label } művelet
+    .parameter = { $label } paraméter
+    .edit-block = { $label } blokk szerkesztése
+    .save-block = Blokk mentése { $label } néven
+    .delete-block = { $label } blokk törlése
+
+block-history-kinds =
+    .flip = Átfordítás
+    .polar-stretch = Poláris nyújtás
+    .basepoint = Bázispont
+    .lookup = Keresés

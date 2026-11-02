@@ -8156,3 +8156,16 @@ block-operation-history =
     .properties-table = ブロックプロパティテーブル
     .visibility-state = 可視性の状態
     .visibility-states = 可視性の状態一覧
+
+block-formatted-history =
+    .action = { $label } アクション
+    .parameter = { $label } パラメーター
+    .edit-block = ブロック { $label } を編集
+    .save-block = ブロックを { $label } として保存
+    .delete-block = ブロック { $label } を削除
+
+block-history-kinds =
+    .flip = 反転
+    .polar-stretch = 極ストレッチ
+    .basepoint = 基点
+    .lookup = ルックアップ

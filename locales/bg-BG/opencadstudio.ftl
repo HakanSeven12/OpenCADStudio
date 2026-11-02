@@ -8178,3 +8178,16 @@ block-operation-history =
     .properties-table = Таблица със свойства на блок
     .visibility-state = Състояние на видимост
     .visibility-states = Състояния на видимост
+
+block-formatted-history =
+    .action = Действие { $label }
+    .parameter = Параметър { $label }
+    .edit-block = Редактиране на блок { $label }
+    .save-block = Записване на блок като { $label }
+    .delete-block = Изтриване на блок { $label }
+
+block-history-kinds =
+    .flip = Обръщане
+    .polar-stretch = Полярно разтягане
+    .basepoint = Базова точка
+    .lookup = Справка

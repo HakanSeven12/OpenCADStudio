@@ -522,7 +522,7 @@ impl OpenCADStudio {
                     Ok(handle)
                 }) {
                     Ok(_) => {
-                        self.push_undo_snapshot(i, &format!("{} action", kind.name()));
+                        self.push_undo_snapshot(i, super::document::HistoryLabel::formatted(format!("{} action", kind.name()), "action", super::document::HistoryLabel::Message(kind.name())));
                         self.tabs[i].scene.document = staged;
                         self.tabs[i].scene.bump_geometry();
                         self.tabs[i].dirty = true;

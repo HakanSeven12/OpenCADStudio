@@ -468,7 +468,7 @@ impl OpenCADStudio {
             .iter()
             .map(|session| session.br_handle)
             .collect();
-        self.push_undo_snapshot(i, format!("Delete block {name}"));
+        self.push_undo_snapshot(i, crate::app::document::HistoryLabel::formatted(format!("Delete block {name}"), "delete-block", name.to_owned().into()));
         let options = crate::scene::block_service::DeleteOptions {
             force,
             open_edits: &open_edits,

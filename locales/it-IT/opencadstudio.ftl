@@ -8177,3 +8177,16 @@ block-operation-history =
     .properties-table = Tabella delle proprietà del blocco
     .visibility-state = Stato di visibilità
     .visibility-states = Stati di visibilità
+
+block-formatted-history =
+    .action = Azione { $label }
+    .parameter = Parametro { $label }
+    .edit-block = Modifica blocco { $label }
+    .save-block = Salva blocco come { $label }
+    .delete-block = Elimina blocco { $label }
+
+block-history-kinds =
+    .flip = Capovolgi
+    .polar-stretch = Stiramento polare
+    .basepoint = Punto base
+    .lookup = Ricerca

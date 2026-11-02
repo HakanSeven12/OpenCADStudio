@@ -8163,3 +8163,16 @@ block-operation-history =
     .properties-table = 圖塊性質表
     .visibility-state = 可見性狀態
     .visibility-states = 可見性狀態清單
+
+block-formatted-history =
+    .action = { $label } 動作
+    .parameter = { $label } 參數
+    .edit-block = 編輯圖塊 { $label }
+    .save-block = 將圖塊另存為 { $label }
+    .delete-block = 刪除圖塊 { $label }
+
+block-history-kinds =
+    .flip = 翻轉
+    .polar-stretch = 極座標拉伸
+    .basepoint = 基準點
+    .lookup = 查詢

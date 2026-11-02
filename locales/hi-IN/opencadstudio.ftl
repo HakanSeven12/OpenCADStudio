@@ -8166,3 +8166,16 @@ block-operation-history =
     .properties-table = ब्लॉक गुण तालिका
     .visibility-state = दृश्यता स्थिति
     .visibility-states = दृश्यता स्थितियाँ
+
+block-formatted-history =
+    .action = { $label } क्रिया
+    .parameter = { $label } पैरामीटर
+    .edit-block = ब्लॉक { $label } संपादित करें
+    .save-block = ब्लॉक को { $label } नाम से सहेजें
+    .delete-block = ब्लॉक { $label } हटाएँ
+
+block-history-kinds =
+    .flip = पलटें
+    .polar-stretch = ध्रुवीय खिंचाव
+    .basepoint = आधार बिंदु
+    .lookup = लुकअप

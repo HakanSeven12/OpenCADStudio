@@ -916,6 +916,11 @@ impl DocumentTab {
 pub(super) enum HistoryLabel {
     Literal(String),
     Message(&'static str),
+    Formatted {
+        source: String,
+        attribute: &'static str,
+        value: Box<HistoryLabel>,
+    },
 }
 
 impl HistoryLabel {
@@ -923,22 +928,45 @@ impl HistoryLabel {
         match self {
             Self::Literal(value) => value,
             Self::Message(source) => source,
+            Self::Formatted { source, .. } => source,
         }
+    }
+
+    pub(super) fn formatted(source: String, attribute: &'static str, value: Self) -> Self {
+        Self::Formatted { source, attribute, value: Box::new(value) }
     }
 
     fn display_with<'a>(
         &'a self,
-        translate: impl FnOnce(&'static str) -> std::borrow::Cow<'static, str>,
+        translate: &dyn Fn(&'static str) -> std::borrow::Cow<'static, str>,
+        format: &dyn Fn(&str, &str) -> Option<String>,
     ) -> std::borrow::Cow<'a, str> {
         match self {
             Self::Literal(value) => std::borrow::Cow::Borrowed(value),
             Self::Message(source) => translate(source),
+            Self::Formatted { source, attribute, value } => {
+                format(attribute, &value.display_with(translate, format))
+                    .map(std::borrow::Cow::Owned)
+                    .unwrap_or_else(|| std::borrow::Cow::Borrowed(source.as_str()))
+            }
+        }
+    }
+
+    fn estimated_bytes(&self) -> usize {
+        match self {
+            Self::Formatted { source, value, .. } => source.len()
+                .saturating_add(std::mem::size_of::<Self>())
+                .saturating_add(value.estimated_bytes()),
+            _ => self.as_str().len(),
         }
     }
 
     pub(super) fn display(&self) -> std::borrow::Cow<'_, str> {
-        self.display_with(crate::i18n::translate)
+        self.display_with(&|source| crate::i18n::translate(source), &|attribute, value| {
+            crate::i18n::format_attribute("block-formatted-history", attribute, &[("label", value)])
+        })
     }
+
 }
 
 impl From<String> for HistoryLabel {
@@ -1038,7 +1066,7 @@ impl HistorySnapshot {
                     (before.len() + after.len()).saturating_mul(32)
                 }))
                 .saturating_add(d.reference_designations.len().saturating_mul(16))
-                .saturating_add(d.label.as_str().len()),
+                .saturating_add(d.label.estimated_bytes()),
             HistorySnapshot::ObjectVisibility(v) => v
                 .before
                 .hidden
@@ -1049,7 +1077,7 @@ impl HistorySnapshot {
                 .saturating_add(v.selected_before.len())
                 .saturating_add(v.selected_after.len())
                 .saturating_mul(16)
-                .saturating_add(v.label.as_str().len()),
+                .saturating_add(v.label.estimated_bytes()),
         }
     }
 }
@@ -1240,8 +1268,27 @@ mod history_label_tests {
     fn history_literal_labels_bypass_translation_even_when_they_match_catalog_sources() {
         for value in ["LINE", "PLUGIN: custom", "Revert", "Edit construction geometry"] {
             let label = HistoryLabel::from(value);
-            assert_eq!(label.display_with(|_| panic!("literal label was translated")), value);
+            assert_eq!(label.display_with(&|_| panic!("literal label was translated"), &|_, _| panic!("literal label was formatted")), value);
             assert_eq!(label.as_str(), value);
+        }
+    }
+
+    #[test]
+    fn formatted_history_retains_source_and_only_translates_marked_arguments() {
+        for value in [HistoryLabel::from("Revert"), HistoryLabel::Message("Revert")] {
+            let message = matches!(value, HistoryLabel::Message(_));
+            let label = HistoryLabel::formatted("Edit block Revert".into(), "edit-block", value);
+            let rendered = label.display_with(&|source| {
+                assert_eq!(source, "Revert");
+                Cow::Borrowed("translated kind")
+            }, &|attribute, value| {
+                assert_eq!(attribute, "edit-block");
+                assert_eq!(value, if message { "translated kind" } else { "Revert" });
+                Some(format!("localized template: {value}"))
+            });
+            assert!(rendered.starts_with("localized template:"));
+            assert_eq!(label.as_str(), "Edit block Revert");
+            assert_eq!(label.display_with(&|source| Cow::Borrowed(source), &|_, _| None), label.as_str());
         }
     }
 
@@ -1250,10 +1297,10 @@ mod history_label_tests {
         let label = HistoryLabel::Message("Edit construction geometry");
         let retained = label.clone();
         for translated in ["Modifier la géométrie de construction", "تحرير الهندسة الإنشائية"] {
-            assert_eq!(retained.display_with(|source| {
+            assert_eq!(retained.display_with(&|source| {
                 assert_eq!(source, "Edit construction geometry");
                 Cow::Owned(translated.to_owned())
-            }), translated);
+            }, &|_, _| panic!("plain message was formatted")), translated);
             assert_eq!(retained.as_str(), "Edit construction geometry");
         }
     }

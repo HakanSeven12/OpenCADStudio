@@ -8175,3 +8175,16 @@ block-operation-history =
     .properties-table = Lohkon ominaisuustaulukko
     .visibility-state = Näkyvyystila
     .visibility-states = Näkyvyystilat
+
+block-formatted-history =
+    .action = Toiminto { $label }
+    .parameter = Parametri { $label }
+    .edit-block = Muokkaa lohkoa { $label }
+    .save-block = Tallenna lohko nimellä { $label }
+    .delete-block = Poista lohko { $label }
+
+block-history-kinds =
+    .flip = Käännä
+    .polar-stretch = Polaarinen venytys
+    .basepoint = Peruspiste
+    .lookup = Haku

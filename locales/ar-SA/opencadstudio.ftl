@@ -8181,3 +8181,16 @@ block-operation-history =
     .properties-table = جدول خصائص الكتلة
     .visibility-state = حالة الرؤية
     .visibility-states = حالات الرؤية
+
+block-formatted-history =
+    .action = إجراء { $label }
+    .parameter = معلمة { $label }
+    .edit-block = تحرير الكتلة { $label }
+    .save-block = حفظ الكتلة باسم { $label }
+    .delete-block = حذف الكتلة { $label }
+
+block-history-kinds =
+    .flip = قلب
+    .polar-stretch = تمديد قطبي
+    .basepoint = نقطة الأساس
+    .lookup = بحث

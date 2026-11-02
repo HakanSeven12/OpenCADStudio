@@ -8167,3 +8167,16 @@ block-operation-history =
     .properties-table = 블록 특성 테이블
     .visibility-state = 가시성 상태
     .visibility-states = 가시성 상태 목록
+
+block-formatted-history =
+    .action = { $label } 동작
+    .parameter = { $label } 매개변수
+    .edit-block = 블록 { $label } 편집
+    .save-block = 블록을 { $label } 이름으로 저장
+    .delete-block = 블록 { $label } 삭제
+
+block-history-kinds =
+    .flip = 반전
+    .polar-stretch = 극 신축
+    .basepoint = 기준점
+    .lookup = 조회

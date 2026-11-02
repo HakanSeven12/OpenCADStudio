@@ -8178,3 +8178,16 @@ block-operation-history =
     .properties-table = Πίνακας ιδιοτήτων μπλοκ
     .visibility-state = Κατάσταση ορατότητας
     .visibility-states = Καταστάσεις ορατότητας
+
+block-formatted-history =
+    .action = Ενέργεια { $label }
+    .parameter = Παράμετρος { $label }
+    .edit-block = Επεξεργασία μπλοκ { $label }
+    .save-block = Αποθήκευση μπλοκ ως { $label }
+    .delete-block = Διαγραφή μπλοκ { $label }
+
+block-history-kinds =
+    .flip = Αναστροφή
+    .polar-stretch = Πολική επέκταση
+    .basepoint = Βασικό σημείο
+    .lookup = Αναζήτηση

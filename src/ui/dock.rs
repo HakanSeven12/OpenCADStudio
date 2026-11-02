@@ -1210,9 +1210,9 @@ pub fn title_bar_with<'a>(
             None => Space::new().width(0).height(0).into(),
         };
     }
-    // The pallet's control, pin and close only show while the pointer is
-    // over the bar; the fixed height keeps the bar from jumping when they
-    // appear.
+    // The pallet's control and pin only show while the pointer is over the
+    // bar; close always shows. The fixed height keeps the bar from jumping
+    // when they appear.
     let mut bar = row![text(title).size(12), Space::new().width(Length::Fill)]
         .spacing(3)
         .height(Length::Fixed(TITLE_BUTTON_H))
@@ -1221,14 +1221,13 @@ pub fn title_bar_with<'a>(
         if let Some(extra) = extra {
             bar = bar.push(extra);
         }
-        bar = bar
-            .push(pin_button(
-                id,
-                chrome.auto_collapse,
-                tooltip::Position::Bottom,
-            ))
-            .push(close_button(id, tooltip::Position::Bottom));
+        bar = bar.push(pin_button(
+            id,
+            chrome.auto_collapse,
+            tooltip::Position::Bottom,
+        ));
     }
+    bar = bar.push(close_button(id, tooltip::Position::Bottom));
     mouse_area(
         container(bar)
             .style(|theme: &Theme| container::Style {

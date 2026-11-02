@@ -4619,7 +4619,7 @@ mod ext_tests {
     }
 
     #[test]
-        fn snap_hysteresis_retains_only_verified_discrete_features() {
+    fn snap_hysteresis_retains_only_verified_discrete_features() {
         let make = |x: f64, kind| SnapResult {
             world: DVec3::new(x, 0.0, 0.0),
             screen: Point::new(x as f32, 0.0),

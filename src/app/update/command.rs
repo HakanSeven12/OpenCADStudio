@@ -261,6 +261,12 @@ impl OpenCADStudio {
         if let Some(closing_id) = closing_tab_id {
             crate::io::fs_access::drop_handle(closing_id);
         }
+        // The drawing is gone, and the positions it had placed are not the
+        // next drawing's: forget them with the tab.
+        if let Some(closing_id) = closing_tab_id {
+            crate::modules::draw::draw::attdef::session().forget_place_of(closing_id);
+            crate::modules::annotate::text::forget_place_of(closing_id);
+        }
         // Only-tab case: when the lone non-start tab closes, fall
         // back to the Start tab if it exists; otherwise spawn a
         // fresh blank drawing (legacy behaviour).
@@ -5767,6 +5773,34 @@ mod tab_close_tests {
     /// removes the tab, the second carries the now-outdated reference. The
     /// close request must degrade to a no-op, not panic.
     #[test]
+    /// A closing drawing takes its remembered ATTDEF placement with it: the
+    /// coordinates belong to the drawing that placed them.
+    #[test]
+    fn closing_a_tab_drops_the_place_it_remembered() {
+        let mut app = three_tabs();
+        let i = app
+            .tabs
+            .iter()
+            .position(|tab| !tab.is_start)
+            .expect("a drawing tab, not the fixed start page");
+        let id = app.tabs[i].id;
+        crate::modules::draw::draw::attdef::session().set_place(id, &Default::default());
+        assert!(
+            crate::modules::draw::draw::attdef::session().last_in(id).is_some(),
+            "the drawing remembered a place"
+        );
+
+        app.tabs[i].dirty = false;
+        let _ = app.update(Message::TabClose(id));
+
+        assert!(
+            crate::modules::draw::draw::attdef::session()
+                .last_in(id)
+                .is_none(),
+            "the place belonged to the drawing that just closed"
+        );
+    }
+
     fn stale_tab_close_is_a_no_op() {
         let mut app = three_tabs();
         let id = app.tabs[app.tabs.len() - 1].id;

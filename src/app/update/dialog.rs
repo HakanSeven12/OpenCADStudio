@@ -244,6 +244,10 @@ impl OpenCADStudio {
                         self.active_tab = self.tabs.len() - 1;
                     }
                 }
+                // Discarded for good: the positions this drawing had placed
+                // go with it, so a later drawing cannot inherit them.
+                crate::modules::draw::draw::attdef::session().forget_place_of(tab_id);
+                crate::modules::annotate::text::forget_place_of(tab_id);
                 // The active tab is now a fresh blank or a
                 // different existing tab; sync ribbon chips so
                 // they don't keep showing the discarded tab's

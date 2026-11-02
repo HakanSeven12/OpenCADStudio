@@ -914,11 +914,7 @@ impl Snapper {
         // tracking rays lie within four screen pixels of each other.
         // The point is always recomputed on a live ray: no stale guide.
         let rank_ray = |base: DVec3, dir: DVec3, distance_px: f32| {
-            let retained = previous_ray.is_some_and(|(old_base, old_dir)| {
-                (old_base - base).length_squared() < 1e-12
-                    && old_dir.dot(dir).abs() > 0.9999
-            });
-            distance_px - if retained { 4.0 } else { 0.0 }
+            otrack_ray_score(previous_ray, base, dir, distance_px)
         };
 
         let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
@@ -3255,6 +3251,22 @@ pub(crate) fn snap_tier(t: SnapType) -> u8 {
     }
 }
 
+/// Rank only tracking rays which were calculated from acquired points in
+/// this exact frame. A small bias toward the same origin/axis prevents guide
+/// lines from swapping at nearly identical cursor distances.
+fn otrack_ray_score(
+    previous: Option<(DVec3, DVec3)>,
+    base: DVec3,
+    dir: DVec3,
+    distance_px: f32,
+) -> f32 {
+    let retained = previous.is_some_and(|(old_base, old_dir)| {
+        (old_base - base).length_squared() < 1e-12
+            && old_dir.dot(dir).abs() > 0.9999
+    });
+    distance_px - if retained { 4.0 } else { 0.0 }
+}
+
 /// Maximum distance advantage (screen pixels) a competing point may have
 /// while the user's currently acquired, still-valid point remains selected.
 /// This is *not* an additional capture radius and introduces no dwell delay.
@@ -4598,7 +4610,16 @@ mod ext_tests {
     }
 
     #[test]
-    fn snap_hysteresis_retains_only_verified_discrete_features() {
+    fn otrack_ray_hysteresis_keeps_a_same_origin_axis_only_within_four_pixels() {
+        let prev = Some((DVec3::ZERO, DVec3::X));
+        assert_eq!(otrack_ray_score(prev, DVec3::ZERO, DVec3::X, 8.0), 4.0);
+        assert_eq!(otrack_ray_score(prev, DVec3::ZERO, -DVec3::X, 8.0), 4.0);
+        assert_eq!(otrack_ray_score(prev, DVec3::Y, DVec3::X, 8.0), 8.0);
+        assert_eq!(otrack_ray_score(prev, DVec3::ZERO, DVec3::Y, 8.0), 8.0);
+    }
+
+    #[test]
+        fn snap_hysteresis_retains_only_verified_discrete_features() {
         let make = |x: f64, kind| SnapResult {
             world: DVec3::new(x, 0.0, 0.0),
             screen: Point::new(x as f32, 0.0),

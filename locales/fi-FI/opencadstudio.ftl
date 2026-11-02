@@ -8116,3 +8116,6 @@ array-grips = Kohteiden määrä
     .prompt-item-spacing = Määritä kohteiden välinen etäisyys:
     .prompt-item-angle = Määritä kohteiden välinen kulma:
     .prompt-radius = Määritä säde:
+block-chain =
+    .label = Ketjuta toiminnot
+    .cycle = Lohkon toimintoketjussa on silmukka.

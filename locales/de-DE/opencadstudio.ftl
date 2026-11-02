@@ -8117,3 +8117,6 @@ array-grips = Elementanzahl
     .prompt-item-spacing = Abstand zwischen Elementen angeben:
     .prompt-item-angle = Winkel zwischen Elementen angeben:
     .prompt-radius = Radius angeben:
+block-chain =
+    .label = Aktionen verketten
+    .cycle = Die Aktionskette des Blocks enthält einen Zyklus.

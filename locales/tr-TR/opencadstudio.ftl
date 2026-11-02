@@ -8040,3 +8040,6 @@ array-grips = Öğe sayısı
     .prompt-item-spacing = Öğeler arası mesafeyi belirtin:
     .prompt-item-angle = Öğeler arası açıyı belirtin:
     .prompt-radius = Yarıçapı belirtin:
+block-chain =
+    .label = Zincirleme eylemler
+    .cycle = Blok eylem zinciri bir döngü içeriyor.

@@ -8104,3 +8104,6 @@ array-grips = 項目數
     .prompt-item-spacing = 指定項目之間的距離:
     .prompt-item-angle = 指定項目之間的角度:
     .prompt-radius = 指定半徑:
+block-chain =
+    .label = 連鎖動作
+    .cycle = 圖塊的動作鏈包含循環。

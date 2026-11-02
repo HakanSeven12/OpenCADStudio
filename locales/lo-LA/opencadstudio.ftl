@@ -8110,3 +8110,6 @@ array-grips = ຈຳນວນລາຍການ
     .prompt-item-spacing = ລະບຸໄລຍະຫ່າງລະຫວ່າງລາຍການ:
     .prompt-item-angle = ລະບຸມຸມລະຫວ່າງລາຍການ:
     .prompt-radius = ລະບຸລັດສະໝີ:
+block-chain =
+    .label = ການກະທຳຕໍ່ເນື່ອງ
+    .cycle = ລຳດັບການກະທຳຂອງບລັອກມີວົງຈອນ.

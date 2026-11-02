@@ -8117,3 +8117,6 @@ array-grips = Aantal items
     .prompt-item-spacing = Geef de afstand tussen items op:
     .prompt-item-angle = Geef de hoek tussen items op:
     .prompt-radius = Geef de straal op:
+block-chain =
+    .label = Acties koppelen
+    .cycle = De actieketen van het blok bevat een cyclus.

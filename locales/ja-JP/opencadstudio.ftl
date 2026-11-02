@@ -8097,3 +8097,6 @@ array-grips = 項目数
     .prompt-item-spacing = 項目の間隔を指定:
     .prompt-item-angle = 項目間の角度を指定:
     .prompt-radius = 半径を指定:
+block-chain =
+    .label = アクションを連鎖
+    .cycle = ブロックのアクション連鎖に循環があります。

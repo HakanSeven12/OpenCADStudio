@@ -8119,3 +8119,6 @@ array-grips = Número de itens
     .prompt-item-spacing = Especifique a distância entre itens:
     .prompt-item-angle = Especifique o ângulo entre itens:
     .prompt-radius = Especifique o raio:
+block-chain =
+    .label = Ações encadeadas
+    .cycle = A cadeia de ações do bloco contém um ciclo.

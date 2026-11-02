@@ -8122,3 +8122,6 @@ array-grips = عدد العناصر
     .prompt-item-spacing = حدد المسافة بين العناصر:
     .prompt-item-angle = حدد الزاوية بين العناصر:
     .prompt-radius = حدد نصف القطر:
+block-chain =
+    .label = الإجراءات المتسلسلة
+    .cycle = تحتوي سلسلة إجراءات الكتلة على دورة.

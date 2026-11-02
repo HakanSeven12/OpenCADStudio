@@ -734,26 +734,13 @@ impl Snapper {
                         && elapsed >= DWELL_MS
                     {
                         self.dwell_acquired = true;
-                        // Dwelling over an already-acquired point removes it;
-                        // otherwise acquire it.
-                        let existing = self.tracking_points.iter().position(|t| {
-                            let d = (*t - p).length();
-                            d < self.grid_spacing as f64 * 0.1
-                        });
-                        match existing {
-                            Some(idx) => {
-                                self.tracking_points.remove(idx);
-
-                                if idx < self.tracking_dirs.len() {
-                                    self.tracking_dirs.remove(idx);
-                                }
-
-                                if idx < self.tracking_perp_dirs.len() {
-                                    self.tracking_perp_dirs.remove(idx);
-                                }
-                            }
-                            None => self.acquire_tracking_point(p, wires, endpoints_only),
-                        }
+                        // Do not toggle off an acquired point just because
+                        // the cursor rests over it again. In dense drawings
+                        // repeated dwell passes were silently dropping a
+                        // source while the user tried to construct its crossing.
+                        // A point remains acquired until command reset or the
+                        // four-point capacity replaces the oldest reference.
+                        self.acquire_tracking_point(p, wires, endpoints_only);
                     }
                 } else {
                     // Moved to a different snap point: capture the previous one

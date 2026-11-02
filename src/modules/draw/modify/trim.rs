@@ -4103,7 +4103,9 @@ impl TrimCommand {
         let nearby_ms = crate::perf::elapsed_ms(Some(solve_started));
         let entity = self.entity_index.get(&self.all_entities, handle)?;
         let cuts = match entity {
-            EntityType::Line(l) => line_seg_ts(l.start.x, l.start.y, l.end.x, l.end.y, handle, &nearby),
+            EntityType::Line(l) => {
+                line_seg_ts(l.start.x, l.start.y, l.end.x, l.end.y, handle, &nearby)
+            }
             EntityType::Arc(a) => arc_seg_ts(
                 a.center.x, a.center.y, a.radius, a.start_angle, a.end_angle, handle, &nearby,
             ),
@@ -4518,6 +4520,7 @@ impl CadCommand for TrimCommand {
             return vec![];
         }
 
+        let hover_started = std::time::Instant::now();
         let hover_cuts = if self.implied_edges {
             None
         } else {
@@ -4837,6 +4840,14 @@ impl CadCommand for TrimCommand {
                 let cuts = piece_cut_points(orig, &pieces);
                 hover_wires.extend(implied_cut_guides(&self.all_entities, handle, &cuts));
             }
+        }
+        let hover_ms = crate::perf::elapsed_ms(Some(hover_started));
+        if hover_ms >= 8.0 {
+            crate::perf_record!(
+                "[perf] trim-hover-total {hover_ms:.2}ms cached_cuts={} wires={}",
+                hover_cuts.is_some(),
+                hover_wires.len(),
+            );
         }
         hover_wires
     }
@@ -6264,7 +6275,10 @@ mod tests {
         let nearby = command.nearby_geos(Handle::new(1));
         assert!(nearby.iter().any(|g| g.handle() == near_handle));
         assert!(!nearby.iter().any(|g| g.handle() == far_handle));
-        assert_eq!(line_seg_ts(0.0, 5.0, 10.0, 5.0, Handle::new(1), &nearby).len(), 1);
+        assert_eq!(
+            line_seg_ts(0.0, 5.0, 10.0, 5.0, Handle::new(1), &nearby).len(),
+            1
+        );
     }
 
     #[test]

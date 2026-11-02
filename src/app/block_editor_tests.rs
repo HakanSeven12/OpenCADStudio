@@ -8436,6 +8436,91 @@ fn escape_reverts_a_pending_block_parameter_edit_and_keeps_the_selection() {
 }
 
 #[test]
+fn a_written_parameter_value_moves_the_reference_geometry() {
+    use crate::scene::model::object::{BlockParameterComponent as Component, PropValue};
+    use crate::scene::{block_actions as actions, block_distance_parameter as distance};
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let def = app.tabs[i]
+        .active_block_edit_session()
+        .unwrap()
+        .br_handle;
+    let parameter = distance::create(
+        &mut app.tabs[i].scene.document,
+        def,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    let target = members(&app)[0];
+    actions::create(
+        &mut app.tabs[i].scene.document,
+        def,
+        actions::Kind::Move,
+        parameter,
+        &[target],
+        glam::DVec3::ZERO,
+    )
+    .unwrap();
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    let i = app.active_tab;
+    app.tabs[i].scene.select_entity(reference, true);
+    app.tabs[i].selected_handle = Some(reference);
+    app.refresh_properties();
+    let field = app.tabs[i]
+        .properties
+        .sections
+        .iter()
+        .flat_map(|section| &section.props)
+        .find_map(|property| match property.value {
+            PropValue::BlockNumber { key, .. } if key.component == Component::Distance => Some(key),
+            _ => None,
+        })
+        .unwrap();
+    let starts = |doc: &codec::Document| {
+        doc.entities()
+            .filter_map(|entity| match entity {
+                codec::EntityType::Line(line) => Some(line.start),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = starts(&app.tabs[i].scene.document);
+    let _ = app.update(Message::PropBlockInput {
+        key: field,
+        value: "40".into(),
+    });
+    let _ = app.update(Message::PropBlockCommit(field));
+    let after = starts(&app.tabs[i].scene.document);
+    let moved = |points: &[Vector3]| {
+        points
+            .iter()
+            .any(|p| (p.x - 30.).abs() < 1e-9 && p.y.abs() < 1e-9)
+    };
+    assert!(
+        !moved(&before),
+        "nothing starts 30 along the parameter before the value is written"
+    );
+    assert!(
+        moved(&after),
+        "the written value moved a copy of the member 30 along the parameter"
+    );
+    let definition_member = match app.tabs[i].scene.document.get_entity(target) {
+        Some(codec::EntityType::Line(line)) => line.start,
+        other => panic!("the definition member is not a plain line: {other:?}"),
+    };
+    assert_eq!(
+        definition_member,
+        Vector3::ZERO,
+        "editing one reference leaves the definition's own member where it was authored"
+    );
+}
+
+#[test]
 fn block_reference_properties_keys_do_not_retarget_other_selections() {
     use crate::scene::model::object::PropValue;
     use crate::scene::{block_actions as actions, block_distance_parameter as distance};

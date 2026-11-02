@@ -76,7 +76,7 @@ fn the_counts_come_from_one_walk_and_cover_every_kind() {
     assert_eq!(app.textstyle_counts.get("notes"), Some(&4));
     assert_eq!(app.textstyle_counts.get("spare"), None);
     assert_eq!(
-        Usage::of(&app.textstyle_users),
+        Usage::of(app.selected_textstyle_users()),
         Usage {
             kinds: vec![
                 (TextKind::Text, 2),
@@ -128,7 +128,7 @@ fn a_changed_value_says_what_was_stored_and_apply_says_what_it_does() {
     let mut ui = window(&app, 1280.0);
     // As the field showed it.
     shown(&mut ui, "Modified · was 2.5000");
-    shown(&mut ui, "On Apply");
+    shown(&mut ui, "Apply will change");
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn the_columns_sit_side_by_side_and_stack_in_a_narrow_window() {
     // The modal keeps its size; a narrow window makes it narrow. Where the
     // columns stack, the toolbar shows icons only, the names as hints.
     let mut narrow = window(&app, 780.0);
-    let summary = shown(&mut narrow, "On Apply");
+    let summary = shown(&mut narrow, "Apply will change");
     let font = shown(&mut narrow, "Font style");
     assert!(summary.y < font.y, "{summary:?} {font:?}");
     assert!(narrow.find("Set Current".to_string()).is_err());
@@ -164,7 +164,7 @@ fn the_preview_draws_the_draft_with_its_sample_text() {
     });
     let mut ui = window(&app, 1280.0);
     shown(&mut ui, "Hello");
-    shown(&mut ui, "Where used");
+    shown(&mut ui, "Texts using this style");
 }
 
 #[test]

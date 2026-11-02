@@ -642,18 +642,51 @@ impl OpenCADStudio {
     pub(in crate::app) fn load_textstyle_draft(&mut self, tab: usize) {
         let doc = &self.tabs[tab].scene.document;
         // One walk of the drawing gives the list's counts and the texts of
-        // the selected style.
-        let mut users = crate::app::text_style_users::users_by_style(doc);
+        // every style.
+        let users = crate::app::text_style_users::users_by_style(doc);
         self.textstyle_counts = users
             .iter()
             .map(|(name, texts)| (name.clone(), texts.len()))
             .collect();
         if let Some(s) = doc.text_styles.get(&self.textstyle_selected) {
             self.textstyle_draft = crate::app::text_style_draft::TextStyleDraft::load(s);
-            self.textstyle_users = users
-                .remove(&s.name.to_ascii_lowercase())
-                .unwrap_or_default();
         }
+        self.textstyle_users = users;
+    }
+
+    /// What Apply would change now: every staged text style, with the draft
+    /// written over the selected one as Apply writes it.
+    pub(in crate::app) fn textstyle_pending_changes(
+        &self,
+    ) -> Vec<crate::app::text_style_users::StyleChange> {
+        let edited = self.textstyle_draft.resolved();
+        let read_only = self.selected_textstyle_is_read_only();
+        crate::app::text_style_users::pending_changes(
+            |handle| self.text_style_baseline(handle),
+            self.tabs[self.active_tab]
+                .scene
+                .document
+                .text_styles
+                .iter()
+                .map(|s| {
+                    if !read_only && s.handle == edited.handle {
+                        &edited
+                    } else {
+                        s
+                    }
+                }),
+            &self.textstyle_users,
+        )
+    }
+
+    /// The texts that use the selected text style.
+    pub(in crate::app) fn selected_textstyle_users(
+        &self,
+    ) -> &[crate::app::text_style_users::TextUser] {
+        self.textstyle_users
+            .get(&self.textstyle_selected.to_ascii_lowercase())
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {

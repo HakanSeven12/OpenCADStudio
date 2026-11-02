@@ -57,15 +57,24 @@ pub fn item<'a>(
         } else {
             crate::ui::icons::themed_check_cell(is_current)
         };
-        let name_text = text(name.to_string()).size(11).width(Fill);
+        // One line: a long name ends in "…" (the whole name is the row's
+        // hint) and never pushes the count out of the row.
+        let name_text = text(name.to_string())
+            .size(11)
+            .width(Fill)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .ellipsis(iced::widget::text::Ellipsis::End);
         let name_text = if locked && !is_selected {
             name_text.style(crate::ui::style::common::muted_style)
         } else {
             name_text
         };
-        let mut label = row![mark, name_text].align_y(iced::Center);
+        let mut label = row![mark, name_text].spacing(4).align_y(iced::Center);
         if let Some(info) = info {
-            let count = text(info.count.to_string()).size(10);
+            let count = text(info.count.to_string())
+                .size(10)
+                .width(COUNT_W)
+                .align_x(iced::widget::text::Alignment::Right);
             label = label.push(if is_selected {
                 count
             } else {
@@ -93,11 +102,23 @@ pub fn item<'a>(
                 }
             });
         let area = mouse_area(cell).on_press(on_select);
-        if can_rename {
+        let area: Element<'a, Message> = if can_rename {
             area.on_double_click(Message::StyleRenameStart(kind, name.to_string()))
                 .into()
         } else {
             area.into()
-        }
+        };
+        iced::widget::tooltip(
+            area,
+            container(text(name.to_string()).size(11))
+                .padding(6)
+                .style(container::rounded_box),
+            iced::widget::tooltip::Position::Right,
+        )
+        .delay(std::time::Duration::from_millis(600))
+        .into()
     }
 }
+
+/// The count column: room for five digits, right-aligned.
+const COUNT_W: f32 = 34.0;

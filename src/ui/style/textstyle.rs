@@ -50,8 +50,8 @@ pub struct TextStyleView<'a> {
     pub font_picker: &'a FontPickerState,
     /// What the last font switch turned off.
     pub turned_off: Option<String>,
-    /// What Apply does to the texts that use the style, one line each.
-    pub apply_summary: Vec<String>,
+    /// What Apply does to every changed style.
+    pub apply_summary: ApplySummary,
     pub preview: Preview,
     pub sample: &'a str,
     /// The TrueType font style (typeface flags).
@@ -63,6 +63,14 @@ pub struct TextStyleView<'a> {
     pub annotative: bool,
     pub rename_active: Option<&'a str>,
     pub rename_buf: &'a str,
+}
+
+/// What Apply changes: each changed style's name with its lines, and how many
+/// properties change in all.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ApplySummary {
+    pub styles: Vec<(String, Vec<String>)>,
+    pub properties: usize,
 }
 
 /// What the preview draws: the draft resolved as the drawing resolves a
@@ -388,13 +396,13 @@ fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
     font_rows.extend([
             labelled_row(t!("Font style"), face_style),
             toggle(
-                t!("Use Big Font"),
+                t!("Use SHX Big Font"),
                 v.use_big_font,
                 "use_big_font",
                 v.read_only || ttf,
             ),
             number_row(
-                t!("Big font"),
+                t!("Big Font file"),
                 "",
                 v.bigfont_buf,
                 "bigfont",
@@ -420,7 +428,7 @@ fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
                 v.height_error.clone(),
                 v.height_was.clone(),
             ),
-            hint(t!("0 = the height is asked when the text is placed.")),
+            hint(t!("0 = the height is asked for when the text is placed.")),
             toggle(t!("Annotative"), v.annotative, "annotative", v.read_only),
             hint(t!("On: the height above is the paper height.")),
         ],
@@ -504,20 +512,54 @@ fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
     .into()
 }
 
-/// What Apply does to the texts, framed; nothing when it changes none.
-fn apply_summary<'a>(v: &TextStyleView<'a>) -> Option<Element<'a, Message>> {
-    if v.apply_summary.is_empty() {
+/// What Apply does to every changed style and its texts, framed; nothing
+/// when Apply changes nothing. The title, the counts and the closing note
+/// stay put while the styles scroll, at most `height` tall.
+fn apply_summary<'a>(v: &TextStyleView<'a>, height: f32) -> Option<Element<'a, Message>> {
+    let summary = &v.apply_summary;
+    if summary.styles.is_empty() {
         return None;
     }
-    let lines = v
-        .apply_summary
-        .iter()
-        .map(|line| text(line.clone()).size(11).into());
+    let (styles, properties) = (summary.styles.len(), summary.properties);
+    let counts = match (styles, properties) {
+        (1, 1) => t!("1 style, 1 property"),
+        (1, _) => crate::tf!("1 style, {properties} properties"),
+        _ => crate::tf!("{styles} styles, {properties} properties"),
+    };
+    let groups = summary.styles.iter().map(|(name, lines)| {
+        column![text(name.clone()).size(11).style(primary_style)]
+            .extend(
+                lines
+                    .iter()
+                    .map(|line| text(line.clone()).size(11).width(Length::Fill).into()),
+            )
+            .spacing(3)
+            .into()
+    });
+    let body = scrollable(
+        container(column(groups).spacing(9))
+            .padding(iced::Padding::default().right(12.0))
+            .width(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fit.max(height));
     Some(
         container(
-            column![text(t!("On Apply")).size(11).style(primary_style)]
-                .extend(lines)
-                .spacing(5),
+            column![
+                row![
+                    text(t!("Apply will change")).size(11).style(primary_style),
+                    text(counts).size(10).style(muted_style),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+                body,
+                text(t!(
+                    "Texts in external references do not change. A single Undo reverts every change."
+                ))
+                .size(10)
+                .style(muted_style),
+            ]
+            .spacing(6),
         )
         .padding([9, 10])
         .width(Length::Fill)
@@ -599,7 +641,7 @@ fn preview_and_usage<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
         preview,
         caption(t!("Sample text")),
         sample,
-        caption(t!("Where used")),
+        caption(t!("Texts using this style")),
         container(usage)
             .padding([8, 10])
             .width(Length::Fill)
@@ -618,15 +660,23 @@ pub fn view_window<'a>(
     v: TextStyleView<'a>,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    responsive(move |size| layout(&v, sizing, size.width)).into()
+    responsive(move |size| layout(&v, sizing, size)).into()
+}
+
+/// The tallest the Apply summary's list of styles grows before it scrolls,
+/// for a window `height` tall: the preview and "Where used" keep their room.
+fn summary_height(height: f32) -> f32 {
+    (height * 0.32).clamp(110.0, 320.0)
 }
 
 fn layout<'a>(
     v: &TextStyleView<'a>,
     sizing: crate::ui::modal::ModalSizing,
-    width: f32,
+    size: iced::Size,
 ) -> Element<'a, Message> {
+    let width = size.width;
     let narrow = width < STACK_BELOW;
+    let summary_height = summary_height(size.height);
     let pane = |content: Element<'a, Message>| {
         scrollable(container(content).padding([12, 14]))
             .width(Length::Fill)
@@ -634,13 +684,13 @@ fn layout<'a>(
     };
     let editor: Element<'a, Message> = if narrow {
         let mut stack = column![].spacing(12);
-        if let Some(summary) = apply_summary(v) {
+        if let Some(summary) = apply_summary(v, summary_height) {
             stack = stack.push(summary);
         }
         pane(stack.push(properties(v)).push(preview_and_usage(v)).into()).into()
     } else {
         let mut side = column![].spacing(12);
-        if let Some(summary) = apply_summary(v) {
+        if let Some(summary) = apply_summary(v, summary_height) {
             side = side.push(summary);
         }
         let side = side.push(preview_and_usage(v));

@@ -3862,8 +3862,6 @@ fn xy_parameter_prompts_for_grip_count_and_places_an_automatic_label() {
         "{prompt}"
     );
     let before = app.tabs[i].scene.document.clone();
-    // An integer the option list does not offer is refused with the list; an
-    // answer that is not an integer at all is refused for what it is.
     for (invalid, reason) in [
         ("3", "Enter the number of grips: 0, 1, 2 or 4."),
         ("-1", "Enter the number of grips: 0, 1, 2 or 4."),

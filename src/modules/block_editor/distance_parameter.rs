@@ -109,11 +109,10 @@ impl CadCommand for DistanceParameterCommand {
             "2" => 2,
             "4" => 4,
             _ => {
-                // A whole number the list does not offer stays a list problem;
-                // an answer that is no number at all is refused for what it is.
-                // The widest integer type is what a count typed in digits is, so
-                // a long answer is refused for the count it is not rather than
-                // for the digits it happens to overflow.
+                // Which refusal an answer gets depends on its form, not its
+                // value: digits are a count this list happens not to offer,
+                // anything else is no count at all. The widest integer type
+                // keeps a long typed answer a count rather than a non-number.
                 let refusal = if answer.parse::<i128>().is_ok() {
                     "Enter the number of grips: 0, 1, 2 or 4."
                 } else {

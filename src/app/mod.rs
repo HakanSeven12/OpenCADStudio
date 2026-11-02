@@ -3534,6 +3534,8 @@ pub enum Message {
     /// space separates the answers to the command's prompts, as in a menu
     /// macro, and no Enter follows the last one.
     MenuCommand(String),
+    /// The Quick Access Toolbar's lists and menus.
+    RibbonQat(crate::ui::ribbon::QatMsg),
     /// The minimize button and the minimized ribbon's popups.
     RibbonMinimize(crate::ui::ribbon::MinimizeMsg),
     /// The pointer and pins of the ribbon's slide-outs.
@@ -3548,6 +3550,16 @@ pub enum Message {
         module: &'static str,
         titles: Vec<String>,
     },
+    /// A ribbon panel dropped off the ribbon: it floats with its top-left
+    /// corner at (`x`, `y`).
+    RibbonFloatPanel {
+        module: &'static str,
+        title: String,
+        x: f32,
+        y: f32,
+    },
+    /// A floating ribbon panel: pressed, moved, released.
+    RibbonFloat(crate::ui::ribbon::FloatMsg),
     /// Ribbon key tips: Alt, typed codes and Esc.
     KeyTip(crate::ui::ribbon::KeyTipInput),
     /// A ribbon tool button was clicked — highlights the tool and dispatches its event.

@@ -2772,6 +2772,21 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::RibbonQat(msg) => {
+                let out = self.ribbon.on_qat(msg);
+                if out.save {
+                    self.save_config();
+                }
+                let focus = if out.focus {
+                    iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::ribbon::QAT_PICKER_INPUT,
+                    ))
+                } else {
+                    Task::none()
+                };
+                let run = out.run.map_or_else(Task::none, |run| self.update(run));
+                Task::batch([focus, run])
+            }
             Message::RibbonSlideOut(msg) => {
                 if self.ribbon.on_slide_out(msg, iced::time::Instant::now()) {
                     self.save_config();
@@ -2807,6 +2822,12 @@ impl OpenCADStudio {
             Message::MenuCommand(line) => {
                 let sweep = self.sync_active_field_if_any();
                 self.ribbon.close_dropdown();
+                // As a typed command does: the application menu, the
+                // drawing's context menu and the Isolate menu close.
+                self.ribbon.close_app_menu();
+                let i = self.active_tab;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.isolate_popup_open = false;
                 // A single word dispatches as a ribbon button does; a line
                 // with answers runs its command and feeds them to its
                 // prompts, leaving the command at its next one.
@@ -2816,6 +2837,18 @@ impl OpenCADStudio {
                     self.dispatch_ribbon_command(&line)
                 };
                 Task::batch([sweep, run])
+            }
+            Message::RibbonFloatPanel { module, title, x, y } => {
+                if self.ribbon.float_panel(module, &title, x, y) {
+                    self.save_config();
+                }
+                Task::none()
+            }
+            Message::RibbonFloat(msg) => {
+                if self.ribbon.on_float(msg, iced::time::Instant::now()) {
+                    self.save_config();
+                }
+                Task::none()
             }
             Message::RibbonReorderPanels { module, titles } => {
                 self.ribbon.reorder_panels(module, &titles);
@@ -7723,7 +7756,9 @@ impl OpenCADStudio {
                         task = self.block_palette.open_gallery();
                     }
                     // The per-viewport freeze column follows the active viewport.
-                    if id == crate::ui::ribbon::widgets::LAYER_COMBO_ID {
+                    if crate::ui::ribbon::qat_list_source(&id).unwrap_or(&id)
+                        == crate::ui::ribbon::widgets::LAYER_COMBO_ID
+                    {
                         self.refresh_layer_panel();
                     }
                     self.ribbon.toggle_dropdown(&id);

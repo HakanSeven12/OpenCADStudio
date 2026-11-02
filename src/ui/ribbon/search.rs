@@ -17,8 +17,10 @@ use iced::{
     Size, Theme, Vector,
 };
 
+use super::layout::{QatBuiltin, QatItem};
+use super::qat::FaceIcon;
 use super::widgets::{make_icon, make_tip, tip_style};
-use super::{app_menu, draw_panel, extras, Ribbon, QUICK_ACCESS};
+use super::{app_menu, draw_panel, extras, Ribbon};
 use crate::app::Message;
 use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
 use crate::ui::icons;
@@ -170,6 +172,35 @@ pub(super) struct SearchState {
     lit: Option<String>,
 }
 
+/// How many results More Commands lists.
+const QAT_CANDIDATES: usize = 30;
+
+/// A command More Commands can add to the Quick Access Toolbar.
+#[derive(Clone)]
+pub(super) struct QatCandidate {
+    pub label: String,
+    /// Where the search found it.
+    pub path: String,
+    pub icon: Option<IconKind>,
+    pub item: QatItem,
+}
+
+/// The Quick Access item that runs what a search result's message runs.
+fn qat_item_of(run: &Message) -> Option<QatItem> {
+    let command = |line: &str| Some(QatItem::Command(line.trim().to_string()));
+    match run {
+        Message::Undo => Some(QatItem::Builtin(QatBuiltin::Undo)),
+        Message::Redo => Some(QatItem::Builtin(QatBuiltin::Redo)),
+        Message::MenuCommand(line) | Message::Command(line) => command(line),
+        Message::DropdownSelectItem { cmd, .. } => command(cmd),
+        Message::RibbonToolClick {
+            event: ModuleEvent::Command(line),
+            ..
+        } => command(line),
+        _ => None,
+    }
+}
+
 /// What the app does after a search message.
 #[derive(Default)]
 pub struct SearchOutcome {
@@ -188,27 +219,42 @@ impl Ribbon {
     fn search_index(&self) -> Vec<Hit> {
         let mut hits = Vec::new();
         let quick_access = crate::tr!("ribbon-menu", "quick-access-toolbar");
-        for &(icon, label, command) in &QUICK_ACCESS {
+        for item in &self.layout.qat {
+            let (label, command, icon, run) = match item {
+                QatItem::Command(command) => {
+                    let face = self.command_face(command);
+                    let icon = match face.icon {
+                        FaceIcon::Chrome(icon) => Some(IconKind::Svg(icon)),
+                        FaceIcon::Tool(icon) => Some(icon),
+                        FaceIcon::Text => None,
+                    };
+                    (
+                        face.label,
+                        command.clone(),
+                        icon,
+                        Message::MenuCommand(command.clone()),
+                    )
+                }
+                QatItem::Builtin(QatBuiltin::Undo) => (
+                    crate::t!("Undo").into_owned(),
+                    "UNDO".to_string(),
+                    crate::modules::registry::command_icon("UNDO").map(IconKind::Svg),
+                    Message::Undo,
+                ),
+                QatItem::Builtin(QatBuiltin::Redo) => (
+                    crate::t!("Redo").into_owned(),
+                    "REDO".to_string(),
+                    crate::modules::registry::command_icon("REDO").map(IconKind::Svg),
+                    Message::Redo,
+                ),
+                QatItem::Builtin(_) | QatItem::Separator => continue,
+            };
             hits.push(Hit {
                 group: Group::QuickAccess,
-                label: crate::t!(label).into_owned(),
+                label,
                 path: quick_access.clone(),
-                command: Some(command.to_string()),
-                icon: Some(IconKind::Svg(icon)),
-                run: Message::Command(command.to_string()),
-                place: None,
-            });
-        }
-        for (label, command, run) in [
-            ("Undo", "UNDO", Message::Undo),
-            ("Redo", "REDO", Message::Redo),
-        ] {
-            hits.push(Hit {
-                group: Group::QuickAccess,
-                label: crate::t!(label).into_owned(),
-                path: quick_access.clone(),
-                command: Some(command.to_string()),
-                icon: crate::modules::registry::command_icon(command).map(IconKind::Svg),
+                command: Some(command),
+                icon,
                 run,
                 place: None,
             });
@@ -252,7 +298,7 @@ impl Ribbon {
                 continue;
             }
             let tab = crate::i18n::ribbon_module_title(module.id(), module.title());
-            for group in self.groups_for(index) {
+            for group in self.shown_groups(index) {
                 let path = format!("{ribbon_tab}: {tab} › {}", crate::t!(group.title));
                 // Label, command line, icon, message and highlight id of each
                 // button of the panel.
@@ -356,6 +402,125 @@ impl Ribbon {
             }
         }
         hits
+    }
+
+    /// What More Commands offers for the lower-case `query`: each command
+    /// the search finds, once, as (label, where it is, icon, the Quick
+    /// Access item it would add), the best matches first.
+    pub(super) fn qat_candidates(&self, query: &str) -> Vec<QatCandidate> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        // The commands, then the ribbon's lists.
+        let hits: Vec<(Hit, QatItem)> = self
+            .search_index()
+            .into_iter()
+            .filter_map(|hit| qat_item_of(&hit.run).map(|item| (hit, item)))
+            .chain(self.list_hits())
+            .collect();
+        let mut ranked: Vec<(u8, usize)> = hits
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (hit, _))| hit.rank(&query).map(|rank| (rank, i)))
+            .collect();
+        ranked.sort_by_key(|&(rank, i)| (rank, hits[i].0.group != Group::Ribbon, i));
+        let mut seen: Vec<QatItem> = Vec::new();
+        let mut out = Vec::new();
+        for (_, i) in ranked {
+            let (hit, item) = &hits[i];
+            let item = item.clone();
+            if seen.iter().any(|known| known.same(&item)) {
+                continue;
+            }
+            seen.push(item.clone());
+            out.push(QatCandidate {
+                label: hit.label.clone(),
+                path: hit.path.clone(),
+                icon: hit.icon,
+                item,
+            });
+            if out.len() == QAT_CANDIDATES {
+                break;
+            }
+        }
+        out
+    }
+
+    /// The ribbon's lists the Quick Access Toolbar can hold, each found by
+    /// its name or the system variable it sets, under the panel it is on.
+    fn list_hits(&self) -> Vec<(Hit, QatItem)> {
+        let ribbon_tab = crate::tr!("ribbon-menu", "ribbon-tab");
+        // Where each list is: the first panel holding it.
+        let mut paths: Vec<(QatBuiltin, String)> = Vec::new();
+        for (index, module) in self.modules.iter().enumerate() {
+            let tab = crate::i18n::ribbon_module_title(module.id(), module.title());
+            // Hidden panels too: their lists still work on the toolbar.
+            for group in self.ordered_groups(index) {
+                let path = format!("{ribbon_tab}: {tab} › {}", crate::t!(group.title));
+                let key = extras::panel_key(module.id(), group.title);
+                let mut held: Vec<QatBuiltin> = Vec::new();
+                for item in &group.tools {
+                    match item {
+                        RibbonItem::LayerComboGroup { .. } => held.push(QatBuiltin::LayerCombo),
+                        RibbonItem::PropertiesGroup { .. } => held.extend([
+                            QatBuiltin::Color,
+                            QatBuiltin::Linetype,
+                            QatBuiltin::Lineweight,
+                        ]),
+                        RibbonItem::StyleComboGroup {
+                            style_key,
+                            combo_id,
+                            ..
+                        } => {
+                            held.extend(super::qat::list_control(combo_id));
+                            match style_key {
+                                crate::modules::StyleKey::DimStyle => {
+                                    held.push(QatBuiltin::DimLayer)
+                                }
+                                crate::modules::StyleKey::MLeaderStyle => {
+                                    held.push(QatBuiltin::MleaderLayer)
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if draw_panel::panel_for_group(&key)
+                    .is_some_and(|panel| panel.layout == extras::Layout::CenterLayer)
+                {
+                    held.push(QatBuiltin::CenterLayer);
+                }
+                for control in held {
+                    if !paths.iter().any(|(known, _)| *known == control) {
+                        paths.push((control, path.clone()));
+                    }
+                }
+            }
+        }
+        super::qat::list_controls()
+            .map(|(control, variable)| {
+                let path = paths
+                    .iter()
+                    .find(|(known, _)| *known == control)
+                    .map_or_else(|| ribbon_tab.clone(), |(_, path)| path.clone());
+                let open = super::qat::list_ids(control)
+                    .map(|(_, source)| source)
+                    .unwrap_or_default();
+                let hit = Hit {
+                    group: Group::Ribbon,
+                    label: super::qat::list_name(control),
+                    path,
+                    command: Some(variable.to_string()),
+                    icon: None,
+                    // Never run: More Commands adds the list instead.
+                    run: Message::ToggleRibbonDropdown(open.to_string()),
+                    place: None,
+                };
+                (hit, QatItem::Builtin(control))
+            })
+            .collect()
     }
 
     /// Match the query against a fresh index.
@@ -472,7 +637,7 @@ impl Ribbon {
         let Some(module) = self.modules.get(tab) else {
             return false;
         };
-        !self.groups_for(tab).any(|group| {
+        !self.shown_groups(tab).any(|group| {
             super::locate::group_holds(&extras::panel_key(module.id(), group.title), group, id)
                 && recent_bounds(&super::minimize::opener_id(group.title)).is_some()
         })

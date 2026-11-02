@@ -162,6 +162,7 @@ impl Ribbon {
         self.min.opening.is_some()
             || self.min.closing.is_some()
             || self.slide.closing.is_some()
+            || self.float_closing()
             || self.search_flashing()
     }
 
@@ -285,6 +286,7 @@ impl Ribbon {
             }
         }
         self.slide_out_tick(now);
+        self.float_tick(now);
         self.search_tick(now);
     }
 

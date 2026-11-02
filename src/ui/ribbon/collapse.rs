@@ -30,6 +30,8 @@ pub(crate) struct Panel<'a> {
     pub(crate) id: String,
     elements: [Option<Element<'a, Message>>; SLOTS],
     build: Box<dyn Fn(Level) -> Element<'a, Message> + 'a>,
+    /// Dragged far enough off the ribbon, the panel floats.
+    floatable: bool,
 }
 
 impl<'a> Panel<'a> {
@@ -46,7 +48,14 @@ impl<'a> Panel<'a> {
             id: id.into(),
             elements: std::array::from_fn(|_| None),
             build: Box::new(build),
+            floatable: false,
         }
+    }
+
+    /// Let the panel float when it is dragged off the ribbon.
+    pub(crate) fn floatable(mut self, floatable: bool) -> Self {
+        self.floatable = floatable;
+        self
     }
 }
 
@@ -176,6 +185,9 @@ pub(crate) struct CollapsePanels<'a> {
     drag_strip: f32,
     /// The message a drop sends: the panel ids in their new order.
     on_reorder: Option<Box<dyn Fn(Vec<String>) -> Message + 'a>>,
+    /// The message a drop off the ribbon sends: the panel id and where its
+    /// top-left corner landed.
+    on_float: Option<Box<dyn Fn(String, Point) -> Message + 'a>>,
 }
 
 /// How far the pointer moves from the press before the press becomes a drag.
@@ -184,6 +196,9 @@ const DRAG_THRESHOLD: f32 = 5.0;
 const PLACEHOLDER_INSET: f32 = 3.0;
 /// Opacity of the panel copy that follows the pointer.
 const GHOST_ALPHA: f32 = 0.9;
+/// How far above or below the tool area the pointer goes before a dragged
+/// panel leaves the ribbon.
+const FLOAT_MARGIN: f32 = crate::ui::style::ribbon_metrics::FLOAT_DRAG_MARGIN;
 
 /// Tree state: the measurements and the drag in progress.
 #[derive(Default)]
@@ -209,6 +224,10 @@ struct Drag {
     order: Vec<usize>,
     /// The pointer's last position.
     cursor: Point,
+    /// The panel may float.
+    floatable: bool,
+    /// The pointer is off the ribbon: the panel left its row.
+    outside: bool,
 }
 
 impl Drag {
@@ -239,6 +258,12 @@ fn drag_to(order: &mut [usize], panel: usize, x: f32, bounds: &[Rectangle]) -> b
         }
     }
     slot != start
+}
+
+/// Whether `at` is more than `FLOAT_MARGIN` above or below the row `row`:
+/// a panel dragged there leaves the ribbon.
+fn off_row(row: Rectangle, at: Point) -> bool {
+    at.y < row.y - FLOAT_MARGIN || at.y > row.y + row.height + FLOAT_MARGIN
 }
 
 /// A 1 px dashed outline along the inside of `r`.
@@ -306,7 +331,16 @@ impl<'a> CollapsePanels<'a> {
             measure_key: 0,
             drag_strip: 0.0,
             on_reorder: None,
+            on_float: None,
         }
+    }
+
+    /// Let a floatable panel dragged more than `FLOAT_MARGIN` above or below
+    /// the row leave it; a drop there sends `on_float` with the panel id
+    /// and the window point its top-left corner landed on.
+    pub fn on_float(mut self, on_float: impl Fn(String, Point) -> Message + 'a) -> Self {
+        self.on_float = Some(Box::new(on_float));
+        self
     }
 
     /// Let a press on the bottom `strip` px of a full or compact panel drag
@@ -537,6 +571,12 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             Some(drag) if drag.moving => drag.order.clone(),
             _ => (0..n).collect(),
         };
+        // A panel dragged off the ribbon leaves its row: the others close up.
+        let left = state
+            .drag
+            .as_ref()
+            .filter(|drag| drag.moving && drag.outside)
+            .map(|drag| drag.panel);
 
         // Place the chosen element for each panel left-to-right, in `order`.
         let mut placed: Vec<(layout::Node, f32, f32)> = (0..n)
@@ -553,7 +593,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             })
             .collect();
         let mut x = 0.0f32;
-        for (k, &i) in order.iter().enumerate() {
+        for (k, &i) in order.iter().filter(|&&i| Some(i) != left).enumerate() {
             if k > 0 {
                 x -= squeeze;
             }
@@ -631,6 +671,9 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                                 cancelled: false,
                                 order: (0..self.panels.len()).collect(),
                                 cursor: at,
+                                floatable: self.on_float.is_some()
+                                    && self.panels[i].floatable,
+                                outside: false,
                             })
                     })
                 });
@@ -644,9 +687,15 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                     if drag.moving {
                         drag.cursor = *position;
                         if !drag.cancelled {
+                            let outside = drag.floatable && off_row(layout.bounds(), *position);
+                            if outside != drag.outside {
+                                drag.outside = outside;
+                                shell.invalidate_layout();
+                            }
                             let bounds: Vec<Rectangle> =
                                 layout.children().map(|child| child.bounds()).collect();
-                            if drag_to(&mut drag.order, drag.panel, position.x, &bounds) {
+                            if !outside && drag_to(&mut drag.order, drag.panel, position.x, &bounds)
+                            {
                                 shell.invalidate_layout();
                             }
                         }
@@ -661,7 +710,14 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                     if drag.moving {
                         // The pressed button lets go without a click.
                         cursor = mouse::Cursor::Unavailable;
-                        if !drag.cancelled && drag.reordered() {
+                        if !drag.cancelled && drag.outside {
+                            if let Some(on_float) = &self.on_float {
+                                shell.publish(on_float(
+                                    self.panels[drag.panel].id.clone(),
+                                    drag.cursor - drag.grab,
+                                ));
+                            }
+                        } else if !drag.cancelled && drag.reordered() {
                             if let Some(on_reorder) = &self.on_reorder {
                                 shell.publish(on_reorder(
                                     drag.order
@@ -683,6 +739,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                 // Escape puts the panel back; the release still ends the drag.
                 if let Some(drag) = state.drag.as_mut().filter(|drag| drag.moving) {
                     drag.cancelled = true;
+                    drag.outside = false;
                     drag.order = (0..self.panels.len()).collect();
                     shell.invalidate_layout();
                     shell.request_redraw();
@@ -784,6 +841,10 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             .as_ref()
             .filter(|drag| drag.moving && drag.order.len() == n);
         for (i, child_layout) in layout.children().enumerate() {
+            // Off the ribbon it leaves no place behind.
+            if drag.is_some_and(|drag| drag.panel == i && drag.outside) {
+                continue;
+            }
             if drag.is_some_and(|drag| drag.panel == i) {
                 // The dragged panel's place: a fill with a dashed outline.
                 let b = child_layout.bounds();
@@ -849,7 +910,16 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                 );
             }
         }
-        let order: Vec<usize> = drag.map_or_else(|| (0..n).collect(), |drag| drag.order.clone());
+        let order: Vec<usize> = drag.map_or_else(
+            || (0..n).collect(),
+            |drag| {
+                drag.order
+                    .iter()
+                    .copied()
+                    .filter(|&i| !(drag.outside && i == drag.panel))
+                    .collect()
+            },
+        );
         for pair in order.windows(2) {
             let (left, right) = (pair[0], pair[1]);
             if is_btn(levels[left]) && is_btn(levels[right]) {
@@ -890,15 +960,22 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             .drag
             .as_ref()
             .filter(|drag| drag.moving)
-            .map(|drag| (drag.panel, drag.grab, drag.cursor));
-        if let Some((p, grab, at)) = dragged {
+            .map(|drag| (drag.panel, drag.grab, drag.cursor, drag.outside));
+        if let Some((p, grab, at, outside)) = dragged {
             let level = levels.get(p).copied().unwrap_or(Level::Full);
+            // Off the ribbon the copy is the full panel, as it will float.
+            let level = if outside && self.panels.get(p)?.elements[Level::Full as usize].is_some() {
+                Level::Full
+            } else {
+                level
+            };
             let content = self.panels.get_mut(p)?.elements[level as usize].as_mut()?;
             return Some(overlay::Element::new(Box::new(GhostOverlay {
                 content,
                 tree: &mut tree.children[slot(p, level)],
                 grab,
                 at,
+                outside,
             })));
         }
 
@@ -953,6 +1030,8 @@ struct GhostOverlay<'a, 'b> {
     grab: Vector,
     /// Pointer position to use when the draw has none.
     at: Point,
+    /// Off the ribbon: outlined in `border`, over it in `accent`.
+    outside: bool,
 }
 
 impl overlay::Overlay<Message, Theme, Renderer> for GhostOverlay<'_, '_> {
@@ -1004,6 +1083,24 @@ impl overlay::Overlay<Message, Theme, Renderer> for GhostOverlay<'_, '_> {
                 quad(b),
                 Background::Color(background.scale_alpha(1.0 - GHOST_ALPHA)),
             );
+            // A 1 px outline: `border` off the ribbon, `accent` over it.
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: b,
+                    border: Border {
+                        color: if self.outside {
+                            chrome::border(theme)
+                        } else {
+                            chrome::accent(theme)
+                        },
+                        width: crate::ui::icons::hairline(),
+                        radius: 0.0.into(),
+                    },
+                    shadow: Shadow::default(),
+                    snap: true,
+                },
+                Background::Color(Color::TRANSPARENT),
+            );
         });
     }
 }
@@ -1037,6 +1134,17 @@ mod tests {
         let mut order = vec![0, 1, 2];
         assert!(drag_to(&mut order, 1, 40.0, &bounds));
         assert_eq!(order, [1, 0, 2]);
+    }
+
+    #[test]
+    fn a_panel_leaves_the_row_more_than_the_margin_above_or_below_it() {
+        let row = Rectangle::new(Point::new(0.0, 50.0), Size::new(800.0, 99.0));
+        assert!(!off_row(row, Point::new(10.0, 50.0 - FLOAT_MARGIN)));
+        assert!(off_row(row, Point::new(10.0, 50.0 - FLOAT_MARGIN - 1.0)));
+        assert!(!off_row(row, Point::new(10.0, 149.0 + FLOAT_MARGIN)));
+        assert!(off_row(row, Point::new(10.0, 149.0 + FLOAT_MARGIN + 1.0)));
+        // Sideways it stays on the ribbon.
+        assert!(!off_row(row, Point::new(-500.0, 100.0)));
     }
 
     #[test]

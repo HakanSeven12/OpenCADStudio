@@ -534,6 +534,36 @@ mod tests {
     }
 
     #[test]
+    fn large_coordinate_grip_hit_matches_display_projection() {
+        use super::*;
+        let scene = crate::scene::Scene::new();
+        let bounds = Rectangle::with_size(iced::Size::new(1200.0, 800.0));
+        let mut camera = scene.camera.borrow_mut();
+        let base = DVec3::new(1_000_000.0, 5_000_000.0, 0.0);
+        camera.fit_to_bounds_f64(
+            base - DVec3::new(15.0, 10.0, 0.0),
+            base + DVec3::new(15.0, 10.0, 0.0),
+            1.25,
+        );
+        let grip = GripDef {
+            id: 42,
+            world: base + DVec3::new(0.125, 0.25, 0.0),
+            is_midpoint: false,
+            shape: GripShape::Square,
+            dir: None,
+            axis: None,
+        };
+        let cursor = camera.project(grip.world, bounds).expect("visible grip");
+        let cursor = Point::new(cursor.x, cursor.y);
+        let hit = find_hit_grip(cursor, std::slice::from_ref(&grip), &camera, bounds)
+            .expect("precise grip hit");
+        assert_eq!(hit.1, 42);
+        let on_screen = grips_to_screen(&[grip], &camera, bounds);
+        assert!((on_screen[0].1.x - cursor.x).abs() < 0.001);
+        assert!((on_screen[0].1.y - cursor.y).abs() < 0.001);
+    }
+
+    #[test]
     fn scalar_dynamic_input_modes_include_move_parallel() {
         assert!(GripEditMode::MoveParallel.uses_scalar_dynamic_input());
         assert!(GripEditMode::Radius.uses_scalar_dynamic_input());

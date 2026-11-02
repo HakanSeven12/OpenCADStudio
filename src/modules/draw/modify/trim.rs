@@ -5500,6 +5500,56 @@ mod tests {
     }
 
     #[test]
+    fn coincident_line_boundaries_produce_one_cut_even_with_reversed_duplicates() {
+        let all = vec![
+            xline_at(0.0, 5.0, 10.0, 5.0, 1),
+            xline_at(5.0, -5.0, 5.0, 15.0, 2),
+            xline_at(5.0, -5.0, 5.0, 15.0, 3),
+            xline_at(5.0, 15.0, 5.0, -5.0, 4),
+        ];
+        let geos = build_geos(&all);
+        let cuts = line_seg_ts(0.0, 5.0, 10.0, 5.0, Handle::new(1), &geos);
+        assert_eq!(cuts.len(), 1, "duplicate cutters should create one cut");
+        assert!((cuts[0] - 0.5).abs() < 1e-8);
+    }
+
+    #[test]
+    fn fence_candidates_skip_far_entities_without_losing_long_crossing_lines() {
+        let all = vec![
+            xline_at(-100.0, 5.0, 100.0, 5.0, 1),
+            xline_at(3.0, 3.0, 8.0, 8.0, 2),
+            xline_at(500.0, 500.0, 600.0, 600.0, 3),
+        ];
+        let index = ModifyEntityIndex::build(&all);
+        let window = CrossingWindow {
+            min: [0.0, 0.0],
+            max: [10.0, 10.0],
+        };
+        let hits = trim_fence_candidates(&index, &[], Some(window)).unwrap();
+        assert!(hits.contains(&Handle::new(1)));
+        assert!(hits.contains(&Handle::new(2)));
+        assert!(!hits.contains(&Handle::new(3)));
+    }
+
+    #[test]
+    fn crowded_crossing_preview_is_skipped_but_does_not_affect_final_cut() {
+        let mut all: Vec<_> = (0..70)
+            .map(|i| xline_at(-2.0, i as f64 * 0.1, 12.0, i as f64 * 0.1, i + 1))
+            .collect();
+        all.push(xline_at(5.0, -2.0, 5.0, 12.0, 100));
+        let index = ModifyEntityIndex::build(&all);
+        let geos = build_geos(&all);
+        let window = CrossingWindow {
+            min: [1.0, 1.0],
+            max: [9.0, 9.0],
+        };
+        let fence = [[1.0, 1.0], [9.0, 1.0], [9.0, 9.0], [1.0, 9.0], [1.0, 1.0]];
+        assert!(fence_result_preview(&all, &index, &geos, &fence, Some(window), false, false).is_empty());
+        let replacements = fence_pass(&all, &index, &geos, &fence, Some(window), false);
+        assert!(!replacements.is_empty(), "actual TRIM must not inherit the preview cap");
+    }
+
+    #[test]
     fn trim_hatch_removes_clicked_side_and_detaches_association() {
         let hatch = rect_hatch(1, true);
         let boundary = xline_at(5.0, -2.0, 5.0, 12.0, 50);

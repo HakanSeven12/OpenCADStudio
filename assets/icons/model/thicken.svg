@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Thicken">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M4 12 15 6 28 12 17 18Z" fill="#DCE7F0"/>
+    <path d="M4 12 17 18V23L4 17Z" fill="#6DB7ED"/>
+    <path d="M17 18 28 12V17L17 23Z" fill="#1565C0"/>
+  </g>
+  <path d="M4 22 17 28 28 22" fill="none" stroke="#6DB7ED" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

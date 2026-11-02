@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Solid Edit">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M4 10 15 4 26 10 15 16Z" fill="#DCE7F0"/>
+    <path d="M4 10 15 16V28L4 22Z" fill="#A9BFCE"/>
+    <path d="M15 16 26 10V22L15 28Z" fill="#6DB7ED"/>
+  </g>
+  <path d="M21 18 29 22m-3.5.8L29 22l-.8-3.5" fill="none" stroke="#6DB7ED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

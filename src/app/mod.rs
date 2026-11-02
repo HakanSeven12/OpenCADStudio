@@ -45,6 +45,8 @@ pub(crate) use command_driver::{
 pub(crate) mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
+mod dimension_convert_tests;
+#[cfg(test)]
 mod dimension_preview_tests;
 mod dock;
 mod document;

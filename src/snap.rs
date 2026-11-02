@@ -4668,6 +4668,70 @@ mod ext_tests {
     }
 
     #[test]
+    fn hovering_an_acquired_point_twice_never_discards_its_tracking_source() {
+        let mut snapper = Snapper::default();
+        snapper.otrack_enabled = true;
+        let wire = WireModel {
+            points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+            ..Default::default()
+        };
+        let wires = [wire];
+        let view = Mat4::from_scale(Vec3::splat(0.01));
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let make_hit = |x: f64| SnapResult {
+            world: DVec3::new(x, 0.0, 0.0),
+            screen: world_to_screen(DVec3::new(x, 0.0, 0.0), view, DVec3::ZERO, bounds),
+            snap_type: SnapType::Endpoint,
+            tangent_obj: None, extension_base: None, extension_base2: None,
+            extension_origin: None, extension_dir: None, viewport: None,
+            source: None, secondary_source: None, model_point: None,
+        };
+        let start = Instant::now();
+        let dt = |millis| start + std::time::Duration::from_millis(millis);
+        snapper.update_otrack_dwell(Some(make_hit(0.0)), &wires, view, DVec3::ZERO, bounds, dt(0));
+        snapper.update_otrack_dwell(Some(make_hit(0.0)), &wires, view, DVec3::ZERO, bounds, dt(300));
+        assert_eq!(snapper.tracking_points.len(), 1);
+        snapper.update_otrack_dwell(Some(make_hit(0.0)), &wires, view, DVec3::ZERO, bounds, dt(650));
+        assert_eq!(snapper.tracking_points.len(), 1, "repeated dwell must not toggle off a source");
+        snapper.update_otrack_dwell(Some(make_hit(10.0)), &wires, view, DVec3::ZERO, bounds, dt(700));
+        snapper.update_otrack_dwell(Some(make_hit(10.0)), &wires, view, DVec3::ZERO, bounds, dt(1000));
+        assert_eq!(snapper.tracking_points.len(), 2, "both crossing origins remain acquired");
+        assert!(snapper.has_tracking_point(DVec3::new(0.0, 0.0, 0.0)));
+        assert!(snapper.has_tracking_point(DVec3::new(10.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn extension_allows_inward_and_outward_from_an_acquired_endpoint() {
+        let view = Mat4::from_scale(Vec3::splat(0.01));
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let origin = DVec3::ZERO;
+        let outward = -DVec3::X;
+        let inward = DVec3::new(4.0, 0.0, 0.0);
+        let beyond = DVec3::new(-4.0, 0.0, 0.0);
+        assert_eq!(extension_snap(inward, origin, outward, view, DVec3::ZERO, bounds, 25.0), Some(inward));
+        assert_eq!(extension_snap(beyond, origin, outward, view, DVec3::ZERO, bounds, 25.0), Some(beyond));
+        assert!(extension_snap(origin, origin, outward, view, DVec3::ZERO, bounds, 25.0).is_none());
+    }
+
+    #[test]
+    fn two_acquired_support_lines_can_cross_inside_a_segment() {
+        let mut snapper = Snapper::default();
+        snapper.otrack_enabled = true;
+        snapper.osnap_radius_px = 25.0;
+        snapper.tracking_points = vec![DVec3::ZERO, DVec3::new(5.0, 5.0, 0.0)];
+        snapper.tracking_dirs = vec![vec![-DVec3::X], vec![DVec3::Y]];
+        let view = Mat4::from_scale(Vec3::splat(0.01));
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let cursor = DVec3::new(5.01, 0.02, 0.0);
+        let hit = snapper.otrack_snap(
+            cursor, view, DVec3::ZERO, bounds, None, None, None,
+            false, DVec3::X, DVec3::Y,
+        ).expect("acquired lines must intersect even behind the stored outward directions");
+        assert!(hit.cross.is_some());
+        assert!((hit.aligned - DVec3::new(5.0, 0.0, 0.0)).length() < 1e-7);
+    }
+
+    #[test]
     fn extension_acquisition_keeps_only_endpoints() {
         let mut s = Snapper::default();
         // A single line segment (0,0)-(10,0): its endpoints are vertices, its

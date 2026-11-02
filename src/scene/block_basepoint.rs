@@ -39,6 +39,21 @@ pub(crate) fn parameter(
 pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option<&'static str> {
     authoring::graph(document, definition).err()
 }
+/// How the editor draws the insertion grip: the marker on its own, plus the
+/// `Basepoint` caption only when the definition carries a basepoint parameter.
+/// Captioning the origin marker every time reads as a parameter nobody authored.
+pub(crate) fn marker_graphic(
+    document: &Document,
+    definition: Handle,
+    point: Vector3,
+) -> super::block_distance_parameter::Graphic {
+    let mut graphic = super::block_distance_parameter::Graphic::default();
+    graphic.base_grips.push(point);
+    if parameter(document, definition).is_some() {
+        graphic.labels.push((point, "Basepoint".into()));
+    }
+    graphic
+}
 pub(crate) fn create(
     document: &mut Document,
     definition: Handle,

@@ -331,6 +331,8 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
                     station_pieces: boundary.station_pieces,
                     source_length: boundary.source_length,
                     plinegen: pline.plinegen,
+                    separate_runs: false,
+                    solid: Vec::new(),
                 },
                 snap_pts: vec![],
                 tangent_geoms,

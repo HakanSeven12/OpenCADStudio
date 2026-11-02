@@ -1464,7 +1464,7 @@ fn fillet_arc_arc(
 
     // Same construction as the line-and-arc case, from the same place: the
     // centre is where an offset of one circle crosses an offset of the other.
-    for fillet in ranked_fillets(&arc_curve(a1), click1, &arc_curve(a2), click2, radius) {
+    if let Some(fillet) = ranked_fillets(&arc_curve(a1), click1, &arc_curve(a2), click2, radius).into_iter().next() {
         // Each arc is cut back to its touch, or extended to it.
         let new_a1 = arc_to_angle(
             a1,

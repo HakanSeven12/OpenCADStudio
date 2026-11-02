@@ -24,6 +24,10 @@ pub enum Action {
     Reverse(usize, bool),
     Audit,
     Apply,
+    /// `OK` refused the table; leave without applying anything.
+    DiscardClose,
+    /// Stay in the dialog and keep the work.
+    KeepEditing,
 }
 
 pub(crate) struct Draft {
@@ -50,12 +54,15 @@ pub(crate) struct State {
     pub selected_property: Option<usize>,
     pub error: Option<String>,
     pub notice: Option<String>,
+    /// `OK` refused the table and the dialog now offers to discard and close.
+    pub confirm_close: bool,
 }
 
 impl State {
     pub(crate) fn edit(&mut self, action: Action) {
         self.error = None;
         self.notice = None;
+        self.confirm_close = false;
         match action {
             Action::Select(index) if index < self.drafts.len() => {
                 self.selected = index;
@@ -280,7 +287,7 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
         })
         .map(|(i, _)| i)
         .collect::<Vec<_>>();
-    container(
+    let main = container(
         column![
             row![
                 text(crate::t!("Lookup parameter").into_owned()),
@@ -345,6 +352,13 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
     )
     .padding(16)
     .width(sizing.width)
-    .height(sizing.height)
-    .into()
+    .height(sizing.height);
+    if !state.confirm_close {
+        return main.into();
+    }
+    crate::ui::modal::discard_guard(
+        main,
+        Message::BlockLookup(Action::DiscardClose),
+        Message::BlockLookup(Action::KeepEditing),
+    )
 }

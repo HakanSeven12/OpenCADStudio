@@ -1953,56 +1953,10 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if matches!(
-                        name.as_str(),
-                        "CENTEREXE"
-                            | "CENTERLAYER"
-                            | "CENTERLTYPE"
-                            | "CENTERLTSCALE"
-                            | "CENTERLTYPEFILE"
-                            | "CENTERCROSSSIZE"
-                            | "CENTERCROSSGAP"
-                            | "CENTERMARKEXE"
-                    ) {
-                        let settings = self.tabs[i].scene.centerline_settings();
-                        let current = match name.as_str() {
-                            "CENTEREXE" => settings.extension.to_string(),
-                            "CENTERLAYER" => settings.layer,
-                            "CENTERLTYPE" => settings.linetype,
-                            "CENTERLTSCALE" => settings.linetype_scale.to_string(),
-                            "CENTERLTYPEFILE" => settings.linetype_file,
-                            "CENTERCROSSSIZE" => settings.cross_size,
-                            "CENTERCROSSGAP" => settings.cross_gap,
-                            "CENTERMARKEXE" => i16::from(settings.mark_extensions).to_string(),
-                            _ => unreachable!(),
-                        };
-                        if let Some(value) = &value {
-                            // Web CENTERLTYPEFILE: no path to read — pick the
-                            // .lin/.dnl file through the browser, read its
-                            // bytes at pick time and populate the document
-                            // from the text (native reads the typed path
-                            // inside `set_centerline_setting`).
-                            #[cfg(target_arch = "wasm32")]
-                            if name == "CENTERLTYPEFILE" && !value.trim().is_empty() {
-                                return Some(Task::perform(
-                                    crate::io::pick_linetype_file_web(),
-                                    Message::CenterlineLinetypeFilePicked,
-                                ));
-                            }
-                            match self.tabs[i].scene.set_centerline_setting(&name, value) {
-                                Ok(message) => {
-                                    self.tabs[i].dirty = true;
-                                    self.command_line.push_output(&message);
-                                }
-                                Err(error) => self.command_line.push_error(&error),
-                            }
-                        } else {
-                            self.command_line.push_output(
-                                crate::tf!("Enter new value for {name} <{current}>:").as_ref(),
-                            );
-                            self.pending_setvar = Some(name.clone());
-                        }
-                        return Some(self.finish_dispatch(cmd));
+                    if crate::app::commands::center_vars::is_center_variable(&name) {
+                        let task = self.center_setvar(&name, value.as_deref(), i);
+                        let done = self.finish_dispatch(cmd);
+                        return Some(Task::batch([task, done]));
                     }
                     if name == "DIMCONTINUEMODE" {
                         let current = self.dimension_continue_mode;

@@ -725,7 +725,8 @@ impl OpenCADStudio {
         {
             match prop.value {
                 PropValue::BlockNumber { value, .. } => {
-                    if let Ok(num) = value.parse::<f64>() {
+                    if let Some(num) = crate::app::block_parameter_properties::parse_value(&value)
+                    {
                         dyn_props.insert(prop.label, json!(clean_float(num)));
                     } else {
                         dyn_props.insert(prop.label, json!(value));
@@ -734,9 +735,14 @@ impl OpenCADStudio {
                 PropValue::BlockChoice {
                     selected, options, ..
                 } => {
-                    if let Some(opt) = options.get(selected) {
-                        dyn_props.insert(prop.label, json!(opt));
-                    }
+                    // A row that matches nothing stays in the panel as a
+                    // choice without a current option, so it stays here too:
+                    // `null` means present and unmatched, a missing key means
+                    // the definition has no such property.
+                    dyn_props.insert(
+                        prop.label,
+                        options.get(selected).map_or(Value::Null, |opt| json!(opt)),
+                    );
                 }
                 PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } => {
                     dyn_props.insert(prop.label, json!(selected));
@@ -829,10 +835,16 @@ impl OpenCADStudio {
             .iter()
             .any(|p| p.starts_with('*') && p.len() > 1 && p.chars().nth(1) != Some('*'));
 
-        let scope = req
-            .get("scope")
-            .and_then(Value::as_str)
-            .unwrap_or("active_space");
+        // A block-editing session makes the definition the active space, so
+        // the default scope would report only the inserts nested inside it.
+        // An unscoped read during a session answers for the whole document.
+        let scope = req.get("scope").and_then(Value::as_str).unwrap_or(
+            if tab.active_block_edit.is_some() {
+                "all"
+            } else {
+                "active_space"
+            },
+        );
         let layer_filter = req.get("layer").and_then(Value::as_str);
 
         let handles_filter: Option<FxHashSet<Handle>> = if let Some(h) = req["handle"].as_str() {

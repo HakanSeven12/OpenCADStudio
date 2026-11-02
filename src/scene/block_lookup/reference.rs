@@ -87,16 +87,12 @@ pub(crate) fn reference_properties(
                 }
             } else {
                 PropValue::ReadOnlyWithTooltip {
+                    // No single row applies, so there is nothing to show; the
+                    // name a column carries for itself is not a value.
                     value: selected
                         .and_then(|row| options.get(row))
                         .cloned()
-                        .unwrap_or_else(|| {
-                            if output.unmatched_name.is_empty() {
-                                "Custom".into()
-                            } else {
-                                output.unmatched_name.clone()
-                            }
-                        }),
+                        .unwrap_or_default(),
                     tooltip: parameter.lookup_description.clone(),
                 }
             };

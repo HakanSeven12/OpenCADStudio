@@ -422,6 +422,9 @@ impl OpenCADStudio {
                     selected += 1;
                 }
             }
+            // The selection this replaces was what the panel and the grip
+            // overlay were built from; same rebuild the `select` op runs.
+            self.refresh_properties();
         }
         self.set_control_result(json!({
             "name": name,
@@ -592,6 +595,7 @@ pub(crate) fn new_guid_v4() -> String {
 const READABLE_SYSVARS: &[&str] = &[
     "celtscale",
     "clayer",
+    "constraintstatus",
     "ctextstyle",
     "extmax",
     "extmin",
@@ -626,6 +630,34 @@ fn read_sysvar(scene: &crate::scene::Scene, name: &str) -> Option<Value> {
         "extmax" => {
             let (_, max) = scene.model_space_extents()?;
             json!([max.x, max.y, max.z])
+        }
+        // Constraint state per active space: the scope the solver is working
+        // in and how much of it is constrained. `dof` is the solver's own
+        // derived figure, so it is null until a solve has run.
+        // `scene.block_edit_block` is the scene-side record that
+        // `DocumentTab::current_parametric_scope()` resolves its BEDIT
+        // session to; this read only has the scene, so it follows that field.
+        "constraintstatus" => {
+            use crate::scene::parametric_constraints::ParametricScope;
+            let scope = scene
+                .block_edit_block
+                .map(ParametricScope::Block)
+                .unwrap_or(ParametricScope::ModelSpace);
+            let set = scene.parametric_constraint_set(scope);
+            let owner = scope.owner_handle(&scene.document);
+            json!({
+                "scope": scene
+                    .document
+                    .block_records
+                    .iter()
+                    .find(|record| record.handle == owner)
+                    .map(|record| record.name.clone()),
+                "constraint_count": set.map_or(0, |set| set.constraints.len()),
+                "enabled_count": set.map_or(0, |set| {
+                    set.constraints.iter().filter(|constraint| constraint.enabled).count()
+                }),
+                "dof": set.and_then(|set| set.dof),
+            })
         }
         _ => return None,
     };

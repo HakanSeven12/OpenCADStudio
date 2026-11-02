@@ -110,6 +110,9 @@ fn scale_attribute_for_insert(
         )
     };
     attribute.height *= block_scale;
+    if let Some(mtext) = attribute.embedded_mtext.as_mut() {
+        mtext.rectangle_width *= block_scale;
+    }
     attribute.insertion_point = scale_about(attribute.insertion_point);
     attribute.alignment_point = scale_about(attribute.alignment_point);
 }
@@ -362,6 +365,10 @@ pub(crate) fn insert_attribute_entities(
     insert
         .attributes
         .iter()
+        // A constant attribute is text the definition itself carries: it is the
+        // same for every reference, so the definition draws it and the
+        // reference must not draw it again underneath.
+        .filter(|attribute| !attribute.flags.constant)
         .filter(|attribute| attribute_is_render_visible(document, visibility, attribute))
         .map(|attribute| {
             let mut attribute = attribute.clone();
@@ -593,6 +600,36 @@ mod tests {
         );
     }
 
+    /// A constant attribute is drawn by the definition it belongs to, which is
+    /// why it gets no grip; the reference must not draw the same text a second
+    /// time under it.
+    #[test]
+    fn a_constant_attribute_is_painted_by_the_definition_only() {
+        use codec::EntityType;
+        let mut document = document_with_layers(Vec::new());
+        document.header.attribute_visibility = 1;
+        let mut constant = attribute("TAG_CONST", 1.0, 1.0);
+        constant.flags.constant = true;
+        let ins = block_with(vec![constant, attribute("TAG_VALUE", 2.0, 2.0)]);
+        let painted: Vec<String> = insert_attribute_entities(
+            &document,
+            &ins,
+            1.0,
+            crate::scene::BlockScalePolicy::FromInsert,
+        )
+        .into_iter()
+        .map(|entity| match entity {
+            EntityType::AttributeEntity(attribute) => attribute.tag.clone(),
+            other => panic!("expected an attribute, got {other:?}"),
+        })
+        .collect();
+        assert_eq!(
+            painted,
+            vec!["TAG_VALUE".to_string()],
+            "the definition already draws the constant, so the reference adds nothing"
+        );
+    }
+
     #[test]
     fn visible_attribute_grips_match_render_visibility() {
         let mut off_layer = Layer::new("OFF");
@@ -639,5 +676,25 @@ mod tests {
 
         assert_eq!(grips.len(), 2);
         assert_eq!(grips[1].world, glam::DVec3::new(12.0, 10.0, 0.0));
+    }
+}
+
+#[cfg(test)]
+mod attribute_width_tests {
+    use super::*;
+
+    #[test]
+    fn annotative_attribute_scales_its_wrap_width_with_its_height() {
+        let insert = Insert::new("TITLE", Vector3::ZERO);
+        let mut attribute = codec::entities::AttributeEntity::new("TITLE".into(), "A B".into());
+        let mut mtext = codec::entities::MText::new();
+        mtext.rectangle_width = 15.0;
+        attribute.embedded_mtext = Some(Box::new(mtext));
+        let ratio = 15.0 / attribute.height;
+        scale_attribute_for_insert(&insert, &mut attribute, 3.0);
+        assert_eq!(
+            attribute.embedded_mtext.unwrap().rectangle_width / attribute.height,
+            ratio
+        );
     }
 }

@@ -28,6 +28,9 @@ pub struct UnitContext {
     pub angbase: f64,
     /// ANGDIR — true when written angles grow clockwise.
     pub angdir_cw: bool,
+    /// DIMZIN — zero suppression; its 8 bit drops the trailing zeros of a
+    /// decimal length or angle (`3.5000` → `3.5`, `1.0000` → `1`).
+    pub dimzin: i16,
 }
 
 impl UnitContext {
@@ -42,6 +45,7 @@ impl UnitContext {
             auprec: header.angular_unit_precision,
             angbase: header.angle_base,
             angdir_cw: header.angle_direction != 0,
+            dimzin: header.dim_zero_suppression,
         }
     }
 }
@@ -54,6 +58,7 @@ thread_local! {
         auprec: 0,
         angbase: 0.0,
         angdir_cw: false,
+        dimzin: 0,
     }) };
 }
 
@@ -142,6 +147,14 @@ pub fn without_negative_zero(text: String) -> String {
     }
 }
 
+/// A coordinate typed into a dialog field, as a plain decimal at the drawing's
+/// LUPREC. Fields like these are typed straight back, so they print a number
+/// every length parser reads rather than the drawing's formatted length style.
+pub fn coordinate_text(value: f64, precision: i16) -> String {
+    let precision = precision.clamp(0, 8) as usize;
+    without_negative_zero(format!("{:.*}", precision, value))
+}
+
 fn format_signed_length(value: f64) -> String {
     let ctx = unit_context();
     let prec = ctx.luprec.max(0).min(15) as usize;
@@ -195,8 +208,25 @@ fn format_signed_length(value: f64) -> String {
                 None => format!("{}{:.0}{}", sign, whole, frac_str),
             }
         }
-        _ => format!("{:.*}", prec, value),
+        _ => trailing_zeros(format!("{:.*}", prec, value), ctx.dimzin),
     }
+}
+
+/// Drop the trailing zeros of a decimal (and a bare point) when DIMZIN asks
+/// for it, as the drawing writes its decimal lengths and angles.
+fn trailing_zeros(text: String, dimzin: i16) -> String {
+    if dimzin & 8 == 0 || !text.contains('.') {
+        return text;
+    }
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// A dimensionless decimal (a linetype scale) at the drawing's linear
+/// precision, whatever its linear unit format.
+pub fn format_decimal(value: f64) -> String {
+    let ctx = unit_context();
+    let precision = ctx.luprec.max(0).min(15) as usize;
+    without_negative_zero(trailing_zeros(format!("{:.*}", precision, value), ctx.dimzin))
 }
 
 /// Format an area with the drawing's linear precision. Area stays a decimal
@@ -207,7 +237,7 @@ pub fn format_area(value: f64) -> String {
     if ctx.lunits == 1 {
         format!("{:.*e}", precision, value)
     } else {
-        format!("{:.*}", precision, value)
+        trailing_zeros(format!("{:.*}", precision, value), ctx.dimzin)
     }
 }
 
@@ -227,25 +257,47 @@ fn format_signed_angle(value_rad: f64) -> String {
         }
         3 => format!("{:.*}r", prec, value_rad),
         4 => surveyor(value_rad, prec),
-        _ => format!("{:.*}°", prec, value_rad.to_degrees()),
+        // Decimal degrees carry no mark.
+        _ => trailing_zeros(format!("{:.*}", prec, value_rad.to_degrees()), ctx.dimzin),
     }
 }
 
 /// Degrees / minutes / seconds. Each part carries its own mark — `d`, `'`, `"`
-/// — so the written angle says which convention it is in.
+/// — so the written angle says which convention it is in. The precision
+/// counts the parts as the drawing does: 0 whole degrees (`27d`), 1–2 adds
+/// minutes (`26d34'`), 3–4 adds seconds (`26d33'54"`), and every step past 4
+/// a decimal of the seconds.
 fn dms(degrees: f64, prec: usize) -> String {
     let sign = if degrees < 0.0 { "-" } else { "" };
     let a = degrees.abs();
+    let decimals = prec.saturating_sub(4).min(11);
     // Round before splitting so seconds carry into minutes and degrees.
-    let scale = 10f64.powi(prec.min(15) as i32);
-    let per_minute = 60.0 * scale;
-    let per_degree = 60.0 * per_minute;
-    let ticks = (a * per_degree).round();
-    let d = (ticks / per_degree).trunc();
-    let rest = ticks - d * per_degree;
-    let m = (rest / per_minute).trunc();
-    let s = (rest - m * per_minute) / scale;
-    format!("{}{:.0}d{:.0}'{:.*}\"", sign, d, m, prec, s)
+    let unit = dms_unit_seconds(prec);
+    let label = match prec {
+        0 => 0,
+        1 | 2 => 1,
+        _ => 2,
+    };
+    let ticks = (a * 3600.0 / unit).round() * unit;
+    let d = (ticks / 3600.0).trunc();
+    let rest = ticks - d * 3600.0;
+    let m = (rest / 60.0).trunc();
+    let s = rest - m * 60.0;
+    match label {
+        0 => format!("{}{:.0}d", sign, d),
+        1 => format!("{}{:.0}d{:.0}'", sign, d, m),
+        _ => format!("{}{:.0}d{:.0}'{:.*}\"", sign, d, m, decimals, s),
+    }
+}
+
+/// The seconds one step of a degrees/minutes/seconds angle at `prec` is:
+/// a degree, a minute, a second, then a decimal of it per step past 4.
+fn dms_unit_seconds(prec: usize) -> f64 {
+    match prec {
+        0 => 3600.0,
+        1 | 2 => 60.0,
+        _ => 10f64.powi(-(prec.saturating_sub(4).min(11) as i32)),
+    }
 }
 
 /// Surveyor's units: a bearing away from north or south, toward east or west,
@@ -255,8 +307,9 @@ fn dms(degrees: f64, prec: usize) -> String {
 /// the single letter, which is also what keeps a 90° angle from reading as the
 /// contradictory `N 90d0'0" E`.
 fn surveyor(value_rad: f64, prec: usize) -> String {
-    // Quantize before choosing a cardinal or quadrant.
-    let scale = 3600.0 * 10f64.powi(prec.min(15) as i32);
+    // Quantize as the bearing is written, before choosing a cardinal or
+    // quadrant: steps per degree.
+    let scale = 3600.0 / dms_unit_seconds(prec);
     let turn = 360.0 * scale;
     let ticks = (value_rad.to_degrees().rem_euclid(360.0) * scale)
         .round()
@@ -1394,21 +1447,21 @@ mod angle_format_tests {
 
     #[test]
     fn degrees_minutes_seconds_carry() {
-        assert_eq!(shown(1, 0, 45.9999), "46d0'0\"");
-        assert_eq!(shown(1, 0, 89.99999), "90d0'0\"");
-        assert_eq!(shown(1, 0, 0.99999), "1d0'0\"");
-        assert_eq!(shown(1, 0, 45.5), "45d30'0\"");
-        assert_eq!(shown(1, 2, 45.9999), "45d59'59.64\"");
-        assert_eq!(shown(1, 2, 45.5), "45d30'0.00\"");
+        assert_eq!(shown(1, 0, 45.9999), "46d");
+        assert_eq!(shown(1, 0, 0.99999), "1d");
+        assert_eq!(shown(1, 2, 26.565051177), "26d34'");
+        assert_eq!(shown(1, 2, 45.99999), "46d0'");
+        assert_eq!(shown(1, 4, 45.5), "45d30'0\"");
+        assert_eq!(shown(1, 6, 45.9999), "45d59'59.64\"");
     }
 
     #[test]
     fn surveyor_bearings_stay_inside_a_quadrant() {
         assert_eq!(shown(4, 0, 359.99999), "E");
         assert_eq!(shown(4, 0, 89.99999), "N");
-        assert_eq!(shown(4, 0, 45.0), "N 45d0'0\" E");
+        assert_eq!(shown(4, 0, 45.0), "N 45d E");
         assert_eq!(shown(4, 0, 180.0), "W");
-        assert_ne!(shown(4, 8, 0.0000000005), "E");
+        assert_ne!(shown(4, 8, 0.00001), "E");
         for prec in [0, 2] {
             for deg in [
                 0.99999f64, 45.9999, 89.99999, 179.99999, 269.99999, 359.99999,
@@ -1482,8 +1535,8 @@ mod negative_zero_format_tests {
 
     #[test]
     fn an_angle_that_rounds_to_zero_has_no_sign() {
-        assert_eq!(angle(0, 0, ROTATION_NOISE), "0°");
-        assert_eq!(angle(1, 0, ROTATION_NOISE), "0d0'0\"");
+        assert_eq!(angle(0, 0, ROTATION_NOISE), "0");
+        assert_eq!(angle(1, 0, ROTATION_NOISE), "0d");
         assert_eq!(angle(2, 0, ROTATION_NOISE), "0g");
         assert_eq!(angle(3, 2, ROTATION_NOISE), "0.00r");
     }
@@ -1493,13 +1546,13 @@ mod negative_zero_format_tests {
     fn a_visible_negative_keeps_its_sign() {
         assert_eq!(length(2, 4, -2.5), "-2.5000");
         assert_eq!(length(2, 0, -0.6), "-1");
-        assert_eq!(angle(0, 0, -45f64.to_radians()), "-45°");
-        assert_eq!(angle(1, 1, -0.0001f64.to_radians()), "-0d0'0.4\"");
+        assert_eq!(angle(0, 0, -45f64.to_radians()), "-45");
+        assert_eq!(angle(1, 5, -0.0001f64.to_radians()), "-0d0'0.4\"");
     }
 
     #[test]
     fn a_negative_infinite_value_keeps_its_sign() {
         assert_eq!(length(2, 4, f64::NEG_INFINITY), "-inf");
-        assert_eq!(angle(0, 0, f64::NEG_INFINITY), "-inf°");
+        assert_eq!(angle(0, 0, f64::NEG_INFINITY), "-inf");
     }
 }

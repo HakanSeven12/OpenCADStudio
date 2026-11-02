@@ -15,16 +15,32 @@ fn to_render(line: &Line) -> RenderEntity {
     if let Some(association) =
         codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
-        let segments = crate::scene::centermark::render_segments(&association);
+        // As the stored block lines: the cross (and the detached badge) is
+        // Continuous, and each extension is a line of its own in the object's
+        // linetype, running along the mark's axes and aligned at its ends as
+        // a single line is.
+        let axes = crate::scene::centermark::dvec(association.plane_x)
+            + crate::scene::centermark::dvec(association.plane_y);
+        let segments: Vec<_> = crate::scene::centermark::render_segments(&association)
+            .into_iter()
+            .map(|[a, b]| if (b - a).dot(axes) < 0.0 { [b, a] } else { [a, b] })
+            .collect();
+        let extensions = 2..crate::scene::centermark::mark_segments(&association).len();
         let mut points = Vec::with_capacity(segments.len() * 3);
+        let mut solid = Vec::with_capacity(segments.len() * 3);
         let mut key_vertices = Vec::with_capacity(segments.len() * 2 + 1);
         let mut tangent_geoms = Vec::with_capacity(segments.len());
         for (index, segment) in segments.iter().enumerate() {
-            if index > 0 {
-                points.push([f64::NAN; 3]);
+            let target = if extensions.contains(&index) {
+                &mut points
+            } else {
+                &mut solid
+            };
+            if !target.is_empty() {
+                target.push([f64::NAN; 3]);
             }
             for point in segment {
-                points.push([point.x, point.y, point.z]);
+                target.push([point.x, point.y, point.z]);
                 key_vertices.push([point.x, point.y, point.z]);
             }
             tangent_geoms.push(TangentGeom::Line {
@@ -44,7 +60,16 @@ fn to_render(line: &Line) -> RenderEntity {
         key_vertices.push([center.x, center.y, center.z]);
         return RenderEntity {
             pick_tris: Vec::new(),
-            object: RenderObject::Lines(points),
+            object: RenderObject::BoundaryLines {
+                points,
+                stations: Vec::new(),
+                point_segments: Vec::new(),
+                station_pieces: Vec::new(),
+                source_length: 0.0,
+                plinegen: true,
+                separate_runs: true,
+                solid,
+            },
             snap_pts: Vec::new(),
             tangent_geoms,
             key_vertices,
@@ -152,74 +177,121 @@ fn grips(line: &Line) -> Vec<GripDef> {
     vec![square_grip(0, s), square_grip(1, e), center_grip(2, m)]
 }
 
+/// A centre mark's cross size or gap as the reference shows it: a factor
+/// of the diameter (`0.1x`) or a length.
+fn center_measure_text(value: f64, relative: bool, radius: f64) -> String {
+    let diameter = radius * 2.0;
+    if relative && diameter > 1.0e-12 {
+        let factor = ((value / diameter) * 1.0e6).round() / 1.0e6;
+        format!("{factor}x")
+    } else {
+        format_length(value)
+    }
+}
+
+/// Mark directions as the reference lists them (left, right, top, bottom),
+/// as indexes into the carrier's `[+x, -x, +y, -y]`.
+const MARK_EXTENSIONS: [(&str, &str, usize); 4] = [
+    ("Left extension", "centermark_left_extension", 1),
+    ("Right extension", "centermark_right_extension", 0),
+    ("Top extension", "centermark_top_extension", 2),
+    ("Bottom extension", "centermark_bottom_extension", 3),
+];
+
 fn properties(line: &Line) -> Vec<PropSection> {
+    use crate::scene::model::object::{PropValue, Property};
     if let Some(association) =
         codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
-        use crate::scene::model::object::{PropValue, Property};
-        return vec![PropSection {
-            title: t!("Geometry").into_owned(),
-            props: vec![
-                Property {
-                    label: "Show extension".to_owned(),
-                    field: "centermark_show_extension",
-                    value: PropValue::Choice {
-                        selected: if association.show_extensions {
-                            "Yes"
-                        } else {
-                            "No"
-                        }
-                        .to_owned(),
-                        options: vec!["Yes".to_owned(), "No".to_owned()],
-                    },
-                },
-                edit(
-                    "Cross size",
-                    "centermark_cross_size",
+        let mut geometry = vec![
+            Property {
+                label: t!("Cross size").into_owned(),
+                field: "centermark_cross_size",
+                value: PropValue::EditText(center_measure_text(
                     association.cross_size,
-                ),
-                edit("Cross gap", "centermark_cross_gap", association.cross_gap),
-                edit(
-                    "Extension length",
-                    "centermark_extension_length",
-                    association.extension_length,
-                ),
-                ro(
-                    "Associative",
-                    "centermark_associative",
-                    if association.associated { "Yes" } else { "No" },
-                ),
-            ],
-        }];
+                    association.cross_size_relative,
+                    association.radius,
+                )),
+            },
+            Property {
+                label: t!("Cross gap").into_owned(),
+                field: "centermark_cross_gap",
+                value: PropValue::EditText(center_measure_text(
+                    association.cross_gap,
+                    association.cross_gap_relative,
+                    association.radius,
+                )),
+            },
+        ];
+        for (label, field, index) in MARK_EXTENSIONS {
+            geometry.push(edit(
+                t!(label).as_ref(),
+                field,
+                association.extension_length + association.overshoots[index],
+            ));
+        }
+        geometry.push(Property {
+            label: t!("Show extension").into_owned(),
+            field: "centermark_show_extension",
+            value: PropValue::Choice {
+                selected: if association.show_extensions { t!("Yes") } else { t!("No") }
+                    .into_owned(),
+                options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
+            },
+        });
+        let x = crate::scene::centermark::dvec(association.plane_x);
+        return vec![
+            PropSection {
+                title: t!("Geometry").into_owned(),
+                props: geometry,
+            },
+            PropSection {
+                title: t!("Misc").into_owned(),
+                props: vec![
+                    ro(t!("Type").as_ref(), "center_type", t!("Center Mark").into_owned()),
+                    crate::entities::common::edit_angle_prop(
+                        t!("Rotation").as_ref(),
+                        "centermark_rotation",
+                        x.y.atan2(x.x).to_degrees(),
+                    ),
+                    ro(t!("Annotative").as_ref(), "annotative", t!("No").into_owned()),
+                ],
+            },
+        ];
     }
     if let Some(association) =
         codec::entities::CenterLineAssociation::read(&line.common.extended_data)
     {
-        return vec![PropSection {
-            title: t!("Geometry").into_owned(),
-            props: vec![
-                edit(
-                    "Start extension",
-                    "centerline_start_extension",
-                    association.start_extension,
-                ),
-                edit(
-                    "End extension",
-                    "centerline_end_extension",
-                    association.end_extension,
-                ),
-                ro(
-                    t!("Length").as_ref(),
-                    "length",
-                    format_length(line.length()),
-                ),
-                ro(
-                    "Associative",
-                    "centerline_associative",
-                    if association.associated { "Yes" } else { "No" },
-                ),
-            ],
-        }];
+        return vec![
+            PropSection {
+                title: t!("Geometry").into_owned(),
+                props: vec![
+                    ro(t!("Start X").as_ref(), "start_x", format_length(line.start.x)),
+                    ro(t!("Start Y").as_ref(), "start_y", format_length(line.start.y)),
+                    ro(t!("Start Z").as_ref(), "start_z", format_length(line.start.z)),
+                    ro(t!("End X").as_ref(), "end_x", format_length(line.end.x)),
+                    ro(t!("End Y").as_ref(), "end_y", format_length(line.end.y)),
+                    ro(t!("End Z").as_ref(), "end_z", format_length(line.end.z)),
+                    edit(
+                        t!("Start extension").as_ref(),
+                        "centerline_start_extension",
+                        association.start_extension,
+                    ),
+                    edit(
+                        t!("End extension").as_ref(),
+                        "centerline_end_extension",
+                        association.end_extension,
+                    ),
+                ],
+            },
+            PropSection {
+                title: t!("Misc").into_owned(),
+                props: vec![
+                    ro(t!("Type").as_ref(), "center_type", t!("Centerline").into_owned()),
+                    ro(t!("Annotative").as_ref(), "annotative", t!("No").into_owned()),
+                ],
+            },
+        ];
     }
     let dx = line.end.x - line.start.x;
     let dy = line.end.y - line.start.y;
@@ -257,30 +329,62 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
         match field {
             "centermark_show_extension" => {
                 association.show_extensions = matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "yes" | "on" | "true" | "1"
-                );
+                    value.trim().to_lowercase().as_str(),
+                    "yes" | "on" | "true" | "1" | "evet"
+                ) || value.trim() == t!("Yes").as_ref();
             }
-            "centermark_cross_size" | "centermark_cross_gap" | "centermark_extension_length" => {
-                let Some(number) = parse_f64(value) else {
-                    return;
+            "centermark_cross_size" | "centermark_cross_gap" => {
+                let text = value.trim();
+                let diameter = association.radius * 2.0;
+                let (number, relative) = match text.strip_suffix(['x', 'X']) {
+                    Some(factor) => match parse_f64(factor) {
+                        Some(factor) => (factor * diameter, true),
+                        None => return,
+                    },
+                    None => match parse_f64(text) {
+                        Some(length) => (length, false),
+                        None => return,
+                    },
                 };
-                if !number.is_finite() || number < 0.0 {
+                if !number.is_finite() || number <= 0.0 {
                     return;
-                }
-                match field {
-                    "centermark_cross_size" => association.cross_size = number,
-                    "centermark_cross_gap" => association.cross_gap = number,
-                    "centermark_extension_length" => association.extension_length = number,
-                    _ => unreachable!(),
                 }
                 if field == "centermark_cross_size" {
-                    association.cross_size_relative = false;
-                } else if field == "centermark_cross_gap" {
-                    association.cross_gap_relative = false;
+                    association.cross_size = number;
+                    association.cross_size_relative = relative;
+                } else {
+                    association.cross_gap = number;
+                    association.cross_gap_relative = relative;
                 }
             }
-            _ => return,
+            "centermark_rotation" => {
+                let Some(degrees) = parse_f64(value) else {
+                    return;
+                };
+                let x = crate::scene::centermark::dvec(association.plane_x)
+                    .normalize_or(glam::DVec3::X);
+                let y = crate::scene::centermark::dvec(association.plane_y)
+                    .normalize_or(glam::DVec3::Y);
+                let normal = x.cross(y).normalize_or(glam::DVec3::Z);
+                let turn = degrees.to_radians() - x.y.atan2(x.x);
+                let rotation = glam::DQuat::from_axis_angle(normal, turn);
+                let (x, y) = (rotation * x, rotation * y);
+                association.plane_x = codec::types::Vector3::new(x.x, x.y, x.z);
+                association.plane_y = codec::types::Vector3::new(y.x, y.y, y.z);
+            }
+            field => {
+                let Some((_, _, index)) = MARK_EXTENSIONS
+                    .iter()
+                    .find(|(_, name, _)| *name == field)
+                    .copied()
+                else {
+                    return;
+                };
+                let Some(number) = parse_f64(value).filter(|number| number.is_finite()) else {
+                    return;
+                };
+                association.overshoots[index] = number - association.extension_length;
+            }
         }
         crate::scene::centermark::update_carrier(line, &association);
         return;

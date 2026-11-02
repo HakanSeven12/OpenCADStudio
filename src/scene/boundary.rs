@@ -1211,12 +1211,22 @@ impl Scene {
     /// Keep the boundary sources drawn in the current view. HATCH, GRADIENT
     /// and BOUNDARY find regions among what is on screen; an object off the
     /// view, or on a layer that is off or frozen (never drawn), takes no part
-    /// (#2126). A model view seen through a layout viewport is left whole.
+    /// (#2126). A model view seen through a layout viewport keeps its
+    /// off-screen objects but still drops hidden layers (#2342).
     pub fn retain_sources_on_screen(
         &self,
         sources: &mut rustc_hash::FxHashMap<Handle, BoundarySource>,
         plane: WorkingPlane,
     ) {
+        let shown = |handle: &Handle| {
+            self.document.get_entity(*handle).is_none_or(|entity| {
+                self.document
+                    .layers
+                    .get(&entity.common().layer)
+                    .is_none_or(|layer| !layer.is_off() && !layer.is_frozen())
+            })
+        };
+        sources.retain(|handle, _| shown(handle));
         if self.active_viewport.is_some() {
             return;
         }
@@ -1255,17 +1265,7 @@ impl Scene {
                 && line.start[1].max(line.end[1]) >= min_y
                 && line.start[1].min(line.end[1]) <= max_y
         };
-        let shown = |handle: &Handle| {
-            self.document.get_entity(*handle).is_none_or(|entity| {
-                self.document
-                    .layers
-                    .get(&entity.common().layer)
-                    .is_none_or(|layer| !layer.is_off() && !layer.is_frozen())
-            })
-        };
-        sources.retain(|handle, source| {
-            shown(handle) && source.segments.iter().any(on_screen)
-        });
+        sources.retain(|_, source| source.segments.iter().any(on_screen));
     }
 
     /// Boundary candidates in the active working plane, with exact curves

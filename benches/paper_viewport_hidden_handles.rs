@@ -176,8 +176,8 @@ fn main() {
     // owns the empty VP-frozen list the fixture gave it.
     let listed = scene.viewport_list();
     assert_eq!(listed.len(), VIEWPORTS, "the sheet keeps its content viewports");
-    assert!(listed.iter().all(|(_, _, frozen)| frozen.is_empty()));
-    assert!(listed.iter().any(|(handle, _, _)| *handle == first));
+    assert!(listed.iter().all(|vp| vp.frozen.is_empty()));
+    assert!(listed.iter().any(|vp| vp.handle == first));
     assert_eq!(
         scene.document.entities().count(),
         entities,

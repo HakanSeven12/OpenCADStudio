@@ -106,6 +106,7 @@ impl OpenCADStudio {
         self.grip_pending = None;
         self.visibility_popup = None;
         self.table_popup = None;
+        self.flip_popup = None;
         self.hover_dwell = None;
         self.ucs_grip_drag = None;
         self.ucs_icon_selected = false;
@@ -989,7 +990,16 @@ impl OpenCADStudio {
     /// terminated as if Enter were pressed. Shared by the GUI command line and
     /// the headless automation feeder so both behave identically.
     pub(in crate::app) fn run_command_line(&mut self, cmd: &str) -> Task<Message> {
-        self.run_command_line_streaming(cmd, true)
+        self.run_command_line_impl(cmd, true, true)
+    }
+
+    /// `run_command_line` for a caller that sends one command per call. A word
+    /// the command never asked for is leftover input of *this* line, reported
+    /// in `command_line.unconsumed`, rather than the next command: a caller
+    /// sending `BEDIT CONSTTEST` means one command, and running `CONSTTEST` as
+    /// its own command answers with a failure the caller never asked for.
+    pub(in crate::app) fn run_one_command_line(&mut self, cmd: &str) -> Task<Message> {
+        self.run_command_line_impl(cmd, true, false)
     }
 
     /// `run_command_line`, with the trailing Enter left off when `finish` is
@@ -1001,6 +1011,13 @@ impl OpenCADStudio {
         cmd: &str,
         finish: bool,
     ) -> Task<Message> {
+        self.run_command_line_impl(cmd, finish, true)
+    }
+
+    /// `chain`: words a command that took none leaves behind start the next
+    /// command, as a script line (`REGEN CIRCLE 0,0 5`) expects. Off, they stay
+    /// unconsumed.
+    fn run_command_line_impl(&mut self, cmd: &str, finish: bool, chain: bool) -> Task<Message> {
         let i = self.active_tab;
         self.command_line.unconsumed.clear();
         let tokens: Vec<&str> = cmd.split_whitespace().collect();
@@ -1057,8 +1074,12 @@ impl OpenCADStudio {
             }
             // The command takes no words after it and has run: the rest of
             // the line goes on to the next command, as Enter would send it.
+            if !chain {
+                self.command_line.unconsumed = tokens[1..].iter().map(|s| s.to_string()).collect();
+                return start_task;
+            }
             let rest = tokens[1..].join(" ");
-            return Task::batch([start_task, self.run_command_line_streaming(&rest, finish)]);
+            return Task::batch([start_task, self.run_command_line_impl(&rest, finish, chain)]);
         }
         let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
         let finish_task = self.finish_active_command(&toks, finish);

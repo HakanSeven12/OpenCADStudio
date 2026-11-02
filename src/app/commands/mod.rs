@@ -8,6 +8,7 @@ mod attman;
 mod block_cmdline;
 mod blocks;
 mod blockvars;
+mod center_vars;
 mod purge;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
@@ -133,6 +134,17 @@ impl OpenCADStudio {
     /// part answers the running command's prompt, or starts a command when
     /// none runs (`PDFIMPORT;FILE`).
     pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
+        if cmd.eq_ignore_ascii_case("BLOOKUPTABLE")
+            && self.block_editor_preferences.action_bars
+            && self.tabs[self.active_tab]
+                .active_block_edit_session()
+                .is_some()
+        {
+            // The palette's Lookup tool is the action bar's own affordance, so
+            // the refusal meant for the typed verb would silence it: open the
+            // table editor instead.
+            return self.open_lookup_table("");
+        }
         if !cmd.contains(';') {
             return self.dispatch_command(cmd);
         }
@@ -267,18 +279,25 @@ impl OpenCADStudio {
             } else {
                 cmd.split_once(' ').map_or("", |(_, a)| a.trim())
             };
-            if !args.is_empty() && crate::scene::block_actions::Kind::parse(args).is_none() {
-                self.command_line.push_error(
-                    crate::t!(
-                        "Supported actions: Move, Scale, Stretch, Polar Stretch, Rotate, Flip, Array. Other action types are not wired yet."
-                    )
-                    .as_ref(),
-                );
-                return Some(Task::none());
-            }
-            if let Some(error) = self.action_error(crate::scene::block_actions::Kind::parse(args)) {
-                self.command_line.push_error(crate::t!(error).as_ref());
-                return Some(Task::none());
+            if crate::app::block_actions::lookup_action_arg(args) {
+                if let Some(error) = self.lookup_table_error() {
+                    self.command_line.push_error(crate::t!(error).as_ref());
+                    return Some(Task::none());
+                }
+            } else {
+                if !args.is_empty() && crate::scene::block_actions::Kind::parse(args).is_none() {
+                    self.command_line.push_error(
+                        crate::t!(
+                            "Supported actions: Move, Scale, Stretch, Polar Stretch, Rotate, Flip, Array, Lookup."
+                        )
+                        .as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                if let Some(error) = self.action_error(crate::scene::block_actions::Kind::parse(args)) {
+                    self.command_line.push_error(crate::t!(error).as_ref());
+                    return Some(Task::none());
+                }
             }
         }
         if cmd == "BPARAMETER" || cmd.starts_with("BPARAMETER ") {

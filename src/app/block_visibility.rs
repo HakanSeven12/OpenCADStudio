@@ -169,6 +169,15 @@ impl OpenCADStudio {
                 }
                 self.active_modal = None;
             }
+            Action::Help => {
+                self.command_line.push_info(
+                    crate::t!(
+                        "A visibility state controls which objects a block shows. This dialog lists the states, marks the current one, and creates, renames, reorders or deletes them. OK applies the changes; Cancel discards them."
+                    )
+                    .as_ref(),
+                );
+                return Task::none();
+            }
             action => {
                 let Some(state) = self.block_visibility.as_mut() else {
                     return Task::none();
@@ -188,38 +197,17 @@ impl OpenCADStudio {
                         if rename {
                             state.edited.states[state.selected].name = name;
                         } else {
-                            let mut new = state.edited.states[state.current].clone();
-                            new.name = name;
-                            if state.new_visibility != NewVisibility::Keep {
-                                // Newly controlled geometry was visible in all existing states.
-                                let document = &self.tabs[i].scene.document;
-                                let members = document
-                                    .block_records
-                                    .iter()
-                                    .find(|record| record.handle == state.target.definition)
-                                    .map(|record| record.entity_handles.clone())
-                                    .unwrap_or_default();
-                                for handle in members {
-                                    if !state.edited.all_blocks.contains(&handle) {
-                                        state.edited.all_blocks.push(handle);
-                                        if document
-                                            .get_entity(handle)
-                                            .is_some_and(|entity| !entity.common().invisible)
-                                        {
-                                            for old in &mut state.edited.states {
-                                                old.visible_blocks.push(handle);
-                                            }
-                                        }
-                                    }
-                                }
-                                new.visible_blocks = if state.new_visibility == NewVisibility::Show
-                                {
-                                    state.edited.all_blocks.clone()
-                                } else {
-                                    Vec::new()
-                                };
-                            }
-                            state.edited.states.push(new);
+                            let members = visibility::definition_members(
+                                &self.tabs[i].scene.document,
+                                state.target.definition,
+                            );
+                            visibility::append_state(
+                                &mut state.edited,
+                                &name,
+                                state.current,
+                                state.new_visibility,
+                                &members,
+                            );
                             state.select(state.edited.states.len() - 1);
                         }
                     }

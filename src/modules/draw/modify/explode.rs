@@ -2025,26 +2025,28 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
             }
             let gap = ((d2.x - d1.x).powi(2) + (d2.y - d1.y).powi(2)).sqrt();
             let outside = !ticks && met.dimasz > 1e-6 && gap < 2.0 * met.dimasz;
-            if outside {
-                // Arrow bodies extend outward (tips still at the origins).
-                result.extend(dim_terminator(d1, -ux, -uy, &met.arrow1, &dim_c));
-                result.extend(dim_terminator(d2, ux, uy, &met.arrow2, &dim_c));
-                if !met.dimsoxd {
-                    let stub = 2.0 * met.dimasz;
+            // Flip Arrow turns an arrowhead to the other side of its line.
+            let (out1, out2) = (outside != base.flip_arrow1, outside != base.flip_arrow2);
+            // Outside, arrow bodies extend outward (tips still at the origins).
+            let (s1, s2) = (if out1 { -1.0 } else { 1.0 }, if out2 { -1.0 } else { 1.0 });
+            result.extend(dim_terminator(d1, ux * s1, uy * s1, &met.arrow1, &dim_c));
+            result.extend(dim_terminator(d2, -ux * s2, -uy * s2, &met.arrow2, &dim_c));
+            if !met.dimsoxd {
+                let stub = 2.0 * met.dimasz;
+                if out1 {
                     result.push(make_seg(
                         &v3(d1.x - ux * stub, d1.y - uy * stub, d1.z),
                         &d1,
                         &dim_c,
                     ));
+                }
+                if out2 {
                     result.push(make_seg(
                         &d2,
                         &v3(d2.x + ux * stub, d2.y + uy * stub, d2.z),
                         &dim_c,
                     ));
                 }
-            } else {
-                result.extend(dim_terminator(d1, ux, uy, &met.arrow1, &dim_c));
-                result.extend(dim_terminator(d2, -ux, -uy, &met.arrow2, &dim_c));
             }
         };
 
@@ -2171,29 +2173,26 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
                 result.push(make_seg(&center, &far_outer, &dim_c));
             }
             let outside = !ticks && met.dimasz > 1e-6 && len < 2.0 * met.dimasz;
-            if outside {
-                result.extend(dim_terminator(edge, ux, uy, &met.arrow1, &dim_c));
-                result.extend(dim_terminator(far, -ux, -uy, &met.arrow2, &dim_c));
-                if !met.dimsoxd {
-                    let stub = 2.0 * met.dimasz;
-                    if !met.dimsd1 {
-                        result.push(make_seg(
-                            &edge,
-                            &v3(edge.x + ux * stub, edge.y + uy * stub, edge.z),
-                            &dim_c,
-                        ));
-                    }
-                    if !met.dimsd2 {
-                        result.push(make_seg(
-                            &far,
-                            &v3(far.x - ux * stub, far.y - uy * stub, far.z),
-                            &dim_c,
-                        ));
-                    }
+            let (out1, out2) = (outside != base.flip_arrow1, outside != base.flip_arrow2);
+            let (s1, s2) = (if out1 { 1.0 } else { -1.0 }, if out2 { 1.0 } else { -1.0 });
+            result.extend(dim_terminator(edge, ux * s1, uy * s1, &met.arrow1, &dim_c));
+            result.extend(dim_terminator(far, -ux * s2, -uy * s2, &met.arrow2, &dim_c));
+            if !met.dimsoxd {
+                let stub = 2.0 * met.dimasz;
+                if out1 && !met.dimsd1 {
+                    result.push(make_seg(
+                        &edge,
+                        &v3(edge.x + ux * stub, edge.y + uy * stub, edge.z),
+                        &dim_c,
+                    ));
                 }
-            } else {
-                result.extend(dim_terminator(edge, -ux, -uy, &met.arrow1, &dim_c));
-                result.extend(dim_terminator(far, ux, uy, &met.arrow2, &dim_c));
+                if out2 && !met.dimsd2 {
+                    result.push(make_seg(
+                        &far,
+                        &v3(far.x - ux * stub, far.y - uy * stub, far.z),
+                        &dim_c,
+                    ));
+                }
             }
             let anchor = dim_text_anchor(base, center, edge);
             let distance_squared = |first: Vector3, second: Vector3| {
@@ -2515,19 +2514,13 @@ pub fn bake_dimension_blocks(doc: &mut Document) {
         }
 
         let name = next_dimension_block_name(doc, &mut next_block_number);
-        // Reserve three consecutive handles for the record / block / endblk.
-        // Adding the block + endblk (which carry explicit handles) advances the
-        // document's handle counter past them, so the NULL-handle sub-entities
-        // added afterwards get fresh handles without colliding.
         let next = doc.next_handle();
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
-        let end_handle = Handle::new(next + 2);
 
         let mut br = BlockRecord::new(&name);
         br.handle = br_handle;
         br.block_entity_handle = block_handle;
-        br.block_end_handle = end_handle;
         br.flags.anonymous = true;
         if doc.block_records.add(br).is_err() {
             continue;
@@ -2538,15 +2531,21 @@ pub fn bake_dimension_blocks(doc: &mut Document) {
         block.common.owner_handle = br_handle;
         let _ = doc.add_entity(EntityType::Block(block));
 
-        let mut block_end = BlockEnd::new();
-        block_end.common.handle = end_handle;
-        block_end.common.owner_handle = br_handle;
-        let _ = doc.add_entity(EntityType::BlockEnd(block_end));
-
         for mut sub in subs {
             sub.common_mut().handle = Handle::NULL;
             sub.common_mut().owner_handle = br_handle;
             let _ = doc.add_entity(sub);
+        }
+
+        // The terminator is allocated after the body so handle order matches
+        // record order inside the definition.
+        let end_handle = doc.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = br_handle;
+        let _ = doc.add_entity(EntityType::BlockEnd(block_end));
+        if let Some(record) = doc.block_records.get_mut(&name) {
+            record.block_end_handle = end_handle;
         }
 
         if let Some(EntityType::Dimension(d)) = doc.get_entity_mut(handle) {
@@ -2760,16 +2759,38 @@ mod tests {
         );
     }
 
+    /// The flag, not an empty definition, decides: the same block with one
+    /// line inside explodes when `explodable` is set and stays whole when it
+    /// is cleared.
     #[test]
     fn unexplodable_block_is_not_exploded() {
-        let mut doc = Document::new();
-        let mut block = codec::tables::BlockRecord::new("NO_EXPLODE");
-        block.handle = doc.allocate_handle();
-        block.explodable = false;
-        doc.block_records.add(block).unwrap();
+        fn explode_once(explodable: bool) -> Vec<EntityType> {
+            let mut doc = Document::new();
+            let mut block = codec::tables::BlockRecord::new("NO_EXPLODE");
+            block.handle = doc.allocate_handle();
+            block.explodable = explodable;
+            let child = doc
+                .add_entity(EntityType::Line(codec::entities::Line::from_points(
+                    Vector3::new(0.0, 0.0, 0.0),
+                    Vector3::new(10.0, 0.0, 0.0),
+                )))
+                .unwrap();
+            block.entity_handles.push(child);
+            doc.block_records.add(block).unwrap();
 
-        let insert = codec::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
-        assert!(explode_entity(&EntityType::Insert(insert), &doc).is_empty());
+            let insert = codec::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
+            explode_entity(&EntityType::Insert(insert), &doc)
+        }
+
+        assert_eq!(
+            explode_once(true).len(),
+            1,
+            "the definition holds one line, so an explodable block has something to give"
+        );
+        assert!(
+            explode_once(false).is_empty(),
+            "clearing the flag is what stops the explosion"
+        );
     }
 
     /// A dimension created without a geometry block gets a real `*D` block on
@@ -2806,6 +2827,43 @@ mod tests {
             doc.block_records.len(),
             before,
             "a dimension that already owns a block must not be re-baked"
+        );
+    }
+
+    #[test]
+    fn a_baked_dimension_block_ends_after_its_body() {
+        let mut doc = Document::new();
+        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        let handle = doc
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .unwrap();
+
+        bake_dimension_blocks(&mut doc);
+
+        let block_name = match doc.get_entity(handle) {
+            Some(EntityType::Dimension(d)) => d.base().block_name.clone(),
+            _ => panic!("dimension missing"),
+        };
+        let record = doc
+            .block_records
+            .get(&block_name)
+            .expect("the baked block exists");
+        let marker = record.block_entity_handle.value();
+        let end = record.block_end_handle.value();
+        let body: Vec<_> = record
+            .entity_handles
+            .iter()
+            .map(|handle| handle.value())
+            .collect();
+        assert!(
+            body.iter().all(|handle| *handle > marker),
+            "body handles follow the BLOCK marker: {body:?}"
+        );
+        assert!(
+            end > *body.iter().max().expect("the baked block has geometry"),
+            "the ENDBLK handle follows the body: marker {marker}, body {body:?}, end {end}"
         );
     }
 

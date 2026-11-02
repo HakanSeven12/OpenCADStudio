@@ -566,6 +566,10 @@ impl OpenCADStudio {
         for entity in edited {
             let _ = self.tabs[i].scene.document.add_entity(entity);
         }
+        crate::scene::Scene::sync_attribute_flag(
+            &mut self.tabs[i].scene.document,
+            &session.block_name,
+        );
         let instances = self.tabs[i]
             .scene
             .document
@@ -606,6 +610,14 @@ impl OpenCADStudio {
             },
             None => false,
         };
+        // The definition body was replaced — and an xref reload merged a fresh
+        // one — so its terminator belongs after the new body.
+        if let Err(error) = self.tabs[i]
+            .scene
+            .reterminate_block_definition(&session.block_name)
+        {
+            self.command_line.push_error(&error);
+        }
         let updated = match (session.xref_path.is_some(), instances) {
             (true, 1) => crate::t!("1 xref instance updated").into_owned(),
             (true, n) => crate::tf!("{} xref instances updated", n).into_owned(),

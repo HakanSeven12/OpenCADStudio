@@ -46,9 +46,10 @@ fn typed_point(value: &Value) -> Option<[f64; 3]> {
     })
 }
 
-/// A panel value as a number: plain, or as the panel shows it.
+/// A panel value as a number: plain, numeric, or as the panel shows it.
 fn row_number(value: &Value) -> Option<f64> {
-    graph::value::num(value).or_else(|| crate::app::expr_eval::eval_number(value.as_str()?))
+    graph::value::num(value)
+        .or_else(|| super::block_parameter_properties::parse_value(value.as_str()?))
 }
 
 impl OpenCADStudio {
@@ -94,7 +95,7 @@ impl OpenCADStudio {
                     let property = &props[index];
                     let json = crate::app::control::property_json(property);
                     NodeRow {
-                        field: property.field.to_owned(),
+                        field: crate::app::control::row_id(property),
                         label: label.to_owned(),
                         input: !matches!(json["kind"].as_str(), Some("readonly" | "specialized")),
                         output: true,
@@ -308,7 +309,7 @@ impl OpenCADStudio {
             .graph_panel_sections(i, handle)
             .into_iter()
             .flat_map(|section| section.props)
-            .find(|property| property.field == field)
+            .find(|property| crate::app::control::row_id(property) == field)
         else {
             return Task::none();
         };

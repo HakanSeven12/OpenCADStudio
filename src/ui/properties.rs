@@ -33,12 +33,6 @@ const LINETYPE_MENU_W: f32 = 220.0;
 use crate::app::Message;
 use crate::scene::model::object::{PropSection, PropValue};
 
-#[derive(Clone, Debug, PartialEq)]
-struct IndexedBlockChoice { index: usize, label: String }
-impl fmt::Display for IndexedBlockChoice {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result { formatter.write_str(&self.label) }
-}
-
 const VARIES_LABEL: &str = "*VARIES*";
 
 // ── Linetype item (name + ASCII art for combo_box) ───────────────────────
@@ -414,6 +408,9 @@ pub enum FieldKey {
     BlockParameter(crate::scene::model::object::BlockParameterKey),
     /// A block attribute value field, keyed by its tag.
     Attr(String),
+    /// A plugin class parameter value field (API v14), keyed by the
+    /// declared parameter name.
+    PluginParam(String),
     /// One column of one named-parameter row, keyed by its stable
     /// `ParameterTable::iter()` position (see `PropValue::ParamRow`'s doc
     /// comment for why index rather than name).
@@ -429,6 +426,7 @@ impl FieldKey {
             FieldKey::Geom(field) => prop_geom_field_id(field),
             FieldKey::BlockParameter(key) => iced::widget::Id::from(format!("props-block-{}-{}-{}-{}-{:?}", key.document, key.definition, key.insert, key.parameter, key.component)),
             FieldKey::Attr(tag) => prop_attr_field_id(tag),
+            FieldKey::PluginParam(name) => prop_plugin_param_field_id(name),
             FieldKey::Param(index, field) => prop_param_field_id(*index, *field),
         }
     }
@@ -451,6 +449,18 @@ pub fn prop_param_field_id(
 /// tag. Kept in one place so the live-input handler and the row renderer agree.
 pub fn attr_edit_key(tag: &str) -> FieldKey {
     FieldKey::Attr(tag.to_string())
+}
+
+/// Edit-buffer / active-field key for a plugin class parameter value field,
+/// keyed by the declared parameter name (the AttrText precedent).
+pub fn plugin_param_edit_key(name: &str) -> FieldKey {
+    FieldKey::PluginParam(name.to_string())
+}
+
+/// Text-input widget id for a plugin class parameter value field, keyed by
+/// the declared parameter name.
+pub fn prop_plugin_param_field_id(name: &str) -> iced::widget::Id {
+    iced::widget::Id::from(format!("props-plugin-param-field-{name}"))
 }
 
 /// Text-input widget id for a geometry/common editable value field. The same
@@ -495,6 +505,11 @@ pub fn build_field_key_map(sections: &[PropSection]) -> HashMap<iced::widget::Id
                     Some(FieldKey::Geom(prop.field))
                 }
                 PropValue::AttrText { tag, .. } => Some(FieldKey::Attr(tag.clone())),
+                PropValue::PluginParam {
+                    name,
+                    editable: true,
+                    ..
+                } => Some(FieldKey::PluginParam(name.clone())),
                 PropValue::BlockNumber { key, .. } => Some(FieldKey::BlockParameter(*key)),
                 _ => None,
             };
@@ -632,6 +647,10 @@ pub struct PropertiesPanel {
     pub collapsed_sections: HashSet<String>,
     /// Whether the editable-dropdown (block Name) option list is open.
     pub edit_choice_open: bool,
+    /// The open dynamic-value list (block table / flip / lookup), as its row
+    /// and whether it belongs to the Quick Properties surface — the same row
+    /// is instantiated on both surfaces, so the pair tells them apart.
+    pub open_block_picker: Option<(crate::scene::model::object::BlockParameterKey, bool)>,
     /// The open dropdown belongs to Quick Properties, not the docked panel:
     /// both render these rows, and two open copies swallow each other's
     /// clicks (#1766).
@@ -677,6 +696,7 @@ impl Default for PropertiesPanel {
             expanded_groups: HashSet::default(),
             collapsed_sections: HashSet::default(),
             edit_choice_open: false,
+            open_block_picker: None,
             picker_in_quick: false,
             rendering_quick: std::cell::Cell::new(false),
             active_field: None,
@@ -983,29 +1003,59 @@ impl PropertiesPanel {
                 options,
                 description,
             } => {
-                let choices: Vec<_> = options
-                    .iter()
-                    .enumerate()
-                    .map(|(index, label)| IndexedBlockChoice {
-                        index,
-                        label: label.clone(),
-                    })
-                    .collect();
-                let current = choices.get(*selected).cloned();
                 let key = *key;
-                let picker =
-                    iced::widget::pick_list(current, choices, |choice: &IndexedBlockChoice| {
-                        choice.label.clone()
+                let quick = self.rendering_quick.get();
+                let open = self.open_block_picker == Some((key, quick));
+                let shown = choice_cell_text(options, *selected);
+                let caret = button(
+                    container(if open {
+                        crate::ui::icons::themed_arrow_up(9.0)
+                    } else {
+                        crate::ui::icons::themed_arrow_down(9.0)
                     })
-                    .on_select(move |choice| Message::PropBlockChoice {
-                        key,
-                        index: choice.index,
-                    })
-                    .placeholder(t!("Custom"))
-                    .text_size(FONT_SZ)
-                    .padding([3, 6])
-                    .width(Length::Fill);
-                let row = prop_row_widget(label, picker.into());
+                    .align_y(iced::Center),
+                )
+                .on_press(Message::PropBlockPickerToggle { key, quick })
+                .style(button::subtle)
+                .padding([2, 6]);
+                let head = container(
+                    row![text(shown).size(FONT_SZ).width(Length::Fill), caret]
+                        .align_y(iced::Center),
+                )
+                .style(container::bordered_box)
+                .padding([2, 6])
+                .width(Length::Fill);
+                // A choice cell opens on a click anywhere in it, not only on
+                // the caret.
+                let head = mouse_area(head).on_press(Message::PropBlockPickerToggle { key, quick });
+                // The list is part of the panel's own state, so opening and
+                // closing it needs no widget-tree handle and the keys it
+                // consumes always match the list on screen.
+                let mut list = column![].spacing(1);
+                for (index, option) in options.iter().enumerate() {
+                    list = list.push(
+                        button(text(option.as_str()).size(FONT_SZ))
+                            .on_press(Message::PropBlockChoice { key, index })
+                            .style(button::subtle)
+                            .padding([2, 6])
+                            .width(Length::Fill),
+                    );
+                }
+                let popup = container(scrollable(list).height(Length::Shrink))
+                    .style(container::bordered_box)
+                    .padding(2);
+                // The overlay reports its own Escape before the global shortcut
+                // repeats it; a distinct dismiss message lets the later repeat
+                // be swallowed with the list already closed.
+                let value = crate::ui::color_select::editable_drop_down_below(
+                    head.into(),
+                    popup.into(),
+                    None,
+                    Length::Shrink,
+                    Message::PropBlockPickerDismiss { key, quick },
+                    open,
+                );
+                let row = prop_row_widget(label, value);
                 if description.is_empty() {
                     row
                 } else {
@@ -1054,6 +1104,17 @@ impl PropertiesPanel {
             }
             PropValue::HatchPatternChoice(current) => self.render_hatch_pattern_row(label, current),
             PropValue::AttrText { tag, value } => self.render_attr_row(tag, value),
+            PropValue::PluginParam {
+                name,
+                value,
+                editable,
+            } => {
+                if *editable {
+                    self.render_plugin_param_row(name, value)
+                } else {
+                    render_ro_row(label, value)
+                }
+            }
             PropValue::EntityLink {
                 id,
                 handles,
@@ -1563,6 +1624,37 @@ impl PropertiesPanel {
     /// text box edits the value. Routing rides the tag (a runtime string), so
     /// this uses the dedicated `PropAttr*` messages instead of the geometry
     /// path whose field key is `&'static str`. The row label is the tag itself.
+    fn render_plugin_param_row<'a>(
+        &'a self,
+        name: &'a str,
+        value: &'a str,
+    ) -> Element<'a, Message> {
+        let key = plugin_param_edit_key(name);
+        let display = self
+            .edit_buf
+            .get(&key)
+            .map(|s| s.as_str())
+            .unwrap_or(value);
+
+        let active = self.active_field.as_ref() == Some(&key);
+        let name_for_input = name.to_string();
+        let ti = text_input("", display)
+            .id(prop_plugin_param_field_id(name))
+            .on_input(move |v| {
+                Message::PropPluginParamInput {
+                    name: name_for_input.clone(),
+                    value: v,
+                }
+            })
+            .on_submit(Message::PropPluginParamCommit(name.to_string()))
+            .size(FONT_SZ)
+            .style(text_input_style)
+            .padding([3, 6])
+            .width(Length::Fill);
+
+        prop_row_with_active(name, ti.into(), active)
+    }
+
     fn render_attr_row<'a>(&'a self, tag: &'a str, entity_val: &'a str) -> Element<'a, Message> {
         let key = attr_edit_key(tag);
         let display = self
@@ -2347,6 +2439,12 @@ pub fn acad_color_display(c: AcadColor) -> (Color, &'static str) {
     }
 }
 
+/// What a choice cell shows. A choice with nothing selected shows nothing:
+/// the cell must not fall back to a value the table keeps for itself.
+pub(crate) fn choice_cell_text(options: &[String], selected: usize) -> String {
+    options.get(selected).cloned().unwrap_or_default()
+}
+
 fn aci_label(idx: u8) -> &'static str {
     match idx {
         1 => "Red",
@@ -2403,9 +2501,41 @@ fn hint_text_style(theme: &Theme) -> iced::widget::text::Style {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_key_focused, attr_edit_key, build_field_key_map, hatch_pattern_matches,
-        hatch_preview_scale, prop_attr_field_id, prop_geom_field_id, FieldKey,
+        active_key_focused, attr_edit_key, build_field_key_map, choice_cell_text,
+        hatch_pattern_matches, hatch_preview_scale, prop_attr_field_id, prop_geom_field_id,
+        FieldKey,
     };
+
+    /// A lookup that matches no row has no value, and the cell stays empty
+    /// rather than printing one of the table's own names.
+    #[test]
+    fn a_choice_cell_with_nothing_applied_shows_nothing() {
+        let options = vec!["Small".to_string(), "Large".to_string()];
+        assert_eq!(choice_cell_text(&options, usize::MAX), "");
+        assert_eq!(choice_cell_text(&options, 1), "Large");
+    }
+
+    /// The list holds values that drive the block's geometry; the rows it
+    /// covers must not show through it or the selection band, in any theme.
+    #[test]
+    fn dynamic_value_list_paints_opaque_in_every_theme() {
+        fn is_opaque(background: iced::Background) -> bool {
+            matches!(background, iced::Background::Color(color) if color.a == 1.0)
+        }
+
+        for theme in crate::app::config::all_themes() {
+            let popup = iced::widget::container::bordered_box(&theme);
+            assert!(
+                popup.background.is_some_and(is_opaque),
+                "{theme}: list surface must be opaque"
+            );
+            let head = iced::widget::container::bordered_box(&theme);
+            assert!(
+                head.background.is_some_and(is_opaque),
+                "{theme}: list head must be opaque"
+            );
+        }
+    }
 
     #[test]
     fn transparency_input_keeps_focus_when_dropdown_opens_and_closes() {

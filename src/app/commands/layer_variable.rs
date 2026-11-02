@@ -18,7 +18,12 @@ impl OpenCADStudio {
     /// The layer a new object governed by `name` takes: that layer (created
     /// when it does not exist yet) or the current layer.
     pub(crate) fn new_variable_layer(&mut self, i: usize, name: &str) -> String {
-        match self.layer_variable(i, name) {
+        // A value that is no valid layer name (`bad/name`) would create a
+        // layer no other program can name; it means the current layer.
+        match self
+            .layer_variable(i, name)
+            .filter(|layer| crate::scene::valid_block_name(layer))
+        {
             Some(layer) => {
                 self.tabs[i].scene.ensure_layer(&layer);
                 layer
@@ -58,3 +63,21 @@ impl OpenCADStudio {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::app::OpenCADStudio;
+
+    #[test]
+    fn hatchlayer_with_an_illegal_name_uses_the_current_layer() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let _ = app.dispatch_layer_variable("HATCHLAYER bad/name", i);
+        let current = app.tabs[i].active_layer.clone();
+        assert_eq!(app.new_variable_layer(i, "HATCHLAYER"), current);
+        assert!(!app.tabs[i].scene.document.layers.contains("bad/name"));
+
+        let _ = app.dispatch_layer_variable("HATCHLAYER Hatches", i);
+        assert_eq!(app.new_variable_layer(i, "HATCHLAYER"), "Hatches");
+        assert!(app.tabs[i].scene.document.layers.contains("Hatches"));
+    }
+}

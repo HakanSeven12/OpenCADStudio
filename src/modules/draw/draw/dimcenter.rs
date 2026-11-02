@@ -6,7 +6,8 @@ use codec::types::Vector3;
 use codec::{EntityType, Handle, Line};
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{CadCommand, CmdOption, CmdResult};
+use crate::modules::draw::draw::centerline::CenterLayerOption;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::centerline::{
     center_measure_is_relative, resolve_center_measure, CenterLineSettings,
@@ -135,13 +136,16 @@ impl CadCommand for DimCenterCommand {
 pub struct CenterMarkCommand {
     picked: Option<EntityType>,
     settings: CenterLineSettings,
+    layer: CenterLayerOption,
 }
 
 impl CenterMarkCommand {
-    pub(crate) fn new(settings: CenterLineSettings) -> Self {
+    pub(crate) fn new(settings: CenterLineSettings, layer_names: Vec<String>) -> Self {
+        let layer = CenterLayerOption::new("CENTERMARK", settings.layer.clone(), layer_names);
         Self {
             picked: None,
             settings,
+            layer,
         }
     }
 
@@ -186,7 +190,19 @@ impl CadCommand for CenterMarkCommand {
     }
 
     fn prompt(&self) -> String {
-        t!("CENTERMARK  Select arc or circle <finish>:").into_owned()
+        if self.layer.active {
+            self.layer.prompt()
+        } else {
+            crate::tr!("center-cmd", "mark-select")
+        }
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        if self.layer.active {
+            self.layer.options()
+        } else {
+            vec![CmdOption::new("Layer", "L")]
+        }
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -196,20 +212,47 @@ impl CadCommand for CenterMarkCommand {
         true
     }
 
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
+
     fn inject_picked_entity(&mut self, entity: EntityType) {
-        self.picked = Some(entity);
+        if self.layer.active {
+            self.layer.inject(entity);
+        } else {
+            self.picked = Some(entity);
+        }
+    }
+
+    fn drawing_variable_update(&self) -> Option<(&'static str, String)> {
+        self.layer.update()
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.layer.active {
+            return self.layer.on_text(text);
+        }
+        if matches!(
+            text.trim().trim_start_matches('_').to_ascii_uppercase().as_str(),
+            "L" | "LAYER"
+        ) {
+            self.layer.active = true;
+            return Some(CmdResult::NeedPoint);
+        }
+        None
     }
 
     fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
-        if handle.is_null() {
-            return CmdResult::NeedPoint;
+        if self.layer.active {
+            return self.layer.on_pick(handle);
         }
-        let Some((source, center, radius, x, y)) = self
-            .picked
+        let picked = self.picked.take();
+        let Some((source, center, radius, x, y)) = picked
             .as_ref()
+            .filter(|_| !handle.is_null())
             .and_then(|entity| crate::scene::centermark::picked_mark_source(entity, handle, point))
         else {
-            return CmdResult::NeedPoint;
+            return CmdResult::ReportError(crate::tr!("center-cmd", "mark-invalid"));
         };
         CmdResult::CommitEntity(self.build_mark(source, center, radius, x, y))
     }
@@ -218,33 +261,46 @@ impl CadCommand for CenterMarkCommand {
         CmdResult::NeedPoint
     }
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        if self.layer.active {
+            self.layer.active = false;
+            return CmdResult::NeedPoint;
+        }
+        CmdResult::Done
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
 }
 
-pub struct CenterMarkReassociateCommand {
-    target: Handle,
+/// CENTERREASSOCIATE: pick one centre mark or centre line, then the circle or
+/// arc, or the two lines, it is to follow.
+pub struct CenterReassociateCommand {
+    target: Option<(Handle, bool)>,
+    first: Option<(Handle, DVec3)>,
     picked: Option<EntityType>,
 }
 
-impl CenterMarkReassociateCommand {
-    pub fn new(target: Handle) -> Self {
+impl CenterReassociateCommand {
+    pub fn new() -> Self {
         Self {
-            target,
+            target: None,
+            first: None,
             picked: None,
         }
     }
 }
 
-impl CadCommand for CenterMarkReassociateCommand {
+impl CadCommand for CenterReassociateCommand {
     fn name(&self) -> &'static str {
         "CENTERREASSOCIATE"
     }
     fn prompt(&self) -> String {
-        t!("CENTERREASSOCIATE  Select new arc or circle:").into_owned()
+        match (self.target, self.first) {
+            (None, _) => crate::tr!("center-cmd", "reassociate-select"),
+            (Some((_, true)), _) => crate::tr!("center-cmd", "reassociate-circle"),
+            (Some((_, false)), None) => crate::tr!("center-cmd", "reassociate-first"),
+            (Some((_, false)), Some(_)) => crate::tr!("center-cmd", "reassociate-second"),
+        }
     }
     fn needs_entity_pick(&self) -> bool {
         true
@@ -252,29 +308,73 @@ impl CadCommand for CenterMarkReassociateCommand {
     fn inject_before_entity_pick(&self) -> bool {
         true
     }
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.picked = Some(entity);
     }
-    fn on_entity_pick(&mut self, source: Handle, point: DVec3) -> CmdResult {
-        let valid = self
-            .picked
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
+        let picked = self.picked.take().filter(|_| !handle.is_null());
+        let Some((target, mark)) = self.target else {
+            let kind = picked.as_ref().and_then(|entity| match entity {
+                EntityType::Line(line)
+                    if CenterMarkAssociation::read(&line.common.extended_data).is_some() =>
+                {
+                    Some(true)
+                }
+                EntityType::Line(line)
+                    if codec::entities::CenterLineAssociation::read(&line.common.extended_data)
+                        .is_some() =>
+                {
+                    Some(false)
+                }
+                _ => None,
+            });
+            if let Some(mark) = kind {
+                self.target = Some((handle, mark));
+            }
+            return CmdResult::NeedPoint;
+        };
+        if mark {
+            let valid = picked
+                .as_ref()
+                .and_then(|entity| crate::scene::centermark::picked_mark_source(entity, handle, point))
+                .is_some();
+            if !valid {
+                return CmdResult::ReportError(crate::tr!("center-cmd", "mark-invalid"));
+            }
+            return CmdResult::ReassociateCenterMark {
+                target,
+                source: handle,
+                point,
+            };
+        }
+        let valid = picked
             .as_ref()
-            .and_then(|entity| crate::scene::centermark::picked_mark_source(entity, source, point))
+            .and_then(|entity| crate::scene::centerline::picked_source(entity, handle, point))
             .is_some();
         if !valid {
-            return CmdResult::NeedPoint;
+            return CmdResult::ReportError(crate::tr!("center-cmd", "line-invalid"));
         }
-        CmdResult::ReassociateCenterMark {
-            target: self.target,
-            source,
-            point,
+        let Some(first) = self.first else {
+            self.first = Some((handle, point));
+            return CmdResult::NeedPoint;
+        };
+        if first.0 == handle {
+            return CmdResult::ReportError(crate::tr!("center-cmd", "line-same"));
+        }
+        CmdResult::ReassociateCenterLine {
+            target,
+            first,
+            second: (handle, point),
         }
     }
     fn on_point(&mut self, _point: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        CmdResult::Done
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel

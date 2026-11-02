@@ -174,5 +174,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "FXCONSTRAINT",
         "GCFIX",
         "SYCONSTRAINT",
+        "GCPARALLEL",
+        "GCCOLLINEAR",
+        "GCTANGENT",
+        "GCSYMMETRIC",
     ]
 });

@@ -265,6 +265,8 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
                     station_pieces: boundary.station_pieces,
                     source_length: boundary.source_length,
                     plinegen: continuous,
+                    separate_runs: false,
+                    solid: Vec::new(),
                 },
                 snap_pts: vec![],
                 tangent_geoms,

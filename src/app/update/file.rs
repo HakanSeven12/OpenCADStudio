@@ -930,6 +930,8 @@ impl OpenCADStudio {
             language: self.language,
             cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
             command_line_opacity: self.command_line.opacity_percent(),
+            command_line_font: self.command_line.font_family().to_owned(),
+            command_line_font_size: self.command_line.font_size(),
             commandline_fade_ms: crate::app::settings::clamp_commandline_fade_ms(
                 self.commandline_fade_ms,
             ),
@@ -1142,6 +1144,8 @@ impl OpenCADStudio {
             .set_cliprompt_lines(self.cliprompt_lines.clamp(0, 50) as u8);
         self.command_line
             .set_opacity_percent(s.command_line_opacity);
+        self.command_line
+            .set_font(&s.command_line_font, s.command_line_font_size);
         self.commandline_fade_ms =
             crate::app::settings::clamp_commandline_fade_ms(s.commandline_fade_ms);
         self.command_line
@@ -1190,7 +1194,7 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn record_block_insert(&mut self, name: &str) {
-        self.insname = name.to_string();
+        self.tabs[self.active_tab].insname = name.to_string();
         self.note_recent_block(name);
         let key = name.to_ascii_uppercase();
         *self.block_freq.entry(key).or_insert(0) += 1;
@@ -1499,7 +1503,7 @@ impl OpenCADStudio {
             graphic_fills_on_current_layer: self.graphic_attributes.fill_on_current_layer,
             annotation_auto_scale: self.annotation_auto_scale,
             ribbon: crate::app::config::RibbonConfig {
-                collapse: self.ribbon.collapse_mode(),
+                layout: self.ribbon.layout().clone(),
             },
             plot: self.plot_dialog.clone(),
             shortcuts: crate::app::config::ShortcutConfig {
@@ -1573,7 +1577,7 @@ impl OpenCADStudio {
         self.ribbon
             .set_graphic_attributes(self.show_graphic_attributes);
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
-        self.ribbon.set_collapse_mode(cfg.ribbon.collapse);
+        self.ribbon.set_layout(cfg.ribbon.layout);
         self.plot_dialog = cfg.plot;
         self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
         self.shortcut_bindings
@@ -4511,12 +4515,56 @@ impl OpenCADStudio {
         ext: &str,
         version: codec::DxfVersion,
     ) -> Option<Vec<String>> {
-        let format = ocs_save::external_format(ext)?;
+        let Some(format) = ocs_save::external_format(ext) else {
+            // An older DWG or DXF target has no place for some drawing
+            // properties or MTEXT data: both are listed.
+            let mut losses = self
+                .drawing_properties_loss(i, ext, version)
+                .unwrap_or_default();
+            if matches!(ext, "dwg" | "dwt" | "dxf") {
+                let doc = &self.tabs[i].scene.document;
+                losses.extend(
+                    crate::io::mtext_losses_on_save(doc, version, ext == "dxf")
+                        .into_iter()
+                        .map(|(loss, count)| loss.message(count)),
+                );
+            }
+            return (!losses.is_empty()).then_some(losses);
+        };
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         // A write that fails outright is reported by the save itself.
         let losses = ocs_save::external_losses(&prepared, format).ok()?;
         (!losses.is_empty()).then_some(losses)
+    }
+
+    /// The drawing-properties warning when a DWG/DXF `version` cannot store the
+    /// properties tab `i` has filled in; `None` when there is nothing to lose.
+    fn drawing_properties_loss(
+        &self,
+        i: usize,
+        ext: &str,
+        version: codec::DxfVersion,
+    ) -> Option<Vec<String>> {
+        let (format, is_dxf) = match ext {
+            "dxf" => ("DXF", true),
+            "dwg" | "dwt" => ("DWG", false),
+            _ => return None,
+        };
+        let lost = crate::io::drawing_properties_lost_on_save(
+            &self.tabs[i].scene.document.summary_info,
+            &self.tabs[i].scene.document.header.hyperlink_base,
+            version,
+            is_dxf,
+        );
+        (lost > 0).then(|| {
+            vec![crate::tr!(
+                "dwgprops-dialog",
+                "save-loss",
+                format = format,
+                count = lost.to_string()
+            )]
+        })
     }
 
     /// Hold `pending` back and ask whether to save despite `losses`.
@@ -9615,5 +9663,111 @@ mod save_header_tests {
         app.tabs[0].scene.annotation_scale = 0.02;
         app.prepare_snapshot_save(0);
         assert_eq!(app.tabs[0].scene.document.header.user_real1, 7.5);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod mtext_save_loss_tests {
+    use crate::app::OpenCADStudio;
+    use crate::io::MTextTargetLoss::{BoxHeight, Columns};
+    use codec::{DxfVersion, EntityType};
+
+    /// A tab holding one MTEXT with columns and a defined box height.
+    fn app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs
+            .push(crate::app::document::DocumentTab::new_drawing(1));
+        app.active_tab = 1;
+        let mut text =
+            codec::entities::MText::with_value("rich", codec::types::Vector3::new(0., 0., 0.));
+        text.column_data.column_type = 1;
+        text.column_data.column_count = 2;
+        text.rectangle_height = Some(30.);
+        app.tabs[1]
+            .scene
+            .document
+            .add_entity(EntityType::MText(Box::new(text)))
+            .unwrap();
+        app
+    }
+
+    fn save(app: &mut OpenCADStudio, name: &str, version: DxfVersion) {
+        let dir = std::env::temp_dir().join(format!("ocs_mtext_loss_{}", std::process::id()));
+        let _ = app.queue_native_save(
+            1,
+            dir.join(name),
+            version,
+            crate::app::SavePurpose::SaveAs,
+            crate::app::SaveContinuation::None,
+            true,
+            true,
+        );
+    }
+
+    #[test]
+    fn an_older_dwg_target_asks_before_dropping_mtext_data() {
+        let mut app = app();
+        save(&mut app, "old.dwg", DxfVersion::AC1018);
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::ConversionLoss)
+        );
+        assert_eq!(
+            app.conversion_losses,
+            vec![Columns.message(1), BoxHeight.message(1)]
+        );
+        assert_eq!(
+            app.pending_conversion_save
+                .as_ref()
+                .map(crate::app::PendingConversionSave::format_name)
+                .as_deref(),
+            Some("DWG 2004")
+        );
+    }
+
+    #[test]
+    fn an_older_dxf_target_asks_before_dropping_mtext_columns() {
+        let mut app = app();
+        save(&mut app, "old.dxf", DxfVersion::AC1018);
+        assert_eq!(app.conversion_losses, vec![Columns.message(1)]);
+        assert_eq!(
+            app.pending_conversion_save
+                .as_ref()
+                .map(crate::app::PendingConversionSave::format_name)
+                .as_deref(),
+            Some("DXF 2004")
+        );
+    }
+
+    #[test]
+    fn drawing_properties_and_mtext_losses_share_one_question() {
+        let mut app = app();
+        app.tabs[1].scene.document.summary_info.title = "Title".into();
+        save(&mut app, "r2000.dwg", DxfVersion::AC1015);
+        assert_eq!(
+            app.conversion_losses,
+            vec![
+                crate::tr!("dwgprops-dialog", "save-loss", format = "DWG", count = "1"),
+                Columns.message(1),
+                BoxHeight.message(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn dwg_and_dxf_2018_keep_it_all_and_never_ask() {
+        for (name, version) in [
+            ("new.dwg", DxfVersion::AC1032),
+            ("new.dxf", DxfVersion::AC1032),
+        ] {
+            let mut app = app();
+            save(&mut app, name, version);
+            assert_ne!(
+                app.active_modal,
+                Some(crate::app::ModalKind::ConversionLoss),
+                "{name}"
+            );
+            assert!(app.pending_conversion_save.is_none(), "{name}");
+        }
     }
 }

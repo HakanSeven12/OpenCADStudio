@@ -13,6 +13,7 @@ pub(crate) mod grip_set;
 pub(crate) mod construction;
 pub(crate) mod associate;
 pub mod distance_parameter;
+pub mod lookup_action;
 pub mod orientation_parameter;
 pub mod parameter_set;
 pub mod point_parameter;

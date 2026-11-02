@@ -1031,6 +1031,10 @@ pub struct UserSettings {
     pub commandline_fade_ms: i32,
     /// COMMANDLINEOPACITY: command-line panel opacity in percent (20–100).
     pub command_line_opacity: u8,
+    /// Command line font family; empty uses the interface font.
+    pub command_line_font: String,
+    /// Command line text size in pixels (8–24).
+    pub command_line_font_size: u16,
     /// SNAPUNIT X/Y spacing used by grid snap. 10 matches the Drafting
     /// Settings dialog defaults; older configs without these keys fall
     /// back via `default_snap_spacing`.
@@ -1416,6 +1420,8 @@ impl Default for UserSettings {
             cliprompt_lines: 3,
             commandline_fade_ms: 3000,
             command_line_opacity: 80,
+            command_line_font: String::new(),
+            command_line_font_size: 11,
             snap_spacing_x: 10.0,
             snap_spacing_y: 10.0,
             grid_spacing_x: 10.0,

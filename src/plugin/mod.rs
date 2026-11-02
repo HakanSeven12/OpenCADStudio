@@ -2,6 +2,8 @@
 // from the application bundle or user plugins folder (see `external`).
 // See `docs/plugin-architecture.md`.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod plugin_classes;
 pub mod entity_labels;
 pub mod external;
 #[cfg(not(target_arch = "wasm32"))]

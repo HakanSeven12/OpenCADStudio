@@ -53,10 +53,23 @@ pub fn intrinsic<'a>(
     max: Size,
     extra: Vector,
 ) -> Element<'a, Message> {
+    intrinsic_with_min(measurement, content, max, extra, Size::ZERO)
+}
+
+/// Intrinsic modal measurement with a content minimum. The minimum is still
+/// capped by the actual viewport in `layout`, so small windows remain usable.
+pub fn intrinsic_with_min<'a>(
+    measurement: impl Into<Element<'a, Message>>,
+    content: impl Into<Element<'a, Message>>,
+    max: Size,
+    extra: Vector,
+    min: Size,
+) -> Element<'a, Message> {
     Element::new(Intrinsic {
         children: [measurement.into(), content.into()],
         max,
         extra,
+        min,
     })
 }
 
@@ -64,6 +77,7 @@ struct Intrinsic<'a> {
     children: [Element<'a, Message>; 2],
     max: Size,
     extra: Vector,
+    min: Size,
 }
 
 impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
@@ -73,8 +87,8 @@ impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
 
     fn size(&self) -> Size<Length> {
         Size::new(
-            Length::Fit.max(self.max.width + self.extra.x),
-            Length::Fit.max(self.max.height + self.extra.y),
+            Length::Fit.max((self.max.width + self.extra.x).max(self.min.width)),
+            Length::Fit.max((self.max.height + self.extra.y).max(self.min.height)),
         )
     }
 
@@ -95,8 +109,12 @@ impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
             &measure_limits,
         );
         let size = Size::new(
-            (measured.size().width + self.extra.x).min(limits.max().width),
-            (measured.size().height + self.extra.y).min(limits.max().height),
+            (measured.size().width + self.extra.x)
+                .max(self.min.width)
+                .min(limits.max().width),
+            (measured.size().height + self.extra.y)
+                .max(self.min.height)
+                .min(limits.max().height),
         );
         let final_limits = layout::Limits::new(size, size);
         let content =

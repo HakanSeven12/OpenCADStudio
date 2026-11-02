@@ -645,7 +645,10 @@ mod tests {
         doc
     }
 
+    // NTFS allocates a file grown with set_len (it is sparse on Linux and
+    // macOS), and 64 GiB fills the CI runner's disk.
     #[test]
+    #[cfg_attr(windows, ignore = "allocates the whole oversized file on NTFS")]
     fn reader_rejects_oversized_snapshot() {
         let path = unique_path("oversized.bin");
         let file = OpenOptions::new()

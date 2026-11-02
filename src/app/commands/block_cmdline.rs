@@ -168,8 +168,7 @@ impl OpenCADStudio {
     /// block's attribute definitions, in their order: each attribute takes
     /// its definition's placement and text settings through the reference's
     /// transform, keeps the value it had (new ones take the default), and
-    /// attributes whose definition is gone are dropped. Constant definitions
-    /// carry no attribute.
+    /// attributes whose definition is gone are dropped.
     pub(in crate::app) fn attsync_block(&mut self, i: usize, block: &str) {
         self.attsync_block_with(i, block, true);
     }
@@ -186,9 +185,7 @@ impl OpenCADStudio {
                     .iter()
                     .filter_map(|h| doc.get_entity(*h))
                     .filter_map(|e| match e {
-                        codec::EntityType::AttributeDefinition(a) if !a.flags.constant => {
-                            Some(a.clone())
-                        }
+                        codec::EntityType::AttributeDefinition(a) => Some(a.clone()),
                         _ => None,
                     })
                     .collect()
@@ -225,6 +222,7 @@ impl OpenCADStudio {
                 continue;
             };
             let transform = crate::scene::render_graph::insert_transform_with_base(ins, base);
+            let had_end = ins.seqend_handle;
             let mut rebuilt = Vec::with_capacity(attdefs.len());
             for def in &attdefs {
                 let previous = ins
@@ -244,11 +242,28 @@ impl OpenCADStudio {
                 if attribute.common.handle.is_null() {
                     attribute.common.handle = self.tabs[i].scene.document.allocate_handle();
                 }
+                // The definition's own text object cannot be shared with the
+                // attribute that copies it, any more than its handle can be.
+                if let Some(model) = &mut attribute.embedded_mtext {
+                    model.common.handle = self.tabs[i].scene.document.allocate_handle();
+                    model.common.owner_handle = attribute.common.handle;
+                    model.common.raw_record = None;
+                    model.common.xdictionary_handle = None;
+                    model.common.reactors.clear();
+                }
             }
+            let end = if rebuilt.is_empty() {
+                None
+            } else if let Some(end) = had_end {
+                Some(end)
+            } else {
+                Some(self.tabs[i].scene.document.allocate_handle())
+            };
             if let Some(codec::EntityType::Insert(ins)) =
                 self.tabs[i].scene.document.get_entity_mut(handle)
             {
                 ins.attributes = rebuilt;
+                ins.seqend_handle = end;
                 changes.push((handle, crate::scene::ChangeKind::Modified));
             }
         }

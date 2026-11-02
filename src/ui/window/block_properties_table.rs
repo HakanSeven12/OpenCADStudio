@@ -16,6 +16,10 @@ pub enum Action {
     DeleteRow(usize),
     Apply,
     MustMatch(bool),
+    /// `OK` refused the table; leave without applying anything.
+    DiscardClose,
+    /// Stay in the dialog and keep the work.
+    KeepEditing,
 }
 
 pub(crate) struct State {
@@ -30,12 +34,15 @@ pub(crate) struct State {
     pub rows: Vec<Vec<String>>,
     pub error: Option<String>,
     pub notice: Option<String>,
+    /// `OK` refused the table and the dialog now offers to discard and close.
+    pub confirm_close: bool,
 }
 
 impl State {
     pub(crate) fn edit(&mut self, action: Action) {
         self.error = None;
         self.notice = None;
+        self.confirm_close = false;
         match action {
             Action::Property(index) if index < self.properties.len() => {
                 self.selected_property = Some(index);
@@ -132,7 +139,7 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
         })
         .map(|(i, _)| i)
         .collect::<Vec<_>>();
-    container(
+    let main = container(
         column![
             row![
                 pick_list(state.selected_property, available, |i: &usize| state
@@ -184,6 +191,13 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
     )
     .padding(16)
     .width(sizing.width)
-    .height(sizing.height)
-    .into()
+    .height(sizing.height);
+    if !state.confirm_close {
+        return main.into();
+    }
+    crate::ui::modal::discard_guard(
+        main,
+        Message::BlockPropertiesTable(Action::DiscardClose),
+        Message::BlockPropertiesTable(Action::KeepEditing),
+    )
 }

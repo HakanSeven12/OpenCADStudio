@@ -299,6 +299,83 @@ fn table_records<T: Serialize + TableEntry>(
         .collect()
 }
 
+/// XDATA application an evaluated dynamic reference's anonymous block record
+/// carries, naming the definition it was evaluated from.
+const REPRESENTATION_TAG: &str = "AcDbBlockRepBTag";
+
+fn representation_definition(
+    document: &codec::Document,
+    record: &codec::tables::BlockRecord,
+) -> Option<codec::Handle> {
+    document
+        .object_xdata(record.handle)?
+        .get_record(REPRESENTATION_TAG)?
+        .values
+        .iter()
+        .find_map(|value| match value {
+            codec::xdata::XDataValue::Handle(handle)
+                if !handle.is_null() && *handle != record.handle =>
+            {
+                Some(*handle)
+            }
+            _ => None,
+        })
+}
+
+/// Project the block table. An evaluated dynamic reference points its INSERT
+/// at an anonymous `*U` record, so the named definition's own list is empty:
+/// report the inserts under the definition they display, and keep the
+/// generated record from advertising them a second time.
+fn block_record_records(document: &codec::Document) -> Result<Vec<Value>, String> {
+    let mut folded: rustc_hash::FxHashMap<codec::Handle, Vec<codec::Handle>> = Default::default();
+    let mut generated = rustc_hash::FxHashSet::default();
+    for record in document.block_records.iter() {
+        if record.insert_handles.is_empty() {
+            continue;
+        }
+        let Some(definition) = representation_definition(document, record) else {
+            continue;
+        };
+        if document
+            .block_records
+            .iter()
+            .all(|entry| entry.handle != definition)
+        {
+            continue;
+        }
+        generated.insert(record.handle);
+        folded
+            .entry(definition)
+            .or_default()
+            .extend_from_slice(&record.insert_handles);
+    }
+
+    document
+        .block_records
+        .iter()
+        .map(|entry| {
+            let mut properties = json_value(entry)?;
+            if generated.contains(&entry.handle) {
+                properties["insert_handles"] = json!([]);
+            } else if let Some(extra) = folded.get(&entry.handle) {
+                let mut handles = entry.insert_handles.clone();
+                handles.extend_from_slice(extra);
+                handles.sort_by_key(|handle| handle.value());
+                handles.dedup();
+                properties["insert_handles"] = json_value(&handles)?;
+            }
+            Ok(record(
+                "block_records",
+                "BlockRecord",
+                Some(entry.handle()),
+                Some(entry.name()),
+                true,
+                properties,
+            ))
+        })
+        .collect()
+}
+
 fn map_records<T: Serialize>(
     collection: &str,
     kind: &str,
@@ -331,11 +408,16 @@ fn collection_records(
         "entities" => document
             .entities()
             .map(|entity| {
-                entity_record(
+                let mut value = entity_record(
                     entity,
                     scene.is_reference_only(entity.common().handle),
                     disabled_plugins,
-                )
+                )?;
+                value.as_object_mut().expect("record object").insert(
+                    "constraints".into(),
+                    super::automation::constraint_records_json(scene, entity.common().handle),
+                );
+                Ok(value)
             })
             .collect(),
         "objects" => {
@@ -349,7 +431,7 @@ fn collection_records(
         "layers" => table_records("layers", "Layer", &document.layers),
         "line_types" => table_records("line_types", "LineType", &document.line_types),
         "text_styles" => table_records("text_styles", "TextStyle", &document.text_styles),
-        "block_records" => table_records("block_records", "BlockRecord", &document.block_records),
+        "block_records" => block_record_records(document),
         "dim_styles" => table_records("dim_styles", "DimStyle", &document.dim_styles),
         "app_ids" => table_records("app_ids", "AppId", &document.app_ids),
         "views" => table_records("views", "View", &document.views),
@@ -1664,7 +1746,25 @@ impl OpenCADStudio {
                     "layers" => patch_table!(layers),
                     "line_types" => patch_table!(line_types),
                     "text_styles" => patch_table!(text_styles),
-                    "block_records" => patch_table!(block_records),
+                    "block_records" => {
+                        // The list is a derived reverse index: reads fold in
+                        // the evaluated representations, so writing it back
+                        // from a read would erase the generated record's
+                        // entries.
+                        if let Some(path) = request["updates"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|update| update["path"].as_str())
+                            .find(|path| *path == "/insert_handles" || path.starts_with("/insert_handles/"))
+                        {
+                            return Err(failure(
+                                "invalid_update",
+                                format!("{path} is derived from the inserts and is read-only"),
+                            ));
+                        }
+                        patch_table!(block_records);
+                    }
                     "dim_styles" => patch_table!(dim_styles),
                     "app_ids" => patch_table!(app_ids),
                     "views" => patch_table!(views),
@@ -2150,5 +2250,183 @@ mod tests {
             "compare",
         );
         assert_eq!(compare["code"], "invalid_update", "{compare}");
+    }
+
+    #[test]
+    fn block_records_report_a_dynamic_definitions_evaluated_references() {
+        use codec::entities::Line;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "DOOR_DYN",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(Line::from_coords(0.0, 0.0, 0.0, 90.0, 0.0, 0.0)),
+                EntityType::Line(Line::from_coords(0.0, 0.0, 0.0, 0.0, 45.0, 0.0)),
+            ],
+        );
+        let definition = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("DOOR_DYN")
+            .unwrap()
+            .handle;
+        let parameter = crate::scene::block_visibility::create(
+            &mut app.tabs[i].scene.document,
+            definition,
+            Vector3::ZERO,
+        )
+        .unwrap();
+        let closed = crate::scene::block_visibility::add_state(
+            &mut app.tabs[i].scene.document,
+            parameter,
+            "Closed",
+            0,
+        )
+        .unwrap();
+        let members = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("DOOR_DYN")
+            .unwrap()
+            .entity_handles
+            .clone();
+        crate::scene::block_visibility::set_visible(
+            &mut app.tabs[i].scene.document,
+            parameter,
+            closed,
+            &[members[1]],
+            false,
+        );
+        crate::scene::block_visibility::finish_editing(
+            &mut app.tabs[i].scene.document,
+            definition,
+        );
+
+        let insert = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "DOOR_DYN",
+            Vector3::new(10.0, 20.0, 0.0),
+        )));
+        let anonymous = app.tabs[i]
+            .scene
+            .visibility_representation(insert)
+            .expect("the evaluated representation");
+
+        let records = app.record_query(&json!({"collection":"block_records"}));
+        let by_name = |name: &str| -> Value {
+            records["records"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|record| record["name"] == json!(name))
+                .cloned()
+                .unwrap_or_else(|| panic!("record {name} in {records}"))
+        };
+        // The definition the operator inserted reports the reference…
+        assert_eq!(
+            by_name("DOOR_DYN")["properties"]["insert_handles"],
+            json!([insert.value()]),
+            "{records}"
+        );
+        // …and the generated record does not advertise it a second time.
+        assert_eq!(
+            by_name(&anonymous)["properties"]["insert_handles"],
+            json!([]),
+            "{records}"
+        );
+        let total: usize = records["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| {
+                record["properties"]["insert_handles"]
+                    .as_array()
+                    .map_or(0, Vec::len)
+            })
+            .sum();
+        assert_eq!(total, 1, "{records}");
+    }
+
+    #[test]
+    fn block_record_reference_lists_are_derived_and_read_only() {
+        use codec::entities::Line;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PART",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_coords(
+                0.0, 0.0, 0.0, 10.0, 0.0, 0.0,
+            ))],
+        );
+        app.tabs[i].scene.define_block_raw(
+            "*U7",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_coords(
+                0.0, 0.0, 0.0, 10.0, 0.0, 0.0,
+            ))],
+        );
+        let definition = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PART")
+            .unwrap()
+            .handle;
+        let generated = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("*U7")
+            .unwrap()
+            .handle;
+        let mut tag = codec::xdata::ExtendedDataRecord::new("AcDbBlockRepBTag");
+        tag.add_value(codec::xdata::XDataValue::Integer16(1));
+        tag.add_value(codec::xdata::XDataValue::Handle(definition));
+        app.tabs[i]
+            .scene
+            .document
+            .set_object_xdata_record(generated, tag);
+        let insert = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "*U7",
+            Vector3::new(5.0, 5.0, 0.0),
+        )));
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get_mut("*U7")
+            .unwrap()
+            .insert_handles
+            .push(insert);
+
+        let refused = execute(
+            &mut app,
+            json!({
+                "op":"set_properties",
+                "collection":"block_records",
+                "name":"*U7",
+                "updates":[{"path":"/insert_handles","value":[]}],
+            }),
+            "derived-reference-list",
+        );
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        assert_eq!(refused["code"], json!("invalid_update"), "{refused}");
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("*U7")
+                .unwrap()
+                .insert_handles,
+            vec![insert]
+        );
     }
 }

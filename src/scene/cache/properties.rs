@@ -55,7 +55,9 @@ pub fn general_section(entity: &EntityType) -> PropSection {
             Property {
                 label: t!("Linetype scale").into_owned(),
                 field: "linetype_scale",
-                value: PropValue::EditText(format!("{:.4}", common.linetype_scale)),
+                value: PropValue::EditText(crate::entities::common::format_decimal(
+                    common.linetype_scale,
+                )),
             },
             Property {
                 label: t!("Plot style").into_owned(),

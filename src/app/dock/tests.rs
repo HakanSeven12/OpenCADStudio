@@ -1302,7 +1302,7 @@ fn visibility_ribbon_real_controls_disable_enable_and_open_manager() {
         authoring_capture(&app, "visibility-ribbon-enabled");
         app.ribbon
             .set_collapse_mode(crate::ui::ribbon::CollapseMode::Collapsed);
-        let point = find_in_view(&app, "Visibility ▾");
+        let point = find_in_view(&app, "Visibility");
         authoring_click(&mut app, point);
         let messages = {
             let mut simulator = iced_test::Simulator::with_size(
@@ -1385,7 +1385,10 @@ fn distance_parameter_batch_starts_from_actual_palette_rows() {
                 let _ = app.update(Message::CommandSubmit);
                 assert_eq!(app.tabs[i].scene.document, before);
             }
-            let _ = app.update(Message::CommandInput("0.3,0.2".into()));
+            // XY asks for its grip count and labels itself; Linear and Polar
+            // take the label point.
+            let last = if name == "xy" { "1" } else { "0.3,0.2" };
+            let _ = app.update(Message::CommandInput(last.into()));
             let _ = app.update(Message::CommandSubmit);
             let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
             let found = crate::scene::block_distance_parameter::parameters(
@@ -1409,7 +1412,7 @@ fn orientation_parameter_batch_starts_from_actual_palette_rows() {
             (
                 "authoring-tool-rotation",
                 "rotation",
-                vec!["0.35,-0.12", "0.65,-0.12", "0.35,0.2"],
+                vec!["0.35,-0.12", "0.65,-0.12", "0.35,0.2", "0.3,0.35", ""],
             ),
             (
                 "authoring-tool-alignment",
@@ -1742,7 +1745,7 @@ fn block_actions_rotate_flip_palette_requires_matching_parameters() {
             authoring_click(&mut app, point);
             assert!(app.tabs[app.active_tab].active_cmd.is_none());
         }
-        let _ = app.run_command_line("BPARAMETER ROTATION 0,0 2 0");
+        let _ = app.run_command_line("BPARAMETER ROTATION 0,0 2 0 5,5");
         let point = authoring_control(&app, "authoring-tool-flip-action");
         authoring_click(&mut app, point);
         assert!(app.tabs[app.active_tab].active_cmd.is_none());
@@ -1768,6 +1771,66 @@ fn block_actions_rotate_flip_palette_requires_matching_parameters() {
 }
 
 #[test]
+fn block_properties_table_offers_to_discard_and_close_on_an_unusable_cell() {
+    with_stack(|| {
+        use crate::ui::window::block_properties_table::Action as A;
+        let mut app = authoring_app();
+        let _ = app.dispatch_command("BAUTHORPALETTE");
+        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 1,0 0,0.3");
+        let i = app.active_tab;
+        let before = app.tabs[i].scene.document.clone();
+        let history = app.tabs[i].history.undo_stack.len();
+        let _ = app.dispatch_command("BPROPERTIESTABLE");
+        assert!(
+            app.block_properties_table.is_some(),
+            "the dialog is open before the refusal"
+        );
+        let _ = app.update(Message::BlockPropertiesTable(A::Property(0)));
+        let _ = app.update(Message::BlockPropertiesTable(A::AddProperty));
+        let _ = app.update(Message::BlockPropertiesTable(A::AddRow));
+        let _ = app.update(Message::BlockPropertiesTable(A::Cell(0, 0, "wide".into())));
+        let _ = app.update(Message::BlockPropertiesTable(A::Apply));
+        let state = app
+            .block_properties_table
+            .as_ref()
+            .expect("an unusable cell is refused");
+        assert_eq!(
+            state.error.as_deref(),
+            Some("Each cell must be a finite number."),
+            "the refusal says why"
+        );
+        assert!(state.confirm_close, "and offers a way out");
+        assert!(
+            try_find_in_view(&app, "Discard & close").is_some(),
+            "the offer is on screen, not only in the state"
+        );
+        let _ = app.update(Message::BlockPropertiesTable(A::KeepEditing));
+        let state = app
+            .block_properties_table
+            .as_ref()
+            .expect("keeping editing leaves the work in place");
+        assert!(!state.confirm_close, "the offer is gone");
+        assert!(state.error.is_some(), "the diagnosis stays where it was read");
+        assert_eq!(state.rows[0][0], "wide");
+        assert!(
+            try_find_in_view(&app, "Discard & close").is_none(),
+            "and the screen agrees"
+        );
+        let _ = app.update(Message::BlockPropertiesTable(A::Apply));
+        assert!(app
+            .block_properties_table
+            .as_ref()
+            .expect("the refusal offers the way out again")
+            .confirm_close);
+        let _ = app.update(Message::BlockPropertiesTable(A::DiscardClose));
+        assert!(app.block_properties_table.is_none());
+        assert!(app.active_modal.is_none(), "the dialog actually leaves");
+        assert!(app.tabs[i].scene.document == before, "nothing was applied");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), history);
+    });
+}
+
+#[test]
 fn lookup_basepoint_palette_and_table_dialog_real_controls() {
     with_stack(|| {
         use crate::ui::window::{authoring_palettes::Tab, block_lookup::Action as A};
@@ -1788,6 +1851,10 @@ fn lookup_basepoint_palette_and_table_dialog_real_controls() {
             );
             let _ = app.update(Message::CommandInput(point_text.into()));
             let _ = app.update(Message::CommandSubmit);
+            if id == "authoring-tool-lookup" {
+                let _ = app.update(Message::CommandInput(String::new()));
+                let _ = app.update(Message::CommandSubmit);
+            }
         }
         let _ = app.run_command_line("BPARAMETER LINEAR 0,0 1,0 0,0.3");
         authoring_capture(&app, "lookup-basepoint-placed");
@@ -2014,6 +2081,53 @@ fn authoring_control(app: &OpenCADStudio, id: &'static str) -> iced::Point {
         }
         _ => panic!("{id} not found"),
     }
+}
+
+/// An empty name has to be answered by clicking `OK`: while the button is
+/// disabled for an empty field the dialog's own refusal is unreachable.
+#[test]
+fn block_edit_entry_dialog_answers_an_empty_name_when_ok_is_clicked() {
+    use crate::app::ModalKind;
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let tab = app.active_tab;
+    app.tabs[tab].scene.deselect_all();
+    let _ = app.dispatch_command("BEDIT");
+    assert_eq!(app.active_modal, Some(ModalKind::BlockEditPicker));
+    let _ = app.update(Message::BlockEditPickerName(String::new()));
+    assert!(app.block_edit_picker.as_ref().unwrap().error.is_none());
+    assert!(
+        try_find_in_view(
+            &app,
+            "The name must be at least one character long."
+        )
+        .is_none(),
+        "nothing is said before the button is pressed"
+    );
+    let point = find_in_view(&app, "OK");
+    drive_view(
+        &mut app,
+        point,
+        &[
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)),
+        ],
+    );
+    assert_eq!(
+        app.block_edit_picker.as_ref().unwrap().error.as_deref(),
+        Some("The name must be at least one character long."),
+        "the click reached the dialog"
+    );
+    assert!(
+        try_find_in_view(
+            &app,
+            "The name must be at least one character long."
+        )
+        .is_some(),
+        "the reason is on screen"
+    );
+    assert_eq!(app.active_modal, Some(ModalKind::BlockEditPicker));
+    assert!(app.tabs[tab].active_block_edit.is_none());
 }
 
 fn authoring_click(app: &mut OpenCADStudio, point: iced::Point) {

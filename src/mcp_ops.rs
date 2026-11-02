@@ -193,6 +193,11 @@ pub static INPUT: OpDef = OpDef {
             Ty::Handle,
             "Target entity handle for entity/structure pick.",
         ),
+        opt(
+            "handles",
+            Ty::Handles,
+            "Entity handles to hand a selection prompt (kind selection), instead of the current selection.",
+        ),
     ],
     rules: &[
         Rule::RequiredWhen {

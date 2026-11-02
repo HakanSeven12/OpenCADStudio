@@ -152,3 +152,227 @@ fn conversion_loss_wrapped_and_unbroken_messages_remain_readable() {
         capture(&mut ui, "wrapped-bottom");
     });
 }
+
+mod drawing_properties_loss {
+    use super::*;
+    use crate::app::{SaveContinuation, SavePurpose};
+    use iced::futures::StreamExt;
+    use iced::Task;
+
+    /// Run a task to completion on the current thread and collect its messages.
+    fn run(task: Task<Message>) -> Vec<Message> {
+        let mut messages = Vec::new();
+        if let Some(mut stream) = iced_runtime::task::into_stream(task) {
+            while let Some(action) = iced::futures::executor::block_on(stream.next()) {
+                if let iced_runtime::Action::Output(message) = action {
+                    messages.push(message);
+                }
+            }
+        }
+        messages
+    }
+
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "ocs-dwgprops-loss-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("scratch dir");
+            Self(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn app_with_properties() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let info = &mut app.tabs[0].scene.document.summary_info;
+        info.custom_properties = vec![
+            ("Project".into(), "Bridge".into()),
+            ("Client".into(), "ACME, Inc.".into()),
+            ("Area".into(), "12,5".into()),
+        ];
+        app
+    }
+
+    fn save_as(
+        app: &mut OpenCADStudio,
+        path: &std::path::Path,
+        version: codec::DxfVersion,
+    ) -> Task<Message> {
+        app.queue_native_save(
+            0,
+            path.to_path_buf(),
+            version,
+            SavePurpose::SaveAs,
+            SaveContinuation::None,
+            false,
+            false,
+        )
+    }
+
+    // S5: "Last saved by" is stamped, not authored; alone it is nothing to warn about.
+    #[test]
+    fn last_saved_by_alone_saves_to_dwg_r2000_without_asking() {
+        let scratch = Scratch::new("stamped");
+        let path = scratch.0.join("old.dwg");
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].scene.document.summary_info.last_saved_by = "someone".into();
+        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1015));
+        assert_ne!(app.active_modal, Some(ModalKind::ConversionLoss));
+        assert!(path.exists(), "the save went ahead");
+    }
+
+    // S5
+    #[test]
+    fn saving_custom_properties_to_dwg_r2000_asks_before_writing() {
+        let scratch = Scratch::new("ask");
+        let path = scratch.0.join("old.dwg");
+        let mut app = app_with_properties();
+        let task = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        assert!(run(task).is_empty(), "nothing is saved before the answer");
+        assert_eq!(app.active_modal, Some(ModalKind::ConversionLoss));
+        assert!(!path.exists(), "nothing is written before the answer");
+        assert_eq!(
+            app.conversion_losses,
+            vec![crate::tr!(
+                "dwgprops-dialog",
+                "save-loss",
+                format = "DWG",
+                count = "3"
+            )]
+        );
+    }
+
+    // S5
+    #[test]
+    fn saving_custom_properties_to_dxf_r2000_asks_before_writing() {
+        let scratch = Scratch::new("ask-dxf");
+        let path = scratch.0.join("old.dxf");
+        let mut app = app_with_properties();
+        let _ = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        assert_eq!(app.active_modal, Some(ModalKind::ConversionLoss));
+        assert!(!path.exists());
+        assert_eq!(
+            app.conversion_losses,
+            vec![crate::tr!(
+                "dwgprops-dialog",
+                "save-loss",
+                format = "DXF",
+                count = "3"
+            )]
+        );
+    }
+
+    // S5
+    #[test]
+    fn save_anyway_writes_the_file_and_leaves_the_document_unchanged() {
+        let scratch = Scratch::new("proceed");
+        let path = scratch.0.join("old.dwg");
+        let mut app = app_with_properties();
+        let before = app.tabs[0].scene.document.summary_info.clone();
+        let _ = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        let _ = run(app.update(Message::ConversionLossProceed));
+        assert_eq!(app.active_modal, None);
+        assert!(path.exists(), "the held-back save is replayed");
+        assert_eq!(app.tabs[0].scene.document.summary_info, before);
+    }
+
+    // S5
+    #[test]
+    fn back_discards_the_held_save() {
+        let scratch = Scratch::new("back");
+        let path = scratch.0.join("old.dwg");
+        let mut app = app_with_properties();
+        let _ = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        let _ = app.update(Message::ConversionLossBack);
+        assert_eq!(app.active_modal, None);
+        assert!(!path.exists());
+        assert!(app.tabs[0].scene.document.summary_info.custom_properties.len() == 3);
+    }
+
+    // S5
+    #[test]
+    fn nothing_to_lose_saves_to_dwg_r2000_without_asking() {
+        let scratch = Scratch::new("empty");
+        let path = scratch.0.join("old.dwg");
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1015));
+        assert_eq!(app.active_modal, None);
+        assert!(path.exists());
+    }
+
+    // S3, S5
+    #[test]
+    fn dwg_2018_keeps_custom_properties_in_order_without_asking() {
+        let scratch = Scratch::new("round-trip");
+        let path = scratch.0.join("new.dwg");
+        let mut app = app_with_properties();
+        let expected = app.tabs[0].scene.document.summary_info.custom_properties.clone();
+        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1032));
+        assert_eq!(app.active_modal, None);
+        assert!(path.exists());
+        let reopened = crate::io::load_file(&path).expect("reopen saved drawing");
+        assert_eq!(reopened.summary_info.custom_properties, expected);
+    }
+
+    // S3, S5
+    #[test]
+    fn dxf_2018_keeps_custom_properties_in_order_without_asking() {
+        let scratch = Scratch::new("round-trip-dxf");
+        let path = scratch.0.join("new.dxf");
+        let mut app = app_with_properties();
+        let expected = app.tabs[0].scene.document.summary_info.custom_properties.clone();
+        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1032));
+        assert_eq!(app.active_modal, None);
+        let reopened = crate::io::load_file(&path).expect("reopen saved drawing");
+        assert_eq!(reopened.summary_info.custom_properties, expected);
+    }
+
+    // S5: QSAVE keeps the stored version, so an old file is guarded too.
+    #[test]
+    fn quick_save_of_an_old_version_drawing_asks() {
+        let scratch = Scratch::new("qsave");
+        let path = scratch.0.join("old.dwg");
+        let mut app = app_with_properties();
+        let _ = app.queue_native_save(
+            0,
+            path.clone(),
+            codec::DxfVersion::AC1015,
+            SavePurpose::Manual,
+            SaveContinuation::None,
+            false,
+            false,
+        );
+        assert_eq!(app.active_modal, Some(ModalKind::ConversionLoss));
+        assert!(!path.exists());
+    }
+
+    // S5: autosave cannot answer a modal and only writes a recovery copy.
+    #[test]
+    fn autosave_never_asks() {
+        let scratch = Scratch::new("autosave");
+        let path = scratch.0.join("old.dwg.ocs-autosave.sv$");
+        let mut app = app_with_properties();
+        let task = app.queue_native_save(
+            0,
+            path.clone(),
+            codec::DxfVersion::AC1015,
+            SavePurpose::Autosave,
+            SaveContinuation::None,
+            false,
+            false,
+        );
+        let _ = run(task);
+        assert_eq!(app.active_modal, None);
+    }
+}

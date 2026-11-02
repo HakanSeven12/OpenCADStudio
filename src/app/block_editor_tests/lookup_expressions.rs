@@ -70,6 +70,91 @@ fn block_lookup_expression_authoring_audit_history_and_literal_persistence() {
     let _ = app.update(Message::CloseModal);
 }
 
+// An empty cell holds no control characters, and the other table dialog already
+// names the condition correctly; both should say the same thing.
+#[test]
+fn block_lookup_dialog_names_an_empty_cell_without_blaming_control_characters() {
+    let (mut app, _, _) = lookup_editor_fixture();
+    let _ = app.dispatch_command("BLOOKUPTABLE");
+    edit_lookup(&mut app);
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 1, String::new())));
+    let _ = app.update(Message::BlockLookup(A::Audit));
+    assert_eq!(
+        app.block_lookup
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap(),
+        "Each cell must be a finite number.",
+        "an empty cell is reported as the cell it is"
+    );
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 1, "   ".into())));
+    let _ = app.update(Message::BlockLookup(A::Audit));
+    assert_eq!(
+        app.block_lookup
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap(),
+        "Each cell must be a finite number.",
+        "spaces are an empty cell too"
+    );
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 1, "Small\u{1}".into())));
+    let _ = app.update(Message::BlockLookup(A::Audit));
+    assert_eq!(
+        app.block_lookup
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap(),
+        "Complete each cell without control characters.",
+        "the control-character message stays for the case it names"
+    );
+    let _ = app.update(Message::CloseModal);
+}
+
+// An unapplied table must not trap the operator: `OK` refuses it and offers to
+// discard and close, and taking that offer leaves the drawing untouched.
+#[test]
+fn an_invalid_lookup_table_offers_to_discard_and_close() {
+    let (mut app, _, _) = lookup_editor_fixture();
+    let i = app.active_tab;
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    let _ = app.dispatch_command("BLOOKUPTABLE");
+    edit_lookup(&mut app);
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 1, String::new())));
+    let _ = app.update(Message::BlockLookup(A::Apply));
+    let state = app
+        .block_lookup
+        .as_ref()
+        .expect("an invalid table is not applied");
+    assert!(state.error.is_some(), "the refusal still says why");
+    assert!(state.confirm_close, "and offers a way out");
+    let _ = app.update(Message::BlockLookup(A::KeepEditing));
+    let state = app
+        .block_lookup
+        .as_ref()
+        .expect("keeping editing leaves the work in place");
+    assert!(!state.confirm_close, "the offer is gone");
+    assert!(state.error.is_some(), "the diagnosis stays where it was read");
+    assert_eq!(state.drafts[0].edited.expressions[1], "");
+    let _ = app.update(Message::BlockLookup(A::Apply));
+    assert!(app
+        .block_lookup
+        .as_ref()
+        .expect("the refusal offers the way out again")
+        .confirm_close);
+    let _ = app.update(Message::BlockLookup(A::DiscardClose));
+    assert!(app.block_lookup.is_none());
+    assert!(app.active_modal.is_none(), "the dialog actually leaves");
+    assert!(app.tabs[i].scene.document == before, "nothing was applied");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+}
+
 #[test]
 fn block_lookup_range_and_formula_properties_evaluate_in_drawing_and_test_block() {
     for testing in [false, true] {

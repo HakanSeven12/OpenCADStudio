@@ -7,6 +7,7 @@ use iced::widget::{button, column, combo_box, container, pick_list, row, text, t
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
+use crate::entities::common::{coordinate_text, parse_length};
 use crate::modules::draw::units;
 use crate::t;
 use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio};
@@ -73,6 +74,10 @@ pub struct WblockState {
 
     pub file_path: String,
     pub unit: i16,
+    /// LUPREC — how many decimals the base point fields show. The fields are
+    /// typed back, so they always print plain decimals rather than the
+    /// drawing's formatted length style.
+    pub precision: i16,
 
     pub error_message: Option<String>,
 }
@@ -91,6 +96,7 @@ impl Clone for WblockState {
             object_mode: self.object_mode,
             file_path: self.file_path.clone(),
             unit: self.unit,
+            precision: self.precision,
             error_message: self.error_message.clone(),
         }
     }
@@ -102,17 +108,20 @@ impl WblockState {
         pre_selected: Vec<Handle>,
         default_unit: i16,
         default_path: String,
+        precision: i16,
     ) -> Self {
-        let default_block = existing_blocks.first().cloned().unwrap_or_default();
         let remembered_mode = crate::modules::insert::block_cmdline::defaults().wblock_mode;
+        let zero = coordinate_text(0.0, precision);
         Self {
             source_mode: WblockSourceMode::Objects,
-            block_name: default_block,
+            // The field stays empty until the operator picks the block source;
+            // showing a definition that is not in effect reads as the source.
+            block_name: String::new(),
             block_combo: combo_box::State::new(existing_blocks.clone()),
             existing_blocks,
-            base_point_x: "0".to_string(),
-            base_point_y: "0".to_string(),
-            base_point_z: "0".to_string(),
+            base_point_x: zero.clone(),
+            base_point_y: zero.clone(),
+            base_point_z: zero,
             selected_handles: pre_selected,
             object_mode: match remembered_mode {
                 crate::ui::window::block_definition::BlockObjectMode::Retain => {
@@ -125,17 +134,36 @@ impl WblockState {
                     WblockObjectMode::Delete
                 }
             },
-            file_path: default_path,
+            file_path: platform_path(&default_path),
             unit: default_unit,
+            precision,
             error_message: None,
         }
     }
 
     pub fn parse_base_point(&self) -> glam::DVec3 {
-        let x = self.base_point_x.trim().parse::<f64>().unwrap_or(0.0);
-        let y = self.base_point_y.trim().parse::<f64>().unwrap_or(0.0);
-        let z = self.base_point_z.trim().parse::<f64>().unwrap_or(0.0);
+        let x = parse_length(&self.base_point_x).unwrap_or(0.0);
+        let y = parse_length(&self.base_point_y).unwrap_or(0.0);
+        let z = parse_length(&self.base_point_z).unwrap_or(0.0);
         glam::DVec3::new(x, y, z)
+    }
+
+    /// A point taken from the drawing lands in the fields printed at the
+    /// drawing's precision, the same way the dialog opened them.
+    pub fn show_base_point(&mut self, point: glam::DVec3) {
+        self.base_point_x = coordinate_text(point.x, self.precision);
+        self.base_point_y = coordinate_text(point.y, self.precision);
+        self.base_point_z = coordinate_text(point.z, self.precision);
+    }
+}
+
+/// The path as this platform writes it, so the file row shows the separator the
+/// operator sees in the file manager rather than the one the source used.
+fn platform_path(text: &str) -> String {
+    if std::path::MAIN_SEPARATOR == '\\' {
+        text.replace('/', "\\")
+    } else {
+        text.replace('\\', "/")
     }
 }
 
@@ -344,11 +372,11 @@ pub fn view_window<'a>(
         Space::new().height(14).into()
     } else if count == 0 {
         row![
-            crate::ui::icons::semantic(ICON_WARN, 13.0),
+            crate::ui::icons::semantic_disabled(ICON_WARN, 13.0),
             text(t!("No objects selected"))
                 .size(10)
                 .style(|theme: &Theme| text::Style {
-                    color: Some(theme.palette().warning.base.color),
+                    color: Some(theme.palette().background.base.text.scale_alpha(0.48)),
                 }),
         ]
         .spacing(5)
@@ -516,4 +544,59 @@ pub fn view_window<'a>(
     }
 
     main_column.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_block_field_opens_empty_and_the_definitions_are_still_listed() {
+        let state = WblockState::new(
+            vec!["CHILD".to_string(), "PARENT".to_string()],
+            vec![],
+            6,
+            "new block".to_string(),
+            4,
+        );
+        assert!(
+            state.block_name.is_empty(),
+            "the block field shows a name that is not in effect: {:?}",
+            state.block_name
+        );
+        assert_eq!(state.existing_blocks, vec!["CHILD", "PARENT"]);
+        assert_eq!(
+            state.block_combo.options(),
+            &["CHILD".to_string(), "PARENT".to_string()],
+            "choosing the block source has to offer the drawing's definitions"
+        );
+        assert_eq!(state.source_mode, WblockSourceMode::Objects);
+    }
+
+    #[test]
+    fn the_base_point_prints_at_the_drawing_precision() {
+        let state = WblockState::new(vec![], vec![], 6, "new block".to_string(), 2);
+        assert_eq!(state.base_point_x, "0.00");
+        assert_eq!(state.base_point_y, "0.00");
+        assert_eq!(state.base_point_z, "0.00");
+        assert_eq!(coordinate_text(7.126, 2), "7.13");
+        assert_eq!(coordinate_text(2.5, 2), "2.50");
+    }
+
+    #[test]
+    fn the_file_row_shows_the_platform_path_separator() {
+        let state = WblockState::new(
+            vec![],
+            vec![],
+            6,
+            "C:/Users/me/drawings/new block".to_string(),
+            4,
+        );
+        let expected = if std::path::MAIN_SEPARATOR == '\\' {
+            "C:\\Users\\me\\drawings\\new block"
+        } else {
+            "C:/Users/me/drawings/new block"
+        };
+        assert_eq!(state.file_path, expected);
+    }
 }

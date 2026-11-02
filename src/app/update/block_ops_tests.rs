@@ -1230,45 +1230,170 @@ fn locked_mcp_block_delete_with_force_still_refuses_an_open_bedit_session() {
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }
 
-/// Control/MCP `entities_create` must not route new entities into the open
-/// block while pushing a main-stack entry (same policy as the plugin guard).
+/// Control/MCP `entities_create` targets the definition open in the editor,
+/// the same destination `run` already uses, and keeps the drawing's own undo
+/// stack out of it.
 #[test]
-fn locked_control_entities_create_refused_while_block_editor_open() {
+fn control_entities_create_lands_in_the_definition_open_in_the_editor() {
+    use serde_json::json;
     let mut app = app();
     let name = fixture_unreferenced(&mut app);
     let insert = add_insert(&mut app, &name);
     begin_bedit(&mut app, insert);
     assert!(bedit_open(&app));
+    let definition = record_handle(&app, &name);
     let depth = entity_count(&app);
     let main_depth = app.tabs[app.active_tab]
         .block_edit_history
         .as_ref()
         .map(|h| h.main.undo_stack.len())
         .unwrap_or(app.tabs[app.active_tab].history.undo_stack.len());
-    let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
-        .as_u64()
-        .unwrap();
-    let response = app.automation_op(&format!(
-        r#"{{"protocol":1,"op":"entities_create","request_id":"p11s15","document_id":{doc},"entities":[{{"type":"Point","location":[5,5]}}]}}"#
-    ));
-    assert_eq!(response["ok"], false, "{response}");
-    assert_eq!(response["code"], "block_editor_open", "{response}");
-    assert_eq!(
-        response["error"], "finish the open block editor before adding entities to a block",
-        "{response}"
+    let response = control_request(
+        &mut app,
+        json!({"op":"entities_create","entities":[{"type":"Point","location":[5,5]}]}),
     );
-    assert_eq!(
-        entity_count(&app),
-        depth,
-        "no entity may be created through the control path"
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(entity_count(&app), depth + 1, "{response}");
+    let created = Handle::new(
+        u64::from_str_radix(response["result"]["handles"][0].as_str().unwrap(), 16).unwrap(),
     );
-    let main_depth_after = app.tabs[app.active_tab]
+    let i = tab(&app);
+    assert_eq!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(created)
+            .map(|entity| entity.common().owner_handle),
+        Some(definition),
+        "the entity must land inside the open definition"
+    );
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get(&name)
+            .unwrap()
+            .entity_handles
+            .contains(&created),
+        "the definition must list the new child"
+    );
+    let main_depth_after = app.tabs[i]
         .block_edit_history
         .as_ref()
         .map(|h| h.main.undo_stack.len())
-        .unwrap_or(app.tabs[app.active_tab].history.undo_stack.len());
-    assert_eq!(main_depth_after, main_depth, "no undo entry may be pushed");
+        .unwrap_or(app.tabs[i].history.undo_stack.len());
+    assert_eq!(main_depth_after, main_depth, "no drawing undo entry may be pushed");
     let _ = app.dispatch_command("BEDIT_DISCARD");
+    assert!(
+        app.tabs[i].scene.document.get_entity(created).is_none(),
+        "discarding the session drops the added entity"
+    );
+}
+
+/// A created INSERT naming the open definition would nest it inside itself;
+/// the batch is refused whole, like the interactive insert path.
+#[test]
+fn control_entities_create_refuses_nesting_the_open_definition_inside_itself() {
+    use serde_json::json;
+    let mut app = app();
+    let name = fixture_unreferenced(&mut app);
+    let insert = add_insert(&mut app, &name);
+    begin_bedit(&mut app, insert);
+    let depth = entity_count(&app);
+    let response = control_request(
+        &mut app,
+        json!({"op":"entities_create","entities":[{"type":"Insert","block":name,"position":[0,0,0]}]}),
+    );
+    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["code"], "block_cycle", "{response}");
+    assert_eq!(entity_count(&app), depth, "nothing from the batch may be added");
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+/// A child of the definition open in the editor is an entity being authored —
+/// selectable and grip-enumerable — while a child of a definition nested
+/// inside it, and of any other definition, stays refused.
+#[test]
+fn definition_children_are_selectable_while_their_editor_is_open() {
+    use serde_json::json;
+    let mut app = app();
+    define_block(&mut app, "BO_CLOSED");
+    let closed = record_handle(&app, "BO_CLOSED");
+    let closed_child = app.tabs[tab(&app)]
+        .scene
+        .document
+        .entities()
+        .find(|entity| entity.common().owner_handle == closed)
+        .map(|entity| entity.common().handle)
+        .expect("the closed definition has a child line");
+    let name = "BO_ONE";
+    {
+        let i = tab(&app);
+        app.tabs[i].scene.define_block_raw(
+            name,
+            Vector3::ZERO,
+            vec![
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                EntityType::Insert(Insert::new("BO_CLOSED".to_string(), Vector3::new(2.0, 0.0, 0.0))),
+            ],
+        );
+    }
+    let definition = record_handle(&app, name);
+    let child = app.tabs[tab(&app)]
+        .scene
+        .document
+        .entities()
+        .find(|entity| {
+            entity.common().owner_handle == definition && matches!(entity, EntityType::Line(_))
+        })
+        .map(|entity| entity.common().handle)
+        .expect("the definition has a child line");
+    let insert = add_insert(&mut app, name);
+    begin_bedit(&mut app, insert);
+
+    let response = control_request(
+        &mut app,
+        json!({"op":"select","handles":[format!("{:X}", child.value())]}),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(
+        response["state"]["selection"],
+        json!([format!("{:X}", child.value())]),
+        "{response}"
+    );
+
+    let grips = control_request(&mut app, json!({"op":"grips"}));
+    assert_eq!(grips["ok"], true, "{grips}");
+    assert!(
+        grips["grips"].as_array().is_some_and(|grips| !grips.is_empty()),
+        "the selected definition child must enumerate its grips: {grips}"
+    );
+
+    let response = control_request(
+        &mut app,
+        json!({"op":"select","handles":[format!("{:X}", closed_child.value())]}),
+    );
+    assert_eq!(response["ok"], false, "{response}");
+    assert!(
+        response["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("not selectable")),
+        "{response}"
+    );
+
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+    let response = control_request(
+        &mut app,
+        json!({"op":"select","handles":[format!("{:X}", child.value())]}),
+    );
+    assert_eq!(response["ok"], false, "{response}");
+    assert!(
+        response["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("not selectable")),
+        "outside its session the child is not selectable: {response}"
+    );
 }
 
 // ── PURGE ────────────────────────────────────────────────────────────────
@@ -1707,4 +1832,47 @@ fn locked_bedit_insert_refuses_cycle() {
     );
 
     let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn blocks_stay_readable_while_a_definition_is_open_in_the_editor() {
+    use serde_json::json;
+    let mut app = app();
+    define_block(&mut app, "BEDIT_READ");
+    let insert = add_insert(&mut app, "BEDIT_READ");
+    begin_bedit(&mut app, insert);
+    assert!(bedit_open(&app));
+
+    // An unscoped read answers for the drawing, not for the definition tab.
+    let blocks = control_request(&mut app, json!({"op":"blocks","names":["*"]}));
+    assert_eq!(blocks["ok"], json!(true), "{blocks}");
+    assert_eq!(blocks["count"], json!(1), "{blocks}");
+    assert_eq!(
+        blocks["blocks"][0]["handle"],
+        json!(format!("{:X}", insert.value())),
+        "{blocks}"
+    );
+
+    // An explicit scope still means the space being edited.
+    let active = control_request(&mut app, json!({"op":"blocks","scope":"active_space"}));
+    assert_eq!(active["count"], json!(0), "{active}");
+}
+
+#[test]
+fn state_names_the_definition_open_in_the_editor() {
+    use serde_json::json;
+    let mut app = app();
+    define_block(&mut app, "BEDIT_STATE");
+    let insert = add_insert(&mut app, "BEDIT_STATE");
+    assert_eq!(app.control_state()["block_editor"], json!(null));
+    begin_bedit(&mut app, insert);
+    let state = app.control_state();
+    assert_eq!(state["block_editor"]["name"], json!("BEDIT_STATE"), "{state}");
+    assert_eq!(
+        state["block_editor"]["handle"],
+        json!(format!("{:X}", record_handle(&app, "BEDIT_STATE").value())),
+        "{state}"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+    assert_eq!(app.control_state()["block_editor"], json!(null));
 }

@@ -197,3 +197,116 @@ fn block_lookup_output_properties_use_indexed_callbacks_and_history_in_both_cont
         }
     }
 }
+
+#[test]
+fn blocks_reports_unmatched_lookup_rows_as_present_and_unmatched() {
+    let (mut app, reference) = fixture();
+    let source = app.active_tab;
+    begin(&mut app, reference);
+    let def = app.tabs[source]
+        .active_block_edit_session()
+        .unwrap()
+        .br_handle;
+    let target = members(&app)[0];
+    let doc = &mut app.tabs[source].scene.document;
+    let input = crate::scene::block_distance_parameter::create(
+        doc,
+        def,
+        crate::scene::block_distance_parameter::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(2., 0., 0.),
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    crate::scene::block_actions::create(
+        doc,
+        def,
+        crate::scene::block_actions::Kind::Move,
+        input,
+        &[target],
+        glam::DVec3::ZERO,
+    )
+    .unwrap();
+    let first = lookup::create(doc, def, Vector3::ZERO).unwrap();
+    let second = lookup::create(doc, def, Vector3::UNIT_Y).unwrap();
+    let mut table = lookup::empty_table(
+        lookup::parameters(doc, def)
+            .into_iter()
+            .find(|(h, _)| *h == first)
+            .unwrap()
+            .1,
+    );
+    table
+        .columns
+        .insert(0, lookup::properties(doc, def)[0].column.clone());
+    table.columns.push(
+        lookup::empty_table(
+            lookup::parameters(doc, def)
+                .into_iter()
+                .find(|(h, _)| *h == second)
+                .unwrap()
+                .1,
+        )
+        .columns
+        .remove(0),
+    );
+    table.column_count = 3;
+    table.row_count = 2;
+    table.expressions = ["2", "Small", "Large", "4", "Large", "Small"]
+        .map(str::to_owned)
+        .to_vec();
+    lookup::apply_table(doc, def, first, table).unwrap();
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    let i = app.active_tab;
+    let insert = reference;
+    app.tabs[i].scene.select_entity(insert, true);
+    app.tabs[i].selected_handle = Some(insert);
+    app.refresh_properties();
+    let labels = app.tabs[i]
+        .properties
+        .sections
+        .iter()
+        .flat_map(|section| &section.props)
+        .filter(|property| property.field == "dyn_lookup")
+        .map(|property| property.label.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(labels.len(), 2);
+    assert!(choices(&app).iter().all(|p| p.1 == 0));
+    // Distance 3 falls between the authored rows of 2 and 4.
+    let field = app.tabs[i]
+        .properties
+        .sections
+        .iter()
+        .flat_map(|section| &section.props)
+        .find_map(|property| match property.value {
+            PropValue::BlockNumber { key, .. } => Some(key),
+            _ => None,
+        })
+        .unwrap();
+    let _ = app.update(Message::PropBlockInput {
+        key: field,
+        value: "3".into(),
+    });
+    let _ = app.update(Message::PropBlockCommit(field));
+    assert!(choices(&app).iter().all(|p| p.1 == usize::MAX));
+    let (res, _) = app.control_request(serde_json::json!({
+        "op": "blocks",
+        "names": ["*"],
+        "extract_dynamic_properties": true
+    }));
+    let block = res["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["handle"] == format!("{:X}", insert.value()).as_str())
+        .unwrap();
+    let properties = block["dynamic_properties"].as_object().unwrap();
+    for label in labels {
+        assert!(
+            properties.contains_key(&label),
+            "the row stays present even though no value applies to {label}: {res}"
+        );
+        assert_eq!(properties[&label], serde_json::Value::Null, "{res}");
+    }
+}

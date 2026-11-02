@@ -46,6 +46,201 @@ fn edit(app: &mut OpenCADStudio, field: &str, value: &str) {
     app.finish_pending_history(app.active_tab);
 }
 
+/// The `Allow exploding` row is a switch, not a label: a definition answered
+/// `No` has to survive `EXPLODE` once the editor closes.
+#[test]
+fn block_properties_allow_exploding_refuses_the_explode_command() {
+    let mut app = fixture();
+    let i = app.active_tab;
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .find(|entity| matches!(entity, EntityType::Insert(_)))
+        .unwrap()
+        .common()
+        .handle;
+    edit(&mut app, "bedit_allow_exploding", "No");
+    let _ = app.dispatch_command("BEDIT_SAVE");
+    app.tabs[i].scene.selected.insert(insert);
+    let _ = app.dispatch_command("EXPLODE");
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(insert)
+            .is_some(),
+        "EXPLODE disassembled a definition the row says cannot be exploded"
+    );
+}
+
+/// The switch has to outlive the drawing session: a file written with `No`
+/// reloads as a definition `EXPLODE` still refuses.
+#[test]
+fn block_properties_allow_exploding_survives_the_saved_file() {
+    for ext in ["dxf", "dwg"] {
+        let mut app = fixture();
+        let i = app.active_tab;
+        edit(&mut app, "bedit_allow_exploding", "No");
+        let _ = app.dispatch_command("BEDIT_SAVE");
+        let bytes = crate::io::save_to_bytes(
+            &app.tabs[i].scene.document,
+            ext,
+            app.tabs[i].scene.document.version,
+        )
+        .unwrap_or_else(|error| panic!("save {ext}: {error}"));
+        let read = crate::io::load_bytes(&format!("properties.{ext}"), bytes)
+            .unwrap_or_else(|error| panic!("load {ext}: {error}"));
+        assert!(
+            !read
+                .block_records
+                .get("PROPERTIES")
+                .unwrap_or_else(|| panic!("{ext}: the definition is gone"))
+                .explodable,
+            "{ext}: `Allow exploding = No` did not survive the save"
+        );
+        let reloaded = read
+            .entities()
+            .find(|entity| matches!(entity, EntityType::Insert(_)))
+            .unwrap()
+            .common()
+            .handle;
+        app.tabs[i].scene.document = read;
+        app.tabs[i].scene.selected.insert(reloaded);
+        let _ = app.dispatch_command("EXPLODE");
+        assert!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(reloaded)
+                .is_some(),
+            "{ext}: EXPLODE disassembled a definition reloaded as not explodable"
+        );
+    }
+}
+
+/// A definition that carries a parameter is drawn from a representation copy,
+/// so the switch has to reach that record as well or it is inert exactly where
+/// the block editor is used.
+#[test]
+fn block_properties_allow_exploding_refuses_explode_on_a_parametric_block() {
+    let mut app = fixture();
+    let i = app.active_tab;
+    let definition = app.tabs[i]
+        .active_block_edit_session()
+        .expect("the fixture opens an editor session")
+        .br_handle;
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .find(|entity| matches!(entity, EntityType::Insert(_)))
+        .unwrap()
+        .common()
+        .handle;
+    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 6,2 3,2");
+    assert!(
+        app.tabs[i].scene.document.is_dynamic_block(definition),
+        "the test block has to be parametric for this to mean anything"
+    );
+    app.refresh_properties();
+    edit(&mut app, "bedit_allow_exploding", "No");
+    let _ = app.dispatch_command("BEDIT_SAVE");
+    app.tabs[i].scene.selected.insert(insert);
+    let _ = app.dispatch_command("EXPLODE");
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(insert)
+            .is_some(),
+        "EXPLODE disassembled a parametric definition the row says cannot be exploded"
+    );
+}
+
+/// A reloaded insert can name a record other than the one the row edited, so
+/// the refusal has to follow the record the insert actually names — and a
+/// record that is empty would refuse for the wrong reason.
+#[test]
+fn block_properties_allow_exploding_refuses_explode_on_a_saved_parametric_block() {
+    for ext in ["dxf", "dwg"] {
+        let mut app = fixture();
+        let i = app.active_tab;
+        let definition = app.tabs[i]
+            .active_block_edit_session()
+            .expect("the fixture opens an editor session")
+            .br_handle;
+        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 6,2 3,2");
+        assert!(
+            app.tabs[i].scene.document.is_dynamic_block(definition),
+            "{ext}: the test block has to be parametric for this to mean anything"
+        );
+        app.refresh_properties();
+        edit(&mut app, "bedit_allow_exploding", "No");
+        let _ = app.dispatch_command("BEDIT_SAVE");
+        let bytes = crate::io::save_to_bytes(
+            &app.tabs[i].scene.document,
+            ext,
+            app.tabs[i].scene.document.version,
+        )
+        .unwrap_or_else(|error| panic!("save {ext}: {error}"));
+        let read = crate::io::load_bytes(&format!("properties.{ext}"), bytes)
+            .unwrap_or_else(|error| panic!("load {ext}: {error}"));
+        let (reloaded, named, governed) = read
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Insert(insert) => Some((
+                    insert.common.handle,
+                    insert.block_name.clone(),
+                    read.block_records
+                        .get(&insert.block_name)
+                        .map(|record| record.entity_handles.len())
+                        .unwrap_or(usize::MAX),
+                )),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{ext}: the reloaded drawing has no insert"));
+        assert!(
+            governed > 0,
+            "{ext}: the record `{named}` holds no objects, so there would be nothing to explode"
+        );
+        let record = read.block_records.get(&named).unwrap_or_else(|| {
+            panic!("{ext}: the reloaded insert names `{named}`, which has no record")
+        });
+        assert!(
+            !record.explodable,
+            "{ext}: the reloaded insert names `{named}`, and that record still allows exploding"
+        );
+        app.tabs[i].scene.document = read;
+        app.tabs[i].scene.selected.insert(reloaded);
+        let _ = app.dispatch_command("EXPLODE");
+        assert!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(reloaded)
+                .is_some(),
+            "{ext}: EXPLODE disassembled a parametric definition reloaded from a file that says it cannot be exploded"
+        );
+        // The same reference, the same document, only the flag flipped: what
+        // stopped the explosion was the flag and nothing else about this file.
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get_mut(&named)
+            .unwrap()
+            .explodable = true;
+        app.tabs[i].scene.deselect_all();
+        app.tabs[i].scene.selected.insert(reloaded);
+        let _ = app.dispatch_command("EXPLODE");
+        assert!(
+            app.tabs[i].scene.document.get_entity(reloaded).is_none(),
+            "{ext}: the flag was the only difference, yet the reference still refuses to come apart"
+        );
+    }
+}
+
 #[test]
 fn block_properties_extend_the_existing_panel_only_for_empty_editor_selection() {
     let mut app = fixture();
@@ -513,5 +708,306 @@ fn block_properties_staged_values_do_not_follow_a_different_definition() {
             .unwrap()
             .description,
         ""
+    );
+}
+
+fn select_editor_line(app: &mut OpenCADStudio) -> codec::types::Handle {
+    let i = app.active_tab;
+    let handle = app.tabs[i]
+        .scene
+        .document
+        .entities_in_block("PROPERTIES")
+        .find(|entity| matches!(entity, EntityType::Line(_)))
+        .unwrap()
+        .common()
+        .handle;
+    app.tabs[i].scene.selected.insert(handle);
+    app.refresh_properties();
+    handle
+}
+
+fn block_parameter_key() -> crate::scene::model::object::BlockParameterKey {
+    use crate::scene::model::object::{BlockParameterComponent, BlockParameterKey};
+    BlockParameterKey {
+        document: 0,
+        definition: codec::Handle::new(1),
+        insert: codec::Handle::new(2),
+        parameter: codec::Handle::new(3),
+        component: BlockParameterComponent::Distance,
+    }
+}
+
+fn open_dynamic_value_list(
+    app: &mut OpenCADStudio,
+) -> crate::scene::model::object::BlockParameterKey {
+    let key = block_parameter_key();
+    let _ = app.update(Message::PropBlockPickerToggle { key, quick: false });
+    assert_eq!(
+        app.tabs[app.active_tab].properties.open_block_picker,
+        Some((key, false))
+    );
+    key
+}
+
+#[test]
+fn dynamic_value_list_toggles_open_and_closed() {
+    let mut app = fixture();
+    let key = open_dynamic_value_list(&mut app);
+    let _ = app.update(Message::PropBlockPickerToggle { key, quick: false });
+    assert_eq!(app.tabs[app.active_tab].properties.open_block_picker, None);
+}
+
+/// The same row exists on the docked and Quick Properties surfaces, and a
+/// caret click names the surface it came from: clicking one copy's caret opens
+/// that copy's list instead of closing the other copy's.
+#[test]
+fn each_surface_toggles_its_own_copy_of_the_list() {
+    let mut app = fixture();
+    let key = open_dynamic_value_list(&mut app);
+    let _ = app.update(Message::PropBlockPickerToggle { key, quick: true });
+    assert_eq!(
+        app.tabs[app.active_tab].properties.open_block_picker,
+        Some((key, true))
+    );
+    let _ = app.update(Message::PropBlockPickerToggle { key, quick: false });
+    assert_eq!(
+        app.tabs[app.active_tab].properties.open_block_picker,
+        Some((key, false))
+    );
+    let _ = app.update(Message::PropBlockPickerToggle { key, quick: false });
+    assert_eq!(app.tabs[app.active_tab].properties.open_block_picker, None);
+}
+
+/// Keys the list must keep to itself. Escape closes it; Enter and the arrows
+/// would otherwise leave the list open behind a viewport that has already
+/// reacted (a cleared selection, a recalled command, a nudged selection).
+#[test]
+fn open_dynamic_value_list_swallows_escape_enter_and_the_arrows() {
+    use super::ArrowKey;
+
+    let mut app = fixture();
+    open_dynamic_value_list(&mut app);
+    for msg in [
+        Message::ArrowKeyPressed {
+            direction: ArrowKey::Up,
+            shortcut: "UP".into(),
+            extend_selection: false,
+        },
+        Message::CommandLineArrowProbe {
+            direction: ArrowKey::Down,
+            extend_selection: false,
+        },
+        Message::CommandFinalize,
+        Message::CommandSubmit,
+        Message::CommandSpace,
+        Message::ShortcutPressed("ENTER".into()),
+        Message::ShortcutPressed("SPACE".into()),
+    ] {
+        assert!(
+            app.intercept_block_picker_key(&msg).is_some(),
+            "{msg:?} must not reach the command line or the viewport"
+        );
+    }
+    assert!(app.tabs[app.active_tab].properties.open_block_picker.is_some());
+    assert!(app
+        .intercept_block_picker_key(&Message::PropBlockPickerToggle {
+            key: block_parameter_key(),
+            quick: false,
+        })
+        .is_none());
+}
+
+#[test]
+fn escape_closes_the_dynamic_value_list_and_keeps_the_selection() {
+    for escape in [Message::CommandEscape, Message::ShortcutPressed("ESCAPE".into())] {
+        let mut app = fixture();
+        let handle = select_editor_line(&mut app);
+        open_dynamic_value_list(&mut app);
+        let _ = app.update(escape);
+        let panel = &app.tabs[app.active_tab].properties;
+        assert_eq!(panel.open_block_picker, None);
+        assert!(app.tabs[app.active_tab].scene.selected.contains(&handle));
+    }
+}
+
+#[test]
+fn enter_does_not_reach_the_command_line_while_the_list_is_open() {
+    let mut app = fixture();
+    open_dynamic_value_list(&mut app);
+    app.command_line.history_open = true;
+    app.command_line.input = "LINE".into();
+    let _ = app.update(Message::CommandSubmit);
+    // Submitting would close the history and run the typed command.
+    assert!(app.command_line.history_open);
+    assert_eq!(app.command_line.input, "LINE");
+}
+
+/// A flag naming a row that is not on the panel is dropped by the rebuild
+/// instead of leaving the guard swallowing keys.
+#[test]
+fn a_rebuild_without_a_dynamic_row_drops_the_list() {
+    let mut app = fixture();
+    let i = app.active_tab;
+    open_dynamic_value_list(&mut app);
+    app.refresh_properties();
+    assert_eq!(app.tabs[i].properties.open_block_picker, None);
+}
+
+/// A distance row read from the automation surface has to answer to the `id` it
+/// comes back with, and the value written by that `property` operation has to
+/// reach the geometry instead of resting in a record: the reference draws
+/// through the copy its insert names, so that copy moves while the definition it
+/// came from stays as it was. The editor-session panel messages are pinned
+/// elsewhere; this is the outside-editor route an automation client takes.
+#[test]
+fn a_parameter_value_written_through_the_control_surface_moves_the_reference() {
+    use crate::scene::{block_actions as actions, block_distance_parameter as distance};
+
+    fn control(app: &mut OpenCADStudio, mut req: serde_json::Value) -> serde_json::Value {
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        req["client_id"] = serde_json::json!("test");
+        req["request_id"] =
+            serde_json::json!(format!("req-{}", state["revision"].as_u64().unwrap_or(0)));
+        let (response, task) = app.control_request(req.clone());
+        app.drive_headless_task(task).unwrap();
+        if matches!(response["status"].as_str(), Some("accepted" | "running")) {
+            return app
+                .control_request(serde_json::json!({
+                    "op": "operation",
+                    "request_id": req["request_id"]
+                }))
+                .0;
+        }
+        response
+    }
+
+    fn rows(app: &mut OpenCADStudio) -> Vec<serde_json::Value> {
+        let answer = control(app, serde_json::json!({"op":"properties"}));
+        assert_eq!(answer["ok"], serde_json::json!(true), "{answer}");
+        let mut rows = Vec::new();
+        if let Some(sections) = answer.get("sections").and_then(|v| v.as_array()) {
+            for section in sections {
+                if let Some(props) = section.get("properties").and_then(|v| v.as_array()) {
+                    rows.extend(props.iter().cloned());
+                }
+            }
+        }
+        rows
+    }
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.define_block_raw(
+        "AUTOMATED",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        ))],
+    );
+    let record = app.tabs[i]
+        .scene
+        .document
+        .block_records
+        .get("AUTOMATED")
+        .unwrap();
+    let definition = record.handle;
+    let target = record.entity_handles[0];
+    let parameter = distance::create(
+        &mut app.tabs[i].scene.document,
+        definition,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    actions::create(
+        &mut app.tabs[i].scene.document,
+        definition,
+        actions::Kind::Move,
+        parameter,
+        &[target],
+        glam::DVec3::ZERO,
+    )
+    .unwrap();
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(Insert::new("AUTOMATED", Vector3::ZERO)))
+        .unwrap();
+    app.tabs[i].scene.select_entity(insert, true);
+    app.tabs[i].selected_handle = Some(insert);
+    let id = format!("dyn_{:X}_distance", parameter.value());
+    let printed = |app: &mut OpenCADStudio| -> f64 {
+        rows(app)
+            .into_iter()
+            .find(|row| row["id"].as_str() == Some(id.as_str()))
+            .unwrap_or_else(|| panic!("the properties answer holds no row addressed by {id}"))
+            .get("value")
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| panic!("the {id} row does not print text"))
+            .parse::<f64>()
+            .unwrap_or_else(|error| panic!("the {id} row does not parse: {error}"))
+    };
+    assert_eq!(
+        printed(&mut app),
+        10.,
+        "the reference reads back the distance its parameter was created with"
+    );
+    let written = control(
+        &mut app,
+        serde_json::json!({"op":"property","field":id,"value":"15"}),
+    );
+    assert_eq!(written["ok"], serde_json::json!(true), "{written}");
+    assert_eq!(
+        printed(&mut app),
+        15.,
+        "the row reports the value written through the same address"
+    );
+    // The written value has to land in the copy the insert names; the
+    // definition it came from is the one thing that must stay as it was.
+    let EntityType::Insert(reference) = app.tabs[i]
+        .scene
+        .document
+        .get_entity(insert)
+        .unwrap()
+        .clone()
+    else {
+        panic!("the placed entity is no longer a reference")
+    };
+    assert_ne!(
+        reference.block_name, "AUTOMATED",
+        "a parametric reference draws through its own copy, not the definition"
+    );
+    let lines = |name: &str| -> Vec<(Vector3, Vector3)> {
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get(name)
+            .unwrap_or_else(|| panic!("no block named {name}"));
+        record
+            .entity_handles
+            .iter()
+            .filter_map(|handle| match app.tabs[i].scene.document.get_entity(*handle) {
+                Some(EntityType::Line(line)) => Some((line.start, line.end)),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        lines(&reference.block_name),
+        vec![(Vector3::new(5., 0., 0.), Vector3::new(6., 0., 0.))],
+        "a value of 15 on a ten-unit parameter moves the one line the action acts on by five"
+    );
+    assert_eq!(
+        lines("AUTOMATED"),
+        vec![(Vector3::ZERO, Vector3::UNIT_X)],
+        "writing one reference's value leaves the definition alone"
     );
 }

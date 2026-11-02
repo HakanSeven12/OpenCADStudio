@@ -23,7 +23,7 @@ pub fn ui_name(e: &EntityType) -> &'static str {
             if codec::entities::CenterLineAssociation::read(&line.common.extended_data)
                 .is_some() =>
         {
-            "Center Line"
+            "Centerline"
         }
         EntityType::Line(_) => "Line",
         EntityType::Circle(_) => "Circle",

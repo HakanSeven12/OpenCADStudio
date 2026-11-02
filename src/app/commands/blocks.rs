@@ -522,11 +522,13 @@ impl OpenCADStudio {
                     .collect();
                 let existing_names = self.tabs[i].scene.custom_block_names();
                 let default_unit = self.tabs[i].scene.document.header.insertion_units;
+                let precision = self.tabs[i].scene.document.header.linear_unit_precision;
                 self.block_definition = Some(
                     crate::ui::window::block_definition::BlockDefinitionState::new(
                         existing_names,
                         handles,
                         default_unit,
+                        precision,
                     ),
                 );
                 self.active_modal = Some(crate::app::ModalKind::BlockDefinition);
@@ -540,9 +542,7 @@ impl OpenCADStudio {
                     .collect();
                 if parts.len() == 3 {
                     if let Some(state) = self.block_definition.as_mut() {
-                        state.base_point_x = format!("{:.4}", parts[0]);
-                        state.base_point_y = format!("{:.4}", parts[1]);
-                        state.base_point_z = format!("{:.4}", parts[2]);
+                        state.set_base_point(glam::DVec3::new(parts[0], parts[1], parts[2]));
                     }
                 }
                 self.tabs[i].active_cmd = None;
@@ -576,9 +576,7 @@ impl OpenCADStudio {
                     .collect();
                 if parts.len() == 3 {
                     if let Some(state) = self.wblock.as_mut() {
-                        state.base_point_x = format!("{:.4}", parts[0]);
-                        state.base_point_y = format!("{:.4}", parts[1]);
-                        state.base_point_z = format!("{:.4}", parts[2]);
+                        state.show_base_point(glam::DVec3::new(parts[0], parts[1], parts[2]));
                     }
                 }
                 self.tabs[i].active_cmd = None;
@@ -618,12 +616,23 @@ impl OpenCADStudio {
                 let blocks = self.tabs[i].scene.custom_block_names();
                 let ranked = self.ranked_block_names(&blocks);
                 let snapshot = self.block_usage_snapshot();
+                // The remembered name belongs to this drawing; offering one it
+                // does not define would leave Enter with nothing to answer.
+                let remembered = self.tabs[i].insname.clone();
+                let default_name = if blocks
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&remembered))
+                {
+                    remembered
+                } else {
+                    String::new()
+                };
                 let cmd = InsertBlockCommand::classic(
                     ranked,
                     snapshot,
                     self.cliprompt_lines.clamp(0, 50) as u8,
                     self.block_catalog(),
-                    self.insname.clone(),
+                    default_name,
                 );
                 self.command_line.push_info(&cmd.prompt());
                 self.command_line.set_step_options(cmd.options());
@@ -898,6 +907,7 @@ impl OpenCADStudio {
                     .collect();
                 let existing_blocks = self.tabs[i].scene.custom_block_names();
                 let default_unit = self.tabs[i].scene.document.header.insertion_units;
+                let precision = self.tabs[i].scene.document.header.linear_unit_precision;
                 // "new block" in the drawing's folder, or in Documents for an
                 // unsaved drawing; the file type is added when it is written.
                 let folder = self.tabs[i]
@@ -914,6 +924,7 @@ impl OpenCADStudio {
                     handles,
                     default_unit,
                     default_path,
+                    precision,
                 ));
                 self.active_modal = Some(crate::app::ModalKind::WriteBlock);
             }
@@ -1794,6 +1805,77 @@ mod tests {
         );
     }
 
+    // The Write Block dialog prints coordinates the way the drawing prints
+    // them, and a picked point lands in the same field.
+    #[test]
+    fn write_block_dialog_prints_coordinates_at_the_drawing_precision() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        app.tabs[i].scene.document.header.linear_unit_precision = 2;
+        let _ = app.run_command_line("WBLOCK");
+        let state = app.wblock.as_ref().expect("the dialog opens");
+        assert_eq!(state.base_point_x, "0.00", "bare zero at LUPREC 2");
+        let _ = app.dispatch_command("WBLOCK_POINT_PICKED 2.5 7.126 0");
+        let state = app.wblock.as_ref().expect("the dialog stays open");
+        assert_eq!(state.base_point_x, "2.50");
+        assert_eq!(state.base_point_y, "7.13");
+        assert_eq!(state.base_point_z, "0.00");
+    }
+
+    // The Block dialog prints its base point the same way the drawing does, and
+    // a point picked from the drawing lands in the same fields.
+    #[test]
+    fn block_dialog_prints_coordinates_at_the_drawing_precision() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        app.tabs[i].scene.document.header.linear_unit_precision = 2;
+        app.tabs[i].scene.define_block_raw(
+            "PRE_BASE",
+            codec::Vector3::new(10.0, 5.0, 0.0),
+            vec![codec::EntityType::Line(codec::entities::Line::from_points(
+                codec::Vector3::new(10.0, 5.0, 0.0),
+                codec::Vector3::new(30.0, 5.0, 0.0),
+            ))],
+        );
+        let _ = app.run_command_line("BLOCK");
+        let state = app
+            .block_definition
+            .as_ref()
+            .expect("the dialog opens with the drawing's precision");
+        assert_eq!(state.base_point_x, "0.00", "bare zero at LUPREC 2");
+        let _ = app.dispatch_command("BLOCK_POINT_PICKED 2.5 7.126 0");
+        let state = app
+            .block_definition
+            .as_ref()
+            .expect("the dialog stays open");
+        assert_eq!(state.base_point_x, "2.50");
+        assert_eq!(state.base_point_y, "7.13");
+        assert_eq!(state.base_point_z, "0.00");
+        assert_eq!(
+            state.parse_base_point(),
+            glam::DVec3::new(2.5, 7.13, 0.0),
+            "the printed text reads back as the point it shows"
+        );
+
+        // Choosing an existing definition prefills from its base, printed the
+        // same way rather than at a fixed number of decimals.
+        let _ = app.update(crate::app::Message::BlockDefNameSelect(
+            "PRE_BASE".to_string(),
+        ));
+        let state = app
+            .block_definition
+            .as_ref()
+            .expect("the dialog stays open");
+        assert_eq!(state.base_point_x, "10.00");
+        assert_eq!(state.base_point_y, "5.00");
+        assert_eq!(state.base_point_z, "0.00");
+        assert_eq!(
+            state.parse_base_point(),
+            glam::DVec3::new(10.0, 5.0, 0.0),
+            "the prefilled base reads back exactly"
+        );
+    }
+
     /// Run one command line and return only the command-line text it appended.
     fn run_capture(app: &mut OpenCADStudio, cmd: &str) -> String {
         let start = app.command_line.history.len();
@@ -1803,6 +1885,91 @@ mod tests {
             .map(|e| e.text.as_str())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn define_line_block(app: &mut OpenCADStudio, tab: usize, name: &str) {
+        let mut line = codec::entities::Line::new();
+        line.start = codec::types::Vector3::ZERO;
+        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
+        app.tabs[tab]
+            .scene
+            .define_block_from_owned_entities(
+                vec![codec::EntityType::Line(line)],
+                name,
+                glam::DVec3::ZERO,
+            )
+            .unwrap();
+    }
+
+    fn feed(app: &mut OpenCADStudio, text: &str) {
+        let _ = app.update(crate::app::Message::CommandInput(text.to_string()));
+        let _ = app.update(crate::app::Message::CommandSubmit);
+    }
+
+    // -INSERT remembers the last block used in *this* drawing, so the
+    // bracketed default is always one of the definitions it offers.
+    #[test]
+    fn insert_default_name_is_remembered_per_drawing() {
+        let mut app = fresh_app();
+        let first = app.active_tab;
+        define_line_block(&mut app, first, "ALPHA");
+        app.record_block_insert("ALPHA");
+        app.tabs
+            .push(crate::app::document::DocumentTab::new_drawing(2));
+        app.active_tab = 1;
+        define_line_block(&mut app, 1, "BETA");
+        app.record_block_insert("BETA");
+        app.tabs[1].active_cmd = None;
+
+        app.active_tab = first;
+        let out = run_capture(&mut app, "-INSERT");
+        assert!(out.contains("<ALPHA>"), "{out}");
+        assert!(!out.contains("<BETA>"), "{out}");
+        app.tabs[first].active_cmd = None;
+
+        app.active_tab = 1;
+        let out = run_capture(&mut app, "-INSERT");
+        assert!(out.contains("<BETA>"), "{out}");
+        assert!(!out.contains("<ALPHA>"), "{out}");
+    }
+
+    // A remembered name that no longer names a definition of the drawing is
+    // not offered as the default.
+    #[test]
+    fn insert_default_name_is_dropped_when_the_block_is_not_defined() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        define_line_block(&mut app, i, "REAL");
+        let _ = app.run_command_line("INSNAME GHOST");
+        let out = run_capture(&mut app, "-INSERT");
+        assert!(out.contains("Enter block name or [?]:"), "{out}");
+        assert!(!out.contains("GHOST"), "{out}");
+    }
+
+    // `?` prints the definitions into the transcript and returns to the name
+    // prompt, so the operator can still pick one.
+    #[test]
+    fn insert_listing_prints_and_returns_to_the_name_prompt() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        define_line_block(&mut app, i, "ALPHA");
+        let _ = app.run_command_line("-INSERT");
+        let start = app.command_line.history.len();
+        feed(&mut app, "?");
+        feed(&mut app, "*");
+        let out = app.command_line.history[start..]
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(out.contains("Defined blocks."), "{out}");
+        assert!(out.contains("\"ALPHA\""), "{out}");
+        let cmd = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("-INSERT stays active after the listing");
+        assert_eq!(cmd.prompt(), "Enter block name or [?]:");
+        assert!(out.contains("Enter block name or [?]:"), "{out}");
     }
 
     // ATTMAN and BATTMAN open the Block Attribute Manager. A drawing without

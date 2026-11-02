@@ -449,7 +449,13 @@ pub enum FieldKind {
     /// SheetSet / SheetView: a component picked in a sheet set.
     SheetSetNavigation,
     BlockPlaceholder,
+    /// A custom drawing property: `\AcVar CustomDP.<Name>` (text case).
+    CustomProperty,
 }
+
+/// The pseudo field name of the document custom properties; the property
+/// itself is `FieldDialogState::custom_property`.
+pub const CUSTOM_PROPERTY: &str = "CustomDP";
 
 /// Formula precisions: the current one, then 0 to 8 decimals.
 pub const FORMULA_PRECISIONS: &[&str] = &[
@@ -523,6 +529,7 @@ pub fn kind_of(name: &str) -> FieldKind {
         "SheetSet" | "SheetView" => FieldKind::SheetSetNavigation,
         n if SHEET_SET_FIELDS.contains(&n) => FieldKind::SheetSet,
         "BlockPlaceholder" => FieldKind::BlockPlaceholder,
+        CUSTOM_PROPERTY => FieldKind::CustomProperty,
         _ => FieldKind::Text,
     }
 }
@@ -577,6 +584,10 @@ pub struct FieldDialogState {
     /// Index into codec BLOCK_PLACEHOLDER_PROPERTIES.
     pub placeholder_property: usize,
     pub preview: String,
+    /// The drawing's custom property names in stored order (listed under
+    /// Document) and the one chosen.
+    pub custom_properties: Vec<String>,
+    pub custom_property: String,
     /// Sheet set fields: the open set's sheet (flags 2) and set (flags 1)
     /// custom property names, the chosen one, the placeholder type and the
     /// ViewportScale format.
@@ -599,6 +610,25 @@ pub struct FieldDialogState {
 }
 
 impl FieldDialogState {
+    /// The rows of the field list: the category's fields, and under Document
+    /// the drawing's custom properties after them, in stored order.
+    pub fn entries(&self) -> Vec<(String, bool, FieldDialogMsg)> {
+        let mut rows: Vec<(String, bool, FieldDialogMsg)> = fields_of(self.category)
+            .into_iter()
+            .map(|n| (n.to_string(), self.name == n, FieldDialogMsg::Name(n)))
+            .collect();
+        if CATEGORIES.get(self.category).is_some_and(|(c, _)| *c == "Document") {
+            rows.extend(self.custom_properties.iter().map(|property| {
+                (
+                    property.clone(),
+                    self.name == CUSTOM_PROPERTY && self.custom_property == *property,
+                    FieldDialogMsg::CustomProperty(property.clone()),
+                )
+            }));
+        }
+        rows
+    }
+
     pub fn new(target: FieldTarget) -> Self {
         Self {
             target,
@@ -634,6 +664,8 @@ impl FieldDialogState {
             placeholder_block: None,
             placeholder_property: 7,
             preview: String::new(),
+            custom_properties: Vec::new(),
+            custom_property: String::new(),
             ss_sheet_custom: Vec::new(),
             ss_set_custom: Vec::new(),
             ss_custom: String::new(),
@@ -661,6 +693,12 @@ impl FieldDialogState {
                 vec![],
             ),
             FieldKind::Text => (case(format!("\\AcVar {}", self.name)), vec![]),
+            FieldKind::CustomProperty => (
+                case(crate::entities::field::custom_property_code(
+                    &self.custom_property,
+                )),
+                vec![],
+            ),
             FieldKind::Filename => {
                 let bits = self.file_parts
                     + if self.file_extension && self.file_parts & 2 != 0 {
@@ -870,6 +908,13 @@ impl FieldDialogState {
         } else if evaluator == "\\AcDiesel" {
             self.name = "DieselExpression";
             self.diesel = rest.to_string();
+        } else if let Some(property) = evaluator
+            .starts_with("\\AcVar")
+            .then(|| rest.split(" \\f ").next().unwrap_or(rest))
+            .and_then(crate::entities::field::custom_property_name)
+        {
+            self.name = CUSTOM_PROPERTY;
+            self.custom_property = property.to_string();
         } else if evaluator.starts_with("\\AcVar") {
             let variable = rest.split_whitespace().next().unwrap_or("");
             if let Some(name) = fields_of(0)
@@ -1036,6 +1081,8 @@ pub fn object_properties(entity: &codec::EntityType) -> Vec<&'static str> {
 pub enum FieldDialogMsg {
     Category(usize),
     Name(&'static str),
+    /// A custom drawing property of the Document category.
+    CustomProperty(String),
     DateFormat(String),
     DateExample(usize),
     TextCase(usize),
@@ -1195,7 +1242,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         ]
         .spacing(8)
         .into(),
-        FieldKind::Text => column![text(t!("Format")).size(12), case_list(state)]
+        FieldKind::Text | FieldKind::CustomProperty => column![text(t!("Format")).size(12), case_list(state)]
             .spacing(8)
             .into(),
         FieldKind::Filename => {
@@ -1771,13 +1818,7 @@ pub fn view<'a>(
             ]
             .spacing(8)
             .align_y(iced::Center),
-            list(
-                fields_of(state.category)
-                    .into_iter()
-                    .map(|n| (n.to_string(), state.name == n, FieldDialogMsg::Name(n)))
-                    .collect(),
-                330.0,
-            ),
+            list(state.entries(), 330.0),
         ]
         .spacing(8),
     );

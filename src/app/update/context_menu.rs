@@ -127,9 +127,9 @@ impl OpenCADStudio {
     }
 
     /// Run a picked row. The menu closes first so the action sees the same
-    /// state a typed keyword / shortcut would (no menu open, command line
-    /// focused), then the action is routed through the existing message for
-    /// that behaviour.
+    /// state a typed keyword / shortcut would (no menu open), then the action
+    /// is routed through the existing message for that behaviour. Prompts
+    /// focus the command line; a completed Select Similar returns to the canvas.
     pub(in crate::app) fn on_context_menu_pick(&mut self, action: MenuAction) -> Task<Message> {
         if let MenuAction::ToggleSubmenu(id) = action {
             return self.on_context_menu_submenu_toggle(id);
@@ -142,7 +142,13 @@ impl OpenCADStudio {
             // right-click cycle: the next right-click acts as Enter again.
             sel.input.right_click_entered = false;
         }
-        let focus = self.focus_cmd_input();
+        // Select Similar finishes a canvas selection, not a command prompt.
+        // An empty focused command input captures the following Ctrl+C.
+        let focus = if matches!(action, MenuAction::SelectSimilar) {
+            self.unfocus_widgets()
+        } else {
+            self.focus_cmd_input()
+        };
         let task = match action {
             MenuAction::Enter if self.tabs[i].active_grip.is_some() => {
                 self.commit_active_grip_edit()
@@ -341,6 +347,55 @@ impl OpenCADStudio {
             }
             _ => None,
         }
+    }
+
+    /// Keep Escape, Enter, Space and the arrows out of the command line and the
+    /// viewport while a dynamic-value list is open: they would otherwise
+    /// dismiss the selection the list was opened for. Escape closes the list.
+    pub(in crate::app) fn intercept_block_picker_key(
+        &mut self,
+        msg: &Message,
+    ) -> Option<Task<Message>> {
+        let base = match msg {
+            Message::ShortcutPressed(key) => key.rsplit('+').next(),
+            _ => None,
+        };
+        let escape = matches!(msg, Message::CommandEscape) || matches!(base, Some("ESCAPE"));
+        let consumed = escape
+            || matches!(
+                msg,
+                Message::ArrowKeyPressed { .. }
+                    | Message::CommandLineArrowProbe { .. }
+                    | Message::CommandLineSpaceProbe
+                    | Message::CommandFinalize
+                    | Message::CommandSubmit
+                    | Message::CommandSpace
+            )
+            || matches!(base, Some("ENTER" | "RETURN" | "SPACE"));
+        if !consumed {
+            self.block_picker_dismissed = false;
+            return None;
+        }
+        if self.tabs[self.active_tab]
+            .properties
+            .open_block_picker
+            .is_none()
+        {
+            // The overlay reported its own Escape a moment earlier; the global
+            // shortcut repeats the same keypress with the list already closed.
+            // Dropping that repeat keeps the selection; any other key ends the
+            // window without being swallowed.
+            if self.block_picker_dismissed && escape {
+                self.block_picker_dismissed = false;
+                return Some(Task::none());
+            }
+            self.block_picker_dismissed = false;
+            return None;
+        }
+        if escape {
+            self.tabs[self.active_tab].properties.open_block_picker = None;
+        }
+        Some(Task::none())
     }
 
     /// A printable key while the menu is open: a mnemonic picks its row;

@@ -19,6 +19,26 @@ pub fn tool() -> ToolDef {
     }
 }
 
+/// Download from Source: refresh linked tables from their files.
+pub fn download_tool() -> ToolDef {
+    ToolDef {
+        id: "DATALINKUPDATE",
+        label: "Download from Source",
+        icon: IconKind::Svg(include_bytes!("../../../assets/icons/sync.svg")),
+        event: ModuleEvent::Command("DATALINKUPDATE;_U".to_string()),
+    }
+}
+
+/// Upload to Source: write linked tables back to their files.
+pub fn upload_tool() -> ToolDef {
+    ToolDef {
+        id: "DATALINKUPDATE_WRITE",
+        label: "Upload to Source",
+        icon: IconKind::Svg(include_bytes!("../../../assets/icons/ui/file_export.svg")),
+        event: ModuleEvent::Command("DATALINKUPDATE;_W".to_string()),
+    }
+}
+
 /// Marks a table waiting to be linked to the extraction settings named after
 /// the marker.
 pub const EXTRACTION_PENDING: &str = "__OPENCAD_EXTRACTION_PENDING__";

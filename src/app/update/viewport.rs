@@ -3103,15 +3103,29 @@ impl OpenCADStudio {
                         .and_then(|command| command.cursor_plane())
                         .is_some();
                     if !uses_command_cursor_plane {
-                        // The same ortho/polar resolution as the full path,
-                        // Z axis and kept elevation included.
-                        let drafted = self.last_point.and_then(|base| {
-                            self.drafting_point(i, p, pt, base, view_rot, eye, bounds)
-                        });
-                        match drafted {
-                            Some((point, _)) => pt = point,
-                            None if self.tabs[i].active_ucs.is_none() => pt.z = 0.0,
-                            None => {}
+                        let mut drafted_elevation = false;
+                        if let Some(base) = self.last_point {
+                            // Match the authoritative Ortho/Polar path, including
+                            // elevated drafting planes and the UCS Z direction.
+                            if let Some((point, on_z)) =
+                                self.drafting_point(i, p, pt, base, view_rot, eye, bounds)
+                            {
+                                pt = point;
+                                drafted_elevation = true;
+                                let up = (point - base).dot(self.tabs[i].ucs_xform().axes().3);
+                                if on_z && up != 0.0 {
+                                    self.otrack_active = Some((base, (point - base).normalize()));
+                                    self.otrack_cross = None;
+                                    self.otrack_kind = Some(if up > 0.0 {
+                                        crate::snap::TrackingKind::PlusZ
+                                    } else {
+                                        crate::snap::TrackingKind::MinusZ
+                                    });
+                                }
+                            }
+                        }
+                        if self.tabs[i].active_ucs.is_none() && !drafted_elevation {
+                            pt.z = 0.0;
                         }
                     }
                     pt
@@ -5093,6 +5107,9 @@ impl OpenCADStudio {
         if self.table_popup.take().is_some() {
             return Task::none();
         }
+        if self.flip_popup.take().is_some() {
+            return Task::none();
+        }
         // Same dismiss-on-outside-click for the right-click
         // context menu: its panel is opaque, so a press that
         // reaches here is outside the menu.
@@ -5399,6 +5416,14 @@ impl OpenCADStudio {
                     }
                     if grip_id == crate::app::visibility::TABLE_GRIP_ID {
                         self.open_table_popup(p);
+                        self.grip_hover = None;
+                        self.grip_popup = None;
+                        return Task::none();
+                    }
+                    // A flip parameter's chevron lists its two state labels
+                    // outside the block editor instead of toggling or
+                    // starting a command.
+                    if self.open_flip_popup_at(handle, grip_id, p_full) {
                         self.grip_hover = None;
                         self.grip_popup = None;
                         return Task::none();
@@ -8049,8 +8074,17 @@ properties={:.1}ms picked={}",
 
     pub(super) fn on_view_cube_snap(&mut self, region: CubeRegion) -> Task<Message> {
         // The cube is oriented in the active UCS, so snap in the UCS frame.
-        let r_ucs = self.tabs[self.active_tab].scene.viewcube_ucs_mat();
-        self.snap_view_region(region, r_ucs)
+        let i = self.active_tab;
+        let r_ucs = self.tabs[i].scene.viewcube_ucs_mat();
+        let task = self.snap_view_region(region, r_ucs);
+        // Alt+click on a face also sets the UCS to that view (#2272).
+        if self.alt_down
+            && matches!(region, CubeRegion::Face(_))
+            && self.tabs[i].active_cmd.is_none()
+        {
+            return task.chain(self.dispatch_command("UCS V"));
+        }
+        task
     }
 
     /// Compass cardinals are world-fixed, so they snap in the world frame
@@ -8496,6 +8530,7 @@ properties={:.1}ms picked={}",
             (session.br_handle, session.editor_camera.clone())
         };
         self.layout_rename_state = None;
+        self.flip_popup = None;
         self.tabs[i].scene.active_viewport = None;
         self.tabs[i].scene.set_current_layout("Model".to_string());
         self.tabs[i].scene.block_edit_block = Some(br_handle);
@@ -8960,6 +8995,28 @@ properties={:.1}ms picked={}",
                 .take_undo_recording()
                 .map(|recording| recording.into_recorded_images())
                 .unwrap_or_default();
+            // A grip that detaches a centre object says so, as moving it does.
+            for (handle, original) in &originals {
+                let codec::EntityType::Line(line) = original else {
+                    continue;
+                };
+                let data = &line.common.extended_data;
+                let was_associated = codec::entities::CenterMarkAssociation::read(data)
+                    .map(|association| association.associated)
+                    .or_else(|| {
+                        codec::entities::CenterLineAssociation::read(data)
+                            .map(|association| association.associated)
+                    });
+                if was_associated == Some(true) {
+                    if let Some((mark, false)) = self.tabs[i].scene.center_object_state(*handle) {
+                        self.command_line.push_output(&if mark {
+                            crate::tr!("center-cmd", "mark-disassociated")
+                        } else {
+                            crate::tr!("center-cmd", "line-disassociated")
+                        });
+                    }
+                }
+            }
             if !originals.is_empty() {
                 let mut before: Vec<_> = originals
                     .into_iter()
@@ -9650,6 +9707,74 @@ mod rapid_drawing_tests {
         }
         let second = app.axis_lock_dir.expect("locked to the second axis");
         assert!(second.y.abs() > 0.99, "{second:?}");
+    }
+
+    #[test]
+    fn rapid_drafting_polar_matches_authoritative_point() {
+        for (target, engaged) in [
+            (glam::DVec3::new(40.0, 0.25, 0.0), true),
+            (glam::DVec3::new(40.0, 20.0, 0.0), false),
+        ] {
+            let exercise = |force_full: bool| {
+                let mut app = drawing_app("LINE");
+                let i = app.active_tab;
+                let start = screen(&app, glam::DVec3::ZERO);
+                let _ = app.update(Message::ViewportLeftPressAt(start));
+                app.polar_mode = true;
+                app.polar_increment_deg = 90.0;
+                let first = screen(&app, glam::DVec3::new(20.0, 0.0, 0.0));
+                let _ = app.update(Message::ViewportMove(first));
+                assert!(app.snap_dwell.is_some());
+                if force_full { app.snap_dwell = None; }
+                let at = screen(&app, target);
+                let _ = app.update(Message::ViewportMove(at));
+                assert_eq!(app.last_point, Some(glam::DVec3::ZERO));
+                assert!(app.tabs[i].active_cmd.is_some());
+                if !force_full {
+                    assert!(!app.snap_dwell.as_ref().unwrap().snap_resolved);
+                }
+                app.tabs[i].last_cursor_world
+            };
+            let full = exercise(true);
+            let rapid = exercise(false);
+            assert!(rapid.distance(full) < 0.001, "engaged={engaged}: {rapid:?} != {full:?}");
+            if engaged {
+                assert!(rapid.y.abs() < 0.001);
+            } else {
+                assert!(rapid.distance(target) < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn rapid_drafting_3d_matches_authoritative_z_axis() {
+        for polar in [false, true] {
+            let exercise = |force_full: bool| {
+                let mut app = drawing_app("LINE");
+                let i = app.active_tab;
+                let _ = app.apply_view_preset("SWISO");
+                let start = screen(&app, glam::DVec3::ZERO);
+                let _ = app.update(Message::ViewportLeftPressAt(start));
+                let anchor = app.last_point.expect("initial LINE point");
+                app.ortho_mode = !polar;
+                app.polar_mode = polar;
+                app.polar_increment_deg = 90.0;
+                let first = screen(&app, glam::DVec3::new(0.0, 0.0, 10.0));
+                let _ = app.update(Message::ViewportMove(first));
+                assert!(app.snap_dwell.is_some());
+                if force_full { app.snap_dwell = None; }
+                let at = screen(&app, glam::DVec3::new(0.0, 0.0, 20.0));
+                let _ = app.update(Message::ViewportMove(at));
+                assert_eq!(app.last_point, Some(anchor));
+                (app.tabs[i].last_cursor_world, app.otrack_kind)
+            };
+            let full = exercise(true);
+            let rapid = exercise(false);
+            assert!(rapid.0.distance(full.0) < 0.001, "polar={polar}: {rapid:?} != {full:?}");
+            assert_eq!(rapid.1, full.1);
+            assert!(rapid.0.distance(glam::DVec3::new(0.0, 0.0, 20.0)) < 0.001);
+            assert_eq!(rapid.1, Some(crate::snap::TrackingKind::PlusZ));
+        }
     }
 
     #[test]
@@ -10926,10 +11051,10 @@ mod selection_preview_tests {
         );
     }
 
-    /// With the 3D master off, solid corners are invisible even when the
-    /// Vertex mode is configured — and the 2D system must not catch them.
+    /// With the 3D master off, a solid's corner is no 3D Vertex snap, but
+    /// the 2D Endpoint mode still catches it, as on any edge (#2153).
     #[test]
-    fn box_corner_ignores_3d_master_off() {
+    fn box_corner_answers_2d_endpoint_with_3d_master_off() {
         use crate::snap::SnapType;
         use codec::{entities::Solid3D, EntityType};
 
@@ -10937,6 +11062,7 @@ mod selection_preview_tests {
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         app.snapper.snap_enabled = true;
+        app.snapper.enabled.insert(SnapType::Endpoint);
         app.snapper.snap3d_enabled = false;
         app.snapper.enabled3d.insert(SnapType::Vertex);
         app.snapper.grid_snap_on = false;
@@ -10986,10 +11112,10 @@ mod selection_preview_tests {
             .unwrap();
         let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
 
-        assert!(
-            app.tabs[i].snap_result.is_none(),
-            "3D master off must hide solid corners, got {:?}",
-            app.tabs[i].snap_result.map(|s| (s.snap_type, s.world))
+        assert_eq!(
+            app.tabs[i].snap_result.map(|s| s.snap_type),
+            Some(SnapType::Endpoint),
+            "3D master off leaves the corner to the 2D Endpoint mode"
         );
     }
 

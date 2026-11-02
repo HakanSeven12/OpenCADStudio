@@ -600,7 +600,12 @@ pub(crate) fn validate(
         let mut key = vec![];
         for (col, property) in table.columns.iter().enumerate() {
             let cell = &table.expressions[row * cols + col];
-            if cell.trim().is_empty() || cell.chars().any(char::is_control) {
+            // An empty cell is the same fault in either table dialog, so it
+            // gets the same message; control characters keep their own.
+            if cell.trim().is_empty() {
+                return Err("Each cell must be a finite number.".into());
+            }
+            if cell.chars().any(char::is_control) {
                 return Err("Complete each cell without control characters.".into());
             }
             if property.lookup_property {

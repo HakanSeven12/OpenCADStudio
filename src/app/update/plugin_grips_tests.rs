@@ -1,11 +1,11 @@
-//! Plugin grip surface characterisation (API v11). Tests only; no
+﻿//! Plugin grip surface characterisation (API v11). Tests only; no
 //! production code changed here.
 //!
 //! Paths covered (the commission's acceptance set):
-//!   * read parity — HostApi `entity_grips` equals the automation `grips`
+//!   * read parity â€” HostApi `entity_grips` equals the automation `grips`
 //!     read for the same single-selected entity (one pipeline, three
 //!     consumers: viewport cache, MCP read, plugin read)
-//!   * generality — arc (the 4-grip calibration shape), line, circle, a
+//!   * generality â€” arc (the 4-grip calibration shape), line, circle, a
 //!     Spline (control-point grips) and a boxed-variant Helix
 //!   * programmatic `grip_drag`: exactly one "GRIP"-labeled undo step with
 //!     byte-exact restore; refusal parity (locked layer, reference-only,
@@ -18,7 +18,7 @@
 //!     hard-constraint, the absolute-point rule while the anchor moves,
 //!     anchor-any-type (Spline/Helix), unload/death reaping, panic
 //!     containment, budget caps
-//!   * the coalescing model: 1000 parked points → one in flight, newest
+//!   * the coalescing model: 1000 parked points â†’ one in flight, newest
 //!     delivered next, settle never dropped (unit-level in
 //!     `crate::plugin::grip_points`)
 
@@ -139,7 +139,7 @@ fn radius_of(app: &OpenCADStudio, handle: Handle) -> f64 {
 }
 
 /// Screen point (tile-relative) of a world point through the active tile's
-/// camera — the same projection the grips overlay uses.
+/// camera â€” the same projection the grips overlay uses.
 fn screen_of(app: &OpenCADStudio, world: [f64; 3]) -> iced::Point {
     let i = tab(app);
     let (vw, vh) = app.tabs[i].scene.selection.borrow().view.vp_size;
@@ -189,6 +189,9 @@ struct SinkState {
     live_geom: Rc<RefCell<Vec<(Handle, EntityType)>>>,
     /// Panic on the settle phase (panic-containment test).
     panic_on_settle: Rc<RefCell<bool>>,
+    /// (descriptor design, its per-move tolerance) returned on the Begin
+    /// answer (API v14): the descriptor-backed drag's opt-in.
+    begin_descriptor: Rc<RefCell<Option<(ocs_plugin_api::host::PluginDisplayDescriptor, f64)>>>,
 }
 
 fn install_sink(plugin: &str) -> SinkState {
@@ -198,18 +201,34 @@ fn install_sink(plugin: &str) -> SinkState {
         preview: Rc::new(RefCell::new(None)),
         live_geom: Rc::new(RefCell::new(Vec::new())),
         panic_on_settle: Rc::new(RefCell::new(false)),
+        begin_descriptor: Rc::new(RefCell::new(None)),
     };
     let events = Rc::clone(&state.events);
     let settle_write = Rc::clone(&state.settle_write);
     let preview = Rc::clone(&state.preview);
     let live_geom = Rc::clone(&state.live_geom);
     let panic_on_settle = Rc::clone(&state.panic_on_settle);
+    let begin_descriptor = Rc::clone(&state.begin_descriptor);
     grip_points::install_in_process_sink(plugin, move |host, event| {
         events.borrow_mut().push(event.clone());
         match event.phase {
-            CustomGripPhase::Begin | CustomGripPhase::Move => CustomGripResponse {
-                preview: preview.borrow().clone().into_iter().collect(),
-                live_entities: live_geom.borrow().clone(),
+            CustomGripPhase::Begin | CustomGripPhase::Move => {
+                if event.phase == CustomGripPhase::Begin {
+                    if let Some((chain, tolerance)) = begin_descriptor.borrow().clone() {
+                        return CustomGripResponse {
+                            preview: Vec::new(),
+                            live_entities: Vec::new(),
+                            descriptor: Some(chain),
+                            descriptor_tolerance: Some(tolerance),
+                        };
+                    }
+                }
+                CustomGripResponse {
+                    preview: preview.borrow().clone().into_iter().collect(),
+                    live_entities: live_geom.borrow().clone(),
+                    descriptor: None,
+                    descriptor_tolerance: None,
+                }
             },
             CustomGripPhase::Settle => {
                 if *panic_on_settle.borrow() {
@@ -217,7 +236,7 @@ fn install_sink(plugin: &str) -> SinkState {
                 }
                 if let Some((handle, radius)) = *settle_write.borrow() {
                     // The consumer's exact shape: its own one-scope contract.
-                    host.push_undo("CVI: PI radius");
+                    host.push_undo("PLUGIN: PI radius");
                     if let Some(EntityType::Arc(arc)) = host.document().get_entity(handle).cloned()
                     {
                         let mut updated = arc;
@@ -233,12 +252,12 @@ fn install_sink(plugin: &str) -> SinkState {
     state
 }
 
-// ── Read parity + generality (requirement 1/6/9) ────────────────────────────
+// â”€â”€ Read parity + generality (requirement 1/6/9) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn entity_grips_arc_matches_the_four_grip_calibration() {
     let mut app = app();
-    // R = 15 at a 90° corner: center + both tangent-point endpoints + the
+    // R = 15 at a 90Â° corner: center + both tangent-point endpoints + the
     // radius grip at the parametric mid-angle of the arc.
     let handle = add(
         &mut app,
@@ -254,7 +273,7 @@ fn entity_grips_arc_matches_the_four_grip_calibration() {
         .iter()
         .find(|g| g.grip_id == 3)
         .expect("radius grip id 3");
-    // Mid-angle of [0°, 90°] is 45°: the grip sits at center + R·(cos45, sin45).
+    // Mid-angle of [0Â°, 90Â°] is 45Â°: the grip sits at center + RÂ·(cos45, sin45).
     let mid = 15.0 * std::f64::consts::FRAC_1_SQRT_2;
     assert!((radius_grip.point[0] - (10.0 + mid)).abs() < 1e-9);
     assert!((radius_grip.point[1] - (10.0 + mid)).abs() < 1e-9);
@@ -397,7 +416,7 @@ fn host_api_read_matches_the_mcp_grips_read_for_the_same_entity() {
     }
 }
 
-// ── Programmatic grip drag (requirement 2) ──────────────────────────────────
+// â”€â”€ Programmatic grip drag (requirement 2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn grip_drag_composes_one_undo_step_with_byte_exact_restore() {
@@ -502,7 +521,7 @@ fn grip_drag_refusal_parity() {
     assert!(unknown_handle.is_err());
 }
 
-// ── Custom grips: declare, read, hover, hit, drag, settle, cancel ─────────
+// â”€â”€ Custom grips: declare, read, hover, hit, drag, settle, cancel â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const TEST_PLUGIN: &str = "test.grip-points";
 
@@ -568,8 +587,8 @@ fn custom_grip_drag_settles_as_one_plugin_labeled_step() {
     let before_undo = undo_entry_count(&app);
 
     let state = install_sink(TEST_PLUGIN);
-    // The calibration consumer: a custom grip at an implied PI — the tangent
-    // intersection of the adjacent line directions — anchored to the arc,
+    // The calibration consumer: a custom grip at an implied PI â€” the tangent
+    // intersection of the adjacent line directions â€” anchored to the arc,
     // with the corner's bisector as the hard drag axis.
     declare(
         &mut app,
@@ -625,7 +644,7 @@ fn custom_grip_drag_settles_as_one_plugin_labeled_step() {
     );
     drop(events);
 
-    // Settle: the plugin writes from INSIDE the callback — exactly ONE new
+    // Settle: the plugin writes from INSIDE the callback â€” exactly ONE new
     // undo step, plugin-labeled; the preview clears.
     let _ = app.settle_plugin_grip_drag();
     let events = state.events.borrow();
@@ -636,7 +655,7 @@ fn custom_grip_drag_settles_as_one_plugin_labeled_step() {
     assert_eq!(undo_entry_count(&app), before_undo + 1);
     assert_eq!(
         last_undo_label(&app).as_deref(),
-        Some("CVI: PI radius"),
+        Some("PLUGIN: PI radius"),
         "the settled drag totals exactly the plugin's one labeled step"
     );
     assert!((radius_of(&app, anchor) - 5.0).abs() < 1e-12);
@@ -723,7 +742,7 @@ fn custom_grip_axis_hard_constrains_the_drag() {
 fn custom_grip_point_is_absolute_while_the_anchor_moves() {
     let mut app = app();
     let state = install_sink(TEST_PLUGIN);
-    // Anchor accepts ANY live entity type — here a Spline — and NEVER adds
+    // Anchor accepts ANY live entity type â€” here a Spline â€” and NEVER adds
     // host-side movement semantics: the point stays exactly where declared.
     let spline = add(
         &mut app,
@@ -895,7 +914,7 @@ fn a_panicking_grip_handler_never_takes_the_host_down() {
 
 #[test]
 fn mcp_grip_drag_routes_a_custom_grip_to_its_owner() {
-    // MCP parity: declare → read → drag through the automation op, exactly
+    // MCP parity: declare â†’ read â†’ drag through the automation op, exactly
     // the recipe the consumer tests with.
     let mut app = app();
     let anchor = add(&mut app, arc([0.0, 0.0, 0.0], 8.0, 0.0, 1.0));
@@ -925,7 +944,7 @@ fn mcp_grip_drag_routes_a_custom_grip_to_its_owner() {
     );
     drop(events);
     assert_eq!(undo_entry_count(&app), before_undo + 1);
-    assert_eq!(last_undo_label(&app).as_deref(), Some("CVI: PI radius"));
+    assert_eq!(last_undo_label(&app).as_deref(), Some("PLUGIN: PI radius"));
     assert!((radius_of(&app, anchor) - 4.0).abs() < 1e-12);
 
     // Unknown plugin-grip id refuses.
@@ -994,7 +1013,7 @@ fn live_arc(anchor: Handle, radius: f64, app: &OpenCADStudio) -> codec::EntityTy
 #[test]
 fn live_geometry_moves_elements_during_the_drag() {
     // v11.2 acceptance: the plugin's move answers carry live entity
-    // geometry — the drag shows the true final state at every instant
+    // geometry â€” the drag shows the true final state at every instant
     // through the plugin's returned geometry only (visual parity with the
     // built-in radius grip), ZERO history steps mid-drag, the originals
     // restored before the settle, and the plugin's one labeled step at
@@ -1050,11 +1069,11 @@ fn live_geometry_moves_elements_during_the_drag() {
     );
 
     // Mouse-up: the visual phase is restored BEFORE the settle, the plugin
-    // writes its authoritative edit inside its scope — exactly ONE step.
+    // writes its authoritative edit inside its scope â€” exactly ONE step.
     let _ = app.settle_plugin_grip_drag();
     assert!((radius_of(&app, anchor) - 5.0).abs() < 1e-12);
     assert_eq!(undo_entry_count(&app), before_undo + 1);
-    assert_eq!(last_undo_label(&app).as_deref(), Some("CVI: PI radius"));
+    assert_eq!(last_undo_label(&app).as_deref(), Some("PLUGIN: PI radius"));
     let _ = app.update(Message::Undo);
     assert_eq!(serialized(&app, anchor), before, "undo restores byte-exact");
     grip_points::remove_in_process_sink(TEST_PLUGIN);
@@ -1118,7 +1137,7 @@ fn live_geometry_caps_are_refused_with_an_honest_headline() {
 
 #[test]
 fn entities_batch_reads_live_handles_without_snapshot_clones() {
-    // v11.1 defect 3: per-entity reads are the refresh-pass path — the
+    // v11.1 defect 3: per-entity reads are the refresh-pass path â€” the
     // answers mirror the live document exactly, unknown handles answer
     // None, and no snapshot is involved.
     let mut app = app();
@@ -1183,9 +1202,9 @@ fn settle_after_many_moves_writes_one_plugin_step() {
         let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(4.0, 4.0, k as f64 * 0.01));
     }
 
-    // Settle-write: the full begin → move → settle-with-writes window.
+    // Settle-write: the full begin â†’ move â†’ settle-with-writes window.
     let _ = app.settle_plugin_grip_drag();
-    assert_eq!(last_undo_label(&app).as_deref(), Some("CVI: PI radius"));
+    assert_eq!(last_undo_label(&app).as_deref(), Some("PLUGIN: PI radius"));
     assert!((radius_of(&app, anchor) - 5.0).abs() < 1e-12);
 
     // Re-declare diff at 1 000 grips: the unchanged batch must stay cheap.
@@ -1238,7 +1257,7 @@ mod notification_attach {
 
     /// Deterministic NOTIFICATION attach (API v13 hardening, item 2): the
     /// consumer's real-host validation saw ~4/5 fresh boots where COMMAND
-    /// dispatch worked but the notification channel never attached — the
+    /// dispatch worked but the notification channel never attached â€” the
     /// plugin's boundary work never ran, total silence. The runner now acks
     /// `ChannelReady` at main-loop entry and the host defers boot-window
     /// broadcasts until the ack (flushing them then); this test asserts
@@ -1291,7 +1310,7 @@ mod notification_attach {
             )
             .unwrap_or_else(|e| panic!("fresh boot {boot}: spawn failed: {e}"));
             // A plugin write bumps the epoch and broadcasts DocumentChanged
-            // (deferred until the runner acks ChannelReady, then flushed —
+            // (deferred until the runner acks ChannelReady, then flushed â€”
             // the deferral is what makes this deterministic).
             let handle =
                 host.add_entity(codec::EntityType::Line(codec::entities::Line::from_points(
@@ -1305,7 +1324,7 @@ mod notification_attach {
                 target_epoch > baseline_epoch,
                 "fresh boot {boot}: the plugin write must bump the geometry epoch"
             );
-            // Bounded polling: the notification must arrive — silence is the
+            // Bounded polling: the notification must arrive â€” silence is the
             // exact flake this test forbids.
             let mut observed = None;
             let mut transient = 0;
@@ -1330,12 +1349,12 @@ mod notification_attach {
                         "fresh boot {boot}: MP_LAST_NOTIF never dispatched healthily"
                     );
                 }
-                // The command line prefixes Info entries with the ⓘ icon;
+                // The command line prefixes Info entries with the â“˜ icon;
                 // match on the payload, not the prefix.
                 if let Some(version) = app.command_line.history.iter().rev().find_map(|entry| {
                     entry
                         .text
-                        .strip_prefix("ⓘ ")
+                        .strip_prefix("â“˜ ")
                         .unwrap_or(entry.text.as_str())
                         .strip_prefix("LAST_NOTIF ")
                         .and_then(|tail| tail.trim().parse::<u64>().ok())
@@ -1358,7 +1377,7 @@ mod notification_attach {
                     .collect();
                 panic!(
                     "fresh boot {boot}/{FRESH_BOOTS}: DocumentChanged never reached the \
-                     plugin (expected epoch {target_epoch}) — the notification-attach \
+                     plugin (expected epoch {target_epoch}) â€” the notification-attach \
                      race is a release blocker. History tail: {tail:?}"
                 )
             });
@@ -1374,7 +1393,7 @@ mod notification_attach {
     }
 }
 
-// ── v13 hardening: RunQuiet, constraint_create, dirty regions, defect 5 ──
+// â”€â”€ v13 hardening: RunQuiet, constraint_create, dirty regions, defect 5 â”€â”€
 
 #[test]
 fn run_quiet_suppresses_the_command_line_echo() {
@@ -1396,7 +1415,7 @@ fn run_quiet_suppresses_the_command_line_echo() {
     );
 
     // The same command as a QUIET replay: same geometry, ZERO echo (errors
-    // would still surface — this command errors none).
+    // would still surface â€” this command errors none).
     let before_quiet = app.command_line.history.len();
     {
         let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
@@ -1436,8 +1455,8 @@ fn constraint_create_bonds_without_echo_in_one_plugin_step() {
     let i = tab(&app);
     let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
     // The re-bond shape: the plugin opens its one scope, then composes the
-    // constraint directly — no COINCIDENT command replay, no prompt echo.
-    host.push_undo("CVI: re-bond");
+    // constraint directly â€” no COINCIDENT command replay, no prompt echo.
+    host.push_undo("PLUGIN: re-bond");
     host.constraint_create(ocs_plugin_api::host::PluginConstraint::Coincident {
         first: ocs_plugin_api::host::PluginConstraintPick {
             handle: Some(a),
@@ -1456,7 +1475,7 @@ fn constraint_create_bonds_without_echo_in_one_plugin_step() {
 
     // ONE plugin-labeled undo step; zero command-line echo.
     assert_eq!(undo_entry_count(&app), before_undo + 1);
-    assert_eq!(last_undo_label(&app).as_deref(), Some("CVI: re-bond"));
+    assert_eq!(last_undo_label(&app).as_deref(), Some("PLUGIN: re-bond"));
     assert_eq!(
         app.command_line.history.len(),
         history_before,
@@ -1503,7 +1522,7 @@ fn dirty_regions_ride_the_boundary_notification() {
         assert!(host.write_record(
             handle,
             codec::xdata::ExtendedDataRecord {
-                application_name: "CVIFC".to_string(),
+                application_name: "PLUGIN".to_string(),
                 values: vec![codec::xdata::XDataValue::String("pi-grip".to_string())],
             },
         ));
@@ -1519,7 +1538,7 @@ fn dirty_regions_ride_the_boundary_notification() {
 #[test]
 fn live_geometry_does_not_trigger_the_constraint_solver() {
     // v12.1 defect 5, the regression the consumer captured: live geometry on
-    // a BONDED chain must stay visual-only — the solver must not run mid-
+    // a BONDED chain must stay visual-only â€” the solver must not run mid-
     // drag (no partner movement, no history, byte-identical on Esc).
     let mut app = app();
     let a = add(&mut app, line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]));
@@ -1527,7 +1546,7 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
     let before_a = serialized(&app, a);
     let before_undo = undo_entry_count(&app);
 
-    // Bond the endpoints (coincident) through the new API — the chain whose
+    // Bond the endpoints (coincident) through the new API â€” the chain whose
     // live drag previously dragged the solver in.
     let i = tab(&app);
     {
@@ -1549,7 +1568,7 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
     }
     let bonded_b = serialized(&app, b);
 
-    // A drag whose live answer moves ONLY entity `a` (the plugin's choice —
+    // A drag whose live answer moves ONLY entity `a` (the plugin's choice â€”
     // it returns exactly what its settle will commit).
     let state = install_sink(TEST_PLUGIN);
     declare(&mut app, TEST_PLUGIN, vec![declared(1, [5.0, 0.0, 0.0])]);
@@ -1589,7 +1608,7 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
     grip_points::remove_in_process_sink(TEST_PLUGIN);
 }
 
-// ── The settle watchdog strike ledger ────────────────────────────────────
+// â”€â”€ The settle watchdog strike ledger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // The watchdog floor is lowered from SETTLE_WATCHDOG (10 s) to 10 ms so the
 // missed-delivery ledger runs with millisecond budgets; the silent plugin is
@@ -1650,7 +1669,7 @@ fn first_settle_strike_cancels_the_drag_and_keeps_the_plugin_grips() {
     );
     assert_eq!(strike_count(&app, TEST_PLUGIN), 1);
 
-    // W3: the grips are still served — a healthy drag now runs through to
+    // W3: the grips are still served â€” a healthy drag now runs through to
     // the plugin's own labeled undo step, exactly as before the strike, and
     // the recovery resets the strike count.
     *state.panic_on_settle.borrow_mut() = false;
@@ -1663,7 +1682,7 @@ fn first_settle_strike_cancels_the_drag_and_keeps_the_plugin_grips() {
         app.drive_plugin_grip_settle_to_completion(std::time::Duration::from_millis(500)),
         "the recovered settle finalizes"
     );
-    assert_eq!(last_undo_label(&app).as_deref(), Some("CVI: PI radius"));
+    assert_eq!(last_undo_label(&app).as_deref(), Some("PLUGIN: PI radius"));
     assert_eq!(strike_count(&app, TEST_PLUGIN), 0, "the recovery resets");
     grip_points::remove_in_process_sink(TEST_PLUGIN);
 }
@@ -1739,4 +1758,678 @@ fn third_settle_strike_tears_the_connection_down_and_arms_the_rearm() {
         "still servable after the re-arm"
     );
     grip_points::remove_in_process_sink(TEST_PLUGIN);
+}
+
+// â”€â”€ The descriptor-backed grip drag (API v14) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+#[test]
+fn descriptor_reanchor_solves_ramp_ends_by_bisection() {
+    // The EndCurvatureScale anchor law voices the whole driving ramp
+    // through the deterministic bracketed bisection (16 doublings + 60
+    // bisects): a taller end needs a bigger scale; the resulting chain
+    // passes its own audit (the staging build). The fixture restates the
+    // old sigmoid's sheet reading as dense sampled slope data — the same
+    // table law a plugin ships for its transcendental records.
+    use crate::app::update::plugin_grips::reanchor_profile_chain;
+    use ocs_plugin_api::host::AnchorLaw;
+    let values: Vec<f64> = (0..101)
+        .map(|i| {
+            let xi = i as f64 / 100.0;
+            0.025 + 0.225 * xi * xi
+        })
+        .collect();
+    let chain = ocs_plugin_api::host::ParametricChain {
+        plane: ocs_plugin_api::host::ParametricPlane::Profile,
+        segments: vec![ocs_plugin_api::host::ParametricSegment {
+            def: ocs_plugin_api::host::CurveSegmentDef {
+                length: 100.0,
+                ramp: ocs_plugin_api::host::Ramp::Sampled {
+                    n: 101,
+                    values: values.clone(),
+                },
+                cross_slope: None,
+            },
+            start_point: [0.0, 0.0],
+            start_direction: values[0].atan(),
+        }],
+        layer: String::new(),
+    };
+    // Record-model sanity: the declared end height (the unsigned re-read).
+    let (base, _) = crate::parametric::build_display_entities(&chain, 1e-3)
+        .expect("the base chain derives");
+    let _ = base;
+
+    // The re-anchor: the same run (100.0), the end lifted to 11.0, the
+    // scale law solving through the bisection discipline.
+    let edited = reanchor_profile_chain(
+        &chain,
+        0,
+        AnchorLaw::EndCurvatureScale,
+        glam::DVec3::new(100.0, 11.0, 0.0),
+    )
+    .expect("the height target solves");
+    let ocs_plugin_api::host::Ramp::Sampled {
+        values: solved, ..
+    } = &edited.segments[0].def.ramp
+    else {
+        panic!("the scale keeps the sampled arm");
+    };
+    let end_value = solved[solved.len() - 1];
+    assert!(
+        (end_value - 0.25).abs() > 1e-6,
+        "the ramp's end value moved up to absorb the height: {end_value}"
+    );
+    let sample = crate::parametric::sample_chain(&edited, 100.0)
+        .expect("samples")
+        .expect("at the run");
+    assert!(
+        (sample.point[1] - 11.0).abs() < 1e-7,
+        "the solved end height hits the target: {}",
+        sample.point[1]
+    );
+    // The re-derived design passes its own audit (the staging build).
+    crate::parametric::build_display_entities(&edited, 1e-3).expect("the audit accepts");
+    // Determinism: the same move solves the same value.
+    let again = reanchor_profile_chain(
+        &chain,
+        0,
+        AnchorLaw::EndCurvatureScale,
+        glam::DVec3::new(100.0, 11.0, 0.0),
+    )
+    .expect("solves again");
+    let ocs_plugin_api::host::Ramp::Sampled {
+        values: solved_again,
+        ..
+    } = &again.segments[0].def.ramp
+    else {
+        panic!("the scale keeps the sampled arm");
+    };
+    assert_eq!(
+        solved_again[solved_again.len() - 1].to_bits(),
+        end_value.to_bits(),
+        "the bisection is bit-deterministic"
+    );
+}
+
+/// The crest chain the drag-policy tests stage (a {constant slope,
+/// slope-linear, constant slope} profile sheet as ramp data): the crest's
+/// end sits at (300, 8) under the mean-gradient law.
+fn crest_profile_chain() -> ocs_plugin_api::host::ParametricChain {
+    ocs_plugin_api::host::ParametricChain {
+        plane: ocs_plugin_api::host::ParametricPlane::Profile,
+        segments: vec![
+            ocs_plugin_api::host::ParametricSegment {
+                def: ocs_plugin_api::host::CurveSegmentDef {
+                    length: 100.0,
+                    ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                        degree: 0,
+                        coeffs: [0.01, 0.0, 0.0, 0.0],
+                    },
+                    cross_slope: None,
+                },
+                start_point: [0.0, 0.0],
+                start_direction: 0.01f64.atan(),
+            },
+            ocs_plugin_api::host::ParametricSegment {
+                def: ocs_plugin_api::host::CurveSegmentDef {
+                    length: 200.0,
+                    ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                        degree: 1,
+                        coeffs: [0.01, 0.05, 0.0, 0.0],
+                    },
+                    cross_slope: None,
+                },
+                start_point: [100.0, 1.0],
+                start_direction: 0.01f64.atan(),
+            },
+            ocs_plugin_api::host::ParametricSegment {
+                def: ocs_plugin_api::host::CurveSegmentDef {
+                    length: 80.0,
+                    ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                        degree: 0,
+                        coeffs: [0.06, 0.0, 0.0, 0.0],
+                    },
+                    cross_slope: None,
+                },
+                start_point: [300.0, 8.0],
+                start_direction: 0.06f64.atan(),
+            },
+        ],
+        layer: String::new(),
+    }
+}
+
+#[test]
+fn descriptor_begin_engages_and_moves_restage_in_place() {
+    // The full drag-pipeline arc (API v14): the Begin answer hands the host
+    // the live design; the coalesced cursor move re-derives the display set
+    // LOCALLY (no Move frames cross the IPC, zero history steps, the honest
+    // restage patches the same handles); the settle is the plugin's one
+    // write window â€” records first, then the re-stage â€” one labeled undo
+    // step throughout, and the undo round-trips byte-exactly.
+    let mut app = app();
+    let plugin = "PLUGIN";
+    let i = tab(&app);
+    // A sink first: the class register's own aliveness gate treats an in-process test sink as the loaded+alive marker (grip_points); the full handler installed below replaces this placeholder.
+    crate::plugin::grip_points::install_in_process_sink(plugin, |_host, _event| {
+        ocs_plugin_api::host::CustomGripResponse::default()
+    });
+    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    host.register_plugin_class(
+        plugin,
+        &ocs_plugin_api::host::PluginClassDeclaration {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            grip_schema: vec![ocs_plugin_api::host::PluginGripSchemaEntry {
+                grip_id: 7,
+                param_name: "peak_gradient".to_string(),
+                drives: Some(ocs_plugin_api::host::PluginGripAnchor {
+                    segment: 1,
+                    at_start: false,
+                    anchor: ocs_plugin_api::host::AnchorLaw::EndStationToXY,
+                }),
+            }],
+            parameters: vec![ocs_plugin_api::host::PluginClassParameter {
+                name: "peak_gradient".to_string(),
+                value_kind: ocs_plugin_api::host::PluginClassParameterKind::Real,
+                editable: true,
+            }],
+        },
+    )
+    .expect("the class registers");
+    let handles = host
+        .stage_plugin_class_instance(
+            plugin,
+            &ocs_plugin_api::host::PluginClassInstance {
+                class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                schema_version: 4,
+                design: ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                    crest_profile_chain(),
+                ),
+                tolerance: 1e-3,
+                layer: "PLUGIN_PROFILE".to_string(),
+                design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            },
+        )
+        .expect("the crest instance stages");
+    assert_eq!(handles.len(), 3, "three exact carriers stage");
+    host.create_xrecord(
+        &["PLUGIN"],
+        "PLUGIN_ALIGN_DISPLAY",
+        vec![
+            codec::objects::XRecordEntry::string(1, "peak_gradient"),
+            codec::objects::XRecordEntry::new(
+                140,
+                codec::objects::XRecordValue::Double(0.06),
+            ),
+        ],
+    )
+    .expect("the design record seeds");
+    drop(host);
+    let undo_before = undo_entry_count(&app);
+
+    // The plugin's own grip declaration + Begin answer: the live design and
+    // the SAME per-move tolerance its staging used.
+    let events: Rc<RefCell<Vec<CustomGripEvent>>> = Rc::new(RefCell::new(Vec::new()));
+    let crest_cell = Rc::new(RefCell::new(crest_profile_chain()));
+    let handles_cell = Rc::new(RefCell::new(handles.clone()));
+    let row_cell = Rc::new(RefCell::new(handles[0]));
+    let settle_write = Rc::new(RefCell::new(true));
+    {
+        let events2 = Rc::clone(&events);
+        let crest2 = Rc::clone(&crest_cell);
+        let handles2 = Rc::clone(&handles_cell);
+        let row2 = Rc::clone(&row_cell);
+        let settle2 = Rc::clone(&settle_write);
+        grip_points::install_in_process_sink(plugin, move |host, event| {
+            events2.borrow_mut().push(event.clone());
+            match event.phase {
+                CustomGripPhase::Begin => CustomGripResponse {
+                    preview: Vec::new(),
+                    live_entities: Vec::new(),
+                    descriptor: Some(
+                        ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                            crest_profile_chain(),
+                        ),
+                    ),
+                    descriptor_tolerance: Some(1e-3),
+                },
+                CustomGripPhase::Move => CustomGripResponse::default(),
+                CustomGripPhase::Settle => {
+                    if !*settle2.borrow() {
+                        return CustomGripResponse::default();
+                    }
+                    // The plugin's write window: the RECORD row first (its
+                    // own labeled step), then the re-stage â€” push_undo +
+                    // scope-less entity updates over the same handles, one
+                    // labeled step.
+                    host.update_plugin_class_instance_parameter(
+                        *row2.borrow(),
+                        "peak_gradient",
+                        "0.09",
+                    )
+                    .expect("the parameter row writes in the window");
+                    host.push_undo("PLUGIN: grip edit");
+                    let final_point =
+                        glam::DVec3::new(event.point[0], event.point[1], event.point[2]);
+                    let design = crate::app::update::plugin_grips::reanchor_profile_chain(
+                        &crest2.borrow().clone(),
+                        1,
+                        ocs_plugin_api::host::AnchorLaw::EndStationToXY,
+                        final_point,
+                    )
+                    .expect("the plugin's own law re-derives the settled design");
+                    let (fresh, _) =
+                        crate::parametric::build_display_entities(&design, 1e-3)
+                            .expect("the settled design derives");
+                    let staged = handles2.borrow().clone();
+                    assert_eq!(fresh.len(), staged.len(), "the restage is count-stable");
+                    for (slot, fresh_entity) in staged.iter().zip(fresh.iter()) {
+                        let current = host
+                            .document()
+                            .get_entity(*slot)
+                            .cloned()
+                            .expect("the staged carrier lives");
+                        let mut patched = current;
+                        crate::app::update::plugin_grips::patch_carrier_geometry(
+                            &mut patched,
+                            fresh_entity,
+                        )
+                        .expect("the honest patch preserves the carrier shape");
+                        assert!(host.update_entity(patched));
+                    }
+                    CustomGripResponse::default()
+                }
+                CustomGripPhase::Cancel => CustomGripResponse::default(),
+            }
+        });
+    }
+    let i = tab(&app);
+    let candidate = crate::plugin::grip_points::GripCandidate {
+        plugin: plugin.to_string(),
+        grip_id: 7,
+        anchor: Some(handles[1]),
+        point: glam::DVec3::new(300.0, 8.0, 0.0),
+        axis: None,
+        shape: crate::scene::model::object::GripShape::Square,
+    };
+    assert_eq!(candidate.grip_id, 7);
+    let _ = app.begin_plugin_grip_drag(i, &candidate);
+    assert!(events.borrow().len() == 1, "only the Begin phase crossed");
+    assert!(
+        app.plugin_grip_descriptor_drag.is_some(),
+        "the serviceable declaration engages the descriptor mode"
+    );
+
+    // THE DRAG: the crest's end moves to (300, 11); the section re-derives
+    // per its own record-model laws (the ramp's end value takes 0.09) and
+    // the tail re-bases to the sampled joint. NO Move frame crosses the
+    // IPC.
+    let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(300.0, 11.0, 0.0));
+    assert_eq!(events.borrow().len(), 1, "no Move frame in the mode");
+    assert_eq!(
+        undo_entry_count(&app),
+        undo_before,
+        "the per-move re-derivation records zero history"
+    );
+    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    let EntityType::Spline(spline) = host
+        .document()
+        .get_entity(handles[1])
+        .expect("the crest lives")
+    else {
+        panic!("the crest's carrier keeps its kind");
+    };
+    assert!(
+        (spline.control_points[2].y - 11.0).abs() < 1e-9,
+        "the crest's own crest moved to 11.0 mid-drag"
+    );
+    let EntityType::Line(tail) = host
+        .document()
+        .get_entity(handles[2])
+        .expect("the tail lives")
+    else {
+        panic!("the tail keeps its kind");
+    };
+    assert!(
+        (tail.end.y - (11.0 + 0.09 * 80.0)).abs() < 1e-9,
+        "the tail follows the re-based joint"
+    );
+    drop(host);
+    // The identity stamps and the designation ride untouched mid-drag
+    // (the stamp read goes through its own host session).
+    for handle in &handles {
+        let mut session = crate::app::plugin_host::HostSession::new(&mut app, i);
+        assert!(session.read_record(*handle, "PLUGIN_ALIGN_DISPLAY").is_some());
+    }
+    for handle in &handles {
+        assert!(app.tabs[i].scene.is_reference_only(*handle));
+    }
+
+    // THE SETTLE: the plugin's ONE write window (the record row first, the
+    // re-stage after) â€” one labeled undo step; the restore had put the
+    // pre-drag display back BEFORE the window opened.
+    let _ = app.settle_plugin_grip_drag();
+    assert_eq!(events.borrow().len(), 2, "the Settle phase crossed");
+    assert_eq!(
+        undo_entry_count(&app),
+        undo_before + 2,
+        "the window totals TWO steps: the record row's own + the re-stage's push_undo"
+    );
+    assert_eq!(
+        last_undo_label(&app).as_deref(),
+        Some("PLUGIN: grip edit"),
+        "the last step is the re-stage's own label"
+    );
+    {
+        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let EntityType::Spline(spline) = host
+            .document()
+            .get_entity(handles[1])
+            .expect("the crest lives")
+        else {
+            panic!("the carrier keeps its kind over the settle");
+        };
+        assert!(
+            (spline.control_points[2].y - 11.0).abs() < 1e-9,
+            "the re-stage re-applied the settled design"
+        );
+        assert!(host.read_record(handles[0], "PLUGIN_ALIGN_DISPLAY").is_some());
+    }
+    // Two undos round-trip the original display set (the re-stage's step,
+    // then the record row's step).
+    let _ = app.update(Message::Undo);
+    let _ = app.update(Message::Undo);
+    assert_eq!(undo_entry_count(&app), undo_before);
+    {
+        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let EntityType::Spline(spline) = host
+            .document()
+            .get_entity(handles[1])
+            .expect("the crest lives")
+        else {
+            panic!("the carrier keeps its kind over the undo");
+        };
+        assert!(
+            (spline.control_points[2].y - 8.0).abs() < 1e-9,
+            "the original crest is back after the one undo step"
+        );
+    }
+    grip_points::remove_in_process_sink(plugin);
+}
+
+#[test]
+fn descriptor_refusals_keep_the_streaming_path() {
+    // A descriptor the host cannot serve (a plan chain has no END re-anchor
+    // in the record model's plan laws) refuses the MODE with one headline;
+    // the v12 streaming semantics stay exactly as before: Move frames flow,
+    // the preview/live channels apply, the settle composes as before.
+    let mut app = app();
+    let plugin = "PLUGIN";
+    let i = tab(&app);
+    // A sink first: the class register's own aliveness gate treats an in-process test sink as the loaded+alive marker (grip_points); the full handler installed below replaces this placeholder.
+    crate::plugin::grip_points::install_in_process_sink(plugin, |_host, _event| {
+        ocs_plugin_api::host::CustomGripResponse::default()
+    });
+    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    host.register_plugin_class(
+        plugin,
+        &ocs_plugin_api::host::PluginClassDeclaration {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            grip_schema: vec![ocs_plugin_api::host::PluginGripSchemaEntry {
+                grip_id: 7,
+                param_name: "peak_gradient".to_string(),
+                drives: Some(ocs_plugin_api::host::PluginGripAnchor {
+                    segment: 1,
+                    at_start: true,
+                    anchor: ocs_plugin_api::host::AnchorLaw::EndStationToXY,
+                }),
+            }],
+            parameters: vec![],
+        },
+    )
+    .expect("the class registers");
+    let handles = host
+        .stage_plugin_class_instance(
+            plugin,
+            &ocs_plugin_api::host::PluginClassInstance {
+                class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                schema_version: 4,
+                design: ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                    crest_profile_chain(),
+                ),
+                tolerance: 1e-3,
+                layer: "PLUGIN_PLAN".to_string(),
+                design_record: "PLUGIN_ALIGN_PLAN".to_string(),
+            },
+        )
+        .expect("the plan instance stages");
+    drop(host);
+    let undo_before = undo_entry_count(&app);
+    let events: Rc<RefCell<Vec<CustomGripEvent>>> = Rc::new(RefCell::new(Vec::new()));
+    {
+        let events2 = Rc::clone(&events);
+        let begin2 = Rc::new(RefCell::new(Some((
+                        ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                            crest_profile_chain(),
+                        ),
+            1e-3,
+        ))));
+        grip_points::install_in_process_sink(plugin, move |_host, event| {
+            events2.borrow_mut().push(event.clone());
+            match event.phase {
+                CustomGripPhase::Begin => {
+                    if let Some((chain, tolerance)) = begin2.borrow_mut().take() {
+                        CustomGripResponse {
+                            preview: Vec::new(),
+                            live_entities: Vec::new(),
+                            descriptor: Some(chain),
+                            descriptor_tolerance: Some(tolerance),
+                        }
+                    } else {
+                        CustomGripResponse::default()
+                    }
+                }
+                _ => CustomGripResponse::default(),
+            }
+        });
+    }
+    // The grip anchors a staged carrier; the class stamp resolves.
+    let i = tab(&app);
+    let grip_point = [300.0, 8.0, 0.0];
+    app.tabs[i]
+        .plugin_grips
+        .declare(
+            plugin,
+            vec![PluginGrip {
+                grip_id: 7,
+                anchor: Some(handles[1]),
+                point: grip_point,
+                axis: None,
+                shape: PluginGripShape::Square,
+            }],
+        )
+        .expect("the grip declares");
+    let candidate = crate::plugin::grip_points::GripCandidate {
+        plugin: plugin.to_string(),
+        grip_id: 7,
+        anchor: Some(handles[1]),
+        point: glam::DVec3::new(300.0, 8.0, 0.0),
+        axis: None,
+        shape: crate::scene::model::object::GripShape::Square,
+    };
+    let _ = app.begin_plugin_grip_drag(i, &candidate);
+    assert!(
+        app.plugin_grip_descriptor_drag.is_none(),
+        "the plan drive refuses the mode"
+    );
+    let _ = crate::plugin::drain_errors();
+    let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(300.0, 11.0, 0.0));
+    assert_eq!(
+        events.borrow().len(),
+        2,
+        "the Move frame still crosses: the streaming path is untouched"
+    );
+    let _ = app.settle_plugin_grip_drag();
+    assert_eq!(events.borrow().len(), 3, "the Settle phase crossed");
+    assert_eq!(
+        undo_entry_count(&app),
+        undo_before,
+        "the streaming drag records nothing by itself"
+    );
+    grip_points::remove_in_process_sink(plugin);
+}
+
+#[test]
+fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
+    // In the engaged mode a move the record model refuses (a backward run)
+    // keeps the last good design on the screen, notes the constraint ONCE,
+    // and the drag continues: the next legal move re-derives fully. The
+    // settle without writes stays zero steps.
+    let mut app = app();
+    let plugin = "PLUGIN";
+    let i = tab(&app);
+    // A sink first: the class register's own aliveness gate treats an in-process test sink as the loaded+alive marker (grip_points); the full handler installed below replaces this placeholder.
+    crate::plugin::grip_points::install_in_process_sink(plugin, |_host, _event| {
+        ocs_plugin_api::host::CustomGripResponse::default()
+    });
+    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    host.register_plugin_class(
+        plugin,
+        &ocs_plugin_api::host::PluginClassDeclaration {
+            class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            schema_version: 4,
+            grip_schema: vec![ocs_plugin_api::host::PluginGripSchemaEntry {
+                grip_id: 7,
+                param_name: "peak_gradient".to_string(),
+                drives: Some(ocs_plugin_api::host::PluginGripAnchor {
+                    segment: 1,
+                    at_start: false,
+                    anchor: ocs_plugin_api::host::AnchorLaw::EndStationToXY,
+                }),
+            }],
+            parameters: vec![],
+        },
+    )
+    .expect("the class registers");
+    let handles = host
+        .stage_plugin_class_instance(
+            plugin,
+            &ocs_plugin_api::host::PluginClassInstance {
+                class_id: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                schema_version: 4,
+                design: ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                    crest_profile_chain(),
+                ),
+                tolerance: 1e-3,
+                layer: "PLUGIN_PROFILE".to_string(),
+                design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            },
+        )
+        .expect("the crest stages");
+    drop(host);
+    let events: Rc<RefCell<Vec<CustomGripEvent>>> = Rc::new(RefCell::new(Vec::new()));
+    {
+        let events2 = Rc::clone(&events);
+        let begin2 = Rc::new(RefCell::new(Some((
+            ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
+                crest_profile_chain(),
+            ),
+            1e-3,
+        ))));
+        grip_points::install_in_process_sink(plugin, move |_host, event| {
+            events2.borrow_mut().push(event.clone());
+            match event.phase {
+                CustomGripPhase::Begin => {
+                    if let Some((chain, tolerance)) = begin2.borrow_mut().take() {
+                        CustomGripResponse {
+                            preview: Vec::new(),
+                            live_entities: Vec::new(),
+                            descriptor: Some(chain),
+                            descriptor_tolerance: Some(tolerance),
+                        }
+                    } else {
+                        CustomGripResponse::default()
+                    }
+                }
+                _ => CustomGripResponse::default(),
+            }
+        });
+    }
+    let i = tab(&app);
+    app.tabs[i]
+        .plugin_grips
+        .declare(
+            plugin,
+            vec![PluginGrip {
+                grip_id: 7,
+                anchor: Some(handles[1]),
+                point: [300.0, 8.0, 0.0],
+                axis: None,
+                shape: PluginGripShape::Square,
+            }],
+        )
+        .expect("the grip declares");
+    let candidate = crate::plugin::grip_points::GripCandidate {
+        plugin: plugin.to_string(),
+        grip_id: 7,
+        anchor: Some(handles[1]),
+        point: glam::DVec3::new(300.0, 8.0, 0.0),
+        axis: None,
+        shape: crate::scene::model::object::GripShape::Square,
+    };
+    let _ = app.begin_plugin_grip_drag(i, &candidate);
+    assert!(app.plugin_grip_descriptor_drag.is_some());
+    // The illegal move: a backward run (station 90 behind the crest's own
+    // start at 100).
+    let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(90.0, 30.0, 0.0));
+    assert_eq!(events.borrow().len(), 1, "the move stayed local");
+    {
+        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let EntityType::Spline(spline) = host
+            .document()
+            .get_entity(handles[1])
+            .expect("the crest lives")
+        else {
+            panic!("the carrier keeps its kind");
+        };
+        assert!(
+            (spline.control_points[2].y - 8.0).abs() < 1e-9,
+            "the refused move kept the last good design"
+        );
+    }
+    let errors = crate::plugin::drain_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|note| note.contains("leaves the section's support")
+                || note.contains("the last good design stays")),
+        "the first refusal surfaced one headline: {errors:?}"
+    );
+    // The legal move after the refusal re-derives fully (the drag lives on).
+    let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(300.0, 11.0, 0.0));
+    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    let EntityType::Spline(spline) = host
+        .document()
+        .get_entity(handles[1])
+        .expect("the crest lives")
+    else {
+        panic!("the carrier keeps its kind");
+    };
+    assert!(
+        (spline.control_points[2].y - 11.0).abs() < 1e-9,
+        "the next legal move re-derived the design"
+    );
+    drop(host);
+    // The settle writes nothing (the sink's settle writes off): zero steps.
+    let score_before = undo_entry_count(&app);
+    let _ = app.settle_plugin_grip_drag();
+    assert_eq!(events.borrow().len(), 2, "the Settle phase crossed");
+    assert_eq!(
+        undo_entry_count(&app),
+        score_before,
+        "a write-free settle composes zero steps"
+    );
+    grip_points::remove_in_process_sink(plugin);
 }

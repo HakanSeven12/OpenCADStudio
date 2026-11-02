@@ -372,3 +372,41 @@ fn block_action_foreign_or_malformed_native_dependencies_fail_atomically() {
     .push(999);
     assert!(instance::evaluate_value(&f.doc, f.first, f.parameter.handle, f.input).is_err());
 }
+
+#[test]
+fn an_evaluated_representation_ends_after_its_members() {
+    let f = fixture(Kind::Array);
+    let changed = instance::evaluate_value(&f.doc, f.first, f.parameter.handle, f.input)
+        .unwrap()
+        .unwrap();
+    let codec::EntityType::Insert(reference) = changed.get_entity(f.first).unwrap() else {
+        panic!()
+    };
+    let record = changed.block_records.get(&reference.block_name).unwrap();
+    assert_ne!(
+        record.handle, f.definition,
+        "the assertions cover the anonymous representation, not the definition"
+    );
+    let marker = record.block_entity_handle.value();
+    let end = record.block_end_handle.value();
+    let body: Vec<_> = record
+        .entity_handles
+        .iter()
+        .map(|handle| handle.value())
+        .collect();
+    assert!(
+        body.iter().all(|handle| *handle > marker),
+        "body handles follow the BLOCK marker: {body:?}"
+    );
+    assert!(
+        end > *body.iter().max().expect("the body is not empty"),
+        "the ENDBLK handle follows the body: marker {marker}, body {body:?}, end {end}"
+    );
+    assert!(
+        matches!(
+            changed.get_entity(codec::types::Handle::new(end)),
+            Some(codec::EntityType::BlockEnd(_))
+        ),
+        "the record's end handle names an ENDBLK entity"
+    );
+}

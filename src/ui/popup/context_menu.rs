@@ -26,10 +26,17 @@ pub const MENU_ROW_H: f32 = 22.0;
 pub const MENU_SEP_H: f32 = 7.0;
 /// Vertical padding inside the menu panel above the first row.
 pub const MENU_PAD_TOP: f32 = 4.0;
-/// Column width without keyword hints (the width the menu always had).
-pub const MENU_WIDTH: f32 = 200.0;
-/// Column width when any row carries a right-aligned keyword hint.
-pub const MENU_WIDTH_WITH_HINTS: f32 = 236.0;
+/// The row layout the renderer uses, for sizing the menu to its widest row:
+/// side padding, icon gutter, gap after it, indent of a submenu's items,
+/// least gap before a hint or check, and the check and caret.
+const ROW_PAD_LEFT: f32 = 6.0;
+const ROW_PAD_RIGHT: f32 = 12.0;
+const GUTTER_W: f32 = 18.0;
+const GUTTER_GAP: f32 = 4.0;
+const CHILD_INDENT: f32 = 14.0;
+const END_GAP: f32 = 16.0;
+const CHECK_W: f32 = 10.0;
+const CARET_W: f32 = 9.0;
 /// How many recent entries the Recent Input / Repeat lists show.
 pub const RECENT_LIMIT: usize = 10;
 
@@ -345,12 +352,37 @@ impl ContextMenu {
         h
     }
 
-    fn has_hints(&self) -> bool {
-        self.rows.iter().any(|row| match row {
-            MenuRow::Item(item) => item.hint.is_some(),
-            MenuRow::Separator => false,
-            MenuRow::Submenu { items, .. } => items.iter().any(|item| item.hint.is_some()),
-        })
+    /// As wide as the widest row, with its hint or check (a submenu's
+    /// items count even while it is closed, so opening it keeps the width).
+    fn fit_width(&self) -> f32 {
+        use crate::ui::style::text_metrics::width;
+        let item_w = |item: &MenuItem, indent: f32| {
+            let mut end = 0.0;
+            if let Some(hint) = &item.hint {
+                end += GUTTER_GAP + width(hint, 11.0, false);
+            }
+            if item.checked {
+                end += GUTTER_GAP + CHECK_W;
+            }
+            if end > 0.0 {
+                end += END_GAP - GUTTER_GAP;
+            }
+            indent + width(&item.label, 12.0, item.default) + end
+        };
+        let widest = self
+            .rows
+            .iter()
+            .map(|row| match row {
+                MenuRow::Item(item) => item_w(item, 0.0),
+                MenuRow::Separator => 0.0,
+                MenuRow::Submenu { label, items, .. } => items
+                    .iter()
+                    .map(|item| item_w(item, CHILD_INDENT))
+                    .fold(width(label, 12.0, false) + END_GAP + CARET_W, f32::max),
+            })
+            .fold(0.0, f32::max);
+        // The panel's border on both sides.
+        ROW_PAD_LEFT + GUTTER_W + GUTTER_GAP + widest + ROW_PAD_RIGHT + 2.0
     }
 }
 
@@ -428,13 +460,8 @@ pub fn build_context_menu(ctx: &MenuContext, open_submenu: Option<SubmenuId>) ->
         ),
         MenuContext::Grip(grip) => grip_rows(grip),
     };
-    let mut menu = ContextMenu {
-        rows,
-        width: MENU_WIDTH,
-    };
-    if menu.has_hints() {
-        menu.width = MENU_WIDTH_WITH_HINTS;
-    }
+    let mut menu = ContextMenu { rows, width: 0.0 };
+    menu.width = menu.fit_width();
     menu
 }
 
@@ -909,7 +936,8 @@ mod tests {
         assert_eq!(close.action, MenuAction::Option("C".into()));
         assert!(item_at(&menu, 0).default);
         assert_eq!(menu.default_index(), 0);
-        assert_eq!(menu.width, MENU_WIDTH_WITH_HINTS);
+        // As wide as its widest row with that row's hint.
+        assert!(menu.width > 0.0 && menu.width == menu.fit_width());
     }
 
     #[test]

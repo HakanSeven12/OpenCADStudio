@@ -107,6 +107,11 @@ pub enum RenderObject {
         station_pieces: Vec<crate::scene::model::wire_model::PatternStationPiece>,
         source_length: f32,
         plinegen: bool,
+        /// Each NaN-separated run of `points` is a line of its own: it takes
+        /// the linetype's end alignment by itself, as a single line does.
+        separate_runs: bool,
+        /// NaN-separated lines drawn Continuous beside the patterned ones.
+        solid: Vec<[f64; 3]>,
     },
     /// A wide polyline whose band width VARIES (a taper): a continuous WCS point
     /// list paired index-for-index with a per-point full band width. The wire

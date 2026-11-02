@@ -233,6 +233,24 @@ fn num(v: f64) -> String {
     format!("{v:.6}")
 }
 
+/// The property a `CustomDP.<Name>` field variable names (the stored code
+/// for a custom drawing property).
+pub fn custom_property_name(variable: &str) -> Option<&str> {
+    let variable = variable.trim();
+    let prefix = variable.get(..CUSTOM_PROPERTY_PREFIX.len())?;
+    prefix
+        .eq_ignore_ascii_case(CUSTOM_PROPERTY_PREFIX)
+        .then(|| variable[CUSTOM_PROPERTY_PREFIX.len()..].trim())
+}
+
+/// The variable prefix of a custom drawing property in a field code.
+pub const CUSTOM_PROPERTY_PREFIX: &str = "CustomDP.";
+
+/// The field code that shows custom drawing property `name`.
+pub fn custom_property_code(name: &str) -> String {
+    format!("\\AcVar {CUSTOM_PROPERTY_PREFIX}{name}")
+}
+
 /// A system variable's value as a field shows it.
 pub fn sysvar(document: &Document, name: &str) -> Option<String> {
     let h = &document.header;
@@ -596,6 +614,21 @@ pub fn refresh_sheet_set_fields(document: &mut Document) -> Vec<Handle> {
     changed
 }
 
+/// The hosts holding an `\AcVar` field (document properties, system
+/// variables, dates), each once: what a change to the drawing's summary
+/// information can alter.
+pub fn acvar_hosts(document: &Document) -> Vec<Handle> {
+    let mut hosts: Vec<Handle> = document
+        .fields
+        .values()
+        .filter(|f| f.evaluator.starts_with("AcVar"))
+        .filter_map(|f| field_host(document, f.handle))
+        .collect();
+    hosts.sort_by_key(|h| h.value());
+    hosts.dedup();
+    hosts
+}
+
 /// The entity hosting field `field`: up its owner chain (fields, then the
 /// field dictionary and extension dictionary) to the first non-object.
 fn field_host(document: &Document, field: Handle) -> Option<Handle> {
@@ -702,5 +735,94 @@ impl FieldContext for PlotContext<'_> {
     }
     fn getenv(&self, name: &str) -> Option<String> {
         self.0.getenv(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codec::entities::{EntityType, MText};
+
+    fn document_with_properties() -> Document {
+        let mut document = Document::new();
+        document.summary_info.custom_properties = vec![
+            ("Client".into(), "Acme".into()),
+            ("Job No".into(), "42-7".into()),
+        ];
+        document
+    }
+
+    fn shown(document: &Document, host: Handle) -> String {
+        match document.get_entity(host) {
+            Some(EntityType::MText(m)) => m.value.clone(),
+            other => panic!("expected an MText, got {other:?}"),
+        }
+    }
+
+    /// S6: the field code evaluates to the property's value, and the name
+    /// matches without regard to case.
+    #[test]
+    fn a_custom_property_field_evaluates_to_the_value() {
+        let document = document_with_properties();
+        for code in [
+            r"\AcVar CustomDP.Client",
+            r"\AcVar CustomDP.client",
+            r"\AcVar CustomDP.CLIENT",
+            r"%<\AcVar CustomDP.Client>%",
+        ] {
+            assert_eq!(evaluate(&document, code, &[], None).as_deref(), Some("Acme"), "{code}");
+        }
+        assert_eq!(
+            evaluate(&document, r"\AcVar CustomDP.job no", &[], None).as_deref(),
+            Some("42-7")
+        );
+    }
+
+    /// S6: a property the drawing lacks is as unresolvable as any other
+    /// unknown variable.
+    #[test]
+    fn a_missing_custom_property_is_unresolved_like_an_unknown_variable() {
+        let document = document_with_properties();
+        let unknown = evaluate(&document, r"\AcVar NoSuchVariable", &[], None);
+        assert_eq!(
+            evaluate(&document, r"\AcVar CustomDP.Missing", &[], None),
+            unknown
+        );
+        let mut document = document;
+        let host = document
+            .add_entity(EntityType::MText(Box::new(MText::new())))
+            .unwrap();
+        set_text_field(
+            &mut document,
+            host,
+            Some((r"\AcVar CustomDP.Missing".into(), vec![])),
+            "old",
+        );
+        update_fields(&mut document, 32, None);
+        let missing = shown(&document, host);
+        set_text_field(
+            &mut document,
+            host,
+            Some((r"\AcVar NoSuchVariable".into(), vec![])),
+            "old",
+        );
+        update_fields(&mut document, 32, None);
+        assert_eq!(missing, shown(&document, host));
+    }
+
+    /// Existing behavior: `\AcVar <Name>` keeps resolving summary fields.
+    #[test]
+    fn an_acvar_summary_field_still_evaluates() {
+        let mut document = document_with_properties();
+        document.summary_info.author = "Ana".into();
+        assert_eq!(
+            evaluate(&document, r"\AcVar Author", &[], None).as_deref(),
+            Some("Ana")
+        );
+        // A bare custom property name keeps working as before.
+        assert_eq!(
+            evaluate(&document, r"\AcVar Client", &[], None).as_deref(),
+            Some("Acme")
+        );
     }
 }

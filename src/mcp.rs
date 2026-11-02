@@ -36,8 +36,11 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Sixteen generated intent tools now follow the four facades. `node_graph`
 /// joined the execute ops; the action list gained `extraction_outdated`,
 /// `print_all` and `recovery_accept`.
+/// `input` gained `handles`, so a selection prompt can be handed a set
+/// without a round trip through `select`; the dialog actions gained
+/// `dialog_discard` and `dialog_cancel`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "435331060bf53eb03c2362822f4725a49152fe70a6b9478a3eee04be8256307c";
+const TOOL_SCHEMA_DIGEST: &str = "31b9a8521e51fee379efeea3a7471fde1d7a7dea3ce3257b3f6e7fec411a7d2d";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -446,7 +449,6 @@ struct ResourceStore {
     snapshots: HashMap<String, CachedSnapshot>,
     order: VecDeque<String>,
     latest: HashMap<String, String>,
-    last_captures: HashMap<String, (image::RgbaImage, String)>,
     tiles: HashMap<String, CachedSnapshot>,
     tile_order: VecDeque<String>,
     pyramid_manifests: HashMap<String, Value>,
@@ -2087,7 +2089,7 @@ fn call_tool(
                     "ok": false,
                     "status": "failed",
                     "code": "use_capture_tool",
-                    "error": "Viewport captures run through the ocs_capture tool (scope, annotate, tiles, diff). ocs_read exposes capture products already stored as resources, not new captures."
+                    "error": "Viewport captures run through the ocs_capture tool (scope, annotate, tiles). ocs_read exposes capture products already stored as resources, not new captures."
                 }));
             }
             if op == "tools" {
@@ -2156,15 +2158,9 @@ fn call_tool(
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
             let delivery = arguments["delivery"].as_str().unwrap_or("inline");
-            let diff = arguments["diff"].as_bool().unwrap_or(false);
-            let diff_mode = arguments["diff_mode"].as_str().unwrap_or("highlight");
-            let reset_baseline = arguments["reset_diff_baseline"].as_bool().unwrap_or(false);
+            refuse_retired_capture_parameters(&arguments).map_err(CallError::from)?;
             let tile = arguments.get("tile");
             let want_manifest = arguments["pyramid_manifest"].as_bool().unwrap_or(false);
-
-            if reset_baseline {
-                resources.last_captures.remove(session_id);
-            }
 
             let mut tile_info: Option<(u32, u32, u32, [f64; 4])> = None;
             if let Some(tile_val) = tile {
@@ -2279,92 +2275,11 @@ fn call_tool(
                 }
             }
 
-            let mut final_bytes = bytes;
-            if diff {
-                let current_img = image::load_from_memory(&final_bytes)
-                    .map_err(|e| format!("Failed to decode capture for visual diff: {e}"))?
-                    .to_rgba8();
-
-                let mut p2w = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-                if let Some(arr) = meta
-                    .get("_spatial")
-                    .and_then(|s| s.get("pixel_to_world_matrix"))
-                    .and_then(Value::as_array)
-                {
-                    if arr.len() == 6 {
-                        for (i, v) in arr.iter().enumerate() {
-                            if let Some(num) = v.as_f64() {
-                                p2w[i] = num;
-                            }
-                        }
-                    }
-                }
-
-                if let Some((prev_img, prev_hash)) = resources.last_captures.get(session_id) {
-                    let diff_res = crate::app::control::vision::compute_visual_diff(
-                        prev_img,
-                        &current_img,
-                        &p2w,
-                    );
-                    let diff_info = json!({
-                        "is_baseline": false,
-                        "baseline_hash": prev_hash,
-                        "changed": diff_res.changed,
-                        "change_percentage": (diff_res.change_percentage * 100.0).round() / 100.0,
-                        "changed_pixels": diff_res.changed_pixels,
-                        "dirty_pixel_bounds": diff_res.dirty_pixel_bounds,
-                        "dirty_world_bounds": diff_res.dirty_world_bounds,
-                        "patch_resolution": diff_res.patch_resolution,
-                        "mode": diff_mode,
-                    });
-                    if let Some(obj) = meta.as_object_mut() {
-                        obj.insert("diff".into(), diff_info);
-                    }
-
-                    if diff_res.changed {
-                        match diff_mode {
-                            "crop" => {
-                                if let Some(crop) = &diff_res.cropped_patch {
-                                    final_bytes =
-                                        crate::app::control::vision::encode_image_png(crop)?;
-                                }
-                            }
-                            "highlight" => {
-                                final_bytes = crate::app::control::vision::encode_image_png(
-                                    &diff_res.diff_overlay,
-                                )?;
-                            }
-                            _ => {}
-                        }
-                    }
-                } else {
-                    let diff_info = json!({
-                        "is_baseline": true,
-                        "changed": false,
-                        "change_percentage": 0.0,
-                        "changed_pixels": 0,
-                        "message": "Baseline capture established; subsequent captures with diff: true will report dirty regions.",
-                        "mode": diff_mode,
-                    });
-                    if let Some(obj) = meta.as_object_mut() {
-                        obj.insert("diff".into(), diff_info);
-                    }
-                }
-
-                let mut base_hasher = Sha256::new();
-                let full_png = crate::app::control::vision::encode_image_png(&current_img)?;
-                base_hasher.update(&full_png);
-                let current_full_hash = format!("{:x}", base_hasher.finalize());
-                resources
-                    .last_captures
-                    .insert(session_id.to_string(), (current_img, current_full_hash));
-            }
-
             let mut hasher = Sha256::new();
-            hasher.update(&final_bytes);
+            hasher.update(&bytes);
             let hash = format!("{:x}", hasher.finalize());
-            let b64 = BASE64.encode(&final_bytes);
-            let bytes_len = final_bytes.len();
+            let b64 = BASE64.encode(&bytes);
+            let bytes_len = bytes.len();
 
             let uri = resources.insert(session_id, &hash, b64.clone(), bytes_len, meta.clone());
             if let Some(obj) = meta.as_object_mut() {
@@ -2543,9 +2458,6 @@ pub(crate) fn capture_input_schema() -> Value {
             "scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},
             "max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."},
             "delivery":{"type":"string","enum":["inline","resource","both"],"default":"inline","description":"Image delivery method: 'inline' embeds base64 in tool content, 'resource' returns an MCP cad:// URI reference without inlining image bytes, 'both' returns both inline image and cad:// URI."},
-            "diff":{"type":"boolean","default":false,"description":"If true, calculates visual differential compared to the previous capture of this session, returning dirty bounds and changed areas."},
-            "diff_mode":{"type":"string","enum":["highlight","crop","metadata_only"],"default":"highlight","description":"Visual diff representation: 'highlight' returns full image with changed areas highlighted in vibrant green and unchanged background dimmed; 'crop' returns only the cropped dirty bounding box (saving maximum bandwidth/tokens); 'metadata_only' leaves image untouched but populates the diff metadata."},
-            "reset_diff_baseline":{"type":"boolean","default":false,"description":"If true, discards any previous diff baseline for this session and establishes this capture as the new baseline."},
             "view":{"type":"string","enum":["current","extents","selection","region"],"default":"current","description":"Frame the camera before capture: extents fits all entities, selection fits selected entities, region fits explicit world bounds."},
             "bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"World XY bounding box [min_x, min_y, max_x, max_y] to zoom and fit in view before capturing (used with view: 'region')."},
             "focus_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to zoom and fit in view before capturing."},
@@ -2584,7 +2496,7 @@ pub(crate) fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_capture",
-            "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG with optional camera framing, entity highlighting, spatial coordinates and Set-of-Marks annotations. Works quietly in background and overlapped window states without stealing focus. Read the capture guide for annotations, diff, resource delivery and tiling.",
+            "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG with optional camera framing, entity highlighting, spatial coordinates and Set-of-Marks annotations. Works quietly in background and overlapped window states without stealing focus. Read the capture guide for annotations, resource delivery and tiling.",
             "inputSchema":capture_input_schema(),
             "title":"Capture OCS window","annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
@@ -2596,18 +2508,24 @@ pub(crate) fn tool_definitions() -> Value {
     tools
 }
 
+/// The capture used to compute a visual diff against the previous frame.
+/// That comparison was never trustworthy — its baseline reset whenever the
+/// camera moved and the on-screen command line counted as changed pixels —
+/// so it was removed rather than repaired, and a request that still asks for
+/// it is refused by name instead of quietly returning a plain capture.
+fn refuse_retired_capture_parameters(arguments: &Value) -> Result<(), String> {
+    const RETIRED: [&str; 3] = ["diff", "diff_mode", "reset_diff_baseline"];
+    match RETIRED.iter().find(|key| arguments.get(**key).is_some()) {
+        Some(key) => Err(format!(
+            "ocs_capture no longer computes a visual diff; remove '{key}' (retired: {}) and compare two captures yourself",
+            RETIRED.join(", ")
+        )),
+        None => Ok(()),
+    }
+}
+
 fn tool_result(value: Value) -> Value {
     if value.get("$resource").is_some() || value.get("$image").is_some() {
-        // A baseline also reports changed=false, but the client has not seen
-        // that image yet. Only omit media after an actual unchanged comparison.
-        // Keep the capture metadata (hash, URI, spatial data and request id)
-        // so clients can still fetch the stored image explicitly if needed.
-        let meta = &value["metadata"];
-        if meta["diff"]["is_baseline"].as_bool() == Some(false)
-            && meta["diff"]["changed"].as_bool() == Some(false)
-        {
-            return tool_result(meta.clone());
-        }
         let mut content = Vec::new();
         if let Some(res) = value.get("$resource") {
             let uri = res["uri"].as_str().unwrap_or("");
@@ -4326,65 +4244,7 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_capture_omits_media_but_preserves_metadata() {
-        let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 255, 255, 255]));
-        let diff = crate::app::control::vision::compute_visual_diff(
-            &image,
-            &image,
-            &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-        );
-        assert!(!diff.changed);
-        for delivery in ["inline", "resource", "both"] {
-            let metadata = json!({
-                "hash":"unchanged-hash", "uri":"cad://session/s/snapshot/unchanged-hash.png",
-                "request_id":"capture-2", "revision":12,
-                "_spatial":{"crs":"CAD_WCS"},
-                "diff":{"is_baseline":false,"changed":diff.changed}
-            });
-            let mut capture = json!({"metadata":metadata});
-            if delivery != "resource" {
-                capture["$image"] = json!("image-bytes-must-not-be-returned");
-            }
-            if delivery != "inline" {
-                capture["$resource"] = json!({"uri":metadata["uri"],"mimeType":"image/png"});
-            }
-            let result = tool_result(capture);
-            assert_eq!(result["isError"], false);
-            assert_eq!(result["structuredContent"], metadata);
-            let content = result["content"].as_array().unwrap();
-            assert_eq!(content.len(), 1);
-            assert_eq!(content[0]["type"], "text");
-            assert_eq!(
-                serde_json::from_str::<Value>(content[0]["text"].as_str().unwrap()).unwrap(),
-                metadata
-            );
-        }
-    }
-
-    #[test]
-    fn baseline_changed_and_non_diff_captures_keep_images() {
-        for diff in [
-            json!({"is_baseline":true,"changed":false}),
-            json!({"is_baseline":false,"changed":true}),
-            Value::Null,
-        ] {
-            let result = tool_result(json!({
-                "$image":"baseline-or-changed-png",
-                "metadata":{"diff":diff}
-            }));
-            assert!(result["content"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(
-                    |block| block["type"] == "image" && block["data"] == "baseline-or-changed-png"
-                ));
-        }
-    }
-
-    #[test]
-    fn capture_tool_schema_and_diff_metadata_handling() {
-        // 1. Verify ocs_capture schema has diff parameters
+    fn capture_does_not_advertise_a_visual_diff() {
         let tools = tool_definitions();
         let capture_tool = tools
             .as_array()
@@ -4393,77 +4253,46 @@ mod tests {
             .find(|t| t["name"] == "ocs_capture")
             .expect("ocs_capture tool exists");
         let props = &capture_tool["inputSchema"]["properties"];
-        assert_eq!(props["diff"]["type"], "boolean");
-        assert_eq!(props["diff"]["default"], false);
-        assert_eq!(props["diff_mode"]["type"], "string");
-        assert_eq!(props["diff_mode"]["default"], "highlight");
-        let diff_modes = props["diff_mode"]["enum"].as_array().unwrap();
-        assert!(diff_modes.iter().any(|v| v == "highlight"));
-        assert!(diff_modes.iter().any(|v| v == "crop"));
-        assert!(diff_modes.iter().any(|v| v == "metadata_only"));
-        assert_eq!(props["reset_diff_baseline"]["type"], "boolean");
+        for retired in ["diff", "diff_mode", "reset_diff_baseline"] {
+            assert!(
+                props.get(retired).is_none(),
+                "ocs_capture still advertises '{retired}'"
+            );
+        }
         assert_eq!(props["delivery"]["type"], "string");
 
-        // 2. Test tool_result with diff metadata
-        let diff_capture_res = json!({
-            "$resource": {
-                "uri": "cad://session/s1/snapshot/diffhash789.png",
-                "mimeType": "image/png",
-                "hash": "diffhash789",
-                "bytes": 512
-            },
-            "metadata": {
-                "width": 800,
-                "height": 600,
-                "_spatial": {
-                    "crs": "CAD_WCS",
-                    "unit": "Millimeters",
-                    "pixel_to_world_matrix": [0.05, 0.0, 0.0, -0.05, -20.0, 15.0],
-                    "world_to_pixel_matrix": [20.0, 0.0, 0.0, -20.0, 400.0, 300.0]
-                },
-                "diff": {
-                    "is_baseline": false,
-                    "baseline_hash": "basehash123",
-                    "changed": true,
-                    "change_percentage": 2.5,
-                    "changed_pixels": 12000,
-                    "dirty_pixel_bounds": [100, 150, 300, 350],
-                    "dirty_world_bounds": [-15.0, -2.5, -5.0, 7.5],
-                    "patch_resolution": [201, 201],
-                    "mode": "crop"
-                }
-            }
-        });
+        for retired in ["diff", "diff_mode", "reset_diff_baseline"] {
+            let mut arguments = json!({"ocs_session_id": "s1"});
+            arguments[retired] = json!(true);
+            let error = refuse_retired_capture_parameters(&arguments)
+                .expect_err("the retired parameter must be refused, not ignored");
+            assert!(
+                error.contains(retired),
+                "'{retired}' must be named in the refusal: {error}"
+            );
+        }
+        assert!(refuse_retired_capture_parameters(&json!({"ocs_session_id": "s1"})).is_ok());
+    }
 
-        let structured = tool_result(diff_capture_res);
-        assert_eq!(structured["isError"], false);
-        assert_eq!(structured["structuredContent"]["diff"]["changed"], true);
-        assert_eq!(structured["structuredContent"]["diff"]["mode"], "crop");
-        assert_eq!(
-            structured["structuredContent"]["diff"]["dirty_pixel_bounds"],
-            json!([100, 150, 300, 350])
-        );
-        assert_eq!(
-            structured["structuredContent"]["diff"]["dirty_world_bounds"],
-            json!([-15.0, -2.5, -5.0, 7.5])
-        );
-        assert_eq!(
-            structured["structuredContent"]["_spatial"]["crs"],
-            "CAD_WCS"
-        );
-
-        let content = structured["content"].as_array().unwrap();
-        let text_block = content.iter().find(|c| {
-            c["type"] == "text"
-                && c["text"]
-                    .as_str()
-                    .unwrap_or("")
-                    .contains("\"dirty_pixel_bounds\"")
-        });
-        assert!(
-            text_block.is_some(),
-            "Metadata text block must format diff parameters"
-        );
+    #[test]
+    fn every_capture_delivers_its_image() {
+        for metadata in [
+            json!({"hash":"hash-1","uri":"cad://session/s/snapshot/hash-1.png"}),
+            json!({"hash":"hash-2","uri":"cad://session/s/snapshot/hash-2.png","revision":12}),
+        ] {
+            let result = tool_result(json!({
+                "$image":"capture-png",
+                "metadata":metadata
+            }));
+            assert_eq!(result["isError"], false);
+            assert_eq!(result["structuredContent"], metadata);
+            assert!(result["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|block| block["type"] == "image"
+                    && block["data"] == "capture-png"));
+        }
     }
 
     #[test]

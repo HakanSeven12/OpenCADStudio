@@ -519,6 +519,183 @@ shape and an axis — nothing else. What a grip *means* (an alignment's implied
 PI, a pipe endpoint, a widening handle) is entirely the declaring plugin's,
 resolved in its own `on_custom_grip_event` from the event's grip id and point.
 
+## Derived display, parametric chains, and plugin class objects (API v14)
+
+The parametric display split established the pattern the class objects
+generalize. One law governs both: **the record layer is the file's only
+truth, the host derives the display, and the plugins never run the
+derivation math.**
+
+**Parametric chains (v14, the v2 shapes).** `stage_parametric_chain(reference, chain,
+tolerance)` carries the record layer's declared parameters only — curve
+definitions (`length`, the driving-quantity `ramp`, optional `cross_slope`
+data) plus the continuity fields (start point, start direction radians,
+±2π-legal) — never evaluated geometry. The driving quantity is the plan
+curvature in the plan plane and the profile slope in the profile plane, and
+the ramp is declared DATA (`Ramp::Polynomial` at most cubic, `Ramp::Piecewise`
+of up to six ascending knots in [0,1], or `Ramp::Sampled` of up to 4096
+slots — the vocabulary any alignment library restates its own laws with).
+The host knows no species and validates the STRUCTURE only; the record-model
+consistency checks are the declaring plugin's own. The host evaluates, then
+audits seams *at the instance's own declared tolerance* (the evaluated
+end of segment i must restate segment i+1's declared start — point,
+direction/gradient, where the profile's declared start slope is the next
+ramp's own start value — and the same `PluginClassInstance.tolerance`
+number bounds the chord carriers: point seams read it as meters, the
+plan's bearing seam as radians, the profile's slope seam as the
+gradient family); a refusal names the audited pair and changes nothing (no entities,
+no undo step). Passing designs stage as exact carriers derived GENERICALLY
+(a constant plan curvature as `Line` (zero) or `Arc`; a profile ramp that
+is an at-most-quadratic polynomial as an exact clamped Hermite spline of
+degree up to 3 — one from-end-states builder whose degree-2 mid control
+rides the start-tangent line's mid value, exactly the mean-gradient law) or
+as `LwPolyline` chords refined to the declared tolerance (every table law
+and every law without an exact generic carrier: the plan law integrates via
+a hard-coded 16-node Gauss–Legendre table, the Fresnel series is the tests'
+independent oracle). The staged set is **reference-only** (picks pass
+through, box selections skip it, no grips/edges; the designation applies
+through the same pending-scope machinery as `set_reference_only`) and the
+undo composition is the entity-write contract: the plugin's open `push_undo`
+scope is joined, otherwise one labeled step ("Stage parametric chain").
+`sample_parametric(chain, s)` exposes the same engine as a pure read
+(point/direction at chain position *s*; validates every segment per call —
+the seam audit belongs to staging, not to the pure read; no
+document state, no undo, no publish). Regulations: `MAX_PLUGIN_LIVE_ENTITIES`
+caps the staged set; an empty chain refuses; a declared tolerance above
+`MAX_DECLARED_TOLERANCE` (1e-2) refuses naming the ceiling — the honors
+scheme trusts the plugin's declaration, the ceiling is the host law.
+The lane's bench
+(`cargo bench --bench parametric_display_staging`) pins the budgets:
+50-segment staging far under 5 ms, sampling at sub-µs scale, and the
+Sampled-arm reads ride the stage-time cumulative-integral table (a lookup
+plus the moved tail's exact trapezoid per re-integration).
+
+**Plugin class objects.** `register_plugin_class(plugin_id,
+declaration)` declares a plugin-owned entity class: a stable identity key
+(the XDATA class key staged instances carry), a monotone schema version, a
+class-scoped grip schema (grip id → the parameter name of the class the grip
+drives), and the parameter set lives in the plugin's own record layer. The
+registry is tab-scoped display-session state — **the store dies with its
+plugin's process** (re-declared per load; nothing persists) — and is keyed
+by declaring plugin: the plugin id never travels the wire (the runner
+supplies the serving process's own id, the grip anti-impersonation rule).
+Re-registration is idempotent for an equal schema and refuses a mismatch: a
+schema change is a *re-stage of the instances*, never a hot swap.
+`stage_plugin_class_instance(plugin_id, instance)` stages one instance whose
+payload is identity only — class id, schema version, layer, `design_record`
+linkage — plus a **host-evaluated design descriptor**
+(`PluginDisplayDescriptor`): the v14 engine is the first host-known kind
+(`ParametricChain`), so a chain design stages through exactly the
+audited-seam / cap / refusal / undo contract above; the descriptor enum
+appends kinds at the end (an unknown — newer — kind refuses at the contract
+instead of guessing). The staged set is reference-only and XDATA-stamped
+with the class identity key (the stamp carries the schema version and the
+record linkage; `write_record` auto-registers the APPID so DXF/DWG round
+trips keep the stamp byte-identical).
+
+**Grip editing on the derived path.** Custom-grip drags stream per-move
+geometry when the declaration is unserved (the v11/v12 lane: the plugin
+answers `CustomGripEvent`s with `preview` wires and `live_entities`, the
+host coalesces moves, settle stays the plugin's one write window).
+`CustomGripResponse.descriptor` (a serde-default field — the
+`live_entities` precedent) LANDED the descriptor path the branch's drag
+arc (the squash of the v15/v16 layers): a Begin answer hands the host a
+live *design* plus the per-move tolerance, and when the whole declaration
+is serviceable (the profile chain, the END-side drive row, the segment in
+range, the class stamp resolving a non-empty display set) the host
+re-derives the display set LOCALLY per coalesced cursor move along the
+record model's own laws — **zero Move frames crossing the IPC**; a
+refused move keeps the last good design with one headline, and every
+unserved declaration keeps the streaming path. Measured on the bench's
+grip-edit section: the per-move re-derivation (a clothoid's Fresnel
+re-integration + chord refinement per move) sits in the tens of
+microseconds against a 16.7 ms frame (the staging bench's grip-edit
+section measures it: ~18 µs/move for the declared-ramp carrier, sub-µs
+for the bezier-carrier cubic), so host-local re-derivation wins on both
+latency and traffic. The
+drag's settle keeps the plugin's one write window: the byte-identical
+restore of the live set BEFORE the settle lands, records first, then the
+re-stage — exactly one plugin-labeled undo step. Editing class parameters
+travels the records, not the descriptor: a parameter write goes through
+`update_xrecords`, the plugin sees the record-dirty notification and
+re-stages from its own schema. The grip-edit correctness contract is
+pinned engine-side and session-side (no new code — the tests): a grip
+drag revises one DECLARED parameter, the plugin's honest re-declare
+propagates the moved joint from `sample_parametric` (never a duplicated
+constant), the audited seam law holds on the edited chain, and the
+display set re-applies over the SAME handles in place — count-stable,
+stamps and reference-only designations intact, one undo step
+round-tripping the original. The session pair crosses the wire where the
+reader is concerned: `PluginClassInstanceProperties` frames (additive,
+API v14) serve a plugin's read, and the python `ocs` surface names it
+`plugin_class_instance_properties`.
+
+**Class parameter schema and the properties pair.** A declaration can
+now declare its parameters in the schema (`PluginClassParameter`: name +
+value kind — `Real`/`Integer`/`Text`, appended at the end — + `editable`;
+serde default, so declarations without the field read as an empty schema;
+empty/duplicate names refuse at registration). The declaration says WHAT
+the parameters are; the values stay on the instance's design record row —
+the record layer keeps the truth, the schema only makes it addressable. Two
+session methods ride the same core the host's properties panel uses:
+`plugin_class_instance_properties(handle)` reads a stamped entity's
+declared rows (the design record resolves under the NOD root, then one
+sub-dictionary level — the identity stamp names the record, never its
+path), and `update_plugin_class_instance_parameter(handle, name, value)`
+writes ONE declared, editable parameter's (name, value) pair in place: the
+layout is alternating (String name, value) entries — the pair layout the
+declaration owns — the value entry's group code and everything else on the
+record stay untouched, the write composes as one undo step through the
+existing XRecord update path, and the record's dirty notification asks the
+declaring plugin to re-stage. Refusals — unknown name, read-only row, an
+unparseable or non-finite value, a stale stamp, an unresolvable record —
+happen before any change and record nothing. The properties panel (a user
+surface, not a plugin call) reuses the core for selections whose XDATA
+carries a registered class key: a "Plugin class parameters" section
+renders the declared rows and the owning-record source line; an editable
+row commits through the same one-undo-step write; host-staged
+(reference-only) instances render read-only; the host never invents
+semantics for a name or a value kind the declaration does not spell.
+
+**Ramps as declared data — the generic kernel (v2).** The host carries no
+per-species math wall: the plan's transcendental path is one generic
+Gauss–Legendre executor over the declared ramp, and the three ramp arms are
+the whole vocabulary — every alignment library's laws restate into them as
+DATA (the civil-ifc plugin restates the IFC blend lexics: the spirals as
+linear/polynomial curvature ramps, the cosine/sine/bloss/helmert/viennese
+half-waves as dense sampled or low-degree polynomial tables, bespoke blend
+shapes as piecewise tables; the record-model consistency checks for those
+readings are the plugin's own). The driving ramp IS the law: kappa = ramp
+for the plan plane, gradient = ramp for the profile; a law's deflection is
+its own ramp's integral W(1), nothing normalized behind the declaration.
+Bank/cant corrections do not bend the plane curve — the secondary sheet
+rides along as declared `cross_slope` data. New blend shapes — the cant
+family, custom transitions — join as declared data, never as per-shape
+host code.
+
+**The descriptor-backed grip drag.** The drag pipeline's host-local tier
+(api 14): a class's grip schema may declare a drive —
+`PluginGripSchemaEntry.drives`, a `PluginGripAnchor` naming the segment,
+its end and the record-model anchor law the grip re-anchors — and the
+Begin answer may hand the host the live design plus the same
+tolerance the plugin staged its instance with. When the whole declaration
+is serviceable (the profile chain, the END side), the host re-derives the
+display set LOCALLY per coalesced cursor move through the declared anchor
+law's own generic solve: the ramp's end-sensitive value re-derives per its
+arm's closed integral gain, the EndCurvatureScale route bisects with the
+same 16-doubling + 60-bisect discipline, the downstream joints re-declare
+from the engine's own sampling (each arm's shape preserved), and the
+chain's own audit gates every move's design. No Move frames cross
+the IPC; the per-move restage patches the staged handles in place
+through the visual-only dynamic phase (originals stashed once, zero
+history steps, the byte-identical restore before the settle); the
+plugin's settle callback stays the only write window — records first,
+then the re-stage, exactly one plugin-labeled undo step. Unserved
+declarations (the plan plane, the START side, an out-of-range segment, a
+missing tolerance) fall back to the v12 streaming path with one headline
+in the error queue; older hosts read the new fields as the serde
+defaults and never change behavior.
+
 ## HostApi vs MCP — the two surfaces
 
 The host exposes exactly two programmatic surfaces, and they are separate
@@ -547,6 +724,8 @@ Which surface carries what:
 | Notifications | `events` (the session journal) | `on_notification` (`DocumentChanged`, `DocumentChangedRegions`, …) |
 | Viewport automation | `click`, `pointer`, `getpoint`, `user_select`, `view_focus`, `capture` | — (a plugin's grip events are its gestures) |
 | Reference-only designation | — | `set_reference_only` |
+| Parametric chain staging / sampling (v14) | — (`query` reads the staged entities) | `stage_parametric_chain` / `sample_parametric` |
+| Plugin class objects | — (future: a class/instance browser view) | `register_plugin_class` / `stage_plugin_class_instance`; the instance's declared rows read across the wire (`plugin_class_instance_properties`, the python `ocs` surface names it too) |
 | Files | `new/open/save/save_verified/wblock/plot` | `document_path`, tab lifecycle |
 
 Semantic traps worth knowing before writing a consumer on either side:
@@ -724,13 +903,38 @@ Done:
       `app::serve`). This closes the "drive OCS headless from a process" goal
       of issue #29; this line previously and incorrectly listed it as not yet
       started.
+- [x] Batched record walks + dirty regions + deterministic attach (v13).
+- [x] Parametric display staging + sampling: ramps declared as data
+      (polynomial/piecewise/sampled), audited seams, exact carriers, 
+      reference-only derived display (v14; the species vocabulary lives in
+      plugins — the v2 reshaping of the v14 envelope).
+- [x] Plugin class objects: tab-scoped class registry, host-evaluated design
+      descriptors (the chain kind first), XDATA identity stamps (squashed
+      into the API v14 arc); the grip-edit descriptor hook rides
+      `CustomGripResponse` (inert default).
 
-Next:
+Landed in this branch:
 
-- [ ] Incremental document snapshots instead of cloning `Document` over IPC.
-- [ ] `#[repr(C)]` vtable / strict handshake for cross-toolchain binaries.
-- [ ] Trust: checksums / signatures before spawning plugin processes.
-- [ ] Interchange (LandXML / SWMM) and live `on_entity_committed` hooks.
+- [x] Descriptor-backed grip drags: the Begin descriptor consumed per
+      coalesced move (zero Move frames; the declared `drives` row — the
+      v2 `PluginGripAnchor` with its anchor law — plus the response's
+      per-move tolerance engage the profile-chain END re-anchor through
+      the generic solver; unserved declarations keep the v12 streaming
+      path) — the drag's settle stays the plugin's one write window and
+      the session tests mirror the grip-edit restage arc.
+- [x] Properties-panel parameter editing for plugin class entities: a
+      `PluginClassParameter` schema on the declaration, the panel section
+      bound to selected class-stamped entities, edits through the session's
+      `update_plugin_class_instance_parameter` (XRecord update; one undo
+      step), the plugin re-stages from the record-dirty notification.
+- [x] The generic ramp kernel (v2): the ramp arms are the whole declared
+      vocabulary (polynomial/piecewise/sampled); the exact carriers derive
+      generically (the constant plan classes as Line/Arc, the profile
+      polynomial-slope class as the one from-end-states Hermite), table
+      laws stage measured chords, the Sampled arm carries the stage-time
+      cumulative-integral table, and the plan integrator's swing budget
+      (65 536 half-radian sub-intervals) keeps the surface hang-free past
+      legal-but-absurd curvature data.
 
 ---
 

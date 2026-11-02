@@ -22,25 +22,7 @@ pub struct RibbonContext {
     pub mode: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NewVisibility {
-    Keep,
-    Show,
-    Hide,
-}
-
-impl std::fmt::Display for NewVisibility {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(
-            crate::t!(match self {
-                Self::Keep => "Keep current visibility",
-                Self::Show => "Show all objects",
-                Self::Hide => "Hide all objects",
-            })
-            .as_ref(),
-        )
-    }
-}
+pub use crate::scene::block_visibility::NewStateVisibility as NewVisibility;
 
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -56,6 +38,7 @@ pub enum Action {
     SetCurrent,
     Move(bool),
     Apply,
+    Help,
 }
 
 pub(crate) struct State {
@@ -191,6 +174,7 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
                     .on_press(send(Action::Apply))
                     .style(button::primary),
                 button(text(crate::t!("Cancel").into_owned())).on_press(Message::CloseModal),
+                button(text(crate::t!("Help").into_owned())).on_press(send(Action::Help)),
             ]
             .spacing(8),
         ]

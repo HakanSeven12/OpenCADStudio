@@ -140,6 +140,12 @@ impl CadCommand for ZoomWindowCommand {
         true
     }
 
+    fn wants_raw_point(&self) -> bool {
+        // A display command: the window corners are where the cursor is, not
+        // the nearest object snap, which would pull the window onto geometry.
+        true
+    }
+
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let pt = pt.as_vec3();
         let p1 = self.first?;

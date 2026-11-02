@@ -5188,6 +5188,7 @@ mod tests {
             ],
             &[first_ref],
             true,
+            &[],
         );
 
         let EntityType::Circle(first_circle) = scene.document.get_entity(first).unwrap() else {

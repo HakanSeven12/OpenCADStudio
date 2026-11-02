@@ -1306,32 +1306,54 @@ fn join_strokes(strokes: Vec<Stroke>, join: bool) -> Vec<Stroke> {
             open.push(s);
         }
     }
+    // Endpoints by grid cell, so finding the next stroke of a chain is a
+    // lookup rather than a scan of every open stroke: a dense page has
+    // hundreds of thousands of them (#2285). A cell is the `same_point`
+    // tolerance, so a match is in the point's cell or a neighbouring one.
+    let cell = |p: [f64; 2]| ((p[0] / 1e-7).floor() as i64, (p[1] / 1e-7).floor() as i64);
+    let mut ends: rustc_hash::FxHashMap<(i64, i64), Vec<usize>> = Default::default();
+    for (index, stroke) in open.iter().enumerate() {
+        for p in [stroke.points[0], *stroke.points.last().expect("strokes have points")] {
+            ends.entry(cell(p)).or_default().push(index);
+        }
+    }
+    let mut open: Vec<Option<Stroke>> = open.into_iter().map(Some).collect();
+    // The earliest drawn unused stroke of the chain's kind with an end at `p`.
+    let find = |open: &[Option<Stroke>], chain: &Stroke, p: [f64; 2]| {
+        let (cx, cy) = cell(p);
+        (cx - 1..=cx + 1)
+            .flat_map(|x| (cy - 1..=cy + 1).map(move |y| (x, y)))
+            .filter_map(|key| ends.get(&key))
+            .flatten()
+            .copied()
+            .filter(|&index| {
+                open[index].as_ref().is_some_and(|o| {
+                    o.layer == chain.layer
+                        && o.color == chain.color
+                        && o.weight == chain.weight
+                        && (same_point(o.points[0], p) || same_point(*o.points.last().unwrap(), p))
+                })
+            })
+            .min()
+    };
     // Drawing order is kept: dashes read as a run only in the order drawn.
-    while !open.is_empty() {
-        let mut chain = open.remove(0);
+    for first in 0..open.len() {
+        let Some(mut chain) = open[first].take() else {
+            continue;
+        };
         loop {
             let end = *chain.points.last().expect("strokes have points");
             let start = chain.points[0];
-            let fits = |o: &Stroke| {
-                o.layer == chain.layer && o.color == chain.color && o.weight == chain.weight
-            };
-            if let Some(i) = open.iter().position(|o| {
-                fits(o)
-                    && (same_point(o.points[0], end) || same_point(*o.points.last().unwrap(), end))
-            }) {
-                let mut next = open.remove(i);
+            if let Some(i) = find(&open, &chain, end) {
+                let mut next = open[i].take().expect("found strokes are unused");
                 if !same_point(next.points[0], end) {
                     next.reverse();
                 }
                 chain.points.extend(next.points.into_iter().skip(1));
                 chain.bulges.pop();
                 chain.bulges.extend(next.bulges);
-            } else if let Some(i) = open.iter().position(|o| {
-                fits(o)
-                    && (same_point(*o.points.last().unwrap(), start)
-                        || same_point(o.points[0], start))
-            }) {
-                let mut prev = open.remove(i);
+            } else if let Some(i) = find(&open, &chain, start) {
+                let mut prev = open[i].take().expect("found strokes are unused");
                 if !same_point(*prev.points.last().unwrap(), start) {
                     prev.reverse();
                 }

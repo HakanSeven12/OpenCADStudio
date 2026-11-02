@@ -49,11 +49,14 @@ pub enum BlockScalePolicy {
 // blocks and/or free functions). Pure text-move from the original mod.rs.
 #[cfg(test)]
 mod block_base_point_tests;
+#[cfg(test)]
+mod block_definition_handles_tests;
 mod boundary;
 mod camera_ops;
 #[cfg(test)]
 mod reference_only_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
+pub(crate) mod center_native;
 pub(crate) mod centerline;
 pub(crate) mod centermark;
 pub(crate) mod dimension_assoc;
@@ -65,6 +68,7 @@ mod entity;
 pub use camera_ops::named_view_center;
 pub(crate) use entity::gradient_tint_color;
 pub use entity::CreateBlockOptions;
+pub(crate) use entity::normalize_block_terminators;
 mod group_layer;
 #[cfg(test)]
 mod hatch_boundary;
@@ -1856,11 +1860,15 @@ fn build_derived_caches_impl(
 #[cfg(not(target_arch = "wasm32"))]
 pub fn prepare_open_geometry(
     doc: Document,
-    caches: &DerivedCaches,
+    caches: &mut DerivedCaches,
     model_bg: [f32; 4],
 ) -> (Document, PreparedOpenGeometry) {
     let mut scene = Scene::new();
     scene.document = doc;
+    // Solid meshes give solid wires their corner snaps; lent to the scene
+    // for the build and handed back below.
+    scene.meshes = std::mem::take(&mut caches.meshes);
+    scene.block_meshes = std::mem::take(&mut caches.block_meshes);
     scene.local_extent_max = caches.local_extent_max;
     scene.local_center = caches.local_center;
     scene.bg_color = model_bg;
@@ -1928,6 +1936,8 @@ pub fn prepare_open_geometry(
             .map(|(key, (_epoch, cache))| (key, cache))
             .collect();
     let doc = std::mem::replace(&mut scene.document, Document::new());
+    caches.meshes = std::mem::take(&mut scene.meshes);
+    caches.block_meshes = std::mem::take(&mut scene.block_meshes);
     (
         doc,
         PreparedOpenGeometry {
@@ -2887,6 +2897,9 @@ pub struct Scene {
     /// Centre-mark source → carrier lines. See
     /// [`Self::associative_centerline_source_cache`].
     associative_centermark_source_cache: RefCell<Option<HashMap<Handle, Vec<Handle>>>>,
+    /// Messages for the command line about centre objects an edit just
+    /// detached from their sources; the app prints and clears them.
+    pub(crate) center_notices: Vec<String>,
     /// Conservative association hint: unknown until scanned, then updated from
     /// changed entities. Retaining `true` after deletion only costs an extra scan.
     has_associative_centers: std::cell::Cell<Option<bool>>,
@@ -3324,6 +3337,7 @@ impl Scene {
             associative_hatch_source_cache: RefCell::new(None),
             associative_centerline_source_cache: RefCell::new(None),
             associative_centermark_source_cache: RefCell::new(None),
+            center_notices: Vec::new(),
             parametric_constraints: Vec::new(),
             constraint_name_format: 2,
             dynamic_constraint_display: true,
@@ -3503,7 +3517,13 @@ impl Scene {
         // 1.0). An annotative block scales as ONE unit at the INSERT level, so
         // its internal geometry / text / attributes must NOT be scaled
         // individually because that would apply the same scale twice.
-        let mut built = cache::block_cache::BlockCache::build(
+        let solid_snaps: HashMap<Handle, _> = self
+            .block_meshes
+            .keys()
+            .map(|handle| (*handle, self.solid_snap_points(*handle)))
+            .filter(|(_, points)| !points.is_empty())
+            .collect();
+        let mut built = cache::block_cache::BlockCache::build_with_solid_snaps(
             &self.document,
             1.0,
             annotation_scale_handle,
@@ -3511,6 +3531,7 @@ impl Scene {
             bg,
             viewport,
             &self.draw_depth_map(),
+            &solid_snaps,
         );
         if self.constraint_shading_active() { built.disable_prototypes(); }
         let arc = Arc::new(built);
@@ -4185,6 +4206,32 @@ impl Scene {
             &[],
             true,
             false,
+            None,
+        );
+    }
+
+    /// Apply a newly-created relation. A constraint handler names every
+    /// referenced entity `Modified` before the solve runs, so the delta is
+    /// filtered against the pre-solve copies: only geometry that actually
+    /// moved is published. `pre_move` carries the copies a handler took
+    /// before it nudged geometry onto the relation itself; an empty slice
+    /// makes the copies here, which is right for a handler that wrote none.
+    pub fn bump_entities_after_constraint_added(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        driven_refs: &[parametric_constraints::ParametricRef],
+        retain_size: bool,
+        pre_move: &[(Handle, EntityType)],
+    ) {
+        self.bump_entities_with_solve_policy(
+            changes,
+            driven_refs,
+            retain_size,
+            &[],
+            &[],
+            true,
+            false,
+            Some(pre_move),
         );
     }
 
@@ -4193,23 +4240,26 @@ impl Scene {
         &mut self,
         changes: &[(Handle, ChangeKind)],
     ) {
-        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, false);
+        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, false, None);
     }
 
     /// Refresh display after a restyle that moved no geometry: nothing
     /// associated to these entities is re-resolved or re-solved.
     pub(crate) fn bump_entities_restyled(&mut self, changes: &[(Handle, ChangeKind)]) {
-        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, true);
+        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, true, None);
     }
 
     /// Apply a newly-created ordered relation while temporarily anchoring
     /// its reference side. The anchors guide only this first solve and are
-    /// never added to the persistent constraint graph.
+    /// never added to the persistent constraint graph. `pre_move` carries
+    /// the copies a handler took before it nudged geometry onto the relation
+    /// itself, so the delta still names that geometry.
     pub fn bump_entities_with_initial_parametric_policy(
         &mut self,
         changes: &[(Handle, ChangeKind)],
         fixed_refs: &[parametric_constraints::ParametricRef],
         retain_size: bool,
+        pre_move: &[(Handle, EntityType)],
     ) {
         self.bump_entities_with_solve_policy(
             changes,
@@ -4219,6 +4269,7 @@ impl Scene {
             fixed_refs,
             true,
             false,
+            Some(pre_move),
         );
     }
 
@@ -4237,6 +4288,7 @@ impl Scene {
             transformed_refs,
             true,
             false,
+            None,
         );
     }
 
@@ -4249,7 +4301,30 @@ impl Scene {
         fixed_refs: &[parametric_constraints::ParametricRef],
         solve_parametric: bool,
         appearance_only: bool,
+        report_before: Option<&[(Handle, EntityType)]>,
     ) {
+        // A solve can name an entity it then leaves untouched — a neighbour
+        // that already satisfied the relation, or the datum the solver
+        // anchors. When the caller says its list is speculative, keep the
+        // pre-solve copies so the published delta names only geometry that
+        // actually moved; every refresh below still sees the full list,
+        // because they have to run whether or not the entity ends up
+        // modified.
+        let reported_before: Vec<(Handle, EntityType)> = match report_before {
+            Some(pre_move) => changes
+                .iter()
+                .filter(|(_, kind)| matches!(kind, ChangeKind::Modified))
+                .filter_map(|(handle, _)| {
+                    let snapshot = pre_move
+                        .iter()
+                        .find(|(h, _)| h == handle)
+                        .map(|(_, entity)| entity.clone())
+                        .or_else(|| self.document.get_entity(*handle).cloned())?;
+                    Some((*handle, snapshot))
+                })
+                .collect(),
+            None => Vec::new(),
+        };
         if changes.iter().any(|(handle, kind)| {
             matches!(kind, ChangeKind::Removed)
                 || self
@@ -4336,6 +4411,7 @@ impl Scene {
             // same order and see the same accumulated list.
             let mut refreshed_handles: Option<HashSet<Handle>> = None;
             if self.associative_centers_possible(&changes) {
+                self.note_center_disassociations(&changes);
                 let refreshed = self.refresh_associative_centerlines(&changes);
                 Self::absorb_refreshed(&mut changes, &mut refreshed_handles, refreshed);
                 let refreshed = self.refresh_associative_center_marks(&changes);
@@ -4458,7 +4534,34 @@ impl Scene {
                 }
             }
         }
-        self.push_geometry_delta(epoch, changes, false);
+        self.push_geometry_delta(epoch, Self::reported_changes(changes, &reported_before, &self.document), false);
+    }
+
+    /// The delta names what moved. A `Modified` handle whose entity is
+    /// byte-identical to the pre-solve copy is dropped — the solver
+    /// considered it and left it alone — while added and removed handles,
+    /// and anything the refresh pass appended after the snapshot, are
+    /// always named.
+    fn reported_changes(
+        changes: Vec<(Handle, ChangeKind)>,
+        before: &[(Handle, EntityType)],
+        document: &Document,
+    ) -> Vec<(Handle, ChangeKind)> {
+        if before.is_empty() {
+            return changes;
+        }
+        changes
+            .into_iter()
+            .filter(|(handle, kind)| {
+                if !matches!(kind, ChangeKind::Modified) {
+                    return true;
+                }
+                match before.iter().find(|(h, _)| h == handle) {
+                    Some((_, snapshot)) => document.get_entity(*handle) != Some(snapshot),
+                    None => true,
+                }
+            })
+            .collect()
     }
 
     /// Append the handles an associative refresh re-solved, skipping the ones
@@ -6148,17 +6251,20 @@ impl Scene {
     }
 
     /// Model-space annotation multiplier from the header's CANNOSCALEVALUE
-    /// (paper/drawing factor), converted from paper units into the drawing's
-    /// INSUNITS, so a metre drawing uses 0.001 model units per paper
-    /// millimetre at 1:1. Every path that starts or loads a drawing, or
+    /// (paper/drawing factor). Every path that starts or loads a drawing, or
     /// changes its units, goes through here so it agrees with CANNOSCALE.
+    ///
+    /// Annotation sizes (text heights, DIMTXT, arrow sizes) are in drawing
+    /// units, so the multiplier is the scale's own ratio whatever INSUNITS
+    /// says: 0.2 text at 1:30 is 6 drawing units in a centimetre drawing
+    /// (#2354). A template whose scales are stored already converted (a
+    /// metre drawing's 1:50 as 1 = 0.05) gets its conversion from them.
     pub(crate) fn sync_annotation_scale_from_header(&mut self) {
         let cannoscale_value = self.document.header.annotation_scale_value;
-        let unit_factor = self.annotation_scale_unit_factor();
         self.annotation_scale = if cannoscale_value > 1e-9 {
-            ((1.0 / cannoscale_value) / unit_factor) as f32
+            (1.0 / cannoscale_value) as f32
         } else {
-            (1.0 / unit_factor) as f32
+            1.0
         };
     }
 
@@ -6540,18 +6646,13 @@ impl Scene {
 
     pub fn set_annotation_scale_named(&mut self, name: &str) -> Option<Handle> {
         let handle = self.scale_handle_ensuring(name)?;
-        let unit_factor = self.annotation_scale_unit_factor();
 
         let (scale_name, scale_factor, multiplier) = {
             let ObjectType::Scale(scale) = self.document.objects.get(&handle)? else {
                 return None;
             };
 
-            (
-                scale.name.clone(),
-                scale.factor(),
-                scale.inverse_factor() / unit_factor,
-            )
+            (scale.name.clone(), scale.factor(), scale.inverse_factor())
         };
 
         self.annotation_scale = multiplier as f32;
@@ -6702,9 +6803,7 @@ impl Scene {
         let scale = self.displayed_annotation_scale_handle();
         let model_per_paper = scale
             .and_then(|scale| match self.document.objects.get(&scale) {
-                Some(ObjectType::Scale(scale)) => {
-                    Some(scale.inverse_factor() / self.annotation_scale_unit_factor())
-                }
+                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale as f64);
@@ -7402,13 +7501,9 @@ impl Scene {
     }
 
     fn viewport_annotation_multiplier(&self, viewport: Handle) -> f32 {
-        let unit_factor = self.annotation_scale_unit_factor();
-
         self.viewport_scale_handle(viewport)
             .and_then(|handle| match self.document.objects.get(&handle) {
-                Some(ObjectType::Scale(scale)) => {
-                    Some((scale.inverse_factor() / unit_factor) as f32)
-                }
+                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor() as f32),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale)
@@ -15535,9 +15630,9 @@ mod journal_tests {
 
         let mut document = Document::new();
         document.add_entity(line(0.0)).unwrap();
-        let caches = build_derived_caches_impl(&document, None, None);
+        let mut caches = build_derived_caches_impl(&document, None, None);
         let model_bg = [0.0, 0.0, 0.0, 1.0];
-        let (document, prepared) = prepare_open_geometry(document, &caches, model_bg);
+        let (document, prepared) = prepare_open_geometry(document, &mut caches, model_bg);
         assert!(prepared.resident_layout.is_some());
         assert!(prepared.entity_index.is_some());
 

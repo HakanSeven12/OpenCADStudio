@@ -1711,14 +1711,12 @@ pub fn tessellate(
                         });
                     }
                 }
-                // Empty input (no glyphs) → emit a single empty wire so the
-                // entity still has a hit-test target via snap_pts. With SDF on
-                // this is the normal path (strokes suppressed) and the wire
-                // also carries the glyph quads built above.
-                if bins.is_empty() {
+                // Built for both branches below: text with run-less strokes
+                // (underline, a fraction rule) takes the stroke route, and its
+                // mask and frame must not be lost there.
+                let mtext_chrome = || {
                     let mut wires: Vec<WireModel> = Vec::new();
-                    wires.extend(field_background.take());
-                    // MTEXT background and frame follow the glyph bounds.
+                    // MTEXT background mask and frame follow the glyph bounds.
                     if text_aabb != WireModel::UNBOUNDED_AABB {
                         if let EntityType::MText(m) = entity {
                             let has_fill = m.background_fill_flags & 0x03 != 0;
@@ -1854,6 +1852,16 @@ pub fn tessellate(
                             }
                         }
                     }
+                    wires
+                };
+                // Empty input (no glyphs) → emit a single empty wire so the
+                // entity still has a hit-test target via snap_pts. With SDF on
+                // this is the normal path (strokes suppressed) and the wire
+                // also carries the glyph quads built above.
+                if bins.is_empty() {
+                    let mut wires: Vec<WireModel> = Vec::new();
+                    wires.extend(field_background.take());
+                    wires.extend(mtext_chrome());
                     // Debug (env OCS_TEXT_BOX): draw a rectangle around the glyph
                     // bounds as a separate outline wire so the text box is
                     // visible for testing. The empty text wire below is left
@@ -1950,6 +1958,7 @@ pub fn tessellate(
 
                 let mut out: Vec<WireModel> = Vec::new();
                 out.extend(field_background);
+                out.extend(mtext_chrome());
                 let mut is_first = true;
                 for bin in bins {
                     let wire_color = match bin.color {
@@ -2488,6 +2497,8 @@ pub fn tessellate(
                 station_pieces,
                 source_length,
                 plinegen,
+                separate_runs,
+                solid,
             } => {
                 let (local_pts, local_pts_low) = points_to_ds(points);
                 let key_vertices = te
@@ -2501,7 +2512,7 @@ pub fn tessellate(
                     &point_segments,
                     &station_pieces,
                 );
-                return vec![WireModel {
+                let base = WireModel {
                     bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
@@ -2537,7 +2548,57 @@ pub fn tessellate(
                     fill_tris_low: Vec::new(),
 
                     ..Default::default()
-                }];
+                };
+                let mut wires = Vec::new();
+                if separate_runs {
+                    let mut start = 0;
+                    while start < base.points.len() {
+                        let end = base.points[start..]
+                            .iter()
+                            .position(|point| point[0].is_nan())
+                            .map_or(base.points.len(), |offset| start + offset);
+                        if end > start + 1 {
+                            // Snap and pick data ride on one wire only.
+                            wires.push(WireModel {
+                                points: base.points[start..end].to_vec(),
+                                points_low: base.points_low[start..end].to_vec(),
+                                pattern_stations: Vec::new(),
+                                plinegen: true,
+                                snap_pts: Vec::new(),
+                                tangent_geoms: Vec::new(),
+                                key_vertices: Vec::new(),
+                                ..base.clone()
+                            });
+                        }
+                        start = end + 1;
+                    }
+                } else if !base.points.is_empty() {
+                    wires.push(base.clone());
+                }
+                if !solid.is_empty() || (separate_runs && wires.is_empty()) {
+                    let (solid_pts, solid_pts_low) = points_to_ds(solid);
+                    let mut solid_wire = WireModel {
+                        points: solid_pts,
+                        points_low: solid_pts_low,
+                        pattern_stations: Vec::new(),
+                        pattern_length: 0.0,
+                        pattern: [0.0; 8],
+                        ..base
+                    };
+                    if !separate_runs {
+                        solid_wire.snap_pts = Vec::new();
+                        solid_wire.tangent_geoms = Vec::new();
+                        solid_wire.key_vertices = Vec::new();
+                    }
+                    wires.push(solid_wire);
+                } else if separate_runs {
+                    if let Some(first) = wires.first_mut() {
+                        first.snap_pts = base.snap_pts;
+                        first.tangent_geoms = base.tangent_geoms;
+                        first.key_vertices = base.key_vertices;
+                    }
+                }
+                return wires;
             }
 
             RenderObject::SegmentedLines(points) => {
@@ -4011,5 +4072,46 @@ mod tests {
         assert_eq!(inst.start_width, 25.0);
         // params.w (end_width) is at end_angle (physical start, 5.0)
         assert_eq!(inst.params[3], 5.0);
+    }
+
+    #[test]
+    fn mtext_mask_and_frame_draw_on_text_with_run_less_strokes() {
+        // An underline or a fraction rule is a run-less stroke, which sends
+        // the text down the stroke route; its mask and frame are drawn there
+        // too, exactly as for plain text.
+        let wires = |value: &str, flags: i32| {
+            let mut text =
+                codec::entities::MText::with_value(value, codec::types::Vector3::new(0., 0., 0.));
+            text.height = 2.5;
+            text.background_fill_flags = flags;
+            text.background_color = codec::types::Color::Index(1);
+            tessellate(
+                &codec::Document::new(),
+                Handle::new(123),
+                &EntityType::MText(Box::new(text)),
+                false,
+                [1.0; 4],
+                0.0,
+                [0.0; 8],
+                1.0,
+                1.0,
+                None,
+                None,
+                [0.0; 4],
+                false,
+            )
+        };
+        for value in ["plain", r"\Lunder\l", r"a\S1/2;"] {
+            let bare = wires(value, 0);
+            let fill = wires(value, 0x01);
+            assert_eq!(fill.len(), bare.len() + 1, "{value}: fill");
+            assert!(
+                fill.iter()
+                    .any(|w| !w.fill_tris.is_empty() && w.points.is_empty()),
+                "{value}: the fill is a filled wire"
+            );
+            assert_eq!(wires(value, 0x02).len(), bare.len() + 1, "{value}: mask");
+            assert_eq!(wires(value, 0x10).len(), bare.len() + 1, "{value}: frame");
+        }
     }
 }

@@ -446,10 +446,15 @@ impl OpenCADStudio {
             if !xd.is_empty() && !matches!(source_entity, codec::EntityType::Ole2Frame(_)) {
                 let mut xd_props = Vec::new();
                 // A hyperlink shows on its own row; inspection data is the
-                // dimension's own.
+                // dimension's own; a centre object's association shows as its
+                // own Geometry rows (the stored object carries no such data).
                 for rec in xd.records().iter().filter(|rec| {
                     rec.application_name != crate::scene::hyperlink::APP
                         && rec.application_name != crate::entities::dim_inspect::APP
+                        && rec.application_name
+                            != codec::entities::CENTERMARK_XDATA_APPLICATION
+                        && rec.application_name
+                            != codec::entities::CENTERLINE_XDATA_APPLICATION
                 }) {
                     let value_text = rec
                         .values
@@ -789,6 +794,26 @@ impl OpenCADStudio {
             }
         }
 
+        // Centre marks and centre lines: the General rows end with whether
+        // the object still follows its source (read-only), as the reference
+        // lists them; a line's thickness and handle rows are not shown.
+        if let Some((_, associated)) = self.tabs[i].scene.center_object_state(handle) {
+            for section in sections.iter_mut() {
+                section
+                    .props
+                    .retain(|property| !matches!(property.field, "handle" | "thickness"));
+            }
+            if let Some(general) = sections.first_mut() {
+                general.props.push(crate::scene::model::object::Property {
+                    label: t!("Associative").into_owned(),
+                    field: "associative",
+                    value: crate::scene::model::object::PropValue::ReadOnly(
+                        if associated { t!("Yes") } else { t!("No") }.into_owned(),
+                    ),
+                });
+            }
+        }
+
         // Inject DimStyle picker + style-derived groups for Dimensions.
         if let codec::EntityType::Dimension(d) = entity {
             if let Some(general) = sections.first_mut() {
@@ -906,10 +931,19 @@ impl OpenCADStudio {
             // unit-scale factor against the drawing's INSUNITS.
             codec::EntityType::Insert(ins) => {
                 let host = doc.header.insertion_units;
-                let src = doc
-                    .block_records
-                    .get(&ins.block_name)
-                    .map(|br| br.units)
+                // An evaluated instance is named `*U…`; the row shows the
+                // definition it belongs to, and that definition carries the
+                // units the reference was authored in.
+                let (display_name, definition, _) =
+                    crate::app::control::block_ops::resolve_effective_block(doc, ins);
+                let src = definition
+                    .and_then(|handle| {
+                        doc.block_records
+                            .iter()
+                            .find(|record| record.handle == handle)
+                    })
+                    .or_else(|| doc.block_records.get(&ins.block_name))
+                    .map(|record| record.units)
                     .unwrap_or(0);
                 set_row(&mut sections, "block_unit", insunits_name(src).to_string());
                 let factor = insert_unit_scale(host, src).unwrap_or(1.0);
@@ -944,6 +978,8 @@ impl OpenCADStudio {
                             options,
                         },
                     );
+                } else {
+                    set_row(&mut sections, "block", display_name);
                 }
                 if let Some(br) = doc
                     .block_records
@@ -967,12 +1003,13 @@ impl OpenCADStudio {
                     for property in &mut custom_properties {
                         property.value = match &property.value {
                             crate::scene::model::object::PropValue::BlockNumber { value, description, .. } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip { value: value.clone(), tooltip: description.clone() },
-                            crate::scene::model::object::PropValue::BlockChoice { selected, options, description, .. } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip { value: options.get(*selected).cloned().unwrap_or_else(|| t!("Custom").into_owned()), tooltip: description.clone() },
+                            crate::scene::model::object::PropValue::BlockChoice { selected, options, description, .. } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip { value: crate::ui::properties::choice_cell_text(options, *selected), tooltip: description.clone() },
                             value => value.clone(),
                         };
                     }
                 }
                 custom_properties.extend(Self::visibility_property(doc, handle));
+                custom_properties.extend(Self::visible_blocks_property(doc, handle));
                 if !custom_properties.is_empty() {
                     sections.push(crate::scene::model::object::PropSection {
                         title: t!("Custom").into_owned(),
@@ -1257,6 +1294,12 @@ impl OpenCADStudio {
                 use codec::entities::table::{
                     CellEdgeFlags, CellStylePropertyFlags, CellValueType,
                 };
+                // A table shows its linetype scale but does not take one.
+                set_row(
+                    &mut sections,
+                    "linetype_scale",
+                    crate::entities::common::format_length(table.common.linetype_scale),
+                );
 
                 let mut names: Vec<String> = doc
                     .objects
@@ -1304,6 +1347,18 @@ impl OpenCADStudio {
                 let flow_up = crate::entities::table::resolved_flow_up(table, selected_style);
                 let (horizontal_margin, vertical_margin) =
                     crate::entities::table::resolved_table_margins(table, selected_style);
+                // A spacing the table never stored shows its default: five
+                // and a half data-text heights (0.18 high text without data rows).
+                if table.break_spacing <= 0.0 {
+                    let data_height = selected_style
+                        .filter(|_| table.rows.len() > 2)
+                        .map_or(0.18, |style| style.data_row_style.text_height);
+                    update_row_text(
+                        &mut sections,
+                        "tbl_break_spacing",
+                        crate::entities::common::format_length(5.5 * data_height),
+                    );
+                }
                 update_row_toggle(&mut sections, "tbl_title_suppressed", title_suppressed);
                 update_row_toggle(&mut sections, "tbl_header_suppressed", header_suppressed);
                 update_row_text(
@@ -1548,7 +1603,6 @@ impl OpenCADStudio {
                 codec::EntityType::MultiLeader(_) => Some(("annotative", None)),
                 codec::EntityType::Dimension(_) => Some(("annotative", Some("style_name"))),
                 codec::EntityType::Tolerance(_) => Some(("annotative", Some("tol_dim_style"))),
-                codec::EntityType::Table(_) => Some(("annotative", Some("tbl_style_handle"))),
                 _ => None,
             };
             if let Some((anno_field, insert_after)) = anno {
@@ -1832,6 +1886,64 @@ impl OpenCADStudio {
         (sections, title)
     }
 
+    /// The "Plugin class parameters" section (API v14): binds to ONE
+    /// selected entity whose XDATA carries a registered class key. The
+    /// section exists only when the stamp resolves to the LIVE declaration
+    /// (schema match — a stale stamp re-stages instead of rendering). A
+    /// reference-only (host-staged) instance renders every row read-only;
+    /// the source line points at the owning record row either way — the
+    /// values live on the record layer, the host never invents semantics
+    /// for a name or kind the declaration does not spell.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn plugin_class_parameter_section(
+        &self,
+        i: usize,
+        handle: codec::Handle,
+    ) -> Option<crate::scene::model::object::PropSection> {
+        use crate::scene::model::object::{PropSection, PropValue, Property};
+        let binding =
+            crate::app::plugin_host::resolve_plugin_class_binding(self, i, handle).ok()?;
+        let reference_only = self.tabs[i].scene.is_reference_only(handle);
+        let mut rows = crate::app::plugin_host::rows_from_schema(&binding);
+        if !binding.design_record.is_empty() {
+            if let Ok((_, entries)) = crate::app::plugin_host::find_design_record_entries(
+                self, i, handle, &binding.design_record,
+            ) {
+                if let Ok(read_rows) =
+                    crate::app::plugin_host::rows_from_entries(&binding, &entries)
+                {
+                    rows = read_rows;
+                }
+            }
+        }
+        let mut props = Vec::new();
+        let source = if binding.design_record.is_empty() {
+            crate::t!("No record linkage on the identity stamp").into_owned()
+        } else {
+            crate::tf!("Values on record {}", binding.design_record).into_owned()
+        };
+        props.push(Property {
+            label: crate::t!("Source").into_owned(),
+            field: "plugin_class_source",
+            value: PropValue::ReadOnly(source),
+        });
+        for row in rows {
+            props.push(Property {
+                label: row.name.clone(),
+                field: "plugin_class_parameter",
+                value: PropValue::PluginParam {
+                    name: row.name,
+                    value: row.value.unwrap_or_default(),
+                    editable: row.editable && !reference_only,
+                },
+            });
+        }
+        Some(PropSection {
+            title: crate::t!("Plugin class parameters").into_owned(),
+            props,
+        })
+    }
+
     pub(super) fn refresh_properties(&mut self) {
         // A 186 468-entity selection spends ~112 ms in here. Split it into the
         // three phases that can own that: resolving the selected handles,
@@ -1962,7 +2074,8 @@ impl OpenCADStudio {
         } else {
             prop_vertex
         };
-        let prop_vertex_indicator_active = if cur_handles == prev_handles {
+        let same_selection = cur_handles == prev_handles;
+        let prop_vertex_indicator_active = if same_selection {
             self.tabs[i].properties.prop_vertex_indicator_active
         } else {
             false
@@ -1972,7 +2085,7 @@ impl OpenCADStudio {
         crate::entities::table::set_prop_current_cell_active(prop_vertex_indicator_active);
 
         let annotation_scale_handle = self.tabs[i].scene.displayed_annotation_scale_handle();
-        let new_panel = {
+        let mut new_panel = {
             let selected = self.tabs[i].scene.selected_entities();
             let mut panel = match selected.len() {
                 0 => {
@@ -2575,9 +2688,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                     crate::scene::block_authoring::edit::Part::End => "End point",
                                     crate::scene::block_authoring::edit::Part::Reference =>
                                         "Reference point",
-                                    crate::scene::block_authoring::edit::Part::Label(0) =>
-                                        "Label position",
-                                    _ => "Second label position",
+                                    _ => "Label position",
                                 })
                                 .into_owned(),
                                 field: "authoring_grip_position",
@@ -2648,21 +2759,35 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                             ],
                         });
                     }
-                    if let Some((chain_actions, value_sets)) =
+                    if let Some(definition) = self.tabs[i].active_block_edit_session().map(|session| session.br_handle) {
+                        if let Some(current) = crate::scene::block_actions::chain::label(
+                            &self.tabs[i].scene.document, definition, item.handle) {
+                            panel.sections.push(PropSection {
+                                title: crate::t!("Action chain").into_owned(),
+                                props: vec![Property {
+                                    label: crate::t!("Chain to").into_owned(),
+                                    field: "authoring_action_chain",
+                                    value: PropValue::EditText(current),
+                                }],
+                            });
+                        }
+                    }
+                    if let Some((chaining, value_sets)) =
                         self.authoring_parameter_properties(item.handle)
                     {
-                        panel.sections.push(PropSection {
-                            title: crate::t!("Behavior").into_owned(),
-                            props: vec![Property {
-                                label: crate::t!("Chain actions").into_owned(),
-                                field: "authoring_chain_actions_state",
-                                value: PropValue::ReadOnly(if chain_actions {
-                                    crate::t!("Enabled (unsupported)").into_owned()
-                                } else {
-                                    crate::t!("Disabled").into_owned()
-                                }),
-                            }],
-                        });
+                        if let Some(chain_actions) = chaining {
+                            panel.sections.push(PropSection {
+                                title: crate::t!("Behavior").into_owned(),
+                                props: vec![Property {
+                                    label: crate::t!("Chain actions").into_owned(),
+                                    field: "authoring_chain_actions",
+                                    value: PropValue::BoolToggle {
+                                        field: "authoring_chain_actions",
+                                        value: chain_actions,
+                                    },
+                                }],
+                            });
+                        }
                         if !value_sets.is_empty() {
                             let mut props = Vec::new();
                             for (key, label, value_set) in value_sets {
@@ -2823,6 +2948,18 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
             // `PropSyncActive`; derived from `sections`, so rebuild it here.
             panel.field_key_by_id = crate::ui::properties::build_field_key_map(&panel.sections);
             let new_handles: Vec<codec::Handle> = selected.iter().map(|(h, _)| *h).collect();
+            // The plugin class parameter surface (API v14): one stamped
+            // selection rides its class's declared rows. Only the native build
+            // carries plugin classes (the wasm build has no plugin registry the
+            // section could bind to).
+            #[cfg(not(target_arch = "wasm32"))]
+            if new_handles.len() == 1 {
+                if let Some(section) = self.plugin_class_parameter_section(i, new_handles[0]) {
+                    panel.sections.push(section);
+                    panel.field_key_by_id =
+                        crate::ui::properties::build_field_key_map(&panel.sections);
+                }
+            }
             // Carry the in-progress edits only when the selection is unchanged
             // (a commit-triggered rebuild); a genuine selection change starts
             // with a clean buffer so no stale value leaks onto the new entity.
@@ -2886,6 +3023,24 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
             }
             panel
         };
+        // An open dynamic-value list belongs to the row it was opened from, so
+        // the rebuild keeps it only while that row is still on the panel.
+        let old_panel = &self.tabs[i].properties;
+        let keeps_picker = old_panel.open_block_picker.is_some_and(|(open, _)| {
+            same_selection
+                && new_panel.sections.iter().any(|section| {
+                    section.props.iter().any(|property| {
+                        matches!(
+                            &property.value,
+                            crate::scene::model::object::PropValue::BlockChoice { key, .. }
+                                if *key == open
+                        )
+                    })
+                })
+        });
+        if keeps_picker {
+            new_panel.open_block_picker = old_panel.open_block_picker;
+        }
 
         self.tabs[i].properties = new_panel;
         self.refresh_selected_grips();
@@ -3183,10 +3338,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 let anno_scale = annotation_scale_handle
                     .and_then(
                         |handle| match self.tabs[i].scene.document.objects.get(&handle) {
-                            Some(codec::objects::ObjectType::Scale(scale)) => Some(
-                                scale.inverse_factor()
-                                    / self.tabs[i].scene.annotation_scale_unit_factor(),
-                            ),
+                            Some(codec::objects::ObjectType::Scale(scale)) => {
+                                Some(scale.inverse_factor())
+                            }
                             _ => None,
                         },
                     )
@@ -3654,12 +3808,24 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             codec::entities::CenterMarkAssociation::read(&entity.common().extended_data).is_some();
         if center_line || center_mark {
             let settings = self.tabs[i].scene.centerline_settings();
-            if !settings.layer.eq_ignore_ascii_case("Current") {
-                entity.common_mut().layer = settings.layer;
+            // CENTERLAYER: "." is the current layer; a named layer is made
+            // when the drawing does not have it yet.
+            let layer = settings.layer.trim();
+            if !layer.is_empty() && layer != "." {
+                self.tabs[i].scene.ensure_layer(layer);
+                entity.common_mut().layer = layer.to_string();
             }
-            if !settings.linetype.eq_ignore_ascii_case("Current") {
-                entity.common_mut().linetype = settings.linetype;
-            }
+            // CENTERLTYPE: empty is CENTER2, "." the current linetype.
+            let linetype = match settings.linetype.trim() {
+                "" => "CENTER2".to_string(),
+                "." => self.tabs[i].scene.document.header.current_linetype_name.clone(),
+                other => other.to_string(),
+            };
+            crate::io::linetypes::ensure_catalog_linetype(
+                &mut self.tabs[i].scene.document,
+                &linetype,
+            );
+            entity.common_mut().linetype = linetype;
             entity.common_mut().linetype_scale = settings.linetype_scale;
             let application = if center_mark {
                 codec::entities::CENTERMARK_XDATA_APPLICATION
@@ -3859,6 +4025,7 @@ fn make_sections_read_only(
             }
             PropValue::Stepper { display, .. } => display.clone(),
             PropValue::AttrText { value, .. } => value.clone(),
+            PropValue::PluginParam { value, .. } => value.clone(),
             // The Constraints/Parameters sections aren't per-entity editable
             // fields to begin with (a constraint link is a navigation
             // action, not a value; a parameter belongs to the whole

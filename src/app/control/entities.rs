@@ -65,12 +65,6 @@ impl OpenCADStudio {
     /// layers they name, and commit everything as one undoable step. All definitions are validated before the first
     /// entity is added, so the batch is all-or-nothing.
     pub(super) fn control_entities_create(&mut self, req: &Value) -> Result<Task<Message>, Value> {
-        if self.tabs[self.active_tab].scene.block_edit_block.is_some() {
-            return Err(failure(
-                "block_editor_open",
-                "finish the open block editor before adding entities to a block",
-            ));
-        }
         let list = req["entities"]
             .as_array()
             .filter(|v| !v.is_empty())
@@ -81,6 +75,38 @@ impl OpenCADStudio {
                 .map(|spec| build_entity(spec, Some(document)))
                 .collect::<Parsed<_>>()?
         };
+        // New geometry lands in the definition the editor has open, so an
+        // INSERT naming that definition would nest it inside itself. The
+        // interactive insert path refuses the same cycle.
+        {
+            let scene = &self.tabs[self.active_tab].scene;
+            if let Some(container) = scene.block_edit_block.and_then(|definition| {
+                scene
+                    .document
+                    .block_records
+                    .iter()
+                    .find(|record| record.handle == definition)
+                    .map(|record| record.name.clone())
+            }) {
+                for entity in &built {
+                    if let codec::EntityType::Insert(insert) = entity {
+                        if crate::scene::block_service::would_create_cycle(
+                            &scene.document,
+                            &container,
+                            &insert.block_name,
+                        ) {
+                            return Err(failure(
+                                "block_cycle",
+                                crate::scene::block_service::circular_dependency_error(
+                                    &container,
+                                    &insert.block_name,
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
 
         let i = self.active_tab;
         self.push_undo_snapshot(i, "ENTITIESCREATE");

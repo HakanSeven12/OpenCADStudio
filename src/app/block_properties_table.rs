@@ -54,6 +54,7 @@ impl OpenCADStudio {
             rows,
             error: None,
             notice: None,
+            confirm_close: false,
         });
         self.active_modal = Some(ModalKind::BlockPropertiesTable);
         Task::none()
@@ -61,7 +62,19 @@ impl OpenCADStudio {
     pub(super) fn handle_block_properties_table(&mut self, action: Action) -> Task<Message> {
         if !matches!(action, Action::Apply) {
             if let Some(state) = self.block_properties_table.as_mut() {
-                state.edit(action);
+                match action {
+                    Action::DiscardClose => {
+                        // Leaving this way is the same as pressing `Cancel`.
+                        self.close_active_modal();
+                        return Task::none();
+                    }
+                    Action::KeepEditing => {
+                        // The diagnosis stays on screen; only the offer goes.
+                        state.confirm_close = false;
+                        return Task::none();
+                    }
+                    _ => state.edit(action),
+                }
             }
             return Task::none();
         }
@@ -75,8 +88,12 @@ impl OpenCADStudio {
                 match value.trim().parse::<f64>() {
                     Ok(value) if value.is_finite() => parsed.push(value),
                     _ => {
-                        self.block_properties_table.as_mut().unwrap().error =
+                        let state = self.block_properties_table.as_mut().unwrap();
+                        state.error =
                             Some(crate::t!("Each cell must be a finite number.").into_owned());
+                        // Refusing the table is not a reason to hold the operator inside
+                        // the dialog: offer the way out along with the diagnosis.
+                        state.confirm_close = true;
                         return Task::none();
                     }
                 }
@@ -118,8 +135,9 @@ impl OpenCADStudio {
             &cells,
             state.must_match,
         ) {
-            self.block_properties_table.as_mut().unwrap().error =
-                Some(crate::t!(error).into_owned());
+            let state = self.block_properties_table.as_mut().unwrap();
+            state.error = Some(crate::t!(error).into_owned());
+            state.confirm_close = true;
             return Task::none();
         }
         self.push_undo_snapshot(i, "Block Properties Table");

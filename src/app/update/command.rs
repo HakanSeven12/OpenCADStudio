@@ -195,6 +195,7 @@ impl OpenCADStudio {
                 self.grip_pending = None;
                 self.visibility_popup = None;
                 self.table_popup = None;
+                self.flip_popup = None;
                 self.grip_popup = None;
                 self.grip_hover = None;
             }
@@ -370,6 +371,20 @@ impl OpenCADStudio {
                     self.command_line.input.push_str(&s);
                 }
             } else {
+                // A letter after digits typed into a field makes the whole
+                // entry an option keyword such as `2P` or `3P` (#2312).
+                if s.starts_with(|c: char| c.is_alphabetic())
+                    && self.command_line.input.is_empty()
+                    && self.dyn_input
+                    && !self.tabs[i].dyn_fields.is_empty()
+                {
+                    let a = self.tabs[i]
+                        .dyn_active
+                        .min(self.tabs[i].dyn_fields.len() - 1);
+                    if let Some(typed) = self.tabs[i].dyn_fields[a].buffer.take() {
+                        self.command_line.input = typed;
+                    }
+                }
                 // Preserve case while entering a command or literal/free-text
                 // value. Active single-token prompt keywords keep their
                 // established uppercase normalization.
@@ -1305,7 +1320,12 @@ impl OpenCADStudio {
             self.resolve_user_select(false);
             return Task::none();
         }
-        if self.ribbon.escape_extension() {
+        if self.ribbon.escape_search()
+            || self.ribbon.close_menu()
+            || self.ribbon.close_app_menu()
+            || self.ribbon.escape_extension()
+            || self.ribbon.close_popup()
+        {
             return Task::none();
         }
         if self.awaiting_fill_close_answer() {
@@ -1319,8 +1339,12 @@ impl OpenCADStudio {
         self.snapper.clear_override();
         // Clear the deferred snap dwell — the command is being cancelled.
         self.snap_dwell = None;
-        // Open MText editor swallows Escape (cancel without committing).
-        if self.mtext_editor.is_some() {
+        // Open MText editor swallows Escape (cancel without committing). An
+        // open menu or the colour list closes first, one per Escape.
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            if ed.menu.take().is_some() || std::mem::take(&mut ed.color_picker_open) {
+                return Task::none();
+            }
             self.mtext_cancel();
             return self.post_editor_closed(false);
         }
@@ -1392,6 +1416,9 @@ impl OpenCADStudio {
         if self.table_popup.take().is_some() {
             return Task::none();
         }
+        if self.flip_popup.take().is_some() {
+            return Task::none();
+        }
         if self.visibility_popup.take().is_some() {
             self.table_popup = None;
             return Task::none();
@@ -1433,6 +1460,17 @@ impl OpenCADStudio {
         }
         if self.layout_rename_state.take().is_some() {
             return Task::none();
+        }
+        // A palette cell holding typed text reverts first: the value goes
+        // back to the model's and the row keeps its focus and its
+        // reference selected. A second Esc then escalates as usual.
+        if self.tabs[i_e].active_cmd.is_none() {
+            let panel = &mut self.tabs[i_e].properties;
+            if let Some(key) = panel.active_field.clone() {
+                if panel.edit_buf.remove(&key).is_some() {
+                    return Task::none();
+                }
+            }
         }
         // Typed text on the command line cancels first — one
         // Esc empties the buffer, a second Esc then escalates
@@ -4672,6 +4710,42 @@ impl OpenCADStudio {
         self.invalidate_property_targets(i, &handles);
         self.tabs[i].dirty = true;
         self.refresh_properties();
+        Task::none()
+    }
+
+    /// Commit one plugin class parameter's edit (API v14): the stamped
+    /// selection writes through the session's class-parameter path — one
+    /// undo step inside the record update, the declaring plugin re-stages
+    /// from the record's dirty notification; a refusal (unknown or
+    /// non-editable parameter, unparseable value, unresolved record)
+    /// reports and changes nothing. The section binds to one entity and
+    /// exists only on the native build (the wasm build has no plugin
+    /// registry the section could bind to), so the wasm route stays inert.
+    pub(super) fn on_prop_plugin_param_commit(&mut self, name: String) -> Task<Message> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let i = self.active_tab;
+            self.tabs[i].properties.active_field = None;
+            let key = crate::ui::properties::plugin_param_edit_key(&name);
+            let handles = self.property_target_handles(i);
+            if handles.len() != 1 {
+                return Task::none();
+            }
+            let Some(value) = self.tabs[i].properties.edit_buf.remove(&key) else {
+                return Task::none();
+            };
+            let result;
+            {
+                let mut host = crate::app::plugin_host::HostSession::new(self, i);
+                result = host.update_plugin_class_instance_parameter(handles[0], &name, &value);
+            }
+            if let Err(err) = result {
+                self.command_line.push_error(&err);
+            }
+            self.refresh_properties();
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = name;
         Task::none()
     }
 

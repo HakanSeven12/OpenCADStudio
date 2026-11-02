@@ -11,6 +11,7 @@ use iced::widget::{
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
+use crate::entities::common::{coordinate_text, parse_length};
 use crate::scene::WireModel;
 use crate::modules::draw::units;
 use crate::t;
@@ -67,6 +68,10 @@ pub struct BlockDefinitionState {
     pub scale_uniformly: bool,
     pub allow_exploding: bool,
     pub unit: i16,
+    /// LUPREC — how many decimals the base point fields show. The fields are
+    /// typed back, so they always print plain decimals rather than the
+    /// drawing's formatted length style.
+    pub precision: i16,
     pub description: String,
     pub description_content: text_editor::Content,
     pub hyperlink_url: String,
@@ -102,6 +107,7 @@ impl Clone for BlockDefinitionState {
             scale_uniformly: self.scale_uniformly,
             allow_exploding: self.allow_exploding,
             unit: self.unit,
+            precision: self.precision,
             description: self.description.clone(),
             description_content: text_editor::Content::with_text(&self.description),
             hyperlink_url: self.hyperlink_url.clone(),
@@ -117,18 +123,24 @@ impl Clone for BlockDefinitionState {
 }
 
 impl BlockDefinitionState {
-    pub fn new(existing_names: Vec<String>, pre_selected: Vec<Handle>, default_unit: i16) -> Self {
+    pub fn new(
+        existing_names: Vec<String>,
+        pre_selected: Vec<Handle>,
+        default_unit: i16,
+        precision: i16,
+    ) -> Self {
         // The on-screen switches, the conversion and Allow exploding start
         // where the dialog was last confirmed.
         let remembered = *crate::modules::insert::block_cmdline::defaults();
+        let zero = coordinate_text(0.0, precision);
         Self {
             name: String::new(),
             name_combo: combo_box::State::new(existing_names.clone()),
             existing_names,
             base_point_specify_onscreen: remembered.base_on_screen,
-            base_point_x: "0".to_string(),
-            base_point_y: "0".to_string(),
-            base_point_z: "0".to_string(),
+            base_point_x: zero.clone(),
+            base_point_y: zero.clone(),
+            base_point_z: zero,
             objects_specify_onscreen: remembered.objects_on_screen,
             selected_handles: pre_selected,
             object_mode: remembered.mode,
@@ -137,6 +149,7 @@ impl BlockDefinitionState {
             scale_uniformly: false,
             allow_exploding: remembered.allow_exploding,
             unit: default_unit,
+            precision,
             description: String::new(),
             description_content: text_editor::Content::new(),
             hyperlink_url: String::new(),
@@ -151,19 +164,19 @@ impl BlockDefinitionState {
     }
 
     pub fn parse_base_point(&self) -> glam::DVec3 {
-        let x = self.base_point_x.trim().parse::<f64>().unwrap_or(0.0);
-        let y = self.base_point_y.trim().parse::<f64>().unwrap_or(0.0);
-        let z = self.base_point_z.trim().parse::<f64>().unwrap_or(0.0);
+        let x = parse_length(&self.base_point_x).unwrap_or(0.0);
+        let y = parse_length(&self.base_point_y).unwrap_or(0.0);
+        let z = parse_length(&self.base_point_z).unwrap_or(0.0);
         glam::DVec3::new(x, y, z)
     }
 
-    /// Prefill the base point fields from an existing definition, so
-    /// redefining a block starts from the base it already has (0.0000 for a
-    /// new block). Formatted the same way the pick point button writes them.
+    /// Show a base point in the fields — a definition's existing base when
+    /// redefining, or a point picked from the drawing — printed at the
+    /// drawing's precision.
     pub fn set_base_point(&mut self, base: glam::DVec3) {
-        self.base_point_x = format!("{:.4}", base.x);
-        self.base_point_y = format!("{:.4}", base.y);
-        self.base_point_z = format!("{:.4}", base.z);
+        self.base_point_x = coordinate_text(base.x, self.precision);
+        self.base_point_y = coordinate_text(base.y, self.precision);
+        self.base_point_z = coordinate_text(base.z, self.precision);
     }
 
     pub fn is_existing_name(&self) -> bool {

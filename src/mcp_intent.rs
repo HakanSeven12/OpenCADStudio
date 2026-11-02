@@ -749,9 +749,6 @@ mod tests {
             ("scope", json!("viewport")),
             ("max_dimension", json!(1600)),
             ("delivery", json!("inline")),
-            ("diff", json!(false)),
-            ("diff_mode", json!("highlight")),
-            ("reset_diff_baseline", json!(false)),
             ("annotate", json!(false)),
             ("pyramid_manifest", json!(false)),
         ] {

@@ -462,6 +462,38 @@ pub(crate) fn abandon_grip_delivery(plugin_id: &str) {
     }
 }
 
+/// The descriptor-backed grip drag's host state (API v14, additive; the
+/// data-only twin of the active custom grip). The Begin answer handed the
+/// host a live design; the pump re-derives the display set LOCALLY per
+/// coalesced cursor move (no Move frames cross the IPC), and the plugin's
+/// settle callback stays the only write window. Native-only: the type
+/// names the host module's wire types, which the wasm build configures
+/// out (the wasm run configures the root field out with it).
+#[derive(Clone, Debug)]
+pub(crate) struct DescriptorGripDrag {
+    /// The declaring plugin (the class's owner).
+    pub plugin: String,
+    /// The class key the dragged instance staged under (its identity stamp).
+    pub class_id: String,
+    /// The design-record linkage: the parameter/rule rows live in this
+    /// XRecord (the record layer stays the only truth; the settle writes it).
+    pub design_record: String,
+    /// The LAST GOOD design: the current truth the pump re-derives from.
+    pub chain: ocs_plugin_api::host::ParametricChain,
+    /// The per-move re-derivation tolerance the Begin answer declared.
+    pub tolerance: f64,
+    /// The staged display set (the handles the per-move restage patches in
+    /// place; the entity count must stay stable across the drag).
+    pub handles: Vec<Handle>,
+    /// Zero-based index of the re-anchored segment.
+    pub segment: usize,
+    /// The record-model anchor law the drive declares (which quantity the
+    /// cursor re-anchors; the host's solver serves the end-side set).
+    pub anchor: ocs_plugin_api::host::AnchorLaw,
+    /// Whether one move refusal was already noted (one headline per drag).
+    pub refusal_noted: bool,
+}
+
 /// The currently hovered plugin-declared grip (drives hover highlighting
 /// through the same overlay the built-in grip hover uses).
 #[derive(Clone, Debug, PartialEq, Eq)]

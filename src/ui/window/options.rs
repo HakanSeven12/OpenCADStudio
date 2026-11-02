@@ -41,7 +41,7 @@ pub enum OptionsTab {
 /// Gathered rather than passed one by one: `view_window` already carries a
 /// long positional list, and several of these are adjacent `bool`s that would
 /// swap silently at the call site.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct AppPrefs {
     /// SAVETIME, minutes between recovery saves; 0 disables.
     pub savetime_min: i32,
@@ -55,6 +55,9 @@ pub struct AppPrefs {
     pub commandline_fade_ms: i32,
     /// COMMANDLINEOPACITY: command-line panel opacity in percent.
     pub command_line_opacity: u8,
+    /// Command line font family ("" = interface font) and size in pixels.
+    pub command_line_font: String,
+    pub command_line_font_size: u16,
     /// MENUBAR: the pull-down menus show above the ribbon.
     pub show_menu_bar: bool,
     /// The ribbon shows (RIBBON / RIBBONCLOSE).
@@ -983,7 +986,41 @@ pub fn view_window<'a>(
             ]
             .spacing(10)
             .align_y(iced::Center),
-        );
+        )
+        .push(Space::new().height(12))
+        .push({
+            // The interface font first (stored as ""), then the installed
+            // families.
+            let default_label = crate::t!("Interface font").into_owned();
+            let mut families = vec![default_label.clone()];
+            families.extend(crate::scene::text::sysfont::picker_families());
+            let selected = if prefs.command_line_font.is_empty() {
+                default_label.clone()
+            } else {
+                prefs.command_line_font.clone()
+            };
+            row![
+                text(crate::t!("Command line font")).size(12).width(140),
+                iced::widget::pick_list(Some(selected), families, |family| family.clone())
+                    .on_select(move |family| {
+                        Message::CommandLineFontChanged(if family == default_label {
+                            String::new()
+                        } else {
+                            family
+                        })
+                    })
+                    .width(Fill),
+                iced::widget::pick_list(
+                    Some(prefs.command_line_font_size),
+                    (8..=24u16).collect::<Vec<_>>(),
+                    |size| size.to_string(),
+                )
+                .on_select(Message::CommandLineFontSizeChanged)
+                .width(60),
+            ]
+            .spacing(10)
+            .align_y(iced::Center)
+        });
 
     let display_element = display.spacing(0).width(sizing.width);
 

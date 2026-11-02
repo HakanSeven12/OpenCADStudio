@@ -217,41 +217,13 @@ impl CadModule for AnnotateModule {
                     ],
                 },
                 // ── Centerlines ───────────────────────────────────────────────
+                // Center Mark and Centerline; the slide-out holds the layer
+                // new centre objects go on (CENTERLAYER).
                 RibbonGroup {
                     title: "Centerlines",
                     tools: vec![
                         RibbonItem::LargeTool(dimcenter::tool()),
                         RibbonItem::LargeTool(centerline::tool()),
-                        RibbonItem::Dropdown {
-                            id: "ANNOTATE_CENTER_ASSOCIATIVITY",
-                            icon: crate::modules::IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/line.svg"
-                            )),
-                            items: vec![
-                                (
-                                    "CENTERREASSOCIATE",
-                                    "Reassociate Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                                (
-                                    "CENTERDISASSOCIATE",
-                                    "Disassociate Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                                (
-                                    "CENTERRESET",
-                                    "Reset Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                            ],
-                            default: "CENTERREASSOCIATE",
-                        },
                     ],
                 },
                 // ── Leaders ──────────────────────────────────────────────────
@@ -289,7 +261,24 @@ impl CadModule for AnnotateModule {
                             style_key: StyleKey::TableStyle,
                             combo_id: "TABLE_STYLE_COMBO",
                             manager_cmd: Some("TABLESTYLE"),
-                            rows: vec![vec![data_extract::tool(), data_link::tool()]],
+                            // Each row leads with an icon-only update button,
+                            // then the tool named beside its icon.
+                            rows: vec![
+                                vec![
+                                    data_link::download_tool(),
+                                    crate::modules::ToolDef {
+                                        label: "Extract Data",
+                                        ..data_extract::tool()
+                                    },
+                                ],
+                                vec![
+                                    data_link::upload_tool(),
+                                    crate::modules::ToolDef {
+                                        label: "Link Data",
+                                        ..data_link::tool()
+                                    },
+                                ],
+                            ],
                         },
                     ],
                 },

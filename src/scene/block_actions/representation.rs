@@ -194,6 +194,12 @@ pub(super) fn reconcile(
         .get_mut(name)
         .unwrap()
         .entity_handles = ordered;
+    // New members were allocated above the terminator written with the
+    // representation; keep it after the members the record now lists. A
+    // representation loaded without one gains it here.
+    scene
+        .reterminate_block_definition(name)
+        .map_err(|_| "Could not re-terminate the representation.")?;
     // Keep the anonymous block's native base point in step with its definition.
     let source_name = scene
         .document

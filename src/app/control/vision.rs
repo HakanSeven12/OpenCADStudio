@@ -226,6 +226,8 @@ pub(crate) fn compute_grounding(
         handle: codec::Handle,
         entity_type: &'static str,
         layer: String,
+        owner: codec::Handle,
+        space: Option<String>,
         screen_pixel: [i32; 2],
         screen_bounds: [i32; 4],
         world_center: [f64; 3],
@@ -235,6 +237,13 @@ pub(crate) fn compute_grounding(
 
     let selected_set: std::collections::HashSet<codec::Handle> =
         tab.scene.selected_handles_in_order().into_iter().collect();
+    let space_names: rustc_hash::FxHashMap<codec::Handle, String> = tab
+        .scene
+        .document
+        .block_records
+        .iter()
+        .map(|record| (record.handle, record.name.clone()))
+        .collect();
 
     let mut candidates = Vec::new();
 
@@ -281,11 +290,14 @@ pub(crate) fn compute_grounding(
                 let area = (width * (f64::from(s_max_y) - f64::from(s_min_y)).abs()) as f32;
                 let selected = selected_set.contains(&handle);
                 let layer = entity.common().layer.clone();
+                let owner = entity.common().owner_handle;
 
                 candidates.push(Candidate {
                     handle,
                     entity_type: crate::entities::names::ui_name(entity),
                     layer,
+                    owner,
+                    space: space_names.get(&owner).cloned(),
                     screen_pixel: [px, py],
                     screen_bounds: [s_min_x, s_min_y, s_max_x, s_max_y],
                     world_center: [center.x, center.y, center.z],
@@ -316,6 +328,11 @@ pub(crate) fn compute_grounding(
                 "handle": format!("{:X}", cand.handle.value()),
                 "type": cand.entity_type,
                 "layer": cand.layer,
+                "owner": format!("{:X}", cand.owner.value()),
+                "space": cand.space,
+                "constraints": crate::app::automation::constraint_records_json(
+                    &tab.scene, cand.handle,
+                ),
                 "screen_pixel": cand.screen_pixel,
                 "screen_bounds": cand.screen_bounds,
                 "world_center": cand.world_center,
@@ -331,138 +348,6 @@ pub(crate) fn compute_grounding(
         pixel_to_world_matrix,
         world_to_pixel_matrix,
         visible_entities,
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct VisualDiffResult {
-    pub changed: bool,
-    pub change_percentage: f64,
-    pub changed_pixels: usize,
-    pub dirty_pixel_bounds: Option<[u32; 4]>, // [min_x, min_y, max_x, max_y]
-    pub dirty_world_bounds: Option<[f64; 4]>, // [min_wx, min_wy, max_wx, max_wy]
-    pub patch_resolution: Option<[u32; 2]>,
-    pub cropped_patch: Option<image::RgbaImage>,
-    pub diff_overlay: image::RgbaImage,
-}
-
-pub(crate) fn compute_visual_diff(
-    baseline: &image::RgbaImage,
-    current: &image::RgbaImage,
-    pixel_to_world_matrix: &[f64; 6],
-) -> VisualDiffResult {
-    let (w, h) = (current.width(), current.height());
-    let mut diff_overlay = image::RgbaImage::new(w, h);
-
-    if baseline.width() != w || baseline.height() != h {
-        return VisualDiffResult {
-            changed: true,
-            change_percentage: 100.0,
-            changed_pixels: (w * h) as usize,
-            dirty_pixel_bounds: Some([0, 0, w.saturating_sub(1), h.saturating_sub(1)]),
-            dirty_world_bounds: None,
-            patch_resolution: Some([w, h]),
-            cropped_patch: Some(current.clone()),
-            diff_overlay: current.clone(),
-        };
-    }
-
-    let mut min_x = u32::MAX;
-    let mut min_y = u32::MAX;
-    let mut max_x = 0u32;
-    let mut max_y = 0u32;
-    let mut changed_pixels = 0usize;
-
-    for y in 0..h {
-        for x in 0..w {
-            let p1 = baseline.get_pixel(x, y);
-            let p2 = current.get_pixel(x, y);
-
-            let dr = (p1[0] as i32 - p2[0] as i32).abs();
-            let dg = (p1[1] as i32 - p2[1] as i32).abs();
-            let db = (p1[2] as i32 - p2[2] as i32).abs();
-            let da = (p1[3] as i32 - p2[3] as i32).abs();
-
-            let is_diff = (dr + dg + db + da) > 20;
-
-            if is_diff {
-                changed_pixels += 1;
-                min_x = min_x.min(x);
-                min_y = min_y.min(y);
-                max_x = max_x.max(x);
-                max_y = max_y.max(y);
-
-                // Highlight changed pixel in vibrant green
-                diff_overlay.put_pixel(x, y, image::Rgba([0, 255, 128, 255]));
-            } else {
-                // Dim unchanged background: grayscale attenuated to 35%
-                let gray = ((p2[0] as f32 * 0.299 + p2[1] as f32 * 0.587 + p2[2] as f32 * 0.114)
-                    * 0.35) as u8;
-                diff_overlay.put_pixel(x, y, image::Rgba([gray, gray, gray, 200]));
-            }
-        }
-    }
-
-    let total_pixels = (w * h) as f64;
-    let change_percentage = if total_pixels > 0.0 {
-        (changed_pixels as f64 / total_pixels) * 100.0
-    } else {
-        0.0
-    };
-
-    if changed_pixels == 0 {
-        return VisualDiffResult {
-            changed: false,
-            change_percentage: 0.0,
-            changed_pixels: 0,
-            dirty_pixel_bounds: None,
-            dirty_world_bounds: None,
-            patch_resolution: None,
-            cropped_patch: None,
-            diff_overlay,
-        };
-    }
-
-    let pad = 16u32;
-    let b_min_x = min_x.saturating_sub(pad);
-    let b_min_y = min_y.saturating_sub(pad);
-    let b_max_x = (max_x + pad).min(w.saturating_sub(1));
-    let b_max_y = (max_y + pad).min(h.saturating_sub(1));
-
-    let patch_w = (b_max_x - b_min_x + 1).max(1);
-    let patch_h = (b_max_y - b_min_y + 1).max(1);
-
-    let m = pixel_to_world_matrix;
-    let px0 = b_min_x as f64;
-    let py0 = b_min_y as f64;
-    let px1 = b_max_x as f64;
-    let py1 = b_max_y as f64;
-
-    let p00_x = m[0] * px0 + m[1] * py0 + m[4];
-    let p00_y = m[2] * px0 + m[3] * py0 + m[5];
-    let p10_x = m[0] * px1 + m[1] * py0 + m[4];
-    let p10_y = m[2] * px1 + m[3] * py0 + m[5];
-    let p01_x = m[0] * px0 + m[1] * py1 + m[4];
-    let p01_y = m[2] * px0 + m[3] * py1 + m[5];
-    let p11_x = m[0] * px1 + m[1] * py1 + m[4];
-    let p11_y = m[2] * px1 + m[3] * py1 + m[5];
-
-    let w_min_x = p00_x.min(p10_x).min(p01_x).min(p11_x);
-    let w_max_x = p00_x.max(p10_x).max(p01_x).max(p11_x);
-    let w_min_y = p00_y.min(p10_y).min(p01_y).min(p11_y);
-    let w_max_y = p00_y.max(p10_y).max(p01_y).max(p11_y);
-
-    let cropped = image::imageops::crop_imm(current, b_min_x, b_min_y, patch_w, patch_h).to_image();
-
-    VisualDiffResult {
-        changed: true,
-        change_percentage,
-        changed_pixels,
-        dirty_pixel_bounds: Some([b_min_x, b_min_y, b_max_x, b_max_y]),
-        dirty_world_bounds: Some([w_min_x, w_min_y, w_max_x, w_max_y]),
-        patch_resolution: Some([patch_w, patch_h]),
-        cropped_patch: Some(cropped),
-        diff_overlay,
     }
 }
 
@@ -682,55 +567,124 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_visual_diff() {
-        let w = 200;
-        let h = 150;
-        let base = image::RgbaImage::from_pixel(w, h, image::Rgba([30, 30, 30, 255]));
-        let p2w = [0.1, 0.0, 0.0, -0.1, -10.0, 7.5];
+    fn grounding_names_the_space_each_visible_entity_is_drawn_in() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 20,0 30,0"}"#);
+        let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+        let handles: Vec<String> = q["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["handle"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(handles.len(), 2, "{q}");
+        let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+            .as_u64()
+            .unwrap();
+        let defined = app.automation_op(&format!(
+            r#"{{"protocol":1,"op":"block_define","request_id":"g1","document_id":{doc},"name":"SPACE_SRC","base":[0,0,0],"handles":["{}"]}}"#,
+            handles[1]
+        ));
+        assert_eq!(defined["ok"], true, "{defined}");
 
-        // 1. Identical images -> changed: false
-        let diff_same = compute_visual_diff(&base, &base, &p2w);
-        assert_eq!(diff_same.changed, false);
-        assert_eq!(diff_same.change_percentage, 0.0);
-        assert_eq!(diff_same.changed_pixels, 0);
-        assert!(diff_same.dirty_pixel_bounds.is_none());
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        app.tabs[0].scene.fit_all();
+        let grounding = compute_grounding(&app, 800.0, 600.0, 800, 600);
+        let visible = |space: &str| {
+            grounding
+                .visible_entities
+                .iter()
+                .find(|entity| entity["space"] == space)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{space} is not grounded: {:?}",
+                        grounding.visible_entities
+                    )
+                })
+                .clone()
+        };
+        let model = visible("*Model_Space");
+        assert_eq!(model["handle"], handles[0].as_str(), "{model}");
+        let child = visible("SPACE_SRC");
+        assert_ne!(child["owner"], model["owner"], "{model} {child}");
+        assert_ne!(child["handle"], model["handle"], "{model} {child}");
+    }
 
-        // 2. Modify a 20x20 block from (50, 40) to (69, 59)
-        let mut curr = base.clone();
-        for y in 40..60 {
-            for x in 50..70 {
-                curr.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
-            }
-        }
+    #[test]
+    fn grounding_names_the_constraints_on_each_visible_entity() {
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
 
-        let diff_mod = compute_visual_diff(&base, &curr, &p2w);
-        assert_eq!(diff_mod.changed, true);
-        assert_eq!(diff_mod.changed_pixels, 400);
-        assert!(diff_mod.change_percentage > 1.0);
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let line = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+            ["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+            .as_u64()
+            .unwrap();
+        let defined = app.automation_op(&format!(
+            r#"{{"protocol":1,"op":"block_define","request_id":"gc1","document_id":{doc},"name":"CONST_DEF","base":[0,0,0],"handles":["{line}"]}}"#
+        ));
+        assert_eq!(defined["ok"], true, "{defined}");
 
-        let bounds = diff_mod.dirty_pixel_bounds.unwrap();
-        // With 16px pad: min_x <= 50, max_x >= 69, min_y <= 40, max_y >= 59
-        assert!(bounds[0] <= 50);
-        assert!(bounds[1] <= 40);
-        assert!(bounds[2] >= 69);
-        assert!(bounds[3] >= 59);
+        let i = app.active_tab;
+        let definition = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|record| record.name == "CONST_DEF")
+            .expect("definition exists")
+            .handle;
+        let child = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find(|entity| entity.common().owner_handle == definition)
+            .expect("the definition holds the line")
+            .common()
+            .handle;
+        app.tabs[i]
+            .scene
+            .parametric_constraint_set_mut(ParametricScope::Block(definition))
+            .add(
+                ConstraintKind::Vertical,
+                vec![ParametricRef::whole(child)],
+                None,
+            );
+        let child_hex = format!("{:X}", child.value());
 
-        // World bounds should be populated
-        assert!(diff_mod.dirty_world_bounds.is_some());
-        let wb = diff_mod.dirty_world_bounds.unwrap();
-        assert!(wb[0] < wb[2]); // min_x < max_x
-        assert!(wb[1] < wb[3]); // min_y < max_y
-
-        // Cropped patch and overlay
-        assert!(diff_mod.cropped_patch.is_some());
-        let patch = diff_mod.cropped_patch.unwrap();
-        assert!(patch.width() >= 20);
-        assert!(patch.height() >= 20);
-
-        // PNG encoding roundtrip
-        let png_bytes = encode_image_png(&patch).expect("png encode succeeds");
-        assert!(!png_bytes.is_empty());
-        assert_eq!(&png_bytes[1..4], b"PNG");
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        app.tabs[i].scene.fit_all();
+        let grounding = compute_grounding(&app, 800.0, 600.0, 800, 600);
+        let visible = grounding
+            .visible_entities
+            .iter()
+            .find(|entity| entity["space"] == "CONST_DEF")
+            .unwrap_or_else(|| {
+                panic!(
+                    "CONST_DEF is not grounded: {:?}",
+                    grounding.visible_entities
+                )
+            });
+        assert_eq!(
+            visible["constraints"],
+            json!([{
+                "kind": "Vertical",
+                "participants": [child_hex],
+                "enabled": true,
+                "conflict": null,
+                "form": null
+            }]),
+            "{visible}"
+        );
     }
 
     #[test]

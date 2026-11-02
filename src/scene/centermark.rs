@@ -319,8 +319,15 @@ fn apply_source_geometry(
     association.center = vector(center);
     association.radius = radius;
     association.plane_origin = vector(center);
-    association.plane_x = vector(x);
-    association.plane_y = vector(y);
+    // The mark keeps its own rotation while its source stays in the same
+    // plane; only a source turned out of that plane re-aligns it.
+    let old_normal = dvec(association.plane_x)
+        .cross(dvec(association.plane_y))
+        .normalize_or_zero();
+    if old_normal.dot(x.cross(y).normalize_or_zero()) < 1.0 - 1.0e-9 {
+        association.plane_x = vector(x);
+        association.plane_y = vector(y);
+    }
     if association.cross_size_relative {
         association.cross_size = radius * 2.0 * size_factor;
     }

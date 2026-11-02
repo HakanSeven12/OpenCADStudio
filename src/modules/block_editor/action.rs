@@ -143,7 +143,7 @@ impl CadCommand for ActionCommand {
         }
         if self.kind.is_none() {
             return crate::t!(
-                "BACTION  Enter action type [Move/Scale/Stretch/Polar Stretch/Rotate/Flip/Array]:"
+                "BACTION  Enter action type [Move/Scale/Stretch/Polar Stretch/Rotate/Flip/Array/Lookup]:"
             )
             .into_owned();
         }
@@ -198,16 +198,27 @@ impl CadCommand for ActionCommand {
                 .into_owned();
         }
         if self.kind == Some(Kind::Array) {
-            let is_xy = self
+            let chosen = self
                 .candidates
                 .iter()
-                .find(|p| Some(p.handle) == self.parameter)
-                .is_some_and(|p| p.xy);
+                .find(|p| Some(p.handle) == self.parameter);
+            let is_xy = chosen.is_some_and(|p| p.xy);
+            let is_polar = chosen.is_some_and(|p| p.polar);
             if self.column_offset.is_none() {
-                return crate::t!(
-                    "BACTION  Specify distance between columns (or distance between items):"
-                )
-                .into_owned();
+                // One term per array shape: an angular pattern arrays items, a
+                // grid arrays columns and rows, and the alternative named here
+                // is the term the next prompt asks for.
+                if is_polar {
+                    return crate::t!("BACTION  Specify distance between items:").into_owned();
+                }
+                return if is_xy {
+                    crate::t!(
+                        "BACTION  Specify distance between columns (or distance between rows):"
+                    )
+                    .into_owned()
+                } else {
+                    crate::t!("BACTION  Specify distance between columns:").into_owned()
+                };
             }
             if is_xy && self.row_offset.is_none() {
                 return crate::t!("BACTION  Specify distance between rows:").into_owned();
@@ -233,6 +244,7 @@ impl CadCommand for ActionCommand {
                 CmdOption::new("Rotate", "Rotate"),
                 CmdOption::new("Flip", "Flip"),
                 CmdOption::new("Array", "Array"),
+                CmdOption::new("Lookup", "Lookup"),
             ]
         } else if self.parameter.is_some()
             && self.kind.is_some_and(actions::needs_frame)
@@ -333,13 +345,24 @@ impl CadCommand for ActionCommand {
             }
         }
         if self.kind.is_none() {
+            if matches!(
+                s.trim().to_ascii_uppercase().as_str(),
+                "LOOKUP" | "L"
+            ) {
+                return Some(CmdResult::StartBlockLookupAction {
+                    document: self.document,
+                    definition: self.definition,
+                });
+            }
             return Some(if let Some(k) = Kind::parse(s) {
                 self.kind = Some(k);
                 CmdResult::NeedPoint
             } else {
                 CmdResult::ReportError(
-                    crate::t!("Choose Move, Scale, Stretch, Polar Stretch, Rotate, Flip or Array.")
-                        .into_owned(),
+                    crate::t!(
+                        "Choose Move, Scale, Stretch, Polar Stretch, Rotate, Flip, Array or Lookup."
+                    )
+                    .into_owned(),
                 )
             });
         }
@@ -370,7 +393,8 @@ impl CadCommand for ActionCommand {
             if self.column_offset.is_none() {
                 let Ok(dist) = s.trim().parse::<f64>() else {
                     return Some(CmdResult::ReportError(
-                        crate::t!("Specify a positive distance.").into_owned(),
+                        crate::t!("Specify a positive distance as a single value, not a point.")
+                            .into_owned(),
                     ));
                 };
                 if dist <= 1e-6 || !dist.is_finite() {
@@ -384,7 +408,8 @@ impl CadCommand for ActionCommand {
             if is_xy && self.row_offset.is_none() {
                 let Ok(dist) = s.trim().parse::<f64>() else {
                     return Some(CmdResult::ReportError(
-                        crate::t!("Specify a positive distance.").into_owned(),
+                        crate::t!("Specify a positive distance as a single value, not a point.")
+                            .into_owned(),
                     ));
                 };
                 if dist <= 1e-6 || !dist.is_finite() {

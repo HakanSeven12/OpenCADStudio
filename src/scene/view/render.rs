@@ -4511,9 +4511,7 @@ impl Scene {
                     continue;
                 }
                 let context_scale = match self.document.objects.get(&scale) {
-                    Some(codec::objects::ObjectType::Scale(value)) => {
-                        (value.inverse_factor() / self.annotation_scale_unit_factor()) as f32
-                    }
+                    Some(codec::objects::ObjectType::Scale(value)) => value.inverse_factor() as f32,
                     _ => annotation_scale,
                 };
                 let block_cache = self.block_cache_arc_for(Some(scale), true, self.active_viewport);

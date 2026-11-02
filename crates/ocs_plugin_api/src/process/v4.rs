@@ -1282,7 +1282,7 @@ mod tests {
                 &PluginToHostV4::Request {
                     id: 6000 + id,
                     tab_id: Some(0),
-                    payload: PluginRequest::ExecuteCommand("CVI_REPLAY".to_string()),
+                    payload: PluginRequest::ExecuteCommand("PLUGIN_REPLAY".to_string()),
                 },
             )
             .expect("nested command send");
@@ -1305,6 +1305,8 @@ mod tests {
                     payload: HostResponse::CustomGrip(crate::host::CustomGripResponse {
                         preview: Vec::new(),
                         live_entities: Vec::new(),
+                        descriptor: None,
+                        descriptor_tolerance: None,
                     }),
                 },
             )

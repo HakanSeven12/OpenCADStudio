@@ -545,7 +545,7 @@ fn pack_color(color: [f32; 4]) -> [u8; 4] {
 
 /// Cumulative arc-length per point (NaN-break aware) plus the `"A"`-type
 /// alignment pair `(align_end, align_total)`. Shared by the wasm and native
-/// emission paths.
+/// emission paths and PDF dash materialization.
 ///
 /// AutoCAD-style linetypes are implicitly `A` (aligned): a dashed line must
 /// begin AND end on a solid dash, keeping the interior dashes at their nominal
@@ -560,7 +560,7 @@ fn pack_color(color: [f32; 4]) -> [u8; 4] {
 /// Alignment applies only to a single continuous run (`!has_break`) whose
 /// pattern begins with a dash. NaN-separated (plinegen=false) polylines and
 /// non-dash-first patterns keep the legacy centred phase.
-fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
+pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
     let n = wire.points.len();
     let pat_len = wire.pattern_length;
     if pat_len <= 1e-6 || n < 2 {
@@ -602,11 +602,11 @@ fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
     };
 
     if has_break {
-        // A run too short for one whole period of a dash-first pattern is
-        // drawn as one solid dash, as a single line is below. Batched block
-        // wires and plinegen=false polylines are many runs in one wire, so
-        // pin each such run at the first dash's start.
-        if wire.pattern[0] > 0.0 && wire.pattern[1] < 0.0 {
+        // A run too short for one whole period of a dash-first (or
+        // dot-first) pattern is drawn as one solid dash, as a single line is
+        // below. Batched block wires and plinegen=false polylines are many
+        // runs in one wire, so pin each such run at the first element's start.
+        if wire.pattern[0] >= 0.0 && wire.pattern[1] < 0.0 {
             let mut start = 0;
             while start < n {
                 if !wire.points[start][0].is_finite() {
@@ -652,13 +652,16 @@ fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
         return (dists, ae.max(1e-4).min(total * 0.5), total);
     }
 
-    // Align only a proper alternating pattern that BEGINS with a dash followed
-    // by a gap — every standard linetype does (DASHED/DASHDOT/CENTER/HIDDEN/…).
-    // Gap-first, dot-first, single-element, or consecutive-dash patterns keep
-    // the legacy centred phase: the A-type interior-resume assumes the element
-    // after the leading dash is a gap, and force-lighting an end dash on a
-    // non-dash-start would paint over a leading blank.
-    if wire.pattern[0] > 0.0 && wire.pattern[1] < 0.0 {
+    // Align an alternating pattern that BEGINS with a dash, or a dot, followed
+    // by a gap — every standard linetype does (DASHED/DASHDOT/CENTER/HIDDEN/…),
+    // and the drawing aligns a dot-first one the same way: the dot stretches
+    // into the end dash `D = (L - kP) / 2` and the last interior dash runs on
+    // into it. Gap-first (the drawing rejects it for this alignment),
+    // single-element, or consecutive-dash patterns keep the legacy centred
+    // phase: the A-type interior-resume assumes the element after the leading
+    // one is a gap, and force-lighting an end dash on a gap start would paint
+    // over a leading blank.
+    if wire.pattern[0] >= 0.0 && wire.pattern[1] < 0.0 {
         let a = wire.pattern[0];
         let p = pat_len;
         if total <= p {

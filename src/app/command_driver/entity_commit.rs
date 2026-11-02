@@ -1058,12 +1058,34 @@ impl OpenCADStudio {
             .reassociate_center_mark(target, source, point)
         {
             self.tabs[i].dirty = true;
-            self.command_line
-                .push_output(crate::t!("CENTERREASSOCIATE: center mark associated.").as_ref());
         } else {
             self.command_line.push_error(
                 crate::t!("CENTERREASSOCIATE: the selected source is not circular.").as_ref(),
             );
+        }
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        self.refresh_properties();
+        None
+    }
+
+    pub(super) fn handle_reassociate_center_line(
+        &mut self,
+        target: Handle,
+        first: (Handle, glam::DVec3),
+        second: (Handle, glam::DVec3),
+    ) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        if self.reject_locked_edit(i, target) {
+            return Some(Task::none());
+        }
+        self.push_undo_snapshot(i, "CENTERREASSOCIATE");
+        if self.tabs[i].scene.reassociate_centerline(target, first, second) {
+            self.tabs[i].dirty = true;
+        } else {
+            self.command_line
+                .push_error(&crate::tr!("center-cmd", "line-same"));
         }
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;

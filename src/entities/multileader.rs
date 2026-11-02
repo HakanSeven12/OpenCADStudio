@@ -617,7 +617,15 @@ pub(crate) fn add_leader_line(ml: &mut MultiLeader, arrow: codec::types::Vector3
         .flat_map(|root| root.lines.first())
         .next()
         .cloned();
-    let index = ml.total_leader_line_count() as i32;
+    // A new leader line takes the lowest index no line uses. The
+    // line count repeats an index once a leader has been removed.
+    let used: Vec<i32> = ml
+        .context
+        .leader_roots
+        .iter()
+        .flat_map(|root| root.lines.iter().map(|line| line.index))
+        .collect();
+    let index = (0..).find(|i| !used.contains(i)).unwrap_or(0);
     let mut target = 0usize;
     if ml.content_type == LeaderContentType::MText && !ml.context.leader_roots.is_empty() {
         let tl = ml.context.text_location;
@@ -1927,6 +1935,10 @@ pub(crate) fn block_content_insert(
     })?;
     let mut insertion = ml.context.block_content_location;
     if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
+        // Other writers store the block's insertion point in the block content
+        // location, already moved off the landing by the extents; derive it
+        // again from the content base point so it is not moved twice.
+        insertion = ml.context.content_base_point;
         let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
         for handle in &record.entity_handles {
             if let Some(entity) = document.get_entity(*handle) {
@@ -3035,6 +3047,26 @@ mod tests {
     }
 
     #[test]
+    fn test_added_leader_line_takes_lowest_free_index() {
+        // Remove the first leader, then add one: the new line must not repeat
+        // the index of the line that is left (it takes the free 0).
+        let mut ml = MultiLeader::default();
+        ml.content_type = LeaderContentType::MText;
+        add_leader_line(&mut ml, codec::types::Vector3::new(0.0, 0.0, 0.0));
+        add_leader_line(&mut ml, codec::types::Vector3::new(0.0, 10.0, 0.0));
+        ml.context.leader_roots[0].lines.remove(0);
+        add_leader_line(&mut ml, codec::types::Vector3::new(0.0, -10.0, 0.0));
+        let mut indices: Vec<i32> = ml
+            .context
+            .leader_roots
+            .iter()
+            .flat_map(|root| root.lines.iter().map(|line| line.index))
+            .collect();
+        indices.sort();
+        assert_eq!(indices, vec![0, 1]);
+    }
+
+    #[test]
     fn test_mleader_right_underline_attachment_meets_landing() {
         // Text left of its leader attaches with its RIGHT attachment
         // ("underline bottom line" here, while the left one is "underline top
@@ -3241,6 +3273,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Values from an MLEADER made in the reference program: block LABEL (circle r4 at its
+    /// base point), landing at 60,5 pointing right, gap 0.36. It stores
+    /// the block's insertion point 64.36,5 as the block content location.
+    #[test]
+    fn block_content_insert_uses_the_stored_insertion_point() {
+        use codec::types::Vector3;
+        let mut doc = Document::default();
+        let mut record = codec::tables::BlockRecord::new("LABEL");
+        record.handle = doc.allocate_handle();
+        let circle = codec::entities::Circle::from_center_radius(Vector3::new(0.0, 0.0, 0.0), 4.0);
+        let handle = doc.add_entity(codec::EntityType::Circle(circle)).unwrap();
+        record.entity_handles.push(handle);
+        let mut ml = MultiLeader::default();
+        ml.content_type = LeaderContentType::Block;
+        ml.block_connection_type = BlockContentConnectionType::BlockExtents;
+        ml.block_content_handle = Some(record.handle);
+        doc.block_records.add(record).unwrap();
+        ml.context.has_block_contents = true;
+        ml.context.content_base_point = Vector3::new(60.36, 5.0, 0.0);
+        ml.context.block_content_location = Vector3::new(64.36, 5.0, 0.0);
+        let root = ml.context.add_leader_root();
+        root.connection_point = Vector3::new(60.0, 5.0, 0.0);
+        root.direction = Vector3::new(1.0, 0.0, 0.0);
+        let insert = block_content_insert(&doc, &ml).expect("block content");
+        assert!(
+            (insert.insert_point - Vector3::new(64.36, 5.0, 0.0)).length() < 1e-4,
+            "insertion {:?}",
+            insert.insert_point
+        );
     }
 
     /// MIRROR about x = 0, values as AutoCAD writes them: text stays readable

@@ -170,6 +170,14 @@ impl OpenCADStudio {
             state.ss_set_custom = names(codec::sheet_set::CUSTOM_SHEET_SET_PROP);
             state.ss_set_name = db.name().to_string();
         }
+        state.custom_properties = self.tabs[self.active_tab]
+            .scene
+            .document
+            .summary_info
+            .custom_properties
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
         state.ss_sets = self.sheet_set.sets.clone();
         state.ss_set = self.sheet_set.current.unwrap_or(0);
         self.field_dialog = Some(state);
@@ -298,7 +306,9 @@ impl OpenCADStudio {
             FieldDialogMsg::Category(c) => {
                 state.category = c;
                 let names = fields_of(c);
-                if !names.contains(&state.name) {
+                let custom = state.name == crate::ui::window::field_dialog::CUSTOM_PROPERTY
+                    && state.entries().iter().any(|row| row.1);
+                if !names.contains(&state.name) && !custom {
                     state.name = names.first().copied().unwrap_or("Date");
                 }
             }
@@ -316,6 +326,11 @@ impl OpenCADStudio {
                         state.ss_prop = nav_props(db, &state.ss_node).first().map(|p| p.0.clone()).unwrap_or_default();
                     }
                 }
+            }
+            FieldDialogMsg::CustomProperty(property) => {
+                state.name = crate::ui::window::field_dialog::CUSTOM_PROPERTY;
+                state.custom_property = property;
+                state.text_case = 0;
             }
             FieldDialogMsg::SsCustom(name) => state.ss_custom = name,
             FieldDialogMsg::SsSet(k) => {
@@ -577,8 +592,78 @@ fn text_case(value: &str, case: usize) -> String {
 #[cfg(test)]
 mod tests {
     use crate::app::OpenCADStudio;
-    use crate::ui::window::field_dialog::{FieldDialogMsg, FieldTarget};
+    use crate::ui::window::field_dialog::{FieldDialogMsg, FieldDialogState, FieldTarget};
     use codec::entities::{EntityType, LwPolyline, MText};
+
+    fn app_with_custom_properties() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.document.summary_info.custom_properties = vec![
+            ("Zeta".into(), "last?".into()),
+            ("Client".into(), "Acme".into()),
+            ("Job No".into(), "42-7".into()),
+        ];
+        app
+    }
+
+    fn document_category() -> usize {
+        crate::ui::window::field_dialog::CATEGORIES
+            .iter()
+            .position(|(name, _)| *name == "Document")
+            .unwrap()
+    }
+
+    /// S6: the Document category lists the custom properties, in stored
+    /// order, after its own fields.
+    #[test]
+    fn the_document_category_lists_the_custom_properties_in_order() {
+        let mut app = app_with_custom_properties();
+        app.open_field_dialog(FieldTarget::NewText);
+        let _ = app.on_field_dialog(FieldDialogMsg::Category(document_category()));
+        let state = app.field_dialog.as_ref().unwrap();
+        let labels: Vec<String> = state.entries().into_iter().map(|row| row.0).collect();
+        let own = crate::ui::window::field_dialog::fields_of(document_category()).len();
+        assert_eq!(&labels[own..], ["Zeta", "Client", "Job No"]);
+        assert_eq!(labels.len(), own + 3);
+        // Other categories do not list them.
+        let _ = app.on_field_dialog(FieldDialogMsg::Category(0));
+        let state = app.field_dialog.as_ref().unwrap();
+        assert!(state.entries().iter().all(|row| row.0 != "Client"));
+    }
+
+    /// S6: choosing a property writes exactly the stored field code.
+    #[test]
+    fn choosing_a_custom_property_inserts_its_field_code() {
+        let mut app = app_with_custom_properties();
+        app.open_field_dialog(FieldTarget::NewText);
+        let _ = app.on_field_dialog(FieldDialogMsg::Category(document_category()));
+        let pick = app
+            .field_dialog
+            .as_ref()
+            .unwrap()
+            .entries()
+            .into_iter()
+            .find(|row| row.0 == "Job No")
+            .expect("the property is listed");
+        let _ = app.on_field_dialog(pick.2);
+        let state = app.field_dialog.as_ref().unwrap();
+        assert!(state.complete());
+        let (code, objects) = state.code();
+        assert_eq!(format!("%<{code}>%"), r"%<\AcVar CustomDP.Job No>%");
+        assert!(objects.is_empty());
+        assert_eq!(state.preview, "42-7");
+    }
+
+    /// S6: a field opened from the drawing selects its property again.
+    #[test]
+    fn a_custom_property_field_reopens_on_its_property() {
+        let mut state = FieldDialogState::new(FieldTarget::NewText);
+        state.seed_from_code(r"\AcVar CustomDP.Job No", &[]);
+        assert_eq!(state.name, "CustomDP");
+        assert_eq!(state.custom_property, "Job No");
+        assert_eq!(state.code().0, r"\AcVar CustomDP.Job No");
+    }
 
     #[test]
     fn a_field_text_opens_its_field_and_ok_changes_it_in_place() {

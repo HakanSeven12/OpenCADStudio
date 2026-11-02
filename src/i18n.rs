@@ -351,6 +351,11 @@ pub fn translate_format(template: &str, rendered: String) -> Cow<'static, str> {
 /// per-thread label memo below re-renders instead of serving the old language.
 static LANGUAGE_GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// Changes whenever the language does, for caches of translated text.
+pub fn language_generation() -> u64 {
+    LANGUAGE_GENERATION.load(Ordering::Acquire)
+}
+
 /// A label that is already rendered is the same string every time, so the
 /// translated text is memoized per thread on top of the id memo. A view pass
 /// translates hundreds of labels and the Properties panel translates dozens

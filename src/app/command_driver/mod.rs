@@ -683,6 +683,16 @@ impl OpenCADStudio {
             result @ CmdResult::PlaceBlockSingleParameter { .. } => {
                 return self.handle_place_block_single_parameter(result);
             }
+            CmdResult::StartBlockLookupAction { document, definition } => {
+                return self.start_block_lookup_action(document, definition);
+            }
+            CmdResult::OpenBlockLookupTable {
+                document,
+                definition,
+                name,
+            } => {
+                return self.open_lookup_table_from_action(document, definition, name);
+            }
             result @ CmdResult::PlaceBlockOrientationParameter { .. } => {
                 return self.handle_place_block_orientation_parameter(result);
             }
@@ -920,6 +930,15 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::ReassociateCenterLine {
+                target,
+                first,
+                second,
+            } => {
+                if let Some(task) = self.handle_reassociate_center_line(target, first, second) {
+                    return task;
+                }
+            }
             CmdResult::EditDimensionBreak {
                 dimensions,
                 operation,
@@ -1027,8 +1046,8 @@ impl OpenCADStudio {
                     return task;
                 }
             }
-            CmdResult::MatchEntityLayer { dest, src } => {
-                self.handle_match_entity_layer(dest, src);
+            CmdResult::MatchEntityLayer { dest, src, copy } => {
+                self.handle_match_entity_layer(dest, src, copy);
             }
             CmdResult::MatchProperties { dest, src } => {
                 if let Some(task) = self.handle_match_properties(dest, src) {

@@ -30,6 +30,10 @@ struct Uniforms {
 // (scene::text::sdf_atlas PX_PER_UNIT / SPREAD_UNITS).
 const PX_PER_UNIT: f32 = 6.0;
 const SPREAD_UNITS: f32 = 1.5;
+// Zoomed in past the atlas, the filtered field reads a stroke's centreline up
+// to about 0.6 texel off (sdf_atlas test zoomed_in_stroke_centreline_*), so
+// the centreline keeps at least this half-width (glyph units) to stay whole.
+const CENTRELINE_FLOOR_UNITS: f32 = 0.11;
 
 // ── Vertex stage ──────────────────────────────────────────────────────────────
 struct VertIn {
@@ -94,7 +98,8 @@ fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
         let units_per_px = max(footprint, 1e-4) / PX_PER_UNIT;
         if in.pen > 0.5 * units_per_px {
             let from_centre = in.pen - (sd_center - 0.5) * 2.0 * SPREAD_UNITS;
-            alpha = clamp(1.0 - abs(from_centre) / units_per_px, 0.0, 1.0);
+            let half_width = max(0.5 * units_per_px, CENTRELINE_FLOOR_UNITS);
+            alpha = clamp((half_width - abs(from_centre)) / units_per_px + 0.5, 0.0, 1.0);
         }
     }
     if alpha <= 0.0 {

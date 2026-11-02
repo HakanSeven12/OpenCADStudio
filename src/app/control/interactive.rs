@@ -192,14 +192,25 @@ impl OpenCADStudio {
                     .document
                     .get_entity(*handle)
                     .map(|entity| {
-                        entity_json(
+                        let mut json = entity_json(
+                            &self.tabs[i].scene.document,
                             entity,
                             &session.detail,
                             crate::plugin::entity_labels::custom_entity_class_label(
                                 &self.disabled_plugins,
                                 entity,
                             ),
-                        )
+                        );
+                        if session.detail != "summary" {
+                            json.as_object_mut().expect("entity JSON object").insert(
+                                "constraints".into(),
+                                crate::app::automation::constraint_records_json(
+                                    &self.tabs[i].scene,
+                                    entity.common().handle,
+                                ),
+                            );
+                        }
+                        json
                     })
             })
             .collect();
@@ -370,9 +381,10 @@ impl OpenCADStudio {
     /// (the read-back half of the `user_select` sampling flow). `handle`,
     /// `type`, `display_type`, `layer` and `bounds` come straight from the
     /// `query` output so clients share one parser; `text`/`value` expose the
-    /// stripped and raw strings for TEXT/MTEXT, and `block`/`position`
+    /// stripped and raw strings for TEXT/MTEXT, `block`/`position`
     /// identify an INSERT's block definition and insertion point (null
-    /// otherwise). Reads `scene.selection` and never mutates it.
+    /// otherwise), and `constraints` lists the constraints on the entity.
+    /// Reads `scene.selection` and never mutates it.
     pub(in crate::app) fn control_get_selection(&self) -> Value {
         let scene = &self.tabs[self.active_tab].scene;
         let entities: Vec<Value> = scene
@@ -381,6 +393,7 @@ impl OpenCADStudio {
             .filter_map(|handle| {
                 scene.document.get_entity(*handle).map(|entity| {
                     let full = entity_json(
+                        &scene.document,
                         entity,
                         "full",
                         crate::plugin::entity_labels::custom_entity_class_label(
@@ -398,6 +411,9 @@ impl OpenCADStudio {
                         "value": full.get("value").cloned().unwrap_or(Value::Null),
                         "block": full.get("block").cloned().unwrap_or(Value::Null),
                         "position": full.get("position").cloned().unwrap_or(Value::Null),
+                        "constraints": crate::app::automation::constraint_records_json(
+                            scene, *handle,
+                        ),
                     })
                 })
             })

@@ -20,8 +20,9 @@ enum Step {
 
 /// Interactive front end for the Equal geometric constraint: the first
 /// object sets the size, the second (or, with Multiple, each further pick)
-/// takes its length or radius. Objects are picked inside the command; a
-/// selection made before it starts is not used.
+/// takes its length or radius. A selection made before the command starts
+/// is applied by the dispatcher — first selected, rest follow — so the
+/// picks below are the empty-selection path.
 pub struct EqualConstraintCommand {
     step: Step,
     picked_entity: Option<EntityType>,
@@ -62,6 +63,37 @@ impl EqualConstraintCommand {
                 let index = usize::try_from(source.segment_index).ok()?;
                 HorizontalConstraintCommand::segment_is_straight(entity, index)
                     .then_some(ParametricRef::segment(handle, index))
+            }
+            _ => None,
+        }
+    }
+
+    /// The whole object when a live selection names it. A selection set
+    /// carries no pick point, so a polyline contributes only when it is a
+    /// single straight segment; the interactive pick can choose a segment,
+    /// a set cannot.
+    pub fn preselected_reference(entity: &EntityType, handle: Handle) -> Option<ParametricRef> {
+        match entity {
+            EntityType::Line(_) | EntityType::Circle(_) | EntityType::Arc(_) => {
+                Some(ParametricRef::whole(handle))
+            }
+            EntityType::LwPolyline(polyline) => {
+                let segments = if polyline.is_closed {
+                    polyline.vertices.len()
+                } else {
+                    polyline.vertices.len().saturating_sub(1)
+                };
+                (segments == 1 && HorizontalConstraintCommand::segment_is_straight(entity, 0))
+                    .then_some(ParametricRef::segment(handle, 0))
+            }
+            EntityType::Polyline2D(polyline) => {
+                let segments = if polyline.is_closed() {
+                    polyline.vertices.len()
+                } else {
+                    polyline.vertices.len().saturating_sub(1)
+                };
+                (segments == 1 && HorizontalConstraintCommand::segment_is_straight(entity, 0))
+                    .then_some(ParametricRef::segment(handle, 0))
             }
             _ => None,
         }

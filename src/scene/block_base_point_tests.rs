@@ -194,6 +194,46 @@ fn placed_instance(scene: &mut Scene) -> Insert {
     insert_via_command(scene)
 }
 
+/// A reference's box is measured through its definition, so it covers what the
+/// block draws instead of collapsing onto the insertion point. The definition's
+/// members span `x 0..20, y 0..13` relative to its base point, and that box —
+/// not each member — is what the reference transform carries, so the result is
+/// the box around the four rotated corners: `x 87..134.6410`, `y 100..142.5167`.
+/// Measuring the union inflates a circle to its own bounding box, the same
+/// over-approximation the write-a-block path already accepts.
+#[test]
+fn the_reference_bounds_cover_the_transformed_definition() {
+    let mut scene = scene_with_bp_test();
+    placed_instance(&mut scene);
+    let entity = scene
+        .document
+        .entities()
+        .find(|e| matches!(e, EntityType::Insert(ins) if ins.block_name == BP_TEST))
+        .expect("the placed INSERT");
+    let (min, max) = crate::scene::convert::tess::entity_bounds_in(&scene.document, entity);
+    let (start, end) = instance_line_world(&scene, BP_TEST);
+    assert!(
+        min[0] <= start.x + 1e-6 && min[1] <= start.y + 1e-6,
+        "the box starts at or before the line start: min={min:?} start={start:?}"
+    );
+    assert!(
+        max[0] >= end.x - 1e-6 && max[1] >= end.y - 1e-6,
+        "the box reaches the far end of the line: max={max:?} end={end:?}"
+    );
+    assert_close(
+        v(min[0], min[1], min[2]),
+        [87.0, 100.0, 0.0],
+        1e-6,
+        "box min",
+    );
+    assert_close(
+        v(max[0], max[1], max[2]),
+        [134.6410162, 142.5166605, 0.0],
+        1e-6,
+        "box max",
+    );
+}
+
 /// Walk the render graph from model space, collecting (entity, instance
 /// transform) pairs — the traversal the renderer itself uses.
 fn render_graph_leaves(scene: &Scene) -> Vec<(EntityType, Transform)> {
@@ -652,11 +692,11 @@ fn locked_block_definition_dialog_prefills_the_existing_definition_base_point() 
         "the drawing's block base point",
     );
 
-    // A new block: the fields start at 0.
-    let fresh = BlockDefinitionState::new(vec![BP_TEST.to_string()], Vec::new(), 0);
-    assert_eq!(fresh.base_point_x, "0");
-    assert_eq!(fresh.base_point_y, "0");
-    assert_eq!(fresh.base_point_z, "0");
+    // A new block: the fields start at 0, printed at the drawing's precision.
+    let fresh = BlockDefinitionState::new(vec![BP_TEST.to_string()], Vec::new(), 0, 4);
+    assert_eq!(fresh.base_point_x, "0.0000");
+    assert_eq!(fresh.base_point_y, "0.0000");
+    assert_eq!(fresh.base_point_z, "0.0000");
     assert_eq!(fresh.parse_base_point(), DVec3::ZERO);
 
     // Picking the existing block (what `Message::BlockDefNameSelect` does).

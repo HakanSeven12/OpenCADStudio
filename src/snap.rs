@@ -1428,7 +1428,15 @@ impl Snapper {
             } else {
                 self.snap_enabled && self.is_on(snap_type)
             };
-            on.then_some(snap_type)
+            // A solid's vertices and edge middles also answer the 2D
+            // Endpoint and Midpoint modes (#2153).
+            let planar = match hint {
+                SnapHint::Vertex => Some(SnapType::Endpoint),
+                SnapHint::EdgeMidpoint => Some(SnapType::Midpoint),
+                _ => None,
+            }
+            .filter(|planar| self.snap_enabled && self.is_on(*planar));
+            on.then_some(snap_type).or(planar)
         };
         if let Some(points) = wires.snap_points() {
             for point_ref in points {

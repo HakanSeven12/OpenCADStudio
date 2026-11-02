@@ -231,6 +231,35 @@ pub fn handle_plugin_request(
             let path: Vec<&str> = dictionary_path.iter().map(|s| s.as_str()).collect();
             PluginResponse::ListXRecordsWithEntriesResult(host.list_xrecords_with_entries(&path))
         }
+        StageParametricChain {
+            reference_name,
+            chain,
+            tolerance,
+        } => PluginResponse::StageParametricChainResult(host.stage_parametric_chain(
+            &reference_name,
+            &chain,
+            tolerance,
+        )),
+        SampleParametric { chain, s } => {
+            PluginResponse::SampleParametricResult(host.sample_parametric(&chain, s))
+        }
+        RegisterPluginClass { class } => {
+            PluginResponse::RegisterPluginClassResult(host.register_plugin_class(
+                &plugin_id,
+                &class,
+            ))
+        }
+        StagePluginClassInstance { instance } => {
+            PluginResponse::StagePluginClassInstanceResult(host.stage_plugin_class_instance(
+                &plugin_id,
+                &instance,
+            ))
+        }
+        PluginClassInstanceProperties { handle } => {
+            PluginResponse::PluginClassInstancePropertiesResult(
+                host.plugin_class_instance_properties(handle),
+            )
+        }
         ShowDialog(dialog) => PluginResponse::DialogResult(host.show_dialog(dialog)),
         RegisterPanel(panel) => PluginResponse::PanelRegistered(host.register_panel(panel)),
         UpdatePanel { panel_id, values } => {

@@ -32,6 +32,8 @@ pub mod modules;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod network;
 pub mod par;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod parametric;
 pub mod patreon;
 pub mod perf;
 pub mod plugin;

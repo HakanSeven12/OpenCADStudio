@@ -342,6 +342,9 @@ pub fn can_extract_circle_instances(wire: &crate::scene::WireModel) -> bool {
         || wire.fill_is_3d
         || !wire.text_verts.is_empty()
         || wire.render_instance.is_some()
+        // A thickness sweep adds the top curve and the connecting edges as
+        // further runs; the analytical instance would draw the base alone.
+        || wire.points.iter().any(|point| point[0].is_nan())
     {
         return false;
     }
@@ -375,13 +378,7 @@ pub fn extract_circle_instances_into(
     draw_depth: f32,
     out: &mut Vec<CircleInstance>,
 ) -> bool {
-    if wire.pattern_length > 0.0
-        || wire.tangent_geoms.is_empty()
-        || !wire.fill_tris.is_empty()
-        || wire.fill_is_3d
-        || !wire.text_verts.is_empty()
-        || wire.render_instance.is_some()
-    {
+    if !can_extract_circle_instances(wire) {
         return false;
     }
 

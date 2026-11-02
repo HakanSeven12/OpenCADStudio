@@ -170,6 +170,7 @@ impl CadModule for DrawModule {
                                 make_current::tool(),
                                 layiso::tool(),
                                 laywalk::tool(),
+                                match_layer::copy_to_layer_tool(),
                             ],
                             row3: vec![
                                 layon::tool(),
@@ -177,6 +178,7 @@ impl CadModule for DrawModule {
                                 layulk::tool(),
                                 match_layer::tool(),
                                 layuniso::tool(),
+                                match_layer::laycur_tool(),
                             ],
                         },
                     ],

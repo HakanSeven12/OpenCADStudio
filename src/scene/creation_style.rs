@@ -335,9 +335,12 @@ pub fn sync_header_dim_vars(doc: &mut Document) {
         .dim_styles
         .iter()
         .find(|style| style.name.eq_ignore_ascii_case(&current))
-        .map(|style| style.dimdli);
-    if let Some(value) = value {
-        doc.header.dim_line_increment = value;
+        .map(|style| (style.dimdli, style.dimzin));
+    if let Some((dimdli, dimzin)) = value {
+        doc.header.dim_line_increment = dimdli;
+        // The header's DIMZIN follows the current style too; numbers the
+        // drawing writes (Properties, prompts) drop zeros by it.
+        doc.header.dim_zero_suppression = dimzin;
     }
 }
 

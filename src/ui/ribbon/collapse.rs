@@ -15,17 +15,17 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{Renderer as _, Shell, mouse, overlay, renderer};
 use iced::{
-    Background, Border, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size, Theme,
-    Vector,
+    Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
+    Theme, Vector, keyboard,
 };
 
 use crate::app::Message;
+use crate::ui::style::chrome;
 
 /// One panel in its four density renderings. `tight` is the collapsed button
-/// with a small representative icon instead of the large one — the last step
-/// before the buttons are squeezed together. An open flyout draws the panel's
-/// own `full` rendering; see `FlyoutOverlay`. Elements are built lazily and
-/// indexed by `Level`.
+/// at its narrowest — the last step before the buttons are squeezed
+/// together. A collapsed panel's peek is drawn by the ribbon, not here.
+/// Elements are built lazily and indexed by `Level`.
 pub(crate) struct Panel<'a> {
     pub(crate) id: String,
     elements: [Option<Element<'a, Message>>; SLOTS],
@@ -33,6 +33,11 @@ pub(crate) struct Panel<'a> {
 }
 
 impl<'a> Panel<'a> {
+    /// The panel at full size.
+    pub(crate) fn full(&self) -> Element<'a, Message> {
+        (self.build)(Level::Full)
+    }
+
     pub(crate) fn deferred(
         id: impl Into<String>,
         build: impl Fn(Level) -> Element<'a, Message> + 'a,
@@ -72,9 +77,9 @@ fn slot(i: usize, level: Level) -> usize {
 const MAX_PANEL_SQUEEZE: f32 = 8.0;
 
 /// How the ribbon tool panels are sized. `Auto` adapts to the window width (the
-/// step-by-step degradation); the others pin every panel to one density so the
-/// user can override the automatic choice. The selection is persisted.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+/// step-by-step degradation); the others pin every panel to one density, as the
+/// minimized ribbon's popup and the tests do.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum CollapseMode {
     /// Size panels to the window: degrade from the right as space runs out.
     #[default]
@@ -88,24 +93,6 @@ pub enum CollapseMode {
 }
 
 impl CollapseMode {
-    /// Every mode, in dropdown order.
-    pub const ALL: &'static [CollapseMode] = &[
-        CollapseMode::Auto,
-        CollapseMode::Full,
-        CollapseMode::Compact,
-        CollapseMode::Collapsed,
-    ];
-
-    /// Label shown in the dropdown.
-    pub fn label(self) -> &'static str {
-        match self {
-            CollapseMode::Auto => "Auto",
-            CollapseMode::Full => "Full",
-            CollapseMode::Compact => "Compact",
-            CollapseMode::Collapsed => "Collapsed",
-        }
-    }
-
     /// The degradation level every panel is pinned to, or `None` for `Auto`.
     fn forced_level(self) -> Option<Level> {
         match self {
@@ -114,12 +101,6 @@ impl CollapseMode {
             CollapseMode::Compact => Some(Level::Compact),
             CollapseMode::Collapsed => Some(Level::Collapsed),
         }
-    }
-}
-
-impl std::fmt::Display for CollapseMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
     }
 }
 
@@ -138,8 +119,10 @@ pub(crate) struct Widths {
 }
 
 /// Choose the degradation level per panel. `Auto` degrades from the right, one
-/// panel at a time: first Full -> Compact, then Compact -> Collapsed, each phase
-/// only while the row still overflows; if even the all-collapsed row overflows,
+/// panel at a time and one step at a time: the rightmost panel goes Full ->
+/// Compact -> Collapsed before the next panel shrinks, stopping as soon as the
+/// row fits, so no more width is given up than one step and the row's other
+/// panels keep their large buttons. If even the all-collapsed row overflows,
 /// every collapsed panel drops to Tight at once. Forced modes pin everything.
 pub(crate) fn decide_levels(mode: CollapseMode, widths: &[Widths], max_w: f32) -> Vec<Level> {
     if let Some(level) = mode.forced_level() {
@@ -154,10 +137,10 @@ pub(crate) fn decide_levels(mode: CollapseMode, widths: &[Widths], max_w: f32) -
     let total =
         |levels: &[Level]| -> f32 { (0..levels.len()).map(|i| width_of(levels[i], i)).sum() };
     let mut levels = vec![Level::Full; widths.len()];
-    for degraded in [Level::Compact, Level::Collapsed] {
-        for i in (0..widths.len()).rev() {
+    'panels: for i in (0..widths.len()).rev() {
+        for degraded in [Level::Compact, Level::Collapsed] {
             if total(&levels) <= max_w {
-                break;
+                break 'panels;
             }
             levels[i] = degraded;
         }
@@ -173,8 +156,6 @@ pub(crate) fn decide_levels(mode: CollapseMode, widths: &[Widths], max_w: f32) -
 
 pub(crate) struct CollapsePanels<'a> {
     panels: Vec<Panel<'a>>,
-    /// Title of the panel whose flyout is open (if any).
-    open: Option<String>,
     /// Fallback row height, used only when there are no panels to measure.
     row_h: f32,
     /// Chosen degradation level per panel; set during layout.
@@ -183,13 +164,118 @@ pub(crate) struct CollapsePanels<'a> {
     /// anchoring dropdowns below the ribbon).
     height_out: Option<Arc<AtomicU32>>,
     /// If set, `true` is written here whenever the row is in the tight state
-    /// (some panel dropped to its small icon), so the tab bar can react.
+    /// (some panel at its narrowest button), so the tab row can react.
     tight_out: Option<Arc<AtomicBool>>,
-    /// User-chosen density. `Auto` runs the width-based degradation; the others
-    /// pin every panel to one level regardless of the window width.
+    /// `Auto` runs the width-based degradation; the others pin every panel
+    /// to one level regardless of the window width.
     mode: CollapseMode,
     /// Fingerprint of content that can affect natural panel dimensions.
     measure_key: u64,
+    /// Height of the title strip at the bottom of a full or compact panel,
+    /// where a press starts a drag; 0 turns dragging off.
+    drag_strip: f32,
+    /// The message a drop sends: the panel ids in their new order.
+    on_reorder: Option<Box<dyn Fn(Vec<String>) -> Message + 'a>>,
+}
+
+/// How far the pointer moves from the press before the press becomes a drag.
+const DRAG_THRESHOLD: f32 = 5.0;
+/// Inset of the placeholder's dashed outline.
+const PLACEHOLDER_INSET: f32 = 3.0;
+/// Opacity of the panel copy that follows the pointer.
+const GHOST_ALPHA: f32 = 0.9;
+
+/// Tree state: the measurements and the drag in progress.
+#[derive(Default)]
+struct State {
+    measure: MeasureCache,
+    drag: Option<Drag>,
+}
+
+/// A panel pressed on its title strip, and dragged once the pointer moved.
+#[derive(Clone, Debug)]
+struct Drag {
+    /// Index of the panel.
+    panel: usize,
+    /// Where the press landed.
+    press: Point,
+    /// The press point within the panel.
+    grab: Vector,
+    /// The pointer moved far enough: the panel is being dragged.
+    moving: bool,
+    /// Escape ended the drag; the release still belongs to it.
+    cancelled: bool,
+    /// Panel indices in the order the row shows while dragging.
+    order: Vec<usize>,
+    /// The pointer's last position.
+    cursor: Point,
+}
+
+impl Drag {
+    fn reordered(&self) -> bool {
+        self.order
+            .iter()
+            .enumerate()
+            .any(|(slot, &panel)| slot != panel)
+    }
+}
+
+/// Move `panel` in `order` once the pointer at `x` passes the middle of a
+/// neighbour; `bounds` are the panels' rectangles as laid out for `order`,
+/// by panel index. Returns whether the order changed.
+fn drag_to(order: &mut [usize], panel: usize, x: f32, bounds: &[Rectangle]) -> bool {
+    let Some(mut slot) = order.iter().position(|&p| p == panel) else {
+        return false;
+    };
+    let start = slot;
+    while slot > 0 && x < bounds[order[slot - 1]].center_x() {
+        order.swap(slot - 1, slot);
+        slot -= 1;
+    }
+    if slot == start {
+        while slot + 1 < order.len() && x > bounds[order[slot + 1]].center_x() {
+            order.swap(slot, slot + 1);
+            slot += 1;
+        }
+    }
+    slot != start
+}
+
+/// A 1 px dashed outline along the inside of `r`.
+fn dashed_outline(renderer: &mut Renderer, r: Rectangle, color: Color) {
+    const DASH: f32 = 4.0;
+    const GAP: f32 = 3.0;
+    let mut quad = |bounds: Rectangle| {
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                border: Border::default(),
+                shadow: Shadow::default(),
+                snap: true,
+            },
+            Background::Color(color),
+        );
+    };
+    let mut x = r.x;
+    while x < r.x + r.width {
+        let width = DASH.min(r.x + r.width - x);
+        quad(Rectangle::new(Point::new(x, r.y), Size::new(width, 1.0)));
+        quad(Rectangle::new(
+            Point::new(x, r.y + r.height - 1.0),
+            Size::new(width, 1.0),
+        ));
+        x += DASH + GAP;
+    }
+    let mut y = r.y;
+    while y < r.y + r.height {
+        let height = DASH.min(r.y + r.height - y);
+        quad(Rectangle::new(Point::new(r.x, y), Size::new(1.0, height)));
+        quad(Rectangle::new(
+            Point::new(r.x + r.width - 1.0, y),
+            Size::new(1.0, height),
+        ));
+        y += DASH + GAP;
+    }
 }
 
 #[derive(Default)]
@@ -208,18 +294,33 @@ impl MeasureCache {
 }
 
 impl<'a> CollapsePanels<'a> {
-    pub fn new(panels: Vec<Panel<'a>>, open: Option<String>, row_h: f32) -> Self {
+    pub fn new(panels: Vec<Panel<'a>>, row_h: f32) -> Self {
         let n = panels.len();
         Self {
             panels,
-            open,
             row_h,
             levels: RefCell::new(vec![Level::Full; n]),
             height_out: None,
             tight_out: None,
             mode: CollapseMode::Auto,
             measure_key: 0,
+            drag_strip: 0.0,
+            on_reorder: None,
         }
+    }
+
+    /// Let a press on the bottom `strip` px of a full or compact panel drag
+    /// it to another place; a drop sends `on_reorder` with the panel ids in
+    /// their new order. The title strip continues after the last panel to
+    /// the right edge.
+    pub fn draggable(
+        mut self,
+        strip: f32,
+        on_reorder: impl Fn(Vec<String>) -> Message + 'a,
+    ) -> Self {
+        self.drag_strip = strip;
+        self.on_reorder = Some(Box::new(on_reorder));
+        self
     }
 
     /// Reuse natural measurements while the panel content and font metrics stay
@@ -280,11 +381,11 @@ impl<'a> CollapsePanels<'a> {
 
 impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
     fn tag(&self) -> widget::tree::Tag {
-        widget::tree::Tag::of::<MeasureCache>()
+        widget::tree::Tag::of::<State>()
     }
 
     fn state(&self) -> widget::tree::State {
-        widget::tree::State::new(MeasureCache::default())
+        widget::tree::State::new(State::default())
     }
 
     fn diff(&mut self, tree: &mut widget::Tree) {
@@ -321,7 +422,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         let mut heights = Vec::with_capacity(n);
         let auto = self.mode == CollapseMode::Auto;
         if auto {
-            let cache = tree.state.downcast_ref::<MeasureCache>();
+            let cache = &tree.state.downcast_ref::<State>().measure;
             if cache.matches(self.measure_key, n) {
                 widths.clone_from(&cache.widths);
                 heights.clone_from(&cache.heights);
@@ -375,7 +476,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                     });
                     heights.push([f.height, c.height, b.height, t.height]);
                 }
-                let cache = tree.state.downcast_mut::<MeasureCache>();
+                let cache = &mut tree.state.downcast_mut::<State>().measure;
                 cache.key = Some(self.measure_key);
                 cache.widths.clone_from(&widths);
                 cache.heights.clone_from(&heights);
@@ -388,21 +489,15 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         };
 
         // Measurements let Auto choose a density without building all variants
-        // again. On a cache hit only the selected element is built. If a
-        // collapsed panel is open, its Full element is also needed by the flyout.
+        // again. On a cache hit only the selected element is built.
         for (i, &level) in levels.iter().enumerate() {
             self.ensure_element(tree, i, level);
-            if matches!(level, Level::Collapsed | Level::Tight)
-                && self.open.as_deref() == Some(self.panels[i].id.as_str())
-            {
-                self.ensure_element(tree, i, Level::Full);
-            }
         }
 
-        // The row is "tight" once any panel has dropped to its small icon — the
-        // last, most cramped state. The tab bar hides its mode selector then.
+        // The row is tight once any panel is at its narrowest button, the
+        // most cramped state; the tab row hides the minimize button then.
         if let Some(out) = &self.tight_out {
-            out.store(levels.iter().any(|&l| l == Level::Tight), Ordering::Relaxed);
+            out.store(levels.contains(&Level::Tight), Ordering::Relaxed);
         }
         *self.levels.borrow_mut() = levels.clone();
 
@@ -429,24 +524,41 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             0.0
         };
 
-        // Place the chosen element for each panel left-to-right.
-        let mut placed: Vec<(layout::Node, f32, f32)> = Vec::with_capacity(n);
+        // A drag shows the panels in its order; it ends if the panels change.
+        let state = tree.state.downcast_mut::<State>();
+        if state
+            .drag
+            .as_ref()
+            .is_some_and(|drag| drag.order.len() != n)
+        {
+            state.drag = None;
+        }
+        let order: Vec<usize> = match &state.drag {
+            Some(drag) if drag.moving => drag.order.clone(),
+            _ => (0..n).collect(),
+        };
+
+        // Place the chosen element for each panel left-to-right, in `order`.
+        let mut placed: Vec<(layout::Node, f32, f32)> = (0..n)
+            .map(|i| {
+                let level = levels[i];
+                let tree_idx = slot(i, level);
+                let node = self.shown_mut(i, level).as_widget_mut().layout(
+                    &mut tree.children[tree_idx],
+                    renderer,
+                    &natural,
+                );
+                let h = node.size().height;
+                (node, 0.0, h)
+            })
+            .collect();
         let mut x = 0.0f32;
-        for i in 0..n {
-            if i > 0 {
+        for (k, &i) in order.iter().enumerate() {
+            if k > 0 {
                 x -= squeeze;
             }
-            let level = levels[i];
-            let tree_idx = slot(i, level);
-            let node = self.shown_mut(i, level).as_widget_mut().layout(
-                &mut tree.children[tree_idx],
-                renderer,
-                &natural,
-            );
-            let h = node.size().height;
-            let w = node.size().width;
-            placed.push((node, x, h));
-            x += w;
+            placed[i].1 = x;
+            x += placed[i].0.size().width;
         }
 
         // The row is as tall as the tallest shown panel, so the ribbon height
@@ -476,7 +588,13 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             out.store(row_h.to_bits(), Ordering::Relaxed);
         }
 
-        layout::Node::with_children(Size::new(x, row_h), children)
+        // As wide as the space, so the title strip reaches its right edge.
+        let width = if limits.max().width.is_finite() {
+            x.max(limits.max().width)
+        } else {
+            x
+        };
+        layout::Node::with_children(Size::new(width, row_h), children)
     }
 
     fn update(
@@ -490,6 +608,92 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         viewport: &Rectangle,
     ) {
         let levels = self.levels_snapshot(self.panels.len());
+        let mut cursor = cursor;
+        let state = tree.state.downcast_mut::<State>();
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if self.drag_strip > 0.0 && !shell.is_event_captured() =>
+            {
+                // A press on a full or compact panel's title strip may become
+                // a drag; until the pointer moves it stays an ordinary click.
+                state.drag = cursor.position().and_then(|at| {
+                    layout.children().enumerate().find_map(|(i, child)| {
+                        let b = child.bounds();
+                        let strip = b.y + b.height - self.drag_strip;
+                        (matches!(levels.get(i), Some(Level::Full | Level::Compact))
+                            && b.contains(at)
+                            && at.y >= strip)
+                            .then(|| Drag {
+                                panel: i,
+                                press: at,
+                                grab: at - b.position(),
+                                moving: false,
+                                cancelled: false,
+                                order: (0..self.panels.len()).collect(),
+                                cursor: at,
+                            })
+                    })
+                });
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                if let Some(drag) = state.drag.as_mut() {
+                    if !drag.moving && position.distance(drag.press) >= DRAG_THRESHOLD {
+                        drag.moving = true;
+                        shell.invalidate_layout();
+                    }
+                    if drag.moving {
+                        drag.cursor = *position;
+                        if !drag.cancelled {
+                            let bounds: Vec<Rectangle> =
+                                layout.children().map(|child| child.bounds()).collect();
+                            if drag_to(&mut drag.order, drag.panel, position.x, &bounds) {
+                                shell.invalidate_layout();
+                            }
+                        }
+                        shell.request_redraw();
+                        shell.capture_event();
+                        return;
+                    }
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Some(drag) = state.drag.take() {
+                    if drag.moving {
+                        // The pressed button lets go without a click.
+                        cursor = mouse::Cursor::Unavailable;
+                        if !drag.cancelled && drag.reordered() {
+                            if let Some(on_reorder) = &self.on_reorder {
+                                shell.publish(on_reorder(
+                                    drag.order
+                                        .iter()
+                                        .map(|&i| self.panels[i].id.clone())
+                                        .collect(),
+                                ));
+                            }
+                        }
+                        shell.invalidate_layout();
+                        shell.capture_event();
+                    }
+                }
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            }) => {
+                // Escape puts the panel back; the release still ends the drag.
+                if let Some(drag) = state.drag.as_mut().filter(|drag| drag.moving) {
+                    drag.cancelled = true;
+                    drag.order = (0..self.panels.len()).collect();
+                    shell.invalidate_layout();
+                    shell.request_redraw();
+                }
+            }
+            Event::Mouse(_) if state.drag.as_ref().is_some_and(|drag| drag.moving) => {
+                // The panels take no pointer input while one is dragged.
+                return;
+            }
+            _ => {}
+        }
         for (i, child_layout) in layout.children().enumerate() {
             let level = levels[i];
             let tree_idx = slot(i, level);
@@ -513,6 +717,15 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
+        if tree
+            .state
+            .downcast_ref::<State>()
+            .drag
+            .as_ref()
+            .is_some_and(|drag| drag.moving)
+        {
+            return mouse::Interaction::Grabbing;
+        }
         let levels = self.levels_snapshot(self.panels.len());
         let mut interaction = mouse::Interaction::default();
         for (i, child_layout) in layout.children().enumerate() {
@@ -563,7 +776,29 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         viewport: &Rectangle,
     ) {
         let levels = self.levels_snapshot(self.panels.len());
+        let n = self.panels.len();
+        let drag = tree
+            .state
+            .downcast_ref::<State>()
+            .drag
+            .as_ref()
+            .filter(|drag| drag.moving && drag.order.len() == n);
         for (i, child_layout) in layout.children().enumerate() {
+            if drag.is_some_and(|drag| drag.panel == i) {
+                // The dragged panel's place: a fill with a dashed outline.
+                let b = child_layout.bounds();
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: b,
+                        border: Border::default(),
+                        shadow: Shadow::default(),
+                        snap: true,
+                    },
+                    Background::Color(chrome::title_bar(theme)),
+                );
+                dashed_outline(renderer, b.shrink(PLACEHOLDER_INSET), chrome::accent(theme));
+                continue;
+            }
             let level = levels[i];
             let tree_idx = slot(i, level);
             self.shown(i, level).as_widget().draw(
@@ -582,24 +817,58 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         let is_btn = |lv: Level| lv == Level::Collapsed || lv == Level::Tight;
         let bounds: Vec<Rectangle> = layout.children().map(|l| l.bounds()).collect();
         let wb = layout.bounds();
-        for i in 0..self.panels.len().saturating_sub(1) {
-            if is_btn(levels[i]) && is_btn(levels[i + 1]) {
+        // The title strip after the last panel, with its line on top, and a
+        // divider closing the last panel.
+        let end = bounds.iter().map(|b| b.x + b.width).fold(wb.x, f32::max);
+        if self.drag_strip > 0.0 && end < wb.x + wb.width {
+            let quad = |x: f32, y: f32, width: f32, height: f32| renderer::Quad {
+                bounds: Rectangle {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+                border: Border::default(),
+                shadow: Shadow::default(),
+                snap: true,
+            };
+            let top = wb.y + wb.height - self.drag_strip;
+            let width = wb.x + wb.width - end;
+            renderer.fill_quad(
+                quad(end, top, width, self.drag_strip),
+                Background::Color(chrome::title_bar(theme)),
+            );
+            renderer.fill_quad(
+                quad(end, top, width, crate::ui::icons::hairline()),
+                Background::Color(chrome::page(theme)),
+            );
+            if !bounds.is_empty() {
+                renderer.fill_quad(
+                    quad(end, wb.y, crate::ui::icons::hairline(), wb.height),
+                    Background::Color(chrome::page(theme)),
+                );
+            }
+        }
+        let order: Vec<usize> = drag.map_or_else(|| (0..n).collect(), |drag| drag.order.clone());
+        for pair in order.windows(2) {
+            let (left, right) = (pair[0], pair[1]);
+            if is_btn(levels[left]) && is_btn(levels[right]) {
                 continue;
             }
-            let x = bounds[i + 1].x;
+            let x = bounds[right].x;
             renderer.fill_quad(
                 renderer::Quad {
                     bounds: Rectangle {
                         x,
                         y: wb.y,
-                        width: 1.0,
+                        width: crate::ui::icons::hairline(),
                         height: wb.height,
                     },
                     border: Border::default(),
                     shadow: Shadow::default(),
                     snap: true,
                 },
-                Background::Color(theme.palette().background.neutral.color),
+                Background::Color(chrome::page(theme)),
             );
         }
     }
@@ -614,32 +883,26 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let levels = self.levels_snapshot(self.panels.len());
 
-        // An open flyout owns the overlay slot.
-        if let Some(open_id) = self.open.clone() {
-            if let Some(p) = self.panels.iter().position(|pan| pan.id == open_id) {
-                // Only a button-form panel (collapsed or tight) shows a flyout.
-                let lvl = levels.get(p).copied().unwrap_or(Level::Full);
-                if (lvl == Level::Collapsed || lvl == Level::Tight)
-                    && layout.children().nth(p).is_some()
-                {
-                    let child_layout = layout.children().nth(p).unwrap();
-                    let b = child_layout.bounds();
-                    let anchor = Point::new(b.x + translation.x, b.y + b.height + translation.y);
-                    // The flyout is the panel's own `full` rendering (the row
-                    // never shows slot 0 while the panel is button-form, so it
-                    // is free to double as the overlay content).
-                    return Some(overlay::Element::new(Box::new(FlyoutOverlay {
-                        content: self.panels[p].elements[Level::Full as usize]
-                            .as_mut()
-                            .expect("open collapsed flyout has full panel content"),
-                        tree: &mut tree.children[slot(p, Level::Full)],
-                        anchor,
-                    })));
-                }
-            }
+        // A dragged panel's copy follows the pointer; nothing else shows.
+        let dragged = tree
+            .state
+            .downcast_ref::<State>()
+            .drag
+            .as_ref()
+            .filter(|drag| drag.moving)
+            .map(|drag| (drag.panel, drag.grab, drag.cursor));
+        if let Some((p, grab, at)) = dragged {
+            let level = levels.get(p).copied().unwrap_or(Level::Full);
+            let content = self.panels.get_mut(p)?.elements[level as usize].as_mut()?;
+            return Some(overlay::Element::new(Box::new(GhostOverlay {
+                content,
+                tree: &mut tree.children[slot(p, level)],
+                grab,
+                at,
+            })));
         }
 
-        // No flyout: forward the SHOWN children's overlays. Every ribbon
+        // Forward the SHOWN children's overlays. Every ribbon
         // tooltip is an iced overlay produced inside these children, so
         // returning None here left all of them permanently dead (#411 — a
         // regression from the day this widget replaced the plain row).
@@ -681,33 +944,25 @@ impl<'a> From<CollapsePanels<'a>> for Element<'a, Message> {
     }
 }
 
-/// Overlay that renders an open panel's flyout anchored below its button and
-/// closes it when the user presses outside. Draws the panel's `full` rendering
-/// (`content`) inside a thin styled box.
-struct FlyoutOverlay<'a, 'b> {
+/// The copy of a dragged panel that follows the pointer, drawn faded and
+/// taking no pointer input.
+struct GhostOverlay<'a, 'b> {
     content: &'b mut Element<'a, Message>,
     tree: &'b mut widget::Tree,
-    anchor: Point,
+    /// The press point within the panel.
+    grab: Vector,
+    /// Pointer position to use when the draw has none.
+    at: Point,
 }
 
-impl overlay::Overlay<Message, Theme, Renderer> for FlyoutOverlay<'_, '_> {
-    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let viewport = Rectangle::with_size(bounds);
-        let limits = layout::Limits::new(Size::ZERO, viewport.size());
+impl overlay::Overlay<Message, Theme, Renderer> for GhostOverlay<'_, '_> {
+    fn layout(&mut self, renderer: &Renderer, _bounds: Size) -> layout::Node {
+        let natural = layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, f32::INFINITY));
         let node = self
             .content
             .as_widget_mut()
-            .layout(self.tree, renderer, &limits);
-        let size = node.size();
-        let mut x = self.anchor.x;
-        let mut y = self.anchor.y;
-        if x + size.width > viewport.width {
-            x = (viewport.width - size.width).max(0.0);
-        }
-        if y + size.height > viewport.height {
-            y = (self.anchor.y - size.height).max(0.0);
-        }
-        layout::Node::with_children(size, vec![node]).translate(Vector::new(x, y))
+            .layout(self.tree, renderer, &natural);
+        layout::Node::with_children(node.size(), vec![node])
     }
 
     fn draw(
@@ -718,88 +973,95 @@ impl overlay::Overlay<Message, Theme, Renderer> for FlyoutOverlay<'_, '_> {
         layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
+        // Drawn at the pointer, so moving it needs a redraw, not a layout.
         let b = layout.bounds();
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: b,
-                border: Border {
-                    color: theme.palette().background.neutral.color,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                shadow: Shadow::default(),
-                snap: true,
-            },
-            Background::Color(theme.palette().background.weakest.color),
-        );
-        let child = layout.children().next().unwrap();
-        self.content.as_widget().draw(
-            self.tree,
-            renderer,
-            theme,
-            style,
-            child,
-            cursor,
-            &child.bounds(),
-        );
-    }
-
-    fn update(
-        &mut self,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-        shell: &mut Shell<'_, Message>,
-    ) {
-        let child = layout.children().next().unwrap();
-        let vp = child.bounds();
-
-        if let Event::Mouse(mouse::Event::ButtonPressed(_)) = event {
-            if !cursor.is_over(vp) {
-                shell.publish(Message::CloseRibbonDropdown);
-                shell.capture_event();
-                return;
-            }
-        }
-
-        self.content
-            .as_widget_mut()
-            .update(self.tree, event, child, cursor, renderer, shell, &vp);
-    }
-
-    fn operate(
-        &mut self,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
-        let child = layout.children().next().unwrap();
-        self.content
-            .as_widget_mut()
-            .operate(self.tree, child, renderer, operation);
-    }
-
-    fn mouse_interaction(
-        &self,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-    ) -> mouse::Interaction {
-        let child = layout.children().next().unwrap();
-        self.content.as_widget().mouse_interaction(
-            self.tree,
-            child,
-            cursor,
-            &child.bounds(),
-            renderer,
-        )
+        let top_left = cursor.position().unwrap_or(self.at) - self.grab;
+        // The tool area's background (see `Ribbon::view`).
+        let background = chrome::panel(theme);
+        let quad = |bounds| renderer::Quad {
+            bounds,
+            border: Border::default(),
+            shadow: Shadow::default(),
+            snap: true,
+        };
+        renderer.with_translation(top_left - b.position(), |renderer| {
+            renderer.fill_quad(
+                quad(b),
+                Background::Color(background.scale_alpha(GHOST_ALPHA)),
+            );
+            let child = layout.children().next().unwrap();
+            self.content.as_widget().draw(
+                self.tree,
+                renderer,
+                theme,
+                style,
+                child,
+                mouse::Cursor::Unavailable,
+                &b,
+            );
+            // A veil of the background fades the panel's own colours too.
+            renderer.fill_quad(
+                quad(b),
+                Background::Color(background.scale_alpha(1.0 - GHOST_ALPHA)),
+            );
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rects(widths: &[f32]) -> Vec<Rectangle> {
+        let mut x = 0.0;
+        widths
+            .iter()
+            .map(|&w| {
+                let r = Rectangle::new(Point::new(x, 0.0), Size::new(w, 80.0));
+                x += w;
+                r
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_dragged_panel_swaps_once_the_pointer_passes_a_neighbours_middle() {
+        // Panels 0..3, 100 px each; panel 1 is dragged.
+        let bounds = rects(&[100.0, 100.0, 100.0]);
+        let mut order = vec![0, 1, 2];
+        assert!(!drag_to(&mut order, 1, 160.0, &bounds));
+        assert!(!drag_to(&mut order, 1, 249.0, &bounds));
+        assert!(drag_to(&mut order, 1, 251.0, &bounds));
+        assert_eq!(order, [0, 2, 1]);
+
+        let mut order = vec![0, 1, 2];
+        assert!(drag_to(&mut order, 1, 40.0, &bounds));
+        assert_eq!(order, [1, 0, 2]);
+    }
+
+    #[test]
+    fn a_fast_drag_passes_several_panels_at_once() {
+        let bounds = rects(&[100.0, 100.0, 100.0, 100.0]);
+        let mut order = vec![0, 1, 2, 3];
+        assert!(drag_to(&mut order, 0, 390.0, &bounds));
+        assert_eq!(order, [1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn a_swap_does_not_swing_back_with_unequal_widths() {
+        // A narrow panel passes a wide one; after the swap the wide one's
+        // middle is behind the pointer, so the order holds.
+        let mut order = vec![0, 1];
+        let before = rects(&[50.0, 300.0]);
+        assert!(drag_to(&mut order, 0, 201.0, &before));
+        assert_eq!(order, [1, 0]);
+        let after = vec![
+            Rectangle::new(Point::new(300.0, 0.0), Size::new(50.0, 80.0)),
+            Rectangle::new(Point::new(0.0, 0.0), Size::new(300.0, 80.0)),
+        ];
+        assert!(!drag_to(&mut order, 0, 201.0, &after));
+        assert_eq!(order, [1, 0]);
+    }
 
     #[test]
     fn natural_measurements_are_reused_only_for_the_same_key_and_panel_count() {
@@ -819,7 +1081,7 @@ mod tests {
         use iced_test::runtime::user_interface::{Cache, UserInterface};
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        fn view(counter: Arc<AtomicUsize>, open: Option<String>) -> Element<'static, Message> {
+        fn view(counter: Arc<AtomicUsize>) -> Element<'static, Message> {
             let panel = Panel::deferred("test", move |level| {
                 counter.fetch_add(1, Ordering::Relaxed);
                 let (width, height) = match level {
@@ -833,7 +1095,7 @@ mod tests {
                     .height(Length::Fixed(height))
                     .into()
             });
-            CollapsePanels::new(vec![panel], open, 80.0)
+            CollapsePanels::new(vec![panel], 80.0)
                 .measure_key(17)
                 .into()
         }
@@ -849,7 +1111,7 @@ mod tests {
         .expect("headless renderer");
 
         let ui = UserInterface::build(
-            view(count.clone(), None),
+            view(count.clone()),
             Size::new(1000.0, 100.0),
             Cache::default(),
             &mut renderer,
@@ -857,7 +1119,7 @@ mod tests {
         assert_eq!(count.load(Ordering::Relaxed), 4);
 
         let ui = UserInterface::build(
-            view(count.clone(), None),
+            view(count.clone()),
             Size::new(1000.0, 100.0),
             ui.into_cache(),
             &mut renderer,
@@ -865,7 +1127,7 @@ mod tests {
         assert_eq!(count.load(Ordering::Relaxed), 5, "only Full is rebuilt");
 
         let ui = UserInterface::build(
-            view(count.clone(), None),
+            view(count.clone()),
             Size::new(170.0, 100.0),
             ui.into_cache(),
             &mut renderer,
@@ -873,15 +1135,15 @@ mod tests {
         assert_eq!(count.load(Ordering::Relaxed), 6, "resize builds Compact");
 
         let _ui = UserInterface::build(
-            view(count.clone(), Some("test".to_string())),
+            view(count.clone()),
             Size::new(20.0, 100.0),
             ui.into_cache(),
             &mut renderer,
         );
         assert_eq!(
             count.load(Ordering::Relaxed),
-            8,
-            "tight selection builds Tight and Full for the open flyout"
+            7,
+            "tight selection builds only Tight"
         );
     }
 
@@ -969,18 +1231,15 @@ mod tests {
         );
     }
 
-    /// The first (compact) phase completes across the whole row before the
-    /// second (collapsed) phase starts: the left panel ends up compact even
-    /// though at FULL it would have fit next to the eventually-collapsed right
-    /// panel (30 + 40 = 70 <= 100).
+    /// A panel shrinks all the way to its collapsed button before the next
+    /// panel to its left shrinks: the left panel keeps its large buttons.
     #[test]
-    fn auto_runs_the_compact_phase_across_the_row_first() {
+    fn auto_collapses_a_panel_before_shrinking_the_next() {
         let widths = [w(30.0, 26.0, 15.0, 12.0), w(100.0, 80.0, 40.0, 20.0)];
-        // phase compact: right (30+100=130>100 -> compact), left (26+80=110>100 -> compact)
-        // phase collapsed: right (26+40=66<=100 after right->collapsed is 26+80=106>100), left (66<=100 -> stop)
+        // right: 130 > 100 -> compact 30 + 80 = 110 > 100 -> collapsed 70 fits.
         assert_eq!(
             decide_levels(CollapseMode::Auto, &widths, 100.0),
-            vec![Level::Compact, Level::Collapsed]
+            vec![Level::Full, Level::Collapsed]
         );
     }
 
@@ -1074,12 +1333,12 @@ mod tests {
         );
     }
 
-    /// The refactor must be a no-op: `decide_levels` equals the pre-refactor
-    /// inline `u8` algorithm (two rightmost-first phases + the tight cascade)
-    /// on a deterministic sweep of widths and budgets, including the degenerate
+    /// `decide_levels` equals a plain `u8` version of its algorithm (each panel
+    /// from the right through its steps + the tight cascade) on a
+    /// deterministic sweep of widths and budgets, including the degenerate
     /// 0 / 0 / inf / NaN corner cases.
     #[test]
-    fn matches_the_pre_refactor_algorithm() {
+    fn matches_the_plain_algorithm() {
         fn legacy(mode: CollapseMode, widths: &[Widths], max_w: f32) -> Vec<u8> {
             let forced = match mode {
                 CollapseMode::Auto => None,
@@ -1099,10 +1358,10 @@ mod tests {
             let total =
                 |levels: &[u8]| -> f32 { (0..levels.len()).map(|i| width_of(levels[i], i)).sum() };
             let mut levels = vec![0u8; widths.len()];
-            for degraded in [1u8, 2u8] {
-                for i in (0..widths.len()).rev() {
+            'panels: for i in (0..widths.len()).rev() {
+                for degraded in [1u8, 2u8] {
                     if total(&levels) <= max_w {
-                        break;
+                        break 'panels;
                     }
                     levels[i] = degraded;
                 }

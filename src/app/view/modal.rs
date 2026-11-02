@@ -7,6 +7,9 @@ use std::borrow::Cow;
 #[cfg(test)]
 #[path = "conversion_loss_tests.rs"]
 mod conversion_loss_tests;
+#[cfg(test)]
+#[path = "unsaved_changes_tests.rs"]
+mod unsaved_changes_tests;
 
 impl OpenCADStudio {
     /// Title shown in the active modal's title bar. Keep in sync with the
@@ -105,10 +108,13 @@ impl OpenCADStudio {
             Some(K::ExternalChange) => crate::tr!("modal", "drawing-changed"),
             Some(K::LayerDeleteWarning) => crate::tr!("modal", "delete-layer"),
             Some(K::Unsaved) => crate::tr!("modal", "unsaved-changes"),
-            Some(K::BlockEditChanges) => crate::t!("Block Editor").into_owned(),
+            Some(K::BlockEditChanges) => {
+                crate::t!("Block - Save Parameter Changes?").into_owned()
+            }
             Some(K::BlockEditPicker) => crate::t!("Edit Block Definition").into_owned(),
             Some(K::Rename) => crate::tr!("rename-dialog", "title"),
             Some(K::Purge) => crate::tr!("purge-dialog", "title"),
+            Some(K::DrawingProperties) => crate::tr!("dwgprops-dialog", "title"),
             Some(K::SelectSimilarSettings) => crate::tr!("select-similar", "title"),
             Some(K::BlockVisibility) => crate::t!("Visibility States").into_owned(),
             Some(K::BlockLookup) => crate::t!("Property Lookup Table").into_owned(),
@@ -209,6 +215,8 @@ impl OpenCADStudio {
                             cliprompt_lines: self.cliprompt_lines,
                             commandline_fade_ms: self.commandline_fade_ms,
                             command_line_opacity: self.command_line.opacity_percent(),
+                            command_line_font: self.command_line.font_family().to_owned(),
+                            command_line_font_size: self.command_line.font_size(),
                             show_menu_bar: self.show_menu_bar,
                             show_ribbon: !self.ribbon_closed,
                             hatch_associative: self.hatch_associative,
@@ -427,6 +435,12 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::SelectSimilarSettings => {
                 crate::ui::window::select_similar::view_window(self.select_similar_settings?)
+            }
+            super::super::ModalKind::DrawingProperties => {
+                let state = self.drawing_properties.as_ref()?;
+                sized_flow(ex, 560, 440, |flow| {
+                    crate::ui::window::drawing_properties::view(state, flow)
+                })
             }
             super::super::ModalKind::Purge => {
                 let state = self.purge_dialog.as_ref()?;
@@ -1842,18 +1856,20 @@ impl OpenCADStudio {
                     None => String::new(),
                 };
                 automatic_flow(ex, |flow| {
-                    unsaved_changes_dialog_window(&tab_name, flow, false)
+                    unsaved_changes_dialog_window(&tab_name, flow, None)
                 })
             }
             super::super::ModalKind::BlockEditChanges => {
-                let name = self
-                    .pending_block_close
-                    .as_ref()
-                    .and_then(|(id, _)| self.tabs.iter().find(|tab| tab.id == *id))
+                let pending = self.pending_block_close.as_ref();
+                let name = pending
+                    .and_then(|(id, _, _)| self.tabs.iter().find(|tab| tab.id == *id))
                     .and_then(|tab| tab.active_block_edit_session())
                     .map(|session| session.block_name.clone())
                     .unwrap_or_default();
-                automatic_flow(ex, |flow| unsaved_changes_dialog_window(&name, flow, true))
+                let references = pending.map(|(_, _, references)| *references);
+                automatic_flow(ex, |flow| {
+                    unsaved_changes_dialog_window(&name, flow, references)
+                })
             }
             super::super::ModalKind::PointStyle => sized_flow(ex, 360, 470, |flow| {
                 crate::ui::style::point_style::view_window(
@@ -2235,28 +2251,46 @@ fn save_as_dialog_window<'a>(
 fn unsaved_changes_dialog_window(
     name: &str,
     sizing: crate::ui::modal::ModalSizing,
-    block_edit: bool,
+    block_references: Option<usize>,
 ) -> Element<'static, Message> {
-    container(
+    let block_edit = block_references.is_some();
+    let prompt = if block_edit {
         column![
-            text(if block_edit {
-                crate::tf!("Save changes to {}?", name).into_owned()
-            } else {
-                name.to_owned()
-            })
-            .size(14),
+            text(crate::tf!("Save changes to {}?", name).into_owned()).size(14),
             iced::widget::Space::new().height(4),
-            text(if block_edit {
-                String::new()
-            } else {
-                crate::tr!("modal", "unsaved-save-prompt")
-            })
+            text(t!(
+                "Changes to parameters may update existing block references in ways that are not always obvious. What do you want to do?"
+            ))
             .size(12)
             .style(dialog_muted_text_style),
+            iced::widget::Space::new().height(4),
+            text(crate::tf!(
+                "Number of block references in the drawing: {}",
+                block_references.unwrap_or(0)
+            ))
+            .size(12)
+            .style(dialog_muted_text_style),
+        ]
+    } else {
+        column![
+            text(name.to_owned()).size(14),
+            iced::widget::Space::new().height(4),
+            text(crate::tr!("modal", "unsaved-save-prompt"))
+                .size(12)
+                .style(dialog_muted_text_style),
+        ]
+    };
+    container(
+        column![
+            prompt,
             iced::widget::Space::new().height(20),
             row![
                 dialog_button(
-                    t!("Save"),
+                    if block_edit {
+                        t!("Save the changes")
+                    } else {
+                        t!("Save")
+                    },
                     if block_edit {
                         Message::BlockEditChangesSave
                     } else {
@@ -2266,7 +2300,11 @@ fn unsaved_changes_dialog_window(
                 ),
                 iced::widget::Space::new().width(8),
                 dialog_button(
-                    t!("Discard"),
+                    if block_edit {
+                        t!("Discard the changes")
+                    } else {
+                        t!("Discard")
+                    },
                     if block_edit {
                         Message::BlockEditChangesDiscard
                     } else {

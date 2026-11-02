@@ -936,7 +936,8 @@ fn gdi_raster_print(
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Graphics::Gdi::{
         CreateDCW, DeleteDC, GetDeviceCaps, SetStretchBltMode, StretchDIBits, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DEVMODEW, DIB_RGB_COLORS, HORZRES, SRCCOPY,
+        BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DEVMODEW, DIB_RGB_COLORS, HORZRES, LOGPIXELSX,
+        LOGPIXELSY, PHYSICALHEIGHT, PHYSICALOFFSETX, PHYSICALOFFSETY, PHYSICALWIDTH, SRCCOPY,
         VERTRES,
     };
     // windows-sys 0.61 groups the spooler-document calls (StartDoc/StartPage/
@@ -997,12 +998,11 @@ fn gdi_raster_print(
 
     let result = (|| -> Result<(), String> {
         // SAFETY: hdc is a valid printer DC; each capability is a documented index.
-        let (page_w, page_h) = unsafe {
-            (
-                GetDeviceCaps(hdc, HORZRES as i32),
-                GetDeviceCaps(hdc, VERTRES as i32),
-            )
-        };
+        let caps = |index: u32| unsafe { GetDeviceCaps(hdc, index as i32) };
+        let (page_w, page_h) = (caps(HORZRES), caps(VERTRES));
+        let (dpi_x, dpi_y) = (caps(LOGPIXELSX), caps(LOGPIXELSY));
+        let (offset_x, offset_y) = (caps(PHYSICALOFFSETX), caps(PHYSICALOFFSETY));
+        let (physical_w, physical_h) = (caps(PHYSICALWIDTH), caps(PHYSICALHEIGHT));
         if page_w <= 0 || page_h <= 0 {
             return Err("Printer reported no printable area.".into());
         }
@@ -1024,14 +1024,27 @@ fn gdi_raster_print(
             std::mem::swap(&mut src_w, &mut src_h);
         }
 
-        // Fit inside the printable area, preserving the page's aspect ratio.
-        let fit_w = f64::from(page_w) / f64::from(src_w);
-        let fit_h = f64::from(page_h) / f64::from(src_h);
-        let scale = fit_w.min(fit_h);
-        let draw_w = (f64::from(src_w) * scale).max(1.0) as i32;
-        let draw_h = (f64::from(src_h) * scale).max(1.0) as i32;
-        let x = (page_w - draw_w) / 2;
-        let y = (page_h - draw_h) / 2;
+        // The raster is the whole sheet, and the plot already sits inside
+        // the printer's margins on it: print it at true size, its corner on
+        // the paper's corner, so 1:1 measures 1:1 on paper (#1651). The DC's
+        // origin is the printable area's corner. A sheet larger than the
+        // paper the driver took is fitted inside the printable area instead.
+        let true_w = (f64::from(src_w) * f64::from(dpi_x) / f64::from(GDI_PRINT_DPI)) as i32;
+        let true_h = (f64::from(src_h) * f64::from(dpi_y) / f64::from(GDI_PRINT_DPI)) as i32;
+        let fits_paper = dpi_x > 0
+            && dpi_y > 0
+            && f64::from(true_w) <= f64::from(physical_w) * 1.01
+            && f64::from(true_h) <= f64::from(physical_h) * 1.01;
+        let (draw_w, draw_h, x, y) = if fits_paper {
+            (true_w.max(1), true_h.max(1), -offset_x, -offset_y)
+        } else {
+            let fit_w = f64::from(page_w) / f64::from(src_w);
+            let fit_h = f64::from(page_h) / f64::from(src_h);
+            let scale = fit_w.min(fit_h);
+            let draw_w = (f64::from(src_w) * scale).max(1.0) as i32;
+            let draw_h = (f64::from(src_h) * scale).max(1.0) as i32;
+            (draw_w, draw_h, (page_w - draw_w) / 2, (page_h - draw_h) / 2)
+        };
 
         let doc_name = wide("OpenCADStudio Plot");
         // An optional redirect writes the spooled output to a file instead of
@@ -1354,6 +1367,11 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
         // The driver's own options, exactly as the PPD names them.
         for (key, value) in &opts.driver_options {
             cmd.arg("-o").arg(format!("{key}={value}"));
+        }
+        // The plot PDF is already the sheet at size; a driver default of
+        // fitting it into the printable area shrinks a 1:1 plot (#1651).
+        if !opts.driver_options.iter().any(|(key, _)| key == "print-scaling") {
+            cmd.arg("-o").arg("print-scaling=none");
         }
         let lp_result = cmd.arg("--").arg(path_str.as_ref()).output();
         if let Ok(out) = &lp_result {

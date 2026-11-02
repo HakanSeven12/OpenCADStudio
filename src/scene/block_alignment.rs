@@ -410,7 +410,10 @@ impl Targets {
             best = Some((distance, nearest.point, tangent));
         }
         let Some((_, point, tangent)) = best else {
-            return Ok((self.plane.to_world(DVec3::new(local.x, local.y, 0.)), 0.));
+            // Off-target placement is free translation in the reference plane;
+            // Flip still reverses the reference direction, without a target tangent.
+            let angle = if flipped { std::f64::consts::PI } else { 0. };
+            return Ok((self.plane.to_world(DVec3::new(local.x, local.y, 0.)), angle));
         };
         let target = if alignment.perpendicular {
             [-tangent[1], tangent[0]]

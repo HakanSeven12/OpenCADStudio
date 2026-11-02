@@ -59,7 +59,7 @@ impl OpenCADStudio {
             }
             "INSNAME" | "BLOCKNAVIGATE" => {
                 let current = if name == "INSNAME" {
-                    self.insname.clone()
+                    self.tabs[i].insname.clone()
                 } else {
                     self.block_navigate.clone()
                 };
@@ -71,7 +71,7 @@ impl OpenCADStudio {
                             v.trim_matches('"').to_string()
                         };
                         if name == "INSNAME" {
-                            self.insname = v;
+                            self.tabs[i].insname = v;
                         } else {
                             self.block_navigate = if v.is_empty() { ".".to_string() } else { v };
                             self.persist_settings_if_changed();

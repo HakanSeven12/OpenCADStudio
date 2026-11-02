@@ -593,6 +593,9 @@ impl OpenCADStudio {
             PanelId::Properties => {
                 self.show_properties = false;
                 self.ribbon.set_properties(false);
+                // A hidden panel must not leave its list behind to keep the
+                // keyboard guard swallowing keys.
+                self.tabs[self.active_tab].properties.open_block_picker = None;
             }
             PanelId::Layers => {
                 self.show_layers = false;

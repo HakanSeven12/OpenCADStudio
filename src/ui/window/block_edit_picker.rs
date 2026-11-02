@@ -25,7 +25,10 @@ fn list_item_style(selected: bool) -> impl Fn(&Theme, button::Status) -> button:
 }
 
 pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Element<'_, Message> {
-    let can_apply = state.error.is_none() && !state.name.trim().is_empty();
+    // An empty name is a refusal the operator has to be able to ask for: with
+    // the button disabled, `OK` would do nothing at all and the field would
+    // look broken rather than short.
+    let can_apply = state.error.is_none();
 
     // ── Left: Block name field and list of existing blocks ─────────────────────
     let name_input = text_input(crate::t!("Block name").as_ref(), &state.name)

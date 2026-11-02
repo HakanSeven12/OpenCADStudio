@@ -12,6 +12,9 @@ pub(super) const TEST_GRIP_START: usize = crate::scene::pick::grip::CUSTOM_GRIP_
 pub(super) fn is_test_grip(id: usize) -> bool {
     id >= TEST_GRIP_START && crate::scene::block_grips::runtime::decode(id).is_some()
 }
+pub(in crate::app) fn lookup_action_arg(args: &str) -> bool {
+    matches!(args.trim().to_ascii_uppercase().as_str(), "LOOKUP" | "L")
+}
 impl OpenCADStudio {
     pub(in crate::app) fn action_association_error(&self) -> Option<&'static str> {
         let tab = &self.tabs[self.active_tab];
@@ -127,11 +130,17 @@ impl OpenCADStudio {
         {
             return Some(e);
         }
-        let candidates = kind.map_or_else(
-            || actions::all_parameters(&tab.scene.document, s.br_handle),
-            |kind| actions::parameters(&tab.scene.document, s.br_handle, kind),
-        );
-        if candidates.is_empty() {
+        let has_candidate = match kind {
+            Some(kind) => !actions::parameters(&tab.scene.document, s.br_handle, kind).is_empty(),
+            // The type prompt also offers Lookup, whose parameter is not a
+            // geometry action target.
+            None => {
+                !actions::all_parameters(&tab.scene.document, s.br_handle).is_empty()
+                    || !crate::scene::block_lookup::parameters(&tab.scene.document, s.br_handle)
+                        .is_empty()
+            }
+        };
+        if !has_candidate {
             return Some("Place a compatible parameter before adding this action.");
         }
         None
@@ -193,7 +202,58 @@ impl OpenCADStudio {
             }
         }
     }
+    /// Lookup has no geometry action of its own: choose the parameter whose
+    /// property table the new action edits.
+    pub(in crate::app) fn start_block_lookup_action(
+        &mut self,
+        document: u64,
+        definition: Handle,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        if self.tabs[i].id != document
+            || self.tabs[i].active_block_edit_session().map(|s| s.br_handle) != Some(definition)
+        {
+            self.command_line.push_error(
+                crate::t!("The action's Block Editor session is no longer active.").as_ref(),
+            );
+            return Task::none();
+        }
+        if let Some(error) = self.lookup_table_error() {
+            self.command_line.push_error(crate::t!(error).as_ref());
+            return Task::none();
+        }
+        let candidates =
+            crate::scene::block_lookup::parameters(&self.tabs[i].scene.document, definition)
+                .into_iter()
+                .map(
+                    |(_, parameter)| crate::modules::block_editor::lookup_action::Candidate {
+                        name: parameter.lookup_name.clone(),
+                        point: actions::v(parameter.parameter.definition_point),
+                    },
+                )
+                .collect();
+        let command = crate::modules::block_editor::lookup_action::LookupActionCommand::new(
+            document, definition, candidates,
+        );
+        self.command_line.push_info(&command.prompt());
+        self.command_line.set_step_options(command.options());
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        Task::none()
+    }
     pub(in crate::app) fn start_block_action(&mut self, args: &str) -> Task<Message> {
+        if lookup_action_arg(args) {
+            let i = self.active_tab;
+            let Some(definition) = self.tabs[i]
+                .active_block_edit_session()
+                .map(|session| session.br_handle)
+            else {
+                self.command_line.push_error(
+                    crate::t!("Open a block in the Block Editor before adding actions.").as_ref(),
+                );
+                return Task::none();
+            };
+            return self.start_block_lookup_action(self.tabs[i].id, definition);
+        }
         let kind = if args.is_empty() {
             None
         } else {
@@ -201,7 +261,7 @@ impl OpenCADStudio {
         };
         if !args.is_empty() && kind.is_none() {
             self.command_line.push_error(
-                crate::t!("Supported actions: Move, Scale, Stretch, Polar Stretch, Rotate, Flip, Array. Other action types are not wired yet.")
+                crate::t!("Supported actions: Move, Scale, Stretch, Polar Stretch, Rotate, Flip, Array, Lookup.")
                     .as_ref(),
             );
             return Task::none();

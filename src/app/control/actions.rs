@@ -47,6 +47,16 @@ fn color_value(color: codec::types::Color) -> Value {
         json!(color.index())
     }
 }
+/// The id a row answers to: its parameter and component for a dynamic row,
+/// the palette's static field name otherwise.
+pub(crate) fn row_id(p: &crate::scene::model::object::Property) -> String {
+    match &p.value {
+        PropValue::BlockNumber { key, .. } | PropValue::BlockChoice { key, .. } => {
+            crate::scene::block_parameter_properties::field_id(key)
+        }
+        _ => p.field.to_owned(),
+    }
+}
 /// One Properties-panel row as the control protocol's JSON (`id`, `label`,
 /// `kind`, `value`, `options`). The node graph moves values in this form too,
 /// so a port's value round-trips through [`OpenCADStudio::set_property_value`].
@@ -91,9 +101,29 @@ pub(crate) fn property_json(p: &crate::scene::model::object::Property) -> Value 
         PropValue::AttrText { tag, value } => {
             ("attribute", json!({"tag":tag,"value":value}), Value::Null)
         }
+        PropValue::BlockNumber { value, .. } => ("number", json!(value), Value::Null),
+        PropValue::BlockChoice {
+            selected, options, ..
+        } => (
+            "choice",
+            options
+                .get(*selected)
+                .map(|label| json!(label))
+                .unwrap_or(Value::Null),
+            json!(options),
+        ),
         other => ("specialized", json!(format!("{other:?}")), Value::Null),
     };
-    json!({"id":p.field,"label":p.label,"kind":kind,"value":value,"options":options})
+    let mut row = json!({"id":row_id(p),"label":p.label,"kind":kind,"value":value,"options":options});
+    if let PropValue::BlockNumber { key, description, .. }
+    | PropValue::BlockChoice { key, description, .. } = &p.value
+    {
+        row["description"] = json!(description);
+        row["component"] =
+            json!(crate::scene::block_parameter_properties::component_id(&key.component));
+        row["parameter"] = json!(format!("{:X}", key.parameter.value()));
+    }
+    row
 }
 pub(super) const NAMES: &[&str] = &[
     "close_modal",
@@ -143,6 +173,8 @@ pub(super) const NAMES: &[&str] = &[
     "ribbon_dropdown",
     "keytips",
     "dialog_ok",
+    "dialog_discard",
+    "dialog_cancel",
     "block_def_dialog",
     "table_insert_dialog",
     "table_style_dialog",
@@ -438,7 +470,9 @@ impl OpenCADStudio {
             ));
         }
         let path = string(req, "path")?;
-        let document = &self.tabs[self.active_tab].scene.document;
+        // The export is built from the document as a save writes it: the
+        // header's save stamps and the current display form of the geometry.
+        let document = self.tabs[self.active_tab].scene.document_for_save();
         // A template base keeps its tables/styles in the exported file
         // (Catalog §2.1: clone from a .dwt/.dwg template).
         let template_base = match req["template"].as_str().filter(|t| !t.is_empty()) {
@@ -452,10 +486,12 @@ impl OpenCADStudio {
             match &template_base {
                 Some(base) => {
                     let mut base = base.clone();
-                    crate::modules::insert::wblock::extract_block_into(document, block, &mut base)?;
+                    crate::modules::insert::wblock::extract_block_into(
+                        &document, block, &mut base,
+                    )?;
                     Ok(base)
                 }
-                None => crate::modules::insert::wblock::extract_block_to_doc(document, block),
+                None => crate::modules::insert::wblock::extract_block_to_doc(&document, block),
             }
         } else if let Some(listed) = req["handles"].as_array() {
             let handles: Result<Vec<codec::Handle>, Value> = listed
@@ -481,13 +517,16 @@ impl OpenCADStudio {
                 Some(base) => {
                     let mut base = base.clone();
                     crate::modules::insert::wblock::extract_entities_into(
-                        document, &handles?, &mut base,
+                        &document,
+                        &handles?,
+                        &mut base,
                     )?;
                     Ok(base)
                 }
-                None => {
-                    crate::modules::insert::wblock::extract_entities_to_doc(document, &handles?)
-                }
+                None => crate::modules::insert::wblock::extract_entities_to_doc(
+                    &document,
+                    &handles?,
+                ),
             }
         } else {
             return Err(failure(
@@ -1211,7 +1250,7 @@ impl OpenCADStudio {
             .sections
             .iter()
             .flat_map(|s| &s.props)
-            .find(|p| p.field == field)
+            .find(|p| row_id(p) == field)
             .cloned()
             .ok_or_else(|| {
                 failure(
@@ -1316,6 +1355,24 @@ impl OpenCADStudio {
                     field,
                     value: control_lineweight(raw)?,
                 }),
+            PropValue::BlockNumber { key, .. } => {
+                let input = self.update(Message::PropBlockInput { key, value });
+                let commit = self.update(Message::PropBlockCommit(key));
+                Task::batch([input, commit])
+            }
+            PropValue::BlockChoice { key, options, .. } => {
+                let index = options
+                    .iter()
+                    .position(|option| option == &value)
+                    .or_else(|| {
+                        let index = value.trim().parse::<usize>().ok()?;
+                        (index < options.len()).then_some(index)
+                    })
+                    .ok_or_else(|| {
+                        failure("invalid_choice", "Value is not an available option")
+                    })?;
+                self.update(Message::PropBlockChoice { key, index })
+            }
             PropValue::ReadOnly(_) | PropValue::ReadOnlyWithTooltip { .. } => {
                 return Err(failure("readonly_property", "Property cannot be edited"))
             }
@@ -3125,6 +3182,7 @@ impl OpenCADStudio {
             }
             // The open dialog's OK button.
             "dialog_ok" => match self.active_modal {
+                Some(crate::app::ModalKind::Unsaved) => Message::UnsavedDialogSave,
                 Some(crate::app::ModalKind::XrefAttach) => {
                     Message::XrefAttach(crate::ui::window::xref_attach::XrefAttachMsg::Apply)
                 }
@@ -3145,6 +3203,16 @@ impl OpenCADStudio {
                     Message::AttMan(crate::ui::window::attman_dialog::AttManMsg::Ok)
                 }
                 _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
+            },
+            "dialog_discard" | "dialog_cancel" => match self.active_modal {
+                Some(crate::app::ModalKind::Unsaved) => {
+                    if name == "dialog_discard" {
+                        Message::UnsavedDialogDiscard
+                    } else {
+                        Message::UnsavedDialogCancel
+                    }
+                }
+                _ => return Err(failure("no_dialog", "No dialog with that button is open")),
             },
             "close_document" => Message::TabClose(self.tabs[self.active_tab].id),
             "toggle_properties" => Message::ToggleProperties,

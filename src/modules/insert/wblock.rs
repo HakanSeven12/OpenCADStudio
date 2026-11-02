@@ -56,7 +56,51 @@ pub fn extract_block_into(
         .into_owned());
     }
 
+    out.header.insertion_units = src.header.insertion_units;
+    inherit_source_header(src, out);
     Ok(())
+}
+
+/// A WBLOCK output inherits the source drawing's measurement system and save
+/// dates, and its extents are those of the geometry it actually holds.
+fn inherit_source_header(src: &Document, out: &mut Document) {
+    out.header.measurement = src.header.measurement;
+    // A source that has been saved carries the drawing's creation stamp;
+    // a template base keeps its own when the source has none.
+    if src.header.create_date_julian != 0.0 || src.header.universal_create_date_julian != 0.0 {
+        out.header.create_date_julian = src.header.create_date_julian;
+        out.header.universal_create_date_julian = src.header.universal_create_date_julian;
+    }
+    // The export is written now: its update stamp is the source's save stamp,
+    // which an unsaved source and a template base do not have.
+    if src.header.update_date_julian != 0.0 || src.header.universal_update_date_julian != 0.0 {
+        out.header.update_date_julian = src.header.update_date_julian;
+        out.header.universal_update_date_julian = src.header.universal_update_date_julian;
+    }
+    recompute_model_space_extents(out);
+}
+
+/// Handles of the entities placed in model space; entities that belong to a
+/// block definition travel through the references that use them.
+fn model_space_handles(out: &Document) -> Vec<codec::Handle> {
+    let model_space = out.header.model_space_block_handle;
+    out.entities()
+        .filter(|entity| {
+            let owner = entity.common().owner_handle;
+            owner.is_null() || owner == model_space
+        })
+        .map(|entity| entity.common().handle)
+        .collect()
+}
+
+/// EXTMIN / EXTMAX as the geometry in model space actually measures, with
+/// references measured through their block definitions.
+fn recompute_model_space_extents(out: &mut Document) {
+    let handles = model_space_handles(out);
+    if let Some(bounds) = crate::app::helpers::entities_bounds(out, &handles) {
+        out.header.model_space_extents_min = bounds.min;
+        out.header.model_space_extents_max = bounds.max;
+    }
 }
 
 /// Build a standalone `Document` from an explicit list of entity handles
@@ -86,6 +130,8 @@ pub fn extract_entities_into(
         return Err(t!("None of the selected entities could be exported.").into_owned());
     }
 
+    out.header.insertion_units = src.header.insertion_units;
+    inherit_source_header(src, out);
     Ok(())
 }
 
@@ -125,24 +171,28 @@ fn copy_with_dependencies(
 /// interactive WBLOCK export keeps the source coordinates.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn normalize_to_origin(out: &mut Document) {
-    let mut min = [f64::INFINITY; 3];
-    for entity in out.entities() {
-        let (lo, _) = crate::scene::convert::tess::entity_bounds(entity);
-        for axis in 0..3 {
-            if lo[axis] < min[axis] {
-                min[axis] = lo[axis];
-            }
-        }
-    }
-    if min.iter().any(|v| !v.is_finite()) {
+    let model_space = out.header.model_space_block_handle;
+    let handles = model_space_handles(out);
+    let Some(bounds) = crate::app::helpers::entities_bounds(out, &handles) else {
+        return;
+    };
+    let min = bounds.min;
+    if !(min.x.is_finite() && min.y.is_finite() && min.z.is_finite()) {
         return;
     }
     let shift = crate::command::EntityTransform::Affine(codec::types::Transform::from_translation(
-        codec::types::Vector3::new(-min[0], -min[1], -min[2]),
+        codec::types::Vector3::new(-min.x, -min.y, -min.z),
     ));
+    // Only what sits in model space moves; a definition's own entities keep
+    // their coordinates and the reference carries them.
     for entity in out.entities_mut() {
+        let owner = entity.common().owner_handle;
+        if !owner.is_null() && owner != model_space {
+            continue;
+        }
         crate::scene::view::dispatch::apply_transform(entity, &shift);
     }
+    recompute_model_space_extents(out);
 }
 
 /// One-shot point picker for the Write Block dialog's "Pick point" button.
@@ -194,6 +244,7 @@ pub fn extract_entities_to_doc_with_base(
     if out.entities().count() == 0 {
         return Err(t!("None of the selected entities could be exported.").into_owned());
     }
+    inherit_source_header(src, &mut out);
     Ok(out)
 }
 
@@ -252,5 +303,168 @@ mod tests {
         assert_eq!(out.entities().count(), 1);
 
         assert!(extract_block_to_doc(&doc, "NON_EXISTENT").is_err());
+    }
+
+    #[test]
+    fn an_extracted_insert_is_measured_through_its_block_definition() {
+        let mut doc = Document::new();
+        let mut line = Line::new();
+        line.start = Vector3::new(10.0, 20.0, 0.0);
+        line.end = Vector3::new(30.0, 40.0, 0.0);
+        let inner_line = doc.add_entity(EntityType::Line(line)).unwrap();
+        let mut inner = codec::tables::BlockRecord::new("INNER");
+        inner.entity_handles.push(inner_line);
+        doc.block_records.add(inner).unwrap();
+
+        let insert = codec::entities::Insert::new("INNER", Vector3::new(100.0, 200.0, 0.0));
+        let insert_handle = doc.add_entity(EntityType::Insert(insert)).unwrap();
+        let mut outer = codec::tables::BlockRecord::new("OUTER");
+        outer.entity_handles.push(insert_handle);
+        doc.block_records.add(outer).unwrap();
+
+        let out = extract_block_to_doc(&doc, "OUTER").expect("block extract should succeed");
+
+        assert_eq!(
+            out.header.model_space_extents_min,
+            Vector3::new(110.0, 220.0, 0.0)
+        );
+        assert_eq!(
+            out.header.model_space_extents_max,
+            Vector3::new(130.0, 240.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn normalizing_shifts_the_model_and_not_the_definitions() {
+        let mut doc = Document::new();
+        let mut line = Line::new();
+        line.start = Vector3::new(5.0, 5.0, 0.0);
+        line.end = Vector3::new(15.0, 15.0, 0.0);
+        let inner_line = doc.add_entity(EntityType::Line(line)).unwrap();
+        let mut part = codec::tables::BlockRecord::new("PART");
+        part.entity_handles.push(inner_line);
+        doc.block_records.add(part).unwrap();
+
+        let insert = codec::entities::Insert::new("PART", Vector3::new(100.0, 100.0, 0.0));
+        let insert_handle = doc.add_entity(EntityType::Insert(insert)).unwrap();
+
+        let mut out = extract_entities_to_doc(&doc, &[insert_handle]).expect("selection extract");
+        normalize_to_origin(&mut out);
+
+        assert_eq!(
+            out.header.model_space_extents_min,
+            Vector3::new(0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            out.header.model_space_extents_max,
+            Vector3::new(10.0, 10.0, 0.0)
+        );
+        let placed = out
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Insert(insert) => Some(insert.insert_point),
+                _ => None,
+            })
+            .expect("the insert survives the export");
+        assert_eq!(placed, Vector3::new(-5.0, -5.0, 0.0));
+    }
+
+    #[test]
+    fn an_extracted_drawing_keeps_the_source_unit() {
+        let mut doc = Document::new();
+        doc.header.insertion_units = 6;
+        let mut line = Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(1.0, 1.0, 0.0);
+        let h = doc.add_entity(EntityType::Line(line)).unwrap();
+        let mut record = codec::tables::BlockRecord::new("PART");
+        record.entity_handles.push(h);
+        doc.block_records.add(record).unwrap();
+
+        let block = extract_block_to_doc(&doc, "PART").expect("block extract should succeed");
+        assert_eq!(block.header.insertion_units, 6);
+
+        let selection = extract_entities_to_doc(&doc, &[h]).expect("selection extract");
+        assert_eq!(selection.header.insertion_units, 6);
+    }
+
+    #[test]
+    fn a_template_base_keeps_its_dates_when_the_source_never_saved() {
+        let mut doc = Document::new();
+        doc.header.measurement = 1;
+        let mut line = Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(1.0, 1.0, 0.0);
+        let h = doc.add_entity(EntityType::Line(line)).unwrap();
+        let mut record = codec::tables::BlockRecord::new("PART");
+        record.entity_handles.push(h);
+        doc.block_records.add(record).unwrap();
+
+        let mut template = Document::new();
+        template.header.create_date_julian = 2_400_000.0;
+        template.header.update_date_julian = 2_400_001.0;
+        extract_block_into(&doc, "PART", &mut template).expect("template extract should succeed");
+
+        assert_eq!(template.header.create_date_julian, 2_400_000.0);
+        assert_eq!(template.header.update_date_julian, 2_400_001.0);
+        assert_eq!(template.header.measurement, 1);
+    }
+
+    #[test]
+    fn an_extracted_block_carries_the_source_header_and_its_own_extents() {
+        let mut doc = Document::new();
+        doc.header.measurement = 1;
+        doc.header.create_date_julian = 2_460_000.5;
+        doc.header.universal_create_date_julian = 2_460_000.0;
+        doc.header.update_date_julian = 2_460_001.5;
+        doc.header.universal_update_date_julian = 2_460_001.0;
+        let mut line = Line::new();
+        line.start = Vector3::new(20.0, 0.0, 0.0);
+        line.end = Vector3::new(212.0, 206.0, 0.0);
+        let h = doc.add_entity(EntityType::Line(line)).unwrap();
+        let mut record = codec::tables::BlockRecord::new("PART");
+        record.entity_handles.push(h);
+        doc.block_records.add(record).unwrap();
+
+        let out = extract_block_to_doc(&doc, "PART").expect("block extract should succeed");
+
+        assert_eq!(out.header.measurement, 1);
+        assert_eq!(out.header.create_date_julian, 2_460_000.5);
+        assert_eq!(out.header.universal_create_date_julian, 2_460_000.0);
+        assert_eq!(out.header.update_date_julian, 2_460_001.5);
+        assert_eq!(
+            out.header.model_space_extents_min,
+            Vector3::new(20.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            out.header.model_space_extents_max,
+            Vector3::new(212.0, 206.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn an_extracted_selection_carries_the_source_header_and_its_own_extents() {
+        let mut doc = Document::new();
+        doc.header.measurement = 1;
+        doc.header.create_date_julian = 2_460_000.5;
+        doc.header.universal_create_date_julian = 2_460_000.0;
+        let mut line = Line::new();
+        line.start = Vector3::new(10.0, 20.0, 0.0);
+        line.end = Vector3::new(30.0, 40.0, 0.0);
+        let h = doc.add_entity(EntityType::Line(line)).unwrap();
+
+        let out = extract_entities_to_doc(&doc, &[h]).expect("selection extract should succeed");
+
+        assert_eq!(out.header.measurement, 1);
+        assert_eq!(out.header.create_date_julian, 2_460_000.5);
+        assert_eq!(out.header.universal_create_date_julian, 2_460_000.0);
+        assert_eq!(
+            out.header.model_space_extents_min,
+            Vector3::new(10.0, 20.0, 0.0)
+        );
+        assert_eq!(
+            out.header.model_space_extents_max,
+            Vector3::new(30.0, 40.0, 0.0)
+        );
     }
 }

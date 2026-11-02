@@ -60,6 +60,78 @@
 /// pairs), and record walks batch (`read_xrecords` / `update_xrecords` /
 /// `list_xrecords_with_entries` — one frame per pass, not per record).
 ///
+/// **API v14** (the newest painted release; two arcs landed in it: the
+/// runner's self-driving export — no Rust type crosses the library
+/// boundary — and the parametric/class envelopes being reshaped IN PLACE
+/// before release; api_version stays 14): `stage_parametric_chain` — a
+/// declared alignment
+/// chain whose driving ramps are declared DATA (the vocabulary any record
+/// model restates its laws with) turns into reference-only display
+/// geometry staged by the host (exact Line/Arc carriers for the constant
+/// classes, the exact from-end-states Hermite for the profile's
+/// at-most-quadratic polynomial slope class, measured chords within the
+/// declared tolerance for every table law), audited seam-to-seam
+/// before anything is staged and capped by
+/// [`MAX_PLUGIN_LIVE_ENTITIES`](crate::host::MAX_PLUGIN_LIVE_ENTITIES); and
+/// `sample_parametric` — the same engine exposed as a pure placement
+/// evaluation. It adds plugin-scoped class objects —
+/// `register_plugin_class` / `stage_plugin_class_instance`: a declared
+/// entity class (schema version + grip schema + parameter schema) whose
+/// instances carry only identity and a host-evaluated display descriptor
+/// (the parametric engine is the first host-known kind; kinds append at
+/// the end); the staged display set is reference-only and stamped with the
+/// class identity key. Class declarations are session state (like the grip
+/// sets); records stay the only file truth. `CustomGripResponse` gains the
+/// `descriptor` field (serde default): a Begin answer can hand the host a
+/// live design so the host re-derives preview geometry locally per move
+/// instead of the plugin streaming it (older hosts read `None` and keep
+/// the v12 semantics). The declaration's parameter schema —
+/// [`PluginClassParameter`](crate::host::PluginClassParameter): name +
+/// value kind + editability, serde default so declarations without the
+/// field read as an empty schema — and the session's properties pair
+/// (`plugin_class_instance_properties` / `update_plugin_class_instance_parameter`)
+/// turn a stamped instance's record rows into readable/writable
+/// properties: the reading surface renders the declared rows; for rows the
+/// declaration marks editable the write path patches the (name, value)
+/// entry pair on the instance's design record row through the existing
+/// XRecord update machinery (one undo step, the record's dirty
+/// notification re-stages the declaring plugin). The values stay the
+/// records' truth; the host renders and writes only what the declaration
+/// spells, never inventing semantics for a name or kind it does not know.
+/// The host's properties panel rides the same core for selections whose
+/// XDATA carries a registered class key, and the read half crosses the
+/// wire additively (`PluginRequest::PluginClassInstanceProperties` /
+/// `PluginResponse::PluginClassInstancePropertiesResult` with the declared
+/// [`PluginClassParameterRow`](crate::host::PluginClassParameterRow) rows —
+/// appended at the END of the request/response enums; the python `ocs`
+/// surface exposes it as `plugin_class_instance_properties`). A curve's
+/// driving quantity is declared as DATA — a
+/// [`Ramp`](crate::host::Ramp) payload (polynomial, piecewise or sampled
+/// table) per segment, the vocabulary any alignment library restates its
+/// own laws with (the v14 envelope was reshaped IN PLACE to these generic
+/// shapes before release; api_version stays 14 because no deployed
+/// plugins pre-date the reshaping) — and the host's generic Gaussian
+/// integrator executes it; new blend shapes join as declared data, never
+/// as per-shape host code. The drag pipeline consumes
+/// the Begin descriptor: [`PluginGripSchemaEntry`](crate::host::PluginGripSchemaEntry)
+/// gains an optional `drives` row (a
+/// [`PluginGripAnchor`](crate::host::PluginGripAnchor): the segment, the
+/// end and the record-model anchor law the grip re-anchors; serde default
+/// keeps earlier declarations streaming) and
+/// [`CustomGripResponse`](crate::host::CustomGripResponse) gains the
+/// accompanying per-move tolerance (the same value the plugin staged its
+/// instance with). When a Begin answer hands the host a serviceable
+/// descriptor design — a profile-chain END anchor — the host
+/// re-derives the display set LOCALLY per coalesced cursor move through
+/// the declared anchor law's own generic solve (the ramp's end value
+/// re-derives per its arm's integral gain, the downstream joints
+/// re-declare from the engine's own sampling, and the chain's own audit
+/// gates every move): no Move frames cross the IPC, the per-move restage
+/// patches the same staged handles through the visual-only phase (zero
+/// history steps, the byte-identical restore before the settle), and the
+/// plugin's settle callback stays the ONE write window (records first,
+/// then the re-stage; exactly one labeled undo step). Unserved declarations
+/// fall back to the v12 streaming path with one headline.
 /// v14: the plugin runs the runner loop itself through `ocs_plugin_run`
 /// (emitted by `export_plugin!`), so no Rust type crosses the library
 /// boundary. The host no longer matches the plugin's compiler or codec commit;

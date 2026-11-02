@@ -179,6 +179,7 @@ mod tests {
             auprec: 0,
             angbase: 0.0,
             angdir_cw: false,
+            dimzin: 0,
         });
 
         assert!(matches!(
@@ -223,6 +224,7 @@ mod tests {
             auprec: 2,
             angbase: 0.0,
             angdir_cw: false,
+            dimzin: 0,
         });
 
         assert!(matches!(
@@ -263,6 +265,7 @@ mod tests {
             auprec: 0,
             angbase: 0.0,
             angdir_cw: false,
+            dimzin: 0,
         });
 
         assert!(matches!(

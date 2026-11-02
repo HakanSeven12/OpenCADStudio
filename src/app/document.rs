@@ -206,6 +206,10 @@ pub(super) struct DocumentTab {
     /// "Previous" keyword at any Select objects prompt (#426).
     pub(super) prev_selection: Vec<codec::Handle>,
     pub(super) last_cmd: Option<String>,
+    /// INSNAME: the last block inserted in this drawing, offered as `-INSERT`'s
+    /// default. It belongs to the drawing, so a name remembered here is never
+    /// offered in another one.
+    pub(super) insname: String,
     /// Most recently created path drawable. A fresh LINE/PLINE can accept its
     /// current final endpoint with Enter before the first click.
     pub(super) last_draw_anchor: Option<Handle>,
@@ -218,6 +222,12 @@ pub(super) struct DocumentTab {
     /// display state only — never persisted, never host-interpreted.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) plugin_grips: crate::plugin::grip_points::PluginGripStore,
+    /// Plugin-declared entity class registry (API v14): tab-scoped
+    /// display-session state — entries die with their plugin (re-declared
+    /// per load) and are never persisted; the staged instances stamp XDATA
+    /// identity keys + record linkages instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) plugin_classes: crate::plugin::plugin_classes::PluginClassStore,
     /// DIRTY REGION accumulation (API v13): the identity set of what plugin
     /// and built-in paths changed since the previous boundary notification —
     /// `DocumentChangedRegions` carries it so boundary work is O(changed),
@@ -785,6 +795,7 @@ impl DocumentTab {
             layiso_state: None,
             layiso_mode: LayisoMode::Off,
             last_cmd: None,
+            insname: String::new(),
             last_draw_anchor: None,
             snap_result: None,
             active_grip: None,
@@ -792,6 +803,8 @@ impl DocumentTab {
             selected_grip_handles: vec![],
             #[cfg(not(target_arch = "wasm32"))]
             plugin_grips: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            plugin_classes: Default::default(),
             plugin_dirty_entities: Default::default(),
             plugin_dirty_records: Default::default(),
             plugin_dirty_overflow: false,

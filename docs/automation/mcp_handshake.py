@@ -62,7 +62,8 @@ def probe(command: list[str], timeout: float = 10) -> None:
             )
             process.stdin.flush()
             tools = request(2, "tools/list", {})
-            assert {tool["name"] for tool in tools["tools"]} == {
+            # The core tools; intent tools may sit beside them.
+            assert {tool["name"] for tool in tools["tools"]} >= {
                 "ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture",
             }, tools
             request(3, "ping", {})

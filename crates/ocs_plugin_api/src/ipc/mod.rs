@@ -259,6 +259,8 @@ mod tests {
             discriminant(&HostResponse::CustomGrip(crate::host::CustomGripResponse {
                 preview: Vec::new(),
                 live_entities: Default::default(),
+                descriptor: Default::default(),
+                descriptor_tolerance: Default::default(),
             })),
             8
         );
@@ -297,7 +299,11 @@ mod tests {
             grip_id: 42,
             anchor: Some(codec::Handle::from(0x8A)),
             point: [12.5, -3.25, 0.0],
-            axis: Some([0.7071067811865476, 0.7071067811865476, 0.0]),
+            axis: Some([
+                std::f64::consts::FRAC_1_SQRT_2,
+                std::f64::consts::FRAC_1_SQRT_2,
+                0.0,
+            ]),
             shape: crate::host::PluginGripShape::Triangle,
         }];
         let req = crate::ipc::protocol::PluginRequest::SetPluginGrips { grips };
@@ -346,6 +352,8 @@ mod tests {
                     codec::types::Vector3::new(3.0, 0.0, 0.0),
                 )),
             )],
+            descriptor: None,
+            descriptor_tolerance: None,
         });
         let bytes = bincode::serialize(&answer).unwrap();
         let got: HostResponse = bincode::deserialize(&bytes).unwrap();
@@ -388,10 +396,13 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
-        // And a v11-shaped answer (no live_entities) still decodes.
+        // And a v11-shaped answer (no live_entities, no descriptor) still
+        // decodes: both later fields deserialize to their defaults.
         let old = HostResponse::CustomGrip(crate::host::CustomGripResponse {
             preview: Vec::new(),
             live_entities: Default::default(),
+            descriptor: Default::default(),
+            descriptor_tolerance: Default::default(),
         });
         let bytes = bincode::serialize(&old).unwrap();
         let got: HostResponse = bincode::deserialize(&bytes).unwrap();

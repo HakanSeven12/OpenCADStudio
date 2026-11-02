@@ -8,7 +8,8 @@
 
 | Release | Date | Highlights | Details |
 | :--- | :--- | :--- | :--- |
-| **[Unreleased](changelogs/unreleased.md)** | *2026-10-25 to Present* | Dimension association controls and converter-based file interchange with save-loss review | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[Unreleased](changelogs/unreleased.md)** | *2026-11-01 to Present* | Chained dynamic block parameter actions, plus block attribute propagation and visibility-state fixes | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[v2026.44](changelogs/v2026.44.md)** | *2026-11-01* | Shared OpenCADDocument model with IFCX and converter interchange, dimension/multileader/text/table overhauls, ribbon redesign, layer tools, Plugin API 14, MCP intent tools, and plotting/import/performance fixes | [changelogs/v2026.44.md](changelogs/v2026.44.md) |
 | **[v2026.43](changelogs/v2026.43.md)** | *2026-10-25* | Dynamic block authoring, QuickCalc, HATCH editing, expanded import/export, plugin grips, drafting tools, and broad reliability improvements | [changelogs/v2026.43.md](changelogs/v2026.43.md) |
 | **[v2026.42](changelogs/v2026.42.md)** | *2026-10-18* | Dynamic block authoring, broad import support (DGN, PDF, STEP, IGES, SAT, WMF, 3DS), dockable palettes, web parity, and drafting/layout tools | [changelogs/v2026.42.md](changelogs/v2026.42.md) |
 | **[v2026.41](changelogs/v2026.41.md)** | *2026-10-11* | Sheet Set Manager (`SHEETSET`), `COUNT` command & live tables, associative `SWEEP`, RTL text, DimStyle per-end arrowheads (`DIMBLK1`/`DIMBLK2`), GPU options (Metal/OpenGL) | [changelogs/v2026.41.md](changelogs/v2026.41.md) |
@@ -18,9 +19,13 @@
 
 ---
 
-## [Unreleased] - 2026-10-25
+## [Unreleased] - 2026-11-01
 
-> **Summary:** Added dimension association controls and converter-based file interchange with explicit review of content a conversion cannot preserve. See the [full Unreleased notes](changelogs/unreleased.md).
+> **Summary:** Added chained action sequencing to dynamic block parameters and corrected block attribute propagation and visibility-state behavior. See the [full Unreleased notes](changelogs/unreleased.md).
+
+## [v2026.44] - 2026-11-01
+
+> **Summary:** Migrated the drawing database onto the shared OpenCADDocument model with IFCX open/save and converter-based interchange, overhauled dimensions, multileaders, text editing, tables and layer workflows, redesigned the ribbon and command search, expanded the plugin host, automation and MCP surfaces, and delivered broad plotting, import, snapping, localization and performance improvements. See the [full v2026.44 release notes](changelogs/v2026.44.md).
 
 ## [v2026.43] - 2026-10-25
 

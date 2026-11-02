@@ -289,13 +289,13 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32
         if dist <= align_end || dist >= align_total - align_end {
             return true;
         }
-        var first_dash = 0.0;
-        for (var i = 0u; i < count; i++) {
-            if elems[i] > 0.0 { first_dash = elems[i]; break; }
-        }
+        // The aligned pattern leads with its dash or dot (see wire.wgsl).
+        let first_dash = max(elems[0], 0.0);
         d = ((dist - align_end + first_dash) % pat_len + pat_len) % pat_len;
     } else {
-        d = ((dist % pat_len) + pat_len) % pat_len;
+        // The cap before the start reads as the start (see wire.wgsl).
+        let from_start = max(dist, 0.0);
+        d = ((from_start % pat_len) + pat_len) % pat_len;
     }
 
     var pos = 0.0f;

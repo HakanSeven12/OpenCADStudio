@@ -85,6 +85,98 @@ fn choice(app: &OpenCADStudio) -> (BlockParameterKey, usize, Vec<String>) {
 }
 
 #[test]
+fn block_flip_grip_outside_the_editor_lists_states_and_applies_the_choice() {
+    let (mut app, reference, def, _) = setup();
+    edit(&mut app, "authoring_base_state_label", BASE);
+    edit(&mut app, "authoring_flipped_state_label", FLIPPED);
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
+    app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
+        glam::DVec3::new(-4., -3., 0.),
+        glam::DVec3::new(13., 13., 0.),
+        1600. / 900.,
+    );
+    app.tabs[i].scene.select_entity(reference, true);
+    app.tabs[i].selected_handle = Some(reference);
+    app.refresh_properties();
+    let flip = app.tabs[i]
+        .selected_grips
+        .iter()
+        .find_map(|grip| {
+            let (node, _) = crate::scene::block_grips::runtime::decode(grip.id)?;
+            let p = actions::all_parameters(&app.tabs[i].scene.document, def)
+                .into_iter()
+                .find(|p| p.id == node)?;
+            p.flip.then_some((grip.id, grip.world))
+        })
+        .expect("the reference draws the flip chevron");
+    let click = |app: &mut OpenCADStudio, world: glam::DVec3| {
+        let scene = &app.tabs[app.active_tab].scene;
+        let (w, h) = scene.selection.borrow().view.vp_size;
+        let tile = scene.active_model_tile_bounds(w, h);
+        let at = scene
+            .camera
+            .borrow()
+            .project(
+                world,
+                iced::Rectangle {
+                    x: 0.,
+                    y: 0.,
+                    width: tile.width,
+                    height: tile.height,
+                },
+            )
+            .unwrap();
+        let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(
+            at.x + tile.x,
+            at.y + tile.y,
+        )));
+        let _ = app.update(Message::ViewportLeftRelease);
+    };
+    let before = app.tabs[i].scene.document.clone();
+    let member_end = |app: &OpenCADStudio| {
+        let doc = &app.tabs[app.active_tab].scene.document;
+        let EntityType::Insert(ins) = doc.get_entity(reference).unwrap() else {
+            panic!()
+        };
+        let member = doc.block_records.get(&ins.block_name).unwrap().entity_handles[0];
+        let EntityType::Line(line) = doc.get_entity(member).unwrap() else {
+            panic!()
+        };
+        line.end
+    };
+    let original_end = member_end(&app);
+    let depth = app.tabs[i].history.undo_stack.len();
+    click(&mut app, flip.1);
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "the flip chevron lists states instead of starting a command"
+    );
+    let popup = app.flip_popup.as_ref().expect("flip state list");
+    assert_eq!(popup.current, 0);
+    assert_eq!(popup.labels, [BASE.to_string(), FLIPPED.to_string()]);
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+    let _ = app.update(Message::CommandEscape);
+    assert!(app.flip_popup.is_none());
+    assert_eq!(app.tabs[i].selected_handle, Some(reference));
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+    click(&mut app, flip.1);
+    let _ = app.update(Message::FlipPick(1));
+    assert!(app.flip_popup.is_none());
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    let flipped_end = member_end(&app);
+    assert!((flipped_end.x + 1.).abs() < 1e-8, "{:?}", flipped_end);
+    assert!(flipped_end.distance(&original_end) > 0.5);
+    app.undo_steps(1);
+    assert!(member_end(&app).distance(&original_end) < 1e-9);
+    let _ = flip.0;
+}
+
+#[test]
 fn block_flip_state_label_authoring_is_literal_undoable_and_checkpointed() {
     let (mut app, insert, def, parameter) = setup();
     let i = app.active_tab;

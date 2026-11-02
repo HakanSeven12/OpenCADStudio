@@ -16,6 +16,9 @@ use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 use iced_aw::ContextMenu;
 
+#[cfg(test)]
+mod select_similar_clipboard_tests;
+
 /// Invisible event surface for accurate point picking. MouseArea emits a
 /// positionless press message; capturing the cursor in the actual button
 /// event avoids using the previous hover location when clicking quickly.
@@ -51,6 +54,96 @@ impl ViewportPointerState {
             .map(iced::mouse::Cursor::Available)
             .unwrap_or(fallback)
     }
+}
+
+/// Width of the floating Test Block widget panel, including its padding.
+const TEST_WIDGET_PANEL_W: f32 = 202.0;
+const TEST_WIDGET_ROW_H: f32 = 26.0;
+const TEST_WIDGET_ROW_GAP: f32 = 6.0;
+const TEST_WIDGET_PAD: f32 = 6.0;
+
+/// Height of the floating Test Block widget panel for the rows it shows.
+fn test_block_widgets_height(widgets: &super::visibility::TestBlockWidgets) -> f32 {
+    let rows = widgets.visibility.is_some() as usize + widgets.lookup.is_some() as usize;
+    if rows == 0 {
+        return 0.0;
+    }
+    TEST_WIDGET_PAD * 2.0
+        + rows as f32 * TEST_WIDGET_ROW_H
+        + (rows - 1) as f32 * TEST_WIDGET_ROW_GAP
+}
+
+/// Vertical space the overlaid command line takes at the viewport bottom.
+fn command_line_inset(app: &OpenCADStudio) -> f32 {
+    if app.command_line.history_open {
+        app.command_line.history_height.clamp(
+            crate::ui::command_line::HISTORY_HEIGHT_MIN,
+            crate::ui::command_line::history_max_height(app.win_size.1),
+        ) + 72.0
+    } else {
+        34.0 + app.command_line.overlay_lines_height()
+    }
+}
+
+/// Floating lists for the Test Block window: the current visibility state
+/// and lookup value stay on screen instead of living only on a grip of the
+/// selected reference.
+fn test_block_widgets_panel<'a>(
+    widgets: &super::visibility::TestBlockWidgets,
+) -> Element<'a, Message> {
+    let mut col = column![].spacing(TEST_WIDGET_ROW_GAP);
+    if let Some(widget) = &widgets.visibility {
+        col = col.push(test_block_widget_picker(
+            widget,
+            "test-block-visibility",
+            Message::TestVisibilityPick,
+        ));
+    }
+    if let Some(widget) = &widgets.lookup {
+        col = col.push(test_block_widget_picker(
+            widget,
+            "test-block-lookup",
+            Message::TestLookupPick,
+        ));
+    }
+    container(col)
+        .padding(TEST_WIDGET_PAD)
+        .width(iced::Length::Fixed(TEST_WIDGET_PANEL_W))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+fn test_block_widget_picker<'a>(
+    widget: &super::visibility::TestWidget,
+    id: &'static str,
+    on_pick: fn(usize) -> Message,
+) -> Element<'a, Message> {
+    let labels = widget.items.clone();
+    container(
+        iced::widget::pick_list(
+            widget.current,
+            (0..widget.items.len()).collect::<Vec<_>>(),
+            move |idx: &usize| labels.get(*idx).cloned().unwrap_or_default(),
+        )
+        .on_select(on_pick)
+        .placeholder(widget.label.clone())
+        .text_size(12)
+        .padding([4, 6])
+        .width(Fill),
+    )
+    .id(iced::widget::Id::new(id))
+    .into()
 }
 
 /// Pane-local point of a lone finger driving the cursor. Touch events stay
@@ -1316,10 +1409,15 @@ bg={bg_ms:.1}ms n={view_count}"
                             ))
                         })
                         .map(|(handle, point)| {
-                            let mut g = crate::scene::block_distance_parameter::Graphic::default();
-                            g.base_grips.push(point);
-                            g.labels.push((point, "Basepoint".into()));
-                            (handle, g, point)
+                            (
+                                handle,
+                                crate::scene::block_basepoint::marker_graphic(
+                                    &tab.scene.document,
+                                    session.br_handle,
+                                    point,
+                                ),
+                                point,
+                            )
                         }),
                     )
                     .chain(
@@ -2103,6 +2201,31 @@ bg={bg_ms:.1}ms n={view_count}"
                 let bar=crate::ui::window::block_action_bars::view(group,tab.selected_authoring,offset,width,tab.active_cmd.is_none(),bar_color);
                 viewport_stack=viewport_stack.push(position_canvas_overlay(point,bar));
             }
+            // The Test Block window keeps the definition's current
+            // visibility state and lookup row on screen.
+            if tab.block_test.is_some() {
+                if let Some(widgets) = self.test_block_widgets(i) {
+                    let height = test_block_widgets_height(&widgets);
+                    if height > 0.0 {
+                        let min_x = bar_bounds.x + 4.0;
+                        let max_x = (bar_bounds.x + bar_bounds.width
+                            - TEST_WIDGET_PANEL_W
+                            - 4.0)
+                            .max(min_x);
+                        let x = (bar_bounds.x
+                            + (bar_bounds.width - TEST_WIDGET_PANEL_W) * 0.5)
+                            .clamp(min_x, max_x);
+                        let y = bar_bounds.y + bar_bounds.height
+                            - height
+                            - command_line_inset(self)
+                            - 8.0;
+                        viewport_stack = viewport_stack.push(position_canvas_overlay(
+                            iced::Point::new(x, y),
+                            test_block_widgets_panel(&widgets),
+                        ));
+                    }
+                }
+            }
             if let Some(popup) = self.grip_popup.as_ref() {
                 if !tab.is_start {
                     let labels: Vec<String> = popup
@@ -2174,6 +2297,67 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // Dynamic-block flip-state list.
+            if let Some(popup) = self.flip_popup.as_ref() {
+                if !tab.is_start {
+                    let max_len = popup
+                        .labels
+                        .iter()
+                        .map(|s| s.chars().count())
+                        .max()
+                        .unwrap_or(4) as f32;
+                    // +2 chars for the leading "✓ " / "  " marker column.
+                    let row_w = (max_len + 2.0) * 7.0 + 24.0;
+                    let mut col = column![].spacing(0).width(iced::Length::Fixed(row_w));
+                    for (idx, name) in popup.labels.iter().enumerate() {
+                        let is_cur = popup.current == idx;
+                        let mark: Element<'_, Message> = if is_cur {
+                            crate::ui::icons::themed_check_cell(true)
+                        } else {
+                            Space::new().width(11).into()
+                        };
+                        let btn = button(
+                            row![container(mark).width(16), text(name).size(12),]
+                                .spacing(2)
+                                .align_y(iced::Center),
+                        )
+                        .on_press(Message::FlipPick(idx))
+                        .padding([3, 10])
+                        .width(Fill)
+                        .style(move |theme: &Theme, status| {
+                            let palette = theme.palette();
+                            iced::widget::button::Style {
+                                background: matches!(status, iced::widget::button::Status::Hovered)
+                                    .then_some(Background::Color(palette.primary.weak.color)),
+                                border: Border {
+                                    color: Color::TRANSPARENT,
+                                    width: 0.0,
+                                    radius: 0.0.into(),
+                                },
+                                text_color: palette.background.base.text,
+                                ..Default::default()
+                            }
+                        });
+                        col = col.push(btn);
+                    }
+                    let panel = container(col).padding(2).style(|theme: &Theme| {
+                        let palette = theme.palette();
+                        container::Style {
+                            background: Some(Background::Color(palette.background.weak.color)),
+                            border: Border {
+                                color: palette.background.neutral.color,
+                                width: 1.0,
+                                radius: 3.0.into(),
+                            },
+                            ..Default::default()
+                        }
+                    });
+                    let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
+                    viewport_stack =
+                        viewport_stack.push(position_canvas_overlay(anchor, panel.into()));
+                }
+            }
+
             // Dynamic-block visibility-state dropdown.
             if let Some(popup) = self.visibility_popup.as_ref() {
                 if !tab.is_start {
@@ -2242,7 +2426,10 @@ bg={bg_ms:.1}ms n={view_count}"
             }
             if let Some(popup) = self.table_popup.as_ref() {
                 if !tab.is_start {
-                    let mut col = column![text(popup.header.clone()).size(12)].spacing(2);
+                    let mut col = column![text(popup.header.clone())
+                        .size(12)
+                        .wrapping(iced::widget::text::Wrapping::None)]
+                    .spacing(2);
                     for (idx, name) in popup.rows.iter().enumerate() {
                         let mark: Element<'_, Message> = if popup.current == Some(idx) {
                             crate::ui::icons::themed_check_cell(true)
@@ -2251,7 +2438,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         };
                         col = col.push(
                             button(
-                                row![container(mark).width(16), text(name).size(12)]
+                                row![container(mark).width(16), text(name).size(12).wrapping(iced::widget::text::Wrapping::None)]
                                     .spacing(2)
                                     .align_y(iced::Center),
                             )
@@ -2260,12 +2447,20 @@ bg={bg_ms:.1}ms n={view_count}"
                             .width(Fill),
                         );
                     }
-                    let panel =
-                        container(iced::widget::scrollable(col).height(iced::Length::Shrink))
-                            .padding(2);
-                    let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
-                    viewport_stack =
-                        viewport_stack.push(position_canvas_overlay(anchor, panel.into()));
+                    let panel = container(
+                        iced::widget::scrollable(col)
+                            .height(iced::Length::Shrink)
+                            .width(iced::Length::Fixed(table_popup_width(
+                                &popup.header,
+                                &popup.rows,
+                            ))),
+                    )
+                    .padding(2);
+                    viewport_stack = viewport_stack.push(position_canvas_overlay_near_cursor(
+                        popup.anchor,
+                        command_line_inset(self),
+                        panel.into(),
+                    ));
                 }
             }
 
@@ -2346,14 +2541,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
             // Reserve the overlaid command line when placing cursor-anchored panels.
             mark("chrome");
-            let command_line_inset = if self.command_line.history_open {
-                self.command_line.history_height.clamp(
-                    crate::ui::command_line::HISTORY_HEIGHT_MIN,
-                    crate::ui::command_line::history_max_height(self.win_size.1),
-                ) + 72.0
-            } else {
-                34.0 + self.command_line.overlay_lines_height()
-            };
+            let command_line_inset = command_line_inset(self);
             if let Some((cursor, tip)) = self.hovered_dynamic_grip_tip() {
                 viewport_stack = viewport_stack.push(overlay::grip_tip_overlay(cursor, command_line_inset, tip));
             }
@@ -2584,27 +2772,7 @@ bg={bg_ms:.1}ms n={view_count}"
         // `3` must not open the 3DALIGN / 3DARRAY suggestions).
         let allow_autocomplete = self.grip_pending.is_none()
             && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions());
-        // Dynamic input captures keystrokes when its fields are showing,
-        // so the command-line field must release focus / its on_input.
-        // The MText preview also captures keystrokes (typing edits it), so the
-        // command line must likewise release its on_input there.
-        let interactive_value_grip = tab.active_grip.as_ref().is_some_and(|grip| {
-            matches!(
-                grip.mode,
-                crate::scene::pick::grip::GripEditMode::Lengthen
-                    | crate::scene::pick::grip::GripEditMode::Radius
-                    | crate::scene::pick::grip::GripEditMode::ArcLength
-                    | crate::scene::pick::grip::GripEditMode::RectangleWidth
-                    | crate::scene::pick::grip::GripEditMode::RectangleHeight
-                    | crate::scene::pick::grip::GripEditMode::MoveParallel
-            )
-        });
-        let dyn_capturing = (self.dyn_input
-            && (tab.active_cmd.is_some() || tab.active_grip.is_some())
-            && !tab.dyn_fields.is_empty()
-            && !interactive_value_grip)
-            || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
-            || self.text_inline.is_some();
+        let dyn_capturing = self.dyn_capturing();
         // The workspace row is: left edge stack, viewport, right edge stack.
         let mut parts: Vec<Element<'_, Message>> = Vec::new();
         if let Some(e) = left_edge {
@@ -2680,18 +2848,32 @@ bg={bg_ms:.1}ms n={view_count}"
             // menu bar and status bar stay so commands remain reachable and
             // the mode can be toggled back off.
             let mut col = column![];
-            if self.show_menu_bar {
-                col = col.push(crate::ui::menu_bar::view());
-            }
-            if !self.clean_screen && !self.ribbon_closed {
-                col = col.push(self.ribbon.view(
-                    is_paper,
-                    self.tabs[self.active_tab].is_start,
-                    self.tabs[self.active_tab].history.undo_stack.len(),
-                    self.tabs[self.active_tab].history.redo_stack.len(),
-                    self.show_block_palette,
-                    self.block_visibility_context(),
-                ));
+            if self.clean_screen {
+                // Clean screen keeps the menu row, led by the compact logo.
+                if self.show_menu_bar {
+                    col = col.push(
+                        row![
+                            container(self.ribbon.logo_button(false)).padding([0, 6]),
+                            self.ribbon
+                                .with_search_box(crate::ui::menu_bar::view(self.menu_context())),
+                        ]
+                        .align_y(iced::Center),
+                    );
+                }
+            } else {
+                col = col.push(
+                    self.ribbon.view(
+                        self.show_menu_bar
+                            .then(|| crate::ui::menu_bar::view(self.menu_context())),
+                        self.ribbon_closed,
+                        is_paper,
+                        self.tabs[self.active_tab].is_start,
+                        self.tabs[self.active_tab].history.undo_stack.len(),
+                        self.tabs[self.active_tab].history.redo_stack.len(),
+                        self.show_block_palette,
+                        self.block_visibility_context(),
+                    ),
+                );
             }
             // Split the `chrome` bucket so live `view-detail` traces show
             // ribbon vs status-bar construction separately (both gated on
@@ -2880,6 +3062,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.win_size,
                     self.tabs[self.active_tab].is_start,
                     &self.tabs[self.active_tab].recent_colors,
+                    &self.recent_files,
                 )
                 .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
         };
@@ -2914,6 +3097,39 @@ bg={bg_ms:.1}ms n={view_count}"
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        // A minimized ribbon's popup lies over the drawing, under dropdowns.
+        let ribbon_popup_layer: Element<'_, Message> = if self.clean_screen || self.ribbon_closed {
+            None
+        } else {
+            self.ribbon.minimized_popup(
+                is_paper,
+                self.tabs[self.active_tab].is_start,
+                self.show_block_palette,
+                self.block_visibility_context(),
+                self.win_size,
+            )
+        }
+        .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
+        // Pinned slide-outs hang under their panels, over the drawing.
+        let pinned_layer: Element<'_, Message> = if self.clean_screen || self.ribbon_closed {
+            None
+        } else {
+            self.ribbon
+                .pinned_slide_outs(self.tabs[self.active_tab].is_start, self.win_size)
+        }
+        .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
+        let search_layer: Element<'_, Message> = self
+            .ribbon
+            .search_layer()
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
+        let ribbon_menu_layer: Element<'_, Message> = self
+            .ribbon
+            .menu_overlay(self.win_size, self.show_menu_bar, self.ribbon_closed)
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+
         // Key tips: the hint bar under the dropdowns, the codes above all.
         let (keytip_bar, keytip_layer): (Element<'_, Message>, Element<'_, Message>) =
             self.ribbon.keytip_layers().unwrap_or_else(|| {
@@ -2925,8 +3141,12 @@ bg={bg_ms:.1}ms n={view_count}"
 
         let composed = stack![
             main_ui,
+            pinned_layer,
+            ribbon_popup_layer,
             keytip_bar,
             dropdown_layer,
+            search_layer,
+            ribbon_menu_layer,
             qselect_layer,
             snap_override_layer,
             open_progress_layer,
@@ -3142,6 +3362,12 @@ impl OpenCADStudio {
             Subscription::none()
         };
         // Expire the QuickCalc status message ("Copied 870").
+        // Open or close a ribbon popup or slide-out after its delay.
+        let ribbon_minimize = if self.ribbon.wants_tick() {
+            iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::RibbonTick)
+        } else {
+            Subscription::none()
+        };
         let quick_calc_flash = if self.quick_calc.flash.is_some() {
             iced::time::every(crate::ui::window::quick_calc::QuickCalcPalette::flash_interval())
                 .map(|_| {
@@ -3252,6 +3478,17 @@ impl OpenCADStudio {
                     }
                     iced::Event::Window(window::Event::Resized(sz)) => {
                         Some(Message::WindowResized(sz.width as f32, sz.height as f32))
+                    }
+                    // The ribbon's arrows sit on whole physical pixels.
+                    iced::Event::Window(window::Event::Opened {
+                        scale_factor, size, ..
+                    }) => {
+                        crate::ui::icons::set_scale_factor(scale_factor);
+                        Some(Message::WindowOpened(win_id, size.width, size.height))
+                    }
+                    iced::Event::Window(window::Event::Rescaled(scale_factor)) => {
+                        crate::ui::icons::set_scale_factor(scale_factor);
+                        None
                     }
                     iced::Event::Window(window::Event::FileDropped(path)) => {
                         Some(Message::FileDropped(path))
@@ -3448,6 +3685,7 @@ impl OpenCADStudio {
             capture_frame,
             caret_blink,
             quick_calc_flash,
+            ribbon_minimize,
             web_fonts,
             autosave,
             plugin_drain,
@@ -3533,6 +3771,28 @@ fn doc_tab_context_menu(
         .padding([4, 0])
         .width(iced::Length::Fixed(MENU_W))
         .into()
+}
+
+impl OpenCADStudio {
+    /// The open drawings, as the Window menu lists them: tab index and name.
+    fn open_drawings(&self) -> Vec<(usize, String)> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| !tab.is_start)
+            .map(|(index, tab)| (index, tab.tab_display_name()))
+            .collect()
+    }
+
+    /// What the menu bar shows: the open drawings, the command aliases, and
+    /// whether the Start tab is on show.
+    fn menu_context(&self) -> crate::ui::menu_bar::MenuContext<'_> {
+        crate::ui::menu_bar::MenuContext {
+            drawings: self.open_drawings(),
+            aliases: &self.command_line.command_aliases,
+            is_start: self.tabs[self.active_tab].is_start,
+        }
+    }
 }
 
 pub(super) fn doc_tab_bar<'a>(
@@ -4906,9 +5166,92 @@ pub(super) fn recent_files_panel<'a>(
     .into()
 }
 
+/// The value list is as wide as the widest line it shows, plus the marker
+/// column and the padding around it, and it has no opinion about the canvas.
+fn table_popup_width(header: &str, rows: &[String]) -> f32 {
+    let widest = rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(header.chars().count());
+    (widest as f32 + 2.0) * 7.0 + 24.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A two-value list is a few characters wide, however large the canvas it
+    /// is painted over, and a longer line is what widens it — not the viewport.
+    #[test]
+    fn the_value_list_width_follows_the_lines_it_shows() {
+        let narrow = super::table_popup_width("Distance1", &["5.0000".into(), "25.0000".into()]);
+        assert!(
+            narrow < 120.0,
+            "a short list is not sized to the canvas: {narrow}"
+        );
+        let wide =
+            super::table_popup_width("Distance1", &["5.0000, 25.0000, 45.0000, 65.0000".into()]);
+        assert!(
+            wide > narrow * 2.0,
+            "a longer line widens the list: {narrow} → {wide}"
+        );
+        let headered = super::table_popup_width(
+            "Distance1, Distance2, Distance3, Distance4",
+            &["5.0".into()],
+        );
+        assert!(
+            headered > narrow,
+            "the header is one of the lines it shows: {narrow} → {headered}"
+        );
+    }
+
+    /// The visibility dropdown draws its entries in one left-aligned column,
+    /// with a fixed leading slot for the tick of the state in use.
+    #[test]
+    fn visibility_popup_left_aligns_its_state_entries() {
+        use iced_test::core::widget;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::Selector;
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.visibility_popup = Some(crate::app::visibility::VisibilityPopup {
+            insert_handle: codec::Handle::new(1),
+            anchor: iced::Point::new(400.0, 300.0),
+            items: vec!["VisibilityState0".into(), "WindowHidden".into()],
+            current: Some(1),
+        });
+
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                None,
+            ),
+        )
+        .expect("headless renderer");
+        let mut ui = UserInterface::build(
+            app.view_main(),
+            iced::Size::new(1600.0, 900.0),
+            Cache::default(),
+            &mut renderer,
+        );
+        let mut left = Vec::new();
+        for label in ["VisibilityState0", "WindowHidden"] {
+            let mut find = Selector::find(label);
+            ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+            let widget::operation::Outcome::Some(Some(target)) = widget::Operation::finish(&find)
+            else {
+                panic!("{label} is not drawn");
+            };
+            left.push(target.visible_bounds().expect("the entry is visible").x);
+        }
+        assert!(
+            (left[0] - left[1]).abs() < 0.5,
+            "entries of different lengths start on one column, not centred: {left:?}"
+        );
+    }
 
     #[test]
     fn rapid_drawing_batched_pointer_events_keep_the_position_before_each_press() {
@@ -5022,4 +5365,33 @@ fn refedit_working_set_count(
             entity.common().owner_handle == space && session.in_working_set(entity.common().handle)
         })
         .count()
+}
+
+impl OpenCADStudio {
+    /// Whether the dynamic-input fields, the MText preview or an inline text
+    /// edit take the keystrokes: the command-line field is read-only then.
+    pub(in crate::app) fn dyn_capturing(&self) -> bool {
+        let tab = &self.tabs[self.active_tab];
+        // Dynamic input captures keystrokes when its fields are showing,
+        // so the command-line field must release focus / its on_input.
+        // The MText preview also captures keystrokes (typing edits it), so the
+        // command line must likewise release its on_input there.
+        let interactive_value_grip = tab.active_grip.as_ref().is_some_and(|grip| {
+            matches!(
+                grip.mode,
+                crate::scene::pick::grip::GripEditMode::Lengthen
+                    | crate::scene::pick::grip::GripEditMode::Radius
+                    | crate::scene::pick::grip::GripEditMode::ArcLength
+                    | crate::scene::pick::grip::GripEditMode::RectangleWidth
+                    | crate::scene::pick::grip::GripEditMode::RectangleHeight
+                    | crate::scene::pick::grip::GripEditMode::MoveParallel
+            )
+        });
+        (self.dyn_input
+            && (tab.active_cmd.is_some() || tab.active_grip.is_some())
+            && !tab.dyn_fields.is_empty()
+            && !interactive_value_grip)
+            || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
+            || self.text_inline.is_some()
+    }
 }

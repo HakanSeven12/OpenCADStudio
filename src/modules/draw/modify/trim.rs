@@ -2083,16 +2083,21 @@ fn crossing_trim_lwpolyline(
     };
     let seg_bulge = |i: usize| -> f64 { poly.vertices[i % n].bulge };
 
-    let mut removed = Vec::<(f64, f64)>::new();
-
-    // Compute the polyline's own non-adjacent segment intersections once.
-    // These global parameters will later be mapped back into each source segment.
-    let self_cuts = lwpoly_self_cut_params(poly, geos);
-
+    // Cuts along the whole polyline as global parameters (segment index +
+    // local parameter), as a single pick finds them: vertices are not cuts,
+    // and an open polyline's own ends are not either (#2130).
+    let mut cuts = lwpoly_self_cut_params(poly, geos);
+    // The parts of the polyline inside the crossing box.
+    let mut inside = Vec::<(f64, f64)>::new();
     for i in 0..seg_count {
         let a = vertex_xy(i);
         let b = vertex_xy(i + 1);
         let bulge = seg_bulge(i);
+        cuts.extend(
+            polyline_seg_ts(a, b, bulge, handle, geos)
+                .into_iter()
+                .map(|t| i as f64 + t),
+        );
         let window_range = if let Some(ba) = BulgeArc::from_bulge(a, b, bulge) {
             let steps = 32usize;
             let mut min_t: Option<f64> = None;
@@ -2116,54 +2121,73 @@ fn crossing_trim_lwpolyline(
         } else {
             segment_window_range(a, b, window)
         };
-        let Some((inside_lo, inside_hi)) = window_range else {
-            continue;
-        };
-        // External intersections on this segment.
-        let mut cuts = polyline_seg_ts(a, b, bulge, handle, geos);
-
-        // Also include self-intersections belonging to this source segment.
-        // `lwpoly_self_cut_params()` stores them as global polyline parameters:
-        //     segment_index + local_parameter
-        //
-        // Convert the ones belonging to segment `i` back to local 0..1.
-        let seg_start = i as f64;
-        let seg_end = seg_start + 1.0;
-
-        for global_t in self_cuts.iter().copied() {
-            if global_t > seg_start + 1e-6 && global_t < seg_end - 1e-6 {
-                cuts.push(global_t - seg_start);
-            }
-        }
-
-        // The source segment endpoints are also valid trim limits.
-        cuts.push(0.0);
-        cuts.push(1.0);
-
-        cuts.sort_by(f64::total_cmp);
-        cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-
-        // Remove every trim span that is actually touched by the selection box.
-        //
-        // A single source segment may contain several sub-spans when external
-        // boundaries cross it. Only the sub-spans overlapping the window are removed.
-        for span in cuts.windows(2) {
-            let lo = span[0].clamp(0.0, 1.0);
-            let hi = span[1].clamp(0.0, 1.0);
-
-            if hi - lo <= 1e-6 {
-                continue;
-            }
-
-            // This trim span participates when its parameter interval overlaps the
-            // portion of the source segment lying inside the crossing rectangle.
-            let overlaps_window = hi >= inside_lo - 1e-6 && lo <= inside_hi + 1e-6;
-
-            if overlaps_window {
-                removed.push((i as f64 + lo, i as f64 + hi));
-            }
+        if let Some((lo, hi)) = window_range {
+            inside.push((i as f64 + lo, i as f64 + hi));
         }
     }
+    if inside.is_empty() {
+        return None;
+    }
+    if closed {
+        for t in &mut cuts {
+            *t = t.rem_euclid(total);
+        }
+    } else {
+        cuts.retain(|t| *t > 1e-6 && *t < total - 1e-6);
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    if closed && cuts.len() > 1 && cuts[0] + total - cuts[cuts.len() - 1] < 1e-6 {
+        cuts.pop();
+    }
+    // A piece that no cutting edge crosses stays whole: nothing to trim.
+    if cuts.is_empty() || (closed && cuts.len() < 2) {
+        return None;
+    }
+
+    // The pieces between consecutive cuts; a closed polyline's last piece
+    // runs past its start, split there.
+    let mut pieces = Vec::<(f64, f64)>::new();
+    if closed {
+        for pair in cuts.windows(2) {
+            pieces.push((pair[0], pair[1]));
+        }
+        let (last, first) = (cuts[cuts.len() - 1], cuts[0]);
+        pieces.push((last, total));
+        if first > 1e-6 {
+            pieces.push((0.0, first));
+        }
+    } else {
+        let mut bounds = vec![0.0];
+        bounds.extend(cuts.iter().copied());
+        bounds.push(total);
+        for pair in bounds.windows(2) {
+            pieces.push((pair[0], pair[1]));
+        }
+    }
+    let overlaps = |(lo, hi): (f64, f64)| {
+        inside
+            .iter()
+            .any(|&(a, b)| b >= lo - 1e-6 && a <= hi + 1e-6 && hi - lo > 1e-6)
+    };
+    let mut removed: Vec<(f64, f64)> = if closed {
+        // The wrapped piece counts as one: both of its halves go together.
+        let wrapped = (cuts[cuts.len() - 1], total);
+        let head = (0.0, cuts[0]);
+        let wrap_hit = overlaps(wrapped) || overlaps(head);
+        pieces
+            .into_iter()
+            .filter(|&piece| {
+                if piece == wrapped || piece == head {
+                    wrap_hit
+                } else {
+                    overlaps(piece)
+                }
+            })
+            .collect()
+    } else {
+        pieces.into_iter().filter(|&piece| overlaps(piece)).collect()
+    };
     if removed.is_empty() {
         return None;
     }

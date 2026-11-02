@@ -20,7 +20,8 @@ mod ocs {
     use codec::objects::ObjectType;
     use codec::types::{Transform, Vector2, Vector3};
     use ocs_plugin_api::host::{
-        codec, EntityType, ExtendedDataRecord, Handle, ReaderEntityKind, XDataValue,
+        codec, EntityType, ExtendedDataRecord, Handle, PluginClassParameterKind, ReaderEntityKind,
+        XDataValue,
     };
 
     use crate::host_ctx;
@@ -724,6 +725,56 @@ mod ocs {
             host.remove_record(Handle::new(handle), &app_name)
         })
         .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))
+    }
+
+    /// A plugin class instance's declared parameter rows (API v14, additive):
+    /// the entity's XDATA class stamp resolves the session-registered class,
+    /// and every declared parameter reads its (name, value) pair from the
+    /// instance's design record. Returns a list of
+    /// `{"name": str, "value_kind": "Real" | "Integer" | "Text",
+    /// "editable": bool, "value": str | None}` dicts ("value" is `None`
+    /// where the record row does not carry the parameter's pair yet — the
+    /// row renders the declaration). Raises `ValueError` on a missing
+    /// entity, a broken linkage or a stale schema (the caller re-stages);
+    /// the values are exactly what the record row carries, never a unit or
+    /// semantic conversion.
+    #[pyfunction]
+    fn plugin_class_instance_properties(
+        handle: u64,
+        vm: &VirtualMachine,
+    ) -> PyResult<Vec<PyObjectRef>> {
+        let rows = host_ctx::with_host(|host| host.plugin_class_instance_properties(Handle::new(handle)))
+            .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?
+            .map_err(|reason| {
+                vm.new_value_error(format!("ocs.plugin_class_instance_properties: {reason}"))
+            })?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let dict = vm.ctx.new_dict();
+            dict.set_item("name", vm.new_pyobj(row.name), vm)?;
+            dict.set_item(
+                "value_kind",
+                vm.new_pyobj(kind_py_name(row.value_kind)),
+                vm,
+            )?;
+            dict.set_item("editable", vm.new_pyobj(row.editable), vm)?;
+            match row.value {
+                Some(value) => dict.set_item("value", vm.new_pyobj(value), vm)?,
+                None => dict.set_item("value", vm.ctx.none(), vm)?,
+            }
+            out.push(dict.into());
+        }
+        Ok(out)
+    }
+
+    /// The python spelling of a declared parameter kind (the schema's own
+    /// names; kinds append at the END of the wire enum forever).
+    fn kind_py_name(kind: PluginClassParameterKind) -> &'static str {
+        match kind {
+            PluginClassParameterKind::Real => "Real",
+            PluginClassParameterKind::Integer => "Integer",
+            PluginClassParameterKind::Text => "Text",
+        }
     }
 
     fn xdata_record_to_py(
@@ -5835,6 +5886,16 @@ mod tests {
         assert!(
             error.contains("not running inside a PY_ command"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn class_instance_properties_reaches_for_the_host() {
+        // The binding completes its own argument parsing first; outside a
+        // PY_ command the host lookup is the sentinel, not a parse error.
+        assert_eq!(
+            eval("ocs.plugin_class_instance_properties(11)"),
+            Err(NO_HOST.to_string())
         );
     }
 

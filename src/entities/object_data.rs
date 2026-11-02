@@ -716,81 +716,6 @@ fn dynamic_data_text(data: &DynamicBlockData) -> String {
     }
 }
 
-fn dynamic_block_sections(
-    document: &Document,
-    cache: &ObjectDataCache,
-    handle: Handle,
-) -> Vec<PropSection> {
-    let Some(definition) = document.dynamic_definition_for_insert(handle) else {
-        return Vec::new();
-    };
-    let mut objects = cache
-        .dynamic_objects
-        .iter()
-        .filter_map(|object_handle| match document.objects.get(object_handle) {
-            Some(ObjectType::DynamicBlock(value))
-                if document.owner_chain_reaches(value.owner, definition) =>
-            {
-                Some(value)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let visibility = document.block_visibility_param_for_def(definition);
-    if objects.is_empty() && visibility.is_none() {
-        return Vec::new();
-    }
-    objects.sort_by_key(|object| object.handle.value());
-
-    let mut overview = vec![
-        ro("Definition", handle_text(definition)),
-        ro("Native records", objects.len().to_string()),
-    ];
-    if let Some(parameter) = visibility {
-        overview.push(ro("Visibility", parameter.name.clone()));
-        overview.push(ro(
-            "Visibility states",
-            parameter
-                .states
-                .iter()
-                .map(|state| state.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-        ));
-    }
-
-    let mut sections = vec![PropSection {
-        title: "Dynamic Block".to_string(),
-        props: overview,
-    }];
-    if !objects.is_empty() {
-        sections.push(PropSection {
-            title: "Dynamic Parameters / Actions".to_string(),
-            props: objects
-                .into_iter()
-                .filter(|object| {
-                    !matches!(
-                        object.data,
-                        DynamicBlockData::SolidHistory(_) | DynamicBlockData::SolidHistoryNode(_)
-                    )
-                })
-                .map(|object| {
-                    let class = if object.dxf_name.is_empty() {
-                        object.cpp_class_name.as_str()
-                    } else {
-                        object.dxf_name.as_str()
-                    };
-                    ro(
-                        format!("{} · {}", handle_text(object.handle), class),
-                        dynamic_data_text(&object.data),
-                    )
-                })
-                .collect(),
-        });
-    }
-    sections
-}
-
 fn associative_data_text(data: &AssociativeData) -> String {
     match data {
         AssociativeData::Unknown => "Unknown".to_string(),
@@ -962,9 +887,6 @@ pub fn sections(
     entity: &EntityType,
 ) -> Vec<PropSection> {
     let mut sections = solid_history_sections(document, cache, entity);
-    if matches!(entity, EntityType::Insert(_)) {
-        sections.extend(dynamic_block_sections(document, cache, handle));
-    }
     if let EntityType::Table(table) = entity {
         let mut linked = rustc_hash::FxHashSet::default();
         for row in &table.rows {

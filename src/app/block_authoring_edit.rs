@@ -105,6 +105,9 @@ impl OpenCADStudio {
         if field.starts_with("authoring_action_base_") {
             return self.commit_authoring_action_base(field);
         }
+        if field == "authoring_action_chain" {
+            return self.commit_authoring_action_chain();
+        }
         use crate::scene::block_actions::options;
         let i = self.active_tab;
         let Some(session) = self.tabs[i].active_block_edit_session() else { return Task::none() };
@@ -134,6 +137,38 @@ impl OpenCADStudio {
                     }
                 };
                 self.push_undo_snapshot(i, "Edit block action override");
+                self.apply_action_document(i, staged);
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.bump_geometry();
+                self.finish_pending_history(i);
+                self.tabs[i].properties.edit_buf.remove(&key);
+                self.refresh_properties();
+            }
+            Ok(false) => { self.tabs[i].properties.edit_buf.remove(&key); }
+            Err(error) => self.command_line.push_error(crate::t!(error).as_ref()),
+        }
+        Task::none()
+    }
+
+    pub(super) fn commit_authoring_action_chain(&mut self) -> Task<Message> {
+        use crate::scene::block_actions::{chain, instance};
+        let i = self.active_tab;
+        let Some(session) = self.tabs[i].active_block_edit_session() else { return Task::none() };
+        let definition = session.br_handle;
+        let Some(handle) = self.tabs[i].selected_authoring else { return Task::none() };
+        let key = crate::ui::properties::FieldKey::Geom("authoring_action_chain");
+        let Some(input) = self.tabs[i].properties.edit_buf.get(&key).cloned() else { return Task::none() };
+        let mut staged = self.tabs[i].scene.document.clone();
+        match chain::set_by_name(&mut staged, definition, handle, &input) {
+            Ok(true) => {
+                let staged = match instance::refresh(&staged, definition) {
+                    Ok(staged) => staged,
+                    Err(error) => {
+                        self.command_line.push_error(crate::t!(error).as_ref());
+                        return Task::none();
+                    }
+                };
+                self.push_undo_snapshot(i, "Edit block action chain");
                 self.apply_action_document(i, staged);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
@@ -255,11 +290,14 @@ impl OpenCADStudio {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, index, g)| (index, g.id, g.is_midpoint, g.world))
     }
+    /// The chaining bit and the value sets a parameter's row offers. A `None` chaining
+    /// means this kind's actions never run, so the bit would store a promise the
+    /// definition cannot keep.
     pub(super) fn authoring_parameter_properties(
         &self,
         handle: Handle,
     ) -> Option<(
-        bool,
+        Option<bool>,
         Vec<(
             &'static str,
             &'static str,
@@ -276,48 +314,84 @@ impl OpenCADStudio {
         };
         let (chain_actions, value_sets) = match &object.data {
             codec::objects::DynamicBlockData::LinearParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![("linear_distance", "Distance", &parameter.value_set)],
             ),
             codec::objects::DynamicBlockData::PolarParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![
                     ("polar_distance", "Distance", &parameter.distance_value_set),
                     ("polar_angle", "Angle", &parameter.angle_value_set),
                 ],
             ),
             codec::objects::DynamicBlockData::XYParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![
                     ("xy_x", "X Distance", &parameter.x_value_set),
                     ("xy_y", "Y Distance", &parameter.y_value_set),
                 ],
             ),
             codec::objects::DynamicBlockData::RotationParameter(parameter) => (
-                parameter.parameter.parameter.chain_actions,
+                Some(parameter.parameter.parameter.chain_actions),
                 vec![("rotation_angle", "Angle", &parameter.value_set)],
             ),
             codec::objects::DynamicBlockData::PointParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
-            codec::objects::DynamicBlockData::AlignmentParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
+                (Some(parameter.parameter.parameter.chain_actions), vec![])
             }
             codec::objects::DynamicBlockData::FlipParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
+                (Some(parameter.parameter.parameter.chain_actions), vec![])
             }
-            codec::objects::DynamicBlockData::BasePointParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
-            codec::objects::DynamicBlockData::LookupParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
-            codec::objects::DynamicBlockData::UserParameter(parameter) => {
-                (parameter.parameter.parameter.chain_actions, vec![])
-            }
+            codec::objects::DynamicBlockData::AlignmentParameter(_)
+            | codec::objects::DynamicBlockData::BasePointParameter(_)
+            | codec::objects::DynamicBlockData::LookupParameter(_)
+            | codec::objects::DynamicBlockData::UserParameter(_) => (None, vec![]),
             _ => return None,
         };
         Some((chain_actions, value_sets))
+    }
+
+    /// Flip the bit that says a parameter's actions run one after the other,
+    /// each acting on the member as the previous action left it. Only a parameter
+    /// whose actions the evaluator runs has such an order to declare.
+    fn set_chain_actions(document: &mut codec::Document, handle: Handle, value: bool) -> bool {
+        use codec::objects::{DynamicBlockData, ObjectType};
+        let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle) else {
+            return false;
+        };
+        let bit = match &mut object.data {
+            DynamicBlockData::LinearParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::PolarParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::XYParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::RotationParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::PointParameter(p) => &mut p.parameter.parameter.chain_actions,
+            DynamicBlockData::FlipParameter(p) => &mut p.parameter.parameter.chain_actions,
+            _ => return false,
+        };
+        if *bit == value {
+            return false;
+        }
+        *bit = value;
+        true
+    }
+
+    pub(super) fn toggle_authoring_chain_actions(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(handle) = self.tabs[i].selected_authoring else {
+            return Task::none();
+        };
+        let Some((Some(chain_actions), _)) = self.authoring_parameter_properties(handle) else {
+            return Task::none();
+        };
+        let mut document = self.tabs[i].scene.document.clone();
+        if !Self::set_chain_actions(&mut document, handle, !chain_actions) {
+            return Task::none();
+        }
+        self.push_undo_snapshot(i, "BEDIT Chain parameter actions");
+        self.tabs[i].scene.document = document;
+        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        Task::none()
     }
 
     pub(super) fn toggle_authoring_value_set_flag(&mut self, field: &'static str) -> Task<Message> {

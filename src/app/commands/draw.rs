@@ -1953,9 +1953,6 @@ impl OpenCADStudio {
                     self.command_line.push_error(
                         "Invalid selection for Perpendicular. Select a line segment, polyline segment, text, MText, major or minor axis of ellipse or elliptical arc.",
                     );
-                    let command = PerpendicularConstraintCommand::new();
-                    self.command_line.push_info(&command.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(command));
                 }
             }
 
@@ -1992,9 +1989,6 @@ impl OpenCADStudio {
                     self.command_line.push_error(
                         "Invalid selection for Tangent. Select a line, polyline segment, circle, arc or ellipse.",
                     );
-                    let command = TangentConstraintCommand::new();
-                    self.command_line.push_info(&command.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(command));
                 }
             }
 
@@ -2107,6 +2101,9 @@ impl OpenCADStudio {
                     );
                     let command = refs
                         .first()
+                        // Unlike the perpendicular and tangent refusals, this
+                        // one keeps a pick that did convert: the command asks
+                        // for the partner of a circle it already holds.
                         .copied()
                         .map(ConcentricConstraintCommand::with_first)
                         .unwrap_or_else(ConcentricConstraintCommand::new);

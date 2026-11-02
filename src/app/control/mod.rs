@@ -3480,6 +3480,24 @@ mod tests {
             app.tabs[app.active_tab].active_cmd.is_none(),
             "a failed symmetric pick cancels the command instead of leaving it waiting: {symmetric}"
         );
+
+        // A pair those two aliases cannot constrain at all: one line and one
+        // point. The count is right, the objects are not.
+        for cmd in ["QCONSTRAINT", "TCONSTRAINT"] {
+            request(
+                &mut app,
+                json!({"op":"select","handles":[&point, &lines[0]]}),
+            );
+            let refused = request(&mut app, json!({"op":"run","cmd":cmd}));
+            assert_eq!(
+                refused["ok"], false,
+                "{cmd} must refuse a pair it cannot constrain: {refused}"
+            );
+            assert!(
+                app.tabs[app.active_tab].active_cmd.is_none(),
+                "a failed {cmd} pick leaves no command waiting for another pick: {refused}"
+            );
+        }
     }
 
     /// `DCFORM` converts the selected dimensional constraint and the record

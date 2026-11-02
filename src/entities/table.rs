@@ -2243,6 +2243,9 @@ impl Grippable for Table {
             }
             _ => {}
         }
+        // Resize previews draw from the cells; commit refills the picture by
+        // name, just as a cell edit does. A move keeps its authored picture.
+        self.block_record_handle = None;
     }
 }
 

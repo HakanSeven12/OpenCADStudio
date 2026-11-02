@@ -70,9 +70,12 @@ fn attribute_is_render_visible(
         .layers
         .get(&attribute.common.layer)
         .is_none_or(|layer| !layer.flags.off && !layer.flags.frozen);
+    // ATTMODE controls the ATTRIB's own invisible flag, but the common entity
+    // visibility flag still hides the entity independently.
     layer_visible
         && visibility != 0
-        && (visibility == 2 || (!attribute.common.invisible && !attribute.flags.invisible))
+        && !attribute.common.invisible
+        && (visibility == 2 || !attribute.flags.invisible)
 }
 
 fn insert_attribute_block_scale(
@@ -482,6 +485,12 @@ mod tests {
         att
     }
 
+    fn one_character_attribute(tag: &str, x: f64) -> AttributeEntity {
+        let mut att = attribute(tag, x, 0.0);
+        att.value = "X".into();
+        att
+    }
+
     fn block_with(attributes: Vec<AttributeEntity>) -> Insert {
         let mut ins = Insert::new("BLOCK", Vector3::new(0.0, 0.0, 0.0));
         ins.attributes = attributes;
@@ -660,6 +669,109 @@ mod tests {
             1,
             "ATTMODE=0 should hide every attribute grip",
         );
+    }
+
+    #[test]
+    fn attmode_keeps_entity_and_attribute_visibility_independent() {
+        let mut off_layer = Layer::new("OFF");
+        off_layer.flags.off = true;
+        let mut frozen_layer = Layer::new("FROZEN");
+        frozen_layer.flags.frozen = true;
+        let mut document = document_with_layers(vec![off_layer, frozen_layer]);
+
+        // One-character labels at spaced X positions let the emitted wire
+        // geometry identify which attribute reached the render path.
+        let mut common_invisible = one_character_attribute("TAG_COMMON_INVISIBLE", 2_000.0);
+        common_invisible.common.invisible = true;
+        let mut attribute_invisible = one_character_attribute("TAG_ATTRIBUTE_INVISIBLE", 3_000.0);
+        attribute_invisible.flags.invisible = true;
+        let mut both_invisible = one_character_attribute("TAG_BOTH_INVISIBLE", 4_000.0);
+        both_invisible.common.invisible = true;
+        both_invisible.flags.invisible = true;
+        let mut off_layer_attribute = one_character_attribute("TAG_OFF_LAYER", 5_000.0);
+        off_layer_attribute.common.layer = "OFF".into();
+        let mut frozen_layer_attribute = one_character_attribute("TAG_FROZEN_LAYER", 6_000.0);
+        frozen_layer_attribute.common.layer = "FROZEN".into();
+        let mut constant = one_character_attribute("TAG_CONSTANT", 7_000.0);
+        constant.flags.constant = true;
+
+        let insert = block_with(vec![
+            one_character_attribute("TAG_NORMAL", 1_000.0),
+            common_invisible,
+            attribute_invisible,
+            both_invisible,
+            off_layer_attribute,
+            frozen_layer_attribute,
+            constant,
+        ]);
+
+        for (mode, expected_geometry_indices, expected_grip_indices) in [
+            (0, vec![], vec![]),
+            (1, vec![0], vec![0]),
+            (2, vec![0, 2], vec![0, 2]),
+        ] {
+            document.header.attribute_visibility = mode;
+
+            let mut wires = Vec::new();
+            let insert_color = [1.0; 4];
+            append_insert_attribute_wires(
+                &mut wires,
+                &document,
+                &insert,
+                Handle::new(0x40),
+                false,
+                insert_color,
+                0.0,
+                [0.0; 8],
+                1.0,
+                render::InheritStyle {
+                    color: insert_color,
+                    pat_len: 0.0,
+                    pat: [0.0; 8],
+                    lw_px: 1.0,
+                },
+                true,
+                [0.0, 0.0, 0.0, 1.0],
+                false,
+                1.0,
+                1.0,
+            );
+
+            let mut geometry_xs = Vec::new();
+            for wire in &wires {
+                for (index, point) in wire.points.iter().enumerate() {
+                    let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                    geometry_xs.push(f64::from(point[0]) + f64::from(low[0]));
+                }
+                geometry_xs.extend(
+                    wire.text_verts
+                        .iter()
+                        .map(|vertex| f64::from(vertex.pos[0]) + f64::from(vertex.pos_low[0])),
+                );
+            }
+            let geometry_indices: Vec<usize> = (0..7)
+                .filter(|index| {
+                    let min_x = (*index as f64 + 1.0) * 1_000.0 - 1.0;
+                    let max_x = min_x + 100.0;
+                    geometry_xs.iter().any(|x| *x >= min_x && *x < max_x)
+                })
+                .collect();
+            assert_eq!(
+                geometry_indices, expected_geometry_indices,
+                "rendered geometry for ATTMODE={mode}"
+            );
+
+            let grips = visible_attribute_grips(&document, &insert, 1.0);
+            let grip_indices: Vec<usize> = grips
+                .iter()
+                .skip(1)
+                .map(|grip| grip.id - ATTRIBUTE_GRIP_BASE)
+                .collect();
+            assert_eq!(
+                grip_indices, expected_grip_indices,
+                "attribute grips for ATTMODE={mode}"
+            );
+        }
     }
 
     #[test]

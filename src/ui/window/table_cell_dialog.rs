@@ -885,7 +885,7 @@ pub fn view_format<'a>(
         for (index, separator) in THOUSANDS_SEPARATORS.iter().enumerate() {
             let label = separator
                 .map(|c| c.to_string())
-                .unwrap_or_else(|| crate::tr!("table-cells", "none"));
+                .unwrap_or_else(|| crate::tr!("table-cells", "separator-none"));
             thousands = thousands.push(
                 button(text(label).size(11))
                     .on_press(msg(M::ThousandsSeparator(index)))

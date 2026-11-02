@@ -6565,6 +6565,7 @@ dimstyle =
     .move-text-outside-first = Önce metni dışarı taşı
     .period = Nokta
     .space = Boşluk
+    .separator-none = (Yok)
     .surveyors-units = Haritacılık birimleri
 
 style-manager =
@@ -8230,6 +8231,7 @@ table-cells =
     .decimal-separator = Ondalık ayırıcı
     .thousands-separator = Binlik ayırıcı
     .space = Boşluk
+    .separator-none = (Yok)
     .zero-leading = Baştaki sıfırlar
     .zero-trailing = Sondaki sıfırlar
     .zero-feet = 0 fit

@@ -6643,6 +6643,7 @@ dimstyle =
     .move-text-outside-first = Move text outside first
     .period = Period
     .space = Space
+    .separator-none = (None)
     .surveyors-units = Surveyor's units
 
 style-manager =
@@ -8310,6 +8311,7 @@ table-cells =
     .decimal-separator = Decimal separator
     .thousands-separator = Thousands separator
     .space = Space
+    .separator-none = (None)
     .zero-leading = Leading zeros
     .zero-trailing = Trailing zeros
     .zero-feet = 0 feet

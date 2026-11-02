@@ -4360,6 +4360,26 @@ impl CadCommand for TrimCommand {
                 }
                 let (px, py) = (pt.x, pt.y);
                 let entity = self.entity_index.get(&self.all_entities, handle);
+                // Block references can provide cutting edges, but are not
+                // editable TRIM targets. Avoid scanning/cloning all cutters
+                // for INSERTs and other unsupported entity types.
+                if !matches!(
+                    entity,
+                    Some(
+                        EntityType::Line(_)
+                            | EntityType::Arc(_)
+                            | EntityType::Circle(_)
+                            | EntityType::Ray(_)
+                            | EntityType::XLine(_)
+                            | EntityType::Ellipse(_)
+                            | EntityType::Spline(_)
+                            | EntityType::LwPolyline(_)
+                            | EntityType::MLine(_)
+                            | EntityType::Hatch(_)
+                    )
+                ) {
+                    return CmdResult::NeedPoint;
+                }
                 let new_entities = if self.shift {
                     // Shift+click swaps to Extend for this pick (#336).
                     pick_extend_at(&self.all_entities, &self.geos, handle, px, py).map(|e| vec![e])
@@ -4517,6 +4537,25 @@ impl CadCommand for TrimCommand {
             return vec![];
         }
         if handle.is_null() {
+            return vec![];
+        }
+        // A picked INSERT is not an editable entity for TRIM. Its nested
+        // geometry still acts as cutting edges for external targets, but
+        // hovering the block must not query/clone thousands of cutters.
+        if !matches!(
+            self.entity_index.get(&self.all_entities, handle),
+            Some(
+                EntityType::Line(_)
+                    | EntityType::Arc(_)
+                    | EntityType::Circle(_)
+                    | EntityType::Ray(_)
+                    | EntityType::XLine(_)
+                    | EntityType::Ellipse(_)
+                    | EntityType::Spline(_)
+                    | EntityType::LwPolyline(_)
+                    | EntityType::Hatch(_)
+            )
+        ) {
             return vec![];
         }
 
@@ -6255,6 +6294,25 @@ mod tests {
         }
         command.on_entity_replaced(Handle::new(1), &[]);
         assert!(command.all_entities.is_empty());
+    }
+
+    #[test]
+    fn virtual_block_reference_is_not_a_trim_hover_or_pick_target() {
+        let virtual_handle = Handle::new(90);
+        let mut command = TrimCommand::with_block_boundaries(
+            vec![xline_at(0.0, 5.0, 10.0, 5.0, 1)],
+            vec![(virtual_handle, vec![xline_at(5.0, 0.0, 5.0, 10.0, 101)])],
+            Vec::new(),
+        );
+        let point = DVec3::new(5.0, 5.0, 0.0);
+        assert!(command.on_hover_entity(virtual_handle, point).is_empty());
+        assert!(command.hover_cut_cache.is_empty());
+        assert!(matches!(
+            command.on_entity_pick(virtual_handle, point),
+            CmdResult::NeedPoint
+        ));
+        // The block is still a valid cutting boundary for a real LINE.
+        assert_eq!(command.cached_hover_cut_params(Handle::new(1)).unwrap().len(), 1);
     }
 
     #[test]

@@ -5,8 +5,6 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-// Keep a bounded recent trace in the in-app PERF panel; full logs remain
-// available through the terminal output during long editing sessions.
 const MAX_LINES: usize = 2_000;
 
 static UI_ENABLED: AtomicBool = AtomicBool::new(false);

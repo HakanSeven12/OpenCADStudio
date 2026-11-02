@@ -349,6 +349,10 @@ jobs:
       - name: Build MSI installer
         shell: pwsh
         run: |
+          # The package template comes from this workflow's commit, so an
+          # older tag rebuilt here gets the ARM64-capable one.
+          git fetch --no-tags --depth=1 origin ${{ github.workflow_sha }}
+          git show FETCH_HEAD:packaging/windows/main.wxs | Set-Content -Encoding utf8 packaging/windows/main.wxs
           $version = "${{ steps.version.outputs.msi }}"
           $candle = Join-Path $env:WIX "bin\candle.exe"
           $light  = Join-Path $env:WIX "bin\light.exe"

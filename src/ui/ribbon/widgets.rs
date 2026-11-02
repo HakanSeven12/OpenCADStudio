@@ -545,6 +545,7 @@ pub(super) fn split_outline<'a>(content: Element<'a, Message>) -> Element<'a, Me
 /// freeze and lock states, its colour and name, and the arrow that opens
 /// the layer list `id`. It reports its bounds under `id`, which the list
 /// opens under.
+/// Clicking the colour swatch opens the current layer's colour palette.
 pub(super) fn layer_combo_face<'a>(
     id: &'static str,
     layer_infos: &[LayerInfo],
@@ -562,18 +563,23 @@ pub(super) fn layer_combo_face<'a>(
     let vis_icon = icons::tool(icons::layer_visible(lv), SMALL_ICON);
     let freeze_icon = icons::tool(icons::layer_freeze(lf), SMALL_ICON);
     let lock_icon = icons::tool(icons::layer_lock(ll), SMALL_ICON);
-    let swatch = container(text(""))
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(lc)),
-            border: Border {
-                color: chrome::border(theme),
-                width: crate::ui::icons::hairline(),
-                radius: 1.0.into(),
-            },
-            ..Default::default()
-        })
-        .width(12)
-        .height(12);
+    let swatch = button(
+        container(text(""))
+            .style(move |theme: &Theme| container::Style {
+                background: Some(Background::Color(lc)),
+                border: Border {
+                    color: chrome::border(theme),
+                    width: crate::ui::icons::hairline(),
+                    radius: 1.0.into(),
+                },
+                ..Default::default()
+            })
+            .width(12)
+            .height(12),
+    )
+    .padding(0)
+    .on_press(Message::ToggleRibbonDropdown(format!("LAYER_COLOR:{id}")))
+    .style(button::text);
 
     const FIXED_COMBO_W: f32 = 14.0 * 3.0 + 12.0 + 9.0 + 4.0 * 4.0 + 8.0 * 2.0;
     let name_w = (width - FIXED_COMBO_W).max(24.0);
@@ -609,6 +615,38 @@ pub(super) fn layer_combo_face<'a>(
     .height(metrics::COMBO_H)
     .width(Length::Fixed(width));
     PosReport::new(id, combo_btn).into()
+}
+
+#[cfg(test)]
+mod layer_color_tests {
+    use super::*;
+
+    #[test]
+    fn ribbon_layer_color_swatch_click_does_not_open_layer_list() {
+        for id in [LAYER_COMBO_ID, "QAT_LAYER_COMBO"] {
+            let face = layer_combo_face(id, &[], "0", false, 250., false);
+            let mut ui = iced_test::simulator::Simulator::with_size(
+                iced::Settings::default(),
+                (260., 40.),
+                face,
+            );
+            ui.point_at(iced::Point::new(68., metrics::COMBO_H / 2.));
+            ui.simulate([
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )),
+            ]);
+            let ids: Vec<_> = ui
+                .into_messages()
+                .filter_map(|m| match m {
+                    Message::ToggleRibbonDropdown(id) => Some(id),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(ids, vec![format!("LAYER_COLOR:{id}")]);
+        }
+    }
 }
 
 /// A combo box in a panel (layer, colour, linetype, lineweight, styles).

@@ -8875,6 +8875,9 @@ impl OpenCADStudio {
             Message::RibbonLayerChanged(layer) => self.on_ribbon_layer_changed(layer),
 
             Message::RibbonColorChanged(color) => self.on_ribbon_color_changed(color),
+            Message::RibbonLayerColorChanged { layer, color } => {
+                self.set_ribbon_layer_color(&layer, color, None)
+            }
             Message::RibbonColorPaletteToggle => {
                 self.ribbon.prop_color_palette_open ^= true;
                 Task::none()
@@ -13930,7 +13933,8 @@ impl OpenCADStudio {
             crate::app::ColorPickTarget::Ribbon => {
                 return (color, false, self.ribbon.active_color_name());
             }
-            crate::app::ColorPickTarget::Layer(layer) => {
+            crate::app::ColorPickTarget::Layer(layer)
+            | crate::app::ColorPickTarget::RibbonLayer(layer) => {
                 let name = document
                     .layers
                     .get(layer)
@@ -13977,6 +13981,7 @@ impl OpenCADStudio {
                     entity.as_entity().layer()
                 }),
             crate::app::ColorPickTarget::Ribbon => self.tabs[i].active_layer.as_str(),
+            crate::app::ColorPickTarget::RibbonLayer(layer) => layer.as_str(),
             _ => return None,
         };
         document.layers.get(layer).map(|layer| layer.color)
@@ -14024,16 +14029,48 @@ impl OpenCADStudio {
         name: Option<&str>,
     ) -> Task<Message> {
         let i = self.active_tab;
+        let names = self.selected_layer_names(i);
+        self.set_layer_colors(&names, color, name)
+    }
+
+    pub(super) fn set_ribbon_layer_color(
+        &mut self,
+        layer: &str,
+        color: codec::types::Color,
+        name: Option<&str>,
+    ) -> Task<Message> {
+        if !matches!(
+            color,
+            codec::types::Color::Index(1..=255) | codec::types::Color::Rgb { .. }
+        ) || !self.tabs[self.active_tab]
+            .scene
+            .document
+            .layers
+            .contains(layer)
+        {
+            return Task::none();
+        }
+        self.ribbon.close_dropdown();
+        self.note_recent_color(color);
+        self.set_layer_colors(&[layer.to_owned()], color, name)
+    }
+
+    fn set_layer_colors(
+        &mut self,
+        names: &[String],
+        color: codec::types::Color,
+        name: Option<&str>,
+    ) -> Task<Message> {
+        let i = self.active_tab;
         // Layers keep the book and the colour name apart.
         let (book_name, color_name) = match name.map(|name| name.split_once('$')) {
             Some(Some((book, name))) => (Some(book), Some(name)),
             Some(None) => (None, name),
             None => (None, None),
         };
-        let names = self.selected_layer_names(i);
         if !names.is_empty() {
-            let undo = self.begin_layer_undo(i, "LAYER COLOR", &names);
-            for name in &names {
+            let undo = self.begin_layer_undo(i, "LAYER COLOR", names);
+            for name in names {
                 if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                     dl.color = color;
                     dl.color_name = color_name.map(str::to_string);
@@ -14052,7 +14089,7 @@ impl OpenCADStudio {
             // ByLayer color is baked into the cached wires at
             // tessellation time, so bump the geometry epoch to
             // invalidate the wire cache and repaint with the new color.
-            self.tabs[i].scene.invalidate_layer_dependencies(&names);
+            self.tabs[i].scene.invalidate_layer_dependencies(names);
             self.tabs[i].layers.color_picker_row = None;
             self.tabs[i].layers.color_full_palette = false;
             self.sync_ribbon_layers();

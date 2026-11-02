@@ -2221,6 +2221,8 @@ pub enum ColorPickTarget {
     PropertiesField(String),
     /// Current creation colour (ribbon).
     Ribbon,
+    /// The ribbon's displayed layer, independent of Layer Manager selection.
+    RibbonLayer(String),
     /// A layer's colour, by layer name.
     Layer(String),
     /// A layer's colour override in one layout viewport.
@@ -4422,6 +4424,10 @@ pub enum Message {
     LayerManagerFilterChanged(String),
     /// User changed the active color in the Properties toolbar.
     RibbonColorChanged(AcadColor),
+    RibbonLayerColorChanged {
+        layer: String,
+        color: AcadColor,
+    },
     /// Toggle the full ACI palette inside the ribbon color picker.
     RibbonColorPaletteToggle,
     /// User changed the active linetype in the Properties toolbar.

@@ -449,6 +449,7 @@ pub struct Ribbon {
 pub struct LayerInfo {
     pub name: String,
     pub color: Color,
+    pub acad_color: AcadColor,
     pub visible: bool,
     pub frozen: bool,
     pub locked: bool,
@@ -1627,6 +1628,25 @@ impl Ribbon {
         if list == LAYER_COMBO_ID {
             return self.layer_combo_overlay(open_id, win);
         }
+        if let Some(target) = open_id.strip_prefix("LAYER_COLOR:") {
+            let (anchor, layer_name) = target
+                .split_once(':')
+                .unwrap_or((target, self.active_layer.as_str()));
+            let layer = self
+                .layer_infos
+                .iter()
+                .find(|l| l.name == layer_name)?;
+            let color = layer.acad_color;
+            let panel = color_dropdown::layer_color_dropdown_panel(
+                color,
+                recent_colors,
+                layer.name.clone(),
+            );
+            let (right, pad, top) = self.dd_anchor(anchor, color_dropdown::PANEL_W, win.0);
+            return Some(dropdown_backdrop(position_ribbon_dropdown(
+                panel, right, pad, top,
+            )));
+        }
 
         if list == widgets::DIM_LAYER_COMBO {
             return Some(self.annotation_layer_overlay(
@@ -1811,9 +1831,8 @@ impl Ribbon {
     /// The layer list under the layer combo `id` (the ribbon's or the Quick
     /// Access Toolbar's).
     fn layer_combo_overlay(&self, id: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
-        // A toggle icon (visible / freeze / lock) is its own button so a click
-        // on it flips that state instead of bubbling up to the row's
-        // make-active handler (#133).
+        // Each layer icon is its own button so state toggles and colour edits
+        // do not bubble up to the row's make-active handler (#133).
         let icon_btn = |bytes: &'static [u8], msg: Message| -> Element<'_, Message> {
             button(crate::ui::icons::tool(bytes, SMALL_ICON))
                 .on_press(msg)
@@ -1846,6 +1865,13 @@ impl Ribbon {
                     })
                     .width(12)
                     .height(12);
+                let color = button(container(swatch).center(Length::Fixed(SMALL_ICON)))
+                    .on_press(Message::ToggleRibbonDropdown(format!(
+                        "LAYER_COLOR:{id}:{}",
+                        info.name
+                    )))
+                    .style(popup_row_style)
+                    .padding([2, 4]);
 
                 let vis = icon_btn(
                     crate::ui::icons::layer_visible(lv),
@@ -1870,9 +1896,9 @@ impl Ribbon {
                     crate::ui::icons::themed_check_cell(is_active);
                 let label = text(&info.name).size(11);
 
-                // The swatch + label area selects the layer as active; the
+                // The label area selects the layer as active; the
                 // icon buttons above handle their own toggles.
-                let select = button(row![swatch, label].spacing(5).align_y(iced::Center))
+                let select = button(label)
                     .on_press(Message::RibbonLayerChanged(name))
                     .style(popup_row_style)
                     .width(Fill)
@@ -1882,6 +1908,7 @@ impl Ribbon {
                     row![checkmark, vis, freeze]
                         .push(vp_freeze)
                         .push(lock)
+                        .push(color)
                         .push(select)
                         .spacing(5)
                         .align_y(iced::Center),
@@ -2532,6 +2559,67 @@ mod tests {
     use super::{CollapseMode, Ribbon, RibbonLayout, StyleContext, panel_measure_key};
     use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
     use rustc_hash::FxHashMap;
+
+    #[test]
+    fn ribbon_layer_color_list_swatch_targets_its_row_without_selecting_it() {
+        use crate::app::{ColorPickTarget, Message};
+        use codec::types::Color as AcadColor;
+        use iced_test::simulator::Simulator;
+
+        for (id, vp_frozen) in [
+            (super::widgets::LAYER_COMBO_ID, None),
+            (super::qat::QAT_LAYER_COMBO_ID, Some((0, false))),
+        ] {
+            let mut ribbon = Ribbon::new();
+            ribbon.set_layers(
+                ["0", "Walls"]
+                    .into_iter()
+                    .map(|name| super::LayerInfo {
+                        name: name.into(),
+                        color: iced::Color::WHITE,
+                        acad_color: if name == "0" {
+                            AcadColor::Index(7)
+                        } else {
+                            AcadColor::Index(3)
+                        },
+                        visible: true,
+                        frozen: false,
+                        locked: false,
+                        vp_frozen,
+                    })
+                    .collect(),
+                "0",
+            );
+            let mut ui = Simulator::new(ribbon.layer_combo_overlay(id, (1024., 768.)).unwrap());
+            let label = ui.find("Walls").unwrap().bounds();
+            ui.point_at(iced::Point::new(label.x - 20., label.center_y()));
+            ui.simulate(iced_test::simulator::click());
+            let messages: Vec<_> = ui.into_messages().collect();
+            let [Message::ToggleRibbonDropdown(target)] = messages.as_slice() else {
+                panic!("The colour button must open only its own palette");
+            };
+            assert_eq!(target, &format!("LAYER_COLOR:{id}:Walls"));
+            ribbon.open_dropdown = Some(target.clone());
+            let palette = ribbon
+                .dropdown_overlay(&[], &[], (1024., 768.), false, &[], &[], &[])
+                .unwrap();
+            let mut ui = Simulator::new(palette);
+            ui.click(crate::t!("Select Color...").as_ref()).unwrap();
+            assert!(ui.into_messages().any(|message| matches!(
+                message,
+                Message::OpenColorWindow(ColorPickTarget::RibbonLayer(name), AcadColor::Index(3))
+                    if name == "Walls"
+            )));
+            assert_eq!(ribbon.active_layer, "0");
+
+            let mut ui = Simulator::new(ribbon.layer_combo_overlay(id, (1024., 768.)).unwrap());
+            ui.click("Walls").unwrap();
+            assert!(ui.into_messages().any(|message| matches!(
+                message,
+                Message::RibbonLayerChanged(name) if name == "Walls"
+            )));
+        }
+    }
 
     fn measurement_key(tool_id: &'static str, selected_command: &'static str) -> u64 {
         let groups = [RibbonGroup {

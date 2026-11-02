@@ -1362,6 +1362,9 @@ impl OpenCADStudio {
                 self.ribbon.active_color_book = name.map(|name| (color, name));
                 return task;
             }
+            Some(crate::app::ColorPickTarget::RibbonLayer(layer)) => {
+                return self.set_ribbon_layer_color(&layer, color, name.as_deref());
+            }
             Some(crate::app::ColorPickTarget::Layer(layer)) => {
                 let i = self.active_tab;
                 match self.layer_panel_index(i, &layer) {

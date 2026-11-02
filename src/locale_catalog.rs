@@ -3,6 +3,12 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Action base point" => Some(("block-action-properties", "base-point")),
+        "Action overrides" => Some(("block-action-properties", "overrides")),
+        "Distance multiplier" => Some(("block-action-properties", "multiplier")),
+        "Angle offset (degrees)" => Some(("block-action-properties", "angle-offset")),
+        "Action chain" => Some(("block-action-properties", "chain")),
+        "Chain to" => Some(("block-action-properties", "chain-to")),
         "Flip" => Some(("block-history-kinds", "flip")),
         "Polar Stretch" => Some(("block-history-kinds", "polar-stretch")),
         "Basepoint" => Some(("block-history-kinds", "basepoint")),

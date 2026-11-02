@@ -8193,3 +8193,11 @@ block-history-kinds =
     .polar-stretch = Rozciąganie biegunowe
     .basepoint = Punkt bazowy
     .lookup = Wyszukiwanie
+
+block-action-properties =
+    .base-point = Punkt bazowy operacji
+    .overrides = Nadpisania operacji
+    .multiplier = Mnożnik odległości
+    .angle-offset = Przesunięcie kąta (stopnie)
+    .chain = Łańcuch operacji
+    .chain-to = Połącz z

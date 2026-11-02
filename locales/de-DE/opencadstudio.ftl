@@ -8189,3 +8189,11 @@ block-history-kinds =
     .polar-stretch = Polar strecken
     .basepoint = Basispunkt
     .lookup = Abruf
+
+block-action-properties =
+    .base-point = Aktionsbasispunkt
+    .overrides = Aktionsüberschreibungen
+    .multiplier = Abstandsfaktor
+    .angle-offset = Winkelversatz (Grad)
+    .chain = Aktionskette
+    .chain-to = Verketten mit

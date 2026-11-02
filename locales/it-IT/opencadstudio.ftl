@@ -8190,3 +8190,11 @@ block-history-kinds =
     .polar-stretch = Stiramento polare
     .basepoint = Punto base
     .lookup = Ricerca
+
+block-action-properties =
+    .base-point = Punto base dell’azione
+    .overrides = Sostituzioni dell’azione
+    .multiplier = Moltiplicatore distanza
+    .angle-offset = Offset angolare (gradi)
+    .chain = Catena di azioni
+    .chain-to = Concatena a

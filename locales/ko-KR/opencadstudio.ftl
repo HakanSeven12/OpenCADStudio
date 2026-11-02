@@ -8180,3 +8180,11 @@ block-history-kinds =
     .polar-stretch = 극 신축
     .basepoint = 기준점
     .lookup = 조회
+
+block-action-properties =
+    .base-point = 동작 기준점
+    .overrides = 동작 재지정
+    .multiplier = 거리 승수
+    .angle-offset = 각도 간격띄우기 (도)
+    .chain = 동작 체인
+    .chain-to = 연결 대상

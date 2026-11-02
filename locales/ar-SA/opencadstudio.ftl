@@ -8194,3 +8194,11 @@ block-history-kinds =
     .polar-stretch = تمديد قطبي
     .basepoint = نقطة الأساس
     .lookup = بحث
+
+block-action-properties =
+    .base-point = نقطة أساس الإجراء
+    .overrides = تجاوزات الإجراء
+    .multiplier = معامل المسافة
+    .angle-offset = إزاحة الزاوية (درجات)
+    .chain = سلسلة الإجراءات
+    .chain-to = الربط بـ

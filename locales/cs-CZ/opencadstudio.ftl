@@ -8191,3 +8191,11 @@ block-history-kinds =
     .polar-stretch = Polární protažení
     .basepoint = Základní bod
     .lookup = Vyhledávání
+
+block-action-properties =
+    .base-point = Základní bod akce
+    .overrides = Přepsání akce
+    .multiplier = Násobitel vzdálenosti
+    .angle-offset = Úhlový posun (stupně)
+    .chain = Řetězec akcí
+    .chain-to = Navázat na

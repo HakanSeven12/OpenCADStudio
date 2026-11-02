@@ -8191,3 +8191,11 @@ block-history-kinds =
     .polar-stretch = Estiramiento polar
     .basepoint = Punto base
     .lookup = Consulta
+
+block-action-properties =
+    .base-point = Punto base de acción
+    .overrides = Modificaciones de acción
+    .multiplier = Multiplicador de distancia
+    .angle-offset = Desfase angular (grados)
+    .chain = Cadena de acciones
+    .chain-to = Encadenar a

@@ -8169,3 +8169,11 @@ block-history-kinds =
     .polar-stretch = 極ストレッチ
     .basepoint = 基点
     .lookup = ルックアップ
+
+block-action-properties =
+    .base-point = アクションの基点
+    .overrides = アクションの上書き
+    .multiplier = 距離乗数
+    .angle-offset = 角度オフセット（度）
+    .chain = アクションの連鎖
+    .chain-to = 連鎖先

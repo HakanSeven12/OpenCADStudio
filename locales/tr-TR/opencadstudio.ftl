@@ -8112,3 +8112,11 @@ block-history-kinds =
     .polar-stretch = Kutupsal germe
     .basepoint = Temel nokta
     .lookup = Arama
+
+block-action-properties =
+    .base-point = Eylem temel noktası
+    .overrides = Eylem geçersiz kılmaları
+    .multiplier = Mesafe çarpanı
+    .angle-offset = Açı farkı (derece)
+    .chain = Eylem zinciri
+    .chain-to = Şuna zincirle

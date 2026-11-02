@@ -8182,3 +8182,11 @@ block-history-kinds =
     .polar-stretch = ຍືດແບບຂົ້ວ
     .basepoint = ຈຸດຖານ
     .lookup = ຄົ້ນຫາ
+
+block-action-properties =
+    .base-point = ຈຸດຖານການກະທຳ
+    .overrides = ຄ່າແທນການກະທຳ
+    .multiplier = ຕົວຄູນໄລຍະຫ່າງ
+    .angle-offset = ມຸມຊົດເຊີຍ (ອົງສາ)
+    .chain = ລຳດັບການກະທຳ
+    .chain-to = ເຊື່ອມຕໍ່ໄປຫາ

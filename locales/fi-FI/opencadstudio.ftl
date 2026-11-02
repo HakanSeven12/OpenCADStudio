@@ -8188,3 +8188,11 @@ block-history-kinds =
     .polar-stretch = Polaarinen venytys
     .basepoint = Peruspiste
     .lookup = Haku
+
+block-action-properties =
+    .base-point = Toiminnon peruspiste
+    .overrides = Toiminnon ohitukset
+    .multiplier = Etäisyyskerroin
+    .angle-offset = Kulman siirtymä (astetta)
+    .chain = Toimintoketju
+    .chain-to = Ketjuta kohteeseen

@@ -8195,3 +8195,11 @@ block-history-kinds =
     .polar-stretch = Полярное растяжение
     .basepoint = Базовая точка
     .lookup = Выбор
+
+block-action-properties =
+    .base-point = Базовая точка операции
+    .overrides = Переопределения операции
+    .multiplier = Множитель расстояния
+    .angle-offset = Смещение угла (градусы)
+    .chain = Цепочка операций
+    .chain-to = Связать с

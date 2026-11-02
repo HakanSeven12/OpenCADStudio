@@ -8179,3 +8179,11 @@ block-history-kinds =
     .polar-stretch = ध्रुवीय खिंचाव
     .basepoint = आधार बिंदु
     .lookup = लुकअप
+
+block-action-properties =
+    .base-point = क्रिया आधार बिंदु
+    .overrides = क्रिया ओवरराइड
+    .multiplier = दूरी गुणक
+    .angle-offset = कोण ऑफ़सेट (डिग्री)
+    .chain = क्रिया श्रृंखला
+    .chain-to = इससे जोड़ें

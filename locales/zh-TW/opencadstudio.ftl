@@ -8176,3 +8176,11 @@ block-history-kinds =
     .polar-stretch = 極座標拉伸
     .basepoint = 基準點
     .lookup = 查詢
+
+block-action-properties =
+    .base-point = 動作基準點
+    .overrides = 動作取代
+    .multiplier = 距離倍數
+    .angle-offset = 角度偏移（度）
+    .chain = 動作鏈
+    .chain-to = 串連至

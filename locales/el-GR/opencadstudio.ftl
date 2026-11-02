@@ -8191,3 +8191,11 @@ block-history-kinds =
     .polar-stretch = Πολική επέκταση
     .basepoint = Βασικό σημείο
     .lookup = Αναζήτηση
+
+block-action-properties =
+    .base-point = Βασικό σημείο ενέργειας
+    .overrides = Παρακάμψεις ενέργειας
+    .multiplier = Πολλαπλασιαστής απόστασης
+    .angle-offset = Μετατόπιση γωνίας (μοίρες)
+    .chain = Αλυσίδα ενεργειών
+    .chain-to = Σύνδεση με

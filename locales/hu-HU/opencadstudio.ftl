@@ -8169,3 +8169,11 @@ block-history-kinds =
     .polar-stretch = Poláris nyújtás
     .basepoint = Bázispont
     .lookup = Keresés
+
+block-action-properties =
+    .base-point = Művelet bázispontja
+    .overrides = Művelet felülbírálásai
+    .multiplier = Távolságszorzó
+    .angle-offset = Szögeltolás (fok)
+    .chain = Műveletlánc
+    .chain-to = Láncolás ehhez

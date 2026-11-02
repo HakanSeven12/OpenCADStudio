@@ -8188,3 +8188,11 @@ block-history-kinds =
     .polar-stretch = Kéo giãn cực
     .basepoint = Điểm gốc
     .lookup = Tra cứu
+
+block-action-properties =
+    .base-point = Điểm gốc hành động
+    .overrides = Ghi đè hành động
+    .multiplier = Hệ số khoảng cách
+    .angle-offset = Độ lệch góc (độ)
+    .chain = Chuỗi hành động
+    .chain-to = Nối với

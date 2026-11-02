@@ -8189,3 +8189,11 @@ block-history-kinds =
     .polar-stretch = Polair uitrekken
     .basepoint = Basispunt
     .lookup = Opzoeken
+
+block-action-properties =
+    .base-point = Basispunt van actie
+    .overrides = Actieoverschrijvingen
+    .multiplier = Afstandsfactor
+    .angle-offset = Hoekverschuiving (graden)
+    .chain = Actieketen
+    .chain-to = Koppelen aan

@@ -4126,7 +4126,7 @@ impl TrimCommand {
             EntityType::Spline(s) => spline_seg_ts(s, handle, &nearby),
             _ => return None,
         };
-        let solve_ms = crate::perf::elapsed_ms(solve_started);
+        let solve_ms = crate::perf::elapsed_ms(Some(solve_started));
         if solve_ms >= 8.0 {
             crate::perf_record!(
                 "[perf] trim-hover-cuts {solve_ms:.2}ms boundaries={} cuts={}",
@@ -4785,7 +4785,7 @@ impl CadCommand for TrimCommand {
                     .hatch_trim_at(handle, pt)
                     .map(|trim| trim.preview_wires())
                     .unwrap_or_default();
-                let ms = crate::perf::elapsed_ms(started);
+                let ms = crate::perf::elapsed_ms(Some(started));
                 if ms >= 8.0 {
                     crate::perf_record!("[perf] trim-hover-hatch {ms:.2}ms");
                 }
@@ -4794,7 +4794,7 @@ impl CadCommand for TrimCommand {
             Some(EntityType::LwPolyline(p)) => {
                 let started = std::time::Instant::now();
                 let result = trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos);
-                let ms = crate::perf::elapsed_ms(started);
+                let ms = crate::perf::elapsed_ms(Some(started));
                 if ms >= 8.0 {
                     crate::perf_record!("[perf] trim-hover-polyline {ms:.2}ms");
                 }

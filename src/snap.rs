@@ -872,6 +872,31 @@ impl Snapper {
         ucs_x: DVec3,
         ucs_y: DVec3,
     ) -> Option<OtrackHit> {
+        self.otrack_snap_stable(
+            cursor_world, view_rot, eye, bounds, polar_step_deg, last_point,
+            required_crossing_ray, ortho, ucs_x, ucs_y, None,
+        )
+    }
+
+    pub fn otrack_snap_stable(
+        &self,
+        cursor_world: DVec3,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        polar_step_deg: Option<f32>,
+        last_point: Option<DVec3>,
+        required_crossing_ray: Option<(DVec3, DVec3)>,
+        // Ortho on: the axis from `last_point` is a hard lock. Only crossings of
+        // an acquired ray with that axis lock; single tracking rays are
+        // suppressed so the cursor can't leave the ortho axis. (#218)
+        ortho: bool,
+        // UCS axes in world space: tracking rays follow the active UCS while
+        // their world geometry stays in f64.
+        ucs_x: DVec3,
+        ucs_y: DVec3,
+        previous_ray: Option<(DVec3, DVec3)>,
+    ) -> Option<OtrackHit> {
         // A point created by typed distance along Extension/OTRACK carries
         // that source direction for exactly one following point. Perpendicular
         // OSNAP may use it even when F11 tracking itself is off.
@@ -884,6 +909,17 @@ impl Snapper {
         if (!self.otrack_enabled || self.tracking_points.is_empty()) && carried_perp.is_none() {
             return None;
         }
+
+        // Prefer the same acquired reference when two currently valid
+        // tracking rays lie within four screen pixels of each other.
+        // The point is always recomputed on a live ray: no stale guide.
+        let rank_ray = |base: DVec3, dir: DVec3, distance_px: f32| {
+            let retained = previous_ray.is_some_and(|(old_base, old_dir)| {
+                (old_base - base).length_squared() < 1e-12
+                    && old_dir.dot(dir).abs() > 0.9999
+            });
+            distance_px - if retained { 4.0 } else { 0.0 }
+        };
 
         let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
         // Use the same aperture as OSNAP so the catch distance is uniform.
@@ -1066,7 +1102,16 @@ impl Snapper {
                     continue;
                 }
                 let sd = screen_dist(x);
-                if sd < r && best_x.as_ref().map_or(true, |(bd, _)| sd < *bd) {
+                if sd < r {
+                    let ranking_ray = if rays[i].group != POLAR_GROUP && rays[i].group != ORTHO_GROUP {
+                        &rays[i]
+                    } else {
+                        &rays[j]
+                    };
+                    let score = rank_ray(ranking_ray.origin, ranking_ray.dir, sd);
+                    if !best_x.as_ref().map_or(true, |(bd, _)| score < *bd) {
+                        continue;
+                    }
                     // Report an acquired tracking ray (not an auxiliary
                     // last_point ray) as base/dir for typed-distance entry.
                     let (ot, other) =
@@ -1088,7 +1133,7 @@ impl Snapper {
                     };
                     let dir_out = outward(ot);
                     best_x = Some((
-                        sd,
+                        score,
                         OtrackHit {
                             aligned: x,
                             dir: dir_out,
@@ -1128,10 +1173,11 @@ impl Snapper {
                 ray.origin.z,
             );
             let sd = screen_dist(aligned);
-            if sd < r && best.as_ref().map_or(true, |(bd, _)| sd < *bd) {
+            let score = rank_ray(ray.origin, ray.dir, sd);
+            if sd < r && best.as_ref().map_or(true, |(bd, _)| score < *bd) {
                 let dir_out = if t >= 0.0 { ray.dir } else { -ray.dir };
                 best = Some((
-                    sd,
+                    score,
                     OtrackHit {
                         aligned,
                         dir: dir_out,

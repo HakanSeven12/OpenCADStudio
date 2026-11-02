@@ -35,9 +35,10 @@ brew install --cask hakanseven12/tap/open-cad-studio
 ## Updating for a new release
 
 Each release run prints the new `version` + `sha256` in the GitHub Actions job
-summary (the **Emit Homebrew cask sha256** step). Paste those two lines into the
-cask. To compute the digest manually:
+summary (the **Emit Homebrew cask sha256** step), once for Apple Silicon and once
+for Intel. Paste the version and the two digests (`sha256 arm:` / `intel:`) into the
+cask. To compute the digests manually:
 
 ```bash
-shasum -a 256 OpenCADStudio-vX.Y.Z-macos-arm64.dmg
+shasum -a 256 OpenCADStudio-vX.Y.Z-macos-arm64.dmg OpenCADStudio-vX.Y.Z-macos-x86_64.dmg
 ```

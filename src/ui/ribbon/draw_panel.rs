@@ -44,13 +44,22 @@ const LIST_MIN_W: f32 = 180.0;
 /// panel, so the pointer can cross the gap between them.
 const CLOSE_DELAY: Duration = Duration::from_millis(300);
 
-/// Command, label and icon of every slide-out tool.
+/// Command, label and icon of every slide-out tool and its submenu options.
 pub(crate) fn tools() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
     extras::all()
         .flat_map(PanelExtras::tools)
-        .filter_map(|tool| match tool.tool.icon {
-            IconKind::Svg(icon) => Some((tool.command(), tool.tool.label, icon)),
-            IconKind::Glyph(_) => None,
+        .flat_map(|tool| {
+            let icon = match tool.tool.icon {
+                IconKind::Svg(icon) => Some(icon),
+                IconKind::Glyph(_) => None,
+            };
+            icon.into_iter().flat_map(move |icon| {
+                std::iter::once((tool.command(), tool.tool.label, icon)).chain(
+                    tool.options
+                        .iter()
+                        .map(move |(cmd, label)| (*cmd, *label, icon)),
+                )
+            })
         })
 }
 

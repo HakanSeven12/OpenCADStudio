@@ -8151,3 +8151,13 @@ block-construction =
     .active-geometry = Sélectionnez la géométrie dans la définition de bloc active.
     .locked-layer = La géométrie de construction ne peut pas être modifiée sur un calque verrouillé.
     .revert-layer = Choisissez un calque existant déverrouillé pour la géométrie rétablie.
+
+block-authoring-history =
+    .alignment-type = Type d’alignement
+    .action-override = Modifier le remplacement d’une action de bloc
+    .action-chain = Modifier la chaîne d’actions de bloc
+    .action-base = Modifier le point de base d’une action de bloc
+    .parameter-chain = BEDIT Enchaîner les actions du paramètre
+    .value-set = BEDIT Ensemble de valeurs du paramètre
+    .parameter-metadata = Modifier les métadonnées d’un paramètre de bloc
+    .authoring-grip = Poignée de création de bloc

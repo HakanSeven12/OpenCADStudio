@@ -87,7 +87,7 @@ impl OpenCADStudio {
         match crate::scene::block_orientation_parameter::set_alignment_type(&mut staged, definition, parameter, perpendicular) {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, "Alignment type");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Alignment type"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;
@@ -138,7 +138,7 @@ impl OpenCADStudio {
                         return Task::none();
                     }
                 };
-                self.push_undo_snapshot(i, "Edit block action override");
+                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block action override"));
                 self.apply_action_document(i, staged);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
@@ -170,7 +170,7 @@ impl OpenCADStudio {
                         return Task::none();
                     }
                 };
-                self.push_undo_snapshot(i, "Edit block action chain");
+                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block action chain"));
                 self.apply_action_document(i, staged);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
@@ -219,7 +219,7 @@ impl OpenCADStudio {
         match result {
             Ok(true) => match instance::refresh(&staged, definition) {
                 Ok(staged) => {
-                    self.push_undo_snapshot(i, "Edit block action base point");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block action base point"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();
@@ -410,7 +410,7 @@ impl OpenCADStudio {
                 }
             };
         }
-        self.push_undo_snapshot(i, "BEDIT Chain parameter actions");
+        self.push_undo_snapshot(i, super::document::HistoryLabel::Message("BEDIT Chain parameter actions"));
         self.apply_action_document(i, document);
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
@@ -426,7 +426,7 @@ impl OpenCADStudio {
         let mut document = self.tabs[i].scene.document.clone();
         match toggle_authoring_value_set_flag(&mut document, handle, field) {
             Ok(true) => {
-                self.push_undo_snapshot(i, "BEDIT Parameter value set");
+                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("BEDIT Parameter value set"));
                 self.tabs[i].scene.document = document;
                 self.tabs[i].scene.bump_geometry();
                 self.tabs[i].dirty = true;
@@ -450,7 +450,7 @@ impl OpenCADStudio {
         let mut document = self.tabs[i].scene.document.clone();
         match set_authoring_value_set_field(&mut document, handle, field, &input) {
             Ok(true) => {
-                self.push_undo_snapshot(i, "BEDIT Parameter value set");
+                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("BEDIT Parameter value set"));
                 self.tabs[i].scene.document = document;
                 self.tabs[i].scene.bump_geometry();
                 self.tabs[i].dirty = true;
@@ -505,7 +505,7 @@ impl OpenCADStudio {
         match result {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, "Edit block parameter metadata");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block parameter metadata"));
                     self.tabs[i].scene.document = staged;
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();
@@ -904,7 +904,7 @@ impl OpenCADStudio {
         ) {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, "Block authoring grip");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Block authoring grip"));
                     // Keep the live entity-change recorder attached. Basepoint edits
                     // can also relocate INSERT attributes outside the edited block.
                     let doc = &mut self.tabs[i].scene.document;

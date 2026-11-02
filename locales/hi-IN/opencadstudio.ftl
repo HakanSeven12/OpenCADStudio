@@ -8139,3 +8139,13 @@ block-construction =
     .active-geometry = सक्रिय ब्लॉक परिभाषा में ज्यामिति चुनें।
     .locked-layer = लॉक की गई परत पर निर्माण ज्यामिति नहीं बदली जा सकती।
     .revert-layer = वापस की गई ज्यामिति के लिए मौजूदा अनलॉक परत चुनें।
+
+block-authoring-history =
+    .alignment-type = संरेखण प्रकार
+    .action-override = ब्लॉक क्रिया का ओवरराइड संपादित करें
+    .action-chain = ब्लॉक क्रिया श्रृंखला संपादित करें
+    .action-base = ब्लॉक क्रिया का आधार बिंदु संपादित करें
+    .parameter-chain = BEDIT पैरामीटर क्रियाओं की श्रृंखला
+    .value-set = BEDIT पैरामीटर मान समूह
+    .parameter-metadata = ब्लॉक पैरामीटर का मेटाडेटा संपादित करें
+    .authoring-grip = ब्लॉक निर्माण ग्रिप

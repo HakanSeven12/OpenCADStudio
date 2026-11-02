@@ -8142,3 +8142,13 @@ block-construction =
     .active-geometry = ເລືອກເລຂາຄະນິດໃນນິຍາມບລັອກທີ່ເປີດໃຊ້.
     .locked-layer = ບໍ່ສາມາດປ່ຽນເລຂາຄະນິດຊ່ວຍໃນຊັ້ນທີ່ລັອກໄດ້.
     .revert-layer = ເລືອກຊັ້ນທີ່ມີຢູ່ ແລະ ບໍ່ລັອກສຳລັບເລຂາຄະນິດທີ່ຄືນຄ່າ.
+
+block-authoring-history =
+    .alignment-type = ປະເພດການຈັດແນວ
+    .action-override = ແກ້ໄຂການກຳນົດຄ່າແທນການກະທຳບລັອກ
+    .action-chain = ແກ້ໄຂລຳດັບການກະທຳບລັອກ
+    .action-base = ແກ້ໄຂຈຸດຖານການກະທຳບລັອກ
+    .parameter-chain = BEDIT ເຊື່ອມຕໍ່ການກະທຳພາຣາມິເຕີ
+    .value-set = BEDIT ຊຸດຄ່າພາຣາມິເຕີ
+    .parameter-metadata = ແກ້ໄຂຂໍ້ມູນກຳກັບພາຣາມິເຕີບລັອກ
+    .authoring-grip = ຈຸດຈັບສຳລັບສ້າງບລັອກ

@@ -8136,3 +8136,13 @@ block-construction =
     .active-geometry = 請選取作用中圖塊定義內的幾何圖形。
     .locked-layer = 無法變更鎖住圖層上的建構幾何圖形。
     .revert-layer = 請為還原的幾何圖形選擇現有的未鎖住圖層。
+
+block-authoring-history =
+    .alignment-type = 對齊類型
+    .action-override = 編輯圖塊動作取代
+    .action-chain = 編輯圖塊動作鏈
+    .action-base = 編輯圖塊動作基準點
+    .parameter-chain = BEDIT 串連參數動作
+    .value-set = BEDIT 參數值集
+    .parameter-metadata = 編輯圖塊參數中繼資料
+    .authoring-grip = 圖塊製作掣點

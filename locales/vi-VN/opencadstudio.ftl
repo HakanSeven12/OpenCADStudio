@@ -8148,3 +8148,13 @@ block-construction =
     .active-geometry = Chọn hình học trong định nghĩa khối đang hoạt động.
     .locked-layer = Không thể thay đổi hình học dựng trên lớp bị khóa.
     .revert-layer = Chọn một lớp hiện có không bị khóa cho hình học được hoàn nguyên.
+
+block-authoring-history =
+    .alignment-type = Kiểu căn chỉnh
+    .action-override = Chỉnh sửa ghi đè hành động khối
+    .action-chain = Chỉnh sửa chuỗi hành động khối
+    .action-base = Chỉnh sửa điểm gốc hành động khối
+    .parameter-chain = BEDIT Nối chuỗi hành động tham số
+    .value-set = BEDIT Tập giá trị tham số
+    .parameter-metadata = Chỉnh sửa siêu dữ liệu tham số khối
+    .authoring-grip = Điểm nắm tạo khối

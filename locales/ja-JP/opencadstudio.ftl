@@ -8129,3 +8129,13 @@ block-construction =
     .active-geometry = アクティブなブロック定義内のジオメトリを選択してください。
     .locked-layer = ロックされた画層上の構築ジオメトリは変更できません。
     .revert-layer = 元に戻すジオメトリには、既存のロックされていない画層を選択してください。
+
+block-authoring-history =
+    .alignment-type = 位置合わせの種類
+    .action-override = ブロックアクションのオーバーライドを編集
+    .action-chain = ブロックアクションの連鎖を編集
+    .action-base = ブロックアクションの基点を編集
+    .parameter-chain = BEDIT パラメーターのアクションを連鎖
+    .value-set = BEDIT パラメーターの値セット
+    .parameter-metadata = ブロックパラメーターのメタデータを編集
+    .authoring-grip = ブロック作成グリップ

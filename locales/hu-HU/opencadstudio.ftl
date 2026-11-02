@@ -8129,3 +8129,13 @@ block-construction =
     .active-geometry = Válasszon geometriát az aktív blokkdefinícióban.
     .locked-layer = Zárolt fólián nem módosítható a szerkesztési geometria.
     .revert-layer = Válasszon meglévő, nem zárolt fóliát a visszaállított geometriához.
+
+block-authoring-history =
+    .alignment-type = Igazítás típusa
+    .action-override = Blokkművelet felülbírálásának szerkesztése
+    .action-chain = Blokkművelet-lánc szerkesztése
+    .action-base = Blokkművelet bázispontjának szerkesztése
+    .parameter-chain = BEDIT Paraméterműveletek láncolása
+    .value-set = BEDIT Paraméterérték-készlet
+    .parameter-metadata = Blokkparaméter metaadatainak szerkesztése
+    .authoring-grip = Blokklétrehozási fogópont

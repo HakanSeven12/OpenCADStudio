@@ -8149,3 +8149,13 @@ block-construction =
     .active-geometry = Selecteer geometrie in de actieve blokdefinitie.
     .locked-layer = Constructiegeometrie kan niet worden gewijzigd op een vergrendelde laag.
     .revert-layer = Kies een bestaande ontgrendelde laag voor de teruggezette geometrie.
+
+block-authoring-history =
+    .alignment-type = Uitlijningstype
+    .action-override = Overschrijving van blokactie bewerken
+    .action-chain = Blokactieketen bewerken
+    .action-base = Basispunt van blokactie bewerken
+    .parameter-chain = BEDIT Parameteracties koppelen
+    .value-set = BEDIT Parameterwaardenset
+    .parameter-metadata = Metagegevens van blokparameter bewerken
+    .authoring-grip = Blokontwerpgreep

@@ -8124,3 +8124,13 @@ block-construction =
     .active-geometry = 请选择活动块定义中的几何图形。
     .locked-layer = 无法更改锁定图层上的构造几何图形。
     .revert-layer = 请为还原的几何图形选择现有的未锁定图层。
+
+block-authoring-history =
+    .alignment-type = 对齐类型
+    .action-override = 编辑块动作替代
+    .action-chain = 编辑块动作链
+    .action-base = 编辑块动作基点
+    .parameter-chain = BEDIT 链接参数动作
+    .value-set = BEDIT 参数值集
+    .parameter-metadata = 编辑块参数元数据
+    .authoring-grip = 块创作夹点

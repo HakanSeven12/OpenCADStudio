@@ -8150,3 +8150,13 @@ block-construction =
     .active-geometry = Selezionare la geometria nella definizione di blocco attiva.
     .locked-layer = La geometria di costruzione non può essere modificata su un layer bloccato.
     .revert-layer = Scegliere un layer esistente sbloccato per la geometria ripristinata.
+
+block-authoring-history =
+    .alignment-type = Tipo di allineamento
+    .action-override = Modifica sostituzione di un’azione di blocco
+    .action-chain = Modifica catena di azioni di blocco
+    .action-base = Modifica punto base di un’azione di blocco
+    .parameter-chain = BEDIT Concatenazione delle azioni del parametro
+    .value-set = BEDIT Insieme di valori del parametro
+    .parameter-metadata = Modifica metadati di un parametro di blocco
+    .authoring-grip = Grip di creazione del blocco

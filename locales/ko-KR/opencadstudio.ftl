@@ -8140,3 +8140,13 @@ block-construction =
     .active-geometry = 활성 블록 정의에서 형상을 선택하십시오.
     .locked-layer = 잠긴 도면층의 구성 형상은 변경할 수 없습니다.
     .revert-layer = 되돌린 형상에 사용할 기존의 잠기지 않은 도면층을 선택하십시오.
+
+block-authoring-history =
+    .alignment-type = 정렬 유형
+    .action-override = 블록 동작 재지정 편집
+    .action-chain = 블록 동작 체인 편집
+    .action-base = 블록 동작 기준점 편집
+    .parameter-chain = BEDIT 매개변수 동작 연결
+    .value-set = BEDIT 매개변수 값 세트
+    .parameter-metadata = 블록 매개변수 메타데이터 편집
+    .authoring-grip = 블록 작성 그립

@@ -8151,3 +8151,13 @@ block-construction =
     .active-geometry = Vyberte geometrii v aktivní definici bloku.
     .locked-layer = Pomocnou geometrii nelze měnit v uzamčené hladině.
     .revert-layer = Pro vrácenou geometrii vyberte existující odemčenou hladinu.
+
+block-authoring-history =
+    .alignment-type = Typ zarovnání
+    .action-override = Upravit přepsání akce bloku
+    .action-chain = Upravit řetězec akcí bloku
+    .action-base = Upravit základní bod akce bloku
+    .parameter-chain = BEDIT Řetězení akcí parametru
+    .value-set = BEDIT Sada hodnot parametru
+    .parameter-metadata = Upravit metadata parametru bloku
+    .authoring-grip = Uzel pro tvorbu bloku

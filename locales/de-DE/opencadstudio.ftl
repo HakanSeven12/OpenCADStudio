@@ -8149,3 +8149,13 @@ block-construction =
     .active-geometry = Wählen Sie Geometrie in der aktiven Blockdefinition.
     .locked-layer = Konstruktionsgeometrie kann auf einem gesperrten Layer nicht geändert werden.
     .revert-layer = Wählen Sie einen vorhandenen entsperrten Layer für die zurückgesetzte Geometrie.
+
+block-authoring-history =
+    .alignment-type = Ausrichtungstyp
+    .action-override = Überschreibung einer Blockaktion bearbeiten
+    .action-chain = Blockaktionskette bearbeiten
+    .action-base = Basispunkt einer Blockaktion bearbeiten
+    .parameter-chain = BEDIT Parameteraktionen verketten
+    .value-set = BEDIT Parameterwertsatz
+    .parameter-metadata = Metadaten eines Blockparameters bearbeiten
+    .authoring-grip = Blockerstellungsgriff

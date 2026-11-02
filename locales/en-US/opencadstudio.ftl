@@ -8152,3 +8152,13 @@ block-construction =
     .active-geometry = Select geometry in the active block definition.
     .locked-layer = Construction geometry cannot be changed on a locked layer.
     .revert-layer = Choose an existing unlocked layer for reverted geometry.
+
+block-authoring-history =
+    .alignment-type = Alignment type
+    .action-override = Edit block action override
+    .action-chain = Edit block action chain
+    .action-base = Edit block action base point
+    .parameter-chain = BEDIT Chain parameter actions
+    .value-set = BEDIT Parameter value set
+    .parameter-metadata = Edit block parameter metadata
+    .authoring-grip = Block authoring grip

@@ -8072,3 +8072,13 @@ block-construction =
     .active-geometry = Etkin blok tanımındaki geometriyi seçin.
     .locked-layer = Kilitli katmandaki yardımcı geometri değiştirilemez.
     .revert-layer = Geri alınan geometri için var olan kilitsiz bir katman seçin.
+
+block-authoring-history =
+    .alignment-type = Hizalama türü
+    .action-override = Blok eylemi geçersiz kılmasını düzenle
+    .action-chain = Blok eylem zincirini düzenle
+    .action-base = Blok eylemi temel noktasını düzenle
+    .parameter-chain = BEDIT Parametre eylemlerini zincirle
+    .value-set = BEDIT Parametre değer kümesi
+    .parameter-metadata = Blok parametresi meta verilerini düzenle
+    .authoring-grip = Blok oluşturma tutamacı

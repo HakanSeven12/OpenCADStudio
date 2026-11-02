@@ -8148,3 +8148,13 @@ block-construction =
     .active-geometry = Valitse geometria aktiivisesta lohkomäärityksestä.
     .locked-layer = Apugeometriaa ei voi muuttaa lukitulla tasolla.
     .revert-layer = Valitse palautettavalle geometrialle olemassa oleva lukitsematon taso.
+
+block-authoring-history =
+    .alignment-type = Kohdistustyyppi
+    .action-override = Muokkaa lohkotoiminnon ohitusta
+    .action-chain = Muokkaa lohkotoimintojen ketjua
+    .action-base = Muokkaa lohkotoiminnon peruspistettä
+    .parameter-chain = BEDIT Ketjuta parametrin toiminnot
+    .value-set = BEDIT Parametrin arvojoukko
+    .parameter-metadata = Muokkaa lohkoparametrin metatietoja
+    .authoring-grip = Lohkon luontikahva

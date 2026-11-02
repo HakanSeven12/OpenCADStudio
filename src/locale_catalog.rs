@@ -3,6 +3,14 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Alignment type" => Some(("block-authoring-history", "alignment-type")),
+        "Edit block action override" => Some(("block-authoring-history", "action-override")),
+        "Edit block action chain" => Some(("block-authoring-history", "action-chain")),
+        "Edit block action base point" => Some(("block-authoring-history", "action-base")),
+        "BEDIT Chain parameter actions" => Some(("block-authoring-history", "parameter-chain")),
+        "BEDIT Parameter value set" => Some(("block-authoring-history", "value-set")),
+        "Edit block parameter metadata" => Some(("block-authoring-history", "parameter-metadata")),
+        "Block authoring grip" => Some(("block-authoring-history", "authoring-grip")),
         "BCONSTRUCTION is only available in the Block Editor." => Some(("block-construction", "requires-session")),
         "Choose Convert, Revert, Show or Hide." => Some(("block-construction", "choose-operation")),
         "The construction geometry's Block Editor session is no longer active." => Some(("block-construction", "stale-session")),

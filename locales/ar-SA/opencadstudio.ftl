@@ -8154,3 +8154,13 @@ block-construction =
     .active-geometry = حدد عناصر هندسية في تعريف الكتلة النشط.
     .locked-layer = لا يمكن تغيير الهندسة الإنشائية على طبقة مقفلة.
     .revert-layer = اختر طبقة موجودة وغير مقفلة للعناصر الهندسية المستعادة.
+
+block-authoring-history =
+    .alignment-type = نوع المحاذاة
+    .action-override = تحرير تجاوز إجراء الكتلة
+    .action-chain = تحرير سلسلة إجراءات الكتلة
+    .action-base = تحرير نقطة أساس إجراء الكتلة
+    .parameter-chain = BEDIT تسلسل إجراءات المعلمة
+    .value-set = BEDIT مجموعة قيم المعلمة
+    .parameter-metadata = تحرير بيانات معلمة الكتلة الوصفية
+    .authoring-grip = مقبض تأليف الكتلة

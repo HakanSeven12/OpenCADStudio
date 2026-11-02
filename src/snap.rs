@@ -1632,6 +1632,30 @@ impl Snapper {
         construction_ray: Option<(glam::DVec3, glam::DVec3)>,
         additional_construction_rays: &[(glam::DVec3, glam::DVec3)],
     ) -> Option<SnapResult> {
+        self.snap_with_additional_construction_rays_stable(
+            cursor_world, cursor_screen, wires, view_rot, eye, bounds,
+            grid_origin, grid_axes, construction_ray, additional_construction_rays, None,
+        )
+    }
+
+    /// The selected feature must still be enumerated in the *current* frame:
+    /// a stale preview never captures the mouse merely because it was nearby
+    /// on an earlier frame. Continuous modes do not get sticky.
+    #[allow(clippy::too_many_arguments)]
+    pub fn snap_with_additional_construction_rays_stable<W: WireSource + ?Sized>(
+        &self,
+        cursor_world: glam::DVec3,
+        cursor_screen: Point,
+        wires: &W,
+        view_rot: Mat4,
+        eye: glam::DVec3,
+        bounds: Rectangle,
+        grid_origin: Vec3,
+        grid_axes: (Vec3, Vec3, Vec3),
+        construction_ray: Option<(glam::DVec3, glam::DVec3)>,
+        additional_construction_rays: &[(glam::DVec3, glam::DVec3)],
+        previous: Option<SnapResult>,
+    ) -> Option<SnapResult> {
         // Object-snap selection is priority-then-distance, NOT nearest-wins.
         // "Continuous" snaps (Nearest, Perpendicular, …) sit on the geometry
         // and are therefore almost always closer to the cursor than a discrete
@@ -1837,6 +1861,9 @@ impl Snapper {
         // instead of recomputing `world_to_screen`. The slot is consumed by
         // every `try_pt` call, so it can never go stale.
         let pre_screen = std::cell::Cell::new(None::<Point>);
+        // A candidate counts as retained only after passing this frame's
+        // bounds, enabled-mode and snap-aperture tests.
+        let retained = std::cell::Cell::new(None::<(SnapResult, f32)>);
 
         let mut try_pt = |world: glam::DVec3,
                           snap_type: SnapType,
@@ -1864,6 +1891,15 @@ impl Snapper {
                 return;
             }
             let (tier, sub) = (snap_tier(snap_type), snap_priority(snap_type));
+            if previous.is_some_and(|old| same_discrete_snap(old, world, snap_type)) {
+                retained.set(Some((SnapResult {
+                    world, screen, snap_type, tangent_obj: None,
+                    extension_base: None, extension_base2: None,
+                    extension_origin: None, extension_dir: None,
+                    viewport: None, source: src, secondary_source: secondary,
+                    model_point: None,
+                }, d2)));
+            }
             // Coincident 3D features share pixels (top and bottom face
             // centres coincide in plan view): break exact ties by eye depth
             // so the nearer one wins instead of whichever was evaluated
@@ -3052,6 +3088,10 @@ impl Snapper {
                 best = Some(found);
             }
         }
+
+        // Only an observed, valid discrete candidate may be held across
+        // frames; never keep a previous location absent from this frame.
+        best = keep_stable_snap(best, retained.get(), cursor_screen);
 
         // If an Extension snap or an extended intersection won, re-find the
         // endpoint(s) whose ray(s) it lies on so the overlay can draw the dashed

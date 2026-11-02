@@ -594,6 +594,19 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::MoveLayerCopies(handles, delta) => {
+                let i = self.active_tab;
+                // Copy + layer + placement share the snapshot taken before copying.
+                self.tabs[i].scene.transform_entities(
+                    &handles,
+                    &crate::command::EntityTransform::Translate(delta),
+                );
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.refresh_properties();
+            }
             CmdResult::CopySelected(handles, transform) => {
                 if let Some(task) = self.handle_copy_selected(handles, transform) {
                     return task;

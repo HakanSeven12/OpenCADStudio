@@ -45,6 +45,8 @@ pub struct CopyCommand {
     awaiting_mode: bool,
     /// COPYMODE: Single ends the command after the first copy.
     single: bool,
+    /// COPYTOLAYER already created these handles in its single undo snapshot.
+    moving_layer_copies: bool,
 }
 
 impl CopyCommand {
@@ -58,16 +60,41 @@ impl CopyCommand {
             awaiting_count: false,
             awaiting_mode: false,
             single: false,
+            moving_layer_copies: false,
         }
+    }
+
+    pub fn move_layer_copies(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        let mut cmd = Self::new(handles, wire_models);
+        cmd.moving_layer_copies = true;
+        cmd
     }
 }
 
 impl CadCommand for CopyCommand {
     fn name(&self) -> &'static str {
-        "COPY"
+        if self.moving_layer_copies {
+            "COPYTOLAYER"
+        } else {
+            "COPY"
+        }
     }
 
     fn prompt(&self) -> String {
+        if self.moving_layer_copies {
+            return match self.step {
+                Step::Base => {
+                    crate::t!("Specify base point or [Displacement/eXit] <eXit>:").into_owned()
+                }
+                Step::Placing(_) => crate::t!(
+                    "Specify second point of displacement or <use first point as displacement>:"
+                )
+                .into_owned(),
+                Step::Displacement => {
+                    crate::t!("Specify displacement <0.0000,0.0000,0.0000>:").into_owned()
+                }
+            };
+        }
         if self.awaiting_count {
             return crate::tr!("command-copy", "array-count");
         }
@@ -101,6 +128,15 @@ impl CadCommand for CopyCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
+        if self.moving_layer_copies {
+            return match self.step {
+                Step::Base => vec![
+                    CmdOption::new("Displacement", "D"),
+                    CmdOption::new("eXit", "X"),
+                ],
+                _ => Vec::new(),
+            };
+        }
         if self.awaiting_count {
             return Vec::new();
         }
@@ -128,6 +164,17 @@ impl CadCommand for CopyCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if self.moving_layer_copies {
+            let delta = match self.step {
+                Step::Base => {
+                    self.step = Step::Placing(pt);
+                    return CmdResult::NeedPoint;
+                }
+                Step::Placing(base) => pt - base,
+                Step::Displacement => pt,
+            };
+            return CmdResult::MoveLayerCopies(self.handles.clone(), delta);
+        }
         match &self.step {
             Step::Base => {
                 self.step = Step::Placing(pt);
@@ -164,6 +211,13 @@ impl CadCommand for CopyCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.moving_layer_copies {
+            return match self.step {
+                Step::Base => CmdResult::Cancel,
+                Step::Placing(base) => CmdResult::MoveLayerCopies(self.handles.clone(), base),
+                Step::Displacement => CmdResult::MoveLayerCopies(self.handles.clone(), DVec3::ZERO),
+            };
+        }
         // Cancel an in-progress Array count / mode entry; otherwise finish.
         if self.awaiting_count {
             self.awaiting_count = false;
@@ -192,6 +246,16 @@ impl CadCommand for CopyCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.moving_layer_copies {
+            return match (&self.step, text.trim().to_uppercase().as_str()) {
+                (Step::Base, "D" | "DISPLACEMENT") => {
+                    self.step = Step::Displacement;
+                    Some(CmdResult::NeedPoint)
+                }
+                (Step::Base, "X" | "EXIT") => Some(CmdResult::Cancel),
+                _ => None,
+            };
+        }
         if self.awaiting_count {
             if let Ok(n) = text.trim().parse::<usize>() {
                 if !super::array::array_items_within_limit(&[n as u64]) {
@@ -236,11 +300,23 @@ impl CadCommand for CopyCommand {
         }
     }
 
+    fn groups_undo(&self) -> bool {
+        self.moving_layer_copies
+    }
+
     fn on_undo_step(&mut self) -> Option<CmdResult> {
         if matches!(self.step, Step::Placing(_)) && self.count > 0 {
             self.on_text_input("U")
         } else {
             None
+        }
+    }
+
+    fn preview_hidden_handles(&self) -> &[Handle] {
+        if self.moving_layer_copies && matches!(self.step, Step::Placing(_)) {
+            &self.handles
+        } else {
+            &[]
         }
     }
 

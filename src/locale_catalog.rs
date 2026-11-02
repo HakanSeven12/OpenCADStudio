@@ -2183,6 +2183,9 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         }
         "LAYUNISO: no layers were isolated by LAYISO." => Some(("layers", "layuniso-no-layers-were-isolated-by-layiso")),
         "LAYMATCH  Select objects to change layer:" => Some(("layers", "laymatch-select-objects-to-change-layer")),
+        "Specify base point or [Displacement/eXit] <eXit>:" => Some(("layers", "copytolayer-base")),
+        "Specify second point of displacement or <use first point as displacement>:" => Some(("layers", "copytolayer-second")),
+        "Specify displacement <0.0000,0.0000,0.0000>:" => Some(("layers", "copytolayer-displacement")),
         "COPYTOLAYER  Select objects to copy:" => Some(("layers", "copytolayer-select-objects-to-copy")),
         "COPYTOLAYER  Select an object on the destination layer:" => Some(("layers", "copytolayer-select-an-object-on-the-destination-layer")),
         "LAYMATCH  Select source object to match layer from:" => Some(("layers", "laymatch-select-source-object-to-match-layer-f")),

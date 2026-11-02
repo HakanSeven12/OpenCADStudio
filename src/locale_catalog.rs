@@ -3,6 +3,20 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "BCONSTRUCTION is only available in the Block Editor." => Some(("block-construction", "requires-session")),
+        "Choose Convert, Revert, Show or Hide." => Some(("block-construction", "choose-operation")),
+        "The construction geometry's Block Editor session is no longer active." => Some(("block-construction", "stale-session")),
+        "{} geometry objects changed." => Some(("block-construction", "changed-count")),
+        "BCONSTRUCTION  Select geometry or [Convert/Revert/Show/Hide]:" => Some(("block-construction", "prompt-selection")),
+        "BCONSTRUCTION  Choose [Convert/Revert] <Convert>, or press Enter to apply the selected operation:" => Some(("block-construction", "prompt-operation")),
+        "Revert" => Some(("block-construction", "revert")),
+        "Edit construction geometry" => Some(("block-construction", "history")),
+        "This construction record has an unsupported version or value." => Some(("block-construction", "unsupported-record")),
+        "Open a block definition before editing construction geometry." => Some(("block-construction", "open-definition")),
+        "A selected construction object is no longer available." => Some(("block-construction", "missing-object")),
+        "Select geometry in the active block definition." => Some(("block-construction", "active-geometry")),
+        "Construction geometry cannot be changed on a locked layer." => Some(("block-construction", "locked-layer")),
+        "Choose an existing unlocked layer for reverted geometry." => Some(("block-construction", "revert-layer")),
         "BACTIONBAR  [Show/Hide/Reset]:" => Some(("block-action-bars", "prompt-mode")),
         "BACTIONBAR  Select a parameter, enter its name or [All] <Selected>:" => Some(("block-action-bars", "prompt-selected")),
         "BACTIONBAR  Select a parameter, enter its name or [All] <All>:" => Some(("block-action-bars", "prompt-all")),

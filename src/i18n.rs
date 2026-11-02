@@ -523,6 +523,33 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
+    fn construction_prompts_preserve_operation_keywords_in_every_locale() {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("Fluent resources must parse");
+            for (attribute, tokens) in [
+                ("prompt-selection", &["[Convert/Revert/Show/Hide]"][..]),
+                ("prompt-operation", &["[Convert/Revert]", "<Convert>"][..]),
+                ("choose-operation", &["Convert", "Revert", "Show", "Hide"][..]),
+            ] {
+                let translated = loader.get_attr("block-construction", attribute);
+                for token in tokens {
+                    assert!(translated.contains(token), "{language:?}/{attribute}");
+                }
+                if attribute.starts_with("prompt-") {
+                    assert!(translated.starts_with("BCONSTRUCTION  "), "{language:?}");
+                }
+            }
+            if language != Language::EnUs {
+                assert_ne!(loader.get_attr("block-construction", "revert"), "Revert");
+            }
+        }
+    }
+
+    #[test]
     fn action_bar_prompts_preserve_command_keywords_in_every_locale() {
         let prompts = [
             ("BACTIONBAR  [Show/Hide/Reset]:", "prompt-mode"),

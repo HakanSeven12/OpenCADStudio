@@ -1498,10 +1498,10 @@ fn lwpoly_self_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
                 let mut ua = hit.t_a;
                 let mut ub = hit.t_b;
 
-                if reverse_a {
+                if *reverse_a {
                     ua = 1.0 - ua;
                 }
-                if reverse_b {
+                if *reverse_b {
                     ub = 1.0 - ub;
                 }
 

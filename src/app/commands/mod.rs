@@ -394,6 +394,7 @@ impl OpenCADStudio {
         // one (ZOOM Window) parks the running command and resumes it when the
         // zoom ends, as does a ZOOM the zoom prompt itself hands off to.
         let transparent = is_transparent(cmd)
+            || (cmd == "PARAMETERS" && self.tabs[i].active_block_edit_session().is_some())
             || (quoted && is_transparent_capable(cmd))
             || (self.tabs[i].transparent_resume && cmd.starts_with("ZOOM"));
         if transparent {

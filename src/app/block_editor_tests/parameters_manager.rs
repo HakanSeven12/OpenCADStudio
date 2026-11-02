@@ -689,3 +689,245 @@ fn an_attribute_tagged_like_a_parameter_is_listed_once() {
         "and the surviving row is the one the manager writes"
     );
 }
+
+#[test]
+fn the_parameters_command_reaches_the_manager_in_the_editor_and_the_modal_outside_it() {
+    use crate::ui::dock::PanelId;
+    let (mut app, reference) = fixture();
+    // With no definition open there are no definition parameters to list, so the
+    // command keeps its global route to the formula modal. That modal is an effect
+    // the headless test cannot observe, so what is pinned here is the part the
+    // manager could get wrong: the command asks for no pane outside a definition.
+    let _ = app.dispatch_command("PARAMETERS");
+    assert!(
+        !app.show_parameters_manager,
+        "outside the editor the command asks for no manager pane"
+    );
+    let _ = app.dispatch_command("PARAMETERSCLOSE");
+    assert!(
+        !app.show_parameters_manager,
+        "and the paired command asks for nothing either"
+    );
+
+    begin(&mut app, reference);
+    let _ = app.dispatch_command("PARAMETERS");
+    assert!(
+        app.dock_panel_visible(PanelId::ParametersManager),
+        "inside a definition the same command opens the manager"
+    );
+    assert!(
+        app.active_modal.is_none(),
+        "without raising the global modal as well"
+    );
+    let click = || Message::RibbonToolClick {
+        tool_id: "PARAMETERS".into(),
+        event: crate::modules::ModuleEvent::Command("PARAMETERS".into()),
+    };
+    let _ = app.update(click());
+    assert!(
+        !app.dock_panel_visible(PanelId::ParametersManager),
+        "the same tool clicked again closes the pane"
+    );
+    assert!(
+        !app.ribbon.show_parameters_manager,
+        "and the light goes out on the frame that renders it"
+    );
+    let _ = app.update(click());
+    assert!(
+        app.ribbon.show_parameters_manager,
+        "and comes back with the pane"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn the_manager_stays_open_while_the_authoring_palettes_switch_tabs() {
+    use crate::ui::dock::PanelId;
+    use crate::ui::window::authoring_palettes::Tab;
+    let (mut app, _tab, _definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    assert!(
+        app.dock_panel_visible(PanelId::ParametersManager),
+        "the manager came up with the definition"
+    );
+    for tab in [
+        Tab::Actions,
+        Tab::ParameterSets,
+        Tab::Constraints,
+        Tab::Parameters,
+    ] {
+        let _ = app.update(Message::AuthoringPaletteTabSelected(tab));
+        assert!(
+            app.dock_panel_visible(PanelId::ParametersManager),
+            "switching the authoring palette to {:?} leaves the manager open",
+            tab
+        );
+    }
+    let _ = app.dispatch_command("BAUTHORPALETTECLOSE");
+    assert!(
+        app.dock_panel_visible(PanelId::ParametersManager),
+        "and closing the palettes does not take it either"
+    );
+}
+
+#[test]
+fn the_manager_stays_wanted_until_the_user_closes_it() {
+    use crate::ui::dock::PanelId;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.dispatch_command("PARAMETERS");
+    assert!(app.dock_panel_visible(PanelId::ParametersManager));
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    assert!(
+        !app.dock_panel_visible(PanelId::ParametersManager),
+        "outside a definition the manager has nothing to list"
+    );
+    begin(&mut app, reference);
+    assert!(
+        app.dock_panel_visible(PanelId::ParametersManager),
+        "a pane the user never closed is still wanted by the next definition opened"
+    );
+    let _ = app.dispatch_command("BPARAMETERSCLOSE");
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+    begin(&mut app, reference);
+    assert!(
+        !app.dock_panel_visible(PanelId::ParametersManager),
+        "and once the user closes it, it does not come back on its own"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn the_ribbon_light_goes_out_with_the_definition() {
+    let (mut app, _tab, _definition) = open(&[], &[]);
+    // The command line changed the state without a frame, so this is the frame
+    // that renders it.
+    let _ = app.update(Message::Tick(std::time::Instant::now()));
+    assert!(
+        app.ribbon.show_parameters_manager,
+        "the tool is lit while its pane is open"
+    );
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    assert!(
+        app.show_parameters_manager,
+        "the pane is still the one the user left open"
+    );
+    // The light is derived from what is rendered, and rendering happens on the
+    // next frame.
+    let _ = app.update(Message::Tick(std::time::Instant::now()));
+    assert!(
+        !app.ribbon.show_parameters_manager,
+        "but with no definition open the pane prints nothing, so its tool is dark"
+    );
+}
+
+#[test]
+fn the_parameters_toggle_keeps_the_running_drawing_command() {
+    let (mut app, _tab, _definition) = open(&[], &[]);
+    let i = app.active_tab;
+    let _ = app.dispatch_command("LINE");
+    assert!(app.tabs[i].active_cmd.is_some(), "a line is being drawn");
+    let _ = app.dispatch_command("PARAMETERSCLOSE");
+    assert!(
+        app.tabs[i].active_cmd.is_some(),
+        "closing the manager from the command line leaves the line running"
+    );
+    let _ = app.dispatch_command("PARAMETERS");
+    assert!(
+        app.tabs[i].active_cmd.is_some(),
+        "and opening it again does not abandon it either"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn the_parameters_toggle_changes_nothing_but_the_pane() {
+    use crate::ui::dock::{DockMsg, PanelId};
+    let (mut app, tab, _definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    let before = app.tabs[tab].scene.document.clone();
+    let history = app.tabs[tab].history.undo_stack.len();
+    let dirty = app.block_edit_dirty(tab);
+    assert!(dirty, "the authored parameter is already a change to save");
+    // A cell the user opened but never typed into rides along with the pane: it
+    // has no number to apply, so the toggles must not change the definition.
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Value,
+    ));
+    let click = || Message::RibbonToolClick {
+        tool_id: "PARAMETERS".into(),
+        event: crate::modules::ModuleEvent::Command("PARAMETERS".into()),
+    };
+    let _ = app.update(click());
+    assert!(!app.dock_panel_visible(PanelId::ParametersManager));
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_none(),
+        "the open cell goes with the pane"
+    );
+    let _ = app.update(click());
+    assert!(app.dock_panel_visible(PanelId::ParametersManager));
+    let _ = app.on_dock(DockMsg::Close(PanelId::ParametersManager));
+    assert!(!app.show_parameters_manager);
+    assert!(!app.dock_panel_visible(PanelId::ParametersManager));
+    assert_eq!(app.tabs[tab].scene.document, before);
+    assert_eq!(app.tabs[tab].history.undo_stack.len(), history);
+    assert_eq!(app.block_edit_dirty(tab), dirty);
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn a_cell_the_pane_does_not_own_closes_without_a_refusal() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    let before = manager::rows(&app.tabs[tab].scene.document, definition);
+    // The panel holds the definition a cell was opened on, so a cell left from a
+    // definition this pane is not showing is not its to apply. Closing prints no
+    // refusal for it and writes nothing. (Which real route leaves such a cell
+    // behind is not measured; the guard is the pane's own promise.)
+    app.tabs[tab].parameters_panel.editing = Some(crate::ui::window::parameters_manager::Edit {
+        definition: codec::Handle::NULL,
+        parameter: crate::scene::block_actions::all_parameters(
+            &app.tabs[tab].scene.document,
+            definition,
+        )[0]
+        .handle,
+        component: Component::Distance,
+        name: "Distance1".to_owned(),
+        cell: Cell::Value,
+    });
+    app.tabs[tab].parameters_panel.edit_buf = "40".to_owned();
+    let _ = app.dispatch_command("BPARAMETERSCLOSE");
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        None,
+        "closing the pane prints no refusal for a cell it never held"
+    );
+    assert!(app.tabs[tab].parameters_panel.editing.is_none());
+    assert_eq!(
+        manager::rows(&app.tabs[tab].scene.document, definition),
+        before,
+        "and the open definition keeps its parameter"
+    );
+}
+
+#[test]
+fn closing_the_pane_applies_the_number_typed_in_its_open_cell() {
+    use crate::ui::dock::PanelId;
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Value,
+    ));
+    let _ = app.update(Message::ParametersManagerInput("20".to_owned()));
+    let _ = app.dispatch_command("BPARAMETERSCLOSE");
+    assert!(
+        !app.dock_panel_visible(PanelId::ParametersManager),
+        "the command closed the pane"
+    );
+    let _ = app.dispatch_command("BPARAMETERS");
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").expression,
+        "20",
+        "and the number typed in its open cell was applied on the way out"
+    );
+}

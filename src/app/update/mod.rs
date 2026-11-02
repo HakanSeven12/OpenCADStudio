@@ -535,6 +535,10 @@ impl OpenCADStudio {
             self.ribbon.set_block_testing(false);
             self.ribbon.set_block_editing(block_editing);
         }
+        // The ribbon light follows the pane that is actually rendered, so a
+        // session ending, a clean screen or another tab closes the light with it.
+        self.ribbon.show_parameters_manager =
+            self.dock_panel_visible(crate::ui::dock::PanelId::ParametersManager);
         task
     }
 

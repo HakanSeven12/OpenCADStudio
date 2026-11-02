@@ -228,9 +228,30 @@ impl OpenCADStudio {
             }
 
             "PARAMETERS" => {
+                // Inside a block edit session the command names the definition's
+                // parameters, which the docked manager lists and edits; the global
+                // formula modal is what is left when no definition is open.
+                if self.tabs[self.active_tab]
+                    .active_block_edit_session()
+                    .is_some()
+                {
+                    let open = !self.show_parameters_manager;
+                    return Some(
+                        self.dock_set_open(crate::ui::dock::PanelId::ParametersManager, open),
+                    );
+                }
                 return Some(Task::done(Message::NamedParametersOpen));
             }
             "PARAMETERSCLOSE" => {
+                if self.tabs[self.active_tab]
+                    .active_block_edit_session()
+                    .is_some()
+                    && self.show_parameters_manager
+                {
+                    return Some(
+                        self.dock_set_open(crate::ui::dock::PanelId::ParametersManager, false),
+                    );
+                }
                 if self.active_modal == Some(crate::app::ModalKind::NamedParameters) {
                     self.active_modal = None;
                     self.named_parameter_editor_rows.clear();

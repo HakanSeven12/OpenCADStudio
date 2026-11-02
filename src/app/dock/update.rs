@@ -587,7 +587,27 @@ impl OpenCADStudio {
                 self.show_authoring_palettes = false;
                 self.ribbon.show_authoring_palettes = false;
             }
-            PanelId::ParametersManager => self.show_parameters_manager = false,
+            PanelId::ParametersManager => {
+                // Closing the pane moves the click off an open cell, which is how
+                // every other route out of a cell applies what was typed. A cell
+                // left on another definition is not this pane's to apply, so it
+                // goes with the pane instead of printing a refusal.
+                let i = self.active_tab;
+                let cell_of_this_session = self.tabs[i]
+                    .parameters_panel
+                    .editing
+                    .as_ref()
+                    .is_some_and(|edit| {
+                        self.tabs[i]
+                            .active_block_edit_session()
+                            .is_some_and(|session| session.br_handle == edit.definition)
+                    });
+                if cell_of_this_session {
+                    let _ = self.commit_parameters_manager(false);
+                }
+                self.show_parameters_manager = false;
+                self.tabs[i].parameters_panel = Default::default();
+            }
             PanelId::ExternalReferences => self.show_external_references = false,
             PanelId::Browser => self.show_browser = false,
             PanelId::NodeGraph => self.show_node_graph = false,

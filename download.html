@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="{{locale}}" dir="{{direction}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{dl_title}}</title>
+    <meta name="description" content="{{dl_description}}" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0b1016" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="canonical" href="{{url}}" />
+    {{alternates}}
+    {{icons}}
+    <link rel="manifest" href="{{home}}site.webmanifest" />
+    <link rel="stylesheet" href="/site.css?v={{css_version}}" />
+    <script src="/site.js?v={{js_version}}"></script>
+    <script id="openaec-analytics-loader" src="https://open-aec.com/shared/analytics.js?v=20261026" defer></script>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Open CAD Studio" />
+    <meta property="og:title" content="{{dl_title}}" />
+    <meta property="og:description" content="{{dl_description}}" />
+    <meta property="og:url" content="{{url}}" />
+    <meta property="og:locale" content="{{og_locale}}" />
+    <meta property="og:image" content="https://www.opencadstudio.com{{workspace}}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{dl_title}}" />
+    <meta name="twitter:description" content="{{dl_description}}" />
+    <meta name="twitter:image" content="https://www.opencadstudio.com{{workspace}}" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">{{skip}}</a>
+    <header class="site-header">
+      <div class="shell nav-shell">
+        <a class="brand" href="{{home}}" aria-label="{{home_label}}">
+          <img src="{{logo}}" width="38" height="38" alt="" />
+          <span dir="ltr">Open <strong>CAD</strong> Studio</span>
+        </a>
+        <nav class="primary-nav" aria-label="{{navigation}}">
+          <a href="{{home}}#capabilities">{{capabilities}}</a>
+          <a href="{{home}}#formats">{{formats}}</a>
+          <a href="{{path}}" aria-current="page">{{download_nav}}</a>
+          <a href="https://github.com/HakanSeven12/OpenCADStudio">GitHub</a>
+        </nav>
+        <details class="language-picker">
+          <summary aria-label="{{language}}: {{name}}"><span aria-hidden="true">◎</span> {{name}}</summary>
+          <nav aria-label="{{language}}">{{language_links}}</nav>
+        </details>
+        <a class="button button-small" href="/app/">{{launch}} <span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+    <main id="main" class="download-page" data-downloads data-release-api="https://api.github.com/repos/HakanSeven12/OpenCADStudio/releases/latest" data-fallback="https://github.com/HakanSeven12/OpenCADStudio/releases/latest" data-unavailable="{{dl_unavailable}}" data-download-for="{{dl_for}}">
+      <section class="dl-hero shell">
+        <p class="eyebrow"><span></span>{{dl_eyebrow}}</p>
+        <h1>{{dl_heading}}</h1>
+        <p class="hero-lead">{{dl_lead}}</p>
+        <div class="dl-recommended" data-recommended hidden>
+          <p class="dl-recommended-label">{{dl_recommended}}</p>
+          <a class="button dl-big" data-primary href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>
+            <span data-primary-label>{{download_nav}}</span>
+          </a>
+          <p class="dl-file" data-primary-file></p>
+        </div>
+        <p class="dl-release" data-release-line hidden>
+          <span>{{dl_version}}</span> <strong dir="ltr" data-version></strong>
+          <span aria-hidden="true">·</span> <time data-date></time>
+          <span aria-hidden="true">·</span> <a href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest" data-notes>{{release_notes}} <span aria-hidden="true">↗</span></a>
+        </p>
+      </section>
+
+      <section class="shell dl-platforms" aria-label="{{dl_other_platforms}}">
+        <article class="dl-card" id="windows" data-os="windows">
+          <header class="dl-card-head">
+            <span class="dl-os-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg></span>
+            <div><h2 dir="ltr">Windows</h2><p>{{dl_req_windows}}</p></div>
+          </header>
+          <div class="dl-rows">
+            <a class="dl-row" data-suffix="windows-x86_64-installer.msi" data-arch="x64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong>{{dl_installer}}</strong><small><span dir="ltr">x64</span> · {{dl_x64}} · <span dir="ltr">.msi</span></small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="dl-row" data-suffix="windows-arm64-installer.msi" data-arch="arm64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong>{{dl_installer}}</strong><small><span dir="ltr">ARM64</span> · {{dl_arm64}} · <span dir="ltr">.msi</span></small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="dl-row" data-suffix="windows-x86_64-portable.exe" data-arch="x64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong>{{dl_portable}}</strong><small><span dir="ltr">x64</span> · {{dl_x64}} · <span dir="ltr">.exe</span></small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="dl-row" data-suffix="windows-arm64-portable.exe" data-arch="arm64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong>{{dl_portable}}</strong><small><span dir="ltr">ARM64</span> · {{dl_arm64}} · <span dir="ltr">.exe</span></small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+          </div>
+          <p class="dl-note">{{dl_windows_note}}</p>
+        </article>
+
+        <article class="dl-card" id="macos" data-os="macos">
+          <header class="dl-card-head">
+            <span class="dl-os-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="1.6"/><path d="M2 19h20l-1.4-2.2H3.4z"/></svg></span>
+            <div><h2 dir="ltr">macOS</h2><p>{{dl_req_macos}}</p></div>
+          </header>
+          <div class="dl-rows">
+            <a class="dl-row" data-suffix="macos-arm64.dmg" data-arch="arm64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong>{{dl_apple}}</strong><small><span dir="ltr">M1 · M2 · M3 · M4</span> · <span dir="ltr">.dmg</span></small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="dl-row" data-suffix="macos-x86_64.dmg" data-arch="x64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong>{{dl_intel}}</strong><small><span dir="ltr">x64</span> · <span dir="ltr">.dmg</span></small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+          </div>
+          <p class="dl-note">{{dl_mac_note}}</p>
+        </article>
+
+        <article class="dl-card" id="linux" data-os="linux">
+          <header class="dl-card-head">
+            <span class="dl-os-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 10 3 2.5L7 15"/><path d="M12.5 15H17"/></svg></span>
+            <div><h2 dir="ltr">Linux</h2><p>{{dl_req_linux}}</p></div>
+          </header>
+          <div class="dl-rows">
+            <a class="dl-row" data-suffix="linux-x86_64.AppImage" data-arch="x64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong dir="ltr">AppImage</strong><small><span dir="ltr">x64</span> · {{dl_x64}}</small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="dl-row" data-suffix="linux-aarch64.AppImage" data-arch="arm64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong dir="ltr">AppImage</strong><small><span dir="ltr">ARM64</span> · {{dl_arm64}}</small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="dl-row" data-suffix="linux-x86_64.snap" data-arch="x64" href="https://github.com/HakanSeven12/OpenCADStudio/releases/latest">
+              <span class="dl-row-text"><strong dir="ltr">Snap</strong><small><span dir="ltr">x64</span> · {{dl_x64}}</small></span>
+              <span class="dl-row-size" data-size></span><span class="dl-row-arrow" aria-hidden="true">↓</span>
+            </a>
+          </div>
+          <p class="dl-note">{{dl_linux_note}}</p>
+        </article>
+      </section>
+
+      <section class="shell dl-web">
+        <div>
+          <p class="card-kicker">{{web}}</p>
+          <h2>{{dl_web_title}}</h2>
+          <p>{{dl_web_text}}</p>
+        </div>
+        <a class="button button-quiet" href="/app/">{{launch}} <span aria-hidden="true">↗</span></a>
+      </section>
+
+      <p class="shell dl-source">{{dl_source}} <a href="https://github.com/HakanSeven12/OpenCADStudio/releases">{{dl_all_releases}} <span aria-hidden="true">↗</span></a></p>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-grid">
+        <div class="brand footer-brand"><img src="{{logo}}" width="34" height="34" alt="" /><span dir="ltr">Open <strong>CAD</strong> Studio</span></div>
+        <p>{{footer}}</p>
+        <nav aria-label="{{navigation}}"><a href="/app/">{{web_app}}</a><a href="{{path}}">{{download_nav}}</a><a href="https://github.com/HakanSeven12/OpenCADStudio/discussions">{{discussions}}</a><a href="https://github.com/HakanSeven12/OpenCADStudio/blob/main/LICENSE">GPL-3.0</a></nav>
+      </div>
+    </footer>
+  </body>
+</html>

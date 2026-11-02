@@ -238,91 +238,138 @@ fn append_planar_text(
     }
 }
 
-fn append_arc_aligned_text(points: &mut Vec<[f64; 3]>, data: &ArcAlignedTextData) {
-    if data.text.is_empty() || data.radius.abs() < 1e-12 || data.text_size.abs() < 1e-12 {
-        return;
-    }
-    let (axis_x, axis_y, _) = plane_axes(data.normal);
-    let size = data.text_size.abs();
-    let x_scale = data.x_scale.abs().max(0.01);
-    // Outward text stands on the arc reading clockwise; inward text hangs
-    // from it reading counter-clockwise (text direction 2).
-    let outward = data.text_direction != 2;
-    // Convex side (1) is outside the arc, concave (2) inside; the letters
-    // keep `offset_from_arc` clear of it.
-    let radius = data.radius.abs();
-    let offset = data.offset_from_arc;
-    let baseline = match (data.text_position == 2, outward) {
-        (false, true) => radius + offset,
-        (false, false) => radius + offset + size,
-        (true, true) => radius - offset - size,
-        (true, false) => radius - offset,
-    }
-    .abs()
-    .max(1e-9);
-    let mut span = data.end_angle - data.start_angle;
-    span = span.rem_euclid(std::f64::consts::TAU);
-    if span < 1e-12 {
-        span = std::f64::consts::TAU;
-    }
-    let (first, sweep) = match outward {
-        true => (data.end_angle, -1.0),
-        false => (data.start_angle, 1.0),
-    };
-    let mut characters: Vec<char> = data.text.chars().collect();
-    if data.reverse {
-        characters.reverse();
-    }
-    let count = characters.len() as f64;
-    // ponytail: fixed glyph cell, not the font's own advances.
-    let width = size * x_scale * 0.72;
-    let pitch = width + data.character_spacing;
-    let usable = span * baseline - data.left_offset - data.right_offset;
-    let natural = count * width + (count - 1.0) * data.character_spacing;
-    // Arc length from the reading start to each character's left edge.
-    let (start, pitch) = match data.alignment {
-        2 => (data.left_offset, pitch),
-        3 => (data.left_offset + usable - natural, pitch),
-        4 => (data.left_offset + (usable - natural) / 2.0, pitch),
-        _ => {
-            let cell = usable / count;
-            (data.left_offset + (cell - width) / 2.0, cell)
+/// Arc-aligned text as text: each character a run of its own, standing on
+/// the arc and as wide as its font makes it, so TrueType letters fill like
+/// any TEXT (#2444).
+fn arc_aligned_text_render(data: &ArcAlignedTextData) -> RenderEntity {
+    use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke};
+    let center = data.center;
+    let mut runs = Vec::new();
+    if !(data.text.is_empty() || data.radius.abs() < 1e-12 || data.text_size.abs() < 1e-12) {
+        let (axis_x, axis_y, normal) = plane_axes(data.normal);
+        // The centre in the text plane's own coordinates.
+        let dot = |a: Vector3, b: Vector3| a.x * b.x + a.y * b.y + a.z * b.z;
+        let (cx, cy, elevation) = (dot(center, axis_x), dot(center, axis_y), dot(center, normal));
+        let size = data.text_size.abs();
+        let x_scale = data.x_scale.abs().max(0.01);
+        // Outward text stands on the arc reading clockwise; inward text hangs
+        // from it reading counter-clockwise (text direction 2).
+        let outward = data.text_direction != 2;
+        // Convex side (1) is outside the arc, concave (2) inside; the letters
+        // keep `offset_from_arc` clear of it.
+        let radius = data.radius.abs();
+        let offset = data.offset_from_arc;
+        let baseline = match (data.text_position == 2, outward) {
+            (false, true) => radius + offset,
+            (false, false) => radius + offset + size,
+            (true, true) => radius - offset - size,
+            (true, false) => radius - offset,
         }
-    };
-    let font = if data.font_name.trim().is_empty() {
-        data.style_name.as_str()
-    } else {
-        data.font_name.as_str()
-    };
-    let font = if font.trim().is_empty() {
-        "standard"
-    } else {
-        font
-    };
-    for (index, character) in characters.into_iter().enumerate() {
-        let middle = start + index as f64 * pitch + width / 2.0;
-        let angle = first + sweep * middle / baseline;
-        let radial = axis_x * angle.cos() + axis_y * angle.sin();
-        let tangent = (axis_y * angle.cos() - axis_x * angle.sin()) * sweep;
-        let up = if outward { radial } else { radial * -1.0 };
-        let origin = data.center + radial * baseline + tangent * (-width / 2.0);
-        let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
-            [0.0, 0.0],
-            size as f32,
-            0.0,
-            x_scale as f32,
-            0.0,
-            font,
-            &character.to_string(),
-        );
-        for stroke in strokes {
-            push_chain(
-                points,
-                stroke
-                    .into_iter()
-                    .map(|[x, y]| add_scaled(origin, tangent, x as f64, up, y as f64)),
+        .abs()
+        .max(1e-9);
+        let mut span = (data.end_angle - data.start_angle).rem_euclid(std::f64::consts::TAU);
+        if span < 1e-12 {
+            span = std::f64::consts::TAU;
+        }
+        let (first, sweep) = if outward {
+            (data.end_angle, -1.0)
+        } else {
+            (data.start_angle, 1.0)
+        };
+        let font = [data.font_name.as_str(), data.style_name.as_str()]
+            .into_iter()
+            .find(|name| !name.trim().is_empty())
+            .unwrap_or("standard")
+            .to_string();
+        let mut characters: Vec<char> = data.text.chars().collect();
+        if data.reverse {
+            characters.reverse();
+        }
+        let advances: Vec<f64> = characters
+            .iter()
+            .map(|c| {
+                crate::entities::text_support::text_local_bounds(
+                    &font,
+                    &c.to_string(),
+                    size as f32,
+                    x_scale as f32,
+                    0.0,
+                )
+                .map(|b| f64::from(b.advance))
+                .filter(|a| a.is_finite() && *a > 0.0)
+                .unwrap_or(size * x_scale * 0.72)
+            })
+            .collect();
+        let count = characters.len() as f64;
+        let natural = advances.iter().sum::<f64>() + (count - 1.0) * data.character_spacing;
+        let usable = span * baseline - data.left_offset - data.right_offset;
+        // Arc length from the reading start to each character's middle: set
+        // one after another from the left, right or centre, or (fit) each
+        // centred in an equal share of the usable arc.
+        let mut along = match data.alignment {
+            2 => data.left_offset,
+            3 => data.left_offset + usable - natural,
+            4 => data.left_offset + (usable - natural) / 2.0,
+            _ => 0.0,
+        };
+        let cell = usable / count;
+        for (index, (character, advance)) in characters.into_iter().zip(advances).enumerate() {
+            let middle = match data.alignment {
+                2..=4 => along + advance / 2.0,
+                _ => data.left_offset + (index as f64 + 0.5) * cell,
+            };
+            along += advance + data.character_spacing;
+            let angle = first + sweep * middle / baseline;
+            let (sin, cos) = angle.sin_cos();
+            // The baseline runs along the tangent, its left end half a
+            // character back from the middle.
+            let (tx, ty) = (-sin * sweep, cos * sweep);
+            let origin = [
+                cx + cos * baseline - tx * advance / 2.0,
+                cy + sin * baseline - ty * advance / 2.0,
+            ];
+            let rotation = ty.atan2(tx) as f32;
+            let value = character.to_string();
+            let (strokes, fill_tris) = crate::scene::text::lff::tessellate_text_ex(
+                [0.0, 0.0],
+                size as f32,
+                rotation,
+                x_scale as f32,
+                0.0,
+                &font,
+                &value,
             );
+            runs.push(TextStroke {
+                strokes,
+                origin,
+                color: None,
+                fill_tris,
+                plane: crate::scene::convert::acad_to_render::ocs_text_plane(
+                    data.normal,
+                    origin,
+                    elevation,
+                ),
+                run: Some(GlyphRun {
+                    text: value,
+                    font: font.clone(),
+                    height: size as f32,
+                    rotation,
+                    width_factor: x_scale as f32,
+                    oblique: 0.0,
+                    tracking: 1.0,
+                    bold: data.bold,
+                    aci: None,
+                }),
+            });
         }
+    }
+    RenderEntity {
+        pick_tris: Vec::new(),
+        object: RenderObject::Text(runs),
+        snap_pts: vec![(glam::DVec3::new(center.x, center.y, center.z), SnapHint::Center)],
+        tangent_geoms: vec![],
+        key_vertices: vec![[center.x, center.y, center.z]],
+        fill_tris: vec![],
     }
 }
 
@@ -671,6 +718,9 @@ fn camera_lines(document: &codec::Document, view_handle: Handle) -> Vec<[f64; 3]
 }
 
 fn to_render(entity: &ExtendedEntity, document: &codec::Document) -> Option<RenderEntity> {
+    if let ExtendedEntityData::ArcAlignedText(data) = &entity.data {
+        return Some(arc_aligned_text_render(data));
+    }
     let (points, snaps, keys): (Vec<[f64; 3]>, Vec<(glam::DVec3, SnapHint)>, Vec<[f64; 3]>) =
         match &entity.data {
             ExtendedEntityData::Camera { view_handle } => {
@@ -692,18 +742,8 @@ fn to_render(entity: &ExtendedEntity, document: &codec::Document) -> Option<Rend
                     .collect();
                 (section_lines(data), snaps, keys)
             }
-            ExtendedEntityData::ArcAlignedText(data) => {
-                let mut points = Vec::new();
-                append_arc_aligned_text(&mut points, data);
-                (
-                    points,
-                    vec![(
-                        glam::DVec3::new(data.center.x, data.center.y, data.center.z),
-                        SnapHint::Center,
-                    )],
-                    vec![[data.center.x, data.center.y, data.center.z]],
-                )
-            }
+            // Drawn as text above.
+            ExtendedEntityData::ArcAlignedText(_) => return None,
             ExtendedEntityData::RemoteText(data) => (
                 remote_text_lines(data),
                 vec![(

@@ -539,7 +539,6 @@ impl OpenCADStudio {
                     }
                     PanelId::AuthoringPalettes => {
                         self.show_authoring_palettes = true;
-                        self.ribbon.show_authoring_palettes = true;
                         self.dock_open_at_default(id);
                         self.save_config();
                     }
@@ -585,7 +584,6 @@ impl OpenCADStudio {
             }
             PanelId::AuthoringPalettes => {
                 self.show_authoring_palettes = false;
-                self.ribbon.show_authoring_palettes = false;
             }
             PanelId::ParametersManager => {
                 // Closing the pane moves the click off an open cell, which is how

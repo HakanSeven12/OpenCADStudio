@@ -539,6 +539,8 @@ impl OpenCADStudio {
         // session ending, a clean screen or another tab closes the light with it.
         self.ribbon.show_parameters_manager =
             self.dock_panel_visible(crate::ui::dock::PanelId::ParametersManager);
+        self.ribbon.show_authoring_palettes =
+            self.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes);
         task
     }
 

@@ -1992,12 +1992,40 @@ fn authoring_palettes_ribbon_toggle_and_dock_close_leave_document_and_history_un
     assert!(!app.dock_panel_visible(PanelId::AuthoringPalettes));
     assert!(!app.ribbon.show_authoring_palettes);
     let _ = app.dispatch_command("BAUTHORPALETTE");
+    // The command line changes state without a frame; the light follows on the
+    // frame that renders it.
+    let _ = app.update(Message::Tick(std::time::Instant::now()));
+    assert!(app.ribbon.show_authoring_palettes);
     let _ = app.on_dock(DockMsg::Close(PanelId::AuthoringPalettes));
+    let _ = app.update(Message::Tick(std::time::Instant::now()));
     assert!(!app.show_authoring_palettes);
     assert!(!app.ribbon.show_authoring_palettes);
     assert_eq!(app.tabs[i].scene.document, before);
     assert_eq!(app.tabs[i].history.undo_stack.len(), history);
     assert!(!app.block_edit_dirty(i));
+}
+
+#[test]
+fn the_authoring_palettes_light_goes_out_with_the_session() {
+    use crate::ui::dock::PanelId;
+    let mut app = authoring_app();
+    let _ = app.dispatch_command("BAUTHORPALETTE");
+    let _ = app.update(Message::Tick(std::time::Instant::now()));
+    assert!(app.ribbon.show_authoring_palettes, "the pane is open");
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+    let _ = app.update(Message::Tick(std::time::Instant::now()));
+    assert!(
+        !app.dock_panel_visible(PanelId::AuthoringPalettes),
+        "the discarded session has no palette to show"
+    );
+    assert!(
+        app.show_authoring_palettes,
+        "the user never closed the pane, so it is still wanted"
+    );
+    assert!(
+        !app.ribbon.show_authoring_palettes,
+        "but with no session the pane prints nothing, so its tool is dark"
+    );
 }
 
 #[test]

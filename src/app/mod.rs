@@ -6255,6 +6255,7 @@ impl OpenCADStudio {
         {
             for (id, res) in crate::plugin::external::load_at_startup(&mut app) {
                 if let Err(e) = res {
+                    eprintln!("[plugin] {id} FAILED to load: {e}");
                     app.command_line
                         .push_error(crate::tf!("Plugin '{id}' failed to load: {e}").as_ref());
                     app.plugin_load_errors.insert(id, e);

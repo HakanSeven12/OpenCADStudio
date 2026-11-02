@@ -701,7 +701,7 @@ impl Snapper {
         // does not create accidental tracking points.
         const DWELL_MS: u128 = 250;
         const DWELL_PX: f32 = 8.0;
-        const MIN_OBSERVATIONS: u8 = 3;
+        const MIN_OBSERVATIONS: u8 = 1;
 
         match snap_world {
             None => {
@@ -755,6 +755,15 @@ impl Snapper {
             }
         }
     }
+    /// Return whether this acquisition point has already been captured.
+    /// Used when the fast cursor preview needs to preserve dwell state without
+    /// repeatedly scanning geometric directions for an already acquired point.
+    pub fn has_tracking_point(&self, point: DVec3) -> bool {
+        self.tracking_points
+            .iter()
+            .any(|p| (*p - point).length() <= tracking_point_tolerance(point))
+    }
+
     /// Immediately acquire the explicitly engaged grip as a tracking point.
     ///
     /// A grip was deliberately selected by the user, so unlike ordinary cursor
@@ -786,7 +795,7 @@ impl Snapper {
         if self
             .tracking_points
             .iter()
-            .any(|t| (*t - p).length() < self.grid_spacing as f64 * 0.1)
+            .any(|t| (*t - p).length() <= tracking_point_tolerance(p))
         {
             return;
         }
@@ -3235,6 +3244,13 @@ pub(crate) fn snap_tier(t: SnapType) -> u8 {
         SnapType::NearestFace => 13,
         other => snap_priority(other),
     }
+}
+
+/// World-coordinate precision for identifying the same physical point.
+/// Never use the view's grid spacing: at a coarse zoom it can treat two
+/// distinct vertices several metres apart as a single OTRACK reference.
+fn tracking_point_tolerance(p: DVec3) -> f64 {
+    1e-8_f64.max(2e-12 * p.x.abs().max(p.y.abs()))
 }
 
 /// Rank only tracking rays which were calculated from acquired points in

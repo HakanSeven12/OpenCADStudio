@@ -102,6 +102,8 @@ mod text_style_pending_tests;
 mod tolerance_dialog;
 mod update;
 pub(crate) use update::style_import::{style_exists as style_import_exists, StyleImportDraft};
+#[cfg(test)]
+mod table_content_tests;
 mod view;
 #[cfg(test)]
 mod viewport_dimension_tests;

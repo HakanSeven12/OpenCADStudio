@@ -1589,7 +1589,29 @@ impl Snapper {
         grid_axes: (Vec3, Vec3, Vec3),
         construction_ray: Option<(glam::DVec3, glam::DVec3)>,
     ) -> Option<SnapResult> {
-        self.snap_with_additional_construction_rays(
+        self.snap_stable(
+            cursor_world, cursor_screen, wires, view_rot, eye, bounds,
+            grid_origin, grid_axes, construction_ray, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn snap_stable<W: WireSource + ?Sized>(
+        &self,
+        cursor_world: glam::DVec3,
+        cursor_screen: Point,
+        wires: &W,
+        view_rot: Mat4,
+        eye: glam::DVec3,
+        bounds: Rectangle,
+        // Grid origin and live drafting axes, so grid snap lands on the same
+        // rotated or isometric grid the user sees.
+        grid_origin: Vec3,
+        grid_axes: (Vec3, Vec3, Vec3),
+        construction_ray: Option<(glam::DVec3, glam::DVec3)>,
+        previous: Option<SnapResult>,
+    ) -> Option<SnapResult> {
+        self.snap_with_additional_construction_rays_stable(
             cursor_world,
             cursor_screen,
             wires,
@@ -1600,6 +1622,7 @@ impl Snapper {
             grid_axes,
             construction_ray,
             &[],
+            previous,
         )
         .map(|hit| self.on_osnap_z_plane(hit))
     }

@@ -753,6 +753,18 @@ impl OpenCADStudio {
                 }
             }
 
+            // The annotation scale is the drawing's own scale object, named
+            // in the drawing's units.
+            if let Some(name) = self.tabs[i].scene.viewport_annotation_scale_name(handle) {
+                if let Some(prop) = sections
+                    .iter_mut()
+                    .flat_map(|section| section.props.iter_mut())
+                    .find(|p| p.field == "vp_anno_scale")
+                {
+                    prop.value = crate::scene::model::object::PropValue::ReadOnly(name);
+                }
+            }
+
             // Drive the viewport scale picker from the drawing's
             // own scale list instead of a built-in set.
             let file_scales = self.tabs[i].scene.scale_list();

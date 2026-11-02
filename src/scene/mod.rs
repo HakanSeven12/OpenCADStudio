@@ -6731,16 +6731,19 @@ impl Scene {
 
     pub fn annotation_all_visible(&self) -> bool {
         use codec::objects::XRecordValue;
-        let Some(layout) = self.current_layout_object_handle() else {
-            return true;
-        };
-        self.document
-            .xrecord(layout, "OPEN_CAD_ANNOTATION_STATE")
+        // A value set here for this layout, else the drawing's own
+        // ANNOALLVISIBLE, else on.
+        self.current_layout_object_handle()
+            .and_then(|layout| self.document.xrecord(layout, "OPEN_CAD_ANNOTATION_STATE"))
             .and_then(|record| {
                 record.entries.iter().find_map(|entry| match entry.value {
                     XRecordValue::Bool(value) if entry.code == 290 => Some(value),
                     _ => None,
                 })
+            })
+            .or_else(|| {
+                let value = self.document.drawing_variable("ANNOALLVISIBLE")?;
+                value.trim().parse::<i32>().ok().map(|value| value != 0)
             })
             .unwrap_or(true)
     }
@@ -7550,6 +7553,15 @@ impl Scene {
             })
             .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(handle, _)| handle)
+    }
+
+    /// The name of the annotation scale a viewport shows its annotative
+    /// objects at.
+    pub(crate) fn viewport_annotation_scale_name(&self, viewport: Handle) -> Option<String> {
+        match self.document.objects.get(&self.viewport_scale_handle(viewport)?) {
+            Some(ObjectType::Scale(scale)) => Some(scale.name.clone()),
+            _ => None,
+        }
     }
 
     fn viewport_annotation_multiplier(&self, viewport: Handle) -> f32 {

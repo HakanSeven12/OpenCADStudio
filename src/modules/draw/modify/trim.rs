@@ -3981,7 +3981,7 @@ impl TrimCommand {
             .into_iter()
             .map(entity_with_lwpolyline_world_xy_owned)
             .collect();
-        let block_boundaries = block_boundaries
+        let block_boundaries: Vec<(Handle, Vec<EntityType>)> = block_boundaries
             .into_iter()
             .map(|(handle, entities)| {
                 (

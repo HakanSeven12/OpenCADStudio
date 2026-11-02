@@ -895,9 +895,10 @@ impl DocumentTab {
     /// `DocumentOpened` once for this load (API v9). Call after the document
     /// and its derived caches have settled.
     pub(super) fn note_document_loaded(&mut self) {
-        // The document that owned this tab's remembered attribute position is
+        // The document this tab's identity remembers a placed position in is
         // gone, and its coordinates are not the new document's.
         crate::modules::draw::draw::attdef::session().forget_place_of(self.id);
+        crate::modules::annotate::text::forget_place_of(self.id);
         self.document_opened_pending = true;
     }
 

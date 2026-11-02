@@ -36,11 +36,13 @@ pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 use widgets::{StyleContext, *};
 mod app_menu;
 mod collapse;
+mod floating;
 mod keytips;
 mod layout;
 mod locate;
 mod minimize;
 mod panel_frame;
+mod qat;
 mod ribbon_menu;
 mod search;
 mod stretch_column;
@@ -51,15 +53,20 @@ pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
 use collapse::{CollapsePanels, Panel};
 pub use draw_panel::SlideOutMsg;
+pub use floating::FloatMsg;
 pub use keytips::{
     KeyTipInput, KeyTipStep, active as keytips_active, clear_alt_alone as keytip_clear_alt_alone,
     key_pressed as keytip_key_pressed, key_released as keytip_key_released,
     note_command_finished as keytip_note_command_finished,
     note_focus_changed as keytip_note_focus_changed, pointer_pressed as keytip_pointer_pressed,
 };
-pub use layout::{MinimizePref, RibbonLayout, RibbonMinimize};
+pub use layout::{
+    default_qat, FloatingPanel, MinimizePref, QatBuiltin, QatItem, RibbonLayout, RibbonMinimize,
+};
 pub use minimize::{MinimizeMsg, Opener};
-pub use ribbon_menu::{RibbonMenuMsg, Submenu};
+pub(crate) use qat::{list_source as qat_list_source, QAT_SWITCH_ID};
+pub use qat::{QatMsg, QatOutcome, QAT_PICKER_INPUT};
+pub use ribbon_menu::{MenuTarget, RibbonMenuMsg, Submenu};
 pub use search::{results_scroll_id, SearchMsg, SearchOutcome, SEARCH_INPUT_ID};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
@@ -206,6 +213,24 @@ fn panel_measure_key(
     hasher.finish()
 }
 
+/// The id the whole ribbon (with the Quick Access row below it) reports its
+/// bounds under: floating panels snap to its bottom.
+const RIBBON_ID: &str = "ribbon_whole";
+
+/// The id the tool area of the tab on show reports its bounds under.
+const TOOL_AREA_ID: &str = "ribbon_tool_area";
+
+/// The id the panel `title` of module `module_id` reports its place in the
+/// ribbon row under.
+fn row_panel_id(module_id: &str, title: &str) -> String {
+    format!("rowpanel:{module_id}/{title}")
+}
+
+/// The id a floating panel reports its bounds under.
+fn floating_id(key: &str) -> String {
+    format!("float:{key}")
+}
+
 /// Height of a tab, and of the tab row it stands at the bottom of.
 const TAB_H: f32 = metrics::TAB_H;
 const TAB_ROW_H: f32 = metrics::TAB_ROW_H;
@@ -302,16 +327,6 @@ const CONTEXTUAL_LINE: f32 = 2.0;
 fn is_contextual(id: &str) -> bool {
     id == "block_editor"
 }
-
-/// The quick-access file buttons before Undo and Redo: icon, label and
-/// command.
-static QUICK_ACCESS: [(&[u8], &str, &str); 5] = [
-    (crate::ui::icons::DOC_NEW, "New", "QNEW"),
-    (crate::ui::icons::FOLDER_OPEN, "Open", "OPEN"),
-    (crate::ui::icons::SAVE, "Save", "SAVE"),
-    (crate::ui::icons::FILE_EXPORT, "Save As", "SAVEAS"),
-    (crate::ui::icons::PRINT, "Print", "PRINT"),
-];
 
 // ── Ribbon state ───────────────────────────────────────────────────────────
 
@@ -422,6 +437,13 @@ pub struct Ribbon {
     pub center_layer: String,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
+    /// What More Commands searches for, and what it found.
+    qat_query: String,
+    qat_found: Vec<search::QatCandidate>,
+    /// What each Quick Access command item is, worked out once.
+    qat_cache: qat::QatLooks,
+    /// The floating panels' moves and extra tools.
+    float_ui: floating::FloatUi,
 }
 
 /// Per-layer display data shown in the ribbon layer dropdown.
@@ -564,6 +586,10 @@ impl Ribbon {
             center_layer: String::new(),
             mleader_layer: String::new(),
             keytips: None,
+            qat_query: String::new(),
+            qat_found: Vec::new(),
+            qat_cache: qat::QatLooks::default(),
+            float_ui: floating::FloatUi::default(),
         }
     }
 
@@ -576,6 +602,7 @@ impl Ribbon {
         let was_narrow = self.win_w < search::NARROW;
         self.win_w = w;
         self.win_h = h;
+        self.layout.clamp_floating((w, h), Self::floating_size);
         self.search_resized(was_narrow);
     }
 
@@ -589,6 +616,9 @@ impl Ribbon {
     /// consolidated app config (`save_config`).
     pub fn set_layout(&mut self, layout: RibbonLayout) {
         self.layout = layout;
+        self.layout.dedupe_qat();
+        self.layout
+            .clamp_floating((self.win_w, self.win_h), Self::floating_size);
         self.show_a_visible_tab();
     }
 
@@ -752,13 +782,30 @@ impl Ribbon {
         groups.unwrap_or_default()
     }
 
-    /// The panels of tab `index` as the ribbon shows them: in the user's
-    /// order, without the hidden ones.
+    /// The panels of tab `index` as its ribbon row shows them: in the
+    /// user's order, without the hidden and the floating ones.
     fn groups_for(&self, index: usize) -> impl Iterator<Item = &RibbonGroup> {
+        let module_id = self.modules.get(index).map_or("", |module| module.id());
+        let mut groups = self.ordered_groups(index);
+        groups.retain(|group| {
+            !self.layout.panel_hidden(module_id, group.title)
+                && self.layout.floating_panel(module_id, group.title).is_none()
+        });
+        groups.into_iter()
+    }
+
+    /// The panels of tab `index` the user can reach: those in its ribbon row
+    /// and those floating.
+    fn shown_groups(&self, index: usize) -> impl Iterator<Item = &RibbonGroup> {
         let module_id = self.modules.get(index).map_or("", |module| module.id());
         let mut groups = self.ordered_groups(index);
         groups.retain(|group| !self.layout.panel_hidden(module_id, group.title));
         groups.into_iter()
+    }
+
+    /// The size panel `key` floated at when last drawn.
+    fn floating_size(key: &str) -> Option<(f32, f32)> {
+        crate::ui::wrap_bar::recent_bounds(&floating_id(key)).map(|b| (b.width, b.height))
     }
 
     /// Save the panels of module `module_id` in the order a drag left them.
@@ -810,6 +857,7 @@ impl Ribbon {
     /// Plugin Manager). Clamps the active tab so it stays in range.
     pub fn set_modules(&mut self, modules: Vec<Box<dyn CadModule>>) {
         self.modules = modules;
+        self.forget_qat_looks();
         if self.active >= self.modules.len() {
             self.active = self.modules.len().saturating_sub(1);
         }
@@ -939,12 +987,59 @@ impl Ribbon {
                 holds,
             )
         };
-        Panel::deferred(g.title, move |level| match level {
-            collapse::Level::Full => group(false),
-            collapse::Level::Compact => group(true),
-            collapse::Level::Collapsed => button(false),
-            collapse::Level::Tight => button(true),
+        // The contextual tabs' panels and the test-block Close panel stay in
+        // the ribbon.
+        let floatable = !is_contextual(module_id) && !(module_id == "draw" && g.title == "Close");
+        // Each form reports where it is, for docking a floating panel
+        // between two.
+        let row_id = row_panel_id(module_id, g.title);
+        Panel::deferred(g.title, move |level| {
+            let element = match level {
+                collapse::Level::Full => group(false),
+                collapse::Level::Compact => group(true),
+                collapse::Level::Collapsed => button(false),
+                collapse::Level::Tight => button(true),
+            };
+            PosReport::owned(row_id.clone(), element).into()
         })
+        .floatable(floatable)
+    }
+
+    /// Float the panel `title` of module `module` with its top-left corner
+    /// at (`x`, `y`), on top of the other floating panels. Returns whether
+    /// the layout changed.
+    pub fn float_panel(&mut self, module: &str, title: &str, x: f32, y: f32) -> bool {
+        let Some(index) = self.modules.iter().position(|m| m.id() == module) else {
+            return false;
+        };
+        let known = self
+            .ordered_groups(index)
+            .iter()
+            .any(|group| group.title == title);
+        if !known || is_contextual(module) || self.layout.floating_panel(module, title).is_some() {
+            return false;
+        }
+        let z = self.top_float_z() + 1;
+        self.layout.floating.push(FloatingPanel {
+            key: extras::panel_key(module, title),
+            module_id: module.to_string(),
+            x,
+            y,
+            z,
+            ..FloatingPanel::default()
+        });
+        self.close_popup();
+        true
+    }
+
+    /// The highest stacking order among the floating panels, 0 for none.
+    fn top_float_z(&self) -> u32 {
+        self.layout
+            .floating
+            .iter()
+            .map(|panel| panel.z)
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn toggle_dropdown(&mut self, id: &str) {
@@ -1055,30 +1150,15 @@ impl Ribbon {
         show_block_palette: bool,
         visibility: Option<crate::ui::window::block_visibility::RibbonContext>,
     ) -> Element<'a, Message> {
-        // ── Quick-access file commands + undo/redo, one merged flow ────────
-        let lead = iced::widget::Row::with_children(
-            QUICK_ACCESS
-                .iter()
-                .map(|&(icon, label, cmd)| quick_access_btn(icon, label, cmd, !is_start))
-                .chain([
-                    render_history_control(
-                        "Undo",
-                        UNDO_HISTORY_ID,
-                        if is_start { 0 } else { undo_count },
-                        &self.open_dropdown,
-                    ),
-                    render_history_control(
-                        "Redo",
-                        REDO_HISTORY_ID,
-                        if is_start { 0 } else { redo_count },
-                        &self.open_dropdown,
-                    ),
-                ]),
-        )
-        .spacing(TOP_HIST_GAP)
-        .align_y(iced::Center)
-        .wrap()
-        .vertical_spacing(0.0);
+        // ── Quick Access Toolbar, one flow ───────────────────────────────
+        // Below the ribbon it has a row of its own, except while the ribbon
+        // is closed, when it comes back to the top row.
+        let qat_below = self.layout.qat_below && !closed;
+        let lead: Element<'_, Message> = if qat_below {
+            Space::new().into()
+        } else {
+            self.qat_row(is_start, undo_count, redo_count)
+        };
 
         // The quick-access flow and the tabs flow each flex-wrap; WrapBar stacks
         // them so a wrapped tab never shares a row with a quick-access button.
@@ -1214,8 +1294,8 @@ impl Ribbon {
         }
         tab_row = tab_row.push(
             container(
-                WrapBar::new(lead.into(), tabs.into())
-                    .spacing(6.0)
+                WrapBar::new(lead, tabs.into())
+                    .spacing(if qat_below { 0.0 } else { 6.0 })
                     .min_row_h(TAB_ROW_H)
                     .report_height(self.tab_bar_h.clone()),
             )
@@ -1237,6 +1317,8 @@ impl Ribbon {
             })
             .width(Length::Fill);
 
+        // Right-clicked, the tab row also offers where the toolbar shows.
+        let tab_bar = ribbon_menu::RightPress::for_target(ribbon_menu::MenuTarget::TabRow, tab_bar);
         let tab_bar = PosReport::new(minimize::TAB_BAR_ID, tab_bar);
         let top: Element<'a, Message> = match menu_row {
             Some(menu_row) => row![
@@ -1267,7 +1349,13 @@ impl Ribbon {
                 ribbon = ribbon.push(self.minimized_row(is_start));
             }
         }
-        keytips::ribbon_area(ribbon_menu::RightPress::new(ribbon))
+        if qat_below {
+            // The tool area and the minimized rows end with a line of their
+            // own; under the bare tab row the toolbar's row draws it.
+            let line = self.layout.minimize == RibbonMinimize::Tabs;
+            ribbon = ribbon.push(self.qat_below_row(is_start, undo_count, redo_count, line));
+        }
+        keytips::ribbon_area(ribbon_menu::RightPress::new(PosReport::new(RIBBON_ID, ribbon)))
     }
 
     /// The menu row with the search box at its right end.
@@ -1369,16 +1457,23 @@ impl Ribbon {
             } else {
                 metrics::THIN_STRIP_H
             };
-            CollapsePanels::new(panels, self.panel_h())
+            let collapse = CollapsePanels::new(panels, self.panel_h())
                 .draggable(strip, move |titles| Message::RibbonReorderPanels {
                     module,
                     titles,
                 })
+                .on_float(move |title, at| Message::RibbonFloatPanel {
+                    module,
+                    title,
+                    x: at.x,
+                    y: at.y,
+                })
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
                 .report_tight(self.collapse_tight.clone())
-                .mode(mode)
-                .into()
+                .mode(mode);
+            // A floating panel dropped on it docks here.
+            PosReport::new(TOOL_AREA_ID, collapse).into()
         } else {
             text("").into()
         };
@@ -1470,10 +1565,14 @@ impl Ribbon {
         is_start: bool,
         recent_colors: &[AcadColor],
         recent_files: &[std::path::PathBuf],
+        drawings: &[(usize, String, bool)],
     ) -> Option<Element<'_, Message>> {
         let open_id = self.open_dropdown.as_deref()?;
         if open_id == APP_MENU_ID {
             return Some(self.app_menu(recent_files, win));
+        }
+        if let Some(menu) = self.qat_overlay(open_id, win, is_start, drawings) {
+            return Some(menu);
         }
         // The minimize button belongs to the tab row, which the Start tab
         // keeps; the tools' dropdowns need a drawing.
@@ -1523,53 +1622,62 @@ impl Ribbon {
             return Some(dropdown_backdrop(positioned));
         }
 
-        if open_id == LAYER_COMBO_ID {
-            return self.layer_combo_overlay(win);
+        // A list on the Quick Access Toolbar opens its ribbon list's
+        // dropdown, under itself.
+        let list = qat::list_source(open_id).unwrap_or(open_id);
+
+        if list == LAYER_COMBO_ID {
+            return self.layer_combo_overlay(open_id, win);
         }
 
-        if open_id == widgets::DIM_LAYER_COMBO {
+        if list == widgets::DIM_LAYER_COMBO {
             return Some(self.annotation_layer_overlay(
-                widgets::DIM_LAYER_COMBO,
+                open_id,
                 &self.dim_layer,
                 Message::RibbonDimLayer,
                 win,
             ));
         }
-        if open_id == widgets::CENTER_LAYER_COMBO {
+        if list == widgets::CENTER_LAYER_COMBO {
             return Some(self.annotation_layer_overlay(
-                widgets::CENTER_LAYER_COMBO,
+                open_id,
                 &self.center_layer,
                 Message::RibbonCenterLayer,
                 win,
             ));
         }
-        if open_id == widgets::MLEADER_LAYER_COMBO {
+        if list == widgets::MLEADER_LAYER_COMBO {
             return Some(self.annotation_layer_overlay(
-                widgets::MLEADER_LAYER_COMBO,
+                open_id,
                 &self.mleader_layer,
                 Message::RibbonMLeaderLayer,
                 win,
             ));
         }
 
-        if open_id == PROP_COLOR_ID {
-            return self.prop_color_overlay(win, recent_colors);
+        if list == PROP_COLOR_ID {
+            return self.prop_color_overlay(open_id, win, recent_colors);
         }
-        if open_id == PROP_LINETYPE_ID {
-            return self.prop_linetype_overlay(win);
+        if list == PROP_LINETYPE_ID {
+            return self.prop_linetype_overlay(open_id, win);
         }
-        if open_id == PROP_LW_ID {
-            return self.prop_lw_overlay(win);
+        if list == PROP_LW_ID {
+            return self.prop_lw_overlay(open_id, win);
         }
 
         // Style combo dropdowns (annotate tab) float as overlays so the list
         // isn't clipped by the fixed ribbon-row height, the way the Draw-tab
         // dropdowns already are. (#153)
-        if let Some(ov) = self.style_combo_overlay(open_id, win) {
+        if let Some(ov) = self.style_combo_overlay(list, open_id, win) {
             return Some(ov);
         }
 
-        let groups = self.groups_for(self.active);
+        // The tab's panels, and the floating ones, whose dropdowns open from
+        // any tab.
+        let floating = self.floating_groups();
+        let groups = self
+            .groups_for(self.active)
+            .chain(floating.iter().map(|(_, group, _)| *group));
         let mut items_list: Option<Vec<(&'static str, &'static str, IconKind)>> = None;
         let mut dd_default = "";
         let mut dd_id: &'static str = "";
@@ -1599,76 +1707,16 @@ impl Ribbon {
         let items = items_list?;
         let last_cmd = self.last_cmd.get(dd_id).copied().unwrap_or(dd_default);
 
-        // Each item: its large icon and its name, the current one lit.
-        let rows: Vec<Element<Message>> = items
-            .iter()
-            .map(|(cmd, label, item_icon)| {
-                let is_current = *cmd == last_cmd;
-                let disabled = widgets::is_disabled_item(cmd);
-                let icon_el: Element<Message> = container(make_icon(*item_icon, LARGE_ICON))
-                    .width(Length::Fixed(LARGE_ICON))
-                    .into();
-                let label_el = text(t!(*label))
-                    .size(DD_LABEL)
-                    .wrapping(iced::advanced::text::Wrapping::None)
-                    .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: disabled.then_some(chrome::muted(theme)),
-                    });
-                let label_el = keytips::label_anchor(
-                    || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
-                    label_el,
-                );
-                let item = button(
-                    row![icon_el, label_el]
-                        .spacing(DD_GAP)
-                        .align_y(iced::Center),
-                )
-                .on_press_maybe((!disabled).then_some(Message::DropdownSelectItem {
-                    dropdown_id: dd_id,
-                    cmd: *cmd,
-                }))
-                .style(move |theme: &Theme, status| {
-                    if is_current {
-                        popup_row_style(theme, button::Status::Hovered)
-                    } else {
-                        popup_row_style(theme, status)
-                    }
-                })
-                .width(Fill)
-                .padding(DD_PAD);
-                keytips::anchor_with(|| keytips::item_anchor(dd_id, cmd), item)
-            })
-            .collect();
-
-        let header = dropdown_header(dd_id).map(|header| t!(header).into_owned());
-        let mut rows = rows;
-        if let Some(header) = &header {
-            rows.insert(
-                0,
-                container(text(header.clone()).size(10).style(muted_text_style))
-                    .padding([4, 10])
-                    .into(),
-            );
-        }
-        // As wide as the longest name, as the right-click menus are; a
-        // header wraps rather than widening the list.
-        let longest = items
-            .iter()
-            .map(|(_, label, _)| {
-                crate::ui::style::text_metrics::width(&t!(*label), DD_LABEL, false)
-            })
-            .fold(0.0, f32::max);
-        let panel_w = DD_PAD.left + LARGE_ICON + DD_GAP + longest + DD_PAD.right + 2.0;
-        let panel_w = if header.is_some() {
-            panel_w.max(DD_HEADER_MIN_W)
-        } else {
-            panel_w
-        };
-
-        let panel = container(column(rows))
-            .style(popup_panel_style)
-            .width(Length::Fixed(panel_w));
-
+        let (panel, panel_w) = dropdown_list(
+            dd_id,
+            &items,
+            last_cmd,
+            dropdown_header(dd_id).map(|header| t!(header).into_owned()),
+            |cmd| Message::DropdownSelectItem {
+                dropdown_id: dd_id,
+                cmd,
+            },
+        );
         let (align_right, h_pad, top) = self.dd_anchor(open_id, panel_w, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             panel.into(),
@@ -1689,7 +1737,7 @@ impl Ribbon {
     }
 
     /// The colour of layer `name`, `None` for Use Current (empty).
-    fn layer_color(&self, name: &str) -> Option<iced::Color> {
+    pub(super) fn layer_color(&self, name: &str) -> Option<iced::Color> {
         if name.is_empty() {
             return None;
         }
@@ -1703,7 +1751,7 @@ impl Ribbon {
     /// then the drawing's layers; a pick sends `pick`.
     fn annotation_layer_overlay(
         &self,
-        id: &'static str,
+        id: &str,
         current: &str,
         pick: fn(String) -> Message,
         win: (f32, f32),
@@ -1762,7 +1810,9 @@ impl Ribbon {
         dropdown_backdrop(position_ribbon_dropdown(panel.into(), align_right, h_pad, top))
     }
 
-    fn layer_combo_overlay(&self, win: (f32, f32)) -> Option<Element<'_, Message>> {
+    /// The layer list under the layer combo `id` (the ribbon's or the Quick
+    /// Access Toolbar's).
+    fn layer_combo_overlay(&self, id: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
         // A toggle icon (visible / freeze / lock) is its own button so a click
         // on it flips that state instead of bubbling up to the row's
         // make-active handler (#133).
@@ -1905,7 +1955,7 @@ impl Ribbon {
         .style(popup_panel_style)
         .width(Length::Fixed(300.0));
 
-        let (align_right, h_pad, top) = self.dd_anchor(LAYER_COMBO_ID, 300.0, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(id, 300.0, win.0);
         let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
 
         Some(dropdown_backdrop(positioned))
@@ -1916,8 +1966,27 @@ impl Ribbon {
     /// style combo. Built as an overlay — like the layer combo and the
     /// Draw-tab dropdowns — so the list grows to fit its entries instead of
     /// being clipped to the ribbon-row height. (#153)
-    fn style_combo_overlay(&self, open_id: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
-        let groups = self.groups_for(self.active);
+    /// `anchor` is the combo it opens under: the ribbon's, or its copy on
+    /// the Quick Access Toolbar, which opens it from any tab.
+    fn style_combo_overlay(
+        &self,
+        open_id: &str,
+        anchor: &str,
+        win: (f32, f32),
+    ) -> Option<Element<'_, Message>> {
+        // The tab's panels, and the floating ones, whose dropdowns open from
+        // any tab. A toolbar copy opens from any tab, even with its panel
+        // hidden: every tab's panels.
+        let floating = self.floating_groups();
+        let groups: Vec<&RibbonGroup> = if anchor == open_id {
+            self.groups_for(self.active)
+                .chain(floating.iter().map(|(_, group, _)| *group))
+                .collect()
+        } else {
+            (0..self.modules.len())
+                .flat_map(|index| self.ordered_groups(index))
+                .collect()
+        };
 
         // Locate the open style combo; capture its style key + manager command.
         let mut found: Option<(crate::modules::StyleKey, Option<&'static str>)> = None;
@@ -1995,7 +2064,7 @@ impl Ribbon {
             .style(popup_panel_style)
             .width(Length::Fixed(LARGE_W * 2.3));
 
-        let (align_right, h_pad, top) = self.dd_anchor(open_id, LARGE_W * 2.3, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(anchor, LARGE_W * 2.3, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             panel.into(),
             align_right,
@@ -2006,6 +2075,7 @@ impl Ribbon {
 
     fn prop_color_overlay(
         &self,
+        anchor: &str,
         win: (f32, f32),
         recent_colors: &[AcadColor],
     ) -> Option<Element<'_, Message>> {
@@ -2015,8 +2085,7 @@ impl Ribbon {
             self.active_layer_color(),
         );
 
-        let (align_right, h_pad, top) =
-            self.dd_anchor(PROP_COLOR_ID, color_dropdown::PANEL_W, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(anchor, color_dropdown::PANEL_W, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             panel,
             align_right,
@@ -2025,7 +2094,7 @@ impl Ribbon {
         )))
     }
 
-    fn prop_linetype_overlay(&self, win: (f32, f32)) -> Option<Element<'_, Message>> {
+    fn prop_linetype_overlay(&self, anchor: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
         let active_lt = &self.active_linetype;
 
         let mut items: Vec<LinetypeItem> = vec![
@@ -2071,7 +2140,7 @@ impl Ribbon {
             .style(popup_panel_style)
             .width(Length::Fixed(220.0));
 
-        let (align_right, h_pad, top) = self.dd_anchor(PROP_LINETYPE_ID, 220.0, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(anchor, 220.0, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             list.into(),
             align_right,
@@ -2080,7 +2149,7 @@ impl Ribbon {
         )))
     }
 
-    fn prop_lw_overlay(&self, win: (f32, f32)) -> Option<Element<'_, Message>> {
+    fn prop_lw_overlay(&self, anchor: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
         let active_lw = self.active_lineweight;
         let rows: Vec<Element<Message>> = lw_options()
             .into_iter()
@@ -2101,7 +2170,7 @@ impl Ribbon {
             })
             .collect();
 
-        self.prop_overlay_positioned(rows, PROP_LW_ID, 140.0, win)
+        self.prop_overlay_positioned(rows, anchor, 140.0, win)
     }
 
     fn prop_overlay_positioned<'a>(
@@ -2137,6 +2206,82 @@ enum Strip {
     Peek,
     /// No strip: a peek's panel while its extra tools show under it.
     Bare,
+}
+
+/// The list of the ribbon dropdown `dd_id`: each of `items` with its large
+/// icon and name, `current` lit, under an optional `header`. Returns the
+/// list and its width, as wide as the longest name.
+fn dropdown_list<'a>(
+    dd_id: &'static str,
+    items: &[(&'static str, &'static str, IconKind)],
+    current: &str,
+    header: Option<String>,
+    pick: impl Fn(&'static str) -> Message,
+) -> (Element<'a, Message>, f32) {
+    let last_cmd = current;
+    // Each item: its large icon and its name, the current one lit.
+    let mut rows: Vec<Element<Message>> = items
+        .iter()
+        .map(|(cmd, label, item_icon)| {
+            let is_current = *cmd == last_cmd;
+            let disabled = widgets::is_disabled_item(cmd);
+            let icon_el: Element<Message> = container(make_icon(*item_icon, LARGE_ICON))
+                .width(Length::Fixed(LARGE_ICON))
+                .into();
+            let label_el = text(t!(*label))
+                .size(DD_LABEL)
+                .wrapping(iced::advanced::text::Wrapping::None)
+                .style(move |theme: &Theme| iced::widget::text::Style {
+                    color: disabled.then_some(chrome::muted(theme)),
+                });
+            let label_el = keytips::label_anchor(
+                || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
+                label_el,
+            );
+            let item = button(
+                row![icon_el, label_el]
+                    .spacing(DD_GAP)
+                    .align_y(iced::Center),
+            )
+            .on_press_maybe((!disabled).then(|| pick(cmd)))
+            .style(move |theme: &Theme, status| {
+                if is_current {
+                    popup_row_style(theme, button::Status::Hovered)
+                } else {
+                    popup_row_style(theme, status)
+                }
+            })
+            .width(Fill)
+            .padding(DD_PAD);
+            keytips::anchor_with(|| keytips::item_anchor(dd_id, cmd), item)
+        })
+        .collect();
+
+    if let Some(header) = &header {
+        rows.insert(
+            0,
+            container(text(header.clone()).size(10).style(muted_text_style))
+                .padding([4, 10])
+                .into(),
+        );
+    }
+    // As wide as the longest name, as the right-click menus are; a
+    // header wraps rather than widening the list.
+    let longest = items
+        .iter()
+        .map(|(_, label, _)| crate::ui::style::text_metrics::width(&t!(*label), DD_LABEL, false))
+        .fold(0.0, f32::max);
+    let panel_w = DD_PAD.left + LARGE_ICON + DD_GAP + longest + DD_PAD.right + 2.0;
+    let panel_w = if header.is_some() {
+        panel_w.max(DD_HEADER_MIN_W)
+    } else {
+        panel_w
+    };
+
+    let panel = container(column(rows))
+        .style(popup_panel_style)
+        .width(Length::Fixed(panel_w));
+    (panel.into(), panel_w)
 }
 
 /// Render a single ribbon panel (tools + group label), fixed `TOOL_BAR_H` tall.
@@ -2454,6 +2599,84 @@ mod tests {
             let view = ribbon.view(None, false, false, false, 0, 0, false, None);
             std::hint::black_box(view);
         }
+    }
+
+    #[test]
+    fn the_toolbar_below_the_ribbon_builds_in_every_minimize_state() {
+        use super::layout::{QatBuiltin, QatItem};
+        let mut ribbon = Ribbon::default();
+        let mut layout = RibbonLayout {
+            qat_below: true,
+            ..RibbonLayout::default()
+        };
+        layout.qat.push(QatItem::Separator);
+        layout.qat.push(QatItem::Builtin(QatBuiltin::LayerCombo));
+        for minimize in [
+            super::RibbonMinimize::Off,
+            super::RibbonMinimize::Tabs,
+            super::RibbonMinimize::PanelTitles,
+            super::RibbonMinimize::PanelButtons,
+        ] {
+            layout.minimize = minimize;
+            ribbon.set_layout(layout.clone());
+            for closed in [false, true] {
+                let view = ribbon.view(None, closed, false, false, 3, 1, false, None);
+                std::hint::black_box(view);
+            }
+        }
+    }
+
+    #[test]
+    fn a_floating_panel_leaves_its_row_but_keeps_its_slot() {
+        let mut ribbon = Ribbon::default();
+        let draw = ribbon
+            .modules
+            .iter()
+            .position(|module| module.id() == "draw")
+            .unwrap();
+        let before: Vec<_> = ribbon.groups_for(draw).map(|g| g.title).collect();
+        let mut layout = RibbonLayout::default();
+        layout.floating.push(super::FloatingPanel {
+            key: "draw/Modify".into(),
+            module_id: "draw".into(),
+            ..super::FloatingPanel::default()
+        });
+        ribbon.set_layout(layout);
+        let row: Vec<_> = ribbon.groups_for(draw).map(|g| g.title).collect();
+        assert!(!row.contains(&"Modify"));
+        assert_eq!(row.len() + 1, before.len());
+        // It is still one of the tab's panels, in its place, and its tools
+        // are still found.
+        let shown: Vec<_> = ribbon.shown_groups(draw).map(|g| g.title).collect();
+        assert_eq!(shown, before);
+        assert!(ribbon.tool_for_command("TRIM").is_some());
+    }
+
+    #[test]
+    fn a_dropped_panel_floats_on_top_once_and_contextual_ones_stay() {
+        let mut ribbon = Ribbon::default();
+        assert!(ribbon.float_panel("draw", "Draw", 300.0, 200.0));
+        assert!(ribbon.float_panel("draw", "Modify", 500.0, 200.0));
+        let z: Vec<u32> = ribbon.layout.floating.iter().map(|p| p.z).collect();
+        assert_eq!(z, [1, 2]);
+        let draw = &ribbon.layout.floating[0];
+        assert_eq!(
+            (draw.key.as_str(), draw.x, draw.y),
+            ("draw/Draw", 300.0, 200.0)
+        );
+        // Not twice, not a panel that does not exist, not a contextual tab's.
+        assert!(!ribbon.float_panel("draw", "Draw", 0.0, 0.0));
+        assert!(!ribbon.float_panel("draw", "Gone", 0.0, 0.0));
+        let block_editor = ribbon
+            .modules
+            .iter()
+            .find(|module| module.id() == "block_editor")
+            .and_then(|module| module.ribbon_groups().first())
+            .map(|group| group.title);
+        if let Some(title) = block_editor {
+            assert!(!ribbon.float_panel("block_editor", title, 0.0, 0.0));
+        }
+        assert_eq!(ribbon.layout.floating.len(), 2);
     }
 
     #[test]

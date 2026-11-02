@@ -1885,8 +1885,8 @@ impl MTextTargetLoss {
     pub fn lost_in(self, version: codec::DxfVersion, is_dxf: bool) -> bool {
         use codec::DxfVersion::*;
         match self {
-            Self::Columns if is_dxf => version < AC1021,
-            Self::Columns => version < AC1032,
+            // R2007 to R2013 DWG keeps them in the text's xdata.
+            Self::Columns => version < AC1021,
             _ if is_dxf => false,
             Self::BoxHeight => version < AC1021,
             Self::Background => version < AC1018,
@@ -2917,6 +2917,34 @@ fn sync_current_styles_on_save(doc: &mut Document) {
     let increment = doc.header.sketch_increment;
     let tolerance = doc.header.sketch_tolerance;
     set_sketch_settings(doc, sketch_type, increment, tolerance);
+    drop_loaded_text_style_font_xdata(doc);
+}
+
+/// A text style's TrueType family and flags live in its `ACAD` xdata record,
+/// which the writer builds from the style itself. A DXF read also keeps the
+/// record it loaded, so writing that copy too would save a stale second
+/// family, and after a switch to a stroke font, a family the style no longer
+/// has. Drop the loaded copy when it holds only the font (family + flags).
+fn drop_loaded_text_style_font_xdata(doc: &mut Document) {
+    use codec::xdata::XDataValue;
+    let handles: Vec<_> = doc.text_styles.iter().map(|style| style.handle).collect();
+    for handle in handles {
+        let Some(xdata) = doc.object_xdata.get_mut(&handle) else {
+            continue;
+        };
+        let font_only = xdata.get_record("ACAD").is_some_and(|record| {
+            matches!(
+                record.values.as_slice(),
+                [XDataValue::String(_)] | [XDataValue::String(_), XDataValue::Integer32(_)]
+            )
+        });
+        if font_only {
+            xdata.remove_record("ACAD");
+            if xdata.is_empty() {
+                doc.object_xdata.remove(&handle);
+            }
+        }
+    }
 }
 
 /// Recovery runs the codec's repair and reports what it did, and what it

@@ -3,7 +3,7 @@
 //! would. Seeing which button runs a typed command is how its place in the
 //! ribbon is learned.
 
-use crate::modules::{ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
+use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
 use super::{draw_panel, extras, Ribbon};
 
@@ -57,7 +57,150 @@ pub(super) fn group_holds(key: &str, group: &RibbonGroup, id: &str) -> bool {
         .any(|(entry, _)| *entry == id)
 }
 
+/// The label and icon `item` shows for the command line or dropdown id
+/// `want` (ignoring case), if it offers it.
+fn item_face(item: &RibbonItem, want: &str) -> Option<(&'static str, IconKind)> {
+    let tool_face = |tool: &ToolDef| {
+        let runs = match &tool.event {
+            ModuleEvent::Command(cmd) => cmd.eq_ignore_ascii_case(want),
+            _ => false,
+        };
+        (runs || tool.id.eq_ignore_ascii_case(want)).then(|| (tool.label, tool.icon))
+    };
+    match item {
+        RibbonItem::Tool(t) | RibbonItem::LabeledTool(t) | RibbonItem::LargeTool(t) => tool_face(t),
+        RibbonItem::PropertiesGroup { match_prop } => tool_face(match_prop),
+        RibbonItem::ToolGrid { columns } | RibbonItem::StyleComboGroup { rows: columns, .. } => {
+            columns.iter().flatten().find_map(tool_face)
+        }
+        RibbonItem::LayerComboGroup { row2, row3 } => row2.iter().chain(row3).find_map(tool_face),
+        RibbonItem::Dropdown {
+            id,
+            icon,
+            items,
+            default,
+        } => {
+            if id.eq_ignore_ascii_case(want) {
+                let label = items
+                    .iter()
+                    .find(|(cmd, _, _)| cmd == default)
+                    .map_or(*id, |(_, label, _)| *label);
+                return Some((label, *icon));
+            }
+            dropdown_item_face(items, want)
+        }
+        RibbonItem::LabeledDropdown {
+            id,
+            label,
+            icon,
+            items,
+            ..
+        }
+        | RibbonItem::LargeDropdown {
+            id,
+            label,
+            icon,
+            items,
+            ..
+        } => {
+            if id.eq_ignore_ascii_case(want) {
+                return Some((label, *icon));
+            }
+            dropdown_item_face(items, want)
+        }
+    }
+}
+
+fn dropdown_item_face(
+    items: &[(&'static str, &'static str, IconKind)],
+    want: &str,
+) -> Option<(&'static str, IconKind)> {
+    items
+        .iter()
+        .find(|(cmd, _, _)| cmd.eq_ignore_ascii_case(want))
+        .map(|(_, label, icon)| (*label, *icon))
+}
+
 impl Ribbon {
+    /// The label and icon of the ribbon button that runs the command line
+    /// (or opens the dropdown) `want`, on any tab, shown or not: its own
+    /// tools, dropdown items and slide-out tools.
+    pub(super) fn ribbon_face(&self, want: &str) -> Option<(&'static str, IconKind)> {
+        let want = want.trim();
+        self.modules.iter().find_map(|module| {
+            module.ribbon_groups().iter().find_map(|group| {
+                group
+                    .tools
+                    .iter()
+                    .find_map(|item| item_face(item, want))
+                    .or_else(|| {
+                        let key = extras::panel_key(module.id(), group.title);
+                        extras::for_panel(&key)?.tools().find_map(|more| {
+                            if more.command().eq_ignore_ascii_case(want) {
+                                return Some((more.tool.label, more.tool.icon));
+                            }
+                            more.options
+                                .iter()
+                                .find(|(cmd, _)| cmd.eq_ignore_ascii_case(want))
+                                .map(|(_, label)| (*label, more.tool.icon))
+                        })
+                    })
+            })
+        })
+    }
+
+    /// The ribbon dropdown `id` (ignoring case), on any tab: its id, label,
+    /// items and default item.
+    #[allow(clippy::type_complexity)]
+    pub(super) fn ribbon_dropdown(
+        &self,
+        id: &str,
+    ) -> Option<(
+        &'static str,
+        &'static str,
+        &[(&'static str, &'static str, IconKind)],
+        &'static str,
+    )> {
+        let id = id.trim();
+        self.modules.iter().find_map(|module| {
+            module
+                .ribbon_groups()
+                .iter()
+                .flat_map(|group| &group.tools)
+                .find_map(|item| match item {
+                    RibbonItem::Dropdown {
+                        id: dd,
+                        items,
+                        default,
+                        ..
+                    } if dd.eq_ignore_ascii_case(id) => {
+                        let label = items
+                            .iter()
+                            .find(|(cmd, _, _)| cmd == default)
+                            .map_or(*dd, |(_, label, _)| *label);
+                        Some((*dd, label, items.as_slice(), *default))
+                    }
+                    RibbonItem::LabeledDropdown {
+                        id: dd,
+                        label,
+                        items,
+                        default,
+                        ..
+                    }
+                    | RibbonItem::LargeDropdown {
+                        id: dd,
+                        label,
+                        items,
+                        default,
+                        ..
+                    } if dd.eq_ignore_ascii_case(id) => {
+                        Some((*dd, *label, items.as_slice(), *default))
+                    }
+                    _ => None,
+                })
+        })
+    }
+
     /// Every button of every tab, with the index of the tab it is on. The
     /// tab on show comes first, so a command offered on two tabs lights the
     /// button the user can already see.
@@ -66,7 +209,7 @@ impl Ribbon {
             .chain((0..self.modules.len()).filter(move |i| *i != self.active));
         order.flat_map(|i| {
             let module_id = self.modules[i].id();
-            self.groups_for(i)
+            self.shown_groups(i)
                 .flat_map(move |group| {
                     group_entries(&extras::panel_key(module_id, group.title), group)
                 })
@@ -108,7 +251,7 @@ impl Ribbon {
         let id = self.active_tool.as_deref()?;
         let holds = |i: usize| {
             let module_id = self.modules[i].id();
-            self.groups_for(i)
+            self.shown_groups(i)
                 .any(|group| group_holds(&extras::panel_key(module_id, group.title), group, id))
         };
         if self

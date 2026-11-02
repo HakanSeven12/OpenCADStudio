@@ -41,6 +41,25 @@ mod common_tests {
         assert_eq!(a.color, b.color);
     }
 
+    /// The green, orange and red the text style windows write in read as
+    /// body text on the light and the dark theme.
+    #[test]
+    fn a_readable_accent_reaches_body_text_contrast_in_both_themes() {
+        use crate::ui::style::common::{readable_accent, wcag_contrast};
+        for theme in [Theme::Light, Theme::Dark] {
+            let palette = theme.palette();
+            let bg = palette.background.base.color;
+            for accent in [
+                palette.success.base.color,
+                palette.warning.base.color,
+                palette.danger.base.color,
+            ] {
+                let color = readable_accent(accent, bg, palette.background.base.text);
+                assert!(wcag_contrast(color, bg) >= 4.5, "{theme}: {color:?}");
+            }
+        }
+    }
+
     #[test]
     fn btn_s_bodies_documented_as_divergent() {
         // The two `btn_s` locals are NOT byte-identical (plotstyle vs style_manager).

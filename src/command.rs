@@ -2361,6 +2361,12 @@ pub enum CmdResult {
         dimensions: Vec<Handle>,
         offset: Option<f64>,
     },
+    /// An associative array arrow grip: set these parameters on the array
+    /// referenced by `insert` and rebuild its items.
+    EditAssocArray {
+        insert: Handle,
+        changes: Vec<(&'static str, f64)>,
+    },
     /// Cancel: discard any preview and end the command.
     Cancel,
     /// Cleanly end the command without reporting cancellation.

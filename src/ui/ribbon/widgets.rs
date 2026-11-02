@@ -541,6 +541,76 @@ pub(super) fn split_outline<'a>(content: Element<'a, Message>) -> Element<'a, Me
     iced::widget::hover(content, outline)
 }
 
+/// The closed current-layer combo `width` wide: the current layer's on,
+/// freeze and lock states, its colour and name, and the arrow that opens
+/// the layer list `id`. It reports its bounds under `id`, which the list
+/// opens under.
+pub(super) fn layer_combo_face<'a>(
+    id: &'static str,
+    layer_infos: &[LayerInfo],
+    active_layer: &str,
+    is_open: bool,
+    width: f32,
+    keytip_label: bool,
+) -> Element<'a, Message> {
+    let info = layer_infos.iter().find(|l| l.name == active_layer);
+    let lc = info.map(|l| l.color).unwrap_or(Color::WHITE);
+    let lv = info.map(|l| l.visible).unwrap_or(true);
+    let lf = info.map(|l| l.frozen).unwrap_or(false);
+    let ll = info.map(|l| l.locked).unwrap_or(false);
+
+    let vis_icon = icons::tool(icons::layer_visible(lv), SMALL_ICON);
+    let freeze_icon = icons::tool(icons::layer_freeze(lf), SMALL_ICON);
+    let lock_icon = icons::tool(icons::layer_lock(ll), SMALL_ICON);
+    let swatch = container(text(""))
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(lc)),
+            border: Border {
+                color: chrome::border(theme),
+                width: crate::ui::icons::hairline(),
+                radius: 1.0.into(),
+            },
+            ..Default::default()
+        })
+        .width(12)
+        .height(12);
+
+    const FIXED_COMBO_W: f32 = 14.0 * 3.0 + 12.0 + 9.0 + 4.0 * 4.0 + 8.0 * 2.0;
+    let name_w = (width - FIXED_COMBO_W).max(24.0);
+    // About 6 px per glyph at 11 px. The dropdown itself keeps the
+    // complete layer name available; only its closed label is shortened
+    // to preserve the fixed row height.
+    let name_budget = ((name_w / 6.0) as usize).max(4);
+    let active_layer_label = crate::ui::text_util::elide(active_layer, name_budget);
+    let label: Element<'a, Message> = if keytip_label {
+        super::keytips::label_anchor(
+            || super::keytips::label_id(id),
+            text(active_layer_label).size(11),
+        )
+    } else {
+        text(active_layer_label).size(11).into()
+    };
+
+    let combo_btn = button(
+        row![
+            vis_icon,
+            freeze_icon,
+            lock_icon,
+            swatch,
+            container(label).width(name_w).clip(true),
+            icons::dropdown_arrow(),
+        ]
+        .spacing(4)
+        .align_y(iced::Center),
+    )
+    .on_press(Message::ToggleRibbonDropdown(id.to_string()))
+    .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 3.0))
+    .padding([0, 8])
+    .height(metrics::COMBO_H)
+    .width(Length::Fixed(width));
+    PosReport::new(id, combo_btn).into()
+}
+
 /// A combo box in a panel (layer, colour, linetype, lineweight, styles).
 pub(super) fn combo_btn_style(
     theme: &Theme,
@@ -708,13 +778,30 @@ pub(super) fn render_row_item<'a>(
     state: ToggleState,
 ) -> Element<'a, Message> {
     match item {
-        RibbonItem::LabeledTool(t) => labeled_tool(t, active_tool, state, Length::Shrink),
+        RibbonItem::LabeledTool(t) => super::ribbon_menu::tool_target(
+            super::ribbon_menu::tool_qat(t),
+            labeled_tool(t, active_tool, state, Length::Shrink),
+        ),
         _ => render_small(item, active_tool, open_dd, last_cmd, state),
     }
 }
 
-/// Render a 1-row small button (Tool or Dropdown).
+/// Render a 1-row small button (Tool or Dropdown). Right-clicked, it offers
+/// to go on the Quick Access Toolbar.
 pub(super) fn render_small<'a>(
+    item: &RibbonItem,
+    active_tool: &Option<String>,
+    open_dd: &Option<String>,
+    last_cmd: &HashMap<&'static str, &'static str>,
+    state: ToggleState,
+) -> Element<'a, Message> {
+    super::ribbon_menu::tool_target(
+        super::ribbon_menu::item_qat(item),
+        small_button(item, active_tool, open_dd, last_cmd, state),
+    )
+}
+
+fn small_button<'a>(
     item: &RibbonItem,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
@@ -1127,7 +1214,10 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
             .gap(4.0)
             .delay(Duration::from_millis(400))
             .style(tip_style);
-            super::keytips::anchor(t.id, btn)
+            super::ribbon_menu::tool_target(
+                super::ribbon_menu::tool_qat(t),
+                super::keytips::anchor(t.id, btn),
+            )
         })
         .collect();
     row(btns).spacing(2).align_y(iced::Center).into()
@@ -1153,6 +1243,19 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
 /// [`render_large`], with `below` (small labeled tools) as the bottom row of
 /// the Dimensions style/layer lists.
 pub(super) fn render_large_with<'a>(
+    item: &RibbonItem,
+    ctx: &RenderCtx<'_>,
+    below: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    // A single button offers to go on the Quick Access Toolbar; a group's
+    // own buttons do so each.
+    super::ribbon_menu::tool_target(
+        super::ribbon_menu::item_qat(item),
+        large_item(item, ctx, below),
+    )
+}
+
+fn large_item<'a>(
     item: &RibbonItem,
     ctx: &RenderCtx<'_>,
     below: Vec<Element<'a, Message>>,
@@ -1274,66 +1377,22 @@ pub(super) fn render_large_with<'a>(
             // in the closed combo.
             let combo_w = (LARGE_W * 2.5).max(tools_w).max(250.0);
 
-            let info = layer_infos.iter().find(|l| l.name == active_layer);
-            let lc = info.map(|l| l.color).unwrap_or(Color::WHITE);
-            let lv = info.map(|l| l.visible).unwrap_or(true);
-            let lf = info.map(|l| l.frozen).unwrap_or(false);
-            let ll = info.map(|l| l.locked).unwrap_or(false);
             let is_open = open_dd.as_deref() == Some(LAYER_COMBO_ID);
-
-            let vis_icon = icons::tool(icons::layer_visible(lv), SMALL_ICON);
-            let freeze_icon = icons::tool(icons::layer_freeze(lf), SMALL_ICON);
-            let lock_icon = icons::tool(icons::layer_lock(ll), SMALL_ICON);
-            let swatch = container(text(""))
-                .style(move |theme: &Theme| container::Style {
-                    background: Some(Background::Color(lc)),
-                    border: Border {
-                        color: chrome::border(theme),
-                        width: crate::ui::icons::hairline(),
-                        radius: 1.0.into(),
-                    },
-                    ..Default::default()
-                })
-                .width(12)
-                .height(12);
-
-            const FIXED_COMBO_W: f32 = 14.0 * 3.0 + 12.0 + 9.0 + 4.0 * 4.0 + 8.0 * 2.0;
-            let name_w = (combo_w - FIXED_COMBO_W).max(24.0);
-            // About 6 px per glyph at 11 px. The dropdown itself keeps the
-            // complete layer name available; only its closed ribbon label is
-            // shortened to preserve the fixed row height.
-            let name_budget = ((name_w / 6.0) as usize).max(4);
-            let active_layer_label = crate::ui::text_util::elide(active_layer, name_budget);
-
-            let combo_btn = button(
-                row![
-                    vis_icon,
-                    freeze_icon,
-                    lock_icon,
-                    swatch,
-                    container(super::keytips::label_anchor(
-                        || super::keytips::label_id(LAYER_COMBO_ID),
-                        text(active_layer_label).size(11),
-                    ))
-                    .width(name_w)
-                    .clip(true),
-                    icons::dropdown_arrow(),
-                ]
-                .spacing(4)
-                .align_y(iced::Center),
-            )
-            .on_press(Message::ToggleRibbonDropdown(LAYER_COMBO_ID.to_string()))
-            .style(move |theme: &Theme, status| combo_btn_style(theme, is_open, status, 3.0))
-            .padding([0, 8])
-            .height(metrics::COMBO_H)
-            .width(Fill);
+            let combo_btn = layer_combo_face(
+                LAYER_COMBO_ID,
+                layer_infos,
+                active_layer,
+                is_open,
+                combo_w,
+                true,
+            );
+            // Right-clicked, it offers to go on the Quick Access Toolbar.
+            let combo_btn = super::qat::list_target(LAYER_COMBO_ID, combo_btn);
 
             combo_panel_col(
                 combo_w,
                 vec![
-                    container(PosReport::new(LAYER_COMBO_ID, combo_btn))
-                        .width(Fill)
-                        .into(),
+                    container(combo_btn).width(Fill).into(),
                     tool_row(row2, active_tool),
                     tool_row(row3, active_tool),
                 ],
@@ -1423,9 +1482,15 @@ pub(super) fn render_large_with<'a>(
             // the same baseline as the Layers / style selectors.
             let combos = container(
                 column![
-                    PosReport::new(PROP_COLOR_ID, color_row),
-                    PosReport::new(PROP_LINETYPE_ID, lt_row),
-                    PosReport::new(PROP_LW_ID, lw_row),
+                    super::qat::list_target(
+                        PROP_COLOR_ID,
+                        PosReport::new(PROP_COLOR_ID, color_row)
+                    ),
+                    super::qat::list_target(
+                        PROP_LINETYPE_ID,
+                        PosReport::new(PROP_LINETYPE_ID, lt_row)
+                    ),
+                    super::qat::list_target(PROP_LW_ID, PosReport::new(PROP_LW_ID, lw_row)),
                 ]
                 .spacing(2)
                 .align_x(iced::Left),
@@ -1482,12 +1547,15 @@ pub(super) fn render_large_with<'a>(
             let items_panel: Element<Message> =
                 iced::widget::Space::new().width(0).height(0).into();
 
-            let mut col_items: Vec<Element<Message>> =
-                vec![
-                    container(row![PosReport::new(*combo_id, combo_btn), items_panel].spacing(0))
-                        .width(Fill)
-                        .into(),
-                ];
+            let mut col_items: Vec<Element<Message>> = vec![container(
+                row![
+                    super::qat::list_target(combo_id, PosReport::new(combo_id, combo_btn)),
+                    items_panel
+                ]
+                .spacing(0),
+            )
+            .width(Fill)
+            .into()];
             // Dimensions: the style list and the dimension layer list each
             // lead a row of small tools.
             if *style_key == StyleKey::DimStyle && rows.len() == 2 {
@@ -1641,7 +1709,7 @@ pub(super) fn layer_combo<'a>(
     let combo = tooltip(PosReport::new(id, combo), make_tip(tip), TipPos::Bottom)
         .delay(Duration::from_millis(400))
         .style(tip_style);
-    super::keytips::anchor(id, combo)
+    super::keytips::anchor(id, super::qat::list_target(id, combo))
 }
 
 /// Annotate > Text find box id, and its text height box.
@@ -1722,41 +1790,47 @@ pub fn module_event_to_message(event: ModuleEvent) -> Message {
 
 // ── History control ────────────────────────────────────────────────────────
 
-/// Quick-access chrome button (New / Open / Save / Save As / Print) in the top
-/// strip: an SVG icon that dispatches a command string, with a hover tooltip.
-/// A Quick Access button; greyed out and inert unless `enabled` (the Start
-/// tab has no drawing for it).
+/// A Quick Access command button: the command's icon (its name when it has
+/// none), running it as a ribbon button does. A command OCS does not have
+/// yet (`runs` false) is greyed out and inert, as the menu bar shows it.
 pub(super) fn quick_access_btn<'a>(
-    icon_bytes: &'static [u8],
-    label: &'static str,
-    cmd: &'static str,
-    enabled: bool,
+    face: super::qat::Face,
+    cmd: String,
+    runs: bool,
 ) -> Element<'a, Message> {
-    // The bundled UI SVGs are black-stroked; tint them to a light chrome grey so
-    // they read on the dark top strip (raw black is invisible there).
-    let icon = if enabled {
-        icons::chrome(icon_bytes, SMALL_ICON)
-    } else {
-        icons::chrome_disabled(icon_bytes, SMALL_ICON)
-    };
+    let icon = super::qat::face_icon(&face, SMALL_ICON, runs);
+    let text_face = matches!(face.icon, super::qat::FaceIcon::Text);
     let btn = button(
         container(icon)
-            .width(Fill)
+            .width(if text_face { Length::Shrink } else { Fill })
             .height(Fill)
             .align_x(iced::Center)
             .align_y(iced::Center),
     )
-    .on_press_maybe(enabled.then(|| Message::Command(cmd.to_string())))
-    .style(move |theme: &Theme, status| top_hist_btn_style(theme, enabled, false, status))
-    .width(Length::Fixed(TOP_HIST_W))
+    .on_press_maybe(runs.then(|| Message::MenuCommand(cmd.clone())))
+    .style(move |theme: &Theme, status| top_hist_btn_style(theme, runs, false, status))
+    .width(if text_face {
+        Length::Shrink
+    } else {
+        Length::Fixed(TOP_HIST_W)
+    })
     .height(TOP_BUTTON_H)
-    .padding([2, 0]);
+    .padding(if text_face {
+        Padding::from([0.0, metrics::QAT_TEXT_PAD])
+    } else {
+        Padding::from([2.0, 0.0])
+    });
+    let anchor = super::keytips::quick_access_anchor(&cmd);
     super::keytips::anchor_with(
-        || super::keytips::quick_access_anchor(cmd),
-        tooltip(btn, make_tip(t!(label).into_owned()), TipPos::Bottom)
-            .gap(6.0)
-            .delay(Duration::from_millis(400))
-            .style(tip_style),
+        move || anchor,
+        tooltip(
+            btn,
+            make_tip(super::qat::command_tip(&face.label, &cmd)),
+            TipPos::Bottom,
+        )
+        .gap(6.0)
+        .delay(Duration::from_millis(400))
+        .style(tip_style),
     )
 }
 

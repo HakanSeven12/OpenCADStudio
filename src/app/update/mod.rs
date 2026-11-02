@@ -2,6 +2,7 @@ use super::{ArrowKey, Message, OpenCADStudio, TextEntryMode};
 use crate::command::CadCommand;
 use crate::io::plot_style::PlotStyleTableExt as _;
 use crate::scene::VIEWCUBE_DRAW_PX;
+use crate::ui::font_picker::FontChoice;
 use crate::ui::PropertiesPanel;
 use iced::time::Instant;
 use iced::Task;
@@ -2771,6 +2772,21 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::RibbonQat(msg) => {
+                let out = self.ribbon.on_qat(msg);
+                if out.save {
+                    self.save_config();
+                }
+                let focus = if out.focus {
+                    iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::ribbon::QAT_PICKER_INPUT,
+                    ))
+                } else {
+                    Task::none()
+                };
+                let run = out.run.map_or_else(Task::none, |run| self.update(run));
+                Task::batch([focus, run])
+            }
             Message::RibbonSlideOut(msg) => {
                 if self.ribbon.on_slide_out(msg, iced::time::Instant::now()) {
                     self.save_config();
@@ -2806,6 +2822,12 @@ impl OpenCADStudio {
             Message::MenuCommand(line) => {
                 let sweep = self.sync_active_field_if_any();
                 self.ribbon.close_dropdown();
+                // As a typed command does: the application menu, the
+                // drawing's context menu and the Isolate menu close.
+                self.ribbon.close_app_menu();
+                let i = self.active_tab;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.isolate_popup_open = false;
                 // A single word dispatches as a ribbon button does; a line
                 // with answers runs its command and feeds them to its
                 // prompts, leaving the command at its next one.
@@ -2815,6 +2837,18 @@ impl OpenCADStudio {
                     self.dispatch_ribbon_command(&line)
                 };
                 Task::batch([sweep, run])
+            }
+            Message::RibbonFloatPanel { module, title, x, y } => {
+                if self.ribbon.float_panel(module, &title, x, y) {
+                    self.save_config();
+                }
+                Task::none()
+            }
+            Message::RibbonFloat(msg) => {
+                if self.ribbon.on_float(msg, iced::time::Instant::now()) {
+                    self.save_config();
+                }
+                Task::none()
             }
             Message::RibbonReorderPanels { module, titles } => {
                 self.ribbon.reorder_panels(module, &titles);
@@ -7728,14 +7762,17 @@ impl OpenCADStudio {
                         task = self.block_palette.open_gallery();
                     }
                     // The per-viewport freeze column follows the active viewport.
-                    if id == crate::ui::ribbon::widgets::LAYER_COMBO_ID {
+                    if crate::ui::ribbon::qat_list_source(&id).unwrap_or(&id)
+                        == crate::ui::ribbon::widgets::LAYER_COMBO_ID
+                    {
                         self.refresh_layer_panel();
                     }
                     self.ribbon.toggle_dropdown(&id);
                     // Typing goes straight to the layer list's search box.
-                    if self.ribbon.open_dropdown.as_deref()
-                        == Some(crate::ui::ribbon::widgets::LAYER_COMBO_ID)
-                    {
+                    if self.ribbon.open_dropdown.as_deref().is_some_and(|open| {
+                        crate::ui::ribbon::qat_list_source(open).unwrap_or(open)
+                            == crate::ui::ribbon::widgets::LAYER_COMBO_ID
+                    }) {
                         task = task.chain(iced::widget::operation::focus(iced::widget::Id::new(
                             crate::ui::ribbon::widgets::LAYER_SEARCH_ID,
                         )));
@@ -7971,9 +8008,57 @@ impl OpenCADStudio {
                 self.mtext_object_style(s);
                 Task::none()
             }
-            Message::MTextFont(f) => {
-                self.mtext_apply_font(&f);
+            Message::MTextFontPicker(event) => {
+                let doc = &self.tabs[self.active_tab].scene.document;
+                let picked = self
+                    .mtext_editor
+                    .as_mut()
+                    .and_then(|ed| ed.font_picker.update(event, doc, true));
+                match picked {
+                    Some(FontChoice::StyleDefault) => self.mtext_apply_font("[Style default]"),
+                    Some(FontChoice::Stroke(font) | FontChoice::TrueType(font)) => {
+                        self.mtext_apply_font(&font)
+                    }
+                    None => {}
+                }
                 Task::none()
+            }
+            Message::MTextResetToStyle(field) => {
+                self.mtext_reset_to_style(field);
+                Task::none()
+            }
+            Message::MTextNewStyleOpen => self.mtext_new_style_open(),
+            Message::MTextNewStyleName(name) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.new_style_name = name;
+                }
+                Task::none()
+            }
+            Message::MTextNewStyleCreate => {
+                let name = self
+                    .mtext_editor
+                    .as_ref()
+                    .map(|ed| ed.new_style_name.clone());
+                if let Some(name) = name {
+                    self.mtext_style_from_selection(Some(name));
+                }
+                Task::none()
+            }
+            Message::MTextUpdateStyleFromSelection => {
+                self.mtext_style_from_selection(None);
+                Task::none()
+            }
+            Message::MTextStyleManager => {
+                let style = self.mtext_editor.as_ref().map(|ed| ed.style.clone());
+                let task = self.on_text_style_dialog_open();
+                let i = self.active_tab;
+                if let Some(style) =
+                    style.filter(|s| self.tabs[i].scene.document.text_styles.get(s).is_some())
+                {
+                    self.textstyle_selected = style;
+                    self.load_textstyle_draft(i);
+                }
+                task
             }
             Message::MTextOblique(s) => {
                 self.mtext_apply_span_number("oblique", s);
@@ -13011,14 +13096,21 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TextStyleDialogSelect(name) => {
-                self.stage_textstyle_bufs();
+                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                    return Task::none();
+                }
+                self.flush_textstyle_draft();
                 let i = self.active_tab;
                 self.textstyle_selected = name;
-                self.load_textstyle_bufs(i);
+                self.load_textstyle_draft(i);
                 Task::none()
             }
-            Message::TextStyleDialogTab(tab) => {
-                self.textstyle_tab = tab;
+            Message::TextStyleInUseFilter(on) => {
+                self.textstyle_in_use_only = on;
+                Task::none()
+            }
+            Message::TextStyleSample(text) => {
+                self.textstyle_sample = text;
                 Task::none()
             }
             Message::TextStyleDialogCompare(name) => {
@@ -13029,13 +13121,7 @@ impl OpenCADStudio {
                 // Staged: persists on Apply.
                 let i = self.active_tab;
                 let name = self.textstyle_selected.clone();
-                if self.tabs[i]
-                    .scene
-                    .document
-                    .text_styles
-                    .get(&name)
-                    .is_some_and(|style| !style.xref_dependent)
-                {
+                if !self.selected_textstyle_is_read_only() {
                     self.tabs[i].scene.document.header.current_text_style_name = name.clone();
                     self.sync_ribbon_styles();
                     self.command_line
@@ -13081,62 +13167,51 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TextStyleEdit { field, value } => {
+                let draft = &mut self.textstyle_draft;
                 match field {
-                    "font" => self.textstyle_font = value,
-                    "width" => self.textstyle_width = value,
-                    "oblique" => self.textstyle_oblique = value,
-                    "height" => self.textstyle_height = value,
-                    "bigfont" => self.textstyle_bigfont = value,
-                    "ttf" => self.textstyle_ttf = value,
+                    "width" => draft.width.text = value,
+                    "oblique" => draft.oblique.text = value,
+                    "height" => draft.height.text = value,
+                    "bigfont" if draft.big_font_on => draft.style.big_font_file = value,
                     _ => {}
                 }
                 Task::none()
             }
             Message::TextStyleToggle(field) => {
-                // Staged: mutate live for preview, persist on Apply.
-                let i = self.active_tab;
-                let name = self.textstyle_selected.clone();
-                if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
-                    if s.xref_dependent {
-                        return Task::none();
-                    }
-                    match field {
-                        "backward" => s.flags.backward = !s.flags.backward,
-                        "upside_down" => s.flags.upside_down = !s.flags.upside_down,
-                        "vertical" => s.is_vertical = !s.is_vertical,
-                        "annotative" => s.annotative = !s.annotative,
-                        "bold" => {
-                            s.true_type_font_flags ^= crate::entities::text_support::TTF_FLAG_BOLD
-                        }
-                        "italic" => {
-                            s.true_type_font_flags ^=
-                                crate::entities::text_support::TTF_FLAG_ITALIC
-                        }
-                        _ => {}
-                    }
+                if self.selected_textstyle_is_read_only() {
+                    return Task::none();
+                }
+                let s = &mut self.textstyle_draft.style;
+                match field {
+                    "backward" => s.flags.backward = !s.flags.backward,
+                    "upside_down" => s.flags.upside_down = !s.flags.upside_down,
+                    "vertical" => s.is_vertical = !s.is_vertical,
+                    "annotative" => s.annotative = !s.annotative,
+                    "use_big_font" => self.textstyle_draft.toggle_big_font(),
+                    _ => {}
                 }
                 Task::none()
             }
             Message::TextStyleApply => self.on_text_style_apply(),
-            Message::TextStyleFontPick(font_file) => {
-                // Staged: update the buffer + live style; persist on Apply.
-                let i = self.active_tab;
-                let name = self.textstyle_selected.clone();
-                if self.tabs[i]
-                    .scene
-                    .document
-                    .text_styles
-                    .get(&name)
-                    .is_some_and(|style| style.xref_dependent)
-                {
+            Message::TextStyleFont(event) => {
+                if self.selected_textstyle_is_read_only() {
                     return Task::none();
                 }
-                self.textstyle_font = font_file.clone();
-                // A stroke font replaces the system font, which would
-                // otherwise keep taking precedence.
-                self.textstyle_ttf.clear();
-                if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
-                    s.font_file = font_file;
+                let doc = &self.tabs[self.active_tab].scene.document;
+                match self.textstyle_font_picker.update(event, doc, false) {
+                    // A stroke font replaces the system font, which would
+                    // otherwise keep taking precedence.
+                    Some(FontChoice::Stroke(file)) => self.textstyle_draft.pick_stroke_font(file),
+                    Some(FontChoice::TrueType(family)) => {
+                        self.textstyle_draft.pick_system_font(family)
+                    }
+                    Some(FontChoice::StyleDefault) | None => {}
+                }
+                Task::none()
+            }
+            Message::TextStyleFaceStyle(face) => {
+                if !self.selected_textstyle_is_read_only() {
+                    self.textstyle_draft.set_face(face.bold(), face.italic());
                 }
                 Task::none()
             }

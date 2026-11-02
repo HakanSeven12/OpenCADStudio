@@ -91,6 +91,9 @@ impl OpenCADStudio {
                 self.command_line
                     .push_output(crate::tf!("SELECTALL: {} object(s) selected.", count).as_ref());
                 self.refresh_properties();
+                // Same as SELECTSIMILAR: leave the command field so Ctrl+C
+                // reaches COPYCLIP.
+                return Some(self.unfocus_widgets());
             }
 
             "DESELECT" | "DESELALL" => {

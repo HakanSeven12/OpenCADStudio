@@ -627,6 +627,88 @@ mod tests {
         }
     }
 
+    /// The text style windows read in Hungarian: "Styles in use", and the
+    /// MTEXT editor's oblique field named as the style manager names it
+    /// (#2413).
+    #[test]
+    fn the_text_style_labels_are_hungarian() {
+        let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        load_language(&loader, Language::HuHu).expect("Fluent resources must parse");
+        assert_eq!(
+            loader.get_attr("table-cmd", "styles-in-use"),
+            "Használt stílusok"
+        );
+        assert_eq!(
+            loader.get_attr("mtext-object-origin", "oblique"),
+            loader.get_attr("style-manager", "oblique-angle")
+        );
+    }
+
+    #[test]
+    fn quick_access_and_floating_panel_texts_are_translated_in_every_locale() {
+        const KEYS: &[&str] = &[
+            "switch-windows",
+            "center-layer",
+            "user-interface",
+            "no-open-drawings",
+            "ucs-icon",
+            "file-tabs",
+            "layout-tabs",
+            "command-line",
+            "status-bar",
+            "customize-qat",
+            "more-commands",
+            "more-commands-title",
+            "find-command-to-add",
+            "show-below",
+            "show-above",
+            "qat-place-unavailable",
+            "qat-new",
+            "qat-open",
+            "qat-save",
+            "qat-save-as",
+            "qat-plot",
+            "qat-undo",
+            "qat-redo",
+            "qat-measure",
+            "qat-batch-plot",
+            "qat-match-properties",
+            "qat-plot-preview",
+            "qat-properties",
+            "add-to-qat",
+            "remove-from-qat",
+            "add-separator",
+            "remove-separator",
+            "qat-show-below",
+            "qat-show-above",
+            "return-to-ribbon",
+            "float-title-side",
+            "float-title-bottom",
+            "floating-suffix",
+        ];
+        let english = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        load_language(&english, Language::EnUs).expect("Fluent resources must parse");
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| !matches!(language, Language::System | Language::EnUs))
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("Fluent resources must parse");
+            for key in KEYS {
+                let text = loader.get_attr("ribbon-menu", key);
+                assert!(!text.is_empty(), "{language:?}: {key}");
+                assert_ne!(
+                    text,
+                    english.get_attr("ribbon-menu", key),
+                    "{language:?}: {key} is still English"
+                );
+            }
+            // The suffix follows a panel name: no quotes from the source.
+            let suffix = loader.get_attr("ribbon-menu", "floating-suffix");
+            assert!(!suffix.contains('"'), "{language:?}: {suffix}");
+        }
+    }
+
     #[test]
     fn donation_text_is_translated_in_every_locale() {
         for language in Language::ALL

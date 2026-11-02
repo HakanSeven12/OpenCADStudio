@@ -14,8 +14,58 @@ pub const TAB_TEXT_RAISE: f32 = 2.0;
 /// A Quick Access button, square, and the gap between buttons.
 pub const QAT_BUTTON: f32 = 22.0;
 pub const QAT_GAP: f32 = 2.0;
+/// Room on each side of the name of a Quick Access command with no icon.
+pub const QAT_TEXT_PAD: f32 = 5.0;
 /// Width of the arrow part of a Quick Access split button.
 pub const QAT_SPLIT_ARROW_W: f32 = 11.0;
+/// The Quick Access layer combo: as high as a Quick Access button, this
+/// wide, with this margin on each side.
+pub const QAT_COMBO_W: f32 = 210.0;
+pub const QAT_COMBO_MARGIN: f32 = 3.0;
+/// The toolbar's copies of Home > Properties' lists (colour, linetype,
+/// lineweight), as wide as on the ribbon.
+pub const QAT_PROP_COMBO_W: f32 = 130.0;
+/// The toolbar's copies of the Annotate style and layer lists.
+pub const QAT_STYLE_COMBO_W: f32 = 150.0;
+/// A toolbar list's colour swatch.
+pub const QAT_COMBO_SWATCH: f32 = 12.0;
+/// A Quick Access separator: a line this high, with this margin on each
+/// side.
+pub const QAT_SEPARATOR_H: f32 = 16.0;
+pub const QAT_SEPARATOR_MARGIN: f32 = 4.0;
+/// The Quick Access menu buttons (Switch Windows, User Interface): icon
+/// and arrow.
+pub const QAT_MENU_BUTTON_W: f32 = QAT_BUTTON + QAT_SPLIT_ARROW_W;
+/// The Quick Access Toolbar's own row below the ribbon: its height and
+/// the room at either end.
+pub const QAT_ROW_H: f32 = 26.0;
+pub const QAT_ROW_PAD: f32 = 6.0;
+/// The customize button at the end of the Quick Access Toolbar.
+pub const QAT_CUSTOMIZE_W: f32 = 20.0;
+/// The title of a Quick Access menu.
+pub const QAT_MENU_TITLE_SIZE: f32 = 11.5;
+/// The Quick Access menus: the title's room, a separator's room, the
+/// size of a check mark, the size of plain menu text (and of a command
+/// shown by its name), and the gap between an icon and its ▾.
+pub const QAT_MENU_TITLE_PAD: [f32; 2] = [4.0, 12.0];
+pub const QAT_MENU_SEP_PAD: [f32; 2] = [3.0, 6.0];
+pub const QAT_MENU_CHECK: f32 = 10.0;
+pub const QAT_TEXT_SIZE: f32 = 11.0;
+pub const QAT_ARROW_GAP: f32 = 2.0;
+/// More Commands: its width, the most its result list grows to, a result
+/// row's height and room, the gap after a result's icon, its name and
+/// place sizes, the search field's text size and room, and the room
+/// around "no matches".
+pub const QAT_PICKER_W: f32 = 340.0;
+pub const QAT_PICKER_LIST_H: f32 = 320.0;
+pub const QAT_PICKER_ROW_H: f32 = 34.0;
+pub const QAT_PICKER_ROW_PAD: [f32; 2] = [3.0, 10.0];
+pub const QAT_PICKER_ICON_GAP: f32 = 8.0;
+pub const QAT_PICKER_LABEL_SIZE: f32 = 12.0;
+pub const QAT_PICKER_PATH_SIZE: f32 = 10.0;
+pub const QAT_PICKER_INPUT_SIZE: f32 = 11.5;
+pub const QAT_PICKER_INPUT_PAD: [f32; 2] = [4.0, 6.0];
+pub const QAT_PICKER_EMPTY_PAD: [f32; 2] = [6.0, 10.0];
 /// Gap between two tabs: none, so a hovered tab meets the active one.
 pub const TAB_GAP: f32 = 0.0;
 /// The minimize split button after the last tab: this far from the tab,
@@ -53,6 +103,53 @@ pub const SLIDE_OUT_TOP: f32 = TITLE_STRIP_H + 1.0;
 pub const THIN_STRIP_H: f32 = 10.0;
 pub const THIN_LAUNCHER_H: f32 = 9.0;
 pub const SLIDE_OUT_TOP_THIN: f32 = THIN_STRIP_H + 1.0;
+
+// ── Floating panels ────────────────────────────────────────────────────────
+
+/// How far above or below the tool area the pointer goes before a
+/// dragged panel leaves the ribbon to float.
+pub const FLOAT_DRAG_MARGIN: f32 = 24.0;
+/// How far the pointer moves from a press on a floating panel's title
+/// strip before the press moves the panel instead of clicking.
+pub const FLOAT_MOVE_THRESHOLD: f32 = 3.0;
+/// The least width of a floating panel's extra tools, before the panel
+/// has been drawn.
+pub const FLOAT_EXTRAS_MIN_W: f32 = 120.0;
+/// Size of a floating panel's title in its footer and side strip.
+pub const FLOAT_TITLE_SIZE: f32 = 11.5;
+/// A floating panel's band of extra tools, to the right of a side title:
+/// its buttons, the room at its ends and above and below the lines
+/// between its groups, the gap on either side of those lines, and the
+/// width of a list in it (the text or center layer list).
+pub const FLOAT_BAND_BUTTON: f32 = 21.0;
+pub const FLOAT_BAND_PAD: f32 = 6.0;
+pub const FLOAT_BAND_GROUP_GAP: f32 = 6.0;
+pub const FLOAT_BAND_LIST_W: f32 = 180.0;
+/// The side title strip: the room above the title, the arrow under it and
+/// the gap around that arrow.
+pub const FLOAT_SIDE_TEXT_PAD: f32 = 5.0;
+pub const FLOAT_SIDE_ARROW: f32 = 6.0;
+pub const FLOAT_SIDE_ARROW_GAP: f32 = 4.0;
+/// How near a moved floating panel's edge comes to another edge before
+/// it snaps there.
+pub const FLOAT_SNAP: f32 = 8.0;
+/// A floating panel's hover-only buttons (Return to ribbon, the
+/// orientation toggle, the pin in the corner tab): the icon, its hit area,
+/// the gap between two, their inset from the strip's left end, and the
+/// room inside the corner tab.
+pub const FLOAT_HOVER_ICON: f32 = 14.0;
+pub const FLOAT_HOVER_HIT: f32 = 16.0;
+pub const FLOAT_HOVER_GAP: f32 = 2.0;
+pub const FLOAT_HOVER_INSET: f32 = 3.0;
+pub const FLOAT_TAB_PAD: f32 = 2.0;
+/// The footer of a floating panel's extra tools: the room around its pin,
+/// at its ends, and between its title and ▴.
+pub const FLOAT_FOOTER_PIN_PAD: [f32; 2] = [1.0, 4.0];
+pub const FLOAT_FOOTER_PAD: [f32; 2] = [0.0, 3.0];
+pub const FLOAT_TITLE_GAP: f32 = 4.0;
+/// Width of a floating panel's title strip at its side, and of the footer
+/// at the end of its extra tools band.
+pub const FLOAT_SIDE_STRIP_W: f32 = 20.0;
 
 // ── Buttons ────────────────────────────────────────────────────────────────
 

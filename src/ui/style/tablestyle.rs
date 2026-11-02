@@ -745,6 +745,9 @@ pub fn view_window<'a>(
         on_apply: Message::TableStyleApply,
         read_only: false,
         in_use_filter: Some((v.in_use_only, Message::TableStyleListInUse)),
+        apply_blocked: None,
+        rows: None,
+        compact: false,
         editor,
     })
 }

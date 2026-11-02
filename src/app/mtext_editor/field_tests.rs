@@ -196,7 +196,11 @@ fn formatting_beside_a_field_is_saved_and_over_it_is_refused() {
     select(&mut app, 0, 1);
     app.mtext_apply_fmt(MTextFmt::Underline);
     caret(&mut app, 0);
-    let _ = app.update(Message::MTextFont("Simplex".into()));
+    let _ = app.update(Message::MTextFontPicker(
+        crate::ui::font_picker::FontPickerEvent::Pick(crate::ui::font_picker::FontChoice::Stroke(
+            "Simplex".into(),
+        )),
+    ));
     assert_eq!(raw(&app), r"\fSimplex;{\La} 12 b");
     assert!(app.mtext_commit());
     assert_eq!(container(&app, h).1, r"\fSimplex;{\La} %<\_FldIdx 0>% b");

@@ -818,16 +818,17 @@ impl OpenCADStudio {
         i: usize,
         before: super::style_ops::StyleStateSnapshot,
         after: super::style_ops::StyleStateSnapshot,
+        entities: Vec<(Handle, Option<Arc<EntityType>>, Option<Arc<EntityType>>)>,
         dirty_before: bool,
     ) {
-        if before == after {
+        if before == after && entities.is_empty() {
             return;
         }
         self.finish_pending_history(i);
         let (text_names, dim_names, object_handles) = after.changed_keys(&before);
         let delta = DeltaSnapshot {
             visibility_states: None,
-            entities: Vec::new(),
+            entities,
             current_layout_before: self.tabs[i].scene.current_layout.clone(),
             current_layout_after: self.tabs[i].scene.current_layout.clone(),
             selected_before: self.tabs[i].scene.selected.iter().copied().collect(),

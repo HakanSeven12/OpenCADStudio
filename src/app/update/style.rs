@@ -627,17 +627,32 @@ impl OpenCADStudio {
         }
     }
 
-    /// Populate edit buffers from the currently selected text style.
+    /// An external-reference text style: flagged, or merged in as
+    /// `XREF|Name` (the merge does not set the flag).
+    pub(in crate::app) fn selected_textstyle_is_read_only(&self) -> bool {
+        self.tabs[self.active_tab]
+            .scene
+            .document
+            .text_styles
+            .get(&self.textstyle_selected)
+            .is_none_or(|style| style.xref_dependent || style.name.contains('|'))
+    }
 
-    pub(in crate::app) fn load_textstyle_bufs(&mut self, tab: usize) {
+    /// Load the selected text style into the editor's draft.
+    pub(in crate::app) fn load_textstyle_draft(&mut self, tab: usize) {
         let doc = &self.tabs[tab].scene.document;
+        // One walk of the drawing gives the list's counts and the texts of
+        // the selected style.
+        let mut users = crate::app::text_style_users::users_by_style(doc);
+        self.textstyle_counts = users
+            .iter()
+            .map(|(name, texts)| (name.clone(), texts.len()))
+            .collect();
         if let Some(s) = doc.text_styles.get(&self.textstyle_selected) {
-            self.textstyle_font = s.font_file.clone();
-            self.textstyle_width = format!("{:.4}", s.width_factor);
-            self.textstyle_oblique = format!("{:.2}", s.oblique_angle.to_degrees());
-            self.textstyle_height = format!("{:.4}", s.height);
-            self.textstyle_bigfont = s.big_font_file.clone();
-            self.textstyle_ttf = s.true_type_font.clone();
+            self.textstyle_draft = crate::app::text_style_draft::TextStyleDraft::load(s);
+            self.textstyle_users = users
+                .remove(&s.name.to_ascii_lowercase())
+                .unwrap_or_default();
         }
     }
 
@@ -662,45 +677,126 @@ impl OpenCADStudio {
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "Standard".to_string())
         };
-        self.load_textstyle_bufs(i);
+        self.load_textstyle_draft(i);
+        // The head marks a missing font before the list is first opened.
+        self.textstyle_font_picker.open = false;
+        self.textstyle_font_picker
+            .refresh(&self.tabs[i].scene.document, false);
         self.active_modal = Some(crate::app::ModalKind::TextStyle);
         self.style_stage_begin();
         Task::none()
     }
 
-    /// Write the editor buffers into the selected text style (staged, no
-    /// commit), so edits survive switching to another style as well as Apply.
-    pub(super) fn stage_textstyle_bufs(&mut self) {
+    /// Write the draft into the selected text style (staged, no commit), so
+    /// edits survive switching to another style as well as Apply. Values the
+    /// user did not change stay exactly as stored.
+    pub(in crate::app) fn flush_textstyle_draft(&mut self) {
+        if self.selected_textstyle_is_read_only() {
+            return;
+        }
         let i = self.active_tab;
-        let name = self.textstyle_selected.clone();
-        let font = self.textstyle_font.clone();
-        let width_str = self.textstyle_width.clone();
-        let oblique_str = self.textstyle_oblique.clone();
-        let height_str = self.textstyle_height.clone();
-        let bigfont = self.textstyle_bigfont.clone();
-        let ttf = self.textstyle_ttf.clone();
-        if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
-            if s.xref_dependent {
-                return;
-            }
-            s.font_file = font;
-            s.big_font_file = bigfont;
-            s.true_type_font = ttf;
-            if let Ok(w) = width_str.trim().parse::<f64>() {
-                s.width_factor = w;
-            }
-            if let Ok(a) = oblique_str.trim().parse::<f64>() {
-                s.oblique_angle = a.to_radians();
-            }
-            if let Ok(h) = height_str.trim().parse::<f64>() {
-                s.height = h.max(0.0);
+        let edited = self.textstyle_draft.resolved();
+        if let Some(s) = self.tabs[i]
+            .scene
+            .document
+            .text_styles
+            .get_mut(&self.textstyle_selected)
+        {
+            if *s != edited {
+                *s = edited;
             }
         }
     }
 
+    /// The text style manager's list: each style's text count and lock.
+    /// "Styles in use" keeps the used ones, the current and the selected. A
+    /// shape file entry (linetype symbols) has no name and is not listed.
+    pub(in crate::app) fn textstyle_list(
+        &self,
+    ) -> (Vec<String>, Vec<crate::ui::style::style_manager::StyleRow>) {
+        let doc = &self.tabs[self.active_tab].scene.document;
+        let current = &doc.header.current_text_style_name;
+        doc.text_styles
+            .iter()
+            .filter(|s| !s.is_shape_file)
+            .map(|s| {
+                let count = self
+                    .textstyle_counts
+                    .get(&s.name.to_ascii_lowercase())
+                    .copied()
+                    .unwrap_or(0);
+                let row = crate::ui::style::style_manager::StyleRow {
+                    count,
+                    locked: s.xref_dependent || s.name.contains('|'),
+                };
+                (s.name.clone(), row)
+            })
+            .filter(|(name, row)| {
+                !self.textstyle_in_use_only
+                    || row.count > 0
+                    || name.eq_ignore_ascii_case(current)
+                    || name.eq_ignore_ascii_case(&self.textstyle_selected)
+            })
+            .unzip()
+    }
+
+    /// What the text style manager's preview draws: `edited` resolved as the
+    /// drawing resolves a style (the SHX file on disk, its big font, the
+    /// TrueType face of the bold and italic flags).
+    pub(in crate::app) fn textstyle_preview(
+        &self,
+        edited: &codec::tables::TextStyle,
+    ) -> crate::ui::style::textstyle::Preview {
+        let doc = &self.tabs[self.active_tab].scene.document;
+        let resolved = crate::entities::text_support::resolve_text_style_record(edited, doc);
+        let ttf = !edited.true_type_font.trim().is_empty();
+        let mut font_label = if ttf {
+            edited.true_type_font.clone()
+        } else {
+            edited.font_file.clone()
+        };
+        if self.textstyle_draft.big_font_on && !edited.big_font_file.trim().is_empty() {
+            font_label = format!("{font_label} + {}", edited.big_font_file);
+        }
+        if edited.height > 0.0 {
+            let mode = if edited.annotative {
+                crate::t!("Paper height")
+            } else {
+                crate::t!("Drawing height")
+            };
+            let height = crate::entities::common::format_length(edited.height);
+            font_label = format!("{font_label} · {mode} {height}");
+        }
+        crate::ui::style::textstyle::Preview {
+            font: resolved.font_name,
+            width_factor: if resolved.is_backward {
+                -resolved.width_factor
+            } else {
+                resolved.width_factor
+            },
+            oblique: resolved.oblique_angle,
+            upside_down: resolved.is_upside_down,
+            vertical: resolved.is_vertical && !ttf,
+            text: if self.textstyle_sample.trim().is_empty() {
+                crate::ui::style::textstyle::default_sample(self.textstyle_draft.big_font_on)
+                    .to_string()
+            } else {
+                self.textstyle_sample.clone()
+            },
+            caption: font_label,
+        }
+    }
+
     pub(super) fn on_text_style_apply(&mut self) -> Task<Message> {
-        self.stage_textstyle_bufs();
+        // A field that cannot be applied keeps Apply off (the window says
+        // which); nothing is written until it is fixed.
+        if self.textstyle_draft.invalid_fields() > 0 {
+            return Task::none();
+        }
+        self.flush_textstyle_draft();
         self.style_stage_commit();
+        // Re-base the draft on the stored values so a second Apply is a no-op.
+        self.load_textstyle_draft(self.active_tab);
         Task::none()
     }
 

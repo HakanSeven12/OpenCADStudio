@@ -1,5 +1,6 @@
 pub mod align;
 pub mod array;
+pub mod array_grip;
 pub mod arrayedit;
 pub mod attedit;
 pub mod blend;

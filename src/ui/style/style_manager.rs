@@ -53,27 +53,103 @@ pub struct Scaffold<'a, 'b> {
     /// "Styles in use" list filter: whether it is on and the message that
     /// sets it. `None` for managers without one.
     pub in_use_filter: Option<(bool, fn(bool) -> Message)>,
+    /// Why Apply is off while the editor holds values it cannot apply, shown
+    /// beside the button; New, Copy, Delete and Import are off with it.
+    /// `None` keeps them on.
+    pub apply_blocked: Option<Cow<'static, str>>,
+    /// What each list row shows beside the name, in `styles` order. `None`
+    /// for managers that do not count their users.
+    pub rows: Option<&'b [StyleRow]>,
+    /// A narrow window: the toolbar shows its icons only, each name as a
+    /// hint.
+    pub compact: bool,
     pub editor: Element<'a, Message>,
 }
+
+/// A list row's extras: how many objects use the style, and whether it is a
+/// referenced (read-only) style.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StyleRow {
+    pub count: usize,
+    pub locked: bool,
+}
+
+const NEW: &[u8] = include_bytes!("../../../assets/icons/ui/doc_new.svg");
+const COPY: &[u8] = include_bytes!("../../../assets/icons/ui/copy.svg");
+const DELETE: &[u8] = include_bytes!("../../../assets/icons/ui/trash.svg");
+const IMPORT: &[u8] = include_bytes!("../../../assets/icons/ui/import.svg");
+const SET_CURRENT: &[u8] = include_bytes!("../../../assets/icons/ui/set_current.svg");
+const APPLY: &[u8] = include_bytes!("../../../assets/icons/ui/check.svg");
 
 pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
     let width = s.sizing.width;
     let height = s.sizing.height;
+    let compact = s.compact;
+    // A value the editor cannot apply would be lost by leaving the style, so
+    // the list operations wait with Apply.
+    let editable = s.apply_blocked.is_none();
+    // Standard, the current style and a style texts use cannot be deleted.
+    let in_use = s
+        .styles
+        .iter()
+        .position(|name| name == s.selected)
+        .and_then(|index| s.rows?.get(index))
+        .is_some_and(|row| row.count > 0);
+    let can_delete = editable
+        && !s.read_only
+        && !in_use
+        && !s.selected.eq_ignore_ascii_case("Standard")
+        && s.current != Some(s.selected);
     // ── Toolbar: New / Copy / Delete | … | Set Current / Apply ────────────
     let mut bar = row![
-        tb_button(t!("New"), s.on_new, false),
-        tb_button(t!("Copy"), s.on_copy, false),
-        tb_button_enabled(t!("Delete"), s.on_delete, false, !s.read_only),
+        tool_button(NEW, t!("New"), editable.then_some(s.on_new), false, compact),
+        tool_button(
+            COPY,
+            t!("Copy"),
+            editable.then_some(s.on_copy),
+            false,
+            compact
+        ),
+        tool_button(
+            DELETE,
+            t!("Delete"),
+            can_delete.then_some(s.on_delete),
+            false,
+            compact
+        ),
     ];
     if let Some(message) = s.on_import {
-        bar = bar.push(tb_button(t!("Import"), message, false));
+        bar = bar.push(tool_button(
+            IMPORT,
+            t!("Import"),
+            editable.then_some(message),
+            false,
+            compact,
+        ));
+    }
+    let mut bar = bar.push(Space::new().width(width));
+    if let Some(reason) = s.apply_blocked {
+        bar = bar.push(
+            text(reason)
+                .size(11)
+                .style(crate::ui::style::editor_table::danger_text_style),
+        );
     }
     let bar = bar
-        .push(Space::new().width(width))
-        .push(tb_button_enabled(
-            t!("Set Current"), s.on_set_current, false, !s.read_only,
+        .push(tool_button(
+            SET_CURRENT,
+            t!("Set Current"),
+            (!s.read_only).then_some(s.on_set_current),
+            false,
+            compact,
         ))
-        .push(tb_button_enabled(t!("Apply"), s.on_apply, true, !s.read_only))
+        .push(tool_button(
+            APPLY,
+            t!("Apply"),
+            (!s.read_only && editable).then_some(s.on_apply),
+            true,
+            compact,
+        ))
         .spacing(4)
         .align_y(iced::Center);
     let toolbar = container(bar)
@@ -88,7 +164,8 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
     let rows: Vec<Element<'_, Message>> = s
         .styles
         .iter()
-        .map(|name| {
+        .enumerate()
+        .map(|(index, name)| {
             let is_sel = name.as_str() == s.selected;
             let is_current = s.current == Some(name.as_str());
             crate::ui::style::style_list::item(
@@ -100,6 +177,7 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
                 s.rename_active,
                 s.rename_buf,
                 !(s.read_only && is_sel),
+                s.rows.and_then(|rows| rows.get(index).copied()),
             )
         })
         .collect();
@@ -133,11 +211,14 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
                 .width(width)
                 .height(height)
                 .padding(2),
+            text(t!("Double-click a name to rename it."))
+                .size(10)
+                .style(muted_text_style),
         ]
         .spacing(4)
         .height(height),
     )
-    .width(170)
+    .width(if s.rows.is_some() { 200 } else { 170 })
     .height(height)
     .padding(iced::Padding {
         top: 12.0,
@@ -240,19 +321,9 @@ pub struct EditorShell<'a> {
     pub content: Element<'a, Message>,
 }
 
-pub fn editor_shell<'a>(shell: EditorShell<'a>) -> Element<'a, Message> {
-    let tabs: Vec<Element<'a, Message>> = shell
-        .tabs
-        .into_iter()
-        .map(|tab| {
-            button(text(tab.label).size(11))
-                .on_press(tab.on_press)
-                .style(tab_button_style(tab.active))
-                .padding([4, 10])
-                .into()
-        })
-        .collect();
-    let comparison: Element<'a, Message> = match shell.comparison {
+/// "Compare with <style>" and what differs; nothing without another style.
+pub fn comparison_row<'a>(comparison: Option<EditorComparison>) -> Element<'a, Message> {
+    match comparison {
         Some(comparison) if !comparison.options.is_empty() => row![
             text(t!("Compare with")).size(10).style(muted_text_style),
             iced::widget::pick_list(Some(comparison.selected), comparison.options, |value| value
@@ -266,7 +337,22 @@ pub fn editor_shell<'a>(shell: EditorShell<'a>) -> Element<'a, Message> {
         .align_y(iced::Center)
         .into(),
         _ => Space::new().height(0).into(),
-    };
+    }
+}
+
+pub fn editor_shell<'a>(shell: EditorShell<'a>) -> Element<'a, Message> {
+    let tabs: Vec<Element<'a, Message>> = shell
+        .tabs
+        .into_iter()
+        .map(|tab| {
+            button(text(tab.label).size(11))
+                .on_press(tab.on_press)
+                .style(tab_button_style(tab.active))
+                .padding([4, 10])
+                .into()
+        })
+        .collect();
+    let comparison = comparison_row(shell.comparison);
     let preview = container(shell.preview)
         .width(Length::Fill)
         .style(|theme: &Theme| container::Style {
@@ -327,18 +413,53 @@ pub(crate) fn tb_button(
         .into()
 }
 
-pub(crate) fn tb_button_enabled(
-    label: impl Into<Cow<'static, str>>,
-    msg: Message,
+/// A toolbar button: icon and name, or (`compact`) the icon with its name as
+/// a hint. `None` leaves it off.
+fn tool_button(
+    icon: &'static [u8],
+    label: Cow<'static, str>,
+    message: Option<Message>,
     accent: bool,
-    enabled: bool,
+    compact: bool,
 ) -> Element<'static, Message> {
-    let pad = if accent { [4, 14] } else { [4, 10] };
-    let button = button(text(label.into()).size(11))
+    let enabled = message.is_some();
+    let glyph = iced::widget::svg(crate::ui::icons::themed_handle(icon))
+        .width(14)
+        .height(14)
+        .opacity(if enabled { 1.0_f32 } else { 0.42 })
+        .style(move |theme: &Theme, _| iced::widget::svg::Style {
+            color: Some(if accent && enabled {
+                theme.palette().primary.base.text
+            } else {
+                theme.palette().background.base.text
+            }),
+        });
+    let content: Element<'static, Message> = if compact {
+        glyph.into()
+    } else {
+        row![glyph, text(label.clone()).size(11)]
+            .spacing(5)
+            .align_y(iced::Center)
+            .into()
+    };
+    let pad = match (compact, accent) {
+        (true, _) => [4, 7],
+        (false, true) => [4, 14],
+        (false, false) => [4, 10],
+    };
+    let button = button(content)
         .style(btn_s(accent))
-        .padding(pad);
-    if enabled {
-        button.on_press(msg).into()
+        .padding(pad)
+        .on_press_maybe(message);
+    if compact {
+        iced::widget::tooltip(
+            button,
+            container(text(label).size(11))
+                .padding(6)
+                .style(container::rounded_box),
+            iced::widget::tooltip::Position::Bottom,
+        )
+        .into()
     } else {
         button.into()
     }

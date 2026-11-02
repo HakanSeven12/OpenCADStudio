@@ -887,7 +887,12 @@ impl OpenCADStudio {
                 };
                 // Consume the preselection so it cannot become a destination.
                 self.tabs[i].scene.deselect_all();
-                let cmd = MatchPropCommand::new(src);
+                let last = self.tabs[i].last_matchprop_src;
+                let last = match self.tabs[i].scene.document.get_entity(last) {
+                    Some(_) => last,
+                    None => codec::Handle::NULL,
+                };
+                let cmd = MatchPropCommand::new(src).with_last(last);
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
                 self.refresh_active_cmd_preview(i);

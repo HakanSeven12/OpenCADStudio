@@ -72,6 +72,7 @@ impl OpenCADStudio {
         src: Handle,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
+        self.tabs[i].last_matchprop_src = src;
         dest.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
         if dest.is_empty() {
             return Some(Task::none());

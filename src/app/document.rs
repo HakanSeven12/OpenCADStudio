@@ -194,6 +194,8 @@ pub(super) struct DocumentTab {
     /// Dropdown state for `layer_walk_filters`.
     pub(super) layer_walk_combo: iced::widget::combo_box::State<String>,
     pub(super) active_cmd: Option<Box<dyn CadCommand>>,
+    /// MATCHPROP's last source; Enter at the source prompt picks it again.
+    pub(super) last_matchprop_src: codec::Handle,
     /// Follow-up command for a Parameter Set macro after parameter placement.
     pub(super) pending_parameter_set_follow_up: Option<&'static str>,
     pub(super) pending_xy_box_set: Option<(codec::Handle, crate::scene::block_actions::Kind, u8)>,
@@ -793,6 +795,7 @@ impl DocumentTab {
             layers: LayerPanel::default(),
             parameters_panel: Default::default(),
             active_cmd: None,
+            last_matchprop_src: codec::Handle::NULL,
             pending_parameter_set_follow_up: None,
             pending_xy_box_set: None,
             pending_action_pair: None,

@@ -1996,12 +1996,24 @@ impl InteractionCandidates {
         if !self.iter().any(|wire| wire.stub.is_some()) {
             return self;
         }
+        let started = crate::perf::enabled().then(iced::time::Instant::now);
+        let source_candidates = self.len();
         let mut wires = Vec::new();
         for wire in self.iter() {
             crate::scene::model::instance_model::expand_stub_near_into(
                 wire,
                 self.query_aabb,
                 &mut wires,
+            );
+        }
+        let elapsed_ms = crate::perf::elapsed_ms(started);
+        if elapsed_ms >= 3.0 {
+            crate::perf_record!(
+                "[perf] stub-materialize {:.2}ms candidates={} expanded={} local_query={}",
+                elapsed_ms,
+                source_candidates,
+                wires.len(),
+                self.query_aabb.is_some(),
             );
         }
         Self {

@@ -159,6 +159,7 @@ pub(super) const NAMES: &[&str] = &[
     "pdf_password_dialog",
     "dim_inspect_dialog",
     "table_cell_dialog",
+    "table_cell_warning",
     "hyperlink_dialog",
     "spell_dialog",
     "table_cell_tab",
@@ -2540,6 +2541,21 @@ impl OpenCADStudio {
                         "ok" => T::Ok,
                         _ => return Err(bad()),
                     })
+                }
+            }
+            // The invalid table cell data type warning: "ok" converts,
+            // "cancel" leaves the cells as they were.
+            "table_cell_warning" => {
+                if self.active_modal != Some(crate::app::ModalKind::TableCellWarning) {
+                    return Err(failure("no_dialog", "The invalid data type warning is not open"));
+                }
+                let spec = string(req, "value")?;
+                match spec {
+                    "ok" => Message::TableCellDialog(
+                        crate::ui::window::table_cell_dialog::TableCellDialogMsg::WarnOk,
+                    ),
+                    "cancel" | "close" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", spec)),
                 }
             }
             "dim_inspect_dialog" => {

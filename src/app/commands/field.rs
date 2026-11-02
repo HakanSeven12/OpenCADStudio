@@ -565,7 +565,7 @@ impl OpenCADStudio {
 }
 
 /// Spreadsheet column letters: A … Z, AA, AB …
-fn column_letters(mut column: usize) -> String {
+pub(super) fn column_letters(mut column: usize) -> String {
     let mut letters = Vec::new();
     loop {
         letters.push(b'A' + (column % 26) as u8);

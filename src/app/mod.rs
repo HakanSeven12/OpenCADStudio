@@ -775,6 +775,9 @@ pub(super) struct OpenCADStudio {
     table_cell_block: Option<crate::ui::window::table_cell_dialog::CellBlockState>,
     /// The picked table cells' Cell Data Format window.
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
+    /// A data format waiting on the invalid data type warning, and the
+    /// cells whose values read as no such type.
+    table_cell_warning: Option<(crate::ui::window::table_cell_dialog::CellFormatState, Vec<String>)>,
     /// The Data Link Manager was opened by Link Cell: its link feeds the
     /// picked cells when it closes.
     data_link_cell_target: bool,
@@ -2871,6 +2874,7 @@ pub enum ModalKind {
     TableCellContents,
     TableCellBlock,
     TableCellFormat,
+    TableCellWarning,
     PdfShxSettings,
     UnderlayLayers,
     PdfImportSettings,
@@ -5649,6 +5653,7 @@ impl OpenCADStudio {
             table_cell_contents: None,
             table_cell_block: None,
             table_cell_format: None,
+            table_cell_warning: None,
             data_link_cell_target: false,
             pdf_shx_dialog: None,
             underlay_layers: None,

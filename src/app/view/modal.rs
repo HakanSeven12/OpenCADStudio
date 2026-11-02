@@ -60,6 +60,7 @@ impl OpenCADStudio {
             Some(K::TableCellContents) => crate::tr!("table-cells", "contents-title"),
             Some(K::TableCellBlock) => crate::tr!("table-cells", "block-title"),
             Some(K::TableCellFormat) => crate::tr!("table-cells", "format-title"),
+            Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
             Some(K::PdfShxSettings) => crate::tr!("pdf-shx", "title"),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
@@ -548,6 +549,12 @@ impl OpenCADStudio {
                 let state = self.table_cell_block.as_ref()?;
                 sized_flow(ex, 470, 330, |flow| {
                     crate::ui::window::table_cell_dialog::view_block(state, flow)
+                })
+            }
+            super::super::ModalKind::TableCellWarning => {
+                let (_, cells) = self.table_cell_warning.as_ref()?;
+                sized_flow(ex, 460, 230, |flow| {
+                    crate::ui::window::table_cell_dialog::view_warning(cells, flow)
                 })
             }
             super::super::ModalKind::TableCellFormat => {

@@ -894,6 +894,17 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         use crate::ui::window::table_cell_dialog::{BorderSet, TableCellDialogMsg as M};
         let i = self.active_tab;
+        // OK in the invalid data type warning converts the cells as the
+        // format asked; values that read as no such type are emptied.
+        if matches!(message, M::WarnOk)
+            && self.active_modal == Some(crate::app::ModalKind::TableCellWarning)
+        {
+            if let Some((state, _)) = self.table_cell_warning.take() {
+                self.close_active_modal();
+                self.apply_cell_format(i, state, true);
+            }
+            return Task::none();
+        }
         if let Some(state) = self.table_cell_borders.as_mut().filter(|_| {
             self.active_modal == Some(crate::app::ModalKind::TableCellBorders)
         }) {
@@ -1016,7 +1027,7 @@ impl OpenCADStudio {
                 M::Ok => {
                     let state = self.table_cell_format.take().expect("open");
                     self.close_active_modal();
-                    self.apply_cell_format(i, &state);
+                    self.apply_cell_format(i, state, false);
                     return Task::none();
                 }
                 _ => {}
@@ -1497,11 +1508,16 @@ impl OpenCADStudio {
     /// The Cell Data Format settings on the picked cells: the data type and
     /// format go into each cell's style, and its value is converted and
     /// shown in the format.
+    /// Give the picked cells the data format of `state`. A value that does
+    /// not read as the type (a date or point) first asks, in the invalid
+    /// data type warning, whether to go on; `confirmed` is its OK.
     fn apply_cell_format(
         &mut self,
         i: usize,
-        state: &crate::ui::window::table_cell_dialog::CellFormatState,
+        owned: crate::ui::window::table_cell_dialog::CellFormatState,
+        confirmed: bool,
     ) {
+        let state = &owned;
         use crate::ui::window::table_cell_dialog::FORMAT_KINDS;
         let picture = state.picture();
         let Some(&(_, data_type, unit_type)) = crate::entities::table::CELL_DATA_CATEGORIES
@@ -1540,13 +1556,17 @@ impl OpenCADStudio {
                     .collect(),
                 _ => return,
             };
-        // A value that does not read as the type (a date or point) is
-        // emptied, with the reference's warning.
-        if values.iter().any(|(_, value)| matches!(value, Some(TypedValue::Invalid))) {
-            self.command_line.push_info(
-                crate::tr!("table-cells", "invalid-datatype").as_str(),
-            );
+        let invalid: Vec<String> = values
+            .iter()
+            .filter(|(_, value)| matches!(value, Some(TypedValue::Invalid)))
+            .map(|((row, column), _)| format!("{}{}", super::field::column_letters(*column), row + 1))
+            .collect();
+        if !invalid.is_empty() && !confirmed {
+            self.table_cell_warning = Some((owned, invalid));
+            self.active_modal = Some(crate::app::ModalKind::TableCellWarning);
+            return;
         }
+        let kind = state.kind;
         self.edit_picked_table(i, "TABLE CELL FORMAT", |table| {
             use codec::entities::table::CellStylePropertyFlags as P;
             let mut changed = false;
@@ -1568,7 +1588,11 @@ impl OpenCADStudio {
                 match (value, cell.contents.first_mut()) {
                     (Some(TypedValue::Converted(value)), Some(content)) => content.value = value,
                     (Some(TypedValue::Invalid), Some(content)) => {
-                        content.value = codec::entities::table::CellValue::new();
+                        content.value = if kind == 2 {
+                            crate::entities::table::empty_date_cell_value()
+                        } else {
+                            codec::entities::table::CellValue::new()
+                        };
                     }
                     _ => {}
                 }

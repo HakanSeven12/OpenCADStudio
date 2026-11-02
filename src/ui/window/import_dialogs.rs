@@ -873,11 +873,9 @@ pub fn view_tds_material<'a>(
     .into()
 }
 
-/// A texture map a 3D Studio import did not find: the file and the material
-/// that comes in without it.
-pub fn view_tds_map<'a>(map: &'a (String, String), sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
-    let (file, material) = map;
-    let badge = container(
+/// The round amber warning mark the warning windows lead with.
+pub(crate) fn warning_badge<'a>() -> Element<'a, Message> {
+    container(
         iced::widget::svg(crate::ui::icons::themed_handle(crate::ui::icons::WARNING))
             .width(18.0)
             .height(18.0)
@@ -894,7 +892,15 @@ pub fn view_tds_map<'a>(map: &'a (String, String), sizing: crate::ui::modal::Mod
             ..Default::default()
         },
         ..Default::default()
-    });
+    })
+    .into()
+}
+
+/// A texture map a 3D Studio import did not find: the file and the material
+/// that comes in without it.
+pub fn view_tds_map<'a>(map: &'a (String, String), sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    let (file, material) = map;
+    let badge = warning_badge();
     let chip = container(
         row![
             crate::ui::icons::themed_secondary(crate::ui::icons::IMAGE, 12.0),

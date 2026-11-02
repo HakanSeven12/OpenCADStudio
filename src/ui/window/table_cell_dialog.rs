@@ -65,6 +65,8 @@ pub enum TableCellDialogMsg {
     Zero(u32),
     Help,
     Ok,
+    /// OK in the invalid data type warning.
+    WarnOk,
 }
 
 fn msg(m: TableCellDialogMsg) -> Message {
@@ -747,6 +749,53 @@ fn choice_list<'a>(
         );
     }
     list.into()
+}
+
+/// The invalid data type warning: the cells whose values read as no value
+/// of the chosen type, which converting empties; Cancel leaves every cell
+/// as it was.
+pub fn view_warning<'a>(cells: &'a [String], sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    let mut chips = row![].spacing(4);
+    for cell in cells.iter().take(8) {
+        chips = chips.push(chip(cell.clone(), false, Message::Noop));
+    }
+    if cells.len() > 8 {
+        chips = chips.push(text(format!("+{}", cells.len() - 8)).size(11).style(muted_style));
+    }
+    column![
+        row![
+            crate::ui::window::import_dialogs::warning_badge(),
+            column![
+                text(crate::tr!("table-cells", "warning-heading")).size(13).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                }),
+                chips,
+                text(crate::tr!("table-cells", "warning-note")).size(11).style(muted_style),
+            ]
+            .spacing(8),
+        ]
+        .spacing(12),
+        iced::widget::rule::horizontal(1),
+        row![
+            Space::new().width(Fill),
+            dialog_button_styled_opt(
+                std::borrow::Cow::Owned(crate::tr!("table-cells", "warning-cancel")),
+                Some(Message::CloseModal),
+                iced::widget::button::secondary
+            ),
+            dialog_button_styled_opt(
+                std::borrow::Cow::Owned(crate::tr!("table-cells", "warning-ok")),
+                Some(msg(TableCellDialogMsg::WarnOk)),
+                iced::widget::button::primary
+            ),
+        ]
+        .spacing(8),
+    ]
+    .spacing(12)
+    .padding([12, 14])
+    .width(sizing.width)
+    .into()
 }
 
 pub fn view_format<'a>(

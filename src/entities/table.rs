@@ -4860,33 +4860,140 @@ pub(crate) fn cell_data_kind(
     use codec::entities::table::CellStylePropertyFlags as P;
     let table_row = table.rows.get(row)?;
     let cell = table_row.cells.get(column)?;
-    let typed = style_for_property(table, table_row, column, cell, P::DATA_TYPE)?;
-    let kind = crate::ui::window::table_cell_dialog::FORMAT_KINDS
-        .iter()
-        .position(|name| *name == cell_data_category(typed.value_data_type, typed.value_unit_type))?;
+    let kind_of = |data_type: i32, unit_type: i32| {
+        crate::ui::window::table_cell_dialog::FORMAT_KINDS
+            .iter()
+            .position(|name| *name == cell_data_category(data_type, unit_type))
+    };
+    let Some(typed) = style_for_property(table, table_row, column, cell, P::DATA_TYPE) else {
+        // Other drawings keep the type and picture with the cell's content.
+        let content = cell.contents.first().filter(|c| c.sets(P::DATA_TYPE))?;
+        let kind = kind_of(content.format_value_data_type, content.format_value_unit_type)?;
+        return Some((kind, content.value_format.clone()));
+    };
+    let kind = kind_of(typed.value_data_type, typed.value_unit_type)?;
     let picture = style_for_property(table, table_row, column, cell, P::DATA_FORMAT)
         .map(|style| style.value_format.clone())
         .unwrap_or_default();
     Some((kind, picture))
 }
 
-/// A typed date: `y-m-d`, `d.m.y` or `m/d/y`.
-fn parse_cell_date(text: &str) -> Option<(i64, u32, u32)> {
-    let text = text.trim();
-    let parts = |sep: char| -> Option<Vec<i64>> {
-        let parts: Vec<i64> = text.split(sep).map(|p| p.trim().parse().ok()).collect::<Option<_>>()?;
-        (parts.len() == 3).then_some(parts)
-    };
-    let (y, m, d) = if let Some(p) = parts('-') {
-        (p[0], p[1], p[2])
-    } else if let Some(p) = parts('.') {
-        (p[2], p[1], p[0])
-    } else if let Some(p) = parts('/') {
-        (p[2], p[0], p[1])
-    } else {
+/// A typed date and its time, as a date cell reads it: `y-m-d` when the
+/// first number has four digits, otherwise the day, month and year in the
+/// order of the regional short date (so `11/2/2026` is 11 February where
+/// the day comes first), any of `/` `.` `-` between them; an optional
+/// `H:mm` or `H:mm:ss` after a space. The flag tells whether a time was
+/// given.
+fn parse_cell_date(text: &str, short_date: &str) -> Option<((i64, u32, u32, u32, u32, u32), bool)> {
+    let mut words = text.split_whitespace();
+    let date = words.next()?;
+    let time = words.next();
+    if words.next().is_some() {
         return None;
+    }
+    let parts: Vec<&str> = date.split(['/', '.', '-']).collect();
+    let numbers: Vec<i64> = parts.iter().map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let [a, b, c] = numbers[..] else { return None };
+    let (y, m, d) = if parts[0].len() == 4 {
+        (a, b, c)
+    } else {
+        // The order of d, M and y in the regional picture; month first
+        // where it does not tell.
+        let at = |letter: char| short_date.find(letter).unwrap_or(usize::MAX);
+        let mut order = [('d', at('d')), ('M', at('M')), ('y', at('y'))];
+        if order.iter().any(|(_, p)| *p == usize::MAX) {
+            order = [('M', 0), ('d', 1), ('y', 2)];
+        }
+        order.sort_by_key(|(_, p)| *p);
+        let value = |letter: char| [a, b, c][order.iter().position(|(l, _)| *l == letter).unwrap_or(0)];
+        // ponytail: two-digit years read as 20yy; a century window if needed.
+        let y = value('y');
+        (if y < 100 { y + 2000 } else { y }, value('M'), value('d'))
     };
-    ((1..=12).contains(&m) && (1..=31).contains(&d) && y > 0).then_some((y, m as u32, d as u32))
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if y <= 0 || !(1..=days).contains(&d) {
+        return None;
+    }
+    let (h, mi, s) = match time {
+        None => (0, 0, 0),
+        Some(time) => {
+            let t: Vec<u32> = time.split(':').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+            match t[..] {
+                [h, mi] if h < 24 && mi < 60 => (h, mi, 0),
+                [h, mi, s] if h < 24 && mi < 60 && s < 60 => (h, mi, s),
+                _ => return None,
+            }
+        }
+    };
+    Some(((y, m as u32, d as u32, h, mi, s), time.is_some()))
+}
+
+/// A date cell value as the file keeps it: the date and time as sixteen
+/// bytes (year, month, weekday from Sunday, day, hour, minute, second,
+/// millisecond — two bytes each) and the text the picture shows; an empty
+/// picture is the regional short date, or date and time.
+fn date_cell_value(
+    base: &codec::entities::table::CellValue,
+    dt: (i64, u32, u32, u32, u32, u32),
+    has_time: bool,
+    picture: &str,
+) -> codec::entities::table::CellValue {
+    use codec::entities::table::{CellValueType as V, ValueUnitType as U};
+    let (y, m, d, h, mi, s) = dt;
+    let weekday = {
+        // Sakamoto: 0 = Sunday.
+        let t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+        let yy = if m < 3 { y - 1 } else { y };
+        (yy + yy / 4 - yy / 100 + yy / 400 + t[(m - 1) as usize] + d as i64).rem_euclid(7)
+    };
+    let picture = match picture {
+        "" if has_time => "%c",
+        "" => "%x",
+        picture => picture,
+    };
+    let mut value = base.clone();
+    value.value_type = V::Date;
+    value.raw_type_code = V::Date as i32;
+    value.unit_type = U::NoUnits;
+    value.raw_unit_type_code = U::NoUnits as i32;
+    value.flags = 4;
+    value.data_size = 16;
+    value.binary_value = [y, m as i64, weekday, d as i64, h as i64, mi as i64, s as i64, 0]
+        .iter()
+        .flat_map(|x| (*x as u16).to_le_bytes())
+        .collect();
+    value.format = picture.to_string();
+    value.formatted_value =
+        codec::fields::format_dt_in(dt, picture, &crate::entities::field::os_date_locale());
+    value.text.clear();
+    value.numeric_value = 0.0;
+    value
+}
+
+/// The date and time a date cell value keeps.
+fn stored_cell_date(value: &codec::entities::table::CellValue) -> Option<(i64, u32, u32, u32, u32, u32)> {
+    let b = &value.binary_value;
+    if value.value_type != codec::entities::table::CellValueType::Date || b.len() < 14 {
+        return None;
+    }
+    let w = |k: usize| u16::from_le_bytes([b[2 * k], b[2 * k + 1]]) as u32;
+    Some((w(0) as i64, w(1), w(3), w(4), w(5), w(6)))
+}
+
+/// A date cell that read as no date: emptied, typed as a date.
+pub(crate) fn empty_date_cell_value() -> codec::entities::table::CellValue {
+    use codec::entities::table::CellValueType as V;
+    let mut value = codec::entities::table::CellValue::new();
+    value.value_type = V::Date;
+    value.raw_type_code = V::Date as i32;
+    value.flags = 7;
+    value
 }
 
 /// A typed point: two or three numbers apart by `,` `;` or `/`.
@@ -4959,19 +5066,16 @@ pub(crate) fn typed_cell_value(
             };
             (V::Double, unit, number, text)
         }
-        // A date keeps its text (the shown date), so the file needs no
-        // date payload.
+        // A date keeps its date and time, shown by the picture.
         2 => {
-            let Some((y, m, d)) = parse_cell_date(&shown) else {
-                return TypedValue::Invalid;
+            let (dt, has_time) = match stored_cell_date(value) {
+                Some(dt) => (dt, dt.3 + dt.4 + dt.5 > 0),
+                None => match parse_cell_date(&shown, &crate::entities::field::os_date_locale().short_date) {
+                    Some(parsed) => parsed,
+                    None => return TypedValue::Invalid,
+                },
             };
-            let picture = if picture.is_empty() { "M/d/yyyy" } else { picture };
-            let text = codec::fields::format_dt_in(
-                (y, m, d, 0, 0, 0),
-                picture,
-                &crate::entities::field::os_date_locale(),
-            );
-            (V::String, U::NoUnits, 0.0, text)
+            return TypedValue::Converted(date_cell_value(value, dt, has_time, picture));
         }
         6 => {
             let p = match value.value_type {

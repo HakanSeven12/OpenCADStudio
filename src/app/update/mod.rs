@@ -299,6 +299,8 @@ impl OpenCADStudio {
                 }
             }
             // OK or ✕ dismisses this map; the next one follows.
+            // Cancel or ✕ leaves the cells as they were.
+            Some(TableCellWarning) => self.table_cell_warning = None,
             Some(TdsMissingMap) => {
                 if !self.import_dialogs.tds_maps.is_empty() {
                     self.import_dialogs.tds_maps.remove(0);

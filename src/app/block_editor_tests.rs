@@ -97,11 +97,11 @@ fn feed(app: &mut OpenCADStudio, text: &str) {
 
 /// Author one attribute definition through the command line, the way an
 /// operator in the block editor does: modes, tag, prompt, default, then the
-/// place, height and rotation it is put at. The command keeps its session —
-/// the modes and the last definition placed — in process-wide state, so the
-/// run starts from the defaults a fresh drawing has and puts that state back
-/// as it found it; otherwise whichever test ran last would write the prompts
-/// this one answers.
+/// place, height and rotation it is put at. The command keeps its modes in
+/// process-wide state and its last placed definition per drawing, so the run
+/// starts from the defaults a fresh drawing has and puts that state back as it
+/// found it; otherwise whichever test ran last would write the prompts this
+/// one answers.
 fn author_attribute(app: &mut OpenCADStudio, tag: &str) {
     use crate::modules::draw::draw::attdef::{session, AttdefSession, AFLAG_LOCK};
     let remembered = {
@@ -116,7 +116,7 @@ fn author_attribute(app: &mut OpenCADStudio, tag: &str) {
         *live = AttdefSession {
             aflags: AFLAG_LOCK,
             annotative: false,
-            last: None,
+            last: Vec::new(),
             on_screen: true,
             editor_value: None,
         };

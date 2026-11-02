@@ -27,11 +27,15 @@ pub const AFLAG_LOCK: u8 = 16;
 pub const AFLAG_MULTILINE: u8 = 32;
 
 /// Session state shared by ATTDEF and -ATTDEF: the AFLAGS modes, the
-/// Annotative switch and the last definition placed (for "align below").
+/// Annotative switch and, for "align below", the last definition each drawing
+/// placed.
 pub struct AttdefSession {
     pub aflags: u8,
     pub annotative: bool,
-    pub last: Option<AttributeDefinition>,
+    /// One placed definition per drawing. Keeping it with the drawing that
+    /// placed it is what stops a remembered position being read as another
+    /// drawing's, and lets each drawing keep its own.
+    pub last: Vec<(u64, AttributeDefinition)>,
     /// The dialog's "Specify on-screen" choice, kept for the session.
     pub on_screen: bool,
     /// Text the multi-line editor handed back to the dialog's Default field.
@@ -41,13 +45,35 @@ pub struct AttdefSession {
 pub static SESSION: Mutex<AttdefSession> = Mutex::new(AttdefSession {
     aflags: AFLAG_LOCK,
     annotative: false,
-    last: None,
+    last: Vec::new(),
     on_screen: true,
     editor_value: None,
 });
 
 pub fn session() -> std::sync::MutexGuard<'static, AttdefSession> {
     SESSION.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl AttdefSession {
+    /// The definition this drawing placed last, if it has placed one.
+    pub fn last_in(&self, document: u64) -> Option<&AttributeDefinition> {
+        self.last
+            .iter()
+            .find(|(placed_in, _)| *placed_in == document)
+            .map(|(_, definition)| definition)
+    }
+
+    /// Drop the place remembered for this drawing, because a whole document
+    /// replaced its content.
+    pub fn forget_place_of(&mut self, document: u64) {
+        self.last.retain(|(placed_in, _)| *placed_in != document);
+    }
+
+    /// The place this drawing should follow next, replacing its old one.
+    pub fn set_place(&mut self, document: u64, definition: &AttributeDefinition) {
+        self.forget_place_of(document);
+        self.last.push((document, definition.clone()));
+    }
 }
 
 /// The fifteen justifications, in the order the dialog lists them.
@@ -447,12 +473,14 @@ pub struct AttdefCommand {
     first: Option<DVec3>,
     second: Option<DVec3>,
     previous: Option<AttributeDefinition>,
+    document: u64,
     name: &'static str,
 }
 
 impl AttdefCommand {
     pub fn new(
         name: &'static str,
+        document: u64,
         style: String,
         height: f64,
         width_factor: f64,
@@ -461,6 +489,7 @@ impl AttdefCommand {
     ) -> Self {
         let s = session();
         Self {
+            document,
             step: Step::Modes,
             spec: AttdefSpec {
                 aflags: s.aflags,
@@ -483,7 +512,7 @@ impl AttdefCommand {
             plane: WorkingPlane::default(),
             first: None,
             second: None,
-            previous: s.last.clone(),
+            previous: s.last_in(document).cloned(),
             name,
         }
     }
@@ -517,7 +546,7 @@ impl AttdefCommand {
     fn finish(&mut self) -> CmdResult {
         let first = self.first.unwrap_or(DVec3::ZERO);
         let entity = build(&self.spec, self.plane, first, self.second);
-        remember(&self.spec, &entity);
+        remember(self.document, &self.spec, &entity);
         CmdResult::CommitAndExit(entity)
     }
 
@@ -540,15 +569,15 @@ impl AttdefCommand {
     }
 }
 
-/// Keep AFLAGS / Annotative and the placed definition for the next ATTDEF.
-/// Multiple lines is not kept: the reference starts the next definition
-/// single-line again.
-pub fn remember(spec: &AttdefSpec, entity: &EntityType) {
+/// Keep AFLAGS / Annotative and the placed definition, with the drawing that
+/// placed it, for the next ATTDEF. Multiple lines is not kept: the reference
+/// starts the next definition single-line again.
+pub fn remember(document: u64, spec: &AttdefSpec, entity: &EntityType) {
     let mut s = session();
     s.aflags = spec.aflags & !AFLAG_MULTILINE;
     s.annotative = spec.annotative;
     if let EntityType::AttributeDefinition(a) = entity {
-        s.last = Some(a.clone());
+        s.set_place(document, a);
     }
 }
 
@@ -941,7 +970,7 @@ impl CadCommand for AttdefCommand {
             Step::Start => match self.previous.clone() {
                 Some(previous) => {
                     let entity = build_below(&self.spec, &previous);
-                    remember(&self.spec, &entity);
+                    remember(self.document, &self.spec, &entity);
                     CmdResult::CommitAndExit(entity)
                 }
                 None => CmdResult::ReportError("Point or option keyword required.".into()),
@@ -986,14 +1015,16 @@ pub struct AttdefPlaceCommand {
     spec: AttdefSpec,
     plane: WorkingPlane,
     first: Option<DVec3>,
+    document: u64,
 }
 
 impl AttdefPlaceCommand {
-    pub fn new(spec: AttdefSpec) -> Self {
+    pub fn new(spec: AttdefSpec, document: u64) -> Self {
         Self {
             spec,
             plane: WorkingPlane::default(),
             first: None,
+            document,
         }
     }
 }
@@ -1033,7 +1064,7 @@ impl CadCommand for AttdefPlaceCommand {
             self.spec.height = aligned_height(&self.spec, length);
         }
         let entity = build(&self.spec, self.plane, first, second);
-        remember(&self.spec, &entity);
+        remember(self.document, &self.spec, &entity);
         CmdResult::CommitAndExit(entity)
     }
 
@@ -1254,5 +1285,99 @@ impl CadCommand for AttdefValueCommand {
 
     fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
         CmdResult::Dispatch("_ATTDEF_VALUE".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_session() -> AttdefSession {
+        AttdefSession {
+            aflags: AFLAG_LOCK,
+            annotative: false,
+            last: Vec::new(),
+            on_screen: true,
+            editor_value: None,
+        }
+    }
+
+    fn placed(tag: &str) -> AttributeDefinition {
+        AttributeDefinition {
+            tag: tag.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// A remembered attribute definition answers the prompt of the drawing
+    /// that placed it and no other: its coordinates are that drawing's, so
+    /// another drawing cannot pick them up as a starting point.
+    #[test]
+    fn a_definition_is_remembered_only_for_the_drawing_that_placed_it() {
+        let placed_in = u64::MAX - 7;
+        let mut held = empty_session();
+        held.set_place(placed_in, &placed("MINE"));
+        assert_eq!(
+            held.last_in(placed_in).map(|a| a.tag.as_str()),
+            Some("MINE"),
+            "the drawing that placed one keeps its position"
+        );
+        assert!(
+            held.last_in(placed_in + 1).is_none(),
+            "a second drawing does not inherit it"
+        );
+        assert!(
+            held.last_in(0).is_none(),
+            "nor does an id no drawing ever had"
+        );
+    }
+
+    /// Drawings open at the same time each follow their own last definition,
+    /// so working in one cannot take the other's starting point away.
+    #[test]
+    fn each_drawing_keeps_its_own_last_definition() {
+        let first = u64::MAX - 5;
+        let second = u64::MAX - 4;
+        let mut held = empty_session();
+        held.set_place(first, &placed("OLD"));
+        held.set_place(second, &placed("OTHER"));
+        held.set_place(first, &placed("NEW"));
+        assert_eq!(
+            held.last.len(),
+            2,
+            "one place per drawing, not one per placement"
+        );
+        assert_eq!(
+            held.last_in(first).map(|a| a.tag.as_str()),
+            Some("NEW"),
+            "the newest placement is the one its drawing follows"
+        );
+        assert_eq!(
+            held.last_in(second).map(|a| a.tag.as_str()),
+            Some("OTHER"),
+            "another drawing's placement is left alone"
+        );
+    }
+
+    /// A drawing that gets a whole new document must not keep answering its
+    /// own prompt with a position from the document it replaced.
+    #[test]
+    fn replacing_the_document_clears_the_place_remembered_for_it() {
+        let first = u64::MAX - 6;
+        let second = u64::MAX - 3;
+        let mut held = empty_session();
+        held.set_place(first, &placed("MINE"));
+        held.set_place(second, &placed("OTHER"));
+        held.forget_place_of(second);
+        assert_eq!(
+            held.last_in(first).map(|a| a.tag.as_str()),
+            Some("MINE"),
+            "another drawing's new document keeps this one's position"
+        );
+        held.forget_place_of(first);
+        assert!(
+            held.last_in(first).is_none(),
+            "this drawing's new document drops the position it no longer owns"
+        );
     }
 }

@@ -11,7 +11,7 @@ impl Kind {
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value.to_ascii_uppercase().as_str() {
             "BASE" | "BASEPOINT" | "B" => Some(Self::Basepoint),
-            "LOOKUP" | "K" => Some(Self::Lookup),
+            "LOOKUP" => Some(Self::Lookup),
             _ => None,
         }
     }

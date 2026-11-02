@@ -2951,7 +2951,7 @@ fn lookup_basepoint_placement_history_test_block_and_saved_parent_undo() {
     );
     app.redo_steps(1);
     let _ = app.dispatch_command("BPARAMETER");
-    feed(&mut app, "K");
+    feed(&mut app, "lookup");
     feed(&mut app, "2,2");
     feed(&mut app, "");
     assert_eq!(
@@ -8840,3 +8840,4 @@ mod lookup_expressions;
 mod array_spacing_prompts;
 mod lookup_set_row;
 mod visibility_set_first_state;
+mod parameter_type_prompts;

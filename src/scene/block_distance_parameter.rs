@@ -20,8 +20,8 @@ impl Kind {
     pub(crate) fn parse(text: &str) -> Option<Self> {
         match text.to_ascii_uppercase().as_str() {
             "LINEAR" | "L" => Some(Self::Linear),
-            "POLAR" | "PO" => Some(Self::Polar),
-            "XY" => Some(Self::XY),
+            "POLAR" | "PO" | "P" => Some(Self::Polar),
+            "XY" | "X" => Some(Self::XY),
             _ => None,
         }
     }

@@ -175,12 +175,13 @@ impl OpenCADStudio {
         };
         match kind.to_ascii_uppercase().as_str() {
             "BASEPOINT"|"BASE"|"B" => crate::scene::block_basepoint::placement_error(&tab.scene.document,session.br_handle),
-            "LOOKUP"|"K" => crate::scene::block_lookup::placement_error(&tab.scene.document,session.br_handle),
-            "POINT" | "P" | "" => crate::scene::block_point_parameter::placement_error(
+            "LOOKUP" => crate::scene::block_lookup::placement_error(&tab.scene.document,session.br_handle),
+            "POINT" | "O" => crate::scene::block_point_parameter::placement_error(
                 &tab.scene.document,
                 session.br_handle,
             ),
-            "LINEAR" | "L" | "POLAR" | "PO" | "XY" => {
+            "" => None,
+            "LINEAR" | "L" | "POLAR" | "PO" | "P" | "XY" | "X" => {
                 crate::scene::block_distance_parameter::placement_error(
                     &tab.scene.document,
                     session.br_handle,
@@ -190,7 +191,7 @@ impl OpenCADStudio {
             "VISIBILITY" | "V" => {
                 visibility::placement_error(&tab.scene.document, session.br_handle)
             }
-            _ => Some("Supported parameter types: Point, Linear, Polar, XY, Rotation, Alignment, Flip, Visibility, Lookup, Basepoint."),
+            _ => Some("Invalid option keyword."),
         }
     }
 
@@ -525,7 +526,7 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 if parameter_type.eq_ignore_ascii_case("POINT")
-                    || parameter_type.eq_ignore_ascii_case("P")
+                    || parameter_type.eq_ignore_ascii_case("O")
                 {
                     let command =
                         crate::modules::block_editor::point_parameter::PointParameterCommand::new(
@@ -540,12 +541,8 @@ impl OpenCADStudio {
                     && !parameter_type.eq_ignore_ascii_case("VISIBILITY")
                     && !parameter_type.eq_ignore_ascii_case("V")
                 {
-                    self.command_line.push_error(
-                        crate::t!(
-                            "Supported parameter types: Point, Linear, Polar, XY, Rotation, Alignment, Flip, Visibility, Lookup, Basepoint."
-                        )
-                        .as_ref(),
-                    );
+                    self.command_line
+                        .push_error(crate::t!("Invalid option keyword.").as_ref());
                     return Some(Task::none());
                 }
                 let command = crate::modules::block_editor::visibility_parameter::VisibilityParameterCommand::new(self.tabs[i].id, block, parameter_type.is_empty());

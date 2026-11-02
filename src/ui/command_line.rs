@@ -1131,7 +1131,24 @@ impl CommandLine {
             .padding([3, 6])
             .style(container::bordered_box);
         let graph_btn = tooltip(graph_btn, graph_tip, tooltip::Position::Top).gap(4);
-        let input_row = row![prompt, literal_btn, input_with_history, graph_btn, mcp_btn]
+        // Enter without a keyboard (touch screens): the same as the context
+        // menu's Enter.
+        let enter_btn = button(crate::ui::icons::themed(crate::ui::icons::CHECK, 13.0))
+            .on_press(Message::CommandFinalize)
+            .style(button::subtle)
+            .padding([2, 6]);
+        let enter_tip = container(text(t!("Enter")).size(11))
+            .padding([3, 6])
+            .style(container::bordered_box);
+        let enter_btn = tooltip(enter_btn, enter_tip, tooltip::Position::Top).gap(4);
+        let input_row = row![
+            prompt,
+            literal_btn,
+            input_with_history,
+            enter_btn,
+            graph_btn,
+            mcp_btn
+        ]
             .spacing(4)
             .align_y(iced::Center);
 

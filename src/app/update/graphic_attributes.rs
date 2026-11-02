@@ -1,6 +1,7 @@
 //! Graphic Attributes palette: applies line attributes and associative fills
 //! to the selection, or to the creation defaults when nothing is selected.
 
+use crate::app::document::HistoryLabel;
 use crate::app::{Message, OpenCADStudio};
 use crate::scene::model::hatch_model::{GradientKind, HatchPattern};
 use crate::ui::window::gradient_editor::{GradientColorMode, GradientEditorState, GradientMsg};
@@ -557,7 +558,7 @@ impl OpenCADStudio {
         let layer_name = name.to_owned();
         let undo = self.begin_layer_undo(
             i,
-            crate::t!("Create Layer with active settings"),
+            HistoryLabel::Message("Create Layer with active settings"),
             std::slice::from_ref(&layer_name),
         );
         let mut layer = codec::tables::Layer::new(name);
@@ -674,7 +675,7 @@ impl OpenCADStudio {
             return Task::none();
         }
         let angle = state.angle_radians();
-        let pending = self.begin_undo(i, crate::t!("Edit gradient"), targets.len(), true);
+        let pending = self.begin_undo(i, HistoryLabel::Message("Edit gradient"), targets.len(), true);
         for handle in &targets {
             let Some(mut entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
                 continue;
@@ -788,7 +789,7 @@ impl OpenCADStudio {
             );
         }
         let selected = selected.as_slice();
-        let pending = self.begin_undo(i, crate::t!("Fill change"), selected.len(), true);
+        let pending = self.begin_undo(i, HistoryLabel::Message("Fill change"), selected.len(), true);
         let mut changed = false;
         for handle in to_close {
             let Some(mut entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {

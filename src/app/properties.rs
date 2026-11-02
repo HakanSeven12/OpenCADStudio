@@ -3559,6 +3559,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         if handles.is_empty() {
             return;
         }
+        let label: String = label.into();
         self.push_undo_snapshot(i, label);
         for &handle in handles {
             apply(self, handle);

@@ -1,6 +1,6 @@
 use super::{
     document::{
-        DeltaSnapshot, HistorySnapshot, ObjectEntryDelta, ObjectVisibilitySnapshot,
+        DeltaSnapshot, HistoryLabel, HistorySnapshot, ObjectEntryDelta, ObjectVisibilitySnapshot,
         ParametricConstraintsEntryDelta, PendingHistorySnapshot, ReferenceDesignationDelta,
         StructureSnapshot, TableEntryDelta,
     },
@@ -69,7 +69,7 @@ fn defer_history_drop(entries: Vec<HistorySnapshot>) {
 /// [`OpenCADStudio::commit_undo_delta`] to close a delta entry. Lives on the
 /// stack across the (synchronous) command body — no per-tab field needed.
 pub(super) struct PendingDelta {
-    label: String,
+    label: HistoryLabel,
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
@@ -77,7 +77,7 @@ pub(super) struct PendingDelta {
 }
 
 pub(super) struct PendingLayerDelta {
-    label: String,
+    label: HistoryLabel,
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
@@ -85,7 +85,7 @@ pub(super) struct PendingLayerDelta {
 }
 
 pub(super) struct PendingTextStyleDelta {
-    label: String,
+    label: HistoryLabel,
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
@@ -93,7 +93,7 @@ pub(super) struct PendingTextStyleDelta {
 }
 
 pub(super) struct PendingDimStyleDelta {
-    label: String,
+    label: HistoryLabel,
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
@@ -101,7 +101,7 @@ pub(super) struct PendingDimStyleDelta {
 }
 
 pub(super) struct PendingObjectDelta {
-    label: String,
+    label: HistoryLabel,
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
@@ -162,7 +162,7 @@ impl OpenCADStudio {
     pub(super) fn push_object_visibility_history(
         &mut self,
         i: usize,
-        label: impl Into<String>,
+        label: impl Into<HistoryLabel>,
         before: ObjectIsolationState,
         selected_before: Vec<Handle>,
     ) {
@@ -187,7 +187,7 @@ impl OpenCADStudio {
     pub(super) fn push_entity_group_history(
         &mut self,
         i: usize,
-        label: impl Into<String>,
+        label: impl Into<HistoryLabel>,
         before: Vec<(Handle, Arc<EntityType>)>,
         object_before: Vec<(Handle, codec::objects::ObjectType)>,
         dirty_before: bool,
@@ -450,7 +450,7 @@ impl OpenCADStudio {
                 .is_some_and(|pending| pending.plugin_owned)
     }
 
-    pub(super) fn push_undo_snapshot(&mut self, i: usize, label: impl Into<String>) {
+    pub(super) fn push_undo_snapshot(&mut self, i: usize, label: impl Into<HistoryLabel>) {
         if self.graph_undo_open {
             return;
         }
@@ -502,7 +502,7 @@ impl OpenCADStudio {
 
     /// [`Self::push_undo_snapshot`] for a command that is an undo step even
     /// when it changes nothing (UNDO and U then name it and undo nothing).
-    pub(super) fn push_undo_mark(&mut self, i: usize, label: impl Into<String>) {
+    pub(super) fn push_undo_mark(&mut self, i: usize, label: impl Into<HistoryLabel>) {
         self.push_undo_snapshot(i, label);
         if let Some(pending) = self.tabs[i].history.pending.as_mut() {
             pending.keep_empty = true;
@@ -517,7 +517,7 @@ impl OpenCADStudio {
     pub(super) fn begin_undo(
         &mut self,
         i: usize,
-        label: impl Into<String>,
+        label: impl Into<HistoryLabel>,
         _touched: usize,
         delta_safe: bool,
     ) -> Option<PendingDelta> {
@@ -555,7 +555,7 @@ impl OpenCADStudio {
     pub(super) fn begin_layer_undo(
         &mut self,
         i: usize,
-        label: impl Into<String>,
+        label: impl Into<HistoryLabel>,
         names: &[String],
     ) -> PendingLayerDelta {
         self.finish_pending_history(i);
@@ -616,7 +616,7 @@ impl OpenCADStudio {
     pub(super) fn begin_text_style_undo(
         &mut self,
         i: usize,
-        label: impl Into<String>,
+        label: impl Into<HistoryLabel>,
         names: &[String],
     ) -> PendingTextStyleDelta {
         self.finish_pending_history(i);
@@ -676,7 +676,7 @@ impl OpenCADStudio {
     pub(super) fn begin_dim_style_undo(
         &mut self,
         i: usize,
-        label: impl Into<String>,
+        label: impl Into<HistoryLabel>,
         names: &[String],
     ) -> PendingDimStyleDelta {
         self.finish_pending_history(i);
@@ -750,7 +750,7 @@ impl OpenCADStudio {
     pub(super) fn begin_group_undo(
         &mut self,
         i: usize,
-        label: impl Into<String>,
+        label: impl Into<HistoryLabel>,
     ) -> PendingObjectDelta {
         self.finish_pending_history(i);
         self.tabs[i].scene.begin_undo_recording();
@@ -847,7 +847,7 @@ impl OpenCADStudio {
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
             named_parameters: None,
-            label: "STYLE".to_string(),
+            label: "STYLE".into(),
         };
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
@@ -1417,8 +1417,8 @@ impl OpenCADStudio {
             let Some(snapshot) = self.tabs[i].history.undo_stack.pop() else {
                 break;
             };
-            last_label = snapshot.label().to_string();
-            let step_label = last_label.clone();
+            last_label = snapshot.display_label().into_owned();
+            let step_label = snapshot.label().to_owned();
             match snapshot {
                 HistorySnapshot::Delta(mut d) => {
                     native_graph_changed |=
@@ -1490,8 +1490,8 @@ impl OpenCADStudio {
             let Some(snapshot) = self.tabs[i].history.redo_stack.pop() else {
                 break;
             };
-            last_label = snapshot.label().to_string();
-            let step_label = last_label.clone();
+            last_label = snapshot.display_label().into_owned();
+            let step_label = snapshot.label().to_owned();
             match snapshot {
                 HistorySnapshot::Delta(mut d) => {
                     native_graph_changed |=
@@ -1572,6 +1572,6 @@ pub(super) fn history_dropdown_labels(stack: &[HistorySnapshot]) -> Vec<String> 
     stack
         .iter()
         .rev()
-        .map(|snapshot| snapshot.label().to_string())
+        .map(|snapshot| snapshot.display_label().into_owned())
         .collect()
 }

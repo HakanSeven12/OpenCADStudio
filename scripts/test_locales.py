@@ -1,4 +1,4 @@
-"""Check literal translation lookups. Fluent syntax and rendering are tested in i18n.rs."""
+"""Check literal translation and history-message lookups. Fluent rendering is tested in i18n.rs."""
 
 import json
 from pathlib import Path
@@ -26,7 +26,7 @@ assert not set(lookup.values()) - keys, f'Missing Fluent targets: {set(lookup.va
 missing = []
 for path in sorted((ROOT / 'src').rglob('*.rs')):
     text = path.read_text()
-    for match in re.finditer(r'\b(?:t|tf)!\(\s*(' + STRING + ')', text, re.S):
+    for match in re.finditer(r'\b(?:(?:t|tf)!\(|HistoryLabel::Message\()\s*(' + STRING + ')', text, re.S):
         # Rust permits escaped line continuations and literal newlines.
         literal = re.sub(r'\\\n\s*', '', match[1])
         literal = re.sub(r'\\u\{([0-9a-fA-F_]+)\}', lambda m: json.dumps(chr(int(m[1].replace('_', ''), 16)))[1:-1], literal)

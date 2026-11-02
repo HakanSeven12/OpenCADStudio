@@ -73,8 +73,8 @@ impl OpenCADStudio {
                 .cloned()
                 .collect(),
             clipboard_nonempty: !self.clipboard.is_empty(),
-            undo_label: tab.history.undo_stack.last().map(|s| s.label().to_string()),
-            redo_label: tab.history.redo_stack.last().map(|s| s.label().to_string()),
+            undo_label: tab.history.undo_stack.last().map(|s| s.display_label().into_owned()),
+            redo_label: tab.history.redo_stack.last().map(|s| s.display_label().into_owned()),
             props_open: self.show_properties,
         }
     }

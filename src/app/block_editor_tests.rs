@@ -388,6 +388,24 @@ fn block_construction_command_history_display_cancel_and_stale_session() {
     assert!(app.tabs[i].active_cmd.is_none());
     assert!(construction::is_construction(app.tabs[i].scene.document.get_entity(handles[0]).unwrap().common()));
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    let assert_history_label = |app: &OpenCADStudio, redo: bool| {
+        let history = &app.tabs[app.active_tab].history;
+        let stack = if redo { &history.redo_stack } else { &history.undo_stack };
+        let snapshot = stack.last().unwrap();
+        assert_eq!(snapshot.label(), "Edit construction geometry");
+        assert!(matches!(snapshot,
+            super::document::HistorySnapshot::Delta(delta)
+                if matches!(delta.label, super::document::HistoryLabel::Message(_))));
+        let expected = crate::t!("Edit construction geometry").into_owned();
+        assert_eq!(super::history::history_dropdown_labels(stack).first(), Some(&expected));
+        let crate::ui::popup::context_menu::MenuContext::Idle { undo_label, redo_label, .. } =
+            app.context_menu_context()
+        else {
+            panic!("construction command must leave an idle context menu");
+        };
+        assert_eq!(if redo { redo_label } else { undo_label }, Some(expected));
+    };
+    assert_history_label(&app, false);
     let changed = app.tabs[i].scene.document.clone();
     for command in ["BCONSTRUCTION HIDE", "BCONSTRUCTION SHOW ALL"] {
         let _ = app.dispatch_command(command);
@@ -408,10 +426,12 @@ fn block_construction_command_history_display_cancel_and_stale_session() {
     let _ = app.dispatch_command("BCONSTRUCTION REVERT");
     assert!(!construction::is_construction(app.tabs[i].scene.document.get_entity(handles[0]).unwrap().common()));
     app.undo_steps(1);
+    assert_history_label(&app, true);
     assert!(construction::is_construction(app.tabs[i].scene.document.get_entity(handles[0]).unwrap().common()));
     app.undo_steps(1);
     assert!(!construction::is_construction(app.tabs[i].scene.document.get_entity(handles[0]).unwrap().common()));
     app.redo_steps(2);
+    assert_history_label(&app, false);
     assert!(!construction::is_construction(app.tabs[i].scene.document.get_entity(handles[0]).unwrap().common()));
     let _ = app.dispatch_command("BEDIT_DISCARD");
     let closed = app.tabs[i].scene.document.clone();

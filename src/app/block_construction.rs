@@ -120,7 +120,10 @@ impl OpenCADStudio {
                             return Task::none();
                         }
                     };
-                self.push_undo_snapshot(i, "Edit construction geometry");
+                self.push_undo_snapshot(
+                    i,
+                    super::document::HistoryLabel::Message("Edit construction geometry"),
+                );
                 self.apply_action_document(i, staged);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();

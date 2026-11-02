@@ -156,7 +156,7 @@ fn last_undo_label(app: &OpenCADStudio) -> Option<String> {
             history
                 .pending
                 .as_ref()
-                .map(|pending| pending.label.clone())
+                .map(|pending| pending.label.to_string())
         })
 }
 

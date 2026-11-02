@@ -910,6 +910,67 @@ impl DocumentTab {
     }
 }
 
+/// History keeps application messages distinct from command and authored labels.
+/// Only explicitly marked messages participate in locale lookup at display time.
+#[derive(Clone, Debug)]
+pub(super) enum HistoryLabel {
+    Literal(String),
+    Message(&'static str),
+}
+
+impl HistoryLabel {
+    pub(super) fn as_str(&self) -> &str {
+        match self {
+            Self::Literal(value) => value,
+            Self::Message(source) => source,
+        }
+    }
+
+    fn display_with<'a>(
+        &'a self,
+        translate: impl FnOnce(&'static str) -> std::borrow::Cow<'static, str>,
+    ) -> std::borrow::Cow<'a, str> {
+        match self {
+            Self::Literal(value) => std::borrow::Cow::Borrowed(value),
+            Self::Message(source) => translate(source),
+        }
+    }
+
+    pub(super) fn display(&self) -> std::borrow::Cow<'_, str> {
+        self.display_with(crate::i18n::translate)
+    }
+}
+
+impl From<String> for HistoryLabel {
+    fn from(value: String) -> Self {
+        Self::Literal(value)
+    }
+}
+
+impl From<&str> for HistoryLabel {
+    fn from(value: &str) -> Self {
+        Self::Literal(value.to_owned())
+    }
+}
+
+impl From<&String> for HistoryLabel {
+    fn from(value: &String) -> Self {
+        Self::Literal(value.clone())
+    }
+}
+
+impl From<std::borrow::Cow<'_, str>> for HistoryLabel {
+    fn from(value: std::borrow::Cow<'_, str>) -> Self {
+        Self::Literal(value.into_owned())
+    }
+}
+
+impl std::fmt::Display for HistoryLabel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// One undo/redo entry. Every edit is represented as a first-touch entity delta
 /// plus an optional structure-only document image, so history never clones the
 /// full entity store.
@@ -926,8 +987,15 @@ pub(super) enum HistorySnapshot {
 impl HistorySnapshot {
     pub(super) fn label(&self) -> &str {
         match self {
-            HistorySnapshot::Delta(d) => &d.label,
-            HistorySnapshot::ObjectVisibility(v) => &v.label,
+            HistorySnapshot::Delta(d) => d.label.as_str(),
+            HistorySnapshot::ObjectVisibility(v) => v.label.as_str(),
+        }
+    }
+
+    pub(super) fn display_label(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::Delta(delta) => delta.label.display(),
+            Self::ObjectVisibility(snapshot) => snapshot.label.display(),
         }
     }
 
@@ -970,7 +1038,7 @@ impl HistorySnapshot {
                     (before.len() + after.len()).saturating_mul(32)
                 }))
                 .saturating_add(d.reference_designations.len().saturating_mul(16))
-                .saturating_add(d.label.len()),
+                .saturating_add(d.label.as_str().len()),
             HistorySnapshot::ObjectVisibility(v) => v
                 .before
                 .hidden
@@ -981,7 +1049,7 @@ impl HistorySnapshot {
                 .saturating_add(v.selected_before.len())
                 .saturating_add(v.selected_after.len())
                 .saturating_mul(16)
-                .saturating_add(v.label.len()),
+                .saturating_add(v.label.as_str().len()),
         }
     }
 }
@@ -994,7 +1062,7 @@ pub(super) struct ObjectVisibilitySnapshot {
     pub(super) after: ObjectIsolationState,
     pub(super) selected_before: Vec<Handle>,
     pub(super) selected_after: Vec<Handle>,
-    pub(super) label: String,
+    pub(super) label: HistoryLabel,
 }
 
 /// A transactional undo entry: for each touched handle, its before-image and
@@ -1041,7 +1109,7 @@ pub(super) struct DeltaSnapshot {
         crate::scene::named_parameters::ParameterTable,
         crate::scene::named_parameters::ParameterTable,
     )>,
-    pub(super) label: String,
+    pub(super) label: HistoryLabel,
 }
 
 #[derive(Clone)]
@@ -1134,7 +1202,7 @@ pub(super) struct HistoryState {
 
 pub(super) struct PendingHistorySnapshot {
     pub(super) visibility_states_before: rustc_hash::FxHashMap<Handle, usize>,
-    pub(super) label: String,
+    pub(super) label: HistoryLabel,
     pub(super) current_layout: String,
     pub(super) active_layer: String,
     pub(super) selected_before: Vec<Handle>,
@@ -1160,4 +1228,33 @@ pub(super) struct PendingHistorySnapshot {
     /// A plugin's undo group: message boundaries leave it open until the
     /// plugin ends it or the user runs a command.
     pub(super) held: bool,
+}
+
+
+#[cfg(test)]
+mod history_label_tests {
+    use super::HistoryLabel;
+    use std::borrow::Cow;
+
+    #[test]
+    fn history_literal_labels_bypass_translation_even_when_they_match_catalog_sources() {
+        for value in ["LINE", "PLUGIN: custom", "Revert", "Edit construction geometry"] {
+            let label = HistoryLabel::from(value);
+            assert_eq!(label.display_with(|_| panic!("literal label was translated")), value);
+            assert_eq!(label.as_str(), value);
+        }
+    }
+
+    #[test]
+    fn history_message_labels_render_again_without_mutating_the_stored_source() {
+        let label = HistoryLabel::Message("Edit construction geometry");
+        let retained = label.clone();
+        for translated in ["Modifier la géométrie de construction", "تحرير الهندسة الإنشائية"] {
+            assert_eq!(retained.display_with(|source| {
+                assert_eq!(source, "Edit construction geometry");
+                Cow::Owned(translated.to_owned())
+            }), translated);
+            assert_eq!(retained.as_str(), "Edit construction geometry");
+        }
+    }
 }

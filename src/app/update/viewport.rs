@@ -8984,6 +8984,36 @@ properties={:.1}ms picked={}",
                 .into_iter()
                 .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                 .collect();
+            let rebuilds_table = changes.iter().any(|(handle, _)| {
+                matches!(self.tabs[i].scene.document.get_entity(*handle),
+                    Some(codec::EntityType::Table(table)) if table.block_record_handle.is_none())
+            });
+            if rebuilds_table {
+                // Picture rebuilds replace block members, possibly adding a
+                // private block. Record structure and removed/added entities,
+                // starting with the drag originals, as one history entry.
+                let mut edited = Vec::new();
+                for (handle, original) in &originals {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                        edited.push((*handle, std::mem::replace(entity, original.clone())));
+                    }
+                }
+                let mut edited_objects = Vec::new();
+                for (handle, original) in history_originals.iter().flat_map(|(_, objects)| objects)
+                {
+                    if let Some(object) = self.tabs[i].scene.document.objects.get_mut(handle) {
+                        edited_objects.push((*handle, std::mem::replace(object, original.clone())));
+                    }
+                }
+                self.tabs[i].dirty = dirty_before;
+                self.push_undo_snapshot(i, "GRIP");
+                for (handle, entity) in edited {
+                    *self.tabs[i].scene.document.get_entity_mut(handle).unwrap() = entity;
+                }
+                for (handle, object) in edited_objects {
+                    self.tabs[i].scene.document.objects.insert(handle, object);
+                }
+            }
             // Dimensions that follow the edited shapes update here; record
             // them so the one undo also brings back their saved pictures.
             self.tabs[i].scene.begin_undo_recording();
@@ -9040,7 +9070,12 @@ properties={:.1}ms picked={}",
                         }
                     }
                 }
-                self.push_entity_group_history(i, "GRIP", before, object_before, dirty_before);
+                if rebuilds_table {
+                    self.tabs[i].dirty = true;
+                    self.finish_pending_history(i);
+                } else {
+                    self.push_entity_group_history(i, "GRIP", before, object_before, dirty_before);
+                }
                 self.tabs[i].dirty = true;
             }
         }
@@ -9104,6 +9139,9 @@ properties={:.1}ms picked={}",
         Task::none()
     }
 }
+
+#[cfg(test)]
+mod table_grip_picture_tests;
 
 #[cfg(test)]
 mod hatch_double_click_tests {

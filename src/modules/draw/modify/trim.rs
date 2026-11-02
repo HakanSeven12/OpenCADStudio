@@ -1415,16 +1415,15 @@ fn lwpoly_self_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
 /// ≥2 cuts and becomes an open polyline (the surviving arc); an open one yields
 /// the surviving piece(s). Bulges on surviving arc segments are preserved
 /// with proportionally scaled curvature.
-fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<Vec<EntityType>> {
+fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
     let handle = poly.common.handle;
     let n = poly.vertices.len();
     if n < 2 {
-        return None;
+        return Vec::new();
     }
     let closed = poly.is_closed;
     let seg_count = if closed { n } else { n - 1 };
     let total = seg_count as f64;
-
     let vx = |i: usize| -> [f64; 2] {
         let v = &poly.vertices[i % n];
         [v.location.x, v.location.y]
@@ -1458,9 +1457,30 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
 
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-    if cuts.is_empty() {
+    cuts
+}
+
+/// Given fixed cutting points, only locate the clicked segment and construct
+/// its surviving pieces. Reusing these points on hover avoids repeating the
+/// expensive multi-segment kernel intersection pass on every cursor move.
+fn trim_lwpolyline_with_cuts(
+    poly: &LwPolyline,
+    cx: f64,
+    cy: f64,
+    cuts: &[f64],
+) -> Option<Vec<EntityType>> {
+    let n = poly.vertices.len();
+    if n < 2 || cuts.is_empty() {
         return None;
     }
+    let closed = poly.is_closed;
+    let seg_count = if closed { n } else { n - 1 };
+    let total = seg_count as f64;
+    let vx = |i: usize| -> [f64; 2] {
+        let v = &poly.vertices[i % n];
+        [v.location.x, v.location.y]
+    };
+    let seg_bulge = |i: usize| -> f64 { poly.vertices[i % n].bulge };
 
     // Click param: nearest point on the polyline.
     let mut best = (f64::INFINITY, 0.0_f64);
@@ -1574,6 +1594,11 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
     } else {
         Some(out)
     }
+}
+
+fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<Vec<EntityType>> {
+    let cuts = lwpoly_cut_params(poly, geos);
+    trim_lwpolyline_with_cuts(poly, cx, cy, &cuts)
 }
 
 // ── Extend helpers ────────────────────────────────────────────────────────
@@ -4091,7 +4116,7 @@ impl TrimCommand {
             entity,
             EntityType::Line(_) | EntityType::Arc(_) | EntityType::Circle(_)
                 | EntityType::Ray(_) | EntityType::XLine(_) | EntityType::Ellipse(_)
-                | EntityType::Spline(_)
+                | EntityType::Spline(_) | EntityType::LwPolyline(_)
         ) {
             return None;
         }
@@ -4132,6 +4157,7 @@ impl TrimCommand {
                 }
             }
             EntityType::Spline(s) => spline_seg_ts(s, handle, &nearby),
+            EntityType::LwPolyline(p) => lwpoly_cut_params(p, &nearby),
             _ => return None,
         };
         let solve_ms = crate::perf::elapsed_ms(Some(solve_started));
@@ -4842,7 +4868,11 @@ impl CadCommand for TrimCommand {
             }
             Some(EntityType::LwPolyline(p)) => {
                 let started = std::time::Instant::now();
-                let result = trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos);
+                let result = if let Some(cuts) = hover_cuts.as_ref() {
+                    trim_lwpolyline_with_cuts(p, pt.x as f64, pt.y as f64, cuts)
+                } else {
+                    trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos)
+                };
                 let ms = crate::perf::elapsed_ms(Some(started));
                 if ms >= 8.0 {
                     crate::perf_record!("[perf] trim-hover-polyline {ms:.2}ms");
@@ -6294,6 +6324,37 @@ mod tests {
         }
         command.on_entity_replaced(Handle::new(1), &[]);
         assert!(command.all_entities.is_empty());
+    }
+
+    #[test]
+    fn lightweight_polyline_hover_reuses_click_independent_cut_points() {
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(10);
+        poly.vertices = vec![
+            LwVertex::from_coords(0.0, 0.0),
+            LwVertex::from_coords(5.0, 0.0),
+            LwVertex::from_coords(10.0, 0.0),
+        ];
+        let all = vec![
+            EntityType::LwPolyline(poly.clone()),
+            xline_at(7.5, -1.0, 7.5, 1.0, 20),
+        ];
+        let geos = build_geos(&all);
+        let cuts = lwpoly_cut_params(&poly, &geos);
+        assert_eq!(cuts.len(), 1);
+
+        let direct_first = trim_lwpolyline(&poly, 2.0, 0.0, &geos).unwrap();
+        let cached_first = trim_lwpolyline_with_cuts(&poly, 2.0, 0.0, &cuts).unwrap();
+        assert_eq!(format!("{direct_first:?}"), format!("{cached_first:?}"));
+
+        let direct_second = trim_lwpolyline(&poly, 9.0, 0.0, &geos).unwrap();
+        let cached_second = trim_lwpolyline_with_cuts(&poly, 9.0, 0.0, &cuts).unwrap();
+        assert_eq!(format!("{direct_second:?}"), format!("{cached_second:?}"));
+
+        let mut command = TrimCommand::new(all);
+        assert_eq!(command.cached_hover_cut_params(Handle::new(10)).unwrap(), cuts);
+        assert!(command.hover_cut_cache.contains_key(&Handle::new(10)));
+        assert_eq!(command.cached_hover_cut_params(Handle::new(10)).unwrap(), cuts);
     }
 
     #[test]

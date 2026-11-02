@@ -4905,10 +4905,17 @@ fn parse_cell_date(text: &str, short_date: &str) -> Option<((i64, u32, u32, u32,
             order = [('M', 0), ('d', 1), ('y', 2)];
         }
         order.sort_by_key(|(_, p)| *p);
-        let value = |letter: char| [a, b, c][order.iter().position(|(l, _)| *l == letter).unwrap_or(0)];
-        // ponytail: two-digit years read as 20yy; a century window if needed.
+        let at = |letter: char| order.iter().position(|(l, _)| *l == letter).unwrap_or(0);
+        let value = |letter: char| [a, b, c][at(letter)];
+        // A year of one or two digits: 00–49 is 2000–2049, 50–99 is
+        // 1950–1999.
         let y = value('y');
-        (if y < 100 { y + 2000 } else { y }, value('M'), value('d'))
+        let y = match (parts[at('y')].len() <= 2, y) {
+            (true, 0..=49) => y + 2000,
+            (true, 50..=99) => y + 1900,
+            _ => y,
+        };
+        (y, value('M'), value('d'))
     };
     let days = match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,

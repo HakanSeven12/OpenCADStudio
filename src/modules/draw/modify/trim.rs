@@ -5972,6 +5972,87 @@ mod tests {
     }
 
     #[test]
+    fn spatial_cut_index_retains_remote_unbounded_edges_but_omits_distant_lines() {
+        let mut geos = vec![Geo::Line {
+            handle: Handle::new(11),
+            p1: [5.0, -1.0],
+            p2: [5.0, 1.0],
+        }];
+        for index in 0..2_000u64 {
+            let x = 100.0 + index as f64;
+            geos.push(Geo::Line {
+                handle: Handle::new(index + 100),
+                p1: [x, 10.0],
+                p2: [x, 20.0],
+            });
+        }
+        geos.push(Geo::InfLine {
+            handle: Handle::new(20_000),
+            bx: 1000.0,
+            by: 1000.0,
+            dx: 0.0,
+            dy: 1.0,
+        });
+        let index = TrimAabbIndex::new(geos.iter().map(trim_geo_aabb));
+        let nearby = index.overlapping([0.0, -2.0, 10.0, 2.0]);
+        assert_eq!(nearby, vec![0, geos.len() - 1]);
+        let retained: Vec<_> = nearby.into_iter().map(|slot| geos[slot].clone()).collect();
+        assert_eq!(
+            line_seg_ts(0.0, 0.0, 10.0, 0.0, Handle::new(1), &retained),
+            line_seg_ts(0.0, 0.0, 10.0, 0.0, Handle::new(1), &geos),
+        );
+    }
+
+    #[test]
+    fn indexed_lowpoly_cut_matches_crossing_positions_with_thousands_of_edges() {
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(1);
+        poly.vertices = (0..=200)
+            .map(|x| LwVertex::from_coords(x as f64, 0.0))
+            .collect();
+        let mut geos = vec![
+            Geo::Line {
+                handle: Handle::new(2),
+                p1: [35.5, -3.0],
+                p2: [35.5, 3.0],
+            },
+            Geo::Line {
+                handle: Handle::new(3),
+                p1: [155.5, -3.0],
+                p2: [155.5, 3.0],
+            },
+        ];
+        for index in 0..2_000u64 {
+            let x = 400.0 + index as f64;
+            geos.push(Geo::Line {
+                handle: Handle::new(index + 100),
+                p1: [x, -1.0],
+                p2: [x, 1.0],
+            });
+        }
+        let cuts = lwpoly_cut_params(&poly, &geos);
+        assert_eq!(cuts.len(), 2);
+        assert!((cuts[0] - 35.5).abs() < 1e-7);
+        assert!((cuts[1] - 155.5).abs() < 1e-7);
+    }
+
+    #[test]
+    fn indexed_self_intersection_preserves_nonadjacent_bowtie_crossings() {
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(1);
+        poly.vertices = [[0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]]
+            .into_iter()
+            .map(|xy| LwVertex::from_coords(xy[0], xy[1]))
+            .collect();
+        let geos = vec![Geo::Line {
+            handle: poly.common.handle,
+            p1: [0.0, 0.0],
+            p2: [2.0, 2.0],
+        }];
+        assert_eq!(lwpoly_self_cut_params(&poly, &geos), vec![0.5, 2.5]);
+    }
+
+    #[test]
     fn broadphase_trim_keeps_real_crossings_and_discards_distant_lines() {
         let target = Curve::Line(KernelLine {
             start: [0.0, 0.0],

@@ -701,6 +701,7 @@ impl OpenCADStudio {
                         self.push_ucs_to_cmd(i);
                         let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
                         let task = result.map(|r| self.apply_cmd_result(r))?;
+                        self.cursor_back_from_typed_point(i);
                         self.refresh_active_cmd_preview(i);
                         return Some(task);
                     }
@@ -782,8 +783,19 @@ impl OpenCADStudio {
         // so the next segment immediately starts from the new
         // last_point even though no mouse-move fires after a typed
         // coordinate. See #32.
+        self.cursor_back_from_typed_point(i);
         self.refresh_active_cmd_preview(i);
         Some(task)
+    }
+
+    /// While a point is typed, the preview reads the typed point as the
+    /// cursor; once it is taken, the next segment runs to the mouse again,
+    /// not to the point just typed (#2456).
+    fn cursor_back_from_typed_point(&mut self, i: usize) {
+        if i < self.tabs.len() && self.tabs[i].dyn_fields.iter().all(|f| f.buffer.is_none()) {
+            let screen = self.tabs[i].last_cursor_screen;
+            self.tabs[i].last_cursor_world = self.cursor_world_at(i, screen);
+        }
     }
 
     /// Mutable access to the currently selected table style.

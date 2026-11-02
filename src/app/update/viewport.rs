@@ -5041,12 +5041,8 @@ impl OpenCADStudio {
     /// Capture the button event without doing the expensive hover/snap pass.
     /// Point commands immediately invoke the release path, which resolves
     /// snapping once using this exact screen position.
-    pub(super) fn set_cursor_for_press(&mut self, position: Point) {
-        let i = self.active_tab;
-        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
-            command.set_ctrl(self.ctrl_down);
-            command.set_shift(self.shift_down);
-        }
+    /// The drawing point under the screen `position` in tab `i`.
+    pub(in crate::app) fn cursor_world_at(&mut self, i: usize, position: Point) -> glam::DVec3 {
         let canvas_size = self.tabs[i].scene.selection.borrow().view.vp_size;
         let frame = self.tabs[i].scene.viewport_edit_frame(canvas_size);
         let tile = frame.as_ref().map(|(_, rect)| *rect).unwrap_or_else(|| {
@@ -5057,7 +5053,16 @@ impl OpenCADStudio {
         let camera = frame.map(|(camera, _)| camera);
         let local = Point::new(position.x - tile.x, position.y - tile.y);
         let bounds = iced::Rectangle::with_size(iced::Size::new(tile.width, tile.height));
-        self.tabs[i].last_cursor_world = self.cursor_model_point(i, &camera, local, bounds);
+        self.cursor_model_point(i, &camera, local, bounds)
+    }
+
+    pub(super) fn set_cursor_for_press(&mut self, position: Point) {
+        let i = self.active_tab;
+        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+            command.set_ctrl(self.ctrl_down);
+            command.set_shift(self.shift_down);
+        }
+        self.tabs[i].last_cursor_world = self.cursor_world_at(i, position);
         self.tabs[i].last_cursor_screen = position;
         self.tabs[i]
             .scene

@@ -1462,25 +1462,37 @@ fn lwpoly_self_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
     let total = segment_count as f64;
 
     let mut cuts = Vec::new();
-
+    // Self-cuts previously reconstructed the arc/line for segment j inside
+    // the nested O(N²) loop. Precompute every curve and its conservative
+    // envelope once; index the envelopes so only spatially overlapping
+    // non-neighbour pairs reach the exact intersection kernel.
+    let curves: Vec<_> = (0..segment_count)
+        .map(|i| lwpoly_segment_curve(poly, i))
+        .collect();
+    let spatial = TrimAabbIndex::new(curves.iter().map(|entry| {
+        entry.as_ref().and_then(|(curve, _)| trim_target_bounds(curve))
+    }));
     for i in 0..segment_count {
-        let Some((curve_a, reverse_a)) = lwpoly_segment_curve(poly, i) else {
+        let Some((curve_a, reverse_a)) = curves[i].as_ref() else {
             continue;
         };
+        let candidate_segments = trim_target_bounds(curve_a)
+            .map(|bounds| spatial.overlapping(bounds))
+            .unwrap_or_else(|| (0..segment_count).collect());
 
-        for j in (i + 1)..segment_count {
+        for j in candidate_segments {
+            if j <= i {
+                continue;
+            }
             // Ordinary neighbouring segments meet at their common vertex.
             let adjacent = j == i + 1 || (closed && i == 0 && j + 1 == segment_count);
-
             if adjacent {
                 continue;
             }
-
-            let Some((curve_b, reverse_b)) = lwpoly_segment_curve(poly, j) else {
+            let Some((curve_b, reverse_b)) = curves[j].as_ref() else {
                 continue;
             };
-
-            let hits = kernel_intersect(&curve_a, &curve_b, KernelTolerance::new(CUT_TOLERANCE));
+            let hits = kernel_intersect(curve_a, curve_b, KernelTolerance::new(CUT_TOLERANCE));
 
             for hit in hits {
                 let mut ua = hit.t_a;

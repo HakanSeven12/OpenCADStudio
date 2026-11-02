@@ -246,3 +246,124 @@ fn an_annotational_conversion_leaves_the_dimension_where_it_is() {
     app.tabs[i].scene.refresh_dynamic_dimension_texts();
     assert_eq!(printed(&app, i, dimension), "d1=40.0000");
 }
+
+/// The two legs of a corner, the angular dimension across it and the two
+/// styles whose angular precisions disagree.
+fn angular_fixture() -> (OpenCADStudio, usize, Handle) {
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 50,0"}"#);
+    let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 30,30"}"#);
+    let i = app.active_tab;
+    // Pinned rather than left at the default, because the label is printed
+    // through it; the drawing is new, so `ang1` is the first free name.
+    app.tabs[i].scene.constraint_name_format = 2;
+    let mut legs: Vec<Handle> = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .filter(|entity| matches!(entity, EntityType::Line(_)))
+        .map(|entity| entity.common().handle)
+        .collect();
+    assert_eq!(legs.len(), 2, "the two legs of the corner");
+    legs.sort_by_key(|handle| handle.value());
+    let (first_leg, second_leg) = (legs[0], legs[1]);
+
+    // The dimension is drawn in a style asking for three decimals while the
+    // drawing's current style asks for none.
+    {
+        let document = &mut app.tabs[i].scene.document;
+        let standard = document
+            .dim_styles
+            .iter()
+            .find(|style| style.name.eq_ignore_ascii_case("Standard"))
+            .cloned()
+            .expect("the standard dimension style");
+        let mut tight = standard.clone();
+        tight.name = "ANG3".to_string();
+        tight.dimadec = 3;
+        let mut loose = standard;
+        loose.name = "ANG0".to_string();
+        loose.dimadec = 0;
+        document.dim_styles.add(tight).unwrap();
+        document.dim_styles.add(loose).unwrap();
+        document.header.current_dimstyle_name = "ANG0".to_string();
+    }
+    let document = &app.tabs[i].scene.document;
+    assert_eq!(
+        crate::scene::parametric_constraints::angle_decimals(document, Some("ANG3")),
+        3,
+        "the style the dimension is drawn in"
+    );
+    assert_eq!(
+        crate::scene::parametric_constraints::angle_decimals(document, None),
+        0,
+        "the style the drawing is currently in"
+    );
+
+    let mut dimension = crate::modules::annotate::angular_dim::angular_two_line_entity(
+        glam::DVec3::ZERO,
+        glam::DVec3::new(50.0, 0.0, 0.0),
+        glam::DVec3::ZERO,
+        glam::DVec3::new(30.0, 30.0, 0.0),
+        glam::DVec3::new(40.0, 25.0, 0.0),
+        None,
+    )
+    .expect("the two legs form a corner the dimension can measure");
+    crate::entities::dimension::as_dimension_mut(&mut dimension)
+        .expect("the entity is a dimension")
+        .base_mut()
+        .style_name = "ANG3".to_string();
+    let dimension = app.tabs[i].scene.add_entity(dimension);
+    app.tabs[i]
+        .scene
+        .attach_dimension_association(dimension, vec![Some(first_leg), Some(second_leg)]);
+    (app, i, dimension)
+}
+
+/// A converted angular dimension reads at its own style's angular precision.
+/// The conversion is not what decides that — the label is restated from the
+/// dimension's own style every time the geometry is refreshed, and a later
+/// refresh must not rewrite what the command left behind.
+#[test]
+fn converting_an_angular_dimension_keeps_its_own_styles_precision() {
+    let (mut app, i, dimension) = angular_fixture();
+    assert!(
+        crate::scene::dimension_assoc::dimension_is_associative(
+            &app.tabs[i].scene.document,
+            dimension
+        ),
+        "the dimension is drawn from both legs"
+    );
+
+    let _ = app.dispatch_command("DCCONVERT");
+    let _ = app.feed_command(StepInput::SelectionComplete(vec![dimension]));
+    let _ = app.feed_command(StepInput::Enter);
+
+    let set = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .expect("the angular dimension converts to an angle constraint");
+    let constraint = set
+        .constraints
+        .iter()
+        .find(|constraint| constraint.kind == ConstraintKind::Angle)
+        .expect("an angular dimension between two lines becomes a two-line angle constraint");
+    assert_eq!(
+        set.dimensions.get(&constraint.id),
+        Some(&dimension),
+        "the dimension is the constraint's own"
+    );
+    let converted = printed(&app, i, dimension);
+    assert_eq!(
+        converted, "ang1=45.000",
+        "the label reads at the dimension's own style: three decimals of the corner between the two legs, in degrees"
+    );
+
+    app.tabs[i].scene.refresh_dynamic_dimension_texts();
+    assert_eq!(
+        printed(&app, i, dimension),
+        converted,
+        "the restated label is stable across refreshes"
+    );
+}

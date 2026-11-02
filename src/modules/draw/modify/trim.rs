@@ -1416,6 +1416,7 @@ fn lwpoly_self_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
 /// the surviving piece(s). Bulges on surviving arc segments are preserved
 /// with proportionally scaled curvature.
 fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
+    let started = std::time::Instant::now();
     let handle = poly.common.handle;
     let n = poly.vertices.len();
     if n < 2 {
@@ -1449,6 +1450,8 @@ fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
         }
     }
 
+    let external_ms = crate::perf::elapsed_ms(Some(started));
+
     // A polyline can also cut itself. These are intersections between
     // non-adjacent segments belonging to this same LwPolyline. Its vertices
     // are not cuts: the trimmed piece runs on past corners to the next
@@ -1457,6 +1460,15 @@ fn lwpoly_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
 
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    let total_ms = crate::perf::elapsed_ms(Some(started));
+    if total_ms >= 8.0 {
+        crate::perf_record!(
+            "[perf] trim-lwpoly-cuts {total_ms:.2}ms segments={seg_count} boundaries={} external={external_ms:.2}ms self={:.2}ms cuts={}",
+            geos.len(),
+            total_ms - external_ms,
+            cuts.len(),
+        );
+    }
     cuts
 }
 
@@ -4415,6 +4427,16 @@ impl CadCommand for TrimCommand {
                     // curved / tilted boundaries while retaining exact paths.
                     self.hatch_trim_at(handle, pt)
                         .map(|trim| vec![EntityType::Hatch(Box::new(trim.kept))])
+                } else if let Some(EntityType::LwPolyline(poly)) = entity {
+                    // A hovered polyline has already calculated its cutting
+                    // points. A click chooses a span; no need to solve every
+                    // intersection a second time.
+                    if let Some(cuts) = self.hover_cut_cache.get(&handle) {
+                        trim_lwpolyline_with_cuts(poly, px, py, cuts)
+                    } else {
+                        let geos = self.nearby_geos(handle);
+                        trim_lwpolyline(poly, px, py, &geos)
+                    }
                 } else {
                     let geos = self.nearby_geos(handle);
                     if self.quick {

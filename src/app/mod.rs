@@ -1,4 +1,4 @@
-mod alias;
+pub(crate) mod alias;
 mod automation;
 pub(crate) mod control;
 pub(crate) fn automation_action_names() -> &'static [&'static str] {

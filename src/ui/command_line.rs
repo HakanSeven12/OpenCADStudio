@@ -1019,12 +1019,20 @@ impl CommandLine {
                             label = label.push(swatch);
                         }
                     } else {
-                        // Normal command autocomplete keeps its existing command icon.
-                        let icon: Element<'_, Message> =
-                            match crate::modules::registry::command_icon(cmd) {
-                                Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
-                                None => Space::new().width(14.0).into(),
-                            };
+                        // Normal command autocomplete keeps its existing command icon,
+                        // falling back to the target command's icon for aliases.
+                        let icon_bytes =
+                            crate::modules::registry::command_icon(cmd).or_else(|| {
+                                self.command_aliases
+                                    .get(cmd.as_str())
+                                    .and_then(|target| {
+                                        crate::modules::registry::command_icon(target)
+                                    })
+                            });
+                        let icon: Element<'_, Message> = match icon_bytes {
+                            Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
+                            None => Space::new().width(14.0).into(),
+                        };
 
                         label = label.push(icon);
                     }

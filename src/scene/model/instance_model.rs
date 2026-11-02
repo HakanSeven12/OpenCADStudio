@@ -208,3 +208,67 @@ pub fn shift_depth(wire: &mut WireModel, delta: f32) {
         });
     }
 }
+
+#[cfg(test)]
+mod nested_stub_perf_tests {
+    use super::*;
+
+    #[test]
+    fn nested_stub_expands_only_local_leaves_and_combines_transforms() {
+        let mut leaf = WireModel::default();
+        leaf.name = "original".to_string();
+        leaf.aabb = [0.0, 0.0, 1.0, 1.0];
+        leaf.points = vec![[0.5, 0.5, 0.0]];
+        leaf.key_vertices = vec![[0.5, 0.5, 0.0]];
+        leaf.depth_override = Some(4.0);
+        leaf.render_instance = Some(RenderInstance {
+            source_id: 5,
+            translation: [0.0; 3],
+        });
+        let inner = stub_wire(
+            Arc::new(vec![leaf]),
+            [0.0, 0.0, 1.0, 1.0],
+            [100.0, 50.0, 0.0],
+            0.5,
+        );
+        let mut inner = inner;
+        inner.display_visible = false;
+        let mut root = stub_wire(
+            Arc::new(vec![inner]),
+            [100.0, 50.0, 101.0, 51.0],
+            [2.0, -10.0, 0.0],
+            1.25,
+        );
+        root.name = "77".to_string();
+        root.selected = true;
+
+        let near = [101.0, 39.0, 104.0, 42.0];
+        let mut result = Vec::new();
+        expand_stub_near_into(&root, Some(near), &mut result);
+        assert_eq!(result.len(), 1);
+        let got = &result[0];
+        assert_eq!(got.name, "77");
+        assert!(got.selected);
+        assert!(!got.display_visible);
+        assert_eq!(got.render_instance.unwrap().translation, [102.0, 40.0, 0.0]);
+        assert_eq!(got.depth_override, Some(5.75));
+        assert!((got.key_vertices[0][0] - 102.5).abs() < 1e-7);
+        assert!((got.key_vertices[0][1] - 40.5).abs() < 1e-7);
+        assert!((got.points[0][0] - 102.5).abs() < 1e-4);
+        assert!((got.points[0][1] - 40.5).abs() < 1e-4);
+
+        result.clear();
+        expand_stub_near_into(&root, Some([0.0, 0.0, 1.0, 1.0]), &mut result);
+        assert!(result.is_empty(), "a distant nested block must not materialize");
+    }
+
+    #[test]
+    fn nonstub_wire_is_untouched_by_near_query() {
+        let mut wire = WireModel::default();
+        wire.name = "plain".to_string();
+        let mut result = Vec::new();
+        expand_stub_near_into(&wire, Some([100.0, 100.0, 101.0, 101.0]), &mut result);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "plain");
+    }
+}

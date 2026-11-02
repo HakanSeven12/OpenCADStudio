@@ -600,7 +600,11 @@ jobs:
         run: softwareupdate --install-rosetta --agree-to-license || true
 
       - name: Verify packaged MCP handshake
-        timeout-minutes: 2
+        timeout-minutes: 5
+        env:
+          # Rosetta translates the Intel build on its first start, which
+          # takes far longer than a native start.
+          OCS_HANDSHAKE_TIMEOUT: ${{ matrix.arch == 'x86_64' && '180' || '10' }}
         run: python3 ci-scripts/docs/automation/mcp_handshake.py OpenCADStudio.app/Contents/MacOS/OpenCADStudio
 
       # Stage the app beside an /Applications symlink so the mounted image

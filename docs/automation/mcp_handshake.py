@@ -10,7 +10,7 @@ import tempfile
 import threading
 
 
-def probe(command: list[str], timeout: float = 10) -> None:
+def probe(command: list[str], timeout: float = float(os.environ.get("OCS_HANDSHAKE_TIMEOUT", "10"))) -> None:
     # A separate process group lets a failed probe clean up a broken launcher
     # and any GUI child it incorrectly spawned. Never touch existing editors.
     with tempfile.TemporaryFile() as stderr:

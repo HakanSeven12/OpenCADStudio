@@ -440,6 +440,26 @@ pub(crate) fn entity_json(
                 .map(|attribute| (attribute.tag.clone(), json!(attribute.value)))
                 .collect();
             map.insert("attributes".into(), Value::Object(attributes));
+            // An attribute reference carries its own baked position, its own
+            // rotation with the insert's already composed in, and a height the
+            // insert's scale has reached, so the read reports each child as it
+            // stands rather than collapsing the list to a tag and a value.
+            // `children` is taken: it names a definition's member entities.
+            let children: Vec<Value> = ins
+                .attributes
+                .iter()
+                .map(|attribute| {
+                    json!({
+                        "tag": attribute.tag,
+                        "value": attribute.value,
+                        "position": v3(attribute.insertion_point),
+                        "rotation": attribute.rotation,
+                        "height": attribute.height,
+                        "normal": v3(attribute.normal),
+                    })
+                })
+                .collect();
+            map.insert("attribute_children".into(), Value::Array(children));
         }
         _ => {}
     }
@@ -2941,6 +2961,87 @@ mod tests {
 
         let selected = app.automation_op(r#"{"op":"select","type":"Insert"}"#);
         assert_eq!(selected["selected"], 1);
+    }
+
+    /// The measured target: a definition holding a line from `(0,0)` to
+    /// `(10,0)` and an attribute definition at `(2,1)` with height `0.2`,
+    /// inserted at `(20,5)` with scale `2` and rotation `30`, reports its
+    /// attribute child at `(22.4641, 8.73205)` with height `0.4` and rotation
+    /// `0.523599` — the child's own world values, not the definition's.
+    #[test]
+    fn a_reference_read_reports_its_attribute_children_in_world_coordinates() {
+        use crate::command::CadCommand;
+        use crate::modules::insert::insert_block::InsertBlockCommand;
+        use crate::ui::window::insert_attr_dialog::InsertAttrMsg;
+        use codec::entities::{AttributeDefinition, EntityType, Line};
+        use codec::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.document.header.attribute_dialog = true;
+        let mut attdef =
+            AttributeDefinition::new("TAG1".to_string(), "Tag one".to_string(), String::new());
+        attdef.insertion_point = Vector3::new(2.0, 1.0, 0.0);
+        attdef.height = 0.2;
+        app.tabs[i].scene.define_block_raw(
+            "PARITY_CHILD",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(Line::from_points(
+                    Vector3::ZERO,
+                    Vector3::new(10.0, 0.0, 0.0),
+                )),
+                EntityType::AttributeDefinition(attdef),
+            ],
+        );
+
+        let mut cmd = InsertBlockCommand::classic_for_block(
+            "PARITY_CHILD".to_string(),
+            Vec::new(),
+            String::new(),
+        );
+        let _ = cmd.on_point(glam::DVec3::new(20.0, 5.0, 0.0));
+        let _ = cmd.on_text_input("2");
+        let _ = cmd.on_text_input("2");
+        let parked = cmd
+            .on_text_input("30")
+            .expect("the last prompt parks the placement on the attribute form");
+        app.tabs[i].active_cmd = Some(Box::new(cmd));
+        let _ = app.apply_cmd_result(parked);
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::InsertAttributes),
+            "the placement is parked on the attribute form"
+        );
+        let _ = app.update(Message::InsertAttrDialog(InsertAttrMsg::Ok));
+
+        let result = app.automation_op(r#"{"op":"query","type":"Insert","detail":"full"}"#);
+        assert_eq!(
+            result["count"], 1,
+            "the placement wrote one reference: {result}"
+        );
+        let children = result["entities"][0]["attribute_children"]
+            .as_array()
+            .expect("the reference's attribute children");
+        assert_eq!(children.len(), 1, "one child, as defined: {result}");
+        let child = &children[0];
+        assert_eq!(child["tag"], "TAG1");
+        assert_eq!(child["normal"], serde_json::json!([0.0, 0.0, 1.0]));
+        let position = child["position"].as_array().expect("the child position");
+        let point: Vec<f64> = position.iter().map(|v| v.as_f64().unwrap()).collect();
+        assert!(
+            (point[0] - 22.464102).abs() < 1e-4 && (point[1] - 8.732051).abs() < 1e-4,
+            "the child is at {point:?}, expected (22.464102, 8.732051)"
+        );
+        assert!(
+            (child["height"].as_f64().unwrap() - 0.4).abs() < 1e-9,
+            "the insert's scale reaches the child's own height: {child}"
+        );
+        assert!(
+            (child["rotation"].as_f64().unwrap() - 0.523599).abs() < 1e-5,
+            "the child carries its own rotation, in radians: {child}"
+        );
     }
 
     #[test]

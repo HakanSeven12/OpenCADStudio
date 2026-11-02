@@ -5340,6 +5340,118 @@ mod layer_name_target_tests {
     use crate::app::{Message, OpenCADStudio};
     use crate::ui::window::layers::LayerSortCol;
 
+    #[test]
+    fn ribbon_layer_color_changes_only_named_layer_and_supports_undo() {
+        use codec::types::Color;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let _ = app.update(Message::LayerSelect("ALPHA".into()));
+        let selected = app.tabs[i].layers.selected_multi.clone();
+        let alpha = app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ALPHA")
+            .unwrap()
+            .color;
+        let old = app.tabs[i].scene.document.layers.get("ZULU").unwrap().color;
+        let creation = app.tabs[i].scene.document.header.current_entity_color;
+        let mut line = codec::entities::Line::new();
+        line.common.color = Color::Index(2);
+        line.common.layer = "ZULU".into();
+        let handle = app.tabs[i].scene.add_entity(codec::EntityType::Line(line));
+        app.tabs[i].scene.select_entity(handle, true);
+        let epoch = app.tabs[i].scene.geometry_epoch;
+        let _ = app.update(Message::RibbonLayerColorChanged {
+            layer: "ZULU".into(),
+            color: Color::Index(1),
+        });
+        assert_eq!(
+            app.tabs[i].scene.document.layers.get("ZULU").unwrap().color,
+            Color::Index(1)
+        );
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ALPHA")
+                .unwrap()
+                .color,
+            alpha
+        );
+        assert_eq!(app.tabs[i].layers.selected_multi, selected);
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .unwrap()
+                .common()
+                .color,
+            Color::Index(2)
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_entity_color,
+            creation
+        );
+        assert!(app.tabs[i].scene.geometry_epoch > epoch);
+        assert_eq!(app.tabs[i].recent_colors.first(), Some(&Color::Index(1)));
+        app.undo_active_tab();
+        assert_eq!(
+            app.tabs[i].scene.document.layers.get("ZULU").unwrap().color,
+            old
+        );
+        app.redo_active_tab();
+        assert_eq!(
+            app.tabs[i].scene.document.layers.get("ZULU").unwrap().color,
+            Color::Index(1)
+        );
+        let history = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::RibbonLayerColorChanged {
+            layer: "missing".into(),
+            color: Color::Index(3),
+        });
+        let _ = app.update(Message::RibbonLayerColorChanged {
+            layer: "ZULU".into(),
+            color: Color::ByLayer,
+        });
+        assert_eq!(app.tabs[i].history.undo_stack.len(), history);
+        let _ = app.update(Message::OpenColorWindow(
+            crate::app::ColorPickTarget::RibbonLayer("ZULU".into()),
+            Color::Index(1),
+        ));
+        let _ = app.update(Message::ColorWindowPick(
+            Color::Rgb {
+                r: 12,
+                g: 34,
+                b: 56,
+            },
+            Some("TEST$Color".into()),
+        ));
+        let layer = app.tabs[i].scene.document.layers.get("ZULU").unwrap();
+        assert_eq!(
+            layer.color,
+            Color::Rgb {
+                r: 12,
+                g: 34,
+                b: 56
+            }
+        );
+        assert_eq!(layer.book_name.as_deref(), Some("TEST"));
+        assert_eq!(layer.color_name.as_deref(), Some("Color"));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ALPHA")
+                .unwrap()
+                .color,
+            alpha
+        );
+    }
+
     fn rename_layer(app: &mut OpenCADStudio, old_name: &str, new_name: &str) {
         let i = app.active_tab;
         assert!(

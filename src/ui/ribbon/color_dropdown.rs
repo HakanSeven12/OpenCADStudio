@@ -212,6 +212,33 @@ pub fn color_dropdown_panel<'a>(
     recent_colors: &[AcadColor],
     layer_color: Option<iced::Color>,
 ) -> Element<'a, Message> {
+    color_panel(active_color, recent_colors, layer_color, true)
+}
+
+pub fn layer_color_dropdown_panel<'a>(
+    active_color: AcadColor,
+    recent_colors: &[AcadColor],
+    layer: String,
+) -> Element<'a, Message> {
+    color_panel(active_color, recent_colors, None, false).map(move |message| match message {
+        Message::RibbonColorChanged(color) => Message::RibbonLayerColorChanged {
+            layer: layer.clone(),
+            color,
+        },
+        Message::OpenColorWindow(_, color) => Message::OpenColorWindow(
+            crate::app::ColorPickTarget::RibbonLayer(layer.clone()),
+            color,
+        ),
+        message => message,
+    })
+}
+
+fn color_panel<'a>(
+    active_color: AcadColor,
+    recent_colors: &[AcadColor],
+    layer_color: Option<iced::Color>,
+    logical_colors: bool,
+) -> Element<'a, Message> {
     // 1. ByLayer and ByBlock
     let by_layer = logical_row(AcadColor::ByLayer, active_color, "ByLayer", layer_color);
     let by_block = logical_row(AcadColor::ByBlock, active_color, "ByBlock", None);
@@ -258,18 +285,22 @@ pub fn color_dropdown_panel<'a>(
     // 5. Select Color...
     let section5 = more_colors_row(active_color);
 
-    let content = column![
-        section1,
-        divider(),
-        grid_rows,
-        divider(),
-        section3,
-        divider(),
-        section4,
-        divider(),
-        section5,
-    ]
-    .spacing(6);
+    let mut content = column![].spacing(6);
+    if logical_colors {
+        content = content.push(section1).push(divider());
+    }
+    let content = content.push(
+        column![
+            grid_rows,
+            divider(),
+            section3,
+            divider(),
+            section4,
+            divider(),
+            section5,
+        ]
+        .spacing(6),
+    );
 
     container(content)
         .padding(Padding {
@@ -286,6 +317,23 @@ pub fn color_dropdown_panel<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ribbon_layer_color_palette_routes_to_layer_and_hides_logical_colors() {
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            iced::Settings::default(),
+            (220., 420.),
+            layer_color_dropdown_panel(AcadColor::Index(7), &[], "Walls".into()),
+        );
+        assert!(ui.find("ByLayer").is_err());
+        assert!(ui.find("ByBlock").is_err());
+        ui.click(t!("Select Color...").as_ref()).unwrap();
+        assert!(ui.into_messages().any(|m| matches!(
+            m,
+            Message::OpenColorWindow(crate::app::ColorPickTarget::RibbonLayer(layer), _)
+                if layer == "Walls"
+        )));
+    }
 
     #[test]
     fn test_quick_pick_grid_dimensions() {

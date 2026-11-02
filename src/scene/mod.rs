@@ -586,12 +586,32 @@ fn tess_memo_guard(
         mix(channel.to_bits() as u64);
     }
     mix(avp.map(|h| h.value()).unwrap_or(0));
-    // SDF glyph quads bake the atlas UV of each tile, so a growth or
-    // a re-bake (which rescale / rewind every UV) makes memoized text
-    // address the wrong tile — garbage on screen, and a silent miss in
-    // the PDF export's glyph lookup (#385 under #347's conditions).
-    mix(crate::scene::text::sdf_atlas::generation());
+    // The SDF atlas generation is not here: a growth or re-bake stales only
+    // the memoized text (see `drop_stale_text`), not every entity.
     g
+}
+
+/// SDF glyph quads bake the atlas UV of each tile, so an atlas growth or
+/// re-bake (which rescale / rewind every UV) makes memoized text address the
+/// wrong tile: garbage on screen, and a silent miss in the PDF export's glyph
+/// lookup (#385 under #347's conditions). When the generation `cell` was
+/// built under moved, the runs carrying glyphs are dropped; the rest stay,
+/// so a first open's atlas growth no longer re-tessellates the whole
+/// drawing (#2164).
+fn drop_stale_text(
+    scene: &Scene,
+    memo: &mut HashMap<Handle, MemoRun>,
+    cell: &std::cell::Cell<u64>,
+) {
+    let now = crate::scene::text::sdf_atlas::generation();
+    if cell.get() != now {
+        memo.retain(|handle, run| {
+            scene
+                .resolve_memo_run(*handle, run)
+                .is_some_and(|hit| hit.wires().iter().all(|w| w.text_verts.is_empty()))
+        });
+        cell.set(now);
+    }
 }
 
 #[derive(Clone, Default)]
@@ -1129,6 +1149,8 @@ pub struct PreparedOpenGeometry {
     pub(crate) tess_memo: HashMap<Handle, MemoRun>,
     pub(crate) tess_memo_backing: MemoBacking,
     pub tess_guard: u64,
+    /// The SDF atlas generation the loader's memo was built under.
+    pub tess_atlas: u64,
     /// The loader's submission-order layout for `wires`.
     ///
     /// Without it the installed set has `layout: None`, and `try_resident_patch`
@@ -1919,6 +1941,7 @@ pub fn prepare_open_geometry(
     let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
     let tess_memo_backing = std::mem::take(&mut *scene.resident_memo_backing.borrow_mut());
     let tess_guard = scene.resident_tess_guard.get();
+    let tess_atlas = scene.resident_tess_atlas.get();
     let draw_depths = scene.draw_depth_cache.borrow_mut().take();
     // The layout the loader already built for exactly these wires. Taken by
     // identity so it cannot be paired with a different assembly.
@@ -1948,6 +1971,7 @@ pub fn prepare_open_geometry(
             tess_memo,
             tess_memo_backing,
             tess_guard,
+            tess_atlas,
             block_defns,
             draw_depths,
             resident_layout,
@@ -3079,8 +3103,12 @@ pub struct Scene {
     /// Set while `resident_wires_for` assembles a set that will become the
     /// memo's backing; new runs then go straight into it (`Pending`).
     building_resident_set: std::cell::Cell<bool>,
-    /// Annotation, background, viewport and glyph-atlas signature.
+    /// Annotation, background and viewport signature.
     resident_tess_guard: std::cell::Cell<u64>,
+    /// The SDF atlas generation the resident memo's text was built under.
+    resident_tess_atlas: std::cell::Cell<u64>,
+    /// The same for `tess_memo`.
+    tess_memo_atlas: std::cell::Cell<u64>,
     /// Per-mutation delta journal: which handles changed on each `geometry_epoch`
     /// bump. Bounded ring ([`GEOMETRY_JOURNAL_CAP`]); a derived cache replays the
     /// entries past its last-synced epoch and patches per-handle instead of
@@ -3380,6 +3408,8 @@ impl Scene {
             resident_memo_backing: RefCell::new(MemoBacking::default()),
             building_resident_set: std::cell::Cell::new(false),
             resident_tess_guard: std::cell::Cell::new(0),
+            resident_tess_atlas: std::cell::Cell::new(0),
+            tess_memo_atlas: std::cell::Cell::new(0),
             geometry_deltas: RefCell::new(std::collections::VecDeque::new()),
             pending_removed_categories: RefCell::new(HashMap::default()),
             geometry_journal_floor: std::cell::Cell::new(0),
@@ -3584,6 +3614,7 @@ impl Scene {
             *self.resident_tess_memo.borrow_mut() = prepared.tess_memo;
             *self.resident_memo_backing.borrow_mut() = prepared.tess_memo_backing;
             self.resident_tess_guard.set(prepared.tess_guard);
+            self.resident_tess_atlas.set(prepared.tess_atlas);
         }
         // Reuse the loader's draw-order map with this scene's epoch.
         if let Some(mut depths) = prepared.draw_depths {
@@ -7966,6 +7997,16 @@ impl Scene {
             // stale quads too, and their cache is keyed by block epoch (which
             // has not moved), so drop them or the rebuild would reuse them.
             self.block_defn_cache.borrow_mut().clear();
+            // The pass just built backs the memo meanwhile, so only its text
+            // (dropped as stale) is tessellated again, not the drawing.
+            let previous = Arc::new(std::mem::take(&mut wires));
+            if self.uses_resident_memo(block, frozen_layers)
+                && self.resident_runs_match_memo(block)
+            {
+                if let Some(layout) = Self::resident_wire_layout(&previous) {
+                    self.bind_memo_to_set(&previous, &layout.ranges);
+                }
+            }
             wires = self.wires_for_block_culled(
                 block,
                 None,
@@ -8404,7 +8445,8 @@ impl Scene {
         // back from the memo, provided it was built under this display context.
         let avp = style_viewport.or(self.active_viewport);
         let memo_ok = self.resident_tess_guard.get()
-            == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp);
+            == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
+            && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation();
         for (h, kind) in &deltas {
             if matches!(kind, ChangeKind::Removed) {
                 continue;
@@ -13417,10 +13459,10 @@ impl Scene {
                 bg,
                 avp,
             ) ^ if self.constraint_shading_active() { 0xC057_A705_0000_0001 } else { 0 };
-            let (memo_cell, guard_cell) = if resident {
-                (&self.resident_tess_memo, &self.resident_tess_guard)
+            let (memo_cell, guard_cell, atlas_cell) = if resident {
+                (&self.resident_tess_memo, &self.resident_tess_guard, &self.resident_tess_atlas)
             } else {
-                (&self.tess_memo, &self.tess_memo_guard)
+                (&self.tess_memo, &self.tess_memo_guard, &self.tess_memo_atlas)
             };
             guard_dbg = guard;
             guard_was_stale = guard_cell.get() != guard;
@@ -13428,6 +13470,7 @@ impl Scene {
                 memo_cell.borrow_mut().clear();
                 guard_cell.set(guard);
             }
+            drop_stale_text(self, &mut memo_cell.borrow_mut(), atlas_cell);
             // Classify (serial, cheap): reuse memoized Arcs, collect misses.
             let t_classify = perf.then(iced::time::Instant::now);
             let mut hit_arcs: Vec<MemoHit> = Vec::new();
@@ -15653,6 +15696,7 @@ mod journal_tests {
             tess_memo: HashMap::default(),
             tess_memo_backing: MemoBacking::default(),
             tess_guard: 0,
+            tess_atlas: 0,
             block_defns: Vec::new(),
             draw_depths: Some(handed_over),
             resident_layout: None,

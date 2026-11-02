@@ -4093,6 +4093,7 @@ impl TrimCommand {
         if let Some(cuts) = self.hover_cut_cache.get(&handle) {
             return Some(cuts.clone());
         }
+        let solve_started = std::time::Instant::now();
         let nearby = self.nearby_geos(handle);
         let entity = self.entity_index.get(&self.all_entities, handle)?;
         let cuts = match entity {
@@ -4125,6 +4126,14 @@ impl TrimCommand {
             EntityType::Spline(s) => spline_seg_ts(s, handle, &nearby),
             _ => return None,
         };
+        let solve_ms = crate::perf::elapsed_ms(solve_started);
+        if solve_ms >= 8.0 {
+            crate::perf_record!(
+                "[perf] trim-hover-cuts {solve_ms:.2}ms boundaries={} cuts={}",
+                nearby.len(),
+                cuts.len(),
+            );
+        }
         const CAP: usize = 32;
         if self.hover_cut_order.len() >= CAP {
             if let Some(oldest) = self.hover_cut_order.pop_front() {
@@ -4771,12 +4780,25 @@ impl CadCommand for TrimCommand {
                         ))
                     }).collect();
                 }
-                self.hatch_trim_at(handle, pt)
+                let started = std::time::Instant::now();
+                let preview = self
+                    .hatch_trim_at(handle, pt)
                     .map(|trim| trim.preview_wires())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                let ms = crate::perf::elapsed_ms(started);
+                if ms >= 8.0 {
+                    crate::perf_record!("[perf] trim-hover-hatch {ms:.2}ms");
+                }
+                preview
             }
             Some(EntityType::LwPolyline(p)) => {
-                let Some(survivors) = trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos) else {
+                let started = std::time::Instant::now();
+                let result = trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos);
+                let ms = crate::perf::elapsed_ms(started);
+                if ms >= 8.0 {
+                    crate::perf_record!("[perf] trim-hover-polyline {ms:.2}ms");
+                }
+                let Some(survivors) = result else {
                     return vec![];
                 };
                 let orig = WireModel::solid(

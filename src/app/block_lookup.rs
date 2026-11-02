@@ -296,7 +296,7 @@ impl OpenCADStudio {
             return Task::none();
         }
         if changed {
-            self.push_undo_snapshot(i, "Lookup tables");
+            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Lookup tables"));
             self.tabs[i].scene.document = working;
             self.tabs[i].scene.bump_geometry();
             self.tabs[i].dirty = true;

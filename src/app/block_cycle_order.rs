@@ -67,7 +67,7 @@ impl OpenCADStudio {
             Ok(changed) => {
                 if changed {
                     let i = self.active_tab;
-                    self.push_undo_snapshot(i, "Change insertion grip order");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Change insertion grip order"));
                     self.tabs[i].scene.document = staged;
                     self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;

@@ -3,6 +3,21 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Reset block references" => Some(("block-operation-history", "reset-references")),
+        "Associate block action" => Some(("block-operation-history", "associate-action")),
+        "Action selection set" => Some(("block-operation-history", "action-selection")),
+        "Test block parameter" => Some(("block-operation-history", "test-parameter")),
+        "Block reference parameter" => Some(("block-operation-history", "reference-parameter")),
+        "Align block reference" => Some(("block-operation-history", "align-reference")),
+        "Change insertion grip order" => Some(("block-operation-history", "insertion-grip-order")),
+        "Move native block grip" => Some(("block-operation-history", "move-grip")),
+        "Configure block parameter grips" => Some(("block-operation-history", "configure-grips")),
+        "Lookup tables" => Some(("block-operation-history", "lookup-tables")),
+        "Block hyperlink" => Some(("block-operation-history", "hyperlink")),
+        "Block properties" => Some(("block-operation-history", "properties")),
+        "Block Properties Table" => Some(("block-operation-history", "properties-table")),
+        "Visibility state" => Some(("block-operation-history", "visibility-state")),
+        "Visibility states" => Some(("block-operation-history", "visibility-states")),
         "Alignment type" => Some(("block-authoring-history", "alignment-type")),
         "Edit block action override" => Some(("block-authoring-history", "action-override")),
         "Edit block action chain" => Some(("block-authoring-history", "action-chain")),

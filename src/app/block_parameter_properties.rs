@@ -65,7 +65,7 @@ impl OpenCADStudio {
         match native::evaluate(&tab.scene.document, baseline, key, input) {
             Ok(staged) => {
                 if let Some(staged) = staged {
-                    self.push_undo_snapshot(i, "Block reference parameter");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Block reference parameter"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;

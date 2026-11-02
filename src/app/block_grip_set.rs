@@ -85,7 +85,7 @@ impl OpenCADStudio {
         ) {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, "Move native block grip");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Move native block grip"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();
@@ -159,7 +159,7 @@ impl OpenCADStudio {
         match crate::scene::block_grips::config::set(&mut staged, definition, parameter, count) {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, "Configure block parameter grips");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Configure block parameter grips"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();

@@ -77,7 +77,7 @@ impl OpenCADStudio {
         let result = self.aligned_reference(i, document, &alignment, cursor, context, flipped);
         match result {
             Ok(Some(entity)) => {
-                self.push_undo_snapshot(i, "Align block reference");
+                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Align block reference"));
                 let mut staged = self.tabs[i].scene.document.clone();
                 *staged.get_entity_mut(insert).unwrap() = entity;
                 self.apply_action_document(i, staged);

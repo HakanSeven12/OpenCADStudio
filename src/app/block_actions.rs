@@ -108,7 +108,7 @@ impl OpenCADStudio {
             }
         }
         if changed != 0 {
-            self.push_undo_snapshot(i, "Reset block references");
+            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Reset block references"));
             self.apply_action_document(i, staged);
             self.tabs[i].scene.bump_geometry();
             self.tabs[i].dirty = true;
@@ -405,7 +405,7 @@ impl OpenCADStudio {
                 match result {
                     Ok(changed) => {
                         if changed {
-                            self.push_undo_snapshot(i, "Associate block action");
+                            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Associate block action"));
                             self.apply_action_document(i, staged);
                             self.tabs[i].scene.bump_geometry();
                             self.tabs[i].dirty = true;
@@ -459,7 +459,7 @@ impl OpenCADStudio {
                 match result {
                     Ok(changed) => {
                         if changed {
-                            self.push_undo_snapshot(i, "Action selection set");
+                            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Action selection set"));
                             self.apply_action_document(i, staged);
                             self.tabs[i].scene.bump_geometry();
                             self.tabs[i].dirty = true;
@@ -626,7 +626,7 @@ impl OpenCADStudio {
                 ) {
                     Ok(staged) => {
                         if let Some(staged) = staged {
-                            self.push_undo_snapshot(i, "Test block parameter");
+                            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Test block parameter"));
                             self.apply_action_document(i, staged);
                             self.tabs[i].scene.bump_geometry();
                             self.tabs[i].dirty = true;
@@ -873,7 +873,7 @@ impl OpenCADStudio {
         match actions::instance::evaluate_value(&tab.scene.document, handle, parameter, local) {
             Ok(staged) => {
                 if let Some(staged) = staged {
-                    self.push_undo_snapshot(i, "Block reference parameter");
+                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Block reference parameter"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;

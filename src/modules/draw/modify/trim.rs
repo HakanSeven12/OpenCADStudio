@@ -3923,6 +3923,9 @@ pub struct TrimCommand {
     all_entities: Vec<EntityType>,
     /// Exploded block contents used only as virtual cutting geometry.
     block_boundaries: Vec<(Handle, Vec<EntityType>)>,
+    /// Look up virtual INSERT boundaries in O(1) during nearby cutter scans,
+    /// rather than searching all block contents for each geometry.
+    block_boundary_owners: rustc_hash::FxHashSet<Handle>,
     entity_index: ModifyEntityIndex,
     geos: Vec<Geo>,
     /// Bounded cache of cursor-independent cutting points for hover previews.
@@ -3991,9 +3994,14 @@ impl TrimCommand {
             })
             .collect();
 
+        let block_boundary_owners = block_boundaries
+            .iter()
+            .map(|(owner, _)| *owner)
+            .collect();
         let mut cmd = Self {
             all_entities,
             block_boundaries,
+            block_boundary_owners,
             entity_index: ModifyEntityIndex::empty(),
             geos: Vec::new(),
             hover_cut_cache: rustc_hash::FxHashMap::default(),
@@ -4068,11 +4076,8 @@ impl TrimCommand {
             .iter()
             .filter(|geo| {
                 handles.contains(&geo.handle())
-                    || self
-                        .block_boundaries
-                        .iter()
-                        .any(|(owner, _)| *owner == geo.handle()
-                            && geo_overlaps_aabb(geo, target_bounds))
+                    || (self.block_boundary_owners.contains(&geo.handle())
+                        && geo_overlaps_aabb(geo, target_bounds))
             })
             .cloned()
             .collect()
@@ -4095,6 +4100,7 @@ impl TrimCommand {
         }
         let solve_started = std::time::Instant::now();
         let nearby = self.nearby_geos(handle);
+        let nearby_ms = crate::perf::elapsed_ms(Some(solve_started));
         let entity = self.entity_index.get(&self.all_entities, handle)?;
         let cuts = match entity {
             EntityType::Line(l) => line_seg_ts(l.start.x, l.start.y, l.end.x, l.end.y, handle, &nearby),
@@ -4129,7 +4135,8 @@ impl TrimCommand {
         let solve_ms = crate::perf::elapsed_ms(Some(solve_started));
         if solve_ms >= 8.0 {
             crate::perf_record!(
-                "[perf] trim-hover-cuts {solve_ms:.2}ms boundaries={} cuts={}",
+                "[perf] trim-hover-cuts {solve_ms:.2}ms search={nearby_ms:.2}ms intersection={:.2}ms boundaries={} cuts={}",
+                solve_ms - nearby_ms,
                 nearby.len(),
                 cuts.len(),
             );
@@ -6237,6 +6244,27 @@ mod tests {
         }
         command.on_entity_replaced(Handle::new(1), &[]);
         assert!(command.all_entities.is_empty());
+    }
+
+    #[test]
+    fn virtual_block_cutters_are_filtered_by_bounds_without_scanning_all_owners() {
+        let target = xline_at(0.0, 5.0, 10.0, 5.0, 1);
+        let near_handle = Handle::new(90);
+        let far_handle = Handle::new(91);
+        let command = TrimCommand::with_block_boundaries(
+            vec![target],
+            vec![
+                (near_handle, vec![xline_at(5.0, 0.0, 5.0, 10.0, 101)]),
+                (far_handle, vec![xline_at(500.0, 0.0, 500.0, 10.0, 102)]),
+            ],
+            Vec::new(),
+        );
+        assert!(command.block_boundary_owners.contains(&near_handle));
+        assert!(command.block_boundary_owners.contains(&far_handle));
+        let nearby = command.nearby_geos(Handle::new(1));
+        assert!(nearby.iter().any(|g| g.handle() == near_handle));
+        assert!(!nearby.iter().any(|g| g.handle() == far_handle));
+        assert_eq!(line_seg_ts(0.0, 5.0, 10.0, 5.0, Handle::new(1), &nearby).len(), 1);
     }
 
     #[test]

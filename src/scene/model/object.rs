@@ -259,6 +259,8 @@ pub enum GripMenuAction {
     AddLeader,
     RemoveLeader,
     ReverseArrows,
+    /// Turn the arrowhead at this end to the other side of its line.
+    FlipArrow,
     MoveWithDimLine,
     MoveWithLeader,
     MoveIndependent,

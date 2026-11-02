@@ -1506,6 +1506,18 @@ impl Grippable for Dimension {
                 label: "Stretch",
                 action: GripMenuAction::Stretch,
             }]
+        } else if arrow_end(self, grip_id).is_some() {
+            // The grips at the two arrow ends flip their own arrow.
+            vec![
+                GripMenuItem {
+                    label: "Stretch",
+                    action: GripMenuAction::Stretch,
+                },
+                GripMenuItem {
+                    label: "Flip Arrow",
+                    action: GripMenuAction::FlipArrow,
+                },
+            ]
         } else if grip_id == dim_line_grip {
             vec![
                 GripMenuItem {
@@ -1562,6 +1574,11 @@ impl Grippable for Dimension {
                 base.flip_arrow1 = !base.flip_arrow1;
                 base.flip_arrow2 = !base.flip_arrow2;
             }
+            A::FlipArrow => match arrow_end(self, grip_id) {
+                Some(1) => self.base_mut().flip_arrow1 ^= true,
+                Some(_) => self.base_mut().flip_arrow2 ^= true,
+                None => {}
+            },
             // The caller sets DIMTAD = Above as an override; the text goes
             // back to automatic placement so DIMGAP and the text height set
             // how far above the line it sits, at any drawing scale. (#543)
@@ -5188,6 +5205,16 @@ struct DimLineParams {
     /// so the leader is drawn to it exactly and only the text is estimated.
     leader_anchor: Option<Vec3>,
 }
+/// Which arrow (1 or 2) sits at grip `grip_id`: the extension origins of a
+/// linear or aligned dimension, the two ends of a diameter.
+fn arrow_end(dim: &Dimension, grip_id: usize) -> Option<u8> {
+    match (dim, grip_id) {
+        (Dimension::Linear(_) | Dimension::Aligned(_) | Dimension::Diameter(_), 0) => Some(1),
+        (Dimension::Linear(_) | Dimension::Aligned(_) | Dimension::Diameter(_), 1) => Some(2),
+        _ => None,
+    }
+}
+
 fn dimension_geometry(
     dim: &Dimension,
     arrow1: &ArrowKind,

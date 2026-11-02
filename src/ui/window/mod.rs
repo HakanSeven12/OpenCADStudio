@@ -9,6 +9,7 @@ pub mod auto_constrain_settings;
 pub mod block_definition;
 pub mod block_edit_picker;
 pub mod block_palette;
+pub mod insert_attr_dialog;
 pub mod block_save_as;
 pub(crate) mod block_editor_settings;
 pub(crate) mod overkill;

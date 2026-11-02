@@ -725,6 +725,14 @@ impl OpenCADStudio {
             {
                 return self.apply_block_save_as_dialog();
             }
+            if self.active_modal == Some(super::ModalKind::InsertAttributes)
+                && (matches!(msg, Message::CommandFinalize)
+                    || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN")))
+            {
+                return self.update(Message::InsertAttrDialog(
+                    crate::ui::window::insert_attr_dialog::InsertAttrMsg::Ok,
+                ));
+            }
             if self.active_modal == Some(super::ModalKind::WriteBlock) {
                 if matches!(msg, Message::CommandFinalize)
                     || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN"))
@@ -2746,6 +2754,7 @@ impl OpenCADStudio {
             Message::PdfDialog(message) => self.update_pdf_dialog(message),
             Message::ImportDialog(message) => self.update_import_dialog(message),
             Message::AttdefDialog(message) => self.on_attdef_dialog(message),
+            Message::InsertAttrDialog(message) => self.on_insert_attr_dialog(message),
             Message::AttMan(message) => self.on_attman(message),
             Message::FieldDialog(message) => self.on_field_dialog(message),
             Message::RefEditDialog(message) => self.update_refedit_dialog(message),
@@ -11309,6 +11318,11 @@ impl OpenCADStudio {
                     } else {
                         Task::none()
                     };
+                }
+                if self.active_modal == Some(super::ModalKind::InsertAttributes) {
+                    self.cancel_insert_attr_dialog();
+                    self.close_active_modal();
+                    return Task::none();
                 }
                 if self.active_modal == Some(super::ModalKind::RefEdit) {
                     self.refedit_dialog = None;

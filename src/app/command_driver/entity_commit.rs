@@ -473,10 +473,7 @@ impl OpenCADStudio {
             .as_ref()
             .is_some_and(|command| command.name() == "DIM");
         if let (true, Some(handle)) = (continue_command && in_dim, committed) {
-            let overlapped = super::dim_edit::overlapping_dimensions(
-                &self.tabs[i].scene,
-                handle,
-            );
+            let overlapped = super::dim_edit::overlapping_dimensions(&self.tabs[i].scene, handle);
             if !overlapped.is_empty() {
                 let asked = self.tabs[i]
                     .active_cmd
@@ -1081,7 +1078,10 @@ impl OpenCADStudio {
             return Some(Task::none());
         }
         self.push_undo_snapshot(i, "CENTERREASSOCIATE");
-        if self.tabs[i].scene.reassociate_centerline(target, first, second) {
+        if self.tabs[i]
+            .scene
+            .reassociate_centerline(target, first, second)
+        {
             self.tabs[i].dirty = true;
         } else {
             self.command_line
@@ -1201,6 +1201,19 @@ impl OpenCADStudio {
             if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
                 cmd.attreq_set_block_base(block_base);
             }
+            let asks = self.tabs[i].scene.document.header.attribute_dialog
+                && attdefs
+                    .iter()
+                    .any(|ad| !ad.flags.constant && !ad.flags.preset);
+            let askable: Vec<codec::entities::AttributeDefinition> = if asks {
+                attdefs
+                    .iter()
+                    .filter(|ad| !ad.flags.constant && !ad.flags.preset)
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let completed = self.tabs[i]
                 .active_cmd
                 .as_mut()
@@ -1219,6 +1232,10 @@ impl OpenCADStudio {
                 } else {
                     CmdResult::CommitAndExit(entity)
                 }));
+            }
+            if asks {
+                self.open_insert_attr_dialog(&block_name, &askable);
+                return None;
             }
             let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
             if let Some(p) = prompt {

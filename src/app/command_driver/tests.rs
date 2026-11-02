@@ -2106,6 +2106,9 @@ mod block_base_point_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
+        // These tests follow the prompt chain, so the insertion form that
+        // answers it in one go has to stay out of the way.
+        app.tabs[i].scene.document.header.attribute_dialog = false;
         // Block "ATTREQ_BP": base (10,5,0); LINE (10,5)-(30,5); ATTDEF TAG1 at
         // (12,8). Rendering convention (see scene::block_base_point_tests): the
         // ATTDEF lands at (100,100) + Rot(30)*Scale(2)*((12,8) - (10,5))
@@ -2187,6 +2190,7 @@ mod block_base_point_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
+        app.tabs[i].scene.document.header.attribute_dialog = false;
         app.tabs[i].scene.define_block_raw(
             "ATTREQ_ID",
             Vector3::ZERO,

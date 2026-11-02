@@ -12,6 +12,9 @@ mod extraction_catalog;
 mod array_grips;
 mod block_actions;
 mod block_parameter_properties;
+mod insert_attributes;
+#[cfg(test)]
+mod insert_attributes_tests;
 mod block_alignment;
 mod block_feedback;
 mod block_flip;
@@ -755,6 +758,7 @@ pub(super) struct OpenCADStudio {
     /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
     attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
     attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
+    insert_attr_dialog: Option<crate::ui::window::insert_attr_dialog::InsertAttrState>,
     /// Block Attribute Manager working copy; `None` while it is closed.
     attman: Option<crate::ui::window::attman_dialog::AttManState>,
     /// Field dialog working copy; `None` while closed.
@@ -2877,6 +2881,7 @@ pub enum ModalKind {
     GeometricTolerance,
     AttDef,
     AttDefEdit,
+    InsertAttributes,
     /// Block Attribute Manager (BATTMAN / ATTMAN).
     AttMan,
     CountInvalidArea,
@@ -5365,6 +5370,7 @@ pub enum Message {
     /// An edit in one of the PDF dialogs.
     PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
     AttdefDialog(crate::ui::window::attdef_dialog::AttdefDialogMsg),
+    InsertAttrDialog(crate::ui::window::insert_attr_dialog::InsertAttrMsg),
     /// Block Attribute Manager edits.
     AttMan(crate::ui::window::attman_dialog::AttManMsg),
     FieldDialog(crate::ui::window::field_dialog::FieldDialogMsg),
@@ -5633,6 +5639,7 @@ impl OpenCADStudio {
             pdf_attach: None,
             point_cloud_attach: None,
             attdef_dialog: None,
+            insert_attr_dialog: None,
             attman: None,
             attdef_edit: None,
             field_dialog: None,

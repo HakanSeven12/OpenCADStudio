@@ -73,6 +73,7 @@ impl OpenCADStudio {
             Some(K::GeometricTolerance) => crate::t!("Geometric Tolerance").into_owned(),
             Some(K::AttDef) => crate::t!("Attribute Definition").into_owned(),
             Some(K::AttDefEdit) => crate::t!("Edit Attribute Definition").into_owned(),
+            Some(K::InsertAttributes) => crate::t!("Edit Attributes").into_owned(),
             Some(K::AttMan) => crate::t!("Block Attribute Manager").into_owned(),
             Some(K::CountInvalidArea) => crate::t!("Count - Invalid Area").into_owned(),
             Some(K::Field) => crate::t!("Field").into_owned(),
@@ -623,6 +624,12 @@ impl OpenCADStudio {
                 let state = self.attdef_dialog.as_ref()?;
                 sized_flow(ex, 720, 520, |flow| {
                     crate::ui::window::attdef_dialog::view(state, flow)
+                })
+            }
+            super::super::ModalKind::InsertAttributes => {
+                let state = self.insert_attr_dialog.as_ref()?;
+                sized_flow(ex, 500, 520, |flow| {
+                    crate::ui::window::insert_attr_dialog::view(state, flow)
                 })
             }
             super::super::ModalKind::SheetSet => {

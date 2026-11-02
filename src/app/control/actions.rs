@@ -3122,6 +3122,9 @@ impl OpenCADStudio {
                 Some(crate::app::ModalKind::AttDefEdit) => {
                     Message::AttdefDialog(crate::ui::window::attdef_dialog::AttdefDialogMsg::EditOk)
                 }
+                Some(crate::app::ModalKind::InsertAttributes) => Message::InsertAttrDialog(
+                    crate::ui::window::insert_attr_dialog::InsertAttrMsg::Ok,
+                ),
                 Some(crate::app::ModalKind::SheetSet) => {
                     Message::SheetSet(crate::ui::window::sheet_set::SheetSetMsg::Ok)
                 }

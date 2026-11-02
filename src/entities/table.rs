@@ -236,14 +236,15 @@ pub(crate) fn style_for_property<'a>(
 }
 
 /// A cell's text height: the content's own format when it overrides it,
-/// else the cell, row, column or table style that sets it, else the
-/// content's value.
+/// else the cell, row, column or table style that sets it, else the row's
+/// cell style (`row_height`), else the content's value.
 fn cell_text_height(
     table: &Table,
     row: &codec::entities::table::TableRow,
     column: usize,
     cell: &codec::entities::table::TableCell,
     content: &codec::entities::table::CellContent,
+    row_height: Option<f64>,
 ) -> Option<f64> {
     use codec::entities::table::CellStylePropertyFlags as P;
     let set = |h: f64| (h > 1e-6).then_some(h);
@@ -254,6 +255,7 @@ fn cell_text_height(
             style_for_property(table, row, column, cell, P::TEXT_HEIGHT)
                 .and_then(|s| set(s.text_height))
         })
+        .or_else(|| row_height.and_then(set))
         .or_else(|| set(content.text_height))
 }
 
@@ -1392,7 +1394,7 @@ impl RenderConvertible for Table {
             let row_mid = (row_top + row_bot) * 0.5;
 
             // Pick the appropriate row_style from TableStyle for this row's role.
-            let row_style: Option<&codec::objects::RowCellStyle> = table_style.map(|ts| {
+            let legacy_row_style: Option<&codec::objects::RowCellStyle> = table_style.map(|ts| {
                 let kind = match (title_suppressed, header_suppressed, ri) {
                     (false, _, 0) => 0,     // title
                     (false, false, 1) => 1, // header
@@ -1405,19 +1407,41 @@ impl RenderConvertible for Table {
                     _ => &ts.data_row_style,
                 }
             });
+            // A row naming a cell style of the table style draws with it.
+            let named_row_style = table_style
+                .filter(|_| row.style_id != 0)
+                .and_then(|ts| ts.cell_style_by_id(row.style_id))
+                .map(|cell| cell.cell_style.to_row_style());
+            let row_style = named_row_style.as_ref().or(legacy_row_style);
 
             for (ci, cell) in row.cells.iter().enumerate() {
                 let text = cell.text_value();
                 if text.is_empty() {
                     continue;
                 }
-                let row_style = table_style
-                    .map(|ts| {
-                        match cell_role_kind(self, title_suppressed, header_suppressed, ri, ci) {
-                            0 => &ts.title_row_style,
-                            1 => &ts.header_row_style,
-                            _ => &ts.data_row_style,
-                        }
+                // The cell style the cell draws with: its own id, else its
+                // column's, else its row's; a named (non-role) style by id.
+                let first_id = [
+                    cell.style_id,
+                    self.columns.get(ci).map_or(0, |column| column.style_id),
+                    row.style_id,
+                ]
+                .into_iter()
+                .find(|id| *id != 0);
+                let named_cell = table_style
+                    .zip(first_id.filter(|id| *id > 3))
+                    .and_then(|(ts, id)| ts.cell_style_by_id(id))
+                    .map(|named| named.cell_style.to_row_style());
+                let row_style = named_cell
+                    .as_ref()
+                    .or_else(|| {
+                        table_style.map(|ts| {
+                            match cell_role_kind(self, title_suppressed, header_suppressed, ri, ci) {
+                                0 => &ts.title_row_style,
+                                1 => &ts.header_row_style,
+                                _ => &ts.data_row_style,
+                            }
+                        })
                     })
                     .or(row_style);
 
@@ -1428,7 +1452,7 @@ impl RenderConvertible for Table {
                 // Resolve text height: content → cell-style → row-style → 0.18.
                 let content = cell.contents.first();
                 let cell_h = content
-                    .and_then(|c| cell_text_height(self, row, ci, cell, c))
+                    .and_then(|c| cell_text_height(self, row, ci, cell, c, row_style.map(|s| s.text_height)))
                     .or_else(|| {
                         cell.style
                             .as_ref()
@@ -1653,7 +1677,7 @@ pub fn tessellate_table(
     let mut text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
     let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> = Vec::new();
     #[allow(clippy::type_complexity)]
-    let mut borders: HashMap<([u8; 4], u32, Option<codec::Handle>), ([f32; 4], f32, Vec<[f32; 3]>)> =
+    let mut borders: HashMap<([u8; 4], u32, u64), ([f32; 4], f32, Vec<[f32; 3]>)> =
         HashMap::default();
     let mut emitted: rustc_hash::FxHashSet<(i32, i32, i32, i32, i32, i32)> =
         rustc_hash::FxHashSet::default();
@@ -1663,11 +1687,10 @@ pub fn tessellate_table(
     let mut add_edge =
         |a: Vec3,
          b: Vec3,
-         (col, lw, lt): ([f32; 4], f32, Option<codec::Handle>),
-         borders: &mut HashMap<
-            ([u8; 4], u32, Option<codec::Handle>),
-            ([f32; 4], f32, Vec<[f32; 3]>),
-        >| {
+         col: [f32; 4],
+         lw: f32,
+         linetype: u64,
+         borders: &mut HashMap<([u8; 4], u32, u64), ([f32; 4], f32, Vec<[f32; 3]>)>| {
             let k = (
                 (a.x * 1000.0) as i32,
                 (a.y * 1000.0) as i32,
@@ -1682,7 +1705,7 @@ pub fn tessellate_table(
             }
             emitted.insert(k);
             let entry = borders
-                .entry((key4(col), (lw * 100.0) as u32, lt))
+                .entry((key4(col), (lw * 100.0) as u32, linetype))
                 .or_insert_with(|| (col, lw, Vec::new()));
             if !entry.2.is_empty() {
                 entry.2.push([f32::NAN; 3]);
@@ -1692,8 +1715,33 @@ pub fn tessellate_table(
         };
 
     let normal = v3(&tab.normal).normalize_or(Vec3::Z);
+    // Each row's named cell style: the one its id names, else the title,
+    // header or data style its place gives it.
+    let row_cells: Vec<Option<&codec::objects::NamedTableCellStyle>> = tab
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(ri, row)| {
+            let ts = table_style?;
+            let kind = match (title_suppressed, header_suppressed, ri) {
+                (false, _, 0) => codec::objects::TITLE_CELL_STYLE,
+                (false, false, 1) | (true, false, 0) => codec::objects::HEADER_CELL_STYLE,
+                _ => codec::objects::DATA_CELL_STYLE,
+            };
+            (row.style_id != 0)
+                .then(|| ts.cell_style_by_id(row.style_id))
+                .flatten()
+                .or_else(|| ts.cell_style(kind))
+        })
+        .collect();
+    let row_projections: Vec<Option<codec::objects::RowCellStyle>> = row_cells
+        .iter()
+        .map(|cell| cell.map(|cell| cell.cell_style.to_row_style()))
+        .collect();
+    let column_count = tab.columns.len();
+    let line_types = &document.line_types;
     for (ri, row) in tab.rows.iter().enumerate() {
-        let row_style: Option<&codec::objects::RowCellStyle> = table_style.map(|ts| {
+        let legacy_row_style: Option<&codec::objects::RowCellStyle> = table_style.map(|ts| {
             let kind = match (title_suppressed, header_suppressed, ri) {
                 (false, _, 0) => 0,
                 (false, false, 1) => 1,
@@ -1706,20 +1754,32 @@ pub fn tessellate_table(
                 _ => &ts.data_row_style,
             }
         });
+        let row_cell = row_cells[ri];
+        let row_style: Option<&codec::objects::RowCellStyle> =
+            row_projections[ri].as_ref().or(legacy_row_style);
+        // The cell style's margins, where it has its own.
+        let cell_margins = row_cell.and_then(|cell| cell.cell_style.margins());
+        let h_margin = cell_margins.map_or(h_margin, |(h, _)| h as f32 * anno_scale);
+        let v_margin = cell_margins.map_or(v_margin, |(_, v)| v as f32 * anno_scale);
 
         for (ci, cell) in row.cells.iter().enumerate() {
             let Some((_, _, row_end, column_end)) = merged_owner_and_span(tab, ri, ci) else {
                 continue;
             };
-            let row_style = table_style
-                .map(|ts| {
-                    match cell_role_kind(tab, title_suppressed, header_suppressed, ri, ci) {
-                        0 => &ts.title_row_style,
-                        1 => &ts.header_row_style,
-                        _ => &ts.data_row_style,
-                    }
-                })
-                .or(row_style);
+            // A cell's own cell style id, else its column's (a column's
+            // wins over its row's), names the cell style it draws with.
+            let cell_projection = table_style.and_then(|ts| {
+                let id = if cell.style_id != 0 {
+                    cell.style_id
+                } else {
+                    tab.columns.get(ci).map_or(0, |column| column.style_id)
+                };
+                (id != 0)
+                    .then(|| ts.cell_style_by_id(id))
+                    .flatten()
+                    .map(|named| named.cell_style.to_row_style())
+            });
+            let row_style = cell_projection.as_ref().or(row_style);
             let frames = break_frames_for_row(
                 tab,
                 document,
@@ -1774,7 +1834,26 @@ pub fn tessellate_table(
 
                 // ── Borders (per edge: cell override → row style → default) ───
                 // (top, right, bottom, left)
-                let edge = |which: u8| -> (bool, [f32; 4], f32, Option<codec::Handle>) {
+                // A row edge shared with a row of the same cell style is
+                // its inside line; a column edge inside the table likewise.
+                let same_above =
+                    ri > 0 && row_cells[ri - 1].map(|c| c.id) == row_cell.map(|c| c.id);
+                let same_below = row_end + 1 < tab.rows.len()
+                    && row_cells[row_end + 1].map(|c| c.id) == row_cell.map(|c| c.id);
+                let grid_edge = |which: u8| -> i32 {
+                    match which {
+                        0 if same_above => 2,
+                        0 => 1,
+                        2 if same_below => 2,
+                        2 => 4,
+                        1 if column_end + 1 < column_count => 16,
+                        1 => 32,
+                        _ if ci > 0 => 16,
+                        _ => 8,
+                    }
+                };
+                // (visible, colour, weight, double spacing, linetype).
+                let edge = |which: u8| -> (bool, [f32; 4], f32, f32, u64) {
                     let edge_flag = match which {
                         0 => codec::entities::table::CellEdgeFlags::TOP,
                         1 => codec::entities::table::CellEdgeFlags::RIGHT,
@@ -1796,7 +1875,37 @@ pub fn tessellate_table(
                                 resolve_col(&b.color, entity_color)
                             },
                             lw_px(&b.line_weight),
-                            b.line_type_handle,
+                            if b.border_type == codec::entities::table::BorderType::Double {
+                                b.double_spacing as f32 * anno_scale
+                            } else {
+                                0.0
+                            },
+                            b.line_type_handle.map_or(0, |handle| handle.value()),
+                        )
+                    } else if let Some(cs) = row_cell {
+                        let mask = grid_edge(which);
+                        let data = &cs.cell_style;
+                        let grid = data.grid(mask);
+                        let double = grid.is_some_and(|g| {
+                            g.border.border_type == codec::objects::TableBorderType::Double
+                        });
+                        (
+                            !data.edge_hidden(mask),
+                            if selected {
+                                sel_col
+                            } else {
+                                grid.map_or(entity_color, |g| {
+                                    resolve_col(&g.border.color, entity_color)
+                                })
+                            },
+                            grid.map_or(line_weight_px, |g| lw_px(&g.border.line_weight)),
+                            if double {
+                                grid.map_or(0.0, |g| g.border.double_line_spacing as f32)
+                                    * anno_scale
+                            } else {
+                                0.0
+                            },
+                            grid.map_or(0, |g| g.line_type.value()),
                         )
                     } else if let Some(rs) = row_style {
                         let b = match which {
@@ -1813,23 +1922,39 @@ pub fn tessellate_table(
                                 resolve_col(&b.color, entity_color)
                             },
                             lw_px(&b.line_weight),
-                            None,
+                            0.0,
+                            0,
                         )
                     } else {
                         (
                             true,
                             if selected { sel_col } else { entity_color },
                             line_weight_px,
-                            None,
+                            0.0,
+                            0,
                         )
                     }
                 };
-                for (which, a, b) in [(0, tl, tr), (1, tr, br_), (2, bl, br_), (3, tl, bl)] {
-                    let (visible, color, weight, linetype) = edge(which);
-                    if visible {
-                        add_edge(a, b, (color, weight, linetype), &mut borders);
+                // A double edge is two lines its spacing apart, about the
+                // edge line.
+                let mut draw_edge = |a: Vec3, b: Vec3, which: u8| {
+                    let (visible, color, weight, spacing, linetype) = edge(which);
+                    if !visible {
+                        return;
                     }
-                }
+                    if spacing > 0.0 {
+                        let along = (b - a).normalize_or(h);
+                        let offset = normal.cross(along) * (spacing * 0.5);
+                        add_edge(a + offset, b + offset, color, weight, linetype, &mut borders);
+                        add_edge(a - offset, b - offset, color, weight, linetype, &mut borders);
+                    } else {
+                        add_edge(a, b, color, weight, linetype, &mut borders);
+                    }
+                };
+                draw_edge(tl, tr, 0);
+                draw_edge(tr, br_, 1);
+                draw_edge(bl, br_, 2);
+                draw_edge(tl, bl, 3);
 
                 let value_contents: Vec<_> = cell
                     .contents
@@ -1928,7 +2053,7 @@ pub fn tessellate_table(
                 let fallback_sizes: Vec<_> = value_contents
                     .iter()
                     .map(|(_, content, text)| {
-                        let height = cell_text_height(tab, row, ci, cell, content)
+                        let height = cell_text_height(tab, row, ci, cell, content, row_style.map(|s| s.text_height))
                             .map_or(fallback_text_height, |h| h as f32 * anno_scale);
                         let mut max_chars = 0usize;
                         let mut line_count = 0usize;
@@ -1958,7 +2083,7 @@ pub fn tessellate_table(
                 for (slot_index, (content_index, content, text)) in
                     value_contents.iter().enumerate()
                 {
-                    let cell_h = cell_text_height(tab, row, ci, cell, content)
+                    let cell_h = cell_text_height(tab, row, ci, cell, content, row_style.map(|s| s.text_height))
                         .or_else(|| {
                             row_style
                                 .map(|style| style.text_height)
@@ -2162,7 +2287,7 @@ pub fn tessellate_table(
                                 }
                                 if !stroke.strokes.is_empty() {
                                     let entry = borders
-                                        .entry((key4(tcol), (line_weight_px * 100.0) as u32, None))
+                                        .entry((key4(tcol), (line_weight_px * 100.0) as u32, 0))
                                         .or_insert_with(|| (tcol, line_weight_px, Vec::new()));
                                     for s in &stroke.strokes {
                                         if s.len() < 2 {
@@ -2289,17 +2414,10 @@ pub fn tessellate_table(
     for ((_, _, linetype), (color, lw, pts)) in borders {
         if !pts.is_empty() {
             let mut wire = mk(color, pts, vec![], lw);
-            // A border's own linetype (ByBlock / ByLayer draw solid here).
-            if let Some(name) = linetype
-                .and_then(|handle| document.line_types.iter().find(|lt| lt.handle == handle))
-                .map(|lt| lt.name.as_str())
-                .filter(|name| {
-                    !name.eq_ignore_ascii_case("ByBlock") && !name.eq_ignore_ascii_case("ByLayer")
-                })
-            {
+            if let Some(line_type) = line_types.iter().find(|lt| lt.handle.value() == linetype) {
                 let (length, pattern) = crate::scene::view::render::resolve_pattern(
-                    &document.line_types,
-                    name,
+                    line_types,
+                    &line_type.name,
                     document.header.linetype_scale as f32,
                 );
                 wire.pattern_length = length;

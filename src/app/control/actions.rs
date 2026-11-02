@@ -180,6 +180,7 @@ pub(super) const NAMES: &[&str] = &[
     "dialog_cancel",
     "block_def_dialog",
     "table_insert_dialog",
+    "table_style_dialog",
     "attdef_dialog",
     "field_dialog",
     "attman_dialog",
@@ -1752,6 +1753,76 @@ impl OpenCADStudio {
             // `width=…`, `lines=…`, `window=0|1`, `columns_fixed=0|1`,
             // `rows_fixed=0|1`, `preview=0|1`, `styles` (the Table Style
             // button), `ok`.
+            "table_style_dialog" => {
+                // value: "open", "select=<style>", "tab=<0-3>", "cell=<name>",
+                // "new[=<name>]", "rename=<name>", "delete", "<field>=<value>"
+                // (cell fields), "edge<0-5>.<field>=<value>", "flow=<Down|Up>",
+                // "description=<text>", "template_pick", "template_remove",
+                // "apply", "close".
+                let value = string(req, "value")?;
+                let (key, v) = value.split_once('=').unwrap_or((value, ""));
+                if key != "open" && self.active_modal != Some(crate::app::ModalKind::TableStyle) {
+                    return Err(failure("no_dialog", "The Table Style dialog is not open"));
+                }
+                let cell = |field: &'static str| Message::TableStyleCellEdit {
+                    field,
+                    value: v.to_string(),
+                };
+                match key {
+                    "open" => Message::TableStyleDialogOpen,
+                    "select" => Message::TableStyleDialogSelect(v.to_string()),
+                    "tab" => Message::TableStyleDialogTab(v.parse().unwrap_or(0)),
+                    "cell" => Message::TableStyleCellSelect(v.to_string()),
+                    "new" => {
+                        let _ = self.update(cell("name"));
+                        Message::TableStyleCellNew
+                    }
+                    "rename" => {
+                        let _ = self.update(cell("name"));
+                        Message::TableStyleCellRename
+                    }
+                    "delete" => Message::TableStyleCellDelete,
+                    "flow" => Message::TableStyleSetFlow(v.to_string()),
+                    "description" => Message::TableStyleEdit {
+                        field: "description",
+                        value: v.to_string(),
+                    },
+                    "template_pick" => Message::TableStyleTemplatePick,
+                    "template_remove" => Message::TableStyleTemplateRemove,
+                    "apply" => Message::TableStyleApply,
+                    "close" => Message::TableStyleDialogClose,
+                    "height" => cell("height"),
+                    "angle" => cell("angle"),
+                    "hmargin" => cell("hmargin"),
+                    "vmargin" => cell("vmargin"),
+                    "format" => cell("format"),
+                    "align" => cell("align"),
+                    "class" => cell("class"),
+                    "datatype" => cell("datatype"),
+                    "textstyle" => cell("textstyle"),
+                    "textcolor" => cell("textcolor"),
+                    "fillcolor" => cell("fillcolor"),
+                    "merge" => cell("merge"),
+                    edge if edge.starts_with("edge") => {
+                        let (slot, field) = edge[4..].split_once('.').unwrap_or(("", ""));
+                        let field: &'static str = match field {
+                            "visible" => "visible",
+                            "lw" => "lw",
+                            "linetype" => "linetype",
+                            "color" => "color",
+                            "double" => "double",
+                            "spacing" => "spacing",
+                            _ => return Err(failure("invalid_value", "Unknown edge field")),
+                        };
+                        Message::TableStyleEdgeEdit {
+                            edge: slot.parse().unwrap_or(0),
+                            field,
+                            value: v.to_string(),
+                        }
+                    }
+                    _ => return Err(failure("invalid_value", "Unknown Table Style field")),
+                }
+            }
             "table_insert_dialog" => {
                 use crate::ui::window::annotation_data::{TableInsertField as F, TableInsertion};
                 if self.active_modal != Some(crate::app::ModalKind::InsertTable) {
@@ -1774,6 +1845,19 @@ impl OpenCADStudio {
                     "columns_fixed" => Message::TableInsertField(F::ColumnsFixed(on)),
                     "rows_fixed" => Message::TableInsertField(F::RowsFixed(on)),
                     "preview" => Message::TableInsertField(F::Preview(on)),
+                    "first_row" => Message::TableInsertField(F::FirstRowStyle(v.to_string())),
+                    "second_row" => Message::TableInsertField(F::SecondRowStyle(v.to_string())),
+                    "other_rows" => Message::TableInsertField(F::OtherRowStyle(v.to_string())),
+                    "extra_rows" => Message::TableInsertField(F::ExtraRows(v.to_string())),
+                    "extra_columns" => Message::TableInsertField(F::ExtraColumns(v.to_string())),
+                    // "keep=<option index>:<0|1>", the -TABLE Options order.
+                    "keep" => {
+                        let (index, state) = v.split_once(':').unwrap_or((v, "1"));
+                        Message::TableInsertField(F::TemplateOption(
+                            index.parse().unwrap_or(0),
+                            state == "1",
+                        ))
+                    }
                     "styles" => Message::TableInsertManageStyles,
                     "ok" => Message::TableInsertApply,
                     _ => return Err(failure("invalid_value", "Unknown Insert Table field")),

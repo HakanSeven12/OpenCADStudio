@@ -85,6 +85,62 @@ pub fn point_cloud_tools() -> Vec<ToolDef> {
     ]
 }
 
+/// Picked table cell tools: rows, columns, merging, locking and editing.
+pub fn table_cell_tools() -> Vec<ToolDef> {
+    vec![
+        tool(
+            "_TCELLROWABOVE",
+            "Insert Row\nAbove",
+            include_bytes!("../../../assets/icons/table_row_above.svg"),
+        ),
+        tool(
+            "_TCELLROWBELOW",
+            "Insert Row\nBelow",
+            include_bytes!("../../../assets/icons/table_row_below.svg"),
+        ),
+        tool(
+            "_TCELLDELROWS",
+            "Delete\nRows",
+            include_bytes!("../../../assets/icons/table_row_delete.svg"),
+        ),
+        tool(
+            "_TCELLCOLLEFT",
+            "Insert Column\nLeft",
+            include_bytes!("../../../assets/icons/table_col_left.svg"),
+        ),
+        tool(
+            "_TCELLCOLRIGHT",
+            "Insert Column\nRight",
+            include_bytes!("../../../assets/icons/table_col_right.svg"),
+        ),
+        tool(
+            "_TCELLDELCOLS",
+            "Delete\nColumns",
+            include_bytes!("../../../assets/icons/table_col_delete.svg"),
+        ),
+        tool(
+            "_TCELLMERGE",
+            "Merge\nCells",
+            include_bytes!("../../../assets/icons/table_merge.svg"),
+        ),
+        tool(
+            "_TCELLUNMERGE",
+            "Unmerge\nCells",
+            include_bytes!("../../../assets/icons/table_unmerge.svg"),
+        ),
+        tool(
+            "_TCELLLOCK",
+            "Cell\nLocking",
+            include_bytes!("../../../assets/icons/table_cell_lock.svg"),
+        ),
+        tool(
+            "_TCELLEDIT",
+            "Edit\nText",
+            include_bytes!("../../../assets/icons/ddedit.svg"),
+        ),
+    ]
+}
+
 /// External reference tools: edit, open, clipping and the palette.
 pub fn xref_tools() -> Vec<ToolDef> {
     vec![

@@ -3665,6 +3665,36 @@ layers =
     .lock-and-fade = Kilitle ve soldur
 
 annotate =
+    .tcell-row-above =
+        Üste
+        Satır Ekle
+    .tcell-row-below =
+        Alta
+        Satır Ekle
+    .tcell-delete-rows =
+        Satırları
+        Sil
+    .tcell-col-left =
+        Sola
+        Sütun Ekle
+    .tcell-col-right =
+        Sağa
+        Sütun Ekle
+    .tcell-delete-cols =
+        Sütunları
+        Sil
+    .tcell-merge =
+        Hücreleri
+        Birleştir
+    .tcell-unmerge =
+        Birleştirmeyi
+        Kaldır
+    .tcell-lock =
+        Hücre
+        Kilidi
+    .tcell-edit =
+        Metni
+        Düzenle
     .dimoverride-invalid-override = DIMOVERRIDE: geçersiz geçersiz kılma "__ocs_fmt_0__".
     .dimoverride-no-dimensions = DIMOVERRIDE: düzenlenebilir ölçü seçilmedi.
     .dimoverride-updated = DIMOVERRIDE: __ocs_fmt_0__ ölçü güncellendi.

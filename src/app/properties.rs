@@ -2075,11 +2075,25 @@ impl OpenCADStudio {
             prop_vertex
         };
         let same_selection = cur_handles == prev_handles;
-        let prop_vertex_indicator_active = if same_selection {
+        let mut prop_vertex_indicator_active = if same_selection {
             self.tabs[i].properties.prop_vertex_indicator_active
         } else {
             false
         };
+        // Picked table cells: the panel shows the first picked cell.
+        let mut prop_vertex = prop_vertex;
+        if let (Some(cells), [handle]) =
+            (self.tabs[i].scene.table_cells, cur_handles.as_slice())
+        {
+            if let (true, Some(codec::EntityType::Table(table))) = (
+                cells.table == *handle,
+                self.tabs[i].scene.document.get_entity(*handle),
+            ) {
+                let (row, column, _, _) = cells.range();
+                prop_vertex = row * table.column_count() + column;
+                prop_vertex_indicator_active = true;
+            }
+        }
         crate::scene::view::dispatch::set_prop_current_vertex(prop_vertex);
         crate::entities::table::set_prop_current_cell(prop_vertex);
         crate::entities::table::set_prop_current_cell_active(prop_vertex_indicator_active);
@@ -3217,7 +3231,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             } else {
                 selected
             };
+            // A table whose cells are picked shows no table grips.
+            let picked_table = self.tabs[i].scene.table_cells_handle();
             for (handle, _entity) in selected {
+                if Some(handle) == picked_table {
+                    continue;
+                }
                 // entity_grips_for errs only for a missing tab/entity; inside
                 // the selection walk the entity exists, so a defensive empty
                 // keeps the cache build total.

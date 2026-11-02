@@ -3656,6 +3656,9 @@ impl OpenCADStudio {
             }
 
             Message::DynTabNext => {
+                if let Some(task) = self.table_cell_tab(true) {
+                    return task;
+                }
                 if self.command_line.has_contextual_suggestions()
                     && self.command_line.autocomplete_next()
                 {
@@ -3674,6 +3677,9 @@ impl OpenCADStudio {
             }
 
             Message::DynTabPrev => {
+                if let Some(task) = self.table_cell_tab(false) {
+                    return task;
+                }
                 if self.command_line.has_contextual_suggestions() {
                     self.command_line.autocomplete_prev();
                 }

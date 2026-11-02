@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Insert Row Below">
+  <rect x="4" y="4" width="16" height="10" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="9" x2="20" y2="9" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="4" x2="12" y2="14" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="4" y="16" width="16" height="4" rx="0.5" stroke="none" fill="#6DB7ED"/>
+</svg>

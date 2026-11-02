@@ -3365,6 +3365,193 @@ pub(crate) fn normalize_scripted_table(old: Option<&Table>, new: &mut Table) {
     }
 }
 
+/// The column label of a 0-based column: A … Z, AA, AB …
+pub fn column_label(mut column: usize) -> String {
+    let mut label = Vec::new();
+    loop {
+        label.push(b'A' + (column % 26) as u8);
+        if column < 26 {
+            break;
+        }
+        column = column / 26 - 1;
+    }
+    label.reverse();
+    String::from_utf8(label).unwrap_or_default()
+}
+
+/// A rectangular cell range, inclusive, widened to whole merged cells.
+pub fn widen_to_merged(
+    table: &Table,
+    (mut r0, mut c0, mut r1, mut c1): (usize, usize, usize, usize),
+) -> (usize, usize, usize, usize) {
+    let last_row = table.rows.len().saturating_sub(1);
+    let last_column = table.columns.len().saturating_sub(1);
+    (r0, r1) = (r0.min(last_row), r1.min(last_row));
+    (c0, c1) = (c0.min(last_column), c1.min(last_column));
+    loop {
+        let before = (r0, c0, r1, c1);
+        for row in r0..=r1.min(last_row) {
+            for column in c0..=c1.min(last_column) {
+                let Some(owner) = (0..=row)
+                    .rev()
+                    .flat_map(|r| (0..=column).rev().map(move |c| (r, c)))
+                    .find_map(|(r, c)| {
+                        merged_owner_and_span(table, r, c)
+                            .filter(|&(_, _, re, ce)| row <= re && column <= ce)
+                    })
+                else {
+                    continue;
+                };
+                r0 = r0.min(owner.0);
+                c0 = c0.min(owner.1);
+                r1 = r1.max(owner.2);
+                c1 = c1.max(owner.3);
+            }
+        }
+        if before == (r0, c0, r1, c1) {
+            return (r0, c0, r1.min(last_row), c1.min(last_column));
+        }
+    }
+}
+
+/// The row and column labels a selected table shows round its grid: a band
+/// of column letters before the first row and a band of row numbers left of
+/// the first column, sized from the smallest row text height and the table
+/// margins (band height: text height plus both vertical margins; band width:
+/// three digits plus both horizontal margins).
+pub struct TableIndicator {
+    /// Each label cell: corners and whether it is in the selected range.
+    pub boxes: Vec<([Vec3; 4], bool)>,
+    /// The label cells' edges.
+    pub lines: Vec<[Vec3; 2]>,
+    /// Label text and its centre.
+    pub labels: Vec<(String, Vec3)>,
+    pub text_height: f32,
+    pub style: ResolvedTextStyle,
+    /// Text rotation (the table's horizontal direction).
+    pub rotation: f32,
+    /// The selected range's outline (corners in order).
+    pub outline: Option<[Vec3; 4]>,
+}
+
+pub fn table_indicator(
+    tab: &Table,
+    document: &codec::Document,
+    range: Option<(usize, usize, usize, usize)>,
+) -> Option<TableIndicator> {
+    if tab.rows.is_empty() || tab.columns.is_empty() {
+        return None;
+    }
+    let table_style: Option<&codec::objects::TableStyle> = tab.table_style_handle.and_then(|h| {
+        match document.objects.get(&h)? {
+            codec::objects::ObjectType::TableStyle(ts) => Some(ts),
+            _ => None,
+        }
+    });
+    let (h, down) = table_axes(tab);
+    let flow = if resolved_flow_up(tab, table_style) { -down } else { down };
+    let (col_offsets, row_offsets) = table_offsets(tab, 1.0);
+    let (hm, vm) = resolved_table_margins(tab, table_style);
+    let title_suppressed = resolved_title_suppressed(tab, table_style);
+    let header_suppressed = resolved_header_suppressed(tab, table_style);
+    use codec::entities::table::CellStylePropertyFlags as P;
+    let mut text_height = f64::MAX;
+    let mut style_handle = None;
+    for (ri, row) in tab.rows.iter().enumerate() {
+        let legacy = table_style.map(|ts| match (title_suppressed, header_suppressed, ri) {
+            (false, _, 0) => &ts.title_row_style,
+            (false, false, 1) | (true, false, 0) => &ts.header_row_style,
+            _ => &ts.data_row_style,
+        });
+        let height = row
+            .cells
+            .first()
+            .and_then(|cell| style_for_property(tab, row, 0, cell, P::TEXT_HEIGHT))
+            .map(|style| style.text_height)
+            .filter(|h| *h > 1e-9)
+            .or_else(|| legacy.map(|style| style.text_height));
+        if let Some(height) = height.filter(|h| *h > 1e-9) {
+            text_height = text_height.min(height);
+        }
+        style_handle = row
+            .cells
+            .first()
+            .and_then(|cell| cell_text_style(document, tab, row, 0, cell, None))
+            .or_else(|| legacy.and_then(|style| style.text_style_handle))
+            .or(style_handle);
+    }
+    if !text_height.is_finite() || text_height == f64::MAX {
+        text_height = 0.18;
+    }
+    let style_name = style_handle
+        .and_then(|handle| document.text_styles.iter().find(|s| s.handle == handle))
+        .map_or_else(|| "Standard".to_string(), |s| s.name.clone());
+    let style = crate::entities::text_support::resolve_text_style(&style_name, document);
+    let text_h = text_height as f32;
+    let digits = layout_mtext(&MTextRenderOpts {
+        columns: Default::default(),
+        value: "000",
+        insertion: [0.0; 3],
+        height: text_h,
+        rect_w: 0.0,
+        rotation: 0.0,
+        style: &style,
+        attach_h_anchor: 0.0,
+        v_anchor: MTextVAnchor::Middle,
+        line_spacing_factor: 1.0,
+        exact_line_spacing: false,
+        rectangle_height: 0.0,
+        vertical_text: false,
+        want_glyph_boxes: false,
+    })
+    .line_widths
+    .first()
+    .copied()
+    .unwrap_or(text_h * 3.0);
+    let band_h = text_h + 2.0 * vm as f32;
+    let band_w = digits + 2.0 * hm as f32;
+    let origin = v3(&tab.insertion_point);
+    let at = |x: f32, y: f32| origin + h * x + flow * y;
+    let quad = |x0: f32, y0: f32, x1: f32, y1: f32| [at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1)];
+    let range = range.map(|r| widen_to_merged(tab, r));
+    let in_range = |index: usize, row: bool| {
+        range.is_some_and(|(r0, c0, r1, c1)| {
+            if row { (r0..=r1).contains(&index) } else { (c0..=c1).contains(&index) }
+        })
+    };
+    let width = *col_offsets.last()?;
+    let height = *row_offsets.last()?;
+    let mut indicator = TableIndicator {
+        boxes: vec![(quad(-band_w, -band_h, 0.0, 0.0), false)],
+        lines: Vec::new(),
+        labels: Vec::new(),
+        text_height: text_h,
+        style,
+        rotation: h.y.atan2(h.x),
+        outline: None,
+    };
+    for (ci, pair) in col_offsets.windows(2).enumerate() {
+        indicator.boxes.push((quad(pair[0], -band_h, pair[1], 0.0), in_range(ci, false)));
+        indicator.labels.push((column_label(ci), at((pair[0] + pair[1]) * 0.5, -band_h * 0.5)));
+    }
+    for (ri, pair) in row_offsets.windows(2).enumerate() {
+        indicator.boxes.push((quad(-band_w, pair[0], 0.0, pair[1]), in_range(ri, true)));
+        indicator.labels.push(((ri + 1).to_string(), at(-band_w * 0.5, (pair[0] + pair[1]) * 0.5)));
+    }
+    for x in std::iter::once(-band_w).chain(col_offsets.iter().copied()) {
+        indicator.lines.push([at(x, -band_h), at(x, 0.0)]);
+    }
+    for y in std::iter::once(-band_h).chain(row_offsets.iter().copied()) {
+        indicator.lines.push([at(-band_w, y), at(0.0, y)]);
+    }
+    indicator.lines.push([at(-band_w, -band_h), at(width, -band_h)]);
+    indicator.lines.push([at(-band_w, -band_h), at(-band_w, height)]);
+    indicator.outline = range.map(|(r0, c0, r1, c1)| {
+        quad(col_offsets[c0], row_offsets[r0], col_offsets[c1 + 1], row_offsets[r1 + 1])
+    });
+    Some(indicator)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

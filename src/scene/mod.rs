@@ -87,6 +87,7 @@ mod project;
 pub mod reference_only;
 mod scene_markers;
 mod selection;
+pub use selection::TableCellSelection;
 pub use selection::SELECT_SIMILAR_DEFAULT;
 pub mod viewport_dimension_pick;
 pub mod viewport_ref;
@@ -2508,6 +2509,9 @@ pub struct Scene {
     /// The parametric-constraint glyph currently selected in the viewport.
     /// Entity selection changes clear it so the two selections stay exclusive.
     pub selected_constraint: Option<crate::scene::parametric_constraints::ConstraintId>,
+    /// Cells picked inside a table (the table itself is then in `selected`
+    /// but draws neither its highlight nor its grips).
+    pub table_cells: Option<crate::scene::TableCellSelection>,
     /// Session-only ISOLATEOBJECTS / HIDEOBJECTS state. Never written to DWG/DXF.
     pub object_isolation: ObjectIsolationState,
     /// Session-only LAYWALK per-space visible-layer sets. In-memory only;
@@ -3226,6 +3230,7 @@ impl Scene {
             sub_segments: HashMap::default(),
             selected_order: Vec::new(),
             selected_constraint: None,
+            table_cells: None,
             object_isolation: ObjectIsolationState::default(),
             layer_walk: LayerWalkState::default(),
             reference_only: Default::default(),

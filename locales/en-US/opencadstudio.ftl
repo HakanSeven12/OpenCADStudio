@@ -3686,6 +3686,36 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: style '__ocs_fmt_1__' not found.
 
 annotate =
+    .tcell-row-above =
+        Insert Row
+        Above
+    .tcell-row-below =
+        Insert Row
+        Below
+    .tcell-delete-rows =
+        Delete
+        Rows
+    .tcell-col-left =
+        Insert Column
+        Left
+    .tcell-col-right =
+        Insert Column
+        Right
+    .tcell-delete-cols =
+        Delete
+        Columns
+    .tcell-merge =
+        Merge
+        Cells
+    .tcell-unmerge =
+        Unmerge
+        Cells
+    .tcell-lock =
+        Cell
+        Locking
+    .tcell-edit =
+        Edit
+        Text
     .dimoverride-invalid-override = DIMOVERRIDE: invalid override "__ocs_fmt_0__".
     .dimoverride-no-dimensions = DIMOVERRIDE: no editable dimensions were selected.
     .dimoverride-updated = DIMOVERRIDE: updated __ocs_fmt_0__ dimension(s).

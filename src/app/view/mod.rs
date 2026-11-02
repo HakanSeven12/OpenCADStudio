@@ -2471,6 +2471,8 @@ bg={bg_ms:.1}ms n={view_count}"
             // are ever needed together.
             let selection_tools = if tab.is_start {
                 None
+            } else if tab.scene.table_cells_handle().is_some() {
+                crate::ui::side_toolbar::view(&crate::ui::ribbon::table_cell_tools())
             } else if self.ribbon.xref_context() {
                 crate::ui::side_toolbar::view(&crate::ui::ribbon::xref_tools())
             } else if let Some(shown) = self.ribbon.point_cloud_context() {

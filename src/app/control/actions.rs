@@ -160,6 +160,7 @@ pub(super) const NAMES: &[&str] = &[
     "dim_inspect_dialog",
     "hyperlink_dialog",
     "spell_dialog",
+    "table_cell_tab",
     "pdf_shx_settings",
     "pdf_layer_toggle",
     "pc_manager_toggle",
@@ -1393,6 +1394,11 @@ impl OpenCADStudio {
         }
         let msg = match name {
             "close_modal" => Message::CloseModal,
+            // Tab / Shift+Tab in a table cell editor: value "next" or "prev".
+            "table_cell_tab" => match req["value"].as_str() {
+                Some("prev") => Message::DynTabPrev,
+                _ => Message::DynTabNext,
+            },
             // The recovery prompt's Recover button; `close_modal` declines.
             "recovery_accept" => Message::RecoveryAttempt,
             // The conversion-loss warning's choices: save with the losses it

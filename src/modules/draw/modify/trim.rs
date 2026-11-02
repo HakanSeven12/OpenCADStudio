@@ -467,9 +467,27 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
     // nearest boundary — has to keep whatever it comes back with, since the
     // whole point is how far away the crossing is.
     let bounded = matches!(target.extent(), KernelExtent::Bounded);
-    let mut ts: Vec<f64> = geos
+    // In imported CAD drawings several LINE entities can coincide exactly.
+    // Intersecting every duplicate has no geometric benefit, and repeated
+    // intersection allocations become especially costly during TRIM hover.
+    // Exclude the picked entity before deduplicating: a coincident *other*
+    // entity must still count as a valid cutting boundary.
+    let mut seen_lines = std::collections::HashSet::new();
+    let candidates: Vec<&Geo> = geos
         .iter()
         .filter(|geo| geo_handle(geo) != handle)
+        .filter(|geo| match geo {
+            Geo::Line { p1, p2, .. } => {
+                let a = (p1[0].to_bits(), p1[1].to_bits());
+                let b = (p2[0].to_bits(), p2[1].to_bits());
+                seen_lines.insert(if a <= b { (a, b) } else { (b, a) })
+            }
+            _ => true,
+        })
+        .collect();
+    let mut ts: Vec<f64> = candidates
+        .iter()
+        .copied()
         .filter_map(geo_to_curve)
         .flat_map(|boundary| {
             kernel_intersect(target, &boundary, tolerance)
@@ -491,7 +509,7 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
     const ENDPOINT_TOLERANCE: f64 = CUT_TOLERANCE;
     let mut contacts = Vec::new();
 
-    for geo in geos.iter().filter(|g| geo_handle(g) != handle) {
+    for &geo in &candidates {
         // 1. Boundary endpoints touching target
         for pt in geo.endpoints() {
             let t = target.parameter_at(pt);
@@ -3418,20 +3436,67 @@ fn build_fence_geos(fence: &[[f64; 2]]) -> Vec<Geo> {
         .collect()
 }
 
+/// Conservative bounding rectangle for the entire fence/window.  A missing
+/// or invalid bound falls back to the old all-entities path (never drop edits).
+fn trim_selection_bounds(
+    fence: &[[f64; 2]],
+    window: Option<CrossingWindow>,
+) -> Option<[f64; 4]> {
+    if let Some(w) = window {
+        let aabb = [w.min[0], w.min[1], w.max[0], w.max[1]];
+        return aabb.iter().all(|v| v.is_finite()).then_some(aabb);
+    }
+    let first = fence.first()?;
+    if !first.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let mut aabb = [first[0], first[1], first[0], first[1]];
+    for point in fence.iter().skip(1) {
+        if !point.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        aabb[0] = aabb[0].min(point[0]);
+        aabb[1] = aabb[1].min(point[1]);
+        aabb[2] = aabb[2].max(point[0]);
+        aabb[3] = aabb[3].max(point[1]);
+    }
+    Some(aabb)
+}
+
+fn trim_fence_candidates(
+    index: &ModifyEntityIndex,
+    fence: &[[f64; 2]],
+    window: Option<CrossingWindow>,
+) -> Option<rustc_hash::FxHashSet<Handle>> {
+    trim_selection_bounds(fence, window).map(|aabb| index.handles_in_aabb(aabb))
+}
+
 /// Live result preview of a fence / crossing pass: each affected original in
 /// gray, its surviving pieces in cyan — the same convention as the pick hover.
 fn fence_result_preview(
     all: &[EntityType],
+    index: &ModifyEntityIndex,
     geos: &[Geo],
     fence: &[[f64; 2]],
     window: Option<CrossingWindow>,
     extend: bool,
     implied_edges: bool,
 ) -> Vec<WireModel> {
+    let candidates = trim_fence_candidates(index, fence, window);
+    // Heavy overlapping geometry must not be re-trimmed on every mouse
+    // movement.  Display the fence alone in crowded areas; the final
+    // operation below remains exact and processes every matching object.
+    const MAX_LIVE_FENCE_TARGETS: usize = 64;
+    if candidates.as_ref().is_some_and(|hits| hits.len() > MAX_LIVE_FENCE_TARGETS) {
+        return Vec::new();
+    }
     let fence_geos = build_fence_geos(fence);
     let mut out = Vec::new();
     for e in all {
-        if e.common().handle.is_null() {
+        let handle = e.common().handle;
+        if handle.is_null()
+            || candidates.as_ref().is_some_and(|hits| !hits.contains(&handle))
+        {
             continue;
         }
         if let Some(pieces) = fence_pieces(e, geos, &fence_geos, window, extend) {
@@ -3465,16 +3530,20 @@ fn fence_result_preview(
 
 fn fence_pass(
     all: &[EntityType],
+    index: &ModifyEntityIndex,
     geos: &[Geo],
     fence: &[[f64; 2]],
     window: Option<CrossingWindow>,
     extend: bool,
 ) -> Vec<(Handle, Vec<EntityType>)> {
+    let candidates = trim_fence_candidates(index, fence, window);
     let fence_geos: Vec<Geo> = build_fence_geos(fence);
     let mut out = Vec::new();
     for e in all {
         let h = e.common().handle;
-        if h.is_null() {
+        if h.is_null()
+            || candidates.as_ref().is_some_and(|hits| !hits.contains(&h))
+        {
             continue;
         }
         if let Some(pieces) = fence_pieces(e, geos, &fence_geos, window, extend) {
@@ -3999,7 +4068,7 @@ impl TrimCommand {
     }
 
     fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
-        let replacements = fence_pass(&self.all_entities, &self.geos, fence, window, self.shift);
+        let replacements = fence_pass(&self.all_entities, &self.entity_index, &self.geos, fence, window, self.shift);
         if replacements.is_empty() {
             return CmdResult::NeedPoint;
         }
@@ -4658,6 +4727,7 @@ impl CadCommand for TrimCommand {
                 fpts.push([pt.x, pt.y]);
                 out.extend(fence_result_preview(
                     &self.all_entities,
+                    &self.entity_index,
                     &self.geos,
                     &fpts,
                     None,
@@ -4677,6 +4747,7 @@ impl CadCommand for TrimCommand {
                 };
                 out.extend(fence_result_preview(
                     &self.all_entities,
+                    &self.entity_index,
                     &self.geos,
                     &rect,
                     Some(window),
@@ -4821,7 +4892,7 @@ impl ExtendCommand {
 
     fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
         // EXTEND's fence extends; Shift held at Enter swaps it to trim.
-        let replacements = fence_pass(&self.all_entities, &self.geos, fence, window, !self.shift);
+        let replacements = fence_pass(&self.all_entities, &self.entity_index, &self.geos, fence, window, !self.shift);
         if replacements.is_empty() {
             return CmdResult::NeedPoint;
         }
@@ -5309,6 +5380,7 @@ impl CadCommand for ExtendCommand {
                 fpts.push([pt.x, pt.y]);
                 out.extend(fence_result_preview(
                     &self.all_entities,
+                    &self.entity_index,
                     &self.geos,
                     &fpts,
                     None,
@@ -5328,6 +5400,7 @@ impl CadCommand for ExtendCommand {
                 };
                 out.extend(fence_result_preview(
                     &self.all_entities,
+                    &self.entity_index,
                     &self.geos,
                     &rect,
                     Some(window),
@@ -6326,7 +6399,7 @@ mod tests {
                 targets[0].clone(),
             ],
         ] {
-            let replacements = fence_pass(&all, &build_geos(&all), &fence, None, false);
+            let replacements = fence_pass(&all, &ModifyEntityIndex::build(&all), &build_geos(&all), &fence, None, false);
             let mut actual: Vec<_> = replacements
                 .into_iter()
                 .map(|(handle, pieces)| {
@@ -6377,7 +6450,7 @@ mod tests {
             min: [1.0, 1.0],
             max: [9.0, 9.0],
         };
-        let replacements = fence_pass(&all, &build_geos(&all), &[], Some(window), false);
+        let replacements = fence_pass(&all, &ModifyEntityIndex::build(&all), &build_geos(&all), &[], Some(window), false);
         assert!(replacements
             .iter()
             .any(|(handle, _)| *handle == Handle::new(1)));
@@ -6482,7 +6555,7 @@ mod tests {
         ];
         let geos = build_geos(&all);
         let fence = [[8.0, 10.0], [10.0, 8.0]];
-        let repl = fence_pass(&all, &geos, &fence, None, false);
+        let repl = fence_pass(&all, &ModifyEntityIndex::build(&all), &geos, &fence, None, false);
         assert_eq!(
             repl.len(),
             1,

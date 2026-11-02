@@ -34,8 +34,10 @@ impl OpenCADStudio {
     pub(in crate::app) fn block_editor_session_variable(&self, name: &str, i: usize) -> Option<u8> {
         let tab = self.tabs.get(i)?;
         Some(match name {
+            // The palettes are a pane, so the answer is the pane the screen
+            // renders: this one reads the active tab, not `i`.
             "APSTATE" => {
-                u8::from(self.show_authoring_palettes && tab.active_block_edit_session().is_some())
+                u8::from(self.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes))
             }
             "BLOCKEDITOR" => u8::from(tab.active_block_edit_session().is_some()),
             "BLOCKTESTWINDOW" => u8::from(tab.block_test.is_some()),
@@ -224,6 +226,54 @@ mod tests {
             app.block_editor_session_variable("APSTATE", source),
             Some(0)
         );
+    }
+
+    #[test]
+    fn the_authoring_palette_variable_reports_the_pane_the_screen_shows() {
+        use crate::ui::dock::PanelId;
+        let mut bare = OpenCADStudio::new_for_test();
+        bare.show_authoring_palettes = true;
+        assert!(
+            bare.tabs[bare.active_tab].is_start,
+            "the app opens on the start screen, which carries no panels"
+        );
+        assert_eq!(
+            bare.block_editor_session_variable("APSTATE", bare.active_tab),
+            Some(0),
+            "so a palette the toggle wants is still not on the screen"
+        );
+        let (mut app, _, reference) = fixture();
+        let i = app.active_tab;
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
+        let _ = app.dispatch_command("BAUTHORPALETTE");
+        assert!(app.dock_panel_visible(PanelId::AuthoringPalettes));
+        assert_eq!(
+            app.block_editor_session_variable("APSTATE", i),
+            Some(1),
+            "the palettes are open, so the variable says so"
+        );
+        let _ = app.update(Message::ToggleCleanScreen);
+        assert!(app.clean_screen, "the viewport is cleared of panels");
+        assert!(
+            app.show_authoring_palettes,
+            "while the flag the toggle command sets stays set"
+        );
+        assert!(
+            !app.dock_panel_visible(PanelId::AuthoringPalettes),
+            "and none of the palettes is rendered"
+        );
+        assert_eq!(
+            app.block_editor_session_variable("APSTATE", i),
+            Some(0),
+            "so the variable cannot report palettes the screen is not showing"
+        );
+        let _ = app.update(Message::ToggleCleanScreen);
+        assert_eq!(
+            app.block_editor_session_variable("APSTATE", i),
+            Some(1),
+            "and it comes back with the pane"
+        );
+        let _ = app.dispatch_command("BEDIT_DISCARD");
     }
 
     #[test]

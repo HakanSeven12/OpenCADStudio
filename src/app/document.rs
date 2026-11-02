@@ -176,6 +176,9 @@ pub(super) struct DocumentTab {
     pub(super) tab_title: String,
     pub(super) properties: PropertiesPanel,
     pub(super) layers: LayerPanel,
+    /// Which Parameters Manager cell the panel has open, and what has been typed
+    /// into it.
+    pub(super) parameters_panel: crate::ui::window::parameters_manager::Panel,
     /// The LAYWALK pallet session, while a walk is open on this drawing.
     pub(super) layer_walk: Option<crate::ui::window::layer_walk::LayerWalkSession>,
     /// Rows cached for that session, so the pallet and the pure logic agree on
@@ -786,6 +789,7 @@ impl DocumentTab {
             tab_title: format!("Drawing{}", n),
             properties: PropertiesPanel::empty(),
             layers: LayerPanel::default(),
+            parameters_panel: Default::default(),
             active_cmd: None,
             pending_parameter_set_follow_up: None,
             pending_xy_box_set: None,

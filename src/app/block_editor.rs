@@ -811,6 +811,8 @@ impl OpenCADStudio {
             self.tabs[i].scene.object_isolation = history.return_isolation;
         }
         self.tabs[i].active_block_edit = None;
+        // An open Parameters Manager cell belongs to the session that ended.
+        self.tabs[i].parameters_panel = Default::default();
         self.restore_after_block_edit_close(
             i,
             None,

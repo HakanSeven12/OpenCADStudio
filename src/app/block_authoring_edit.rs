@@ -469,6 +469,133 @@ impl OpenCADStudio {
         self.commit_authoring_metadata("authoring_name")
     }
 
+    /// A manager edit changes the definition's own parameter objects, and the
+    /// references of that definition are rebuilt from the new values, so the
+    /// staged document goes back into the live one the way an action commit does.
+    fn apply_parameters_manager_edit(&mut self, i: usize, staged: codec::Document) {
+        self.push_undo_snapshot(i, "Parameters Manager edit");
+        self.apply_action_document(i, staged);
+        self.tabs[i].dirty = true;
+        self.tabs[i].scene.bump_geometry();
+        self.finish_pending_history(i);
+        self.refresh_properties();
+    }
+
+    /// Apply the number typed in the open cell. `keep_open` is set when the cell
+    /// itself asked for the commit (Enter); a commit driven by the field moving
+    /// away holds a refused number back, because there is no field left to fix it
+    /// in.
+    pub(super) fn commit_parameters_manager(&mut self, keep_open: bool) -> Task<Message> {
+        use crate::scene::block_parameters_manager as manager;
+        let i = self.active_tab;
+        let Some(edit) = self.tabs[i].parameters_panel.editing.clone() else {
+            return Task::none();
+        };
+        let typed = self.tabs[i].parameters_panel.edit_buf.clone();
+        // Opening a cell and leaving it alone writes nothing; an empty field is
+        // the sign that nothing was typed into it.
+        if typed.trim().is_empty() {
+            self.tabs[i].parameters_panel = Default::default();
+            return Task::none();
+        }
+        let Some(definition) = self.tabs[i]
+            .active_block_edit_session()
+            .map(|session| session.br_handle)
+        else {
+            self.tabs[i].parameters_panel = Default::default();
+            self.command_line
+                .push_error(crate::t!("The Block Editor session is no longer active.").as_ref());
+            return Task::none();
+        };
+        if edit.definition != definition {
+            self.tabs[i].parameters_panel = Default::default();
+            self.command_line
+                .push_error(crate::t!("The Block Editor session is no longer active.").as_ref());
+            return Task::none();
+        }
+        // The cells print in the drawing's units, so a typed value is read back
+        // in them too.
+        crate::entities::common::set_unit_context(
+            crate::entities::common::UnitContext::from_header(&self.tabs[i].scene.document.header),
+        );
+        let Some(value) = crate::app::block_parameter_properties::parse_value(&typed) else {
+            // A refusal from the cell itself leaves the field open with what was
+            // typed in it, so the number only has to be corrected, not retyped.
+            // A refusal after the field has gone away has nothing left to correct.
+            if !keep_open {
+                self.tabs[i].parameters_panel = Default::default();
+            }
+            self.command_line
+                .push_error(crate::t!("Specify a finite numeric parameter value.").as_ref());
+            return Task::none();
+        };
+        let mut staged = self.tabs[i].scene.document.clone();
+        let written = manager::write_number(
+            &mut staged,
+            definition,
+            edit.parameter,
+            edit.component,
+            value,
+        );
+        match written {
+            Ok(true) => {
+                let staged = match crate::scene::block_actions::instance::refresh_after_edit(
+                    &staged,
+                    &self.tabs[i].scene.document,
+                    definition,
+                ) {
+                    Ok(staged) => staged,
+                    Err(error) => {
+                        if !keep_open {
+                            self.tabs[i].parameters_panel = Default::default();
+                        }
+                        self.command_line.push_error(crate::t!(error).as_ref());
+                        return Task::none();
+                    }
+                };
+                self.apply_parameters_manager_edit(i, staged);
+                self.tabs[i].parameters_panel.editing = None;
+                self.tabs[i].parameters_panel.edit_buf.clear();
+            }
+            Ok(false) => {
+                self.tabs[i].parameters_panel.editing = None;
+                self.tabs[i].parameters_panel.edit_buf.clear();
+            }
+            Err(error) => {
+                if !keep_open {
+                    self.tabs[i].parameters_panel = Default::default();
+                }
+                self.command_line.push_error(crate::t!(error).as_ref());
+            }
+        }
+        Task::none()
+    }
+
+    pub(super) fn toggle_parameters_manager_show(&mut self, name: &str) -> Task<Message> {
+        use crate::scene::block_parameters_manager as manager;
+        let i = self.active_tab;
+        let Some(definition) = self.tabs[i]
+            .active_block_edit_session()
+            .map(|session| session.br_handle)
+        else {
+            self.command_line
+                .push_error(crate::t!("The Block Editor session is no longer active.").as_ref());
+            return Task::none();
+        };
+        let mut staged = self.tabs[i].scene.document.clone();
+        let Some((parameter, _)) = manager::target_of(&staged, definition, name) else {
+            self.command_line
+                .push_error(crate::t!(manager::NO_FLAG).as_ref());
+            return Task::none();
+        };
+        match manager::toggle_show(&mut staged, definition, parameter) {
+            Ok(true) => self.apply_parameters_manager_edit(i, staged),
+            Ok(false) => {}
+            Err(error) => self.command_line.push_error(crate::t!(error).as_ref()),
+        }
+        Task::none()
+    }
+
     pub(super) fn commit_authoring_metadata(&mut self, key: &'static str) -> Task<Message> {
         use crate::scene::block_authoring::metadata;
         let i = self.active_tab;

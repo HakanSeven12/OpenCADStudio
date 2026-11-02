@@ -487,16 +487,23 @@ impl OpenCADStudio {
                 )
             }
             crate::ui::dock::PanelId::ParametersManager => {
-                let rows = tab
-                    .active_block_edit_session()
-                    .map(|session| {
+                let (definition, rows) = match tab.active_block_edit_session() {
+                    Some(session) => (
+                        session.br_handle,
                         crate::scene::block_parameters_manager::rows(
                             &tab.scene.document,
                             session.br_handle,
-                        )
-                    })
-                    .unwrap_or_default();
-                crate::ui::window::parameters_manager::view(&rows, width, chrome)
+                        ),
+                    ),
+                    None => (codec::Handle::NULL, Vec::new()),
+                };
+                crate::ui::window::parameters_manager::view(
+                    &rows,
+                    &tab.parameters_panel,
+                    definition,
+                    width,
+                    chrome,
+                )
             }
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, chrome)

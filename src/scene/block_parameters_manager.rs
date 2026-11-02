@@ -36,9 +36,22 @@ pub struct Row {
     pub expression: String,
     pub value: String,
     pub type_name: &'static str,
+    /// Whether the row's two numeric cells name a quantity the manager writes
+    /// back. A point's axes and a flip's state print without being numbers the
+    /// manager has a rule for, so their cells stay as they are printed.
+    pub numeric: bool,
     pub show: bool,
     pub order: String,
     pub description: String,
+}
+
+fn writable(parameter: &actions::Parameter, component: Component) -> bool {
+    match component {
+        Component::X | Component::Y => parameter.xy,
+        Component::Distance => parameter.linear || parameter.polar,
+        Component::Angle => parameter.polar || parameter.rotation,
+        _ => false,
+    }
 }
 
 fn parameter_type(p: &actions::Parameter) -> &'static str {
@@ -69,13 +82,21 @@ fn number(p: &actions::Parameter, component: Component) -> Result<f64, &'static 
 }
 
 fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
-    let mut rows = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
     for p in actions::all_parameters(doc, definition) {
         let Ok(fields) = properties::descriptors(doc, definition, &p) else {
             continue;
         };
         let type_name = parameter_type(&p);
         for field in fields {
+            // Rows are addressed by name, so two components printed under one
+            // label would be one cell that writes both.
+            if rows
+                .iter()
+                .any(|row| row.name.eq_ignore_ascii_case(&field.label))
+            {
+                continue;
+            }
             let number = number(&p, field.component).ok();
             let expression = number.map_or_else(String::new, properties::stored);
             let value = number.map_or_else(String::new, |value| {
@@ -87,6 +108,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
                 expression,
                 value,
                 type_name,
+                numeric: writable(&p, field.component),
                 show: field.show,
                 order: String::new(),
                 description: field.description.to_owned(),
@@ -129,6 +151,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             expression: String::new(),
             value: String::new(),
             type_name,
+            numeric: false,
             show,
             order: String::new(),
             description: String::new(),
@@ -151,6 +174,7 @@ fn attribute_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             expression: String::new(),
             value: String::new(),
             type_name: "Variable",
+            numeric: false,
             show: true,
             order: String::new(),
             description: String::new(),
@@ -164,7 +188,15 @@ pub fn rows(doc: &Document, definition: Handle) -> Vec<Row> {
         &doc.header,
     ));
     let mut rows = parameter_rows(doc, definition);
-    rows.extend(attribute_rows(doc, definition));
+    // Rows are addressed by name, so an attribute tagged like a parameter would
+    // be two rows answering to one name.
+    let mut attributes = attribute_rows(doc, definition);
+    attributes.retain(|attribute| {
+        !rows
+            .iter()
+            .any(|parameter| parameter.name.eq_ignore_ascii_case(&attribute.name))
+    });
+    rows.extend(attributes);
     rows.sort_by(|a, b| {
         (a.group.rank(), a.name.to_lowercase()).cmp(&(b.group.rank(), b.name.to_lowercase()))
     });
@@ -215,4 +247,112 @@ pub(crate) fn displayed<'a>(rows: &'a [Row], filter: &str, search: &str) -> Vec<
 
 pub fn footer(total: usize, shown: usize) -> String {
     format!("All: {shown} of {total} parameters displayed")
+}
+
+/// Where a row points: the parameter object it names, and the component whose
+/// number that row prints. A lookup or visibility row names an object but prints
+/// no number of its own, so it has no component.
+///
+/// A row is opened from this once, and the answer is then written back by handle;
+/// resolving the name again at commit would let a parameter deleted or renumbered
+/// in between take the number.
+pub fn target_of(
+    doc: &Document,
+    definition: Handle,
+    name: &str,
+) -> Option<(Handle, Option<Component>)> {
+    for parameter in actions::all_parameters(doc, definition) {
+        let Ok(fields) = properties::descriptors(doc, definition, &parameter) else {
+            continue;
+        };
+        if let Some(field) = fields
+            .into_iter()
+            .find(|field| field.label.eq_ignore_ascii_case(name))
+        {
+            return Some((parameter.handle, Some(field.component)));
+        }
+    }
+    let Ok(Some(graph)) = graph(doc, definition) else {
+        return None;
+    };
+    for (handle, object) in doc.objects.iter() {
+        let named = match object {
+            ObjectType::DynamicBlock(object) if object.owner == graph => match &object.data {
+                Data::LookupParameter(p) => Some(p.lookup_name.as_str()),
+                _ => None,
+            },
+            ObjectType::BlockVisibilityParameter(p) if p.owner == graph => Some(p.name.as_str()),
+            _ => None,
+        };
+        if named.is_some_and(|named| !named.is_empty() && named.eq_ignore_ascii_case(name)) {
+            return Some((*handle, None));
+        }
+    }
+    None
+}
+
+const NO_NUMBER: &str = "This row has no number to edit.";
+/// A row whose `Show` cell is not a parameter's own visibility flag.
+pub const NO_FLAG: &str = "This row has no visibility flag to change.";
+
+/// Write a row's number into the parameter it points at. The endpoint is where
+/// the row's own measure puts it: a distance along the parameter's direction, an
+/// angle as a bearing from the base point, an XY axis as an offset from the base.
+pub fn write_number(
+    doc: &mut Document,
+    definition: Handle,
+    parameter: Handle,
+    component: Component,
+    input: f64,
+) -> Result<bool, &'static str> {
+    use super::block_authoring::edit::{move_part, Part};
+    let authored = actions::all_parameters(doc, definition)
+        .into_iter()
+        .find(|p| p.handle == parameter)
+        .ok_or(NO_NUMBER)?;
+    let delta = authored.end - authored.base;
+    let at = match component {
+        Component::X if authored.xy => {
+            glam::DVec3::new(authored.base.x + input, authored.end.y, authored.end.z)
+        }
+        Component::Y if authored.xy => {
+            glam::DVec3::new(authored.end.x, authored.base.y + input, authored.end.z)
+        }
+        Component::Distance if authored.linear || authored.polar => {
+            if input <= 1e-9 {
+                return Err("Specify a positive parameter length.");
+            }
+            let axis = delta
+                .try_normalize()
+                .ok_or("The parameter direction is unavailable.")?;
+            authored.base + axis * input
+        }
+        Component::Angle if authored.polar || authored.rotation => {
+            let angle = input.rem_euclid(360.0).to_radians();
+            authored.base + glam::DVec3::new(angle.cos(), angle.sin(), 0.0) * delta.length()
+        }
+        _ => return Err(NO_NUMBER),
+    };
+    move_part(
+        doc,
+        definition,
+        parameter,
+        Part::End,
+        codec::types::Vector3::new(at.x, at.y, at.z),
+    )
+}
+
+/// Flip whether the parameter shows its own values, as the row's `Show` cell
+/// says. A component row shares its parameter's flag with the other rows of the
+/// same parameter, which is what one flag for one parameter means.
+pub fn toggle_show(
+    doc: &mut Document,
+    definition: Handle,
+    parameter: Handle,
+) -> Result<bool, &'static str> {
+    use super::block_authoring::metadata;
+    let visible = metadata::read(doc, definition, parameter)?
+        .visible
+        .ok_or(NO_FLAG)?;
+    metadata::set_visible(doc, definition, parameter, !visible)
 }

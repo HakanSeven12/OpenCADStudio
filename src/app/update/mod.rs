@@ -9367,6 +9367,12 @@ impl OpenCADStudio {
                         crate::ui::properties::focused_widget_task(Message::StyleRenameFocus),
                     ]);
                 }
+                if self.tabs[self.active_tab].parameters_panel.editing.is_some() {
+                    rename_blur = Task::batch([
+                        rename_blur,
+                        crate::ui::properties::focused_widget_task(Message::ParametersManagerFocus),
+                    ]);
+                }
                 if !self.dock_panel_visible(crate::ui::dock::PanelId::Properties)
                     && !self.dock_panel_visible(crate::ui::dock::PanelId::GraphicAttributes)
                 {
@@ -12317,6 +12323,82 @@ impl OpenCADStudio {
             Message::BlockVisibility(action) => self.handle_block_visibility(action),
             Message::BlockLookup(action) => self.handle_block_lookup(action),
             Message::BlockPropertiesTable(action) => self.handle_block_properties_table(action),
+            Message::ParametersManagerEdit(name, cell) => {
+                // Whichever order the click's two messages arrive in, the number
+                // typed in the cell that was open goes to the parameter it was
+                // opened on before this click moves the field somewhere else.
+                let _ = self.commit_parameters_manager(false);
+                let i = self.active_tab;
+                let Some(definition) = self
+                    .tabs[i]
+                    .active_block_edit_session()
+                    .map(|session| session.br_handle)
+                else {
+                    self.tabs[i].parameters_panel = Default::default();
+                    return Task::none();
+                };
+                let rows = crate::scene::block_parameters_manager::rows(
+                    &self.tabs[i].scene.document,
+                    definition,
+                );
+                let Some(row) = rows
+                    .iter()
+                    .find(|row| row.numeric && row.name.eq_ignore_ascii_case(&name))
+                else {
+                    // Nothing to open here, so nothing stays open: a cell left on
+                    // another row would take whatever is typed next.
+                    self.tabs[i].parameters_panel = Default::default();
+                    return Task::none();
+                };
+                let target = crate::scene::block_parameters_manager::target_of(
+                    &self.tabs[i].scene.document,
+                    definition,
+                    &row.name,
+                );
+                let Some((parameter, Some(component))) = target else {
+                    self.tabs[i].parameters_panel = Default::default();
+                    return Task::none();
+                };
+                let name = row.name.clone();
+                let panel = &mut self.tabs[i].parameters_panel;
+                panel.editing = Some(crate::ui::window::parameters_manager::Edit {
+                    definition,
+                    parameter,
+                    component,
+                    name,
+                    cell,
+                });
+                panel.edit_buf.clear();
+                iced::widget::operation::focus(
+                    crate::ui::window::parameters_manager::edit_input_id(),
+                )
+            }
+            Message::ParametersManagerInput(value) => {
+                let panel = &mut self.tabs[self.active_tab].parameters_panel;
+                if panel.editing.is_some() {
+                    panel.edit_buf = value;
+                }
+                Task::none()
+            }
+            Message::ParametersManagerCommit => self.commit_parameters_manager(true),
+            Message::ParametersManagerShow(name) => {
+                let _ = self.commit_parameters_manager(false);
+                self.toggle_parameters_manager_show(&name)
+            }
+            // A click moved focus off the open cell: keep what was typed, as
+            // Enter would. An untouched field stays open.
+            Message::ParametersManagerFocus(focused) => {
+                let commit = {
+                    let panel = &self.tabs[self.active_tab].parameters_panel;
+                    !panel.edit_buf.trim().is_empty()
+                        && focused
+                            != Some(crate::ui::window::parameters_manager::edit_input_id())
+                };
+                if commit {
+                    return self.commit_parameters_manager(false);
+                }
+                Task::none()
+            }
             Message::BlockEditPickerName(name) => {
                 if let Some(state) = self.block_edit_picker.as_mut() {
                     state.name = name.clone();

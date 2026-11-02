@@ -5972,6 +5972,19 @@ mod tests {
     }
 
     #[test]
+    fn trim_hover_spatial_index_is_lazily_cached_and_invalidated_on_rebuild() {
+        let target = xline_at(0.0, 0.0, 10.0, 0.0, 1);
+        let cutter = xline_at(5.0, -5.0, 5.0, 5.0, 2);
+        let mut command = TrimCommand::new(vec![target, cutter]);
+        assert!(command.geo_spatial.borrow().is_none());
+        let nearby = command.nearby_geos(Handle::new(1));
+        assert!(!nearby.is_empty());
+        assert!(command.geo_spatial.borrow().is_some());
+        command.rebuild_geos();
+        assert!(command.geo_spatial.borrow().is_none());
+    }
+
+    #[test]
     fn spatial_cut_index_retains_remote_unbounded_edges_but_omits_distant_lines() {
         let mut geos = vec![Geo::Line {
             handle: Handle::new(11),

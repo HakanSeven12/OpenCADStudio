@@ -5896,9 +5896,16 @@ impl OpenCADStudio {
                 height: vh,
             };
 
-            // Hover may still describe an earlier pointer position while
-            // snap is deferred. Only the snap computed for this click may
-            // supply tangent metadata or decide whether DUCS applies.
+            // Keep the visible discrete candidate only as a ranking hint for
+            // this click. The snap engine MUST rediscover it from the actual
+            // clicked geometry; we never commit a stale cached coordinate.
+            // Results on the tab are canvas-space, while the snap engine
+            // receives tile-local pixels.
+            let visible_before_click = self.tabs[i].snap_result.filter(|hit| {
+                let dx = hit.screen.x - p_full.x;
+                let dy = hit.screen.y - p_full.y;
+                dx * dx + dy * dy <= self.snapper.osnap_radius_px.powi(2)
+            });
             self.tabs[i].snap_result = None;
             let snapped;
             let tangent_obj_at_click;
@@ -6017,7 +6024,7 @@ impl OpenCADStudio {
                         gr,
                         construction_ray,
                         additional_rays.as_ref().map_or(&[], |rays| rays.as_slice()),
-                        self.tabs[i].snap_result,
+                        visible_before_click,
                     )
                 };
                 // Paper-space snapping through layout viewports. Mirrors

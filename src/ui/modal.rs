@@ -286,11 +286,11 @@ pub fn discard_guard<'a>(
                 button(iced::widget::text(crate::t!("Discard & close")).size(12))
                     .on_press(on_discard)
                     .padding([5, 14])
-                    .style(button::danger),
+                    .style(crate::ui::style::form::neutral_button),
                 button(iced::widget::text(crate::t!("Keep editing")).size(12))
                     .on_press(on_keep)
                     .padding([5, 14])
-                    .style(button::secondary),
+                    .style(crate::ui::style::form::accent_button),
             ]
             .spacing(10),
         ]

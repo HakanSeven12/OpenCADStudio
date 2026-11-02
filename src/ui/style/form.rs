@@ -70,6 +70,16 @@ where
 /// Width of the label column in a `label : control` row.
 pub const LABEL_WIDTH: f32 = 92.0;
 
+/// [`button_style`] as a plain function, for the main action.
+pub fn accent_button(theme: &Theme, status: button::Status) -> button::Style {
+    button_style(true)(theme, status)
+}
+
+/// [`button_style`] as a plain function, for every other action.
+pub fn neutral_button(theme: &Theme, status: button::Status) -> button::Style {
+    button_style(false)(theme, status)
+}
+
 /// Dialog button: accent (primary action) or neutral.
 pub fn button_style(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme: &Theme, status| {

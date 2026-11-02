@@ -2298,7 +2298,7 @@ fn unsaved_changes_dialog_window(
                     } else {
                         Message::UnsavedDialogSave
                     },
-                    button::primary
+                    crate::ui::style::form::accent_button
                 ),
                 iced::widget::Space::new().width(8),
                 dialog_button(
@@ -2312,7 +2312,7 @@ fn unsaved_changes_dialog_window(
                     } else {
                         Message::UnsavedDialogDiscard
                     },
-                    button::danger
+                    crate::ui::style::form::neutral_button
                 ),
                 iced::widget::Space::new().width(8),
                 dialog_button(
@@ -2322,7 +2322,7 @@ fn unsaved_changes_dialog_window(
                     } else {
                         Message::UnsavedDialogCancel
                     },
-                    button::secondary
+                    crate::ui::style::form::neutral_button
                 ),
             ],
         ]

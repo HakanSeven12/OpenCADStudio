@@ -619,7 +619,7 @@ impl OpenCADStudio {
         let step = (self.polar_mode && drafting).then_some(self.polar_increment_deg);
         let (_, (ucs_x, ucs_y, _)) = self.drafting_grid_basis(tab);
 
-        let mut hit = self.snapper.otrack_snap(
+        let mut hit = self.snapper.otrack_snap_stable(
             track_cursor,
             view_rot,
             eye,
@@ -630,6 +630,7 @@ impl OpenCADStudio {
             self.ortho_mode && !self.shift_down && drafting,
             ucs_x.as_dvec3(),
             ucs_y.as_dvec3(),
+            self.otrack_active,
         )?;
 
         if let Some(intersection) = intersection {

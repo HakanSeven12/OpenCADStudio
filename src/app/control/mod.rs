@@ -3642,6 +3642,136 @@ mod tests {
         assert!(app.tabs[app.active_tab].active_cmd.is_none());
     }
 
+    /// A value other than the measured one is not just recorded: the same
+    /// command that creates the constraint moves the geometry it drives.
+    #[test]
+    fn a_typed_constraint_value_moves_the_geometry_it_drives() {
+        use crate::command::CmdResult;
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
+
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 40,0"}));
+        let lines = request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let line = codec::Handle::new(
+            u64::from_str_radix(lines[0]["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+            kind: ConstraintKind::DistanceX,
+            first: ParametricRef::point(line, 0),
+            second: ParametricRef::point(line, 1),
+            first_point: glam::DVec3::ZERO,
+            second_point: glam::DVec3::new(40.0, 0.0, 0.0),
+            location: glam::DVec3::new(20.0, -10.0, 0.0),
+            axis: glam::DVec3::X,
+            direction: None,
+            name: "d1".to_string(),
+            expression: "100".to_string(),
+            renamed: false,
+            label: "Linear constraint",
+        });
+        app.drive_headless_task(task).unwrap();
+
+        let document = &app.tabs[app.active_tab].scene.document;
+        let codec::EntityType::Line(line_entity) = document.get_entity(line).unwrap() else {
+            panic!("the picked entity is the line");
+        };
+        assert!(
+            app.tabs[app.active_tab]
+                .scene
+                .parametric_constraint_set(ParametricScope::ModelSpace)
+                .is_some_and(|set| !set.dimensions.is_empty()),
+            "the constraint and its dimension were created"
+        );
+        assert!(
+            line_entity.start.x.abs() < 1e-6,
+            "the first point stays anchored: {}",
+            line_entity.start.x
+        );
+        assert!(
+            (line_entity.end.x - 100.0).abs() < 1e-6,
+            "the typed 100 replaces the measured 40 across X: {}",
+            line_entity.end.x
+        );
+        let dimension = app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .and_then(|set| set.dimensions.values().next().copied())
+            .expect("the constraint drives a dimension");
+        let codec::EntityType::Dimension(printed) = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(dimension)
+            .unwrap()
+        else {
+            panic!("the constraint's dimension is a dimension");
+        };
+        assert_eq!(
+            printed.base().user_text.as_deref(),
+            Some("d1=100"),
+            "the label carries the typed value, not the span that was drawn"
+        );
+    }
+
+    /// Editing the value afterwards drives the same geometry: the participant
+    /// the constraint holds moves to the new value in the edit's own command.
+    #[test]
+    fn editing_a_constraint_value_moves_the_geometry_it_drives() {
+        use crate::command::CmdResult;
+        use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
+
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 40,0"}));
+        let drawn = request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let line = codec::Handle::new(
+            u64::from_str_radix(drawn[0]["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+            kind: ConstraintKind::DistanceX,
+            first: ParametricRef::point(line, 0),
+            second: ParametricRef::point(line, 1),
+            first_point: glam::DVec3::ZERO,
+            second_point: glam::DVec3::new(40.0, 0.0, 0.0),
+            location: glam::DVec3::new(20.0, -10.0, 0.0),
+            axis: glam::DVec3::X,
+            direction: None,
+            name: "d1".to_string(),
+            expression: "40".to_string(),
+            renamed: false,
+            label: "Linear constraint",
+        });
+        app.drive_headless_task(task).unwrap();
+        let end_x = |app: &OpenCADStudio| {
+            let document = &app.tabs[app.active_tab].scene.document;
+            let codec::EntityType::Line(line_entity) = document.get_entity(line).unwrap() else {
+                panic!("the picked entity is the line");
+            };
+            line_entity.end.x
+        };
+        assert!(
+            (end_x(&app) - 40.0).abs() < 1e-6,
+            "the measured value leaves the line where it was drawn: {}",
+            end_x(&app)
+        );
+
+        let edit = request(&mut app, json!({"op":"run","cmd":"DCVALUE d1 100"}));
+        assert_eq!(edit["ok"], json!(true), "the value edit ran: {edit}");
+        assert!(
+            (end_x(&app) - 100.0).abs() < 1e-6,
+            "DCVALUE to 100 moved the constrained line: {}",
+            end_x(&app)
+        );
+    }
+
     /// The geometric umbrella's default follows the type used last, the way
     /// the dimensional umbrella's does, instead of a fixed `Coincident`.
     #[test]

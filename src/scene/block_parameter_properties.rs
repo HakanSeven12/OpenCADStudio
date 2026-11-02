@@ -193,9 +193,16 @@ fn display(value: f64, component: Component) -> String {
             .auprec
             .max(0)
             .min(15) as usize;
+        let scale = 10f64.powi(precision as i32);
+        // An angle the drawing's precision rounds up to a full turn reads back
+        // as zero, so the wrap follows the rounding; rounding afterwards would
+        // print the angle it started from. Angles print as plain degrees here,
+        // whatever AUNITS is set to.
+        let rounded = (value * scale).round() / scale;
         return crate::entities::common::without_negative_zero(format!(
             "{:.*}",
-            precision, value
+            precision,
+            rounded.rem_euclid(360.0)
         ));
     }
     crate::entities::common::format_length(value)

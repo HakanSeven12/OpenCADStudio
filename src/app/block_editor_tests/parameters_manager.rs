@@ -434,6 +434,22 @@ fn polar_parameter_lists_one_row_per_component() {
 }
 
 #[test]
+fn an_angle_the_drawing_rounds_to_a_full_turn_prints_zero() {
+    let rows = edited(&["BPARAMETER POLAR 0,0 10,-0.05 5,2"], &[]);
+    let angle = row(&rows, "Angle1");
+    assert!(
+        angle.expression.starts_with("359."),
+        "the angle is a hair short of a full turn: {}",
+        angle.expression
+    );
+    assert_eq!(
+        angle.value, "0",
+        "the value cell rounds it to a full turn at the drawing's angle precision \
+         and prints that as zero"
+    );
+}
+
+#[test]
 fn every_parameter_and_attribute_of_the_definition_is_listed() {
     let rows = edited(
         &[

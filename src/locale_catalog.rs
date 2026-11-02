@@ -2451,7 +2451,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Mass Properties" => Some(("properties", "mass-properties")),
         "Match" => Some(("properties", "match")),
         "Match Layer" => Some(("layers", "match-layer")),
-        "Change to Current Layer" => Some(("layers", "change-to-current-layer")),
         "Copy to Layer" => Some(("layers", "copy-to-layer")),
         "Material" => Some(("properties", "material")),
         "Material Bindings" => Some(("model", "material-bindings")),

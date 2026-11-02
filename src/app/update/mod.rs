@@ -70,6 +70,29 @@ fn perf_message_label(msg: &Message) -> &'static str {
     }
 }
 
+/// Capture only the enum variant for slow PERF "other" messages. A bounded
+/// fmt sink aborts before formatting potentially huge payloads (documents,
+/// clipboard data, etc.), so diagnostics never clone an entire message.
+fn perf_variant_name(msg: &Message) -> String {
+    struct VariantPrefix(String);
+    impl std::fmt::Write for VariantPrefix {
+        fn write_str(&mut self, part: &str) -> std::fmt::Result {
+            for character in part.chars() {
+                if matches!(character, '(' | '{') || character.is_whitespace()
+                    || self.0.len() >= 72
+                {
+                    return Err(std::fmt::Error);
+                }
+                self.0.push(character);
+            }
+            Ok(())
+        }
+    }
+    let mut prefix = VariantPrefix(String::with_capacity(32));
+    let _ = std::fmt::write(&mut prefix, format_args!("{msg:?}"));
+    prefix.0
+}
+
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_DRAW_PX;
 
 fn format_size(bytes: u64) -> String {
@@ -623,6 +646,8 @@ impl OpenCADStudio {
         self.control_observe_user_message(&msg);
         let perf_started = crate::perf::enabled().then(Instant::now);
         let perf_label = perf_message_label(&msg);
+        let perf_other_variant = (perf_started.is_some() && perf_label == "other")
+            .then(|| perf_variant_name(&msg));
         // Keep the stable tab id because dispatch may switch or close tabs.
         let perf_edit_before = perf_started.map(|started| {
             let tab = &self.tabs[self.active_tab];
@@ -917,12 +942,21 @@ impl OpenCADStudio {
             crate::perf::note_update_time(elapsed_us);
             let elapsed_ms = elapsed_us as f64 / 1000.0;
             if elapsed_ms >= 5.0 {
-                crate::perf_record!(
-                    "[perf] update {:>7.1}ms message={perf_label} dispatch={:.2}ms settle={:.2}ms",
-                    elapsed_ms,
-                    perf_dispatch_ms,
-                    (elapsed_ms - perf_dispatch_ms).max(0.0),
-                );
+                if let Some(variant) = perf_other_variant.as_deref() {
+                    crate::perf_record!(
+                        "[perf] update {:>7.1}ms message={perf_label} variant={variant} dispatch={:.2}ms settle={:.2}ms",
+                        elapsed_ms,
+                        perf_dispatch_ms,
+                        (elapsed_ms - perf_dispatch_ms).max(0.0),
+                    );
+                } else {
+                    crate::perf_record!(
+                        "[perf] update {:>7.1}ms message={perf_label} dispatch={:.2}ms settle={:.2}ms",
+                        elapsed_ms,
+                        perf_dispatch_ms,
+                        (elapsed_ms - perf_dispatch_ms).max(0.0),
+                    );
+                }
             }
         }
         #[cfg(target_arch = "wasm32")]

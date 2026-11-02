@@ -1010,7 +1010,13 @@ impl WireArena {
             .values()
             .filter(|slab| {
                 slab.inst_len > 0
-                    && !super::aabb_offscreen(slab.aabb, view_rot, eye, clip_w, clip_h)
+                    && !super::aabb_offscreen(
+                        slab.aabb.map(f64::from),
+                        view_rot,
+                        eye,
+                        clip_w,
+                        clip_h,
+                    )
             })
             .map(|slab| (slab.inst_off, slab.inst_off + slab.inst_len))
             .collect();
@@ -1140,7 +1146,8 @@ fn visible_ranges(
     let mut ranges: Vec<(u32, u32)> = slabs
         .values()
         .filter(|slab| {
-            slab.inst_len > 0 && !super::aabb_offscreen(slab.aabb, view_rot, eye, clip_w, clip_h)
+            slab.inst_len > 0
+                && !super::aabb_offscreen(slab.aabb.map(f64::from), view_rot, eye, clip_w, clip_h)
         })
         .map(|slab| (slab.inst_off, slab.inst_off + slab.inst_len))
         .collect();

@@ -3064,7 +3064,7 @@ impl OpenCADStudio {
                 // Previously the 250ms clock often started only after the
                 // stationary dwell tick, so a truly still cursor could not
                 // acquire a point without extra mouse movements.
-                if snap.is_some() && self.snapper.tracking_active() {
+                if self.snapper.tracking_active() {
                     self.snapper.update_otrack_dwell(
                         snap, &snap_candidates, view_rot, eye, bounds,
                         Instant::now(),
@@ -3171,26 +3171,12 @@ impl OpenCADStudio {
                 // the full snap pass still waits for the normal dwell tick.
                 self.refresh_active_cmd_preview(i);
             }
-            // Fast previews are not stable OTRACK observations. Start its
-            // acquisition timer only after movement settles, not while a
-            // cursor brushes a candidate or leaves an old candidate behind.
-            // Remaining within the acquisition aperture preserves the acquired
-            // latch so stationary ticks do not toggle or restart repeatedly;
-            // genuine departure resets the latch so returning can reacquire.
-            let within_aperture = self.snapper.last_snap_world.is_some_and(|target| {
-                snap.as_ref()
-                    .is_some_and(|hit| (hit.world - target).length() < 0.001)
-            });
-            if within_aperture {
-                if !self.snapper.dwell_acquired {
-                    self.snapper.last_snap_world = None;
-                    self.snapper.dwell_since = None;
-                }
-            } else {
-                self.snapper.dwell_acquired = false;
-                self.snapper.last_snap_world = None;
-                self.snapper.dwell_since = None;
-            }
+            // The fast indexed preview above now updates OTRACK's acquisition
+            // clock from real, current geometry. Do NOT erase that clock here:
+            // resetting dwell_since on every pointer movement made acquisition
+            // impossible until the user stopped and triggered extra ticks.
+            // A sampled absence / change is handled by update_otrack_dwell;
+            // unsampled frames keep the last verified observation untouched.
             // Re-arm the dwell — tick fires SNAP_DWELL_MS after the last move.
             if let Some(dwell) = self.snap_dwell.as_mut() {
                 dwell.last_move_at = Instant::now();

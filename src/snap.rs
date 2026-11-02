@@ -959,10 +959,9 @@ impl Snapper {
                     kind: TrackingKind::Generic,
                 });
             }
-            // Extension rays along the corner's own edges (world-space geometry
-            // directions — already oriented, no UCS rotation). Included in the
-            // single-ray set so pulling the cursor along a segment's extension
-            // locks to it. (#219)
+            // Tracking along the corner's own supporting lines (both
+            // outward extension and the segment interior). Directions are
+            // stored in world space and are orientation-independent here.
             if let Some(edirs) = self.tracking_dirs.get(gi) {
                 for &d in edirs {
                     rays.push(Ray {
@@ -2398,7 +2397,7 @@ impl Snapper {
             }
         }
 
-        // ── Extension — persistent rays captured at endpoint acquisition ──
+        // ── Extension — persistent full support lines captured at endpoint acquisition ──
         // The source geometry may be far outside the cursor's spatial query by
         // the time its extension is used. Keep the outward incident directions
         // captured with each tracking point instead of rescanning either the
@@ -2420,7 +2419,7 @@ impl Snapper {
                 }
             }
 
-            // Extended intersection: intersect only outward rays whose infinite
+            // Extended intersection: intersect both directions of acquired edges whose infinite
             // lines pass near the cursor. At most four acquired points × six
             // directions participate, independent of drawing density.
             let filter2 = (self.osnap_radius_px * 2.0).powi(2);
@@ -2454,7 +2453,7 @@ impl Snapper {
                     }
                     let t1 = ((b0.x - a0.x) * d2.y - (b0.y - a0.y) * d2.x) / denom;
                     let t2 = ((b0.x - a0.x) * d1.y - (b0.y - a0.y) * d1.x) / denom;
-                    if t1 < 0.05 || t2 < 0.05 {
+                    if t1.abs() < 0.05 || t2.abs() < 0.05 {
                         continue;
                     }
                     // Emit as an Intersection, not an Extension: the crossing is
@@ -4185,9 +4184,9 @@ fn extension_snap(
         return None;
     }
     let t = ((cursor_world.x - origin.x) * dir.x + (cursor_world.y - origin.y) * dir.y) / len2;
-    if t < 0.05 {
+    if t.abs() < 0.05 {
         return None;
-    } // only beyond the endpoint
+    } // Skip only the immediate endpoint itself; allow both directions
     let world_pt = glam::DVec3::new(origin.x + t * dir.x, origin.y + t * dir.y, origin.z);
     let screen_pt = world_to_screen(world_pt, view_rot, eye, bounds);
     let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
@@ -4197,7 +4196,7 @@ fn extension_snap(
     Some(world_pt)
 }
 
-/// Find acquired endpoint(s) whose outward ray contains `snapped`, returning
+/// Find acquired endpoint(s) whose full support line contains `snapped`, returning
 /// their screen positions for Extension guides. The captured ray set persists
 /// after its source geometry leaves the cursor-local spatial query.
 fn extension_bases_screen(
@@ -4224,7 +4223,7 @@ fn extension_bases_screen(
                 continue;
             }
             let t = ((snapped.x - origin.x) * dir.x + (snapped.y - origin.y) * dir.y) / len2;
-            if t < 0.05 {
+            if t.abs() < 0.05 {
                 continue;
             }
             let on = glam::DVec3::new(origin.x + t * dir.x, origin.y + t * dir.y, origin.z);

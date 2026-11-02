@@ -118,6 +118,19 @@ impl ModifyEntityIndex {
         entities.push(entity);
     }
 
+    /// Query a selection rectangle against the already-built command index.
+    /// Entities without a finite AABB remain candidates for correctness
+    /// (rays, XLINEs and other unbounded/unsupported shapes).
+    pub(super) fn handles_in_aabb(&self, aabb: [f64; 4]) -> FxHashSet<Handle> {
+        let mut handles: FxHashSet<Handle> = self
+            .tree
+            .as_ref()
+            .map(|tree| tree.query_rect(aabb).into_iter().collect())
+            .unwrap_or_default();
+        handles.extend(self.unbounded.iter().copied());
+        handles
+    }
+
     pub(super) fn nearby_handles(
         &self,
         entities: &[EntityType],

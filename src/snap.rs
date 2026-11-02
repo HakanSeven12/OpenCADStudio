@@ -4671,6 +4671,8 @@ mod ext_tests {
     fn hovering_an_acquired_point_twice_never_discards_its_tracking_source() {
         let mut snapper = Snapper::default();
         snapper.otrack_enabled = true;
+        // The view/grid spacing must not merge two real vertices 10m apart.
+        snapper.grid_spacing = 1000.0;
         let wire = WireModel {
             points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
             ..Default::default()

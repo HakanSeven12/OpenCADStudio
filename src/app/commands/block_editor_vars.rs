@@ -228,6 +228,80 @@ mod tests {
         );
     }
 
+    /// The action-bar mode is one of the block editor's own variables: the bare
+    /// form answers with the value it holds, and that value decides whether a bar
+    /// is displayed at all.
+    #[test]
+    fn the_action_bar_mode_variable_reads_back_and_gates_the_bars() {
+        let (mut app, _, reference) = fixture();
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
+        let _ = app.run_command_line("BPARAMETER LOOKUP 3,3");
+        let bounds =
+            iced::Rectangle::new(iced::Point::new(0.0, 0.0), iced::Size::new(800.0, 600.0));
+        let last = |app: &OpenCADStudio| app.command_line.history.last().unwrap().text.clone();
+        assert!(
+            !app.action_bar_layout(bounds).is_empty(),
+            "a parameter that carries a bar shows it while the mode is on"
+        );
+
+        let _ = app.dispatch_command("SETVAR BACTIONBARMODE");
+        assert!(
+            last(&app).starts_with("Enter new value for BACTIONBARMODE <"),
+            "the bare form shows the value it holds: {}",
+            last(&app)
+        );
+        assert!(
+            last(&app).contains("<1>"),
+            "and the value the variable holds at that point is one"
+        );
+
+        let _ = app.dispatch_command("SETVAR BACTIONBARMODE 0");
+        assert!(
+            last(&app).contains("BACTIONBARMODE = 0"),
+            "the write answers with the new value"
+        );
+        assert!(
+            app.action_bar_layout(bounds).is_empty(),
+            "with the mode off no bar is laid out"
+        );
+        assert_eq!(
+            app.action_bar_error(),
+            Some("Set BACTIONBARMODE to 1 to display action bars."),
+            "and the bar command says why"
+        );
+
+        let _ = app.dispatch_command("SETVAR BACTIONBARMODE");
+        assert!(
+            last(&app).contains("<0>"),
+            "the read now reports the value the write set"
+        );
+
+        let _ = app.dispatch_command("BACTIONBAR");
+        assert!(
+            app.command_line
+                .last_error
+                .as_ref()
+                .is_some_and(|error| error.contains("Set BACTIONBARMODE to 1")),
+            "the bar command refused off the command line prints that reason too"
+        );
+        assert!(
+            app.tabs[app.active_tab].active_cmd.is_none(),
+            "and the refused bar command leaves nothing running"
+        );
+
+        let _ = app.dispatch_command("SETVAR BACTIONBARMODE 1");
+        assert_eq!(
+            app.action_bar_error(),
+            None,
+            "with the mode back on the refusal is gone"
+        );
+        assert!(
+            !app.action_bar_layout(bounds).is_empty(),
+            "and the bar is laid out again"
+        );
+        let _ = app.dispatch_command("BEDIT_DISCARD");
+    }
+
     #[test]
     fn the_authoring_palette_variable_reports_the_pane_the_screen_shows() {
         use crate::ui::dock::PanelId;

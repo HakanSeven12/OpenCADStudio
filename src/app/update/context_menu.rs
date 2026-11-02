@@ -142,9 +142,12 @@ impl OpenCADStudio {
             // right-click cycle: the next right-click acts as Enter again.
             sel.input.right_click_entered = false;
         }
-        // Select Similar finishes a canvas selection, not a command prompt.
+        // The selection rows finish a canvas selection, not a command prompt.
         // An empty focused command input captures the following Ctrl+C.
-        let focus = if matches!(action, MenuAction::SelectSimilar) {
+        let focus = if matches!(
+            action,
+            MenuAction::SelectSimilar | MenuAction::InvertSelection | MenuAction::DeselectAll
+        ) {
             self.unfocus_widgets()
         } else {
             self.focus_cmd_input()

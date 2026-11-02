@@ -90,7 +90,7 @@ fn copy_events() -> [iced::Event; 2] {
     ]
 }
 
-fn check_copy_after(start: Option<Message>) {
+fn check_copy_after(start: Option<Message>, typed: &str, expected: usize) {
     let mut app = OpenCADStudio::new_for_test();
     let _ = app.automation_op(r#"{"op":"new"}"#);
     let i = app.active_tab;
@@ -111,9 +111,9 @@ fn check_copy_after(start: Option<Message>) {
     ))
     .expect("headless renderer");
     let mut cache = Cache::default();
-    let expected = if let Some(start) = start {
+    if let Some(start) = start {
         if matches!(start, Message::CommandSubmit) {
-            app.command_line.input = "SELECTSIMILAR".into();
+            app.command_line.input = typed.into();
         }
         apply_focus_task(&app, &mut renderer, &mut cache, app.focus_cmd_input());
         // Verify the harness really routes a focused field's captured event:
@@ -126,10 +126,8 @@ fn check_copy_after(start: Option<Message>) {
         assert!(app.clipboard.is_empty());
         let task = app.update(start);
         apply_focus_task(&app, &mut renderer, &mut cache, task);
-        2
-    } else {
-        1 // Baseline: the same committed selection used by a canvas pick.
-    };
+    }
+    // Baseline (no start): the same committed selection used by a canvas pick.
     assert_eq!(app.tabs[i].scene.selected.len(), expected);
     assert!(app.tabs[i].active_cmd.is_none());
     let (messages, statuses) = key_messages(&app, &mut renderer, &mut cache, &copy_events());
@@ -152,18 +150,39 @@ fn check_copy_after(start: Option<Message>) {
 
 #[test]
 fn context_menu_select_similar_copies_via_iced_keyboard() {
-    check_copy_after(Some(Message::ContextMenuPick(
-        crate::ui::popup::context_menu::MenuAction::SelectSimilar,
-    )));
+    check_copy_after(
+        Some(Message::ContextMenuPick(
+            crate::ui::popup::context_menu::MenuAction::SelectSimilar,
+        )),
+        "",
+        2,
+    );
+}
+
+#[test]
+fn context_menu_invert_selection_copies_via_iced_keyboard() {
+    // One of the two lines is selected; inverting leaves the other one.
+    check_copy_after(
+        Some(Message::ContextMenuPick(
+            crate::ui::popup::context_menu::MenuAction::InvertSelection,
+        )),
+        "",
+        1,
+    );
+}
+
+#[test]
+fn typed_select_all_copies_via_iced_keyboard() {
+    check_copy_after(Some(Message::CommandSubmit), "SELECTALL", 2);
 }
 
 #[test]
 fn typed_select_similar_copies_via_iced_keyboard() {
     // CommandSubmit is the real message published by the command text_input.
-    check_copy_after(Some(Message::CommandSubmit));
+    check_copy_after(Some(Message::CommandSubmit), "SELECTSIMILAR", 2);
 }
 
 #[test]
 fn canvas_selection_copies_via_iced_keyboard() {
-    check_copy_after(None);
+    check_copy_after(None, "", 1);
 }

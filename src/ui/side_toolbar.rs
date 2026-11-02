@@ -102,6 +102,72 @@ pub fn refedit_header(name: &str, count: usize) -> Element<'static, Message> {
     .into()
 }
 
+/// One tool's icon button with its label tip on the left.
+fn tool_button(t: &ToolDef, on: bool) -> Element<'static, Message> {
+    let btn = button(icon_el(t.icon))
+        .on_press(Message::RibbonToolClick {
+            tool_id: t.id.to_string(),
+            event: t.event.clone(),
+        })
+        .width(Length::Fixed(BTN_SIZE))
+        .height(Length::Fixed(BTN_SIZE))
+        .style(move |theme: &Theme, status| {
+            let palette = theme.palette();
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: if on {
+                    Some(Background::Color(palette.primary.weak.color))
+                } else {
+                    hovered.then_some(Background::Color(palette.background.strong.color))
+                },
+                border: Border {
+                    radius: 3.0.into(),
+                    color: palette.primary.base.color,
+                    width: if on { 1.0 } else { 0.0 },
+                },
+                text_color: palette.background.base.text,
+                ..Default::default()
+            }
+        });
+    // Label tooltip on the left so it never runs off the right edge.
+    tooltip(btn, tip_panel(t.label), tooltip::Position::Left)
+        .gap(6)
+        .into()
+}
+
+/// The tools in `groups` as a grid `per_row` buttons wide (a rule between
+/// groups), floated at the right edge like [`view`] — for tool sets too
+/// long for one column.
+pub fn view_grid(groups: &[&[ToolDef]], per_row: usize) -> Option<Element<'static, Message>> {
+    if groups.iter().all(|g| g.is_empty()) {
+        return None;
+    }
+    let mut col = column![].spacing(4).align_x(iced::Center);
+    for (index, tools) in groups.iter().filter(|g| !g.is_empty()).enumerate() {
+        if index > 0 {
+            col = col.push(
+                container(iced::widget::Space::new())
+                    .width(Length::Fixed(BTN_SIZE * per_row as f32))
+                    .height(Length::Fixed(1.0))
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(
+                            theme.palette().background.neutral.color,
+                        )),
+                        ..Default::default()
+                    }),
+            );
+        }
+        for chunk in tools.chunks(per_row.max(1)) {
+            let mut line = iced::widget::row![].spacing(4);
+            for t in chunk {
+                line = line.push(tool_button(t, false));
+            }
+            col = col.push(line);
+        }
+    }
+    Some(float_right(col))
+}
+
 /// Build the floating right-edge vertical toolbar from `tools`, vertically
 /// centred over the canvas. Returns `None` when `tools` is empty so the caller
 /// can skip pushing an overlay.
@@ -156,36 +222,15 @@ pub fn view_sections(
                     }),
             );
         }
-        let on = active(t.id);
-        let btn = button(icon_el(t.icon))
-            .on_press(Message::RibbonToolClick {
-                tool_id: t.id.to_string(),
-                event: t.event.clone(),
-            })
-            .width(Length::Fixed(BTN_SIZE))
-            .height(Length::Fixed(BTN_SIZE))
-            .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
-                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                button::Style {
-                    background: if on {
-                        Some(Background::Color(palette.primary.weak.color))
-                    } else {
-                        hovered.then_some(Background::Color(palette.background.strong.color))
-                    },
-                    border: Border {
-                        radius: 3.0.into(),
-                        color: palette.primary.base.color,
-                        width: if on { 1.0 } else { 0.0 },
-                    },
-                    text_color: palette.background.base.text,
-                    ..Default::default()
-                }
-            });
-        // Label tooltip on the left so it never runs off the right edge.
-        col = col.push(tooltip(btn, tip_panel(t.label), tooltip::Position::Left).gap(6));
+        col = col.push(tool_button(t, active(t.id)));
     }
 
+    Some(float_right(col))
+}
+
+/// The tool panel pinned to the canvas's right edge, centred below the view
+/// cube's corner.
+fn float_right(col: iced::widget::Column<'static, Message>) -> Element<'static, Message> {
     let panel = container(col).padding(4).style(|theme: &Theme| {
         let palette = theme.palette();
         container::Style {
@@ -201,17 +246,15 @@ pub fn view_sections(
 
     // Fill the canvas, pin the panel to the right edge and centre it
     // vertically — no manual size/position math needed.
-    Some(
-        container(iced::widget::opaque(panel))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Right)
-            .align_y(iced::Center)
-            .padding(iced::Padding {
-                right: EDGE_MARGIN,
-                top: TOP_RESERVE,
-                ..iced::Padding::ZERO
-            })
-            .into(),
-    )
+    container(iced::widget::opaque(panel))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Right)
+        .align_y(iced::Center)
+        .padding(iced::Padding {
+            right: EDGE_MARGIN,
+            top: TOP_RESERVE,
+            ..iced::Padding::ZERO
+        })
+        .into()
 }

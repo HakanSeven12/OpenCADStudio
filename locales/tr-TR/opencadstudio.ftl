@@ -1567,11 +1567,11 @@ common =
     .current-cell = { common.cell } · { common.current }
     .row = Satır
     .column = Sütun
-    .cell-style = { common.cell }: { properties.style }
-    .cell-type = { common.cell }: { common.type }
+    .cell-style = Hücre stili
+    .cell-type = Hücre türü
     .content-color = { common.content }: { common.color }
     .data-format = { common.data } · { common.format }
-    .background-fill = { properties.background } · { properties.fill }
+    .background-fill = Arka plan dolgusu
     .left-margin = { common.margin } · { common.left }
     .top-margin = { common.margin } · { common.top }
     .right-margin = { common.margin } · { common.right }
@@ -3741,6 +3741,48 @@ annotate =
     .tcell-edit =
         Metni
         Düzenle
+    .tcell-match =
+        Hücreyi
+        Eşle
+    .tcell-borders =
+        Hücre
+        Kenarlıkları
+    .tcell-format =
+        Veri
+        Biçimi
+    .tcell-block =
+        Blok
+        Ekle
+    .tcell-field =
+        Alan
+        Ekle
+    .tcell-contents =
+        Hücre İçeriğini
+        Yönet
+    .tcell-link =
+        Hücreyi
+        Bağla
+    .tcell-download =
+        Kaynaktan
+        İndir
+    .tcell-row-style = Satır stili
+    .tcell-column-style = Sütun stili
+    .tcell-width = Hücre genişliği
+    .tcell-height = Hücre yüksekliği
+    .tcell-border-color = Kenarlık rengi
+    .tcell-border-lineweight = Kenarlık çizgi kalınlığı
+    .tcell-border-linetype = Kenarlık çizgi tipi
+    .tcell-locking = Hücre kilidi
+    .tcell-data-link = Hücre veri bağlantısı
+    .tcell-select-destination = Hedef hücreyi seçin:
+    .tcell-select-cell = Tablo hücresini seçin:
+    .tcell-range-first = Tablo hücre aralığının ilk köşesini seçin:
+    .tcell-range-second = Tablo hücre aralığının ikinci köşesini seçin:
+    .tcell-align-prompt = Hücre hizalamasını girin [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Veri biçimini girin [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Blok adını girin veya [?]:
+    .tcell-formula-prompt = Formül girin [Sum/Average/Count/Cell/Equation]:
+    .tcell-invalid-cell = Geçersiz hücre.
     .dimoverride-invalid-override = DIMOVERRIDE: geçersiz geçersiz kılma "__ocs_fmt_0__".
     .dimoverride-no-dimensions = DIMOVERRIDE: düzenlenebilir ölçü seçilmedi.
     .dimoverride-updated = DIMOVERRIDE: __ocs_fmt_0__ ölçü güncellendi.
@@ -8070,3 +8112,37 @@ array-grips = Öğe sayısı
     .prompt-item-spacing = Öğeler arası mesafeyi belirtin:
     .prompt-item-angle = Öğeler arası açıyı belirtin:
     .prompt-radius = Yarıçapı belirtin:
+table-cells =
+    .borders-title = Hücre Kenarlıkları
+    .contents-title = Hücre İçeriği
+    .line = Çizgi
+    .lineweight = Çizgi kalınlığı
+    .linetype = Çizgi tipi
+    .color = Renk
+    .double = Çift çizgi
+    .spacing = Aralık
+    .apply-to = Uygulanacak kenarlar
+    .all = Tümü
+    .outside = Dış
+    .inside = İç
+    .none = Kenarlık yok
+    .top = Üst
+    .bottom = Alt
+    .left = Sol
+    .right = Sağ
+    .inside-horizontal = İç yatay
+    .inside-vertical = İç dikey
+    .contents = İçerik
+    .empty = Hücre boş.
+    .move-up = Yukarı taşı
+    .move-down = Aşağı taşı
+    .delete = Sil
+    .layout = Yerleşim
+    .flow = Akış
+    .stack-horizontal = Yatay yığın
+    .stack-vertical = Dikey yığın
+    .content-spacing = Aralık
+    .block-item = Blok: { $name }
+    .text-item = Metin: { $text }
+    .borders-help = Seçili hücrelerin kenarlıklarına çizgi kalınlığı, çizgi tipi ve renk verir; uygulanacak kenarları seçin.
+    .contents-help = Seçili hücrenin içeriğini sıralar, kaldırır ve yerleştirir.

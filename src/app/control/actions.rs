@@ -158,9 +158,11 @@ pub(super) const NAMES: &[&str] = &[
     "refedit_dialog",
     "pdf_password_dialog",
     "dim_inspect_dialog",
+    "table_cell_dialog",
     "hyperlink_dialog",
     "spell_dialog",
     "table_cell_tab",
+    "command_submit",
     "pdf_shx_settings",
     "pdf_layer_toggle",
     "pc_manager_toggle",
@@ -1053,8 +1055,14 @@ impl OpenCADStudio {
         if self.tabs[i].scene.document.get_entity(target).is_none() {
             return Err(("entity_absent", "No entity with that handle"));
         }
+        // Picked cells of the target table stay picked: their grips are the
+        // cell grips.
+        let cells = self.tabs[i].scene.table_cells.filter(|cells| cells.table == target);
         self.tabs[i].scene.deselect_all();
         self.tabs[i].scene.select_entity(target, false);
+        if let Some(cells) = cells {
+            self.tabs[i].scene.select_table_cells(cells);
+        }
         self.refresh_properties();
         let (world, moves_entity) = self.tabs[i]
             .selected_grip_handles
@@ -1395,6 +1403,11 @@ impl OpenCADStudio {
         let msg = match name {
             "close_modal" => Message::CloseModal,
             // Tab / Shift+Tab in a table cell editor: value "next" or "prev".
+            // Type `value` into the command line and press Enter.
+            "command_submit" => {
+                self.command_line.input = req["value"].as_str().unwrap_or("").to_string();
+                Message::CommandSubmit
+            }
             "table_cell_tab" => match req["value"].as_str() {
                 Some("prev") => Message::DynTabPrev,
                 _ => Message::DynTabNext,
@@ -2366,6 +2379,57 @@ impl OpenCADStudio {
             // "shape=round|angular|none", "label_on=0|1", "label=<text>",
             // "rate_on=0|1", "rate=<text>", "select", "remove", "ok" or
             // "cancel".
+            // The Cell Borders / Cell Contents window, one field per call:
+            // "lineweight=<name>", "linetype=<name>", "color=<name>",
+            // "double=0|1", "spacing=<n>", "edges=all|outside|inside|none|
+            // top|bottom|left|right|inside_h|inside_v", "pick=<n>", "up",
+            // "down", "delete", "layout=1|2|4", "content_spacing=<n>", "ok"
+            // or "cancel".
+            "table_cell_dialog" => {
+                use crate::ui::window::table_cell_dialog::{BorderSet as B, TableCellDialogMsg as T};
+                if !matches!(
+                    self.active_modal,
+                    Some(crate::app::ModalKind::TableCellBorders)
+                        | Some(crate::app::ModalKind::TableCellContents)
+                ) {
+                    return Err(failure("no_dialog", "No table cell window is open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let bad = || failure("invalid_value", spec);
+                if key == "cancel" {
+                    Message::CloseModal
+                } else {
+                    Message::TableCellDialog(match key {
+                        "lineweight" => T::Lineweight(value.to_string()),
+                        "linetype" => T::Linetype(value.to_string()),
+                        "color" => T::Color(value.to_string()),
+                        "double" => T::Double(value == "1"),
+                        "spacing" => T::Spacing(value.to_string()),
+                        "edges" => T::Edges(match value {
+                            "all" => B::All,
+                            "outside" => B::Outside,
+                            "inside" => B::Inside,
+                            "none" => B::None,
+                            "top" => B::Top,
+                            "bottom" => B::Bottom,
+                            "left" => B::Left,
+                            "right" => B::Right,
+                            "inside_h" => B::InsideHorizontal,
+                            "inside_v" => B::InsideVertical,
+                            _ => return Err(bad()),
+                        }),
+                        "pick" => T::Pick(value.parse().map_err(|_| bad())?),
+                        "up" => T::Up,
+                        "down" => T::Down,
+                        "delete" => T::Delete,
+                        "layout" => T::Layout(value.parse().map_err(|_| bad())?),
+                        "content_spacing" => T::ContentSpacing(value.to_string()),
+                        "ok" => T::Ok,
+                        _ => return Err(bad()),
+                    })
+                }
+            }
             "dim_inspect_dialog" => {
                 use crate::entities::dim_inspect::Shape;
                 use crate::ui::window::dim_inspect_dialog::DimInspectMsg as D;

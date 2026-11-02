@@ -1393,6 +1393,14 @@ fn draw_grip_marker(
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
+        GripShape::Diamond => canvas::Path::new(|b| {
+            let r = h * 1.25;
+            b.move_to(Point::new(sp.x, sp.y - r));
+            b.line_to(Point::new(sp.x + r, sp.y));
+            b.line_to(Point::new(sp.x, sp.y + r));
+            b.line_to(Point::new(sp.x - r, sp.y));
+            b.close();
+        }),
         GripShape::GizmoAxis(_) | GripShape::GizmoPlane(_) => return,
         GripShape::Dropdown | GripShape::DropdownAdjacent => canvas::Path::new(|b| {
             b.move_to(Point::new(sp.x - h, sp.y - h * 0.5));

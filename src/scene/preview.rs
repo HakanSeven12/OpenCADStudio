@@ -701,17 +701,19 @@ impl Scene {
             edge_wire.plot_visible = false;
             edge_wire.text_verts = Self::indicator_text(&indicator);
             wires.push(edge_wire);
-            if let Some(corners) = indicator.outline {
-                // A band along each edge of the range: about a quarter of the
-                // label text height wide, kept between 3 and 12 pixels.
-                let width = (0.28 * indicator.text_height as f64).clamp(3.0 * pixel, 12.0 * pixel)
-                    as f32;
+            for corners in &indicator.outlines {
+                // A band inside each edge of the range: a quarter of the
+                // label text height wide, never thinner than 4 pixels.
+                let width = (0.25 * indicator.text_height as f64).max(4.0 * pixel) as f32;
+                let centre = (corners[0] + corners[2]) * 0.5;
                 for k in 0..4 {
                     let (a, b) = (corners[k], corners[(k + 1) % 4]);
-                    let along = (b - a).normalize_or_zero();
-                    let side = glam::Vec3::Z.cross(along) * (width * 0.5);
-                    let reach = along * (width * 0.5);
-                    let band = [a - reach - side, b + reach - side, b + reach + side, a - reach + side];
+                    let mut inward = glam::Vec3::Z.cross((b - a).normalize_or_zero());
+                    if inward.dot(centre - a) < 0.0 {
+                        inward = -inward;
+                    }
+                    let inward = inward * width;
+                    let band = [a, b, b + inward, a + inward];
                     if let Some(model) = Self::indicator_box(&band, INDICATOR_PICKED) {
                         hatches.push(model);
                     }

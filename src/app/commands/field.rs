@@ -518,6 +518,24 @@ impl OpenCADStudio {
                 self.refresh_properties();
                 return Task::none();
             }
+            FieldTarget::TableCell(table, row, column) => {
+                self.close_active_modal();
+                self.push_undo_snapshot(i, "TABLE CELL FIELD");
+                let (code, objects) = field.expect("set above");
+                let mut child = codec::fields::NewField::new(code, &value);
+                child.objects = objects;
+                let document = &mut self.tabs[i].scene.document;
+                document.set_table_cell_field(table, row, column, "%<\\_FldIdx 0>%", vec![child]);
+                if let Some(codec::EntityType::Table(target)) = document.get_entity_mut(table) {
+                    target.block_record_handle = None;
+                }
+                self.tabs[i]
+                    .scene
+                    .bump_entities(&[(table, crate::scene::ChangeKind::Modified)]);
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+                return Task::none();
+            }
             FieldTarget::AttdefEdit => {
                 if let Some(edit) = self.attdef_edit.as_mut() {
                     edit.default = value;

@@ -2751,6 +2751,7 @@ impl OpenCADStudio {
             Message::RefEditDialog(message) => self.update_refedit_dialog(message),
             Message::PdfPassword(message) => self.update_pdf_password(message),
             Message::DimInspect(message) => self.update_dim_inspect(message),
+            Message::TableCellDialog(message) => self.update_table_cell_dialog(message),
             Message::HyperlinkDialog(message) => self.update_hyperlink_dialog(message),
             Message::Spell(message) => self.update_spell(message),
             Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),
@@ -8932,6 +8933,24 @@ impl OpenCADStudio {
             Message::PropFieldLwChanged { field, value } => {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
+                if field == "tbl_cell_border_lw" {
+                    let cells = self.picked_cell_positions(i);
+                    self.apply_property_op(i, "TABLE CELL BORDER", &handles, |app, handle| {
+                        use crate::entities::table::TableCellBordersExt;
+                        if let Some(codec::EntityType::Table(table)) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            for &(row, column) in &cells {
+                                table.edit_cell_borders(row, column, |border| {
+                                    border.line_weight = value;
+                                    codec::entities::table::BorderPropertyFlags::LINE_WEIGHT
+                                });
+                            }
+                            table.block_record_handle = None;
+                        }
+                    });
+                    return Task::none();
+                }
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                     if let Some(codec::EntityType::MultiLeader(leader)) =
                         app.tabs[i].scene.document.get_entity_mut(handle)
@@ -9601,7 +9620,7 @@ impl OpenCADStudio {
                     field.as_str(),
                     "tbl_cell_content_color" | "tbl_cell_background_color"
                 ) {
-                    let cell_index = self.tabs[i].properties.prop_vertex;
+                    let cells = self.picked_cell_positions(i);
                     if !handles.is_empty() {
                         self.apply_property_op(i, "TABLE CELL COLOR", &handles, |app, handle| {
                             let Some(codec::EntityType::Table(table)) =
@@ -9609,20 +9628,14 @@ impl OpenCADStudio {
                             else {
                                 return;
                             };
-                            let columns = table.column_count();
-                            if columns == 0 {
-                                return;
-                            }
-                            if let Some(cell) = table.cell_mut(
-                                cell_index / columns,
-                                cell_index % columns,
-                            ) {
+                            for &(row, column) in &cells {
+                            if let Some(cell) = table.cell_mut(row, column) {
                                 use codec::entities::table::CellStateFlags;
                                 if cell.state.intersects(
                                     CellStateFlags::FORMAT_LOCKED
                                         | CellStateFlags::FORMAT_READ_ONLY,
                                 ) {
-                                    return;
+                                    continue;
                                 }
                                 let style = cell.style.get_or_insert_with(Default::default);
                                 if field == "tbl_cell_content_color" {
@@ -9637,6 +9650,7 @@ impl OpenCADStudio {
                                         codec::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
                                     );
                                 }
+                            }
                             }
                             table.block_record_handle = None;
                         });

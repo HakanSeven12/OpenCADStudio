@@ -1084,3 +1084,49 @@ mod tabledit_tests {
         }
     }
 }
+
+/// Collects table cell picks for a picked-cell tool and hands them to
+/// `<name> x y z …` (a host that wants more picks starts it again).
+pub struct CellPointsCommand {
+    name: &'static str,
+    prompts: Vec<&'static str>,
+    points: Vec<DVec3>,
+}
+
+impl CellPointsCommand {
+    pub fn new(name: &'static str, prompts: Vec<&'static str>) -> Self {
+        Self {
+            name,
+            prompts,
+            points: Vec::new(),
+        }
+    }
+}
+
+impl CadCommand for CellPointsCommand {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn prompt(&self) -> String {
+        let prompt = self.prompts[self.points.len().min(self.prompts.len() - 1)];
+        t!(prompt).into_owned()
+    }
+
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        self.points.push(point);
+        if self.points.len() < self.prompts.len() {
+            return CmdResult::NeedPoint;
+        }
+        let points: Vec<String> = self
+            .points
+            .iter()
+            .map(|p| format!("{} {} {}", p.x, p.y, p.z))
+            .collect();
+        CmdResult::Dispatch(format!("{} {}", self.name, points.join(" ")))
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}

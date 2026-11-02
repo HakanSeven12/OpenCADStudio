@@ -2048,6 +2048,7 @@ impl OpenCADStudio {
             y: p_full.y - tile_b.y,
         };
         let vp_size = (tile_b.width, tile_b.height);
+        self.drag_table_cells(i, p, tile_b, &edit_cam);
 
         // ── Custom plugin-grip drag (API v11) ────────────────────────────
         // The plugin's preview is the only live feedback: no host ghost, no
@@ -4997,6 +4998,67 @@ impl OpenCADStudio {
         hit
     }
 
+    /// A press-drag that starts inside a table cell picks the cells from
+    /// there to the one under the cursor as it moves — the picked range is
+    /// the only feedback (no selection window or lasso is drawn).
+    fn drag_table_cells(
+        &mut self,
+        i: usize,
+        p: Point,
+        tile: iced::Rectangle,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+    ) {
+        if self.tabs[i].active_cmd.is_some() {
+            return;
+        }
+        let press = {
+            let sel = self.tabs[i].scene.selection.borrow();
+            (sel.input.left_down && sel.input.left_dragging)
+                .then_some(sel.input.left_press_pos)
+                .flatten()
+        };
+        let Some(press) = press else {
+            return;
+        };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: tile.width,
+            height: tile.height,
+        };
+        let press = Point::new(press.x - tile.x, press.y - tile.y);
+        let start = self.cursor_model_point(i, edit_cam, press, bounds);
+        let Some((table, anchor)) = self.tabs[i].scene.table_cell_pick(start, 0.0) else {
+            return;
+        };
+        let here = self.cursor_model_point(i, edit_cam, p, bounds);
+        let end = self.tabs[i]
+            .scene
+            .table_cell_pick(here, 0.0)
+            .filter(|(hit, _)| *hit == table)
+            .map(|(_, end)| end)
+            .or_else(|| {
+                self.tabs[i]
+                    .scene
+                    .table_cells
+                    .filter(|cells| cells.table == table)
+                    .map(|cells| cells.end)
+            })
+            .unwrap_or(anchor);
+        let cells = crate::scene::TableCellSelection { table, anchor, end };
+        {
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            sel.gesture.poly_active = false;
+            sel.gesture.poly_points.clear();
+            sel.gesture.box_anchor = None;
+            sel.gesture.box_current = None;
+        }
+        if self.tabs[i].scene.table_cells != Some(cells) {
+            self.tabs[i].scene.select_table_cells(cells);
+            self.refresh_properties();
+        }
+    }
+
     /// Once a press on a selected object has moved far enough, MOVE (COPY
     /// with Ctrl) runs on the selection from the grabbed point, so the drop
     /// gets the command's preview, snaps and ortho.
@@ -5653,6 +5715,12 @@ impl OpenCADStudio {
         self.drag_move = (self.tabs[i].active_cmd.is_none()
             && !self.shift_down
             && !self.tabs[i].scene.selected.is_empty()
+            // A press inside a table cell drags out a cell range instead.
+            && self
+                .tabs[i]
+                .scene
+                .table_cell_pick(self.tabs[i].last_cursor_world, 0.0)
+                .is_none()
             && self.selected_object_under(i, p, bounds, &edit_cam))
         .then_some((self.tabs[i].last_cursor_world, false));
         let mut sel = self.tabs[i].scene.selection.borrow_mut();

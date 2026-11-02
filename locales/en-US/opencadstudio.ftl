@@ -8166,3 +8166,6 @@ array-grips = Item count
     .prompt-item-spacing = Specify the distance between items:
     .prompt-item-angle = Specify the angle between items:
     .prompt-radius = Specify radius:
+block-chain =
+    .label = Chain actions
+    .cycle = The block action chain contains a cycle.

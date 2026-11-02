@@ -8108,3 +8108,6 @@ array-grips = 항목 수
     .prompt-item-spacing = 항목 사이 거리 지정:
     .prompt-item-angle = 항목 사이 각도 지정:
     .prompt-radius = 반지름 지정:
+block-chain =
+    .label = 작업 연계
+    .cycle = 블록 작업 연계에 순환이 있습니다.

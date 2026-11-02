@@ -33,6 +33,9 @@ pub(super) fn geometry(
                     .collect::<std::collections::BTreeSet<_>>(),
             );
         }
+        if kind == Kind::Move && chains::point_target(doc, definition, parameter_id, *handle).is_some() {
+            continue;
+        }
         if !grips.as_ref().unwrap().contains(handle) {
             return Err("This action targets another parameter or an unsupported native object.");
         }

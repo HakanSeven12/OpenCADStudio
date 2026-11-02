@@ -8097,3 +8097,6 @@ array-grips = Elemek száma
     .prompt-item-spacing = Adja meg az elemek közötti távolságot:
     .prompt-item-angle = Adja meg az elemek közötti szöget:
     .prompt-radius = Adja meg a sugarat:
+block-chain =
+    .label = Műveletek láncolása
+    .cycle = A blokk műveletlánca ciklust tartalmaz.

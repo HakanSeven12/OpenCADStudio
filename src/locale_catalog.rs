@@ -182,6 +182,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Existing" => Some(("style-manager", "existing")),
         "Imported {} style(s). Apply to keep the changes." => Some(("style-manager", "imported-styles-apply")),
         "Some imported styles reference arrow blocks, linetypes, or text styles unavailable in this drawing; defaults will be used." => Some(("style-manager", "missing-style-references")),
+        "The block action chain contains a cycle." => Some(("block-chain", "cycle")),
+        "Chain actions" => Some(("block-chain", "label")),
         "Block evaluation would generate more than 100000 array objects. Reduce the distance or increase the spacing." => Some(("block-array", "limit-error")),
         "The Lookup table is invalid." => Some(("block-lookup", "invalid-table")),
         "The selected Lookup row has an invalid parameter value." => Some(("block-lookup", "invalid-value")),

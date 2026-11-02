@@ -8116,3 +8116,6 @@ array-grips = Số mục
     .prompt-item-spacing = Chỉ định khoảng cách giữa các mục:
     .prompt-item-angle = Chỉ định góc giữa các mục:
     .prompt-radius = Chỉ định bán kính:
+block-chain =
+    .label = Hành động nối tiếp
+    .cycle = Chuỗi hành động của khối chứa vòng lặp.

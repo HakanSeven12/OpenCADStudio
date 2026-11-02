@@ -8121,3 +8121,6 @@ array-grips = Liczba elementów
     .prompt-item-spacing = Podaj odległość między elementami:
     .prompt-item-angle = Podaj kąt między elementami:
     .prompt-radius = Podaj promień:
+block-chain =
+    .label = Łańcuch działań
+    .cycle = Łańcuch działań bloku zawiera cykl.

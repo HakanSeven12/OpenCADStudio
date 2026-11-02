@@ -504,6 +504,7 @@ fn evaluate_input(
         .ok_or("The reference parameter is unavailable.")?;
     let mut evaluated = doc.clone();
     let mut frames = load_frames(doc, &mut evaluated, insert, &parameters)?;
+    let previous_frames = frames.clone();
     let mut base_changed = false;
     if let Some(requested) = requested {
         if selected.flip {
@@ -524,11 +525,13 @@ fn evaluate_input(
         input,
         &frames,
         base_changed,
+        &previous_frames,
     )? {
         return Ok(None);
     }
     let value = super::value(&evaluated, selected)?;
     let mut result = materialize(doc, insert, def, &evaluated)?;
+    save_chain_points(&mut result, &evaluated, doc, def, insert)?;
     if let Value::Point(end) = value {
         let base = frames[&parameter].base;
         save_frame(&mut result, insert, selected, ParameterFrame { base, end })?;
@@ -574,6 +577,7 @@ pub(crate) fn evaluate_test_value(
         .ok_or("The test parameter is unavailable.")?;
     let mut staged = doc.clone();
     let mut frames = load_test_frames(doc, &mut staged, insert, &parameters)?;
+    let previous_frames = frames.clone();
     let mut base_changed = false;
     let input = match input {
         Value::Frame { base, end } => {
@@ -598,10 +602,24 @@ pub(crate) fn evaluate_test_value(
         input,
         &frames,
         base_changed,
+        &previous_frames,
     )? {
         return Ok(None);
     }
     let value = super::value(&staged, selected)?;
+    let chain = super::chains::Graph::new(baseline, definition)?;
+    let points = chain
+        .points()
+        .map(|p| (p.clone(), super::current(&staged, p)))
+        .collect::<Vec<_>>();
+    for (p, end) in points {
+        save_frame(
+            &mut staged,
+            insert,
+            &p,
+            ParameterFrame { base: p.base, end },
+        )?;
+    }
     if let Value::Point(end) = value {
         save_frame(
             &mut staged,
@@ -976,13 +994,47 @@ pub(crate) fn refresh_after_edit(
             _ => None,
         })
         .collect::<Vec<_>>();
+    let has_chain = super::chains::Graph::new(before, def)?.points().next().is_some()
+        || super::chains::Graph::new(doc, def)?.points().next().is_some();
+    let previous_parameters = if has_chain { all_parameters(before, def) } else { Vec::new() };
     for insert in inserts {
         let mut evaluated = staged.clone();
         let parameters = all_parameters(&staged, def);
         let frames = load_frames(&staged, &mut evaluated, insert, &parameters)?;
-        super::rebuild_framed(&mut evaluated, &staged, def, &frames)?;
+        let previous_frames = previous_parameters
+            .iter()
+            .filter(|p| !p.flip)
+            .map(|p| frame(before, insert, p).map(|f| (p.handle, f)))
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let previous_values = previous_frames.iter().map(|(h, f)| (*h, f.end)).collect();
+        super::rebuild_framed(
+            &mut evaluated,
+            &staged,
+            def,
+            &frames,
+            has_chain.then_some(super::RebuildInputs {
+                document: before,
+                frames: &previous_frames,
+                values: &previous_values,
+                requested: &std::collections::BTreeSet::new(),
+            }),
+        )?;
         let state = super::representation::visibility_state(&staged, before, def, insert);
         staged = materialize(&staged, insert, def, &evaluated)?;
+        // Detached points also need their autonomous position republished.
+        if has_chain {
+            for p in parameters.iter().filter(|p| p.point) {
+                save_frame(
+                    &mut staged,
+                    insert,
+                    p,
+                    ParameterFrame {
+                        base: p.base,
+                        end: super::current(&evaluated, p),
+                    },
+                )?;
+            }
+        }
         if let Some(state) = state {
             super::representation::apply_visibility(&mut staged, def, insert, state)?;
         }
@@ -1014,4 +1066,26 @@ pub(crate) fn materialize(
     }
     super::representation::reconcile(&mut scene, def, &name, evaluated)?;
     Ok(scene.document)
+}
+
+fn save_chain_points(
+    doc: &mut Document,
+    evaluated: &Document,
+    baseline: &Document,
+    definition: Handle,
+    insert: Handle,
+) -> Result<(), &'static str> {
+    let graph = super::chains::Graph::new(baseline, definition)?;
+    for p in graph.points() {
+        save_frame(
+            doc,
+            insert,
+            p,
+            ParameterFrame {
+                base: p.base,
+                end: super::current(evaluated, p),
+            },
+        )?;
+    }
+    Ok(())
 }

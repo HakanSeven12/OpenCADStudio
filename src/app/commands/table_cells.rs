@@ -1221,13 +1221,16 @@ fn format_preview(
 ) -> String {
     let picture = state.picture();
     match state.kind {
-        0 => document.format_with_picture(2.103, if picture.is_empty() { "%au5" } else { &picture }),
+        0 => document.format_with_picture(
+            state.sample.unwrap_or(2.103),
+            if picture.is_empty() { "%au5" } else { &picture },
+        ),
         1 | 3 | 5 => {
-            let sample = match state.kind {
+            let sample = state.sample.unwrap_or(match state.kind {
                 1 => -1234.1,
                 3 => 845.34786,
                 _ => 12.34,
-            };
+            });
             if picture.is_empty() {
                 sample.to_string()
             } else {
@@ -1374,6 +1377,27 @@ impl OpenCADStudio {
             return;
         };
         let (r0, c0, _, _) = crate::entities::table::widen_to_merged(table, cells.range());
+        let picture = table
+            .cell(r0, c0)
+            .and_then(|cell| cell.style.as_ref())
+            .filter(|style| {
+                style
+                    .property_flags
+                    .contains(codec::entities::table::CellStylePropertyFlags::DATA_FORMAT)
+            })
+            .map(|style| style.value_format.clone())
+            .unwrap_or_default();
+        let sample = table
+            .cell(r0, c0)
+            .and_then(|cell| cell.contents.first())
+            .filter(|content| {
+                matches!(
+                    content.value.value_type,
+                    codec::entities::table::CellValueType::Long
+                        | codec::entities::table::CellValueType::Double
+                )
+            })
+            .map(|content| content.value.numeric_value);
         let category = table
             .cell(r0, c0)
             .and_then(|cell| cell.style.as_ref())
@@ -1400,8 +1424,10 @@ impl OpenCADStudio {
             separator: 0,
             axes: [true; 3],
             date: String::new(),
+            sample,
             preview: String::new(),
         };
+        state.read_picture(&picture);
         state.preview = format_preview(document, &state);
         self.table_cell_format = Some(state);
         self.active_modal = Some(crate::app::ModalKind::TableCellFormat);

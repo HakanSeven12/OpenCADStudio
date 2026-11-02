@@ -432,8 +432,68 @@ pub struct CellFormatState {
     pub separator: usize,
     pub axes: [bool; 3],
     pub date: String,
-    /// The preview of a sample value in the settings.
+    /// The picked cell's number, previewed in the settings (a sample
+    /// when it holds none), and the preview.
+    pub sample: Option<f64>,
     pub preview: String,
+}
+
+impl CellFormatState {
+    /// Reads a stored picture back into the settings.
+    pub fn read_picture(&mut self, picture: &str) {
+        let digits = |key: &str| -> Option<usize> {
+            let at = picture.find(key)? + key.len();
+            let n: String = picture[at..].chars().take_while(|c| c.is_ascii_digit()).collect();
+            n.parse().ok()
+        };
+        if let Some(n) = digits("%pr") {
+            self.precision = n + 1;
+        }
+        self.negative_parens = picture.contains("%nn1");
+        if let Some(at) = picture.find("%ps[") {
+            let inner = &picture[at + 4..];
+            if let Some(end) = inner.find(']') {
+                let (prefix, suffix) = inner[..end].split_once(',').unwrap_or((&inner[..end], ""));
+                if self.kind == 1 {
+                    self.append = prefix.is_empty() && !suffix.is_empty();
+                    self.symbol = if self.append { suffix } else { prefix }.to_string();
+                } else if self.kind == 5 {
+                    self.append = suffix == "%";
+                }
+            }
+        } else if self.kind == 5 && !picture.is_empty() {
+            self.append = false;
+        }
+        match self.kind {
+            0 => {
+                if let Some(at) = ANGLE_FORMATS
+                    .iter()
+                    .position(|(_, code)| !code.is_empty() && picture.starts_with(code))
+                {
+                    self.unit = at;
+                }
+            }
+            3 | 6 => {
+                if let Some(at) = codec::fields::FORMULA_FORMATS
+                    .iter()
+                    .position(|(_, code)| !code.is_empty() && picture.starts_with(code))
+                {
+                    self.unit = at;
+                }
+                if let Some(bits) = digits("%pt") {
+                    self.axes = [bits & 1 != 0, bits & 2 != 0, bits & 4 != 0];
+                }
+                if let Some(code) = digits("%ls") {
+                    self.separator = SEPARATORS
+                        .iter()
+                        .position(|c| *c as usize == code)
+                        .unwrap_or(0);
+                }
+            }
+            2 => self.date = picture.to_string(),
+            _ => {}
+        }
+    }
 }
 
 impl CellFormatState {

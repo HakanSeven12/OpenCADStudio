@@ -8197,3 +8197,15 @@ block-action-properties =
     .angle-offset = Hoekverschuiving (graden)
     .chain = Actieketen
     .chain-to = Koppelen aan
+
+block-parameter-properties =
+    .show-properties = Tonen in eigenschappen
+    .parameter-name = Parameternaam
+    .grip-count = Aantal grepen
+    .dependent-base = Afhankelijk basispunt
+    .offset-x = Basisverschuiving X
+    .offset-y = Basisverschuiving Y
+    .base-grip = Positie basisgreep
+    .end-grip = Positie eindgreep
+    .x-grip = Positie X-greep
+    .y-grip = Positie Y-greep

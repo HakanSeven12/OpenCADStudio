@@ -8201,3 +8201,15 @@ block-action-properties =
     .angle-offset = Przesunięcie kąta (stopnie)
     .chain = Łańcuch operacji
     .chain-to = Połącz z
+
+block-parameter-properties =
+    .show-properties = Pokaż we właściwościach
+    .parameter-name = Nazwa parametru
+    .grip-count = Liczba uchwytów
+    .dependent-base = Zależny punkt bazowy
+    .offset-x = Przesunięcie bazowe X
+    .offset-y = Przesunięcie bazowe Y
+    .base-grip = Położenie uchwytu bazowego
+    .end-grip = Położenie uchwytu końcowego
+    .x-grip = Położenie uchwytu X
+    .y-grip = Położenie uchwytu Y

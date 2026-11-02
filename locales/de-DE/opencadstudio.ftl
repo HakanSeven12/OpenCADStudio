@@ -8197,3 +8197,15 @@ block-action-properties =
     .angle-offset = Winkelversatz (Grad)
     .chain = Aktionskette
     .chain-to = Verketten mit
+
+block-parameter-properties =
+    .show-properties = In Eigenschaften anzeigen
+    .parameter-name = Parametername
+    .grip-count = Anzahl der Griffe
+    .dependent-base = Abhängiger Basispunkt
+    .offset-x = Basisversatz X
+    .offset-y = Basisversatz Y
+    .base-grip = Position des Basisgriffs
+    .end-grip = Position des Endgriffs
+    .x-grip = Position des X-Griffs
+    .y-grip = Position des Y-Griffs

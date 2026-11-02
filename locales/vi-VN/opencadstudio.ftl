@@ -8196,3 +8196,15 @@ block-action-properties =
     .angle-offset = Độ lệch góc (độ)
     .chain = Chuỗi hành động
     .chain-to = Nối với
+
+block-parameter-properties =
+    .show-properties = Hiển thị trong thuộc tính
+    .parameter-name = Tên tham số
+    .grip-count = Số điểm nắm
+    .dependent-base = Điểm gốc phụ thuộc
+    .offset-x = Độ lệch gốc X
+    .offset-y = Độ lệch gốc Y
+    .base-grip = Vị trí điểm nắm gốc
+    .end-grip = Vị trí điểm nắm cuối
+    .x-grip = Vị trí điểm nắm X
+    .y-grip = Vị trí điểm nắm Y

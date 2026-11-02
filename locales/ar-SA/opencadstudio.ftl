@@ -8202,3 +8202,15 @@ block-action-properties =
     .angle-offset = إزاحة الزاوية (درجات)
     .chain = سلسلة الإجراءات
     .chain-to = الربط بـ
+
+block-parameter-properties =
+    .show-properties = إظهار في الخصائص
+    .parameter-name = اسم المعلمة
+    .grip-count = عدد المقابض
+    .dependent-base = نقطة أساس تابعة
+    .offset-x = إزاحة الأساس X
+    .offset-y = إزاحة الأساس Y
+    .base-grip = موضع مقبض الأساس
+    .end-grip = موضع مقبض النهاية
+    .x-grip = موضع مقبض X
+    .y-grip = موضع مقبض Y

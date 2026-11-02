@@ -8199,3 +8199,15 @@ block-action-properties =
     .angle-offset = Décalage angulaire (degrés)
     .chain = Chaîne d’actions
     .chain-to = Enchaîner à
+
+block-parameter-properties =
+    .show-properties = Afficher dans les propriétés
+    .parameter-name = Nom du paramètre
+    .grip-count = Nombre de poignées
+    .dependent-base = Point de base dépendant
+    .offset-x = Décalage de base X
+    .offset-y = Décalage de base Y
+    .base-grip = Position de la poignée de base
+    .end-grip = Position de la poignée de fin
+    .x-grip = Position de la poignée X
+    .y-grip = Position de la poignée Y

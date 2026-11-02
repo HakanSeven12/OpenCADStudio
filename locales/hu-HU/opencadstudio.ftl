@@ -8177,3 +8177,15 @@ block-action-properties =
     .angle-offset = Szögeltolás (fok)
     .chain = Műveletlánc
     .chain-to = Láncolás ehhez
+
+block-parameter-properties =
+    .show-properties = Megjelenítés a tulajdonságokban
+    .parameter-name = Paraméter neve
+    .grip-count = Fogópontok száma
+    .dependent-base = Függő bázispont
+    .offset-x = Báziseltolás X
+    .offset-y = Báziseltolás Y
+    .base-grip = Bázisfogópont helye
+    .end-grip = Végfogópont helye
+    .x-grip = X fogópont helye
+    .y-grip = Y fogópont helye

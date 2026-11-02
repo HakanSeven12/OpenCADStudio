@@ -3,6 +3,16 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Show in Properties" => Some(("block-parameter-properties", "show-properties")),
+        "Parameter name" => Some(("block-parameter-properties", "parameter-name")),
+        "Number of grips" => Some(("block-parameter-properties", "grip-count")),
+        "Dependent base point" => Some(("block-parameter-properties", "dependent-base")),
+        "Base offset X" => Some(("block-parameter-properties", "offset-x")),
+        "Base offset Y" => Some(("block-parameter-properties", "offset-y")),
+        "Base grip location" => Some(("block-parameter-properties", "base-grip")),
+        "End grip location" => Some(("block-parameter-properties", "end-grip")),
+        "X grip location" => Some(("block-parameter-properties", "x-grip")),
+        "Y grip location" => Some(("block-parameter-properties", "y-grip")),
         "Action base point" => Some(("block-action-properties", "base-point")),
         "Action overrides" => Some(("block-action-properties", "overrides")),
         "Distance multiplier" => Some(("block-action-properties", "multiplier")),

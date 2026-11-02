@@ -8196,3 +8196,15 @@ block-action-properties =
     .angle-offset = Kulman siirtymä (astetta)
     .chain = Toimintoketju
     .chain-to = Ketjuta kohteeseen
+
+block-parameter-properties =
+    .show-properties = Näytä ominaisuuksissa
+    .parameter-name = Parametrin nimi
+    .grip-count = Kahvojen määrä
+    .dependent-base = Riippuvainen peruspiste
+    .offset-x = Perussiirtymä X
+    .offset-y = Perussiirtymä Y
+    .base-grip = Peruskahvan sijainti
+    .end-grip = Päätekahvan sijainti
+    .x-grip = X-kahvan sijainti
+    .y-grip = Y-kahvan sijainti

@@ -8172,3 +8172,15 @@ block-action-properties =
     .angle-offset = 角度偏移（度）
     .chain = 动作链
     .chain-to = 链接到
+
+block-parameter-properties =
+    .show-properties = 在特性中显示
+    .parameter-name = 参数名称
+    .grip-count = 夹点数量
+    .dependent-base = 从属基点
+    .offset-x = 基点偏移 X
+    .offset-y = 基点偏移 Y
+    .base-grip = 基点夹点位置
+    .end-grip = 端点夹点位置
+    .x-grip = X 夹点位置
+    .y-grip = Y 夹点位置

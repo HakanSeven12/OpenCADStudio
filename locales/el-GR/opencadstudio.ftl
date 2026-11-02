@@ -8199,3 +8199,15 @@ block-action-properties =
     .angle-offset = Μετατόπιση γωνίας (μοίρες)
     .chain = Αλυσίδα ενεργειών
     .chain-to = Σύνδεση με
+
+block-parameter-properties =
+    .show-properties = Εμφάνιση στις ιδιότητες
+    .parameter-name = Όνομα παραμέτρου
+    .grip-count = Αριθμός λαβών
+    .dependent-base = Εξαρτημένο βασικό σημείο
+    .offset-x = Μετατόπιση βάσης X
+    .offset-y = Μετατόπιση βάσης Y
+    .base-grip = Θέση βασικής λαβής
+    .end-grip = Θέση τελικής λαβής
+    .x-grip = Θέση λαβής X
+    .y-grip = Θέση λαβής Y

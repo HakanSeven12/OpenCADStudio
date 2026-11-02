@@ -8190,3 +8190,15 @@ block-action-properties =
     .angle-offset = ມຸມຊົດເຊີຍ (ອົງສາ)
     .chain = ລຳດັບການກະທຳ
     .chain-to = ເຊື່ອມຕໍ່ໄປຫາ
+
+block-parameter-properties =
+    .show-properties = ສະແດງໃນຄຸນສົມບັດ
+    .parameter-name = ຊື່ພາຣາມິເຕີ
+    .grip-count = ຈຳນວນຈຸດຈັບ
+    .dependent-base = ຈຸດຖານທີ່ຂຶ້ນກັບຈຸດອື່ນ
+    .offset-x = ໄລຍະຊົດເຊີຍຖານ X
+    .offset-y = ໄລຍະຊົດເຊີຍຖານ Y
+    .base-grip = ຕຳແໜ່ງຈຸດຈັບຖານ
+    .end-grip = ຕຳແໜ່ງຈຸດຈັບປາຍ
+    .x-grip = ຕຳແໜ່ງຈຸດຈັບ X
+    .y-grip = ຕຳແໜ່ງຈຸດຈັບ Y

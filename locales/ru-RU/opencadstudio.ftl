@@ -8203,3 +8203,15 @@ block-action-properties =
     .angle-offset = Смещение угла (градусы)
     .chain = Цепочка операций
     .chain-to = Связать с
+
+block-parameter-properties =
+    .show-properties = Показывать в свойствах
+    .parameter-name = Имя параметра
+    .grip-count = Количество ручек
+    .dependent-base = Зависимая базовая точка
+    .offset-x = Смещение базы X
+    .offset-y = Смещение базы Y
+    .base-grip = Положение базовой ручки
+    .end-grip = Положение конечной ручки
+    .x-grip = Положение ручки X
+    .y-grip = Положение ручки Y

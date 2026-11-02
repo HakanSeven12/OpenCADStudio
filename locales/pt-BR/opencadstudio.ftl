@@ -8199,3 +8199,15 @@ block-action-properties =
     .angle-offset = Deslocamento angular (graus)
     .chain = Cadeia de ações
     .chain-to = Encadear a
+
+block-parameter-properties =
+    .show-properties = Mostrar nas propriedades
+    .parameter-name = Nome do parâmetro
+    .grip-count = Número de alças
+    .dependent-base = Ponto base dependente
+    .offset-x = Deslocamento da base X
+    .offset-y = Deslocamento da base Y
+    .base-grip = Posição da alça base
+    .end-grip = Posição da alça final
+    .x-grip = Posição da alça X
+    .y-grip = Posição da alça Y

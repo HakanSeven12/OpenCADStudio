@@ -8200,3 +8200,15 @@ block-action-properties =
     .angle-offset = Angle offset (degrees)
     .chain = Action chain
     .chain-to = Chain to
+
+block-parameter-properties =
+    .show-properties = Show in Properties
+    .parameter-name = Parameter name
+    .grip-count = Number of grips
+    .dependent-base = Dependent base point
+    .offset-x = Base offset X
+    .offset-y = Base offset Y
+    .base-grip = Base grip location
+    .end-grip = End grip location
+    .x-grip = X grip location
+    .y-grip = Y grip location

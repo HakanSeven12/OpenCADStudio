@@ -8198,3 +8198,15 @@ block-action-properties =
     .angle-offset = Offset angolare (gradi)
     .chain = Catena di azioni
     .chain-to = Concatena a
+
+block-parameter-properties =
+    .show-properties = Mostra nelle proprietà
+    .parameter-name = Nome parametro
+    .grip-count = Numero di grip
+    .dependent-base = Punto base dipendente
+    .offset-x = Offset base X
+    .offset-y = Offset base Y
+    .base-grip = Posizione grip base
+    .end-grip = Posizione grip finale
+    .x-grip = Posizione grip X
+    .y-grip = Posizione grip Y

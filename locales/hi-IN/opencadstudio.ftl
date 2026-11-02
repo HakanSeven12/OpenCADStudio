@@ -8187,3 +8187,15 @@ block-action-properties =
     .angle-offset = कोण ऑफ़सेट (डिग्री)
     .chain = क्रिया श्रृंखला
     .chain-to = इससे जोड़ें
+
+block-parameter-properties =
+    .show-properties = गुणों में दिखाएँ
+    .parameter-name = पैरामीटर नाम
+    .grip-count = ग्रिप की संख्या
+    .dependent-base = आश्रित आधार बिंदु
+    .offset-x = आधार ऑफ़सेट X
+    .offset-y = आधार ऑफ़सेट Y
+    .base-grip = आधार ग्रिप स्थान
+    .end-grip = अंत ग्रिप स्थान
+    .x-grip = X ग्रिप स्थान
+    .y-grip = Y ग्रिप स्थान

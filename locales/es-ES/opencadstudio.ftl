@@ -8199,3 +8199,15 @@ block-action-properties =
     .angle-offset = Desfase angular (grados)
     .chain = Cadena de acciones
     .chain-to = Encadenar a
+
+block-parameter-properties =
+    .show-properties = Mostrar en Propiedades
+    .parameter-name = Nombre del parámetro
+    .grip-count = Número de pinzamientos
+    .dependent-base = Punto base dependiente
+    .offset-x = Desfase base X
+    .offset-y = Desfase base Y
+    .base-grip = Ubicación del pinzamiento base
+    .end-grip = Ubicación del pinzamiento final
+    .x-grip = Ubicación del pinzamiento X
+    .y-grip = Ubicación del pinzamiento Y

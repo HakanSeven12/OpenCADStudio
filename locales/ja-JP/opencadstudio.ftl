@@ -8177,3 +8177,15 @@ block-action-properties =
     .angle-offset = 角度オフセット（度）
     .chain = アクションの連鎖
     .chain-to = 連鎖先
+
+block-parameter-properties =
+    .show-properties = プロパティに表示
+    .parameter-name = パラメーター名
+    .grip-count = グリップ数
+    .dependent-base = 従属する基点
+    .offset-x = 基点オフセット X
+    .offset-y = 基点オフセット Y
+    .base-grip = 基点グリップの位置
+    .end-grip = 端点グリップの位置
+    .x-grip = X グリップの位置
+    .y-grip = Y グリップの位置

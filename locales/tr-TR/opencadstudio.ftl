@@ -8120,3 +8120,15 @@ block-action-properties =
     .angle-offset = Açı farkı (derece)
     .chain = Eylem zinciri
     .chain-to = Şuna zincirle
+
+block-parameter-properties =
+    .show-properties = Özelliklerde göster
+    .parameter-name = Parametre adı
+    .grip-count = Tutamak sayısı
+    .dependent-base = Bağımlı temel nokta
+    .offset-x = Temel ofset X
+    .offset-y = Temel ofset Y
+    .base-grip = Temel tutamak konumu
+    .end-grip = Bitiş tutamacı konumu
+    .x-grip = X tutamacı konumu
+    .y-grip = Y tutamacı konumu

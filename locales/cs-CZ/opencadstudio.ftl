@@ -8199,3 +8199,15 @@ block-action-properties =
     .angle-offset = Úhlový posun (stupně)
     .chain = Řetězec akcí
     .chain-to = Navázat na
+
+block-parameter-properties =
+    .show-properties = Zobrazit ve vlastnostech
+    .parameter-name = Název parametru
+    .grip-count = Počet uzlů
+    .dependent-base = Závislý základní bod
+    .offset-x = Posun základny X
+    .offset-y = Posun základny Y
+    .base-grip = Poloha základního uzlu
+    .end-grip = Poloha koncového uzlu
+    .x-grip = Poloha uzlu X
+    .y-grip = Poloha uzlu Y

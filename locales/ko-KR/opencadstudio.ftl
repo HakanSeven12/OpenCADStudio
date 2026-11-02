@@ -8188,3 +8188,15 @@ block-action-properties =
     .angle-offset = 각도 간격띄우기 (도)
     .chain = 동작 체인
     .chain-to = 연결 대상
+
+block-parameter-properties =
+    .show-properties = 특성에 표시
+    .parameter-name = 매개변수 이름
+    .grip-count = 그립 수
+    .dependent-base = 종속 기준점
+    .offset-x = 기준 간격띄우기 X
+    .offset-y = 기준 간격띄우기 Y
+    .base-grip = 기준 그립 위치
+    .end-grip = 끝 그립 위치
+    .x-grip = X 그립 위치
+    .y-grip = Y 그립 위치

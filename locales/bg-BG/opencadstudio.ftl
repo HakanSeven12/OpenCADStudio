@@ -8199,3 +8199,15 @@ block-action-properties =
     .angle-offset = Отместване на ъгъл (градуси)
     .chain = Верига от действия
     .chain-to = Свързване към
+
+block-parameter-properties =
+    .show-properties = Показване в свойства
+    .parameter-name = Име на параметър
+    .grip-count = Брой манипулатори
+    .dependent-base = Зависима базова точка
+    .offset-x = Отместване на базата X
+    .offset-y = Отместване на базата Y
+    .base-grip = Позиция на базов манипулатор
+    .end-grip = Позиция на краен манипулатор
+    .x-grip = Позиция на манипулатор X
+    .y-grip = Позиция на манипулатор Y

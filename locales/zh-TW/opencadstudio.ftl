@@ -8184,3 +8184,15 @@ block-action-properties =
     .angle-offset = 角度偏移（度）
     .chain = 動作鏈
     .chain-to = 串連至
+
+block-parameter-properties =
+    .show-properties = 在性質中顯示
+    .parameter-name = 參數名稱
+    .grip-count = 掣點數量
+    .dependent-base = 相依基準點
+    .offset-x = 基準偏移 X
+    .offset-y = 基準偏移 Y
+    .base-grip = 基準掣點位置
+    .end-grip = 端點掣點位置
+    .x-grip = X 掣點位置
+    .y-grip = Y 掣點位置

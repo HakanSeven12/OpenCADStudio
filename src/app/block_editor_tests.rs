@@ -3660,7 +3660,7 @@ fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
     let _ = app.dispatch_command("BPARAMETER POLAR");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:"
+        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
     );
     feed(&mut app, "L");
     assert_eq!(
@@ -3675,7 +3675,7 @@ fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
     feed(&mut app, "C");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:"
+        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
     );
     feed(&mut app, "0,0");
     feed(&mut app, "4,0");
@@ -3695,6 +3695,51 @@ fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
             vec!["Dist9".to_string(), "C".to_string()],
             vec!["Distance2".to_string(), "Angle2".to_string()],
         ]
+    );
+
+    let names = |app: &crate::app::OpenCADStudio| {
+        crate::scene::block_distance_parameter::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .map(|parameter| parameter.native.parameter.element.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&app), vec!["Polar1", "Polar2", "Polar3"]);
+
+    let _ = app.dispatch_command("BPARAMETER POLAR");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Polar4>:"
+    );
+    feed(&mut app, "P9");
+    feed(&mut app, "0,0");
+    feed(&mut app, "8,0");
+    feed(&mut app, "3,3");
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(names(&app), vec!["Polar1", "Polar2", "Polar3", "P9"]);
+    assert_eq!(
+        label_sets(&app).last().unwrap(),
+        &["Distance3".to_string(), "Angle3".to_string()]
+    );
+
+    let _ = app.dispatch_command("BPARAMETER POLAR");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Polar4>:"
+    );
+    feed(&mut app, "Polar1");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "4,4");
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(
+        names(&app),
+        vec!["Polar1", "Polar2", "Polar3", "P9", "Polar4"]
+    );
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some("Parameter names must be unique.")
     );
 }
 

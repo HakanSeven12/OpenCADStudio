@@ -180,6 +180,9 @@ impl OpenCADStudio {
             use crate::scene::block_authoring::metadata;
             let document = &mut self.tabs[i].scene.document;
             let labels = kind == crate::scene::block_distance_parameter::Kind::Polar;
+            let parameter_name = options.name.as_deref().filter(|_| labels);
+            let parameter_name = parameter_name
+                .map(|value| metadata::set_parameter_name(document, definition, parameter, value));
             let description = options.description.as_deref().map(|value| {
                 metadata::set_text(
                     document,
@@ -215,8 +218,9 @@ impl OpenCADStudio {
             let palette = options
                 .palette
                 .map(|value| metadata::set_visible(document, definition, parameter, value));
-            description
+            parameter_name
                 .into_iter()
+                .chain(description)
                 .chain(distance_label)
                 .chain(angle_label)
                 .chain(chain)
@@ -619,7 +623,13 @@ impl OpenCADStudio {
                                 &self.tabs[i].scene.document,
                                 block,
                             );
-                        command = command.with_labels(distance, angle);
+                        let name = crate::scene::block_authoring::metadata::next_parameter_name(
+                            &self.tabs[i].scene.document,
+                            block,
+                            kind.name(),
+                        )
+                        .unwrap_or_else(|_| format!("{}1", kind.name()));
+                        command = command.with_name(name).with_labels(distance, angle);
                     }
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));

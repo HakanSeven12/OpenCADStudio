@@ -11,6 +11,7 @@ use glam::DVec3;
 /// Values answered at the base-point prompt before the parameter exists.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
+    pub name: Option<String>,
     pub chain: Option<bool>,
     pub description: Option<String>,
     pub palette: Option<bool>,
@@ -20,6 +21,7 @@ pub struct Options {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Asking {
+    Name,
     Chain,
     Description,
     Palette,
@@ -46,6 +48,7 @@ pub struct DistanceParameterCommand {
     grips: Option<usize>,
     asking: Option<Asking>,
     options: Options,
+    name_default: String,
     distance_label_default: String,
     angle_label_default: String,
 }
@@ -61,9 +64,14 @@ impl DistanceParameterCommand {
             grips: None,
             asking: None,
             options: Options::default(),
+            name_default: String::new(),
             distance_label_default: String::new(),
             angle_label_default: String::new(),
         }
+    }
+    pub(crate) fn with_name(mut self, name: String) -> Self {
+        self.name_default = name;
+        self
     }
     pub(crate) fn with_labels(mut self, distance: String, angle: String) -> Self {
         self.distance_label_default = distance;
@@ -101,6 +109,14 @@ impl DistanceParameterCommand {
             }
             return CmdResult::NeedPoint;
         }
+        if asking == Asking::Name {
+            let value = text.unwrap_or("").trim();
+            if !value.is_empty() && !value.eq_ignore_ascii_case(&self.name_default) {
+                self.options.name = Some(value.to_owned());
+            }
+            self.asking = None;
+            return CmdResult::NeedPoint;
+        }
         if asking == Asking::Description {
             let value = text.unwrap_or("");
             if !value.is_empty() {
@@ -121,7 +137,9 @@ impl DistanceParameterCommand {
             match asking {
                 Asking::Chain => self.options.chain = Some(value),
                 Asking::Palette => self.options.palette = Some(value),
-                Asking::Description | Asking::DistanceLabel | Asking::AngleLabel => unreachable!(),
+                Asking::Name | Asking::Description | Asking::DistanceLabel | Asking::AngleLabel => {
+                    unreachable!()
+                }
             }
         }
         self.asking = None;
@@ -133,6 +151,7 @@ impl DistanceParameterCommand {
     /// The question the open option asks, carrying the defaults it offers.
     fn question(&self, asking: Asking) -> String {
         match asking {
+            Asking::Name => crate::tf!("Enter parameter name <{}>:", self.name_default).into_owned(),
             Asking::Chain => crate::t!(
                 "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
             )
@@ -153,6 +172,8 @@ impl DistanceParameterCommand {
             .into_owned(),
         }
     }
+    /// The measured properties that only a Polar parameter offers: its own
+    /// name and its distance and angle labels.
     fn accepts_label(&self) -> bool {
         self.kind == Kind::Polar
     }
@@ -186,7 +207,7 @@ impl CadCommand for DistanceParameterCommand {
             if self.kind == Kind::Linear {
                 "Specify start point or [Chain/Description/Palette]:"
             } else if self.accepts_label() {
-                "Specify base point or [Label/Chain/Description/Palette]:"
+                "Specify base point or [Name/Label/Chain/Description/Palette]:"
             } else {
                 "Specify base point or [Chain/Description/Palette]:"
             }
@@ -206,9 +227,9 @@ impl CadCommand for DistanceParameterCommand {
     }
     fn input_kind(&self) -> InputKind {
         match self.asking {
-            Some(Asking::Description | Asking::DistanceLabel | Asking::AngleLabel) => {
-                InputKind::FreeText
-            }
+            Some(
+                Asking::Name | Asking::Description | Asking::DistanceLabel | Asking::AngleLabel,
+            ) => InputKind::FreeText,
             Some(_) => InputKind::SingleToken,
             None => InputKind::Point,
         }
@@ -253,6 +274,7 @@ impl CadCommand for DistanceParameterCommand {
         }
         if self.base.is_none() {
             let asking = match text.trim().to_ascii_uppercase().as_str() {
+                "N" | "NAME" if self.accepts_label() => Asking::Name,
                 "C" | "CHAIN" => Asking::Chain,
                 "D" | "DESCRIPTION" => Asking::Description,
                 "P" | "PALETTE" => Asking::Palette,
@@ -264,6 +286,7 @@ impl CadCommand for DistanceParameterCommand {
                 }
             };
             match asking {
+                Asking::Name => self.options.name = None,
                 Asking::Chain => self.options.chain = None,
                 Asking::Description => self.options.description = None,
                 Asking::Palette => self.options.palette = None,
@@ -388,7 +411,7 @@ mod tests {
             ),
             (
                 Kind::Polar,
-                "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:",
+                "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:",
             ),
             (
                 Kind::XY,
@@ -404,7 +427,86 @@ mod tests {
 
     fn polar() -> DistanceParameterCommand {
         DistanceParameterCommand::new(0, Handle::new(1), Kind::Polar)
+            .with_name("Polar1".into())
             .with_labels("Distance2".into(), "Angle2".into())
+    }
+
+    #[test]
+    fn a_name_answer_asks_for_the_parameter_name() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter parameter name <Polar1>:");
+        assert_eq!(command.input_kind(), InputKind::FreeText);
+        assert!(matches!(
+            command.on_text_input("  P9  "),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        );
+        assert_eq!(command.options.name.as_deref(), Some("P9"));
+    }
+
+    #[test]
+    fn an_empty_name_answer_keeps_the_default() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("Name"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.name, None);
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("Polar1"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.name, None);
+    }
+
+    #[test]
+    fn a_name_keyword_is_refused_on_types_without_a_name_question() {
+        for kind in [Kind::Linear, Kind::XY] {
+            let mut command = DistanceParameterCommand::new(0, Handle::new(1), kind);
+            assert!(
+                matches!(
+                    command.on_text_input("N"),
+                    Some(CmdResult::ReportError(reason))
+                        if reason == "Point or option keyword required."
+                ),
+                "{}",
+                kind.name()
+            );
+        }
+    }
+
+    #[test]
+    fn the_name_travels_with_the_placement() {
+        let mut command = polar();
+        for answer in ["N", "P9"] {
+            assert!(
+                matches!(command.on_text_input(answer), Some(CmdResult::NeedPoint)),
+                "{answer}"
+            );
+        }
+        for point in [DVec3::ZERO, DVec3::new(4., 0., 0.), DVec3::new(1., 1., 0.)] {
+            assert!(matches!(
+                command.on_point(point),
+                CmdResult::NeedPoint | CmdResult::PlaceBlockDistanceParameter { .. }
+            ));
+        }
+        assert!(matches!(
+            command.finish(DVec3::new(1., 1., 0.), None),
+            CmdResult::PlaceBlockDistanceParameter { options, .. }
+                if options.name.as_deref() == Some("P9")
+        ));
     }
 
     #[test]
@@ -429,7 +531,7 @@ mod tests {
         ));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:"
+            "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
         );
         assert_eq!(command.options.distance_label.as_deref(), Some("Dist9"));
         assert_eq!(command.options.angle_label.as_deref(), Some("C"));

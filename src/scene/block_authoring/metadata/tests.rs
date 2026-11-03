@@ -200,3 +200,61 @@ fn block_parameter_metadata_rejects_collisions_foreign_objects_and_invalid_field
         Ok(false)
     );
 }
+
+fn name_of(doc: &Document, handle: Handle) -> String {
+    element_name(doc.objects.get(&handle).unwrap())
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn a_parameter_name_defaults_to_the_next_free_type_number() {
+    let (mut doc, def, handles) = fixture();
+    let polar = handles[2];
+    assert_eq!(name_of(&doc, polar), "Polar1");
+    assert_eq!(
+        next_parameter_name(&doc, def, "Polar"),
+        Ok("Polar2".to_owned())
+    );
+    assert_eq!(set_parameter_name(&mut doc, def, polar, "P9"), Ok(true));
+    assert_eq!(
+        next_parameter_name(&doc, def, "Polar"),
+        Ok("Polar1".to_owned())
+    );
+}
+
+#[test]
+fn a_parameter_name_starts_at_one_without_an_authoring_graph() {
+    let mut scene = Scene::new();
+    scene.define_block_raw("PLAIN", Vector3::ZERO, vec![]);
+    let definition = scene.document.block_records.get("PLAIN").unwrap().handle;
+    assert_eq!(
+        next_parameter_name(&scene.document, definition, "Polar"),
+        Ok("Polar1".to_owned())
+    );
+}
+
+#[test]
+fn a_parameter_name_is_trimmed_and_must_be_new() {
+    let (mut doc, def, handles) = fixture();
+    let polar = handles[2];
+    assert_eq!(set_parameter_name(&mut doc, def, polar, "  P9  "), Ok(true));
+    assert_eq!(name_of(&doc, polar), "P9");
+    assert_eq!(set_parameter_name(&mut doc, def, polar, "P9"), Ok(false));
+    assert_eq!(
+        set_parameter_name(&mut doc, def, polar, "   "),
+        Err("Parameter name cannot be empty.")
+    );
+    assert_eq!(
+        set_parameter_name(&mut doc, def, polar, "a\0b"),
+        Err("Parameter text cannot contain a null character.")
+    );
+    assert_eq!(
+        set_parameter_name(&mut doc, def, polar, "linear"),
+        Err("Parameter names must be unique.")
+    );
+    assert_eq!(
+        set_parameter_name(&mut doc, def, Handle::new(999_999), "P9"),
+        Err("The block parameter is unavailable.")
+    );
+}

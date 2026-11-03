@@ -219,6 +219,11 @@ pub(crate) fn create(
         Kind::XY => [end.x - base.x, end.y - base.y],
         _ => offsets(kind, base, end, label),
     };
+    let parameter_name = if kind == Kind::Polar {
+        super::block_authoring::metadata::next_parameter_name(document, definition, kind.name())?
+    } else {
+        kind.name().to_owned()
+    };
     let (graph, slots) = authoring::prepare(document, definition)?;
     let (class, cpp) = kind.class();
     let (grip_class, grip_cpp) = match kind {
@@ -244,7 +249,7 @@ pub(crate) fn create(
     };
     let native = BlockTwoPointParameter {
         parameter: BlockParameter {
-            element: element(0, kind.name()),
+            element: element(0, &parameter_name),
             show_properties: true,
             chain_actions: false,
         },

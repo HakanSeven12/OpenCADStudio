@@ -1175,3 +1175,1011 @@ fn text_audit_system_spellcheck_flags_misspelled_words() {
         );
     }
 }
+
+/// The protocol envelope a bridge supplies, for the operations the
+/// automation surface does not carry (a grip drag lives in the control
+/// surface only).
+fn control(app: &mut OpenCADStudio, mut op: Value) -> Value {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+    let state = app.control_state();
+    op["protocol"] = json!(1);
+    op["document_id"] = state["document_id"].clone();
+    op["revision"] = state["revision"].clone();
+    op["client_id"] = json!("test");
+    op["request_id"] = json!(format!("p1-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed)));
+    let (response, task) = app.control_request(op);
+    let _ = app.drive_headless_task(task);
+    response
+}
+
+/// A line end from the `geometry` query, as (x, y).
+fn line_point(entity: &Value, key: &str) -> (f64, f64) {
+    let p = entity[key].as_array().expect("the line reports both ends");
+    (p[0].as_f64().expect("x"), p[1].as_f64().expect("y"))
+}
+
+/// Whether a point is within solver tolerance of where it was drawn.
+fn stays(p: (f64, f64), want: (f64, f64)) -> bool {
+    (p.0 - want.0).abs() < 1e-9 && (p.1 - want.1).abs() < 1e-9
+}
+
+/// A fixed entity must not move under a grip drag: the constraint that
+/// reports itself applied has to hold the geometry where it was drawn.
+#[test]
+fn a_fixed_entity_resists_a_grip_drag() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[10,5,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "a fixed line stays where it was drawn: {q}"
+    );
+}
+
+/// A command transform must leave a fixed entity where it was, and say why.
+#[test]
+fn a_fixed_entity_resists_a_move() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let moved = app.automation_op(r#"{"op":"run","cmd":"MOVE 0,0,0 5,5,0"}"#);
+    assert_eq!(moved["ok"], json!(false), "{moved}");
+    assert!(
+        moved["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {moved}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "a fixed line stays put: {q}"
+    );
+
+    // The panel edits the current selection, which the command's completion
+    // cleared; pick the line again to reach the same refusal through the
+    // panel's own commit.
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    app.refresh_properties();
+    let before = app.command_line.history.len();
+    let _ = app.update(crate::app::Message::PropGeomInput {
+        field: "start_x",
+        value: "5".to_owned(),
+    });
+    let _ = app.update(crate::app::Message::PropGeomCommit("start_x"));
+    let refusal: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        refusal.iter().any(|text| text.contains("fixed constraint")),
+        "the panel says why it ignored the edit: {refusal:?}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "the refused panel edit left the line put: {q}"
+    );
+}
+
+/// A fixed object holds the whole selection: the free object is not moved
+/// alone and the command is reported as refused.
+#[test]
+fn a_move_holds_the_whole_selection_when_one_object_is_fixed() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 20,0 30,0"}"#);
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+    let handles: Vec<String> = q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .map(|entity| entity["handle"].as_str().expect("handle").to_owned())
+        .collect();
+    assert_eq!(handles.len(), 2, "{q}");
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}"]}}"#,
+        handles[0]
+    ));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}","{}"]}}"#,
+        handles[0], handles[1]
+    ));
+    let moved = app.automation_op(r#"{"op":"run","cmd":"MOVE 0,0,0 5,5,0"}"#);
+    assert_eq!(moved["ok"], json!(false), "{moved}");
+    assert!(
+        moved["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {moved}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let placed = [((0.0, 0.0), (10.0, 0.0)), ((20.0, 0.0), (30.0, 0.0))];
+    for (entity, (start, end)) in q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .zip(placed)
+    {
+        assert!(
+            stays(line_point(entity, "start"), start) && stays(line_point(entity, "end"), end),
+            "neither line left its place: {q}"
+        );
+    }
+}
+
+/// Bounds alignment moves whole objects, so it answers the same refusal.
+#[test]
+fn a_fixed_entity_resists_bounds_alignment() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 20,0 30,0"}"#);
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+    let handles: Vec<String> = q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .map(|entity| entity["handle"].as_str().expect("handle").to_owned())
+        .collect();
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}"]}}"#,
+        handles[0]
+    ));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}","{}"]}}"#,
+        handles[0], handles[1]
+    ));
+
+    let aligned = app.automation_op(r#"{"op":"run","cmd":"ALIGNLEFT"}"#);
+    assert_eq!(aligned["ok"], json!(false), "{aligned}");
+    assert!(
+        aligned["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {aligned}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let placed = [((0.0, 0.0), (10.0, 0.0)), ((20.0, 0.0), (30.0, 0.0))];
+    for (entity, (start, end)) in q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .zip(placed)
+    {
+        assert!(
+            stays(line_point(entity, "start"), start) && stays(line_point(entity, "end"), end),
+            "neither line left its place: {q}"
+        );
+    }
+}
+
+/// The panel's boolean and choice rows that reshape a curve answer the same
+/// refusal as its numeric rows.
+#[test]
+fn a_fixed_curve_resists_a_boolean_and_a_choice() {
+    use codec::entities::{Polyline2D, Spline, Vertex2D};
+    use codec::types::Vector3;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let mut polyline = Polyline2D::new();
+    polyline
+        .vertices
+        .push(Vertex2D::new(Vector3::new(0.0, 0.0, 0.0)));
+    polyline
+        .vertices
+        .push(Vertex2D::new(Vector3::new(10.0, 0.0, 0.0)));
+    let polyline_handle = app
+        .commit_entity_handle(codec::EntityType::Polyline2D(polyline))
+        .expect("the polyline commits");
+    let mut spline = Spline::new();
+    spline.control_points = vec![
+        Vector3::new(0.0, 5.0, 0.0),
+        Vector3::new(3.0, 8.0, 0.0),
+        Vector3::new(6.0, 2.0, 0.0),
+        Vector3::new(9.0, 5.0, 0.0),
+    ];
+    spline.knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    spline.weights = vec![1.0; 4];
+    let spline_handle = app
+        .commit_entity_handle(codec::EntityType::Spline(spline.clone()))
+        .expect("the spline commits");
+    for handle in [polyline_handle, spline_handle] {
+        app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{:X}"]}}"#,
+            handle.value()
+        ));
+        let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+        assert_eq!(fixed["ok"], json!(true), "{fixed}");
+    }
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{:X}"]}}"#,
+        polyline_handle.value()
+    ));
+    app.refresh_properties();
+    let before = app.command_line.history.len();
+    let _ = app.update(crate::app::Message::PropBoolToggle("pl2_closed"));
+    let said: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        said.iter().any(|text| text.contains("fixed constraint")),
+        "the Closed toggle says why it was ignored: {said:?}"
+    );
+    match app.tabs[app.active_tab]
+        .scene
+        .document
+        .get_entity(polyline_handle)
+    {
+        Some(codec::EntityType::Polyline2D(polyline)) => {
+            assert!(!polyline.is_closed(), "the fixed polyline stayed open");
+        }
+        other => panic!("the polyline is still there: {other:?}"),
+    }
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{:X}"]}}"#,
+        spline_handle.value()
+    ));
+    app.refresh_properties();
+    let before = app.command_line.history.len();
+    let _ = app.update(crate::app::Message::PropGeomChoiceChanged {
+        field: "spline_method",
+        value: "Control Vertices".to_owned(),
+    });
+    let said: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        said.iter().any(|text| text.contains("fixed constraint")),
+        "the Method choice says why it was ignored: {said:?}"
+    );
+    match app.tabs[app.active_tab]
+        .scene
+        .document
+        .get_entity(spline_handle)
+    {
+        Some(codec::EntityType::Spline(after)) => {
+            assert_eq!(
+                after.control_points, spline.control_points,
+                "the fixed spline kept its points"
+            );
+        }
+        other => panic!("the spline is still there: {other:?}"),
+    }
+}
+
+/// A property write must not move a fixed entity, and must say why.
+#[test]
+fn a_fixed_entity_resists_a_property_write() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let written = control(
+        &mut app,
+        json!({"op":"property","field":"start_x","value":5.0}),
+    );
+    assert_eq!(written["ok"], json!(false), "{written}");
+    assert!(
+        written["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {written}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "a fixed line stays put: {q}"
+    );
+}
+
+/// A stretch that would move a fixed object is refused with the reason, and
+/// the object keeps the coordinates it had.
+#[test]
+fn a_fixed_entity_resists_a_stretch() {
+    use crate::command::CmdResult;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let printed = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+    let handle = printed["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let before = app.command_line.history.len();
+    let task = app.apply_cmd_result(CmdResult::StretchEntities {
+        handles: vec![codec::Handle::new(
+            u64::from_str_radix(&handle, 16).unwrap(),
+        )],
+        windows: vec![(
+            glam::DVec3::new(-1.0, -1.0, 0.0),
+            glam::DVec3::new(11.0, 1.0, 0.0),
+        )],
+        excluded_points: Vec::new(),
+        delta: glam::DVec3::new(0.0, 5.0, 0.0),
+    });
+    app.drive_headless_task(task).unwrap();
+    let said: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        said.iter().any(|text| text.contains("fixed constraint")),
+        "the stretch says why it moved nothing: {said:?}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "a fixed line stays put through a stretch: {q}"
+    );
+}
+
+/// A constraint command solves the whole network, so a command can move
+/// geometry it never named. The completion says so and names the entity,
+/// instead of leaving the operator to find the movement on the drawing.
+#[test]
+fn a_constraint_command_names_geometry_the_network_moves() {
+    use crate::command::CmdResult;
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,50 10,50"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut short = None;
+    for entity in drawn["entities"].as_array().expect("the two lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").0 > 100.0 {
+            long = Some(handle);
+        } else {
+            short = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let short = short.expect("the other line");
+    // A span that no longer matches its line: the next solve has work to do,
+    // and the line is not a participant of the constraint being added.
+    app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::DistanceX,
+            vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+            Some(DrivingValue::Literal(100.0)),
+        );
+
+    let before = app.command_line.history.len();
+    let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+        kind: ConstraintKind::Horizontal,
+        refs: vec![ParametricRef::whole(short)],
+        driving_param: None,
+        label: "Horizontal constraint",
+    });
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    assert!(
+        q["entities"].as_array().unwrap().iter().any(|entity| {
+            (line_point(entity, "end").0 - line_point(entity, "start").0 - 100.0).abs() < 1e-6
+        }),
+        "the network corrected the line nobody named: {q}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {long}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}
+
+/// The dedicated Horizontal command solves the same network, so it owes the
+/// operator the same warning when the solve lands on geometry it never named.
+#[test]
+fn a_horizontal_command_names_geometry_the_network_moves() {
+    use crate::command::{CmdResult, HorizontalConstraintSelection};
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,50 30,60"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the two lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").0 > 100.0 {
+            long = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let slanted = slanted.expect("the slanted line");
+    app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::DistanceX,
+            vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+            Some(DrivingValue::Literal(100.0)),
+        );
+
+    let before = app.command_line.history.len();
+    let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+        kind: ConstraintKind::Horizontal,
+        selection: HorizontalConstraintSelection::Reference(ParametricRef::whole(slanted)),
+        direction: codec::types::Vector3::new(1.0, 0.0, 0.0),
+        label: "Horizontal",
+    });
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.contains(&"Horizontal constraint applied.".to_string()),
+        "the command completes: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {long}."
+        )),
+        "the dedicated command reports the line the network moved: {said:?}"
+    );
+}
+
+/// A command that runs the solve for its own edit stays quiet about the
+/// geometry that solve moves; the report belongs to constraint additions.
+#[test]
+fn a_move_command_does_not_report_geometry_the_solve_moves() {
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,50 30,60"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the two lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").0 > 100.0 {
+            long = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let slanted = slanted.expect("the slanted line");
+    let set = app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::DistanceX,
+        vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+        Some(DrivingValue::Literal(100.0)),
+    );
+    set.add(
+        ConstraintKind::Horizontal,
+        vec![ParametricRef::whole(slanted)],
+        None,
+    );
+
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{long:X}"]}}"#));
+    let before = app.command_line.history.len();
+    let moved = app.automation_op(r#"{"op":"run","cmd":"MOVE 0,0,0 0,10,0"}"#);
+    assert_eq!(moved["ok"], json!(true), "{moved}");
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        !said
+            .iter()
+            .any(|text| text.contains("constraint network moved")),
+        "a move command does not report the network's work: {said:?}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let levelled = q["entities"].as_array().unwrap().iter().any(|entity| {
+        let start = line_point(entity, "start");
+        let end = line_point(entity, "end");
+        (start.1 - end.1).abs() < 1e-6 && (start.0 - end.0).abs() < 50.0
+    });
+    assert!(
+        levelled,
+        "the solve ran and levelled the slanted line the command never named: {q}"
+    );
+}
+
+/// A converted dimensional constraint is enforced by the drag that moves its
+/// participant, not by some later constraint command that happens to walk the
+/// network. The span is back at its constrained value before the drag ends;
+/// which end the solver holds is the separate datum question.
+#[test]
+fn a_converted_constraint_clamps_the_grip_that_moves_it() {
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let dimension = app.tabs[i].scene.add_entity(
+        crate::modules::annotate::linear_dim::linear_dimension_entity(
+            glam::DVec3::ZERO,
+            glam::DVec3::new(40.0, 0.0, 0.0),
+            glam::DVec3::new(20.0, 10.0, 0.0),
+            glam::DVec3::X,
+            None,
+        ),
+    );
+    app.tabs[i]
+        .scene
+        .attach_dimension_association(dimension, vec![Some(line), Some(line)]);
+    app.tabs[i].scene.select_entity(dimension, false);
+    let _ = app.dispatch_command("DCCONVERTAPPLY");
+    assert!(
+        app.tabs[i]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .is_some_and(|set| set
+                .constraints
+                .iter()
+                .any(|constraint| constraint.kind == ConstraintKind::DistanceX)),
+        "the dimension converts to a driving horizontal span"
+    );
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[80,0,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    let (start, end) = (line_point(entity, "start"), line_point(entity, "end"));
+    assert!(
+        (end.0 - start.0 - 40.0).abs() < 1e-6,
+        "the converted constraint holds the measured span through the drag itself: {q}"
+    );
+}
+
+/// The same constraint holds when an axis relation owns the line's direction:
+/// the drag cannot stretch the span the dimension owns either.
+#[test]
+fn a_converted_constraint_clamps_the_grip_that_moves_a_level_line() {
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    app.tabs[i]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(line)],
+            None,
+        );
+    let dimension = app.tabs[i].scene.add_entity(
+        crate::modules::annotate::linear_dim::linear_dimension_entity(
+            glam::DVec3::ZERO,
+            glam::DVec3::new(40.0, 0.0, 0.0),
+            glam::DVec3::new(20.0, 10.0, 0.0),
+            glam::DVec3::X,
+            None,
+        ),
+    );
+    app.tabs[i]
+        .scene
+        .attach_dimension_association(dimension, vec![Some(line), Some(line)]);
+    app.tabs[i].scene.select_entity(dimension, false);
+    let _ = app.dispatch_command("DCCONVERTAPPLY");
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[80,10,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    let (start, end) = (line_point(entity, "start"), line_point(entity, "end"));
+    assert!(
+        (end.0 - start.0 - 40.0).abs() < 1e-6,
+        "the converted constraint holds the span the drag cannot stretch: {q}"
+    );
+    assert!(
+        (end.1 - start.1).abs() < 1e-6,
+        "the level relation still holds after the drag: {q}"
+    );
+}
+
+/// Auto-constraining a selection adds constraints the same way, so its
+/// completion reports the geometry its solve moves outside the selection.
+#[test]
+fn auto_coincident_names_geometry_the_network_moves() {
+    use crate::command::CmdResult;
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 0,80"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,200 30,210"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut upright = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the three lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let end = line_point(entity, "end");
+        if end.0 > 100.0 {
+            long = Some(handle);
+        } else if end.0.abs() < 1e-6 {
+            upright = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let upright = upright.expect("the upright line");
+    let slanted = slanted.expect("the slanted line");
+    let set = app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::DistanceX,
+        vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+        Some(DrivingValue::Literal(100.0)),
+    );
+    set.add(
+        ConstraintKind::Horizontal,
+        vec![ParametricRef::whole(slanted)],
+        None,
+    );
+
+    let before = app.command_line.history.len();
+    let _ = app.apply_cmd_result(CmdResult::AddAutoCoincidentConstraints {
+        handles: vec![long, upright],
+    });
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.iter()
+            .any(|text| text.contains("coincident constraint(s) applied.")),
+        "the command completes: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {slanted}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}
+
+/// The parallel command applies a follow-up result of its own once its second
+/// line is placed. That result must not swallow the report the constraint
+/// addition just queued.
+#[test]
+fn a_parallel_command_names_geometry_the_network_moves() {
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 100,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,20 100,40"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,200 30,210"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the three lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").1 > 100.0 {
+            slanted = Some(handle);
+        }
+    }
+    let slanted = slanted.expect("the far slanted line");
+    app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(slanted)],
+            None,
+        );
+
+    let before = app.command_line.history.len();
+    let _ = app.automation_op(r#"{"op":"run","cmd":"DCALIGNED"}"#);
+    let _ = app.feed_active_cmd("2L");
+    let _ = app.feed_active_cmd("50,0");
+    let _ = app.feed_active_cmd("50,30");
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.iter()
+            .any(|text| text.contains("Specify dimension line location")),
+        "the command reaches its own placement prompt: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {slanted}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}
+
+/// The inference command adds constraints without a result, so it drains its
+/// own report instead of leaving it for a later command to print.
+#[test]
+fn auto_constrain_names_geometry_the_network_moves() {
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 0,80"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,200 30,210"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut upright = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the three lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let end = line_point(entity, "end");
+        if end.0 > 100.0 {
+            long = Some(handle);
+        } else if end.0.abs() < 1e-6 {
+            upright = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let upright = upright.expect("the upright line");
+    let slanted = slanted.expect("the slanted line");
+    let set = app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::DistanceX,
+        vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+        Some(DrivingValue::Literal(100.0)),
+    );
+    set.add(
+        ConstraintKind::Horizontal,
+        vec![ParametricRef::whole(slanted)],
+        None,
+    );
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{long:X}","{upright:X}"]}}"#
+    ));
+    let before = app.command_line.history.len();
+    let inferred = app.automation_op(r#"{"op":"run","cmd":"AUTOCONSTRAIN"}"#);
+    assert_eq!(inferred["ok"], json!(true), "{inferred}");
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.iter()
+            .any(|text| text.contains("constraint(s) applied")),
+        "the command completes: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {slanted}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}
+
+/// A block whose attributes an automation client fills by tag: WIDTH asks
+/// for a value, CONST carries a fixed one.
+fn define_attributed_block(app: &mut OpenCADStudio) {
+    use codec::entities::AttributeDefinition;
+    use codec::types::Vector3;
+    let definition = |tag: &str, value: &str, at: Vector3| {
+        let mut definition =
+            AttributeDefinition::new(tag.to_string(), format!("{tag}:"), value.to_string());
+        definition.insertion_point = at;
+        definition.height = 1.0;
+        definition
+    };
+    let mut constant = definition("CONST", "fixed", Vector3::new(0.0, 5.0, 0.0));
+    constant.flags.constant = true;
+    let i = app.active_tab;
+    app.tabs[i].scene.define_block_raw(
+        "TAGGED",
+        Vector3::ZERO,
+        vec![
+            codec::EntityType::AttributeDefinition(definition(
+                "WIDTH",
+                "100",
+                Vector3::new(2.0, 3.0, 0.0),
+            )),
+            codec::EntityType::AttributeDefinition(constant),
+        ],
+    );
+}
+
+/// `entities_create` placed an Insert without a way to give its attribute
+/// values: the client had to ATTSYNC or patch `/attributes/N/value` by index
+/// afterwards. The values now come in by tag, like `-INSERT` asks for them.
+#[test]
+fn entities_create_insert_takes_attribute_values_by_tag() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    define_attributed_block(&mut app);
+    let created = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"attr-values","document_id":{doc},"entities":[
+            {"type":"Insert","block":"TAGGED","position":[10,0],"attributes":{"width":"250"}}
+        ]}"#,
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    let i = app.active_tab;
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .find_map(|entity| match entity {
+            codec::EntityType::Insert(insert) if insert.block_name == "TAGGED" => {
+                Some(insert.clone())
+            }
+            _ => None,
+        })
+        .expect("the reference was created");
+    let values: Vec<(&str, &str)> = insert
+        .attributes
+        .iter()
+        .map(|attribute| (attribute.tag.as_str(), attribute.value.as_str()))
+        .collect();
+    assert_eq!(values, vec![("WIDTH", "250"), ("CONST", "fixed")]);
+    assert_eq!(
+        insert.attributes[0].insertion_point,
+        codec::types::Vector3::new(12.0, 3.0, 0.0),
+        "the attribute is placed by the reference"
+    );
+    assert!(insert
+        .attributes
+        .iter()
+        .all(|attribute| !attribute.common.handle.is_null()));
+}
+
+#[test]
+fn entities_create_insert_refuses_unknown_constant_and_non_text_attributes() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    define_attributed_block(&mut app);
+    for (id, attributes, code) in [
+        ("attr-unknown", r#"{"HEIGHT":"1"}"#, "unknown_attribute_tag"),
+        (
+            "attr-constant",
+            r#"{"CONST":"other"}"#,
+            "constant_attribute",
+        ),
+        (
+            "attr-twice",
+            r#"{"WIDTH":"1","width":"2"}"#,
+            "invalid_attributes",
+        ),
+    ] {
+        let refused = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_create","request_id":"{id}","document_id":{{doc}},"entities":[
+                    {{"type":"Insert","block":"TAGGED","position":[0,0],"attributes":{attributes}}}
+                ]}}"#
+            ),
+        );
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["code"], code, "{refused}");
+    }
+    let spec =
+        json!({"type":"Insert","block":"TAGGED","position":[0,0],"attributes":{"WIDTH":250}});
+    assert!(crate::entity_creation::validate_entity(&spec, "").is_err());
+    assert_eq!(count_type(&mut app, "Insert"), 0, "nothing was created");
+}

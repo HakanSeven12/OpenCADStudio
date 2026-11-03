@@ -1,4 +1,5 @@
 use super::*;
+use crate::scene::block_distance_parameter as distance;
 use crate::scene::block_point_parameter as point;
 use codec::{entities::Insert, DwgReader, DwgWriter, DxfReader, DxfWriter};
 use std::io::Cursor;
@@ -580,4 +581,414 @@ fn block_move_point_chains_reject_ambiguous_grip_aliases_before_publication() {
     )
     .is_err());
     assert_eq!(doc, baseline);
+}
+
+#[test]
+fn block_named_order_composes_with_point_transport_on_shared_geometry() {
+    for scale_first in [false, true] {
+        let (mut doc, definition, members) = super::super::tests::fixture();
+        let parent = distance::create(
+            &mut doc,
+            definition,
+            distance::Kind::Linear,
+            Vector3::ZERO,
+            Vector3::new(10., 0., 0.),
+            Vector3::new(5., 2., 0.),
+        )
+        .unwrap();
+        let child = point::create(&mut doc, definition, Vector3::ZERO, Vector3::ZERO).unwrap();
+        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&child).unwrap() else {
+            panic!()
+        };
+        let DynamicBlockData::PointParameter(p) = &mut object.data else {
+            panic!()
+        };
+        p.parameter.parameter.chain_actions = true;
+        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&parent).unwrap() else {
+            panic!()
+        };
+        let DynamicBlockData::LinearParameter(p) = &mut object.data else {
+            panic!()
+        };
+        p.parameter.parameter.chain_actions = true;
+        let move_action = create(
+            &mut doc,
+            definition,
+            Kind::Move,
+            parent,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        let scale_action = create(
+            &mut doc,
+            definition,
+            Kind::Scale,
+            parent,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        create(
+            &mut doc,
+            definition,
+            Kind::Move,
+            child,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        set_targets(&mut doc, move_action, vec![members[1], child]);
+        let second_parent =
+            point::create(&mut doc, definition, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+        let second_move = create(
+            &mut doc,
+            definition,
+            Kind::Move,
+            second_parent,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        set_targets(&mut doc, second_move, vec![child]);
+        let (head, tail) = if scale_first {
+            (scale_action, move_action)
+        } else {
+            (move_action, scale_action)
+        };
+        assert!(super::super::chain::set(&mut doc, definition, head, Some(tail)).unwrap());
+        let first = doc
+            .add_entity(EntityType::Insert(Insert::new("ACTIONS", Vector3::ZERO)))
+            .unwrap();
+        let second = doc
+            .add_entity(EntityType::Insert(Insert::new(
+                "ACTIONS",
+                Vector3::UNIT_X * 50.,
+            )))
+            .unwrap();
+        let parameters = all_parameters(&doc, definition);
+        let child_parameter = parameters
+            .iter()
+            .find(|p| p.handle == child)
+            .unwrap()
+            .clone();
+        let changed =
+            instance::evaluate_value(&doc, first, parent, Value::Point(DVec3::new(20., 0., 0.)))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            instance::frame(&changed, first, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::X * 10.
+        );
+        assert_eq!(
+            instance::frame(&changed, second, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::ZERO
+        );
+        let circle = |drawing: &Document, reference: Handle| {
+            let EntityType::Insert(insert) = drawing.get_entity(reference).unwrap() else {
+                panic!()
+            };
+            drawing
+                .block_records
+                .get(&insert.block_name)
+                .unwrap()
+                .entity_handles
+                .iter()
+                .find_map(|h| match drawing.get_entity(*h) {
+                    Some(EntityType::Circle(circle)) => Some((v(circle.center), circle.radius)),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let expected = (DVec3::new(if scale_first { 28. } else { 38. }, 6., 0.), 4.);
+        assert_eq!(circle(&changed, first), expected);
+        assert_eq!(circle(&changed, second), (DVec3::new(4., 3., 0.), 2.));
+        // The second parent contributes independently; a direct child edit adds
+        // its own input, then changing the first parent must preserve both.
+        let combined =
+            instance::evaluate_value(&changed, first, second_parent, Value::Point(DVec3::X * 3.))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            instance::frame(&combined, first, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::X * 13.
+        );
+        assert_eq!(
+            circle(&combined, first),
+            (expected.0 + DVec3::X * 3., expected.1)
+        );
+        let combined =
+            instance::evaluate_value(&combined, first, child, Value::Point(DVec3::X * 15.))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            circle(&combined, first),
+            (expected.0 + DVec3::X * 5., expected.1)
+        );
+        let combined =
+            instance::evaluate_value(&combined, first, parent, Value::Point(DVec3::X * 10.))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            instance::frame(&combined, first, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::X * 5.
+        );
+        assert_eq!(circle(&combined, first), (DVec3::new(9., 3., 0.), 2.));
+        assert_eq!(circle(&combined, second), (DVec3::new(4., 3., 0.), 2.));
+        for saved in [
+            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&combined).unwrap()))
+                .read()
+                .unwrap(),
+            DxfReader::from_reader(Cursor::new(
+                DxfWriter::new(&combined).write_to_vec().unwrap(),
+            ))
+            .unwrap()
+            .read()
+            .unwrap(),
+        ] {
+            assert_eq!(circle(&saved, first), (DVec3::new(9., 3., 0.), 2.));
+            assert_eq!(
+                instance::frame(&saved, first, &child_parameter)
+                    .unwrap()
+                    .end,
+                DVec3::X * 5.
+            );
+            let resumed =
+                instance::evaluate_value(&saved, first, second_parent, Value::Point(DVec3::X * 4.))
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(
+                instance::frame(&resumed, first, &child_parameter)
+                    .unwrap()
+                    .end,
+                DVec3::X * 6.
+            );
+            assert_eq!(circle(&resumed, first), (DVec3::new(10., 3., 0.), 2.));
+        }
+        for saved in [
+            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&changed).unwrap()))
+                .read()
+                .unwrap(),
+            DxfReader::from_reader(Cursor::new(
+                DxfWriter::new(&changed).write_to_vec().unwrap(),
+            ))
+            .unwrap()
+            .read()
+            .unwrap(),
+        ] {
+            assert_eq!(circle(&saved, first), expected);
+            assert_eq!(
+                instance::frame(&saved, first, &child_parameter)
+                    .unwrap()
+                    .end,
+                DVec3::X * 10.
+            );
+            let reset = instance::reset(&saved, first).unwrap().unwrap();
+            assert_eq!(circle(&reset, first), (DVec3::new(4., 3., 0.), 2.));
+        }
+    }
+}
+
+#[test]
+fn block_move_selection_retargets_point_aliases_and_refreshes_previous_graph() {
+    let (doc, definition, params, actions, first, second) = fixture(true);
+    let mut unchanged = doc.clone();
+    assert!(!super::super::retarget(
+        &mut unchanged,
+        definition,
+        actions[0],
+        &[params[1].handle],
+        None
+    )
+    .unwrap());
+    assert_eq!(
+        unchanged, doc,
+        "the parameter and grip aliases retain their native links"
+    );
+    let changed = instance::evaluate_value(
+        &doc,
+        first,
+        params[0].handle,
+        Value::Point(params[0].end + DVec3::new(3., 4., 0.)),
+    )
+    .unwrap()
+    .unwrap();
+    let geometry = authoring::members(&changed, definition)[0];
+    let mut detached = changed.clone();
+    assert!(
+        super::super::retarget(&mut detached, definition, actions[0], &[geometry], None).unwrap()
+    );
+    let detached = instance::refresh_after_edit(&detached, &changed, definition).unwrap();
+    assert_eq!(
+        instance::frame(&detached, first, &params[1]).unwrap().end,
+        params[1].end
+    );
+    assert_eq!(line(&detached, first), DVec3::X + DVec3::new(3., 4., 0.));
+    assert_eq!(line(&detached, second), DVec3::X);
+    let mut attached = detached.clone();
+    assert!(super::super::retarget(
+        &mut attached,
+        definition,
+        actions[0],
+        &[geometry, params[1].grip],
+        None
+    )
+    .unwrap());
+    let attached = instance::refresh_after_edit(&attached, &detached, definition).unwrap();
+    assert_eq!(
+        instance::frame(&attached, first, &params[1]).unwrap().end,
+        params[1].end + DVec3::new(3., 4., 0.)
+    );
+    assert_eq!(line(&attached, first), DVec3::X + DVec3::new(6., 8., 0.));
+    assert_eq!(line(&attached, second), DVec3::X);
+    let mut cycle = attached.clone();
+    assert!(super::super::retarget(
+        &mut cycle,
+        definition,
+        actions[1],
+        &[params[0].handle],
+        None
+    )
+    .is_err());
+    assert_eq!(
+        cycle, attached,
+        "cycle rejection must not publish a partial edit"
+    );
+}
+
+#[test]
+fn block_move_creation_validates_point_ownership_and_cycles_atomically() {
+    let (mut doc, definition, params, _, _, foreign_entity) = fixture(true);
+    let before = doc.clone();
+    assert!(create(
+        &mut doc,
+        definition,
+        Kind::Move,
+        params[2].handle,
+        &[params[0].handle],
+        DVec3::ZERO
+    )
+    .is_err());
+    assert_eq!(doc, before, "cycle must not publish an action");
+    assert!(create(
+        &mut doc,
+        definition,
+        Kind::Move,
+        params[0].handle,
+        &[foreign_entity],
+        DVec3::ZERO
+    )
+    .is_err());
+    assert_eq!(doc, before, "foreign entity must not publish an action");
+    let mut scene = crate::scene::Scene::new();
+    scene.document = doc;
+    scene.define_block_raw(
+        "FOREIGN",
+        Vector3::ZERO,
+        vec![EntityType::Line(codec::entities::Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        ))],
+    );
+    let foreign = scene.document.block_records.get("FOREIGN").unwrap().handle;
+    let point =
+        point::create(&mut scene.document, foreign, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+    let before = scene.document.clone();
+    assert!(create(
+        &mut scene.document,
+        definition,
+        Kind::Move,
+        params[0].handle,
+        &[point],
+        DVec3::ZERO
+    )
+    .is_err());
+    assert_eq!(
+        scene.document, before,
+        "foreign parameter must not publish an action"
+    );
+}
+
+#[test]
+fn block_chain_frames_preserve_current_source_base_and_point_anchor() {
+    let (mut doc, definition, _) = super::super::tests::fixture();
+    let source = distance::create(
+        &mut doc,
+        definition,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    let child = point::create(
+        &mut doc,
+        definition,
+        Vector3::new(0., 5., 0.),
+        Vector3::new(0., 7., 0.),
+    )
+    .unwrap();
+    create_with_options(
+        &mut doc,
+        definition,
+        Kind::Move,
+        source,
+        Some(XyKeyPoint::Base),
+        &[child],
+        DVec3::ZERO,
+        None,
+        None,
+    )
+    .unwrap();
+    let graph = Graph::new(&doc, definition).unwrap();
+    let old_base = DVec3::new(1., 2., 0.);
+    let new_base = DVec3::new(3., 4., 0.);
+    let child_parameter = graph.parameter(child);
+    let values = BTreeMap::from([
+        (source, DVec3::new(12., 0., 0.)),
+        (child, child_parameter.end + old_base),
+    ]);
+    let autonomous = graph
+        .autonomous(
+            &doc,
+            Some(&values),
+            Some(&BTreeMap::from([(source, old_base)])),
+        )
+        .unwrap();
+    assert_eq!(autonomous[&source].base, old_base);
+    assert_eq!(autonomous[&source].end, values[&source]);
+    assert_eq!(
+        autonomous[&child],
+        ParameterFrame {
+            base: child_parameter.base,
+            end: child_parameter.end
+        }
+    );
+    let mut staged = doc.clone();
+    let result = graph
+        .resolve(
+            &doc,
+            &mut staged,
+            &BTreeSet::new(),
+            &autonomous,
+            Some(&values),
+            Some(&BTreeMap::from([(source, new_base)])),
+        )
+        .unwrap();
+    assert_eq!(
+        result[&child],
+        ParameterFrame {
+            base: child_parameter.base,
+            end: child_parameter.end + new_base
+        }
+    );
+    assert_eq!(current(&staged, child_parameter), child_parameter.end);
 }

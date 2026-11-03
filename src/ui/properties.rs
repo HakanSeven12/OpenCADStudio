@@ -1036,17 +1036,21 @@ impl PropertiesPanel {
                 // The list is part of the panel's own state, so opening and
                 // closing it needs no widget-tree handle and the keys it
                 // consumes always match the list on screen.
-                let mut list = column![].spacing(1);
+                use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+                let mut rows = Vec::with_capacity(options.len());
                 for (index, option) in options.iter().enumerate() {
-                    list = list.push(
-                        button(text(option.as_str()).size(FONT_SZ))
-                            .on_press(Message::PropBlockChoice { key, index })
-                            .style(button::subtle)
-                            .padding([2, 6])
-                            .width(Length::Fill),
-                    );
+                    let msg = Message::PropBlockChoice { key, index };
+                    let btn = button(text(option.as_str()).size(FONT_SZ))
+                        .on_press(msg.clone())
+                        .style(button::subtle)
+                        .padding([2, 6])
+                        .width(Length::Fill);
+                    rows.push(DropdownRow::item(btn, option.clone(), msg));
                 }
-                let popup = container(scrollable(list).height(Length::Shrink))
+                let list = DropdownList::new(rows)
+                    .selected(Some(*selected))
+                    .on_escape(Message::PropBlockPickerDismiss { key, quick });
+                let popup = container(list)
                     .style(container::bordered_box)
                     .padding(2);
                 // The overlay reports its own Escape before the global shortcut
@@ -1588,10 +1592,12 @@ impl PropertiesPanel {
 
         // Transparency presets remain available while entering a custom value.
         // Definition/name fields still filter their potentially long lists.
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
         let filter = typed
             .filter(|_| field != "transparency")
             .map(|s| s.to_lowercase());
-        let mut list = column![].spacing(1);
+        let mut rows = Vec::new();
+        let mut initial_selected: Option<usize> = None;
         for opt in options {
             if let Some(f) = &filter {
                 if !opt.to_lowercase().contains(f.as_str()) {
@@ -1599,15 +1605,27 @@ impl PropertiesPanel {
                 }
             }
             let value = opt.clone();
-            list = list.push(
-                button(text(opt.as_str()).size(FONT_SZ))
-                    .on_press(Message::PropGeomChoiceChanged { field, value })
-                    .style(button::subtle)
-                    .padding([2, 6])
-                    .width(Length::Fill),
-            );
+            let msg = Message::PropGeomChoiceChanged {
+                field,
+                value: value.clone(),
+            };
+            let btn = button(text(opt.as_str()).size(FONT_SZ))
+                .on_press(msg.clone())
+                .style(button::subtle)
+                .padding([2, 6])
+                .width(Length::Fill);
+            if typed.as_deref().map_or(false, |t| t.eq_ignore_ascii_case(opt.as_str())) {
+                initial_selected = Some(rows.len());
+            }
+            rows.push(DropdownRow::item(btn, value, msg));
         }
-        let popup = container(scrollable(list).height(Length::Shrink))
+        let select_first = field != "transparency" || filter.is_none();
+        let list = DropdownList::new(rows)
+            .selected(initial_selected)
+            .select_first_by_default(select_first)
+            .query(filter.unwrap_or_default())
+            .on_escape(Message::PropEditChoiceToggle);
+        let popup = container(list)
             .style(container::bordered_box)
             .padding(2);
 

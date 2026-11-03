@@ -19,6 +19,19 @@ impl OpenCADStudio {
                 .parametric_connected_handles(scope, &handles, false);
             handles.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
         }
+        // A fixed object stays where it is and the command says why, rather
+        // than moving the rest of the selection and letting the solve pull it
+        // back. The whole command is refused so a partial move is never
+        // reported as a failure.
+        if self.any_entity_is_fixed(i, &handles) {
+            self.command_line
+                .push_error(crate::app::properties::HELD_BY_FIXED);
+            self.tabs[i].active_cmd = None;
+            self.tabs[i].snap_result = None;
+            self.tabs[i].scene.clear_preview_wire();
+            self.restore_pre_cmd_tangent();
+            return Some(Task::none());
+        }
         let label = self.history_label_from_active_cmd(i, "MOVE");
         // A translation carries its complete connected constraint
         // component so each member keeps its own dimensions. Other
@@ -303,6 +316,18 @@ impl OpenCADStudio {
         handles.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
         if handles.is_empty() {
             self.tabs[i].active_cmd = None;
+            return Some(Task::none());
+        }
+        // A stretch moves picked points, so a fixed object cannot take part.
+        // The whole command is refused rather than reporting a stretch that
+        // the solve then reverts.
+        if self.any_entity_is_fixed(i, &handles) {
+            self.command_line
+                .push_error(crate::app::properties::HELD_BY_FIXED);
+            self.tabs[i].active_cmd = None;
+            self.tabs[i].snap_result = None;
+            self.tabs[i].scene.clear_preview_wire();
+            self.restore_pre_cmd_tangent();
             return Some(Task::none());
         }
         let structural = handles.iter().any(|handle| {

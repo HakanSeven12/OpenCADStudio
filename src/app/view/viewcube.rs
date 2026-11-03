@@ -166,7 +166,7 @@ pub(super) fn viewcube_ucs_picker<'a>(
     } else {
         current
     };
-    iced::widget::pick_list(Some(selected), options, |value| value.to_string())
+    crate::ui::dropdown_list::pick_list(Some(selected), options, |value| value.to_string())
         .on_select(Message::SetViewcubeUcs)
         .text_size(11)
         .padding([2, 6])

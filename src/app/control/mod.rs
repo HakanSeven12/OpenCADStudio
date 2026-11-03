@@ -1066,10 +1066,18 @@ impl OpenCADStudio {
             && op != "cancel"
             && !answers_attribute_form
         {
-            return (
-                failure("command_busy", "An interactive command is already active"),
-                Task::none(),
-            );
+            // Say who holds the command: the client that started it, or the
+            // user (no client) when it was started or taken over in the window.
+            let mut busy = failure("command_busy", "An interactive command is already active");
+            busy["command"] = json!(tab.active_cmd.as_ref().map(|command| command.name()));
+            busy["document_id"] = json!(tab.id);
+            busy["owner_client_id"] = json!(self
+                .control
+                .owner
+                .as_ref()
+                .filter(|(owner_tab, _)| *owner_tab == tab.id)
+                .map(|(_, owner)| owner.clone()));
+            return (busy, Task::none());
         }
         if matches!(op, "run" | "start" | "input") && tab.is_start {
             return (
@@ -1679,6 +1687,14 @@ impl OpenCADStudio {
         }
         self.control_settle();
     }
+    /// Whether a control client drives the command running in tab `i`.
+    pub(in crate::app) fn control_owns_command(&self, i: usize) -> bool {
+        self.control
+            .owner
+            .as_ref()
+            .is_some_and(|(tab, _)| self.tabs.get(i).is_some_and(|t| t.id == *tab))
+    }
+
     pub(super) fn control_observe_user_message(&mut self, message: &Message) {
         if self.control.routing || self.control.owner.is_none() {
             return;
@@ -2088,18 +2104,9 @@ impl OpenCADStudio {
             let Some(window) = self.main_window else {
                 return Task::done(Message::ControlScreenshot(path, None));
             };
-            // A minimized window has a 0x0 surface and the renderer panics
-            // reading it back, so report instead of capturing.
-            iced::window::size(window).then(move |size| {
-                let path = path.clone();
-                if size.width <= 0.0 || size.height <= 0.0 {
-                    Task::done(Message::ControlScreenshot(path, None))
-                } else {
-                    iced::window::screenshot(window).map(move |screenshot| {
-                        Message::ControlScreenshot(path.clone(), Some(screenshot))
-                    })
-                }
-            })
+            // A minimized window reports a failed capture instead.
+            crate::app::screenshot_if_drawn(window)
+                .map(move |screenshot| Message::ControlScreenshot(path.clone(), screenshot))
         }
     }
 }
@@ -3718,6 +3725,86 @@ mod tests {
         );
     }
 
+    /// A dynamic dimension is placed automatically: its label point is the
+    /// zero sentinel and the dimension line's definition point holds where it
+    /// was drawn. Both survive a save, so the label re-places the same way.
+    #[test]
+    fn a_dynamic_dimensions_placement_survives_a_save() {
+        use crate::command::CmdResult;
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
+
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 700,200 700,240"}));
+        let drawn = request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let line = codec::Handle::new(
+            u64::from_str_radix(drawn[0]["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+            kind: ConstraintKind::DistanceY,
+            first: ParametricRef::point(line, 0),
+            second: ParametricRef::point(line, 1),
+            first_point: glam::DVec3::new(700.0, 200.0, 0.0),
+            second_point: glam::DVec3::new(700.0, 240.0, 0.0),
+            location: glam::DVec3::new(740.0, 220.0, 0.0),
+            axis: glam::DVec3::Y,
+            direction: None,
+            name: "d1".to_string(),
+            expression: "40".to_string(),
+            renamed: false,
+            label: "Vertical distance constraint",
+        });
+        app.drive_headless_task(task).unwrap();
+
+        let dimension = app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .and_then(|set| set.dimensions.values().next().copied())
+            .expect("the constraint drives a dimension");
+        let placement = |document: &codec::Document| {
+            let codec::EntityType::Dimension(printed) =
+                document.get_entity(dimension).expect("the dimension is in the document")
+            else {
+                panic!("the constraint's dimension is a dimension");
+            };
+            (
+                printed.base().definition_point,
+                printed.base().text_middle_point,
+                printed.base().text_user_positioned,
+            )
+        };
+        let (definition, text, positioned) = placement(&app.tabs[app.active_tab].scene.document);
+        assert!(
+            (definition.x - 740.0).abs() < 1e-6,
+            "the dimension line keeps the side the label was given on: {definition:?}"
+        );
+        assert!(
+            text == codec::types::Vector3::ZERO && !positioned,
+            "a dynamic label is placed automatically, not pinned: {text:?}"
+        );
+        let bytes = codec::DxfWriter::new(&app.tabs[app.active_tab].scene.document)
+            .write_to_vec()
+            .unwrap();
+        let reopened = codec::DxfReader::from_reader(std::io::Cursor::new(bytes))
+            .unwrap()
+            .read()
+            .unwrap();
+        let (saved_definition, saved_text, saved_positioned) = placement(&reopened);
+        assert!(
+            (saved_definition - definition).length() < 1e-6,
+            "the dimension line holds its place through the save: {definition:?} -> {saved_definition:?}"
+        );
+        assert!(
+            saved_text == text && saved_positioned == positioned,
+            "the label is still auto-placed after the save"
+        );
+    }
+
     /// Editing the value afterwards drives the same geometry: the participant
     /// the constraint holds moves to the new value in the edit's own command.
     #[test]
@@ -4342,6 +4429,8 @@ mod tests {
             json!({"op":"input","kind":"point","point":[10.,0.,0.]}),
         );
         assert_eq!(result["code"], "command_busy");
+        assert_eq!(result["command"], "LINE");
+        assert_eq!(result["owner_client_id"], Value::Null, "the user holds it now");
     }
     #[test]
     fn control_preserves_other_documents_and_waits_for_async_open() {

@@ -5239,6 +5239,75 @@ fn apply_insert_unit_scale(ins: &mut codec::entities::Insert, ratio: f64) -> boo
     true
 }
 
+/// The refusal when a fixed constraint holds an object an edit would move.
+pub(crate) const HELD_BY_FIXED: &str = "The object is held by a fixed constraint.";
+
+/// Whether a Properties row writes the object's geometry. Read-only rows
+/// cannot move anything and keep their own refusal.
+pub(crate) fn property_edits_geometry(p: &crate::scene::model::object::Property) -> bool {
+    use crate::scene::model::object::PropValue;
+    !matches!(
+        p.value,
+        PropValue::ReadOnly(_) | PropValue::ReadOnlyWithTooltip { .. }
+    ) && field_moves_geometry(p.field)
+}
+
+/// Whether the row named `field` changes the shape or placement of a curve.
+/// Covers every entity a Fixed constraint can hold — line, circle, arc,
+/// ellipse, spline and polyline, 2D or 3D. The count and index rows, the
+/// visible/hidden toggles and linetype generation are excluded: they say what
+/// the panel shows or how the curve is drawn between its points. Also left
+/// out: the stored fit tolerance, which nothing reads when the curve is drawn,
+/// and closing a two-vertex polyline, which adds no drawn segment.
+pub(crate) fn field_moves_geometry(field: &str) -> bool {
+    const PREFIXES: [&str; 14] = [
+        "start_",
+        "end_",
+        "center_",
+        "loc_",
+        "ins_",
+        "align_",
+        "vertex_",
+        "normal_",
+        "major_",
+        "minor_",
+        "ctrl_pt_",
+        "fit_pt_",
+        "pl2_",
+        "pl3_vertex_",
+    ];
+    matches!(
+        field,
+        "radius"
+            | "diameter"
+            | "circumference"
+            | "area"
+            | "major_r"
+            | "minor_r"
+            | "ratio"
+            | "start_angle"
+            | "end_angle"
+            | "arc_length"
+            | "height"
+            | "rotation"
+            | "width_factor"
+            | "oblique_angle"
+            | "elevation"
+            | "global_width"
+            | "bulge"
+            | "start_width"
+            | "end_width"
+            | "weight"
+            | "knot_param"
+            | "spline_method"
+            | "pl_closed"
+            | "pl3_closed"
+            | "pl3_smooth"
+    ) || (PREFIXES.iter().any(|prefix| field.starts_with(prefix))
+        && !field.ends_with("_count")
+        && !matches!(field, "pl2_ltype_gen" | "pl2_current_vertex"))
+}
+
 #[cfg(test)]
 mod asym_scale_tests {
     // #47: the uniform-scale opt-out must be per-tab. Fresh documents restart
@@ -5399,6 +5468,45 @@ mod apply_property_op_tests {
     use crate::app::OpenCADStudio;
     use codec::entities::Line;
     use codec::types::{Color, Vector3};
+
+    #[test]
+    fn geometry_rows_are_told_apart_from_display_rows() {
+        for field in [
+            "start_x",
+            "end_z",
+            "center_y",
+            "radius",
+            "area",
+            "major_r",
+            "start_angle",
+            "ctrl_pt_x",
+            "fit_pt_y",
+            "weight",
+            "pl2_vertex_x",
+            "pl2_closed",
+            "pl3_vertex_z",
+            "pl3_smooth",
+            "spline_method",
+            "knot_param",
+        ] {
+            assert!(
+                crate::app::properties::field_moves_geometry(field),
+                "{field} moves geometry"
+            );
+        }
+        for field in [
+            "pl2_ltype_gen",
+            "pl2_current_vertex",
+            "fit_pt_count",
+            "cv_frame",
+            "layer",
+        ] {
+            assert!(
+                !crate::app::properties::field_moves_geometry(field),
+                "{field} only changes how the row is shown or drawn"
+            );
+        }
+    }
 
     fn line_handle(app: &mut OpenCADStudio) -> codec::Handle {
         let mut line = Line::new();

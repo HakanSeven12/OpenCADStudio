@@ -614,6 +614,22 @@ pub(crate) fn delobj_deletes_auxiliary(value: i16, creates_surface: bool) -> boo
     value == 2 || (value == 3 && !creates_surface)
 }
 
+/// Screenshot `window`, or `None` when it has no area. A minimized window
+/// has a 0x0 surface, and iced's renderer panics reading one back ("buffer
+/// slices can not be empty"), so its size is asked first.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn screenshot_if_drawn(
+    window: iced::window::Id,
+) -> Task<Option<iced::window::Screenshot>> {
+    iced::window::size(window).then(move |size| {
+        if size.width <= 0.0 || size.height <= 0.0 {
+            Task::done(None)
+        } else {
+            iced::window::screenshot(window).map(Some)
+        }
+    })
+}
+
 pub(super) struct OpenCADStudio {
     start: Instant,
     control: control::State,
@@ -1020,6 +1036,10 @@ pub(super) struct OpenCADStudio {
     auto_constrain_angle_input: String,
     pub constraint_solve_mode: bool,
     pub constraint_infer: bool,
+    /// How many `apply_cmd_result` frames are on the stack. A handler that
+    /// applies a follow-up result must not clear or drain the report its
+    /// caller is still filling.
+    result_depth: u32,
     pub constraint_bar_display: i16,
     /// DCFORM: new dimensional constraints use the annotational form.
     pub constraint_form_annotational: bool,
@@ -5808,6 +5828,7 @@ impl OpenCADStudio {
             auto_constrain_angle_input: "1".to_string(),
             constraint_solve_mode: true,
             constraint_infer: false,
+            result_depth: 0,
             constraint_bar_display: 3,
             constraint_form_annotational: false,
             dim_constraint_last: "Aligned",

@@ -1289,4 +1289,25 @@ mod tests {
         let candidates = bedit_candidate_block_names(&scene.document);
         assert_eq!(candidates, vec!["Alpha", "Beta", "zebra"]);
     }
+
+    /// The drawing's block list names the definitions an operator can place,
+    /// not the anonymous record an evaluated reference carries.
+    #[test]
+    fn locked_custom_block_names_omit_the_anonymous_records_evaluation_creates() {
+        let mut scene = scene();
+        define(&mut scene, "ROT_AUDIT");
+        let mut anon = BlockRecord::new("*U1");
+        anon.handle = Handle::new(9904);
+        anon.flags.anonymous = true;
+        scene.document.block_records.add(anon).unwrap();
+        // The flag alone marks a record anonymous, whether or not its name
+        // carries the `*` prefix the generated records use.
+        let mut flagged = BlockRecord::new("VARIANT");
+        flagged.handle = Handle::new(9905);
+        flagged.flags.anonymous = true;
+        scene.document.block_records.add(flagged).unwrap();
+
+        let names = scene.custom_block_names();
+        assert_eq!(names, vec!["ROT_AUDIT"]);
+    }
 }

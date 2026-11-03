@@ -139,6 +139,6 @@ For commands whose answers cannot be written on one line, use `start` and then
 |---|---|---|
 | measure | `{"protocol":1,"op":"measure","handles":["2A"]}` — kernel-computed length, area, bounds and mass properties; no window needed | `ocs_read` with `op: "measure"` and `parameters.handles` |
 | capture | `{"protocol":1,"op":"capture","path":"out.png"}` — needs the editor window, so it answers `gui_required` here | `ocs_capture` with `scope` (`viewport` or `window`) and `max_dimension` |
-| `set_properties` | requires `collection`; colours are the serialised enum — `{"Index": 1}` or `"ByLayer"`; a colour name such as `"Red"` is rejected with `invalid_value` | same request through `ocs_execute` |
+| `set_properties` | requires `collection`; a colour takes an index number (`3`; `0` ByBlock, `256` ByLayer), `{"rgb":[r,g,b]}`, or the serialised enum — `{"Index": 1}` or `"ByLayer"`; a colour name such as `"Red"` is rejected with `invalid_value` | same request through `ocs_execute` |
 | audit | `{"protocol":1,"op":"audit","target_format":"dwg","target_version":"2000"}` | `ocs_read` with `op: "audit"` and the same target parameters |
 | save verified | protocol-1 `save_verified` with absolute `path`, unique `request_id`, and target fields | `ocs_execute` with `op: "save_verified"`; returns hash, reopened version and semantic manifest |

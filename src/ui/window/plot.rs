@@ -1425,7 +1425,7 @@ pub fn view_window(
             .size(11)
             .style(muted_style)
             .width(form::LABEL_WIDTH),
-        iced::widget::pick_list(printer_sel, printer_opts, |value| value.to_string())
+        crate::ui::dropdown_list::pick_list(printer_sel, printer_opts, |value| value.to_string())
             .on_select(|choice| Message::PlotDlg(PlotDlgMsg::Printer(choice.raw)))
             .text_size(12)
             .padding([3, 6])
@@ -1540,7 +1540,7 @@ pub fn view_window(
             .size(11)
             .style(muted_style)
             .width(92),
-        iced::widget::pick_list(
+        crate::ui::dropdown_list::pick_list(
             Some(PlotChoice::localized(s.area.clone())),
             area_options,
             |value| value.to_string(),

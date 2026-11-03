@@ -3809,6 +3809,7 @@ impl OpenCADStudio {
                 if self.tabs[self.active_tab]
                     .properties
                     .hatch_pattern_picker_open
+                    || self.graphic_attributes.hatch_editor.is_some()
                 {
                     return self.update(Message::PropHatchPatternNavigate(-2));
                 }
@@ -3841,6 +3842,7 @@ impl OpenCADStudio {
                 if self.tabs[self.active_tab]
                     .properties
                     .hatch_pattern_picker_open
+                    || self.graphic_attributes.hatch_editor.is_some()
                 {
                     return self.update(Message::PropHatchPatternNavigate(2));
                 }
@@ -8078,6 +8080,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextFontPicker(event) => {
+                let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
                 let doc = &self.tabs[self.active_tab].scene.document;
                 let picked = self
                     .mtext_editor
@@ -8089,6 +8092,16 @@ impl OpenCADStudio {
                         self.mtext_apply_font(&font)
                     }
                     None => {}
+                }
+                if is_toggle
+                    && self
+                        .mtext_editor
+                        .as_ref()
+                        .is_some_and(|ed| ed.font_picker.open)
+                {
+                    return iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
+                    ));
                 }
                 Task::none()
             }
@@ -8411,6 +8424,7 @@ impl OpenCADStudio {
                 if self.tabs[self.active_tab]
                     .properties
                     .hatch_pattern_picker_open
+                    || self.graphic_attributes.hatch_editor.is_some()
                 {
                     return self.update(Message::PropHatchPatternNavigate(d as i8));
                 }
@@ -9108,6 +9122,14 @@ impl OpenCADStudio {
             }
 
             Message::PropHatchPatternNavigate(delta) => {
+                if let Some(editor) = self.graphic_attributes.hatch_editor.as_mut() {
+                    let len = crate::ui::properties::filtered_hatch_patterns(&editor.search).len();
+                    if len > 0 {
+                        editor.focus = (editor.focus as isize + delta as isize)
+                            .rem_euclid(len as isize) as usize;
+                    }
+                    return Task::none();
+                }
                 let panel = &mut self.tabs[self.active_tab].properties;
                 let len =
                     crate::ui::properties::filtered_hatch_patterns(&panel.hatch_pattern_search)
@@ -9148,6 +9170,12 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
+                if crate::app::properties::field_moves_geometry(field) && self.any_entity_is_fixed(i, &handles)
+                {
+                    self.command_line
+                        .push_error(crate::app::properties::HELD_BY_FIXED);
+                    return Task::none();
+                }
                 if !handles.is_empty() {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                         match field {
@@ -9415,6 +9443,26 @@ impl OpenCADStudio {
                 if panel.edit_choice_open {
                     panel.hatch_pattern_picker_open = false;
                     panel.hatch_pattern_search.clear();
+                    let active_edit_choice = panel.active_field.as_ref().and_then(|k| match k {
+                        crate::ui::properties::FieldKey::Geom(f) => Some(*f),
+                        _ => None,
+                    });
+                    let field_to_focus = active_edit_choice.or_else(|| {
+                        panel.sections.iter().find_map(|sec| {
+                            sec.props.iter().find_map(|p| {
+                                matches!(
+                                    p.value,
+                                    crate::scene::model::object::PropValue::EditChoice { .. }
+                                )
+                                .then_some(p.field)
+                            })
+                        })
+                    });
+                    if let Some(field) = field_to_focus {
+                        return iced::widget::operation::focus(
+                            crate::ui::properties::prop_geom_field_id(field),
+                        );
+                    }
                 }
                 Task::none()
             }
@@ -13379,6 +13427,7 @@ impl OpenCADStudio {
                 if self.selected_textstyle_is_read_only() {
                     return Task::none();
                 }
+                let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
                 let doc = &self.tabs[self.active_tab].scene.document;
                 match self.textstyle_font_picker.update(event, doc, false) {
                     // A stroke font replaces the system font, which would
@@ -13388,6 +13437,11 @@ impl OpenCADStudio {
                         self.textstyle_draft.pick_system_font(family)
                     }
                     Some(FontChoice::StyleDefault) | None => {}
+                }
+                if is_toggle && self.textstyle_font_picker.open {
+                    return iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
+                    ));
                 }
                 Task::none()
             }

@@ -444,12 +444,12 @@ fn editor_layer_row<'a>(
                 54.0
             ),
             container(color).width(Length::Fixed(135.0)),
-            iced::widget::pick_list(current_linetype, linetypes, |value| value.to_string(),)
+            crate::ui::dropdown_list::pick_list(current_linetype, linetypes, |value| value.to_string(),)
                 .on_select(move |value| Message::LayerStateEditorLayerLinetype(index, value))
                 .text_size(11)
                 .padding([3, 5])
                 .width(Length::Fixed(150.0)),
-            iced::widget::pick_list(current_lineweight, lw_options(), |value| value.to_string(),)
+            crate::ui::dropdown_list::pick_list(current_lineweight, lw_options(), |value| value.to_string(),)
                 .on_select(move |item: LwItem| {
                     Message::LayerStateEditorLayerLineweight(index, item.0)
                 })
@@ -461,7 +461,7 @@ fn editor_layer_row<'a>(
                 .size(11)
                 .padding([3, 5])
                 .width(Length::Fixed(135.0)),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(TransparencyItem(layer.transparency)),
                 transparency_options(layer.transparency),
                 |value| value.to_string(),
@@ -559,7 +559,7 @@ pub fn view_editor<'a>(
                     .style(muted),
                 Space::new().width(sizing.width),
                 text(t!("Current layer")).size(10).style(muted),
-                iced::widget::pick_list(Some(state.current_layer.clone()), layer_names, |value| {
+                crate::ui::dropdown_list::pick_list(Some(state.current_layer.clone()), layer_names, |value| {
                     value.to_string()
                 },)
                 .on_select(Message::LayerStateEditorCurrentLayer)

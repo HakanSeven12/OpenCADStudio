@@ -5407,8 +5407,11 @@ fn cell_text_extents(table: &Table, document: &codec::Document) -> Vec<CellTextE
             }
             // Ink left of the text start (a first glyph's negative side
             // bearing: Arial A, j) is not counted (measured: ABC 4130 units).
+            // Upright, the box spans at least the lines' text height, from
+            // the first line's top to the last baseline (txt "x": 4.5).
+            let lines_height = height + (lines - 1.0) * layout.line_height as f64;
             let ink = if low[0] <= high[0] && !text.trim().is_empty() {
-                [high[0] - low[0].max(0.0), high[1] - low[1]]
+                [high[0] - low[0].max(0.0), high[1].max(0.0) - low[1].min(-lines_height)]
             } else {
                 [0.0, height]
             };

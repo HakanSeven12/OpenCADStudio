@@ -397,6 +397,30 @@ fn a_row_that_prints_no_writable_number_does_not_open_a_field() {
     );
 }
 
+#[test]
+fn a_point_row_prints_the_label_and_description_taken_at_placement() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let tab = app.active_tab;
+    let _ = app.dispatch_command("BPARAMETER POINT");
+    for typed in ["N", "Pt9", "L", "Pin9", "D", "audit note", "P", "No"] {
+        feed(&mut app, typed);
+    }
+    feed(&mut app, "0,0");
+    feed(&mut app, "5,5");
+    let definition = app.tabs[tab].active_block_edit_session().unwrap().br_handle;
+    let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+    for name in ["Pin9 X", "Pin9 Y"] {
+        let point = row(&rows, name);
+        assert_eq!(point.type_name, "Point");
+        assert_eq!(point.description, "audit note");
+        assert!(
+            !point.show,
+            "a palette answer of No keeps the row out of the property list"
+        );
+    }
+}
+
 fn row<'a>(rows: &'a [manager::Row], name: &str) -> &'a manager::Row {
     rows.iter().find(|row| row.name == name).unwrap_or_else(|| {
         panic!(

@@ -1936,6 +1936,9 @@ pub enum CmdResult {
         label: DVec3,
         /// XY parameter grip count chosen at authoring time, when asked.
         grips: Option<usize>,
+        /// Answers given to the base-point prompt's options; a missing answer
+        /// keeps the parameter's own default.
+        options: crate::modules::block_editor::distance_parameter::Options,
     },
     /// Place a native Point parameter after both authoring picks complete.
     PlaceBlockPointParameter {

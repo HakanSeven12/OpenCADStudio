@@ -3541,6 +3541,104 @@ fn a_rotation_keeps_the_defaults_shown_at_each_question() {
 }
 
 #[test]
+fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Linear  Specify base point or [Chain/Description/Palette]:"
+    );
+    feed(&mut app, "C");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+    );
+    feed(&mut app, "Yes");
+    feed(&mut app, "D");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter property description:"
+    );
+    feed(&mut app, "ramp  length");
+    feed(&mut app, "P");
+    feed(&mut app, "No");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let linear = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
+        .expect("placed linear parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&linear.handle).expect("linear record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+        panic!("expected a linear parameter");
+    };
+    assert!(native.parameter.parameter.chain_actions);
+    assert_eq!(native.distance_description, "ramp  length");
+    assert!(
+        !native.parameter.parameter.show_properties,
+        "No at the palette question hides the property"
+    );
+}
+
+#[test]
+fn a_distance_keeps_the_defaults_shown_at_each_question() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "C");
+    feed(&mut app, "maybe");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:",
+        "a refused answer leaves the question open"
+    );
+    feed(&mut app, "");
+    feed(&mut app, "P");
+    feed(&mut app, "");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let linear = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
+        .expect("placed linear parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&linear.handle).expect("linear record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+        panic!("expected a linear parameter");
+    };
+    assert!(
+        !native.parameter.parameter.chain_actions,
+        "Enter at the chain question keeps the actions unchained"
+    );
+    assert!(
+        native.parameter.parameter.show_properties,
+        "Enter at the palette question keeps the property visible"
+    );
+}
+
+#[test]
 fn a_second_lookup_offers_the_next_free_name_and_a_taken_name_keeps_its_default() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -4251,6 +4349,7 @@ fn distance_parameter_stale_context_and_invalid_result_do_not_start_history() {
                 end,
                 label: glam::DVec3::ZERO,
                 grips: None,
+                options: Default::default(),
             },
         );
         assert_eq!(app.tabs[i].scene.document, before);

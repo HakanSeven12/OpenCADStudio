@@ -125,6 +125,7 @@ impl OpenCADStudio {
             end,
             label,
             grips,
+            options,
         } = result
         else {
             unreachable!()
@@ -174,6 +175,33 @@ impl OpenCADStudio {
                 Some(count),
             )
             .expect("validated XY grip count");
+        }
+        let option_error = {
+            use crate::scene::block_authoring::metadata;
+            let document = &mut self.tabs[i].scene.document;
+            let description = options.description.as_deref().map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::Description,
+                    value,
+                )
+            });
+            let chain = options
+                .chain
+                .map(|value| metadata::set_chain(document, definition, parameter, value));
+            let palette = options
+                .palette
+                .map(|value| metadata::set_visible(document, definition, parameter, value));
+            description
+                .into_iter()
+                .chain(chain)
+                .chain(palette)
+                .find_map(Result::err)
+        };
+        if let Some(error) = option_error {
+            self.command_line.push_error(crate::t!(error).as_ref());
         }
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;

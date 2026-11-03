@@ -3371,6 +3371,75 @@ fn alignment_visibility_and_lookup_name_their_labels_without_asking() {
 }
 
 #[test]
+fn a_lookup_takes_its_name_description_and_palette_switch_at_the_placement_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Lookup1>:",
+        "the name question offers the next free name"
+    );
+    feed(&mut app, "Grip9");
+    feed(&mut app, "D");
+    feed(&mut app, "shows the grip");
+    feed(&mut app, "P");
+    feed(&mut app, "No");
+    feed(&mut app, "6,6");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let lookups = crate::scene::block_lookup::parameters(doc, definition);
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].1.lookup_name, "Grip9");
+    assert_eq!(lookups[0].1.lookup_description, "shows the grip");
+    assert!(!lookups[0].1.parameter.parameter.show_properties);
+    assert_eq!(
+        lookups[0].1.parameter.definition_point,
+        Vector3::new(6.0, 6.0, 0.0)
+    );
+}
+
+#[test]
+fn a_second_lookup_offers_the_next_free_name_and_a_taken_name_keeps_its_default() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "2,2");
+    feed(&mut app, "");
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Lookup2>:",
+        "the second parameter skips the name already placed"
+    );
+    feed(&mut app, "Lookup1");
+    feed(&mut app, "4,4");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let names = crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+        .into_iter()
+        .map(|(_, parameter)| parameter.lookup_name.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        ["Lookup1", "Lookup2"],
+        "a name already in use is refused and the default stands"
+    );
+}
+
+#[test]
 fn orientation_parameter_batch_numeric_rotation_local_history_save_and_parent_undo() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

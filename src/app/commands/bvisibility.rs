@@ -504,7 +504,11 @@ impl OpenCADStudio {
                             self.tabs[i].id,
                             block,
                             kind,
-                        );
+                        )
+                        .with_default_name(crate::scene::block_lookup::next_name(
+                            &self.tabs[i].scene.document,
+                            block,
+                        ));
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(Task::none());

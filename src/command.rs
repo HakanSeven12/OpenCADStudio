@@ -1893,6 +1893,9 @@ pub enum CmdResult {
         kind: crate::modules::block_editor::single_parameter::Kind,
         location: DVec3,
         grips: Option<usize>,
+        /// Answers given to the placement prompt's options; a missing answer
+        /// keeps the parameter's own default.
+        options: crate::modules::block_editor::single_parameter::Options,
     },
     /// An action type was chosen that has no geometry action of its own:
     /// continue with Lookup parameter selection.

@@ -56,6 +56,16 @@ pub(crate) fn parameters(
 pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option<&'static str> {
     authoring::graph(document, definition).err()
 }
+pub(crate) fn next_name(document: &Document, definition: Handle) -> String {
+    let names = parameters(document, definition)
+        .iter()
+        .map(|(_, p)| p.lookup_name.clone())
+        .collect::<Vec<_>>();
+    (1..)
+        .map(|n| format!("Lookup{n}"))
+        .find(|s| names.iter().all(|n| !n.eq_ignore_ascii_case(s)))
+        .unwrap()
+}
 pub(crate) fn create(
     document: &mut Document,
     definition: Handle,
@@ -67,14 +77,7 @@ pub(crate) fn create(
     {
         return Err("Specify a finite parameter location.");
     }
-    let names = parameters(document, definition)
-        .iter()
-        .map(|(_, p)| p.lookup_name.clone())
-        .collect::<Vec<_>>();
-    let name = (1..)
-        .map(|n| format!("Lookup{n}"))
-        .find(|s| names.iter().all(|n| !n.eq_ignore_ascii_case(s)))
-        .unwrap();
+    let name = next_name(document, definition);
     let (graph, slots) = authoring::prepare(document, definition)?;
     register_classes(
         document,

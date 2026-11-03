@@ -212,6 +212,10 @@ debug = 0
 [profile.dev.package."*"]
 opt-level = 2
 
+# meshopt's C++ build maps DEBUG=false to NDEBUG. Keep its C assertions.
+[profile.dev.package.meshopt]
+debug = 1
+
 [profile.test]
 debug = 0
 

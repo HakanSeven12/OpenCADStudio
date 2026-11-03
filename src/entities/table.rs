@@ -1510,6 +1510,7 @@ impl RenderConvertible for Table {
                 // Content rotation (radians) on top of table cell rotation.
                 let rot = content.map(|c| c.rotation as f32).unwrap_or(0.0) + cell.rotation as f32;
                 let layout = layout_mtext(&MTextRenderOpts {
+                    layer_color: None,
                     // Not an MTEXT: text in a fixed box, never columnar.
                     columns: Default::default(),
                     value: text,
@@ -2214,6 +2215,7 @@ pub fn tessellate_table(
                     let field_boxes =
                         content.field_handle.is_some() && crate::entities::field::display();
                     let layout = layout_mtext(&MTextRenderOpts {
+                        layer_color: None,
                         columns: Default::default(),
                         value: text,
                         insertion: [to.x as f64, to.y as f64, to.z as f64],
@@ -4350,6 +4352,7 @@ pub fn table_indicator(
     .map(|bounds| bounds.ink_max[0] - bounds.ink_min[0])
     .filter(|width| *width > 0.0);
     let digits = ink.unwrap_or_else(|| layout_mtext(&MTextRenderOpts {
+        layer_color: None,
         columns: Default::default(),
         value: "000",
         insertion: [0.0; 3],
@@ -5290,6 +5293,7 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
                 - margin(P::MARGIN_LEFT, h_margin)
                 - margin(P::MARGIN_RIGHT, h_margin);
             let layout = layout_mtext(&MTextRenderOpts {
+                layer_color: None,
                 columns: Default::default(),
                 value: &text,
                 insertion: [0.0; 3],

@@ -455,6 +455,7 @@ fn text_frame_polyline(
     use codec::entities::{mtext::DrawingDirection, LineSpacingStyle, LwVertex};
     let style = resolve_text_style(&text.style, doc);
     let layout = layout_mtext(&MTextRenderOpts {
+        layer_color: None,
         columns: Default::default(),
         value: &text.value,
         insertion: [0.0, 0.0, 0.0],

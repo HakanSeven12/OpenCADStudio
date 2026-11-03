@@ -251,6 +251,7 @@ fn build_attr_layout(
             is_vertical: false,
         };
         let layout = layout_mtext(&MTextRenderOpts {
+            layer_color: None,
             // Not an MTEXT: text in a fixed box, never columnar.
             columns: Default::default(),
             value: &display_value,

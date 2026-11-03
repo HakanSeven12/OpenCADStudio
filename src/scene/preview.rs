@@ -741,6 +741,7 @@ impl Scene {
         };
         for (text, center) in &indicator.labels {
             let layout = layout_mtext(&MTextRenderOpts {
+                layer_color: None,
                 columns: Default::default(),
                 value: text,
                 insertion: [center.x as f64, center.y as f64, center.z as f64],

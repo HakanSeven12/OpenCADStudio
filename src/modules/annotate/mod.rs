@@ -283,11 +283,23 @@ impl CadModule for AnnotateModule {
                     ],
                 },
                 // ── Markup ───────────────────────────────────────────────────
+                // Wipeout, then Revision Cloud: its face keeps its name and
+                // runs the type chosen last (Rectangular first).
                 RibbonGroup {
                     title: "Markup",
                     tools: vec![
                         RibbonItem::LargeTool(wipeout::tool()),
-                        RibbonItem::LargeTool(revcloud::tool()),
+                        RibbonItem::LargeDropdown {
+                            id: "REVCLOUD",
+                            label: "Revision Cloud",
+                            icon: revcloud::ICON,
+                            items: vec![
+                                ("REVCLOUD_RECTANGULAR", "Rectangular", revcloud::ICON),
+                                ("REVCLOUD_POLYGONAL", "Polygonal", revcloud::ICON),
+                                ("REVCLOUD_FREEHAND", "Freehand", revcloud::ICON),
+                            ],
+                            default: "REVCLOUD_RECTANGULAR",
+                        },
                     ],
                 },
                 // ── Annotation Scaling ───────────────────────────────────────

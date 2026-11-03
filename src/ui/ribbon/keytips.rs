@@ -579,6 +579,11 @@ const CODES: &[(&str, &str, &str)] = &[
     ("annotate", TABLE_LAUNCHER, "TT"),
     ("annotate", "WIPEOUT", "WI"),
     ("annotate", "REVCLOUD", "AC"),
+    // Every Revision Cloud type is RC in the reference; typing it runs
+    // the first.
+    ("REVCLOUD", "REVCLOUD_RECTANGULAR", "RC"),
+    ("REVCLOUD", "REVCLOUD_POLYGONAL", "RC"),
+    ("REVCLOUD", "REVCLOUD_FREEHAND", "RC"),
     // The reference shows AC here too; typing it runs Revision Cloud.
     ("annotate", "ANNOTATION_CURRENT_SCALE", "AC"),
     ("annotate", "SCALELISTEDIT", "SL"),

@@ -2497,10 +2497,11 @@ fn solve_scope(
             tangent_point,
             originals,
         ) {
-            // The row→id map only backs `diagnose`/`classify_redundant` below.
-            if diagnostics {
-                owner.push((constraint.clone(), c.id));
-            }
+            // The row→id map backs the fixpoint gate below and
+            // `diagnose`/`classify_redundant`; the gate decides whether to
+            // solve at all, so it needs every user row even when the
+            // diagnostics themselves are not collected.
+            owner.push((constraint.clone(), c.id));
             sys.add_constraint(constraint);
         }
     }

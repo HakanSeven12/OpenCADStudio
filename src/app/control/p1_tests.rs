@@ -1175,3 +1175,57 @@ fn text_audit_system_spellcheck_flags_misspelled_words() {
         );
     }
 }
+
+/// The protocol envelope a bridge supplies, for the operations the
+/// automation surface does not carry (a grip drag lives in the control
+/// surface only).
+fn control(app: &mut OpenCADStudio, mut op: Value) -> Value {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+    let state = app.control_state();
+    op["protocol"] = json!(1);
+    op["document_id"] = state["document_id"].clone();
+    op["revision"] = state["revision"].clone();
+    op["client_id"] = json!("test");
+    op["request_id"] = json!(format!("p1-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed)));
+    let (response, task) = app.control_request(op);
+    let _ = app.drive_headless_task(task);
+    response
+}
+
+/// A fixed entity must not move under a grip drag: the constraint that
+/// reports itself applied has to hold the geometry where it was drawn.
+#[test]
+fn a_fixed_entity_resists_a_grip_drag() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[10,5,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    let coords = |key: &str| {
+        let p = entity[key].as_array().expect("the line reports both ends");
+        (p[0].as_f64().expect("x"), p[1].as_f64().expect("y"))
+    };
+    let (sx, sy) = coords("start");
+    let (ex, ey) = coords("end");
+    assert!(
+        sx.abs() < 1e-9 && sy.abs() < 1e-9 && (ex - 10.0).abs() < 1e-9 && ey.abs() < 1e-9,
+        "a fixed line stays where it was drawn: {q}"
+    );
+}

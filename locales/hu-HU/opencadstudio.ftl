@@ -8423,3 +8423,13 @@ table-cells =
     .warning-note = Az átalakítás minden értéket az új típusként olvas; a nem olvasható érték törlődik. A Mégse változatlanul hagyja a cellákat.
     .warning-ok = Átalakítás
     .warning-cancel = Mégse
+
+parameters-manager =
+    .action-parameters = Műveletparaméterek
+    .filter = Név*
+    .search = Paraméter keresése
+    .order = Sorrend
+    .polar = Poláris
+    .visibility = Láthatóság
+    .variable = Változó
+    .footer = Összes: { $shown } / { $total } paraméter látható

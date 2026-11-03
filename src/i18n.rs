@@ -546,6 +546,21 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
+    fn parameters_manager_footer_formats_both_counts_in_every_locale() {
+        for language in Language::ALL.into_iter().filter(|language| *language != Language::System) {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).unwrap();
+            let footer = format_attribute_with(
+                &loader,
+                "parameters-manager",
+                "footer",
+                &[("shown", "7"), ("total", "13")],
+            ).expect("the localized footer must format");
+            assert!(footer.contains('7') && footer.contains("13"), "{language:?}: {footer:?}");
+        }
+    }
+
+    #[test]
     fn formatted_history_preserves_authored_values_in_every_locale() {
         for language in Language::ALL.into_iter().filter(|language| *language != Language::System) {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());

@@ -8443,3 +8443,13 @@ table-cells =
     .warning-note = Beim Konvertieren wird jeder Wert als neuer Typ gelesen; nicht lesbare Werte werden gelöscht. Abbrechen lässt die Zellen unverändert.
     .warning-ok = Konvertieren
     .warning-cancel = Abbrechen
+
+parameters-manager =
+    .action-parameters = Aktionsparameter
+    .filter = Name*
+    .search = Parameter suchen
+    .order = Reihenfolge
+    .polar = Polar
+    .visibility = Sichtbarkeit
+    .variable = Variable
+    .footer = Alle: { $shown } von { $total } Parametern angezeigt

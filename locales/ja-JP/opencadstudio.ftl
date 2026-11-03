@@ -8423,3 +8423,13 @@ table-cells =
     .warning-note = 変換すると各値を新しい型として読み取ります。読み取れない値は消去されます。キャンセルするとセルは変更されません。
     .warning-ok = 変換
     .warning-cancel = キャンセル
+
+parameters-manager =
+    .action-parameters = アクションパラメーター
+    .filter = 名前*
+    .search = パラメーターを検索
+    .order = 順序
+    .polar = 極座標
+    .visibility = 可視性
+    .variable = 変数
+    .footer = すべて: { $total } 個中 { $shown } 個のパラメーターを表示

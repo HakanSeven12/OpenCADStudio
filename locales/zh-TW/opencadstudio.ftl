@@ -8430,3 +8430,13 @@ table-cells =
     .warning-note = 轉換會將每個值依新類型讀取；無法讀取的值將被清除。取消則保持儲存格不變。
     .warning-ok = 轉換
     .warning-cancel = 取消
+
+parameters-manager =
+    .action-parameters = 動作參數
+    .filter = 名稱*
+    .search = 搜尋參數
+    .order = 順序
+    .polar = 極座標
+    .visibility = 可見性
+    .variable = 變數
+    .footer = 全部：顯示 { $total } 個參數中的 { $shown } 個

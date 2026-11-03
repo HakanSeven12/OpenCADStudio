@@ -8445,3 +8445,13 @@ table-cells =
     .warning-note = A conversão lê cada valor como o novo tipo; um valor que não puder ser lido assim é apagado. Cancelar mantém as células inalteradas.
     .warning-ok = Converter
     .warning-cancel = Cancelar
+
+parameters-manager =
+    .action-parameters = Parâmetros de ação
+    .filter = Nome*
+    .search = Buscar parâmetro
+    .order = Ordem
+    .polar = Polar
+    .visibility = Visibilidade
+    .variable = Variável
+    .footer = Todos: { $shown } de { $total } parâmetros exibidos

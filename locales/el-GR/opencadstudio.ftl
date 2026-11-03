@@ -8445,3 +8445,13 @@ table-cells =
     .warning-note = Η μετατροπή διαβάζει κάθε τιμή ως τον νέο τύπο· μια τιμή που δεν διαβάζεται διαγράφεται. Το Άκυρο αφήνει τα κελιά αμετάβλητα.
     .warning-ok = Μετατροπή
     .warning-cancel = Άκυρο
+
+parameters-manager =
+    .action-parameters = Παράμετροι ενεργειών
+    .filter = Όνομα*
+    .search = Αναζήτηση παραμέτρου
+    .order = Σειρά
+    .polar = Πολικό
+    .visibility = Ορατότητα
+    .variable = Μεταβλητή
+    .footer = Όλα: εμφανίζονται { $shown } από { $total } παράμετροι

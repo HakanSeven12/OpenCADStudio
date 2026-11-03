@@ -8444,3 +8444,13 @@ table-cells =
     .warning-note = La conversione legge ogni valore nel nuovo tipo; un valore non leggibile viene cancellato. Annulla lascia le celle invariate.
     .warning-ok = Converti
     .warning-cancel = Annulla
+
+parameters-manager =
+    .action-parameters = Parametri azione
+    .filter = Nome*
+    .search = Cerca parametro
+    .order = Ordine
+    .polar = Polare
+    .visibility = Visibilità
+    .variable = Variabile
+    .footer = Tutti: { $shown } parametri visualizzati su { $total }

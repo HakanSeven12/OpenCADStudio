@@ -8442,3 +8442,13 @@ table-cells =
     .warning-note = Chuyển đổi sẽ đọc từng giá trị theo kiểu mới; giá trị không đọc được theo kiểu đó sẽ bị xóa. Hủy bỏ giữ nguyên các ô.
     .warning-ok = Chuyển đổi
     .warning-cancel = Hủy bỏ
+
+parameters-manager =
+    .action-parameters = Tham số hành động
+    .filter = Tên*
+    .search = Tìm tham số
+    .order = Thứ tự
+    .polar = Cực
+    .visibility = Hiển thị
+    .variable = Biến
+    .footer = Tất cả: hiển thị { $shown } trong { $total } tham số

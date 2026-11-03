@@ -8445,3 +8445,13 @@ table-cells =
     .warning-note = Převod přečte každou hodnotu jako nový typ; hodnota, kterou nelze přečíst, se vymaže. Zrušit ponechá buňky beze změny.
     .warning-ok = Převést
     .warning-cancel = Zrušit
+
+parameters-manager =
+    .action-parameters = Parametry akcí
+    .filter = Název*
+    .search = Hledat parametr
+    .order = Pořadí
+    .polar = Polární
+    .visibility = Viditelnost
+    .variable = Proměnná
+    .footer = Vše: zobrazeno { $shown } z { $total } parametrů

@@ -8436,3 +8436,13 @@ table-cells =
     .warning-note = ການແປງຈະອ່ານແຕ່ລະຄ່າເປັນປະເພດໃໝ່; ຄ່າທີ່ອ່ານບໍ່ໄດ້ຈະຖືກລ້າງ. ຍົກເລີກຈະບໍ່ປ່ຽນແປງຫ້ອງ.
     .warning-ok = ແປງ
     .warning-cancel = ຍົກເລີກ
+
+parameters-manager =
+    .action-parameters = ພາຣາມິເຕີການກະທຳ
+    .filter = ຊື່*
+    .search = ຄົ້ນຫາພາຣາມິເຕີ
+    .order = ລຳດັບ
+    .polar = ແບບຂົ້ວ
+    .visibility = ການເບິ່ງເຫັນ
+    .variable = ຕົວແປ
+    .footer = ທັງໝົດ: ສະແດງ { $shown } ຈາກ { $total } ພາຣາມິເຕີ

@@ -8444,3 +8444,13 @@ block-value-set =
     .title = Value Set
     .x-distance = X Distance
     .y-distance = Y Distance
+
+parameters-manager =
+    .action-parameters = Action Parameters
+    .filter = Name*
+    .search = Search for parameter
+    .order = Order
+    .polar = Polar
+    .visibility = Visibility
+    .variable = Variable
+    .footer = All: { $shown } of { $total } parameters displayed

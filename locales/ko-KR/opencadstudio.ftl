@@ -8434,3 +8434,13 @@ table-cells =
     .warning-note = 변환하면 각 값을 새 유형으로 읽으며, 읽을 수 없는 값은 지워집니다. 취소하면 셀이 변경되지 않습니다.
     .warning-ok = 변환
     .warning-cancel = 취소
+
+parameters-manager =
+    .action-parameters = 동작 매개변수
+    .filter = 이름*
+    .search = 매개변수 검색
+    .order = 순서
+    .polar = 극좌표
+    .visibility = 가시성
+    .variable = 변수
+    .footer = 전체: 매개변수 { $total }개 중 { $shown }개 표시

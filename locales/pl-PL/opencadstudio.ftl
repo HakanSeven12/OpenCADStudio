@@ -8447,3 +8447,13 @@ table-cells =
     .warning-note = Konwersja odczytuje każdą wartość jako nowy typ; wartość, której nie da się tak odczytać, zostaje wyczyszczona. Anuluj pozostawia komórki bez zmian.
     .warning-ok = Konwertuj
     .warning-cancel = Anuluj
+
+parameters-manager =
+    .action-parameters = Parametry operacji
+    .filter = Nazwa*
+    .search = Szukaj parametru
+    .order = Kolejność
+    .polar = Biegunowy
+    .visibility = Widoczność
+    .variable = Zmienna
+    .footer = Wszystkie: wyświetlono { $shown } z { $total } parametrów

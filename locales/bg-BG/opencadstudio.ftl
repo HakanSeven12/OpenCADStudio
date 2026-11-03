@@ -8445,3 +8445,13 @@ table-cells =
     .warning-note = Преобразуването чете всяка стойност като новия тип; стойност, която не може да се прочете, се изчиства. Отказ оставя клетките непроменени.
     .warning-ok = Преобразуване
     .warning-cancel = Отказ
+
+parameters-manager =
+    .action-parameters = Параметри на действия
+    .filter = Име*
+    .search = Търсене на параметър
+    .order = Ред
+    .polar = Полярен
+    .visibility = Видимост
+    .variable = Променлива
+    .footer = Всички: показани са { $shown } от { $total } параметъра

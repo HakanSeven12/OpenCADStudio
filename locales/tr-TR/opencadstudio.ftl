@@ -8364,3 +8364,13 @@ block-value-set =
     .title = Değer kümesi
     .x-distance = X mesafesi
     .y-distance = Y mesafesi
+
+parameters-manager =
+    .action-parameters = Eylem parametreleri
+    .filter = Ad*
+    .search = Parametre ara
+    .order = Sıra
+    .polar = Kutupsal
+    .visibility = Görünürlük
+    .variable = Değişken
+    .footer = Tümü: { $total } parametreden { $shown } tanesi gösteriliyor

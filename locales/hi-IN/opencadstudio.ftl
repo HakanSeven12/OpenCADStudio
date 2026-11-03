@@ -8433,3 +8433,13 @@ table-cells =
     .warning-note = रूपांतरण हर मान को नए प्रकार में पढ़ता है; जो मान पढ़ा न जा सके वह साफ़ हो जाता है। रद्द करने पर सेल अपरिवर्तित रहते हैं।
     .warning-ok = रूपांतरित करें
     .warning-cancel = रद्द करें
+
+parameters-manager =
+    .action-parameters = क्रिया पैरामीटर
+    .filter = नाम*
+    .search = पैरामीटर खोजें
+    .order = क्रम
+    .polar = ध्रुवीय
+    .visibility = दृश्यता
+    .variable = चर
+    .footer = सभी: { $total } में से { $shown } पैरामीटर दिखाए गए

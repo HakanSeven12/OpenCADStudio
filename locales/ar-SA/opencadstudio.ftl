@@ -8448,3 +8448,13 @@ table-cells =
     .warning-note = يقرأ التحويل كل قيمة بالنوع الجديد، وتُمسح القيمة التي لا يمكن قراءتها. يترك الإلغاء الخلايا دون تغيير.
     .warning-ok = تحويل
     .warning-cancel = إلغاء
+
+parameters-manager =
+    .action-parameters = معلمات الإجراءات
+    .filter = الاسم*
+    .search = البحث عن معلمة
+    .order = الترتيب
+    .polar = قطبي
+    .visibility = الرؤية
+    .variable = متغير
+    .footer = الكل: عُرضت { $shown } من { $total } معلمة

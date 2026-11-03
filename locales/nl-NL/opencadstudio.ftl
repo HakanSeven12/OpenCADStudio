@@ -8443,3 +8443,13 @@ table-cells =
     .warning-note = Bij converteren wordt elke waarde als het nieuwe type gelezen; een waarde die zo niet gelezen kan worden, wordt gewist. Annuleren laat de cellen ongewijzigd.
     .warning-ok = Converteren
     .warning-cancel = Annuleren
+
+parameters-manager =
+    .action-parameters = Actieparameters
+    .filter = Naam*
+    .search = Parameter zoeken
+    .order = Volgorde
+    .polar = Polair
+    .visibility = Zichtbaarheid
+    .variable = Variabele
+    .footer = Alles: { $shown } van { $total } parameters weergegeven

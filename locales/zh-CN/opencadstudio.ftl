@@ -8418,3 +8418,13 @@ table-cells =
     .warning-note = 转换会将每个值按新类型读取；无法读取的值将被清除。取消则保持单元格不变。
     .warning-ok = 转换
     .warning-cancel = 取消
+
+parameters-manager =
+    .action-parameters = 动作参数
+    .filter = 名称*
+    .search = 搜索参数
+    .order = 顺序
+    .polar = 极轴
+    .visibility = 可见性
+    .variable = 变量
+    .footer = 全部：显示 { $total } 个参数中的 { $shown } 个

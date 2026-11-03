@@ -8442,3 +8442,13 @@ table-cells =
     .warning-note = Muunnos lukee jokaisen arvon uutena tyyppinä; arvo, jota ei voi lukea, tyhjennetään. Peruuta jättää solut ennalleen.
     .warning-ok = Muunna
     .warning-cancel = Peruuta
+
+parameters-manager =
+    .action-parameters = Toimintoparametrit
+    .filter = Nimi*
+    .search = Etsi parametria
+    .order = Järjestys
+    .polar = Polaarinen
+    .visibility = Näkyvyys
+    .variable = Muuttuja
+    .footer = Kaikki: { $shown } / { $total } parametria näytetään

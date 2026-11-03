@@ -4923,7 +4923,6 @@ pub(crate) fn cell_data_kind(
     row: usize,
     column: usize,
 ) -> Option<(usize, String)> {
-    use codec::entities::table::CellStylePropertyFlags as P;
     let table_row = table.rows.get(row)?;
     let cell = table_row.cells.get(column)?;
     let kind_of = |data_type: i32, unit_type: i32| {
@@ -5406,8 +5405,10 @@ fn cell_text_extents(table: &Table, document: &codec::Document) -> Vec<CellTextE
                     }
                 }
             }
+            // Ink left of the text start (a first glyph's negative side
+            // bearing: Arial A, j) is not counted (measured: ABC 4130 units).
             let ink = if low[0] <= high[0] && !text.trim().is_empty() {
-                [high[0] - low[0], high[1] - low[1]]
+                [high[0] - low[0].max(0.0), high[1] - low[1]]
             } else {
                 [0.0, height]
             };
@@ -5453,7 +5454,6 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
 /// the cell's top left corner, and the box's width and height. Cells
 /// without content keep only the margins.
 pub(crate) fn store_cell_geometry(table: &mut Table, document: &codec::Document) {
-    use codec::entities::table::CellStylePropertyFlags as P;
     let table_style = table.table_style_handle.and_then(|handle| {
         match document.objects.get(&handle) {
             Some(codec::objects::ObjectType::TableStyle(style)) => Some(style.clone()),

@@ -715,10 +715,7 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
         Property {
             label: t!("Linetype generation").into_owned(),
             field: "plinegen",
-            value: PropValue::BoolToggle {
-                field: "plinegen",
-                value: pline.plinegen,
-            },
+            value: crate::entities::common::enabled_choice(pline.plinegen),
         },
     ];
     if let Some(arc_length) = cloud_arc_length {
@@ -811,7 +808,7 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
             pline.plinegen = if value == "toggle" {
                 !pline.plinegen
             } else {
-                value == "true"
+                crate::entities::common::enabled_value(value)
             };
             return;
         }

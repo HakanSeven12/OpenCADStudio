@@ -756,10 +756,7 @@ impl PropertyEditable for Polyline2D {
                     Property {
                         label: t!("Linetype generation").into_owned(),
                         field: "pl2_ltype_gen",
-                        value: PropValue::BoolToggle {
-                            field: "pl2_ltype_gen",
-                            value: self.flags.bits() & 128 != 0,
-                        },
+                        value: crate::entities::common::enabled_choice(self.flags.bits() & 128 != 0),
                     },
                 ],
             },
@@ -860,7 +857,7 @@ impl PropertyEditable for Polyline2D {
                 let on = if value == "toggle" {
                     self.flags.bits() & 128 == 0
                 } else {
-                    value == "true"
+                    crate::entities::common::enabled_value(value)
                 };
                 let bits = if on {
                     self.flags.bits() | 128

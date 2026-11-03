@@ -318,13 +318,39 @@ impl OpenCADStudio {
         let option_error = {
             use crate::scene::block_authoring::metadata;
             let document = &mut self.tabs[i].scene.document;
+            let name = options
+                .name
+                .map(|value| metadata::set_parameter_name(document, definition, parameter, &value));
+            let description = options.description.map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::Description,
+                    &value,
+                )
+            });
+            let label = options.label.map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::Name,
+                    &value,
+                )
+            });
             let chain = options
                 .chain
                 .map(|value| metadata::set_chain(document, definition, parameter, value));
             let palette = options
                 .palette
                 .map(|value| metadata::set_visible(document, definition, parameter, value));
-            chain.into_iter().chain(palette).find_map(Result::err)
+            name.into_iter()
+                .chain(description)
+                .chain(label)
+                .chain(chain)
+                .chain(palette)
+                .find_map(Result::err)
         };
         if let Some(error) = option_error {
             self.command_line.push_error(crate::t!(error).as_ref());
@@ -642,6 +668,13 @@ impl OpenCADStudio {
                         crate::modules::block_editor::point_parameter::PointParameterCommand::new(
                             self.tabs[i].id,
                             block,
+                        )
+                        .with_defaults(
+                            "Point".to_owned(),
+                            crate::scene::block_point_parameter::next_position_name(
+                                &self.tabs[i].scene.document,
+                                block,
+                            ),
                         );
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));

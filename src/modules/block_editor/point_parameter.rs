@@ -7,25 +7,23 @@ use glam::DVec3;
 /// Values answered at the placement prompt before the parameter exists.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
+    pub name: Option<String>,
+    pub label: Option<String>,
     pub chain: Option<bool>,
+    pub description: Option<String>,
     pub palette: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Asking {
+    Name,
+    Label,
     Chain,
+    Description,
     Palette,
 }
 
 impl Asking {
-    fn question(self) -> &'static str {
-        match self {
-            Self::Chain => {
-                "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
-            }
-            Self::Palette => "Display property in Properties palette? [Yes/No] <Yes>:",
-        }
-    }
     /// The creation default the question's Enter answer stands for.
     fn default_answer(self) -> bool {
         self == Self::Palette
@@ -41,6 +39,8 @@ pub struct PointParameterCommand {
     location: Option<DVec3>,
     asking: Option<Asking>,
     options: Options,
+    name_default: String,
+    label_default: String,
 }
 
 impl PointParameterCommand {
@@ -51,13 +51,63 @@ impl PointParameterCommand {
             location: None,
             asking: None,
             options: Options::default(),
+            name_default: "Point".into(),
+            label_default: "Position1".into(),
         }
+    }
+    pub(crate) fn with_defaults(mut self, name: String, label: String) -> Self {
+        self.name_default = name;
+        self.label_default = label;
+        self
     }
 }
 
 impl PointParameterCommand {
+    /// The question the open option asks, carrying the defaults it offers.
+    fn question(&self, asking: Asking) -> String {
+        match asking {
+            Asking::Name => crate::tf!("Enter parameter name <{}>:", self.name_default).into_owned(),
+            Asking::Label => {
+                crate::tf!("Enter position property label <{}>:", self.label_default).into_owned()
+            }
+            Asking::Chain => crate::t!(
+                "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+            )
+            .into_owned(),
+            Asking::Description => crate::t!("Enter property description:").into_owned(),
+            Asking::Palette => {
+                crate::t!("Display property in Properties palette? [Yes/No] <Yes>:").into_owned()
+            }
+        }
+    }
     fn accept(&mut self, text: Option<&str>) -> CmdResult {
         let asking = self.asking.expect("an option question is open");
+        if matches!(asking, Asking::Name | Asking::Label) {
+            let value = text.unwrap_or("").trim();
+            match asking {
+                Asking::Name => {
+                    if !value.is_empty() && !value.eq_ignore_ascii_case(&self.name_default) {
+                        self.options.name = Some(value.to_owned());
+                    }
+                }
+                Asking::Label => {
+                    if !value.is_empty() && !value.eq_ignore_ascii_case(&self.label_default) {
+                        self.options.label = Some(value.to_owned());
+                    }
+                }
+                _ => unreachable!(),
+            }
+            self.asking = None;
+            return CmdResult::NeedPoint;
+        }
+        if asking == Asking::Description {
+            let value = text.unwrap_or("");
+            if !value.is_empty() {
+                self.options.description = Some(value.to_owned());
+            }
+            self.asking = None;
+            return CmdResult::NeedPoint;
+        }
         let value = match text.map(str::trim) {
             None | Some("") => asking.default_answer(),
             Some(text) => match text.to_ascii_uppercase().as_str() {
@@ -70,6 +120,7 @@ impl PointParameterCommand {
             match asking {
                 Asking::Chain => self.options.chain = Some(value),
                 Asking::Palette => self.options.palette = Some(value),
+                Asking::Name | Asking::Label | Asking::Description => unreachable!(),
             }
         }
         self.asking = None;
@@ -84,21 +135,21 @@ impl CadCommand for PointParameterCommand {
 
     fn prompt(&self) -> String {
         if let Some(asking) = self.asking {
-            return crate::t!(asking.question()).into_owned();
+            return self.question(asking);
         }
         crate::t!(if self.location.is_some() {
             "BPARAMETER  Specify point parameter label location:"
         } else {
-            "BPARAMETER  Specify parameter location or [Chain/Palette]:"
+            "BPARAMETER  Specify parameter location or [Name/Label/Chain/Description/Palette]:"
         })
         .into_owned()
     }
 
     fn input_kind(&self) -> InputKind {
-        if self.asking.is_some() {
-            InputKind::SingleToken
-        } else {
-            InputKind::Point
+        match self.asking {
+            Some(Asking::Name | Asking::Label | Asking::Description) => InputKind::FreeText,
+            Some(Asking::Chain | Asking::Palette) => InputKind::SingleToken,
+            None => InputKind::Point,
         }
     }
 
@@ -114,7 +165,10 @@ impl CadCommand for PointParameterCommand {
             return None;
         }
         let asking = match text.trim().to_ascii_uppercase().as_str() {
+            "N" | "NAME" => Asking::Name,
+            "L" | "LABEL" => Asking::Label,
             "C" | "CHAIN" => Asking::Chain,
+            "D" | "DESCRIPTION" => Asking::Description,
             "P" | "PALETTE" => Asking::Palette,
             _ => {
                 return Some(CmdResult::ReportError(
@@ -123,7 +177,10 @@ impl CadCommand for PointParameterCommand {
             }
         };
         match asking {
+            Asking::Name => self.options.name = None,
+            Asking::Label => self.options.label = None,
             Asking::Chain => self.options.chain = None,
+            Asking::Description => self.options.description = None,
             Asking::Palette => self.options.palette = None,
         }
         self.asking = Some(asking);
@@ -205,7 +262,7 @@ mod tests {
     fn a_point_location_prompt_lists_the_options_it_accepts() {
         assert_eq!(
             command().prompt(),
-            "BPARAMETER  Specify parameter location or [Chain/Palette]:"
+            "BPARAMETER  Specify parameter location or [Name/Label/Chain/Description/Palette]:"
         );
     }
 
@@ -386,6 +443,7 @@ mod tests {
                 options: Options {
                     chain: Some(true),
                     palette: Some(false),
+                    ..
                 },
                 ..
             }
@@ -432,5 +490,178 @@ mod tests {
             command.prompt(),
             "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
         );
+    }
+
+    #[test]
+    fn a_name_answer_asks_for_the_parameter_name() {
+        let mut command = command();
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter parameter name <Point>:");
+        assert!(matches!(
+            command.on_text_input("Pt9"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockPointParameter {
+                options: Options {
+                    name: Some(ref name),
+                    ..
+                },
+                ..
+            } if name == "Pt9"
+        ));
+    }
+
+    #[test]
+    fn an_empty_name_answer_keeps_the_default() {
+        let mut command = command();
+        assert!(matches!(
+            command.on_text_input("NAME"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockPointParameter {
+                options: Options { name: None, .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_label_answer_matching_the_offered_default_keeps_it() {
+        let mut command = command();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("position1"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockPointParameter {
+                options: Options { label: None, .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_label_answer_asks_for_the_position_label() {
+        let mut command = command();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter position property label <Position1>:"
+        );
+        assert!(matches!(
+            command.on_text_input("Pin9"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockPointParameter {
+                options: Options {
+                    label: Some(ref label),
+                    ..
+                },
+                ..
+            } if label == "Pin9"
+        ));
+    }
+
+    #[test]
+    fn a_description_answer_takes_free_text() {
+        let mut command = command();
+        assert!(matches!(
+            command.on_text_input("D"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter property description:");
+        assert!(matches!(
+            command.on_text_input("audit note"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockPointParameter {
+                options: Options {
+                    description: Some(ref description),
+                    ..
+                },
+                ..
+            } if description == "audit note"
+        ));
+    }
+
+    #[test]
+    fn an_empty_description_answer_keeps_the_default() {
+        let mut command = command();
+        assert!(matches!(
+            command.on_text_input("D"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockPointParameter {
+                options: Options {
+                    description: None,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_text_option_takes_free_text_and_a_choice_takes_one_token() {
+        let mut free_text = command();
+        assert!(matches!(
+            free_text.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(free_text.input_kind(), InputKind::FreeText));
+        let mut choice = command();
+        assert!(matches!(
+            choice.on_text_input("P"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(choice.input_kind(), InputKind::SingleToken));
+    }
+
+    #[test]
+    fn reopening_a_text_option_clears_its_answer() {
+        let mut command = command();
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("Pt9"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockPointParameter {
+                options: Options { name: None, .. },
+                ..
+            }
+        ));
     }
 }

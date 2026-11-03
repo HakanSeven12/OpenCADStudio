@@ -3415,7 +3415,7 @@ fn a_point_takes_its_chain_and_palette_answers_at_the_placement_prompt() {
     let _ = app.dispatch_command("BPARAMETER POINT");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER  Specify parameter location or [Chain/Palette]:"
+        "BPARAMETER  Specify parameter location or [Name/Label/Chain/Description/Palette]:"
     );
     feed(&mut app, "C");
     assert_eq!(
@@ -4489,6 +4489,89 @@ fn point_parameter_placement_two_picks_one_undo_and_repeated_names() {
     let _ = app.run_command_line("BPARAMETER POINT 8,9 10,11");
     assert_eq!(authored_points(&app)[1].position_name, "Position2");
     assert_eq!(app.tabs[i].history.undo_stack.len(), 2);
+}
+
+#[test]
+fn point_parameter_options_reach_the_placed_parameter() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let prompt = |app: &OpenCADStudio| app.tabs[i].active_cmd.as_ref().unwrap().prompt();
+    let _ = app.dispatch_command("BPARAMETER POINT");
+    assert_eq!(
+        prompt(&app),
+        "BPARAMETER  Specify parameter location or [Name/Label/Chain/Description/Palette]:"
+    );
+    feed(&mut app, "N");
+    assert_eq!(prompt(&app), "Enter parameter name <Point>:");
+    feed(&mut app, "Pt9");
+    assert_eq!(
+        prompt(&app),
+        "BPARAMETER  Specify parameter location or [Name/Label/Chain/Description/Palette]:"
+    );
+    feed(&mut app, "L");
+    assert_eq!(prompt(&app), "Enter position property label <Position1>:");
+    feed(&mut app, "Pin9");
+    feed(&mut app, "D");
+    assert_eq!(prompt(&app), "Enter property description:");
+    feed(&mut app, "audit note");
+    feed(&mut app, "C");
+    assert_eq!(
+        prompt(&app),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+    );
+    feed(&mut app, "Yes");
+    feed(&mut app, "P");
+    assert_eq!(
+        prompt(&app),
+        "Display property in Properties palette? [Yes/No] <Yes>:"
+    );
+    feed(&mut app, "No");
+    feed(&mut app, "3,4");
+    feed(&mut app, "6,7");
+    let point = &authored_points(&app)[0];
+    assert_eq!(point.parameter.parameter.element.name, "Pt9");
+    assert_eq!(point.position_name, "Pin9");
+    assert_eq!(point.position_description, "audit note");
+    assert!(point.parameter.parameter.chain_actions);
+    assert!(!point.parameter.parameter.show_properties);
+}
+
+#[test]
+fn point_parameter_defaults_and_duplicate_name_rule() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let _ = app.run_command_line("BPARAMETER POINT 3,4 6,7");
+    let _ = app.dispatch_command("BPARAMETER POINT");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter position property label <Position2>:"
+    );
+    feed(&mut app, "");
+    feed(&mut app, "8,9");
+    feed(&mut app, "10,11");
+    assert_eq!(authored_points(&app)[1].position_name, "Position2");
+    assert_eq!(authored_points(&app)[1].parameter.parameter.element.name, "Point");
+    let _ = app.dispatch_command("BPARAMETER POINT");
+    feed(&mut app, "N");
+    feed(&mut app, "Pt9");
+    feed(&mut app, "12,13");
+    feed(&mut app, "14,15");
+    assert_eq!(authored_points(&app)[2].parameter.parameter.element.name, "Pt9");
+    let _ = app.dispatch_command("BPARAMETER POINT");
+    feed(&mut app, "N");
+    feed(&mut app, "Pt9");
+    feed(&mut app, "16,17");
+    feed(&mut app, "18,19");
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some("Parameter names must be unique.")
+    );
+    let refused = &authored_points(&app)[3];
+    assert_eq!(refused.parameter.parameter.element.name, "Point");
+    assert_eq!(refused.position_name, "Position4");
 }
 
 #[test]

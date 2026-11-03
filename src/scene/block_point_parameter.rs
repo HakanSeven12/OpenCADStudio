@@ -48,6 +48,20 @@ pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option
     authoring::graph(document, definition).err()
 }
 
+/// The next free position label, e.g. the `Position1` a placement prompt
+/// offers when no such label is taken.
+pub(crate) fn next_position_name(document: &Document, definition: Handle) -> String {
+    let existing = parameters(document, definition);
+    (1..)
+        .map(|number| format!("Position{number}"))
+        .find(|name| {
+            existing
+                .iter()
+                .all(|(_, parameter)| !parameter.position_name.eq_ignore_ascii_case(name))
+        })
+        .unwrap()
+}
+
 pub(crate) fn create(
     document: &mut Document,
     definition: Handle,
@@ -71,15 +85,7 @@ pub(crate) fn create(
             ("BLOCKGRIPLOCATIONCOMPONENT", "AcDbBlockGripExpr", 20),
         ],
     );
-    let existing = parameters(document, definition);
-    let name = (1..)
-        .map(|number| format!("Position{number}"))
-        .find(|name| {
-            existing
-                .iter()
-                .all(|(_, parameter)| !parameter.position_name.eq_ignore_ascii_case(name))
-        })
-        .unwrap();
+    let name = next_position_name(document, definition);
     let [parameter, grip, x, y] = [(); 4].map(|_| document.allocate_handle());
     let element = |offset, name: &str| BlockElement {
         eval: expression(slots.eval + offset, NO_VALUE, BlockEvalValue::None),

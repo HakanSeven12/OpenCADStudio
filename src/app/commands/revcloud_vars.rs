@@ -10,6 +10,12 @@ impl OpenCADStudio {
     /// cloud variables; a rejected value is reported and asked for again.
     /// `false` when `name` is not one of them.
     pub(super) fn revcloud_setvar(&mut self, name: &str, value: Option<&str>, i: usize) -> bool {
+        // `REVCLOUDAPPROXARCLEN@x,y,z`: the length is being given as two
+        // points and this is the second one.
+        let (name, first_point) = match name.split_once('@') {
+            Some((base, point)) => (base, typed_point(point, None)),
+            None => (name, None),
+        };
         let on_off = |on: bool| if on { "ON" } else { "OFF" };
         let current = match name {
             "REVCLOUDCREATEMODE" => revcloud::create_mode().to_string(),
@@ -27,7 +33,12 @@ impl OpenCADStudio {
             _ => return false,
         };
         let prompt = format!("Enter new value for {name} <{current}>:");
+        let second_prompt = || crate::tr!("revcloud-cmd", "second-point");
         let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            if first_point.is_some() {
+                // Enter at the second point keeps the current value.
+                return true;
+            }
             self.command_line.push_output(&prompt);
             self.pending_setvar = Some(name.to_string());
             return true;
@@ -58,27 +69,69 @@ impl OpenCADStudio {
                 }
                 None => Some(crate::tr!("revcloud-cmd", "var-onoff")),
             },
-            _ => match value.parse::<f64>() {
-                Ok(length) if length.is_finite() => {
-                    crate::io::set_drawing_variable(
-                        &mut self.tabs[i].scene.document,
-                        revcloud::ARC_LENGTH_VARIABLE,
-                        &format!("{length:.6}"),
-                    );
-                    self.tabs[i].dirty = true;
-                    None
+            _ => {
+                let length = match first_point {
+                    Some(first) => typed_point(value, Some(first)).map(|second| first.distance(second)),
+                    None => value.parse::<f64>().ok().filter(|length| length.is_finite()),
+                };
+                if let (None, None, Some(first)) = (first_point, length, typed_point(value, None)) {
+                    // A point starts a length measured between two points.
+                    self.command_line.push_output(&second_prompt());
+                    self.pending_setvar = Some(format!("{name}@{},{},{}", first.x, first.y, first.z));
+                    return true;
                 }
-                _ => Some(crate::tr!("revcloud-cmd", "numeric")),
-            },
+                match length {
+                    Some(length) => {
+                        crate::io::set_drawing_variable(
+                            &mut self.tabs[i].scene.document,
+                            revcloud::ARC_LENGTH_VARIABLE,
+                            &format!("{length:.6}"),
+                        );
+                        self.tabs[i].dirty = true;
+                        None
+                    }
+                    None => Some(crate::tr!("revcloud-cmd", "numeric")),
+                }
+            }
         };
         match refused {
             Some(message) => {
                 self.command_line.push_error(&message);
-                self.command_line.push_output(&prompt);
-                self.pending_setvar = Some(name.to_string());
+                match first_point {
+                    Some(first) => {
+                        self.command_line.push_output(&second_prompt());
+                        self.pending_setvar = Some(format!("{name}@{},{},{}", first.x, first.y, first.z));
+                    }
+                    None => {
+                        self.command_line.push_output(&prompt);
+                        self.pending_setvar = Some(name.to_string());
+                    }
+                }
             }
             None => self.save_config(),
         }
         true
+    }
+}
+
+/// A typed `x,y[,z]` point; `@dx,dy[,dz]` is taken from `from`.
+fn typed_point(text: &str, from: Option<glam::DVec3>) -> Option<glam::DVec3> {
+    let (relative, text) = match text.trim().strip_prefix('@') {
+        Some(rest) => (true, rest),
+        None => (false, text.trim()),
+    };
+    let parts: Vec<f64> = text
+        .split(',')
+        .map(|part| part.trim().parse::<f64>().ok().filter(|v| v.is_finite()))
+        .collect::<Option<_>>()?;
+    let point = match parts[..] {
+        [x, y] => glam::DVec3::new(x, y, 0.0),
+        [x, y, z] => glam::DVec3::new(x, y, z),
+        _ => return None,
+    };
+    match (relative, from) {
+        (true, Some(base)) => Some(base + point),
+        (true, None) => None,
+        (false, _) => Some(point),
     }
 }

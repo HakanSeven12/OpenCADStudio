@@ -8380,6 +8380,7 @@ revcloud-cmd =
     .guide = REVCLOUD  İmleci bulut yolu boyunca gezdirin...
     .arc = REVCLOUD  Yaklaşık yay uzunluğunu belirtin <{ $length }>:
     .second = REVCLOUD  İkinci noktayı belirtin:
+    .second-point = İkinci noktayı belirtin:
     .style = REVCLOUD  Yay stilini seçin [Normal/Kaligrafi] <{ $style }>:
     .object = REVCLOUD  Nesne seçin:
     .reverse = REVCLOUD  Yönü ters çevir [Evet/Hayır] <Hayır>:

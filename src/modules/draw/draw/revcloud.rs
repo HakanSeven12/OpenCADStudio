@@ -426,7 +426,8 @@ impl CadCommand for RevCloudCommand {
                         self.stage = Stage::Create;
                         CmdResult::NeedPoint
                     } else {
-                        self.stage = Stage::ArcLength(None);
+                        // A zero length asks for the second point again.
+                        self.stage = Stage::ArcLength(Some(start));
                         CmdResult::ReportError(crate::tr!("revcloud-cmd", "positive"))
                     }
                 }
@@ -443,10 +444,17 @@ impl CadCommand for RevCloudCommand {
                 CmdResult::NeedPoint
             }
             Stage::ModifyDraw(state) => {
-                // A point within an arc length of the cloud ends the new part.
+                // A point within one of the cloud's own arc lengths (not the
+                // command's current one) ends the new part.
+                let reach = match &state.source {
+                    EntityType::LwPolyline(polyline) => {
+                        cloud::arc_length_of(polyline).unwrap_or(self.arc_length)
+                    }
+                    _ => self.arc_length,
+                };
                 if state.path.len() >= 2 {
                     if let Some(end) = Self::on_cloud(state, point)
-                        .filter(|end| end.distance <= self.arc_length)
+                        .filter(|end| end.distance <= reach)
                     {
                         state.path.push(end.point);
                         state.end = Some(end);
@@ -563,6 +571,8 @@ impl CadCommand for RevCloudCommand {
         let input = text.trim().trim_start_matches('_');
         let keyword = input.to_ascii_uppercase();
         match &mut self.stage {
+            // A typed point starts a length given as two points.
+            Stage::ArcLength(None) if input.contains(',') => return None,
             Stage::ArcLength(None) => {
                 return Some(match input.parse::<f64>() {
                     Ok(value) if value.is_finite() && value > 0.0 => {

@@ -8460,6 +8460,7 @@ revcloud-cmd =
     .guide = REVCLOUD  Guide crosshairs along cloud path...
     .arc = REVCLOUD  Specify approximate length of arc <{ $length }>:
     .second = REVCLOUD  Specify second point:
+    .second-point = Specify second point:
     .style = REVCLOUD  Select arc style [Normal/Calligraphy] <{ $style }>:
     .object = REVCLOUD  Select object:
     .reverse = REVCLOUD  Reverse direction [Yes/No] <No>:

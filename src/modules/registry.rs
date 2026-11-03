@@ -332,6 +332,7 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("OBJIMPORT", "IMPORTOBJ"),
     ("ACISIN", "IMPORTOBJ"),
     ("WMFIN", "IMPORTOBJ"),
+    ("SVGIN", "IMPORTOBJ"),
     ("REDRAWALL", "REDRAW"),
     ("REGEN", "REDRAW"),
     ("REGENALL", "REDRAW"),

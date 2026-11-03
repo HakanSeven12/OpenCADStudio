@@ -40,6 +40,7 @@ pub mod tds_legacy;
 pub mod thumbnail;
 pub mod update_check;
 pub mod visual_styles;
+pub mod svg_import;
 pub mod wmf_import;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_recent;

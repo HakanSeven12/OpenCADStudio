@@ -67,6 +67,7 @@ enum Route {
     Dgn,
     Model(ModelFormat),
     Wmf,
+    Svg,
     Tds,
 }
 
@@ -94,6 +95,7 @@ fn route(path: &str, format: Option<usize>) -> Result<Route, String> {
         Some("STEP") => return Ok(Route::Model(ModelFormat::Step)),
         Some("IGES") => return Ok(Route::Model(ModelFormat::Iges)),
         Some("Metafile") => return Ok(Route::Wmf),
+        Some("SVG") => return Ok(Route::Svg),
         Some("3D Studio") => return Ok(Route::Tds),
         _ => {}
     }
@@ -259,6 +261,11 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 self.import_wmf(i, path, false)
             }
+            Ok(Route::Svg) => {
+                self.remember_import(path);
+                let i = self.active_tab;
+                self.import_svg(i, path, false)
+            }
             // The options window opens whatever FILEDIA is.
             Ok(Route::Tds) => {
                 self.remember_import(path);
@@ -385,6 +392,11 @@ impl OpenCADStudio {
                         self.remember_import(&path);
                         self.close_active_modal();
                         return self.import_wmf(i, &path, false);
+                    }
+                    Ok(Route::Svg) => {
+                        self.remember_import(&path);
+                        self.close_active_modal();
+                        return self.import_svg(i, &path, false);
                     }
                     Ok(Route::Tds) => {
                         self.remember_import(&path);

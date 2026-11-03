@@ -1274,6 +1274,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "IMPORT",
         "ACISIN",
         "WMFIN",
+        "SVGIN",
         "DGNIMPORT",
         "-DGNIMPORT",
         "OPEN",

@@ -73,6 +73,33 @@ impl OpenCADStudio {
                 Some(self.import_wmf(i, &path, true))
             }
             ("_WMFINFILE", true) => Some(Task::none()),
+            ("SVGIN", true) if crate::sys::file_dia() => {
+                let filters = vec![("SVG (*.svg; *.svgz)".to_string(), vec!["svg".to_string(), "svgz".to_string()])];
+                let title = crate::t!("Import SVG").into_owned();
+                Some(Task::perform(super::dgn_import::pick(title, filters), |path| match path {
+                    Some(path) => Message::Command(format!("_SVGINFILE {path}")),
+                    None => Message::Noop,
+                }))
+            }
+            ("SVGIN", true) => {
+                use crate::command::FreeTextValuePromptCommand;
+                let command = FreeTextValuePromptCommand::new(
+                    "_SVGINFILE",
+                    "Enter name of SVG file to import (no extension):",
+                );
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                Some(Task::none())
+            }
+            ("SVGIN" | "_SVGINFILE", false) => {
+                let path = if std::path::Path::new(rest).extension().is_some() {
+                    rest.to_string()
+                } else {
+                    format!("{rest}.svg")
+                };
+                Some(self.import_svg(i, &path, true))
+            }
+            ("_SVGINFILE", true) => Some(Task::none()),
             _ => None,
         }
     }
@@ -149,7 +176,7 @@ impl OpenCADStudio {
                 .push_error(&format!("File {path} does not exist."));
             return Task::none();
         };
-        let (centre, size, pixel) = self.tabs[i].scene.view_window();
+        let (_, size, _) = self.tabs[i].scene.view_window();
         let Some(mut picture) =
             crate::io::wmf_import::read(&bytes, [0.5 * size[0], 0.5 * size[1]])
         else {
@@ -182,16 +209,57 @@ impl OpenCADStudio {
                 text.style = styles[*font].clone();
             }
         }
+        self.place_picture_block(i, "WMF", picture.entities, prompt)
+    }
+
+    /// An SVG drawing as a new block `SVG<n>`, fitted to half the current
+    /// view: placed at the view's top-left corner (IMPORT), or by the
+    /// insertion prompts (SVGIN).
+    pub(in crate::app) fn import_svg(&mut self, i: usize, path: &str, prompt: bool) -> Task<Message> {
+        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
+            self.command_line
+                .push_error(&format!("File {path} does not exist."));
+            return Task::none();
+        };
+        let (_, size, _) = self.tabs[i].scene.view_window();
+        let picture = match crate::io::svg_import::read(&bytes, [0.5 * size[0], 0.5 * size[1]]) {
+            Ok(picture) => picture,
+            Err(crate::io::svg_import::Error::NotSvg) => {
+                self.command_line
+                    .push_error(&format!("{path} is not a valid SVG file."));
+                return Task::none();
+            }
+            Err(crate::io::svg_import::Error::Empty) => {
+                self.command_line
+                    .push_error(&format!("{path} has no shapes to import."));
+                return Task::none();
+            }
+        };
+        self.push_undo_snapshot(i, if prompt { "SVGIN" } else { "IMPORT" });
+        self.place_picture_block(i, "SVG", picture.entities, prompt)
+    }
+
+    /// Defines `entities` as a new block `<prefix><n>` and puts it in the
+    /// drawing: at the view's top-left corner, or by the insertion prompts.
+    fn place_picture_block(
+        &mut self,
+        i: usize,
+        prefix: &str,
+        entities: Vec<codec::EntityType>,
+        prompt: bool,
+    ) -> Task<Message> {
+        let (centre, size, pixel) = self.tabs[i].scene.view_window();
+        let scene = &mut self.tabs[i].scene;
         let mut n = 0;
         let name = loop {
-            let name = format!("WMF{n}");
+            let name = format!("{prefix}{n}");
             if scene.document.block_records.get(&name).is_none() {
                 break name;
             }
             n += 1;
         };
         if let Err(error) =
-            scene.define_block_from_owned_entities(picture.entities, &name, glam::DVec3::ZERO)
+            scene.define_block_from_owned_entities(entities, &name, glam::DVec3::ZERO)
         {
             self.command_line.push_error(&error);
             return Task::none();

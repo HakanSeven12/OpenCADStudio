@@ -7198,6 +7198,7 @@ dgn-import =
     .dgn-import = Nhập DGN
     .import-dgn-file = Nhập tệp DGN
     .import-wmf = Nhập WMF
+    .import-svg = Nhập SVG
     .help-dgn = Nhập mô hình DGN thành các đối tượng bản vẽ: level thành lớp, cell thành khối.
     .help-import = Nhập một tệp thuộc định dạng đã chọn bằng trình nhập của định dạng đó.
     .blank = Tên tệp không được để trống

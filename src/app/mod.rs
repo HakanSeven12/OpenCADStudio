@@ -43,6 +43,8 @@ pub(crate) use command_driver::{
     copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
 };
 pub(crate) mod commands;
+#[cfg(test)]
+mod dim_constraint_value_tests;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
 mod dimension_convert_tests;

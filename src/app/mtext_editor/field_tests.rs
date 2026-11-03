@@ -241,3 +241,109 @@ fn an_edited_field_host_reopens_editable_after_dwg_and_dxf() {
         assert_eq!(raw(&reopened), "yxa 12 b", "{ext}");
     }
 }
+
+/// A drawing whose document has the custom property "Job No" = "42-7".
+fn with_job_no(app: &mut OpenCADStudio) {
+    app.tabs[1].scene.document.summary_info.custom_properties =
+        vec![("Job No".into(), "42-7".into())];
+}
+
+/// Ctrl+F in the editor, then the Document field "Job No", then OK.
+fn insert_job_no(app: &mut OpenCADStudio) {
+    use crate::ui::window::field_dialog::{FieldDialogMsg, CATEGORIES};
+    let _ = app.run_action("FIND");
+    let category = CATEGORIES
+        .iter()
+        .position(|(name, _)| *name == "Document")
+        .unwrap();
+    let _ = app.on_field_dialog(FieldDialogMsg::Category(category));
+    let pick = app
+        .field_dialog
+        .as_ref()
+        .expect("the Field dialog is open")
+        .entries()
+        .into_iter()
+        .find(|row| row.0 == "Job No")
+        .unwrap();
+    let _ = app.on_field_dialog(pick.2);
+    let _ = app.on_field_dialog(FieldDialogMsg::Ok);
+}
+
+/// A plain text "ab" opened in the editor.
+fn plain() -> (OpenCADStudio, Handle) {
+    let (mut app, h) = host("ab", &[]);
+    with_job_no(&mut app);
+    (app, h)
+}
+
+#[test]
+fn find_in_the_editor_opens_the_field_dialog_for_it() {
+    use crate::ui::window::field_dialog::FieldTarget;
+    let (mut app, _) = plain();
+    let _ = app.run_action("FIND");
+    assert_eq!(
+        app.field_dialog.as_ref().map(|s| s.target),
+        Some(FieldTarget::EditorInsert)
+    );
+    assert!(app.mtext_editor.is_some(), "the editor stays open");
+}
+
+#[test]
+fn find_outside_the_editor_does_not_open_the_field_dialog() {
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.run_action("FIND");
+    assert!(app.field_dialog.is_none());
+}
+
+#[test]
+fn a_field_inserted_at_the_caret_is_saved_between_the_texts() {
+    let (mut app, h) = plain();
+    caret(&mut app, 1);
+    insert_job_no(&mut app);
+    assert_eq!(raw(&app), "a42-7b");
+    assert!(app.mtext_commit());
+    assert_eq!(value(&app, h), "a42-7b");
+    assert_eq!(container(&app, h).1, r"a%<\_FldIdx 0>%b");
+    assert_eq!(
+        codec::fields::field_spans(&app.tabs[1].scene.document, h, "a42-7b"),
+        Some(vec![1..5])
+    );
+}
+
+#[test]
+fn an_inserted_field_keeps_the_existing_ones_and_leaves_no_orphan() {
+    let (mut app, h) = host(r"a %<\_FldIdx 0>% b", &["12"]);
+    with_job_no(&mut app);
+    let end = doc_to_cells(&ed(&app).doc).len();
+    caret(&mut app, end);
+    insert_job_no(&mut app);
+    assert_eq!(raw(&app), "a 12 b42-7");
+    assert!(app.mtext_commit());
+    let doc = &app.tabs[1].scene.document;
+    assert_eq!(container(&app, h).1, r"a %<\_FldIdx 0>% b%<\_FldIdx 1>%");
+    assert_eq!(
+        codec::fields::field_spans(doc, h, &value(&app, h)),
+        Some(vec![2..4, 7..11])
+    );
+    let fields = doc
+        .objects
+        .values()
+        .filter(|o| matches!(o, ObjectType::Field(_)))
+        .count();
+    assert_eq!(fields, 3, "the container and its two fields");
+}
+
+#[test]
+fn a_cancelled_insert_changes_nothing() {
+    let (mut app, h) = plain();
+    caret(&mut app, 1);
+    insert_job_no(&mut app);
+    app.mtext_cancel();
+    assert_eq!(value(&app, h), "ab");
+    assert!(!app.tabs[1]
+        .scene
+        .document
+        .objects
+        .values()
+        .any(|o| matches!(o, ObjectType::Field(_))));
+}

@@ -1,7 +1,7 @@
 //! SVG reading: the shapes of a vector drawing as the drawing objects of a
 //! block — every path, rectangle, circle, ellipse, line, polyline and
-//! polygon as polylines in their stroke's colour and width (or, for a
-//! filled shape without a stroke, the fill's colour as an outline).
+//! polygon as polylines in their stroke's colour and width, and a filled
+//! shape as a solid hatch in the fill's colour under its outline.
 //!
 //! `usvg` does the SVG itself — XML, CSS, `use`, `viewBox`, units and every
 //! transform — so each path arrives in the picture's own coordinates; curves
@@ -15,8 +15,10 @@
 //! imported into, with its top-left corner at the block's origin; SVG's y
 //! runs down the page, so it runs down the drawing here too.
 
-use codec::entities::{Polyline2D, Vertex2D};
-use codec::types::{Color, Vector3};
+use codec::entities::{
+    BoundaryEdge, BoundaryPath, Hatch, Polyline2D, PolylineEdge, Vertex2D,
+};
+use codec::types::{Color, Vector2, Vector3};
 use codec::EntityType;
 use resvg::tiny_skia::PathSegment;
 use resvg::usvg::{self, Node, Paint};
@@ -46,6 +48,12 @@ struct Flattener {
     /// share of it.
     extent: f64,
     entities: Vec<EntityType>,
+    /// Whether the path being read draws an outline.
+    outline: bool,
+    /// The subpaths of the path being read, in block coordinates, for its fill.
+    loops: Vec<Vec<Vector2>>,
+    /// Where the path being read starts in `entities`.
+    outline_start: usize,
 }
 
 impl Flattener {
@@ -71,6 +79,19 @@ impl Flattener {
             closed = true;
         }
         if points.len() < 2 {
+            return;
+        }
+        // A fill closes every subpath.
+        self.loops.push(
+            points
+                .iter()
+                .map(|p| {
+                    let v = self.at(*p);
+                    Vector2::new(v.x, v.y)
+                })
+                .collect(),
+        );
+        if !self.outline {
             return;
         }
         let width = width * self.scale;
@@ -101,6 +122,11 @@ impl Flattener {
             (None, Some(c)) => (c, 0.0),
             (None, None) => return,
         };
+        // A filled shape is a solid hatch of its subpaths in the fill's
+        // colour, under its outline; a shape with only a fill has no outline.
+        self.outline = stroke_color.is_some();
+        self.outline_start = self.entities.len();
+        self.loops.clear();
         let transform = path.abs_transform();
         let map = |p: resvg::tiny_skia::Point| {
             let mut p = p;
@@ -165,6 +191,29 @@ impl Flattener {
         if points.len() > 1 {
             self.polyline(&points, closed, width, color);
         }
+        if let Some(fill) = fill_color {
+            self.fill(fill);
+        }
+    }
+
+    /// The subpaths read for the current path as one solid hatch, ahead of
+    /// the outline polylines it was read with.
+    fn fill(&mut self, color: Color) {
+        let loops: Vec<_> = self.loops.drain(..).filter(|l| l.len() >= 3).collect();
+        if loops.is_empty() {
+            return;
+        }
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        hatch.common.color = color;
+        for (k, vertices) in loops.into_iter().enumerate() {
+            let mut boundary = if k == 0 { BoundaryPath::external() } else { BoundaryPath::new() };
+            boundary.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(vertices, true)));
+            hatch.paths.push(boundary);
+        }
+        // Drawn before this path's outline, after everything painted earlier.
+        let at = self.outline_start;
+        self.entities.insert(at, EntityType::Hatch(Box::new(hatch)));
     }
 
     fn group(&mut self, group: &usvg::Group) {
@@ -200,6 +249,11 @@ fn paint_color(paint: &Paint) -> Option<Color> {
         Paint::RadialGradient(g) => g.stops().first()?.color(),
         Paint::Pattern(_) => return None,
     };
+    // Black and white draw as colour 7, which contrasts with either canvas
+    // background (as the WMF import does).
+    if (c.red, c.green, c.blue) == (0, 0, 0) || (c.red, c.green, c.blue) == (255, 255, 255) {
+        return Some(Color::Index(7));
+    }
     Some(Color::Rgb { r: c.red, g: c.green, b: c.blue })
 }
 
@@ -221,7 +275,7 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Result<Picture, Error> {
     }
     let scale = (fit[0] / w).min(fit[1] / h);
     let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    let mut flattener = Flattener { scale, extent: w.max(h), entities: Vec::new() };
+    let mut flattener = Flattener { scale, extent: w.max(h), entities: Vec::new(), outline: true, loops: Vec::new(), outline_start: 0 };
     flattener.group(tree.root());
     if flattener.entities.is_empty() {
         return Err(Error::Empty);
@@ -253,7 +307,7 @@ mod tests {
     fn shapes_become_polylines_fitted_to_the_view() {
         let picture = read(SQUARE.as_bytes(), [10.0, 10.0]).unwrap();
         let lines = polylines(&picture);
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 2);
         // 100 units across fit 10: a scale of 0.1; the rectangle is the
         // stroke's red, 4 vertices, closed, y running down.
         let rect = lines[0];
@@ -266,14 +320,29 @@ mod tests {
     }
 
     #[test]
-    fn filled_curve_without_stroke_is_an_outline_in_the_fill_colour() {
+    fn filled_curve_without_stroke_is_a_solid_hatch_in_the_fill_colour() {
         let picture = read(SQUARE.as_bytes(), [100.0, 100.0]).unwrap();
-        let shape = polylines(&picture)[1];
-        assert_eq!(shape.common.color, Color::Rgb { r: 0, g: 255, b: 0 });
-        assert!(shape.is_closed());
-        assert!(shape.vertices.len() > 6, "the curve is flattened");
-        // The group's translation is applied.
-        assert!(shape.vertices.iter().all(|v| v.location.x >= 50.0 - 1e-6));
+        let hatches: Vec<_> = picture
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                EntityType::Hatch(h) => Some(h),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(hatches.len(), 1);
+        let hatch = hatches[0];
+        assert!(hatch.is_solid);
+        assert_eq!(hatch.common.color, Color::Rgb { r: 0, g: 255, b: 0 });
+        assert_eq!(hatch.paths.len(), 1);
+        match &hatch.paths[0].edges[0] {
+            BoundaryEdge::Polyline(edge) => {
+                assert!(edge.vertices.len() > 6, "the curve is flattened");
+                // The group's translation is applied.
+                assert!(edge.vertices.iter().all(|v| v.x >= 50.0 - 1e-6));
+            }
+            _ => panic!("a polyline boundary"),
+        }
     }
 
     #[test]

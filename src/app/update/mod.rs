@@ -1583,6 +1583,9 @@ impl OpenCADStudio {
                 if ext == "scr" {
                     return self.dispatch_command(&format!("SCRIPT \"{}\"", path.display()));
                 }
+                if matches!(ext.as_str(), "svg" | "svgz") {
+                    return self.dispatch_command(&format!("_SVGINFILE {}", path.display()));
+                }
                 if !matches!(ext.as_str(), "dwg" | "dxf" | "bak" | "sv$")
                     && ocs_save::external_format(&ext).is_none()
                 {

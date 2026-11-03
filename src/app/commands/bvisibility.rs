@@ -204,6 +204,7 @@ impl OpenCADStudio {
             definition,
             location,
             label,
+            options,
         } = result
         else {
             unreachable!()
@@ -237,6 +238,20 @@ impl OpenCADStudio {
             codec::types::Vector3::new(label.x, label.y, label.z),
         )
         .expect("validated Point placement");
+        let option_error = {
+            use crate::scene::block_authoring::metadata;
+            let document = &mut self.tabs[i].scene.document;
+            let chain = options
+                .chain
+                .map(|value| metadata::set_chain(document, definition, parameter, value));
+            let palette = options
+                .palette
+                .map(|value| metadata::set_visible(document, definition, parameter, value));
+            chain.into_iter().chain(palette).find_map(Result::err)
+        };
+        if let Some(error) = option_error {
+            self.command_line.push_error(crate::t!(error).as_ref());
+        }
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;

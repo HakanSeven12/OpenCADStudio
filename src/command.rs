@@ -1940,6 +1940,9 @@ pub enum CmdResult {
         definition: Handle,
         location: DVec3,
         label: DVec3,
+        /// Answers given to the placement prompt's options; a missing answer
+        /// keeps the parameter's own default.
+        options: crate::modules::block_editor::point_parameter::Options,
     },
     /// Place the visibility parameter in the definition that requested it.
     PlaceBlockVisibilityParameter {

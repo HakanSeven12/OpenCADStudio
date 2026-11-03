@@ -494,6 +494,9 @@ pub(super) fn active_command_metadata(command: &dyn crate::command::CadCommand) 
             accepts.push("point");
         }
         accepts.push(kind);
+        if command.point_step_accepts_keywords() && !accepts.contains(&"token") {
+            accepts.push("token");
+        }
     }
     if options.iter().any(|option| !option.keyword.is_empty()) && !accepts.contains(&"token") {
         accepts.push("token");

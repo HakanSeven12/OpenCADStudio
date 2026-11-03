@@ -343,6 +343,29 @@ pub(crate) fn set_text(
     sync_visibility(document, handle);
     Ok(true)
 }
+pub(crate) fn set_chain(
+    document: &mut Document,
+    definition: Handle,
+    handle: Handle,
+    value: bool,
+) -> Result<bool, &'static str> {
+    object(document, definition, handle)?;
+    let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle) else {
+        return Err("This parameter has no chained-actions setting.");
+    };
+    let flag = match &mut object.data {
+        Data::PointParameter(p) => &mut p.parameter.parameter.chain_actions,
+        Data::LinearParameter(p) => &mut p.parameter.parameter.chain_actions,
+        Data::PolarParameter(p) => &mut p.parameter.parameter.chain_actions,
+        Data::XYParameter(p) => &mut p.parameter.parameter.chain_actions,
+        Data::RotationParameter(p) => &mut p.parameter.parameter.chain_actions,
+        Data::FlipParameter(p) => &mut p.parameter.parameter.chain_actions,
+        _ => return Err("This parameter has no chained-actions setting."),
+    };
+    let old = *flag;
+    *flag = value;
+    Ok(old != value)
+}
 pub(crate) fn set_visible(
     document: &mut Document,
     definition: Handle,

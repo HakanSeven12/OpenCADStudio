@@ -3406,6 +3406,54 @@ fn a_lookup_takes_its_name_description_and_palette_switch_at_the_placement_promp
 }
 
 #[test]
+fn a_point_takes_its_chain_and_palette_answers_at_the_placement_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER POINT");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER  Specify parameter location or [Chain/Palette]:"
+    );
+    feed(&mut app, "C");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+    );
+    feed(&mut app, "Z");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:",
+        "an answer that is neither Yes nor No keeps the question"
+    );
+    feed(&mut app, "Yes");
+    feed(&mut app, "P");
+    feed(&mut app, "");
+    feed(&mut app, "3,4");
+    feed(&mut app, "6,7");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let points = crate::scene::block_point_parameter::parameters(doc, definition);
+    assert_eq!(points.len(), 1);
+    assert!(points[0].1.parameter.parameter.chain_actions);
+    assert!(
+        points[0].1.parameter.parameter.show_properties,
+        "Enter at the palette question keeps the property visible"
+    );
+    assert_eq!(
+        points[0].1.parameter.definition_point,
+        Vector3::new(3.0, 4.0, 0.0)
+    );
+    assert_eq!(
+        points[0].1.definition_label_point,
+        Vector3::new(6.0, 7.0, 0.0)
+    );
+}
+
+#[test]
 fn a_second_lookup_offers_the_next_free_name_and_a_taken_name_keeps_its_default() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -4271,6 +4319,7 @@ fn point_parameter_placement_discard_and_stale_context_leave_no_objects() {
                 definition,
                 location,
                 label: glam::DVec3::ZERO,
+                options: Default::default(),
             },
         );
         assert_eq!(app.tabs[i].scene.document, start);

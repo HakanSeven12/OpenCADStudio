@@ -179,12 +179,33 @@ impl OpenCADStudio {
         let option_error = {
             use crate::scene::block_authoring::metadata;
             let document = &mut self.tabs[i].scene.document;
+            let labels = kind == crate::scene::block_distance_parameter::Kind::Polar;
             let description = options.description.as_deref().map(|value| {
                 metadata::set_text(
                     document,
                     definition,
                     parameter,
                     metadata::Field::Description,
+                    value,
+                )
+            });
+            let distance_label = options.distance_label.as_deref().filter(|_| labels);
+            let distance_label = distance_label.map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::Name,
+                    value,
+                )
+            });
+            let angle_label = options.angle_label.as_deref().filter(|_| labels);
+            let angle_label = angle_label.map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::SecondaryName,
                     value,
                 )
             });
@@ -196,6 +217,8 @@ impl OpenCADStudio {
                 .map(|value| metadata::set_visible(document, definition, parameter, value));
             description
                 .into_iter()
+                .chain(distance_label)
+                .chain(angle_label)
                 .chain(chain)
                 .chain(palette)
                 .find_map(Result::err)
@@ -589,7 +612,15 @@ impl OpenCADStudio {
                 if let Some(kind) =
                     crate::scene::block_distance_parameter::Kind::parse(parameter_type)
                 {
-                    let command = crate::modules::block_editor::distance_parameter::DistanceParameterCommand::new(self.tabs[i].id, block, kind);
+                    let mut command = crate::modules::block_editor::distance_parameter::DistanceParameterCommand::new(self.tabs[i].id, block, kind);
+                    if kind == crate::scene::block_distance_parameter::Kind::Polar {
+                        let [distance, angle] =
+                            crate::scene::block_distance_parameter::next_polar_labels(
+                                &self.tabs[i].scene.document,
+                                block,
+                            );
+                        command = command.with_labels(distance, angle);
+                    }
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(Task::none());

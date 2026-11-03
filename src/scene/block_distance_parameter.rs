@@ -59,6 +59,36 @@ fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     }
 }
 
+fn label_names(document: &Document, definition: Handle) -> Vec<String> {
+    let mut names = parameters(document, definition)
+        .into_iter()
+        .flat_map(|p| p.labels)
+        .collect::<Vec<_>>();
+    names.extend(
+        super::block_orientation_parameter::parameters(document, definition)
+            .into_iter()
+            .map(|p| p.label),
+    );
+    names
+}
+
+fn unique_label(names: &[String], prefix: &str) -> String {
+    (1..)
+        .map(|n| format!("{prefix}{n}"))
+        .find(|name| names.iter().all(|old| !old.eq_ignore_ascii_case(name)))
+        .unwrap()
+}
+
+/// The next free distance and angle label names, the defaults a Polar
+/// placement prompt shows for its label questions.
+pub(crate) fn next_polar_labels(document: &Document, definition: Handle) -> [String; 2] {
+    let names = label_names(document, definition);
+    [
+        unique_label(&names, "Distance"),
+        unique_label(&names, "Angle"),
+    ]
+}
+
 pub(crate) fn parameters(document: &Document, definition: Handle) -> Vec<Parameter<'_>> {
     let Some(graph) = graph_handle(document, definition) else {
         return Vec::new();
@@ -179,21 +209,8 @@ pub(crate) fn create(
     if let Some(error) = points_error(kind, base, end, label) {
         return Err(error);
     }
-    let mut names = parameters(document, definition)
-        .into_iter()
-        .flat_map(|p| p.labels)
-        .collect::<Vec<_>>();
-    names.extend(
-        super::block_orientation_parameter::parameters(document, definition)
-            .into_iter()
-            .map(|p| p.label),
-    );
-    let unique = |prefix: &str| {
-        (1..)
-            .map(|n| format!("{prefix}{n}"))
-            .find(|name| names.iter().all(|old| !old.eq_ignore_ascii_case(name)))
-            .unwrap()
-    };
+    let names = label_names(document, definition);
+    let unique = |prefix: &str| unique_label(&names, prefix);
     let distance_name = unique("Distance");
     let angle_name = unique("Angle");
     let x_label = unique("DistanceX");

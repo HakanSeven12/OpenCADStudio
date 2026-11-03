@@ -14,6 +14,8 @@ pub struct Options {
     pub chain: Option<bool>,
     pub description: Option<String>,
     pub palette: Option<bool>,
+    pub distance_label: Option<String>,
+    pub angle_label: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,18 +23,11 @@ enum Asking {
     Chain,
     Description,
     Palette,
+    DistanceLabel,
+    AngleLabel,
 }
 
 impl Asking {
-    fn question(self) -> &'static str {
-        match self {
-            Self::Chain => {
-                "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
-            }
-            Self::Description => "Enter property description:",
-            Self::Palette => "Display property in Properties palette? [Yes/No] <Yes>:",
-        }
-    }
     /// The creation default the question's Enter answer stands for.
     fn default_answer(self) -> bool {
         self == Self::Palette
@@ -51,6 +46,8 @@ pub struct DistanceParameterCommand {
     grips: Option<usize>,
     asking: Option<Asking>,
     options: Options,
+    distance_label_default: String,
+    angle_label_default: String,
 }
 
 impl DistanceParameterCommand {
@@ -64,10 +61,46 @@ impl DistanceParameterCommand {
             grips: None,
             asking: None,
             options: Options::default(),
+            distance_label_default: String::new(),
+            angle_label_default: String::new(),
         }
+    }
+    pub(crate) fn with_labels(mut self, distance: String, angle: String) -> Self {
+        self.distance_label_default = distance;
+        self.angle_label_default = angle;
+        self
     }
     fn accept(&mut self, text: Option<&str>) -> CmdResult {
         let asking = self.asking.expect("an option question is open");
+        if matches!(asking, Asking::DistanceLabel | Asking::AngleLabel) {
+            let value = text.unwrap_or("").trim();
+            match asking {
+                Asking::DistanceLabel => {
+                    if !value.is_empty() && value != self.distance_label_default {
+                        self.options.distance_label = Some(value.to_owned());
+                    }
+                    self.asking = Some(Asking::AngleLabel);
+                }
+                Asking::AngleLabel => {
+                    let distance = self
+                        .options
+                        .distance_label
+                        .as_deref()
+                        .unwrap_or(&self.distance_label_default);
+                    if value.eq_ignore_ascii_case(distance) {
+                        return CmdResult::ReportError(
+                            crate::t!("The distance and angle labels must differ.").into_owned(),
+                        );
+                    }
+                    if !value.is_empty() && value != self.angle_label_default {
+                        self.options.angle_label = Some(value.to_owned());
+                    }
+                    self.asking = None;
+                }
+                _ => unreachable!(),
+            }
+            return CmdResult::NeedPoint;
+        }
         if asking == Asking::Description {
             let value = text.unwrap_or("");
             if !value.is_empty() {
@@ -88,7 +121,7 @@ impl DistanceParameterCommand {
             match asking {
                 Asking::Chain => self.options.chain = Some(value),
                 Asking::Palette => self.options.palette = Some(value),
-                Asking::Description => unreachable!(),
+                Asking::Description | Asking::DistanceLabel | Asking::AngleLabel => unreachable!(),
             }
         }
         self.asking = None;
@@ -96,6 +129,32 @@ impl DistanceParameterCommand {
     }
     fn asking_grips(&self) -> bool {
         self.kind == Kind::XY && self.end.is_some() && self.grips.is_none()
+    }
+    /// The question the open option asks, carrying the defaults it offers.
+    fn question(&self, asking: Asking) -> String {
+        match asking {
+            Asking::Chain => crate::t!(
+                "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+            )
+            .into_owned(),
+            Asking::Description => crate::t!("Enter property description:").into_owned(),
+            Asking::Palette => {
+                crate::t!("Display property in Properties palette? [Yes/No] <Yes>:").into_owned()
+            }
+            Asking::DistanceLabel => crate::tf!(
+                "Enter distance property label <{}>:",
+                self.distance_label_default
+            )
+            .into_owned(),
+            Asking::AngleLabel => crate::tf!(
+                "Enter angle property label <{}>:",
+                self.angle_label_default
+            )
+            .into_owned(),
+        }
+    }
+    fn accepts_label(&self) -> bool {
+        self.kind == Kind::Polar
     }
     fn finish(&self, label: DVec3, grips: Option<usize>) -> CmdResult {
         CmdResult::PlaceBlockDistanceParameter {
@@ -121,11 +180,13 @@ impl CadCommand for DistanceParameterCommand {
     }
     fn prompt(&self) -> String {
         if let Some(asking) = self.asking {
-            return crate::t!(asking.question()).into_owned();
+            return self.question(asking);
         }
         let step = if self.base.is_none() {
             if self.kind == Kind::Linear {
                 "Specify start point or [Chain/Description/Palette]:"
+            } else if self.accepts_label() {
+                "Specify base point or [Label/Chain/Description/Palette]:"
             } else {
                 "Specify base point or [Chain/Description/Palette]:"
             }
@@ -145,7 +206,9 @@ impl CadCommand for DistanceParameterCommand {
     }
     fn input_kind(&self) -> InputKind {
         match self.asking {
-            Some(Asking::Description) => InputKind::FreeText,
+            Some(Asking::Description | Asking::DistanceLabel | Asking::AngleLabel) => {
+                InputKind::FreeText
+            }
             Some(_) => InputKind::SingleToken,
             None => InputKind::Point,
         }
@@ -193,6 +256,7 @@ impl CadCommand for DistanceParameterCommand {
                 "C" | "CHAIN" => Asking::Chain,
                 "D" | "DESCRIPTION" => Asking::Description,
                 "P" | "PALETTE" => Asking::Palette,
+                "L" | "LABEL" if self.accepts_label() => Asking::DistanceLabel,
                 _ => {
                     return Some(CmdResult::ReportError(
                         crate::t!("Point or option keyword required.").into_owned(),
@@ -203,6 +267,11 @@ impl CadCommand for DistanceParameterCommand {
                 Asking::Chain => self.options.chain = None,
                 Asking::Description => self.options.description = None,
                 Asking::Palette => self.options.palette = None,
+                Asking::DistanceLabel => {
+                    self.options.distance_label = None;
+                    self.options.angle_label = None;
+                }
+                Asking::AngleLabel => unreachable!(),
             }
             self.asking = Some(asking);
             return Some(CmdResult::NeedPoint);
@@ -312,20 +381,225 @@ mod tests {
 
     #[test]
     fn a_distance_base_prompt_lists_the_options_it_accepts() {
-        for (kind, noun) in [
-            (Kind::Linear, "start"),
-            (Kind::Polar, "base"),
-            (Kind::XY, "base"),
+        for (kind, prompt) in [
+            (
+                Kind::Linear,
+                "BPARAMETER Linear  Specify start point or [Chain/Description/Palette]:",
+            ),
+            (
+                Kind::Polar,
+                "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:",
+            ),
+            (
+                Kind::XY,
+                "BPARAMETER XY  Specify base point or [Chain/Description/Palette]:",
+            ),
         ] {
-            let command = DistanceParameterCommand::new(0, Handle::new(1), kind);
             assert_eq!(
-                command.prompt(),
-                format!(
-                    "BPARAMETER {}  Specify {noun} point or [Chain/Description/Palette]:",
-                    kind.name()
-                )
+                DistanceParameterCommand::new(0, Handle::new(1), kind).prompt(),
+                prompt
             );
         }
+    }
+
+    fn polar() -> DistanceParameterCommand {
+        DistanceParameterCommand::new(0, Handle::new(1), Kind::Polar)
+            .with_labels("Distance2".into(), "Angle2".into())
+    }
+
+    #[test]
+    fn a_label_answer_asks_both_property_labels_in_turn() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter distance property label <Distance2>:"
+        );
+        assert!(matches!(
+            command.on_text_input("Dist9"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter angle property label <Angle2>:");
+        assert!(matches!(
+            command.on_text_input("C"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:"
+        );
+        assert_eq!(command.options.distance_label.as_deref(), Some("Dist9"));
+        assert_eq!(command.options.angle_label.as_deref(), Some("C"));
+    }
+
+    #[test]
+    fn an_empty_label_answer_keeps_the_default() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.prompt(), "Enter angle property label <Angle2>:");
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.distance_label, None);
+        assert_eq!(command.options.angle_label, None);
+    }
+
+    #[test]
+    fn a_label_question_takes_typed_text() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.input_kind(), InputKind::FreeText);
+    }
+
+    #[test]
+    fn a_pick_at_a_label_question_keeps_the_question() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_point(DVec3::ONE), CmdResult::NeedPoint));
+        assert_eq!(
+            command.prompt(),
+            "Enter distance property label <Distance2>:"
+        );
+        assert!(matches!(
+            command.on_text_input("Dist9"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_point(DVec3::ONE), CmdResult::NeedPoint));
+        assert_eq!(command.prompt(), "Enter angle property label <Angle2>:");
+        assert_eq!(command.options.distance_label.as_deref(), Some("Dist9"));
+    }
+
+    #[test]
+    fn an_angle_label_equal_to_the_distance_label_is_refused() {
+        let mut command = polar();
+        for answer in ["L", "Dist9"] {
+            assert!(matches!(
+                command.on_text_input(answer),
+                Some(CmdResult::NeedPoint)
+            ));
+        }
+        assert!(matches!(
+            command.on_text_input("dist9"),
+            Some(CmdResult::ReportError(reason))
+                if reason == "The distance and angle labels must differ."
+        ));
+        assert_eq!(command.prompt(), "Enter angle property label <Angle2>:");
+        assert_eq!(command.options.angle_label, None);
+        assert!(matches!(
+            command.on_text_input("C"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.angle_label.as_deref(), Some("C"));
+    }
+
+    #[test]
+    fn an_angle_label_equal_to_the_offered_default_is_refused() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_text_input("Distance2"),
+            Some(CmdResult::ReportError(reason))
+                if reason == "The distance and angle labels must differ."
+        ));
+        assert_eq!(command.prompt(), "Enter angle property label <Angle2>:");
+    }
+
+    #[test]
+    fn a_label_answer_is_trimmed() {
+        let mut command = polar();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("  Dist9  "),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.distance_label.as_deref(), Some("Dist9"));
+        assert!(matches!(
+            command.on_text_input("   "),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.angle_label, None);
+    }
+
+    #[test]
+    fn reopening_the_label_option_clears_both_answers() {
+        let mut command = polar();
+        for answer in ["L", "Dist9", "C"] {
+            assert!(
+                matches!(command.on_text_input(answer), Some(CmdResult::NeedPoint)),
+                "{answer}"
+            );
+        }
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter distance property label <Distance2>:"
+        );
+        assert_eq!(command.options.distance_label, None);
+        assert_eq!(command.options.angle_label, None);
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.distance_label, None);
+        assert_eq!(command.options.angle_label, None);
+    }
+
+    #[test]
+    fn a_label_keyword_is_refused_on_types_without_labels() {
+        for kind in [Kind::Linear, Kind::XY] {
+            let mut command = DistanceParameterCommand::new(0, Handle::new(1), kind);
+            assert!(
+                matches!(
+                    command.on_text_input("L"),
+                    Some(CmdResult::ReportError(reason))
+                        if reason == "Point or option keyword required."
+                ),
+                "{}",
+                kind.name()
+            );
+        }
+    }
+
+    #[test]
+    fn the_labels_travel_with_the_placement() {
+        let mut command = polar();
+        for answer in ["L", "Dist9", "C"] {
+            assert!(
+                matches!(command.on_text_input(answer), Some(CmdResult::NeedPoint)),
+                "{answer}"
+            );
+        }
+        for point in [DVec3::ZERO, DVec3::new(4., 0., 0.), DVec3::new(1., 1., 0.)] {
+            assert!(matches!(
+                command.on_point(point),
+                CmdResult::NeedPoint | CmdResult::PlaceBlockDistanceParameter { .. }
+            ));
+        }
+        assert!(matches!(
+            command.finish(DVec3::new(1., 1., 0.), None),
+            CmdResult::PlaceBlockDistanceParameter { options, .. }
+                if options.distance_label.as_deref() == Some("Dist9")
+                    && options.angle_label.as_deref() == Some("C")
+        ));
     }
 
     #[test]

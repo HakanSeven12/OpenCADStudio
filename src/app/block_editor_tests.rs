@@ -3639,6 +3639,66 @@ fn a_distance_keeps_the_defaults_shown_at_each_question() {
 }
 
 #[test]
+fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let _ = app.run_command_line("BPARAMETER POLAR 0,0 5,0 2,2");
+
+    let label_sets = |app: &crate::app::OpenCADStudio| {
+        crate::scene::block_distance_parameter::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .map(|parameter| parameter.labels)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        label_sets(&app),
+        vec![vec!["Distance1".to_string(), "Angle1".to_string()]]
+    );
+
+    let _ = app.dispatch_command("BPARAMETER POLAR");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:"
+    );
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter distance property label <Distance2>:"
+    );
+    feed(&mut app, "Dist9");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter angle property label <Angle2>:"
+    );
+    feed(&mut app, "C");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Polar  Specify base point or [Label/Chain/Description/Palette]:"
+    );
+    feed(&mut app, "0,0");
+    feed(&mut app, "4,0");
+    feed(&mut app, "1,1");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let _ = app.dispatch_command("BPARAMETER POLAR");
+    feed(&mut app, "0,0");
+    feed(&mut app, "6,0");
+    feed(&mut app, "2,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    assert_eq!(
+        label_sets(&app),
+        vec![
+            vec!["Distance1".to_string(), "Angle1".to_string()],
+            vec!["Dist9".to_string(), "C".to_string()],
+            vec!["Distance2".to_string(), "Angle2".to_string()],
+        ]
+    );
+}
+
+#[test]
 fn a_second_lookup_offers_the_next_free_name_and_a_taken_name_keeps_its_default() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

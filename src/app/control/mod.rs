@@ -3772,6 +3772,51 @@ mod tests {
         );
     }
 
+    /// Every type the umbrella offers resolves as a command of its own, so
+    /// the option list is not the only way to reach any of them.
+    #[test]
+    fn every_umbrella_type_answers_to_its_own_command_name() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,5 10,5"}));
+        let umbrella = request(&mut app, json!({"op":"run","cmd":"GEOMCONSTRAINT"}));
+        let prompt = umbrella["state"]["command"]["prompt"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let types: Vec<String> = prompt
+            .match_indices('[')
+            .next()
+            .map(|(start, _)| {
+                prompt[start + 1..]
+                    .split(']')
+                    .next()
+                    .unwrap_or("")
+                    .split('/')
+                    .map(|token| token.trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(types.len() >= 12, "the umbrella lists its types: {prompt}");
+        request(&mut app, json!({"op":"cancel"}));
+        for token in &types {
+            let name = format!("GC{}", token.to_uppercase());
+            let opened = request(&mut app, json!({"op":"run","cmd": &name}));
+            assert!(
+                opened["ok"] == json!(true),
+                "{name} does not reach the constraint it is named for: {opened}"
+            );
+            assert!(
+                !app.command_line
+                    .history_plain_text()
+                    .contains(&format!("Unknown command: {name}")),
+                "{name} is not a command"
+            );
+            request(&mut app, json!({"op":"cancel"}));
+        }
+    }
+
     /// The geometric umbrella's default follows the type used last, the way
     /// the dimensional umbrella's does, instead of a fixed `Coincident`.
     #[test]

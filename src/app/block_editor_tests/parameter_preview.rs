@@ -1442,10 +1442,26 @@ fn block_move_point_targets_can_be_picked_in_the_viewport() {
 
 #[test]
 fn block_move_point_targets_support_window_and_lasso_selection() {
-    for lasso in [false, true] {
+    for (method, pick_add) in (0..3).flat_map(|method| [true, false].map(|add| (method, add))) {
+        let lasso = method == 1;
         let (mut app, insert, def, root, child, existing) = setup_point_transport(false, true);
         let _ = app.update(Message::CommandEscape);
+        let i = app.active_tab;
+        let other = point::create(
+            &mut app.tabs[i].scene.document,
+            def,
+            Vector3::new(3., 6., 0.),
+            Vector3::new(3., 8., 0.),
+        )
+        .unwrap();
+        let other_name = actions::all_parameters(&app.tabs[i].scene.document, def)
+            .into_iter()
+            .find(|p| p.handle == other)
+            .unwrap()
+            .name;
         begin(&mut app, insert);
+        app.pick_add = pick_add;
+        app.pick_drag_rect = method == 2;
         let i = app.active_tab;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
         app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
@@ -1535,6 +1551,11 @@ fn block_move_point_targets_support_window_and_lasso_selection() {
                 ];
                 drop(selection);
                 let _ = app.update(Message::ViewportLeftRelease);
+            } else if method == 2 {
+                let _ = app.update(Message::ViewportLeftPressAt(lo));
+                let _ = app.update(Message::ViewportMove(hi));
+                assert!(app.tabs[i].scene.selection.borrow().input.left_dragging);
+                let _ = app.update(Message::ViewportLeftRelease);
             } else {
                 for p in [lo, hi] {
                     let _ = app.update(Message::ViewportLeftPressAt(p));
@@ -1545,8 +1566,35 @@ fn block_move_point_targets_support_window_and_lasso_selection() {
         };
         let _ = app.dispatch_command("BACTION MOVE");
         feed(&mut app, &root.name);
+        if !pick_add {
+            feed(
+                &mut app,
+                &format!("Parameter {}", serde_json::to_string(&other_name).unwrap()),
+            );
+            let geometry = members(&app)[0];
+            app.tabs[i].scene.select_entities(&[geometry]);
+            let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![geometry]));
+        }
         select(&mut app, false);
+        let cmd = app.tabs[i].active_cmd.as_ref().unwrap();
+        assert!(
+            cmd.selection_marker_selected(child.handle),
+            "method={method}, add={pick_add}"
+        );
+        assert!(
+            !cmd.selection_marker_selected(other),
+            "replaced Point method={method}"
+        );
+        assert!(
+            app.tabs[i].scene.selected_entities().is_empty(),
+            "replaced geometry method={method}"
+        );
         select(&mut app, true);
+        assert!(!app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .unwrap()
+            .selection_marker_selected(child.handle));
         let _ = app.feed_command(crate::command::StepInput::Enter);
         assert!(
             app.tabs[i]

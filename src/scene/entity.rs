@@ -310,32 +310,42 @@ impl Scene {
             return;
         }
         let name = insert.block_name.clone();
-        let base = crate::scene::render_graph::block_base_point(document, &name);
-        let place = crate::scene::render_graph::insert_transform_with_base(insert, base);
-        let definitions: Vec<codec::entities::AttributeDefinition> = document
-            .entities_in_block(&name)
-            .filter_map(|entity| match entity {
-                EntityType::AttributeDefinition(definition) => Some(definition.clone()),
-                _ => None,
-            })
-            .collect();
-        if definitions.is_empty() {
+        let attributes = Self::attributes_from_definitions(document, insert, |_| None);
+        if attributes.is_empty() {
             return;
         }
         Self::sync_attribute_flag(document, &name);
-        let attributes: Vec<codec::entities::AttributeEntity> = definitions
-            .iter()
-            .map(|definition| {
-                let mut attribute =
-                    codec::entities::AttributeEntity::from_definition(definition, None);
-                codec::Entity::apply_transform(&mut attribute, &place);
-                attribute
-            })
-            .collect();
         let Some(EntityType::Insert(insert)) = document.get_entity_mut(insert_handle) else {
             return;
         };
         insert.attributes = attributes;
+    }
+
+    /// The attributes `insert` gets from its block's definitions, placed by
+    /// the reference. `value` answers each definition; `None` keeps its
+    /// default value.
+    pub(crate) fn attributes_from_definitions(
+        document: &codec::Document,
+        insert: &codec::entities::Insert,
+        mut value: impl FnMut(&codec::entities::AttributeDefinition) -> Option<String>,
+    ) -> Vec<codec::entities::AttributeEntity> {
+        let name = &insert.block_name;
+        let base = crate::scene::render_graph::block_base_point(document, name);
+        let place = crate::scene::render_graph::insert_transform_with_base(insert, base);
+        document
+            .entities_in_block(name)
+            .filter_map(|entity| match entity {
+                EntityType::AttributeDefinition(definition) => {
+                    let mut attribute = codec::entities::AttributeEntity::from_definition(
+                        definition,
+                        value(definition),
+                    );
+                    codec::Entity::apply_transform(&mut attribute, &place);
+                    Some(attribute)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Give the attributes a reference arrives with their own identity. Whoever

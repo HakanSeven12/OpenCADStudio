@@ -1026,3 +1026,150 @@ fn closing_the_pane_applies_the_number_typed_in_its_open_cell() {
         "and the number typed in its open cell was applied on the way out"
     );
 }
+
+#[test]
+fn manager_edit_refreshes_ordered_actions_and_transported_point_with_undo() {
+    use crate::scene::block_actions::{self as actions, instance, Kind, Value};
+    use crate::scene::{block_distance_parameter as distance, block_point_parameter as point};
+    use glam::DVec3;
+
+    for scale_first in [false, true] {
+        let (mut app, insert) = fixture();
+        let tab = app.active_tab;
+        let other = app.tabs[tab]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new(
+                "EDIT_ME",
+                Vector3::UNIT_X * 50.,
+            )))
+            .unwrap();
+        begin(&mut app, insert);
+        let definition = app.tabs[tab].active_block_edit_session().unwrap().br_handle;
+        let member = members(&app)[0];
+        let doc = &mut app.tabs[tab].scene.document;
+        let parent = distance::create(
+            doc,
+            definition,
+            distance::Kind::Linear,
+            Vector3::ZERO,
+            Vector3::UNIT_X * 10.,
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+        let child = point::create(doc, definition, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+        for handle in [parent, child] {
+            let codec::objects::ObjectType::DynamicBlock(object) =
+                doc.objects.get_mut(&handle).unwrap()
+            else {
+                panic!()
+            };
+            match &mut object.data {
+                codec::objects::DynamicBlockData::LinearParameter(p) => {
+                    p.parameter.parameter.chain_actions = true
+                }
+                codec::objects::DynamicBlockData::PointParameter(p) => {
+                    p.parameter.parameter.chain_actions = true
+                }
+                _ => panic!(),
+            }
+        }
+        let moved =
+            actions::create(doc, definition, Kind::Move, parent, &[member], DVec3::ZERO).unwrap();
+        let scaled =
+            actions::create(doc, definition, Kind::Scale, parent, &[member], DVec3::ZERO).unwrap();
+        actions::create(doc, definition, Kind::Move, child, &[member], DVec3::ZERO).unwrap();
+        let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
+        else {
+            panic!()
+        };
+        let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
+            panic!()
+        };
+        action.action.dependencies = vec![member, child];
+        let (head, tail) = if scale_first {
+            (scaled, moved)
+        } else {
+            (moved, scaled)
+        };
+        assert!(actions::chain::set(doc, definition, head, Some(tail)).unwrap());
+        let point = actions::all_parameters(doc, definition)
+            .into_iter()
+            .find(|p| p.handle == child)
+            .unwrap();
+        let _ = app.dispatch_command("BSAVE");
+        let _ = app.dispatch_command("BCLOSE");
+        let changed = instance::evaluate_value(
+            &app.tabs[tab].scene.document,
+            insert,
+            parent,
+            Value::Point(DVec3::new(20., 0., 0.)),
+        )
+        .unwrap()
+        .unwrap();
+        let changed = instance::evaluate_value(
+            &changed,
+            insert,
+            child,
+            Value::Point(DVec3::new(15., 0., 0.)),
+        )
+        .unwrap()
+        .unwrap();
+        app.apply_action_document(tab, changed);
+        begin(&mut app, insert);
+        let line = |doc: &codec::Document, handle: Handle| {
+            let EntityType::Insert(reference) = doc.get_entity(handle).unwrap() else {
+                panic!()
+            };
+            doc.block_records
+                .get(&reference.block_name)
+                .unwrap()
+                .entity_handles
+                .iter()
+                .find_map(|h| {
+                    if let Some(EntityType::Line(line)) = doc.get_entity(*h) {
+                        Some((actions::v(line.start), actions::v(line.end)))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
+        };
+        let before = app.tabs[tab].scene.document.clone();
+        let original = line(&before, other);
+        let depth = app.tabs[tab].history.undo_stack.len();
+        answer(&mut app, "Distance1", Cell::Value, "15");
+        assert_eq!(app.tabs[tab].history.undo_stack.len(), depth + 1);
+        let after = &app.tabs[tab].scene.document;
+        let frame = instance::frame(after, insert, &point).unwrap();
+        assert!((frame.end - DVec3::X * 10.).length() < 1e-9);
+        let start = if scale_first { 15. } else { 10. + 20. / 3. };
+        let expected = (DVec3::X * start, DVec3::X * (start + 4. / 3.));
+        let actual = line(after, insert);
+        assert!(
+            (actual.0 - expected.0).length() < 1e-9 && (actual.1 - expected.1).length() < 1e-9,
+            "scale_first={scale_first}: expected {expected:?}, got {actual:?}"
+        );
+        assert_eq!(line(after, other), original);
+        app.undo_steps(1);
+        assert_eq!(
+            line(&app.tabs[tab].scene.document, insert),
+            line(&before, insert)
+        );
+        assert_eq!(
+            instance::frame(&app.tabs[tab].scene.document, insert, &point).unwrap(),
+            instance::frame(&before, insert, &point).unwrap()
+        );
+        assert_eq!(line(&app.tabs[tab].scene.document, other), original);
+        app.redo_steps(1);
+        let restored = line(&app.tabs[tab].scene.document, insert);
+        assert!(
+            (restored.0 - expected.0).length() < 1e-9 && (restored.1 - expected.1).length() < 1e-9
+        );
+        assert_eq!(
+            instance::frame(&app.tabs[tab].scene.document, insert, &point).unwrap(),
+            frame
+        );
+        assert_eq!(line(&app.tabs[tab].scene.document, other), original);
+    }
+}

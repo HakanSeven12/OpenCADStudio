@@ -4965,6 +4965,7 @@ pub enum Message {
     MTextCharSpace(String),
     /// Undo / redo editor text and inline-format operations.
     MTextUndo,
+    MTextInsertField,
     MTextRedo,
     /// Convert the selected numerator/separator/denominator to a stacked run.
     MTextStack,

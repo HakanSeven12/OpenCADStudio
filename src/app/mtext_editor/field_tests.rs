@@ -323,7 +323,7 @@ fn an_inserted_field_keeps_the_existing_ones_and_leaves_no_orphan() {
     assert_eq!(container(&app, h).1, r"a %<\_FldIdx 0>% b%<\_FldIdx 1>%");
     assert_eq!(
         codec::fields::field_spans(doc, h, &value(&app, h)),
-        Some(vec![2..4, 7..11])
+        Some(vec![2..4, 6..10])
     );
     let fields = doc
         .objects
@@ -335,15 +335,20 @@ fn an_inserted_field_keeps_the_existing_ones_and_leaves_no_orphan() {
 
 #[test]
 fn a_cancelled_insert_changes_nothing() {
+    let count = |app: &OpenCADStudio| {
+        app.tabs[1]
+            .scene
+            .document
+            .objects
+            .values()
+            .filter(|o| matches!(o, ObjectType::Field(_)))
+            .count()
+    };
     let (mut app, h) = plain();
+    let before = count(&app);
     caret(&mut app, 1);
     insert_job_no(&mut app);
     app.mtext_cancel();
     assert_eq!(value(&app, h), "ab");
-    assert!(!app.tabs[1]
-        .scene
-        .document
-        .objects
-        .values()
-        .any(|o| matches!(o, ObjectType::Field(_))));
+    assert_eq!(count(&app), before);
 }

@@ -352,7 +352,7 @@ impl crate::app::OpenCADStudio {
                     _ => unreachable!("target checked before the change"),
                 }
                 if let Some((host, value)) = pending_fields {
-                    host.save(&mut self.tabs[i].scene.document, &value);
+                    host.save(&mut self.tabs[i].scene.document, h, &value);
                 }
                 // The annotation scales change only with the annotative flag.
                 if annotation_changed {

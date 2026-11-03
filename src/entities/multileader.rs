@@ -350,8 +350,8 @@ fn to_render(ml: &MultiLeader, document: &codec::Document) -> Option<RenderEntit
                 }
             }
 
-            // Arrowhead
-            if draw_arrow {
+            // Arrowhead; a leader of type None draws neither it nor the landing.
+            if draw_arrow && !invisible {
                 let tip = &line.points[0];
                 let tip_f = p3(tip);
                 let next = if line.points.len() >= 2 {
@@ -381,7 +381,7 @@ fn to_render(ml: &MultiLeader, document: &codec::Document) -> Option<RenderEntit
         }
 
         // Horizontal landing from the leader end to the text's near edge.
-        if dogleg > 0.0 {
+        if dogleg > 0.0 && !invisible {
             points.push(nan);
             points.push(elbow_pt);
             points.push(text_edge_pt);
@@ -2338,7 +2338,9 @@ impl MultiLeaderFrameTess for MultiLeader {
                     }
                 }
 
-                if draw_arrow {
+                // A leader of type None draws neither its arrowhead nor its
+                // landing: only the content shows.
+                if draw_arrow && !invisible {
                     let tip = &line.points[0];
                     let tip_f = p3(tip);
                     let next = if line.points.len() >= 2 {
@@ -2368,7 +2370,8 @@ impl MultiLeaderFrameTess for MultiLeader {
                 ml.text_attachment_direction,
                 codec::entities::multileader::TextAttachmentDirectionType::Vertical
             );
-            if ml.enable_landing
+            if !invisible
+                && ml.enable_landing
                 && ml.enable_dogleg
                 && root.landing_distance > 0.0
                 && !vertical_attach
@@ -3555,6 +3558,33 @@ mod tests {
         assert_eq!(ml.block_scale.x, 1.0);
         assert_eq!(ml.block_rotation, 0.0);
         assert_eq!(ml.text_attachment_point, TextAttachmentPointType::Left);
+    }
+
+    #[test]
+    fn leader_type_none_draws_no_arrowhead_or_landing() {
+        // A leader of type None (path type Invisible) shows only its content.
+        // The arrowhead used to be drawn at the hidden leader's tip and the
+        // landing beside the text, so a site plan's street labels picked up
+        // stray dots and dashes.
+        let tip = [-341.0, -387.0];
+        let near = |p: &[f64; 2], q: [f64; 2], r: f64| (p[0] - q[0]).hypot(p[1] - q[1]) < r;
+        let on_landing = |p: &[f64; 2]| p[1].abs() < 1.0 && p[0] > -1.0 && p[0] < DOGLEG;
+
+        let mut shown = landed_leader("LABEL", TextAttachmentType::MiddleOfText);
+        shown.context.arrowhead_size = 40.0;
+        let shown_pts = drawn_positions(&tess(&shown), [0.0, 0.0]);
+        assert!(shown_pts.iter().any(|p| near(p, tip, 50.0)));
+        assert!(shown_pts.iter().any(on_landing));
+
+        let mut hidden = shown.clone();
+        hidden.path_type = MultiLeaderPathType::Invisible;
+        let hidden_pts = drawn_positions(&tess(&hidden), [0.0, 0.0]);
+        assert!(!hidden_pts.is_empty(), "the text still draws");
+        assert!(
+            !hidden_pts.iter().any(|p| near(p, tip, 50.0)),
+            "no arrowhead at the hidden leader's tip"
+        );
+        assert!(!hidden_pts.iter().any(on_landing), "no landing");
     }
 }
 

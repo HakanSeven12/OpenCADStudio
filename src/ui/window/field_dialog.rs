@@ -24,6 +24,8 @@ pub enum FieldTarget {
     AttdefEdit,
     /// The field a text already shows, edited in place.
     EditText(codec::Handle),
+    /// A picked table cell (table, row, column).
+    TableCell(codec::Handle, usize, usize),
 }
 
 /// The categories the dialog offers, with their fields (only the ones the

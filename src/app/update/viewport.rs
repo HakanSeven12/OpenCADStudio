@@ -2052,6 +2052,7 @@ impl OpenCADStudio {
             y: p_full.y - tile_b.y,
         };
         let vp_size = (tile_b.width, tile_b.height);
+        self.drag_table_cells(i, p, tile_b, &edit_cam);
 
         // ── Custom plugin-grip drag (API v11) ────────────────────────────
         // The plugin's preview is the only live feedback: no host ghost, no
@@ -5006,6 +5007,67 @@ impl OpenCADStudio {
         hit
     }
 
+    /// A press-drag that starts inside a table cell picks the cells from
+    /// there to the one under the cursor as it moves — the picked range is
+    /// the only feedback (no selection window or lasso is drawn).
+    fn drag_table_cells(
+        &mut self,
+        i: usize,
+        p: Point,
+        tile: iced::Rectangle,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+    ) {
+        if self.tabs[i].active_cmd.is_some() {
+            return;
+        }
+        let press = {
+            let sel = self.tabs[i].scene.selection.borrow();
+            (sel.input.left_down && sel.input.left_dragging)
+                .then_some(sel.input.left_press_pos)
+                .flatten()
+        };
+        let Some(press) = press else {
+            return;
+        };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: tile.width,
+            height: tile.height,
+        };
+        let press = Point::new(press.x - tile.x, press.y - tile.y);
+        let start = self.cursor_model_point(i, edit_cam, press, bounds);
+        let Some((table, anchor)) = self.tabs[i].scene.table_cell_pick(start, 0.0) else {
+            return;
+        };
+        let here = self.cursor_model_point(i, edit_cam, p, bounds);
+        let end = self.tabs[i]
+            .scene
+            .table_cell_pick(here, 0.0)
+            .filter(|(hit, _)| *hit == table)
+            .map(|(_, end)| end)
+            .or_else(|| {
+                self.tabs[i]
+                    .scene
+                    .table_cells
+                    .filter(|cells| cells.table == table)
+                    .map(|cells| cells.end)
+            })
+            .unwrap_or(anchor);
+        let cells = crate::scene::TableCellSelection { table, anchor, end };
+        {
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            sel.gesture.poly_active = false;
+            sel.gesture.poly_points.clear();
+            sel.gesture.box_anchor = None;
+            sel.gesture.box_current = None;
+        }
+        if self.tabs[i].scene.table_cells != Some(cells) {
+            self.tabs[i].scene.select_table_cells(cells);
+            self.refresh_properties();
+        }
+    }
+
     /// Once a press on a selected object has moved far enough, MOVE (COPY
     /// with Ctrl) runs on the selection from the grabbed point, so the drop
     /// gets the command's preview, snaps and ortho.
@@ -5667,6 +5729,12 @@ impl OpenCADStudio {
         self.drag_move = (self.tabs[i].active_cmd.is_none()
             && !self.shift_down
             && !self.tabs[i].scene.selected.is_empty()
+            // A press inside a table cell drags out a cell range instead.
+            && self
+                .tabs[i]
+                .scene
+                .table_cell_pick(self.tabs[i].last_cursor_world, 0.0)
+                .is_none()
             && self.selected_object_under(i, p, bounds, &edit_cam))
         .then_some((self.tabs[i].last_cursor_world, false));
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
@@ -6872,7 +6940,26 @@ impl OpenCADStudio {
                     }
                 }
 
-                if !poly_drag {
+                // A drag that starts inside a table cell picks the cells
+                // from there to the one under the release.
+                let cell_drag = box_anchor
+                    .filter(|_| self.tabs[i].active_cmd.is_none())
+                    .and_then(|a| {
+                        let start = self.cursor_model_point(i, &edit_cam, a, bounds);
+                        let end = self.cursor_model_point(i, &edit_cam, p, bounds);
+                        let (table, anchor) = self.tabs[i].scene.table_cell_pick(start, 0.0)?;
+                        let (end_table, end) = self.tabs[i].scene.table_cell_pick(end, 0.0)?;
+                        (end_table == table).then_some(crate::scene::TableCellSelection {
+                            table,
+                            anchor,
+                            end,
+                        })
+                    });
+                if let Some(cells) = cell_drag {
+                    self.tabs[i].scene.select_table_cells(cells);
+                    self.refresh_properties();
+                    selection_just_completed = true;
+                } else if !poly_drag {
                     // PICKDRAG 1 (#226): the press-drag spanned a
                     // rectangle through the box machinery — complete
                     // it here on release.
@@ -6996,7 +7083,63 @@ properties={:.1}ms picked={}",
                         self.refresh_properties();
                         selection_just_completed = true;
                     }
-                    if glyph_hit.is_none() {
+                    // A click inside a table cell (clear of its grid lines)
+                    // picks the cell; Shift+click stretches the picked range.
+                    let mut cell_hit = false;
+                    if glyph_hit.is_none() && self.tabs[i].active_cmd.is_none() {
+                        let click_world = self.cursor_model_point(i, &edit_cam, p, bounds);
+                        let aperture = crate::ui::overlay::pick_box_aperture_px(self.pick_box);
+                        let edge = self.cursor_model_point(
+                            i,
+                            &edit_cam,
+                            iced::Point::new(p.x + aperture, p.y),
+                            bounds,
+                        );
+                        let margin = (edge - click_world).length();
+                        if let Some((table, cell)) =
+                            self.tabs[i].scene.table_cell_pick(click_world, margin)
+                        {
+                            // A quick press-move-release across cells picks the
+                            // range between them.
+                            let released = self.tabs[i]
+                                .scene
+                                .selection
+                                .borrow()
+                                .input
+                                .last_move_pos
+                                .map(|last| iced::Point::new(last.x - tile_off.x, last.y - tile_off.y));
+                            let end = released
+                                .map(|last| self.cursor_model_point(i, &edit_cam, last, bounds))
+                                .and_then(|world| self.tabs[i].scene.table_cell_pick(world, 0.0))
+                                .filter(|(end_table, end)| *end_table == table && *end != cell)
+                                .map(|(_, end)| end);
+                            let cells = match self.tabs[i]
+                                .scene
+                                .table_cells
+                                .filter(|c| self.shift_down && c.table == table)
+                            {
+                                _ if end.is_some() => crate::scene::TableCellSelection {
+                                    table,
+                                    anchor: cell,
+                                    end: end.unwrap_or(cell),
+                                },
+                                Some(c) => crate::scene::TableCellSelection {
+                                    end: cell,
+                                    ..c
+                                },
+                                None => crate::scene::TableCellSelection {
+                                    table,
+                                    anchor: cell,
+                                    end: cell,
+                                },
+                            };
+                            self.tabs[i].scene.select_table_cells(cells);
+                            self.refresh_properties();
+                            selection_just_completed = true;
+                            cell_hit = true;
+                        }
+                    }
+                    if glyph_hit.is_none() && !cell_hit {
                         let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
                         let click_world = self.cursor_model_point(i, &edit_cam, p, bounds);
                         let t_arm = crate::perf::enabled().then(Instant::now);
@@ -7440,6 +7583,14 @@ properties={:.1}ms picked={}",
                         candidate_handles.as_ref(),
                         crate::ui::overlay::pick_box_aperture_px(self.pick_box),
                     )
+                })
+                // Inside an empty table cell nothing is drawn to hit: the
+                // cell under the cursor takes the double-click.
+                .or_else(|| {
+                    self.tabs[i]
+                        .scene
+                        .table_cell_pick(click_world, 0.0)
+                        .map(|(table, _)| table)
                 });
                 if let Some(handle) = hit {
                     // Locked layer: double-click must not open any editor

@@ -158,8 +158,12 @@ pub(super) const NAMES: &[&str] = &[
     "refedit_dialog",
     "pdf_password_dialog",
     "dim_inspect_dialog",
+    "table_cell_dialog",
+    "table_cell_warning",
     "hyperlink_dialog",
     "spell_dialog",
+    "table_cell_tab",
+    "command_submit",
     "pdf_shx_settings",
     "pdf_layer_toggle",
     "pc_manager_toggle",
@@ -1054,8 +1058,14 @@ impl OpenCADStudio {
         if self.tabs[i].scene.document.get_entity(target).is_none() {
             return Err(("entity_absent", "No entity with that handle"));
         }
+        // Picked cells of the target table stay picked: their grips are the
+        // cell grips.
+        let cells = self.tabs[i].scene.table_cells.filter(|cells| cells.table == target);
         self.tabs[i].scene.deselect_all();
         self.tabs[i].scene.select_entity(target, false);
+        if let Some(cells) = cells {
+            self.tabs[i].scene.select_table_cells(cells);
+        }
         self.refresh_properties();
         let (world, moves_entity) = self.tabs[i]
             .selected_grip_handles
@@ -1395,6 +1405,16 @@ impl OpenCADStudio {
         }
         let msg = match name {
             "close_modal" => Message::CloseModal,
+            // Tab / Shift+Tab in a table cell editor: value "next" or "prev".
+            // Type `value` into the command line and press Enter.
+            "command_submit" => {
+                self.command_line.input = req["value"].as_str().unwrap_or("").to_string();
+                Message::CommandSubmit
+            }
+            "table_cell_tab" => match req["value"].as_str() {
+                Some("prev") => Message::DynTabPrev,
+                _ => Message::DynTabNext,
+            },
             // The recovery prompt's Recover button; `close_modal` declines.
             "recovery_accept" => Message::RecoveryAttempt,
             // The conversion-loss warning's choices: save with the losses it
@@ -2445,6 +2465,100 @@ impl OpenCADStudio {
             // "shape=round|angular|none", "label_on=0|1", "label=<text>",
             // "rate_on=0|1", "rate=<text>", "select", "remove", "ok" or
             // "cancel".
+            // The Cell Borders / Cell Contents window, one field per call:
+            // "lineweight=<name>", "linetype=<name>", "color=<name>",
+            // "double=0|1", "spacing=<n>", "edges=all|outside|inside|none|
+            // top|bottom|left|right|inside_h|inside_v", "pick=<n>", "up",
+            // "down", "delete", "layout=1|2|4", "content_spacing=<n>"; the
+            // Cell Block window: "block=<name>", "align=1..9",
+            // "scale=<n>", "autofit=0|1", "rotation=<deg>"; the Cell Data
+            // Format window: "kind=0..8", "unit=<n>", "precision=<text>",
+            // "symbol=<s>", "append=0|1", "negative=0|1", "separator=0..2",
+            // "axis=0..2", "date=<picture>", "conversion=<n>", "prefix=<s>",
+            // "suffix=<s>", "decimal=0..2", "thousands=0..3",
+            // "zero=4|8|1|2" (toggles); "ok" or "cancel".
+            "table_cell_dialog" => {
+                use crate::ui::window::table_cell_dialog::{BorderSet as B, TableCellDialogMsg as T};
+                if !matches!(
+                    self.active_modal,
+                    Some(crate::app::ModalKind::TableCellBorders)
+                        | Some(crate::app::ModalKind::TableCellContents)
+                        | Some(crate::app::ModalKind::TableCellBlock)
+                        | Some(crate::app::ModalKind::TableCellFormat)
+                ) {
+                    return Err(failure("no_dialog", "No table cell window is open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let bad = || failure("invalid_value", spec);
+                if key == "cancel" {
+                    Message::CloseModal
+                } else {
+                    Message::TableCellDialog(match key {
+                        "lineweight" => T::Lineweight(value.to_string()),
+                        "linetype" => T::Linetype(value.to_string()),
+                        "color" => T::Color(value.to_string()),
+                        "double" => T::Double(value == "1"),
+                        "spacing" => T::Spacing(value.to_string()),
+                        "edges" => T::Edges(match value {
+                            "all" => B::All,
+                            "outside" => B::Outside,
+                            "inside" => B::Inside,
+                            "none" => B::None,
+                            "top" => B::Top,
+                            "bottom" => B::Bottom,
+                            "left" => B::Left,
+                            "right" => B::Right,
+                            "inside_h" => B::InsideHorizontal,
+                            "inside_v" => B::InsideVertical,
+                            _ => return Err(bad()),
+                        }),
+                        "pick" => T::Pick(value.parse().map_err(|_| bad())?),
+                        "up" => T::Up,
+                        "down" => T::Down,
+                        "delete" => T::Delete,
+                        "layout" => T::Layout(value.parse().map_err(|_| bad())?),
+                        "content_spacing" => T::ContentSpacing(value.to_string()),
+                        "block" => T::BlockName(value.to_string()),
+                        "align" => T::Align(value.parse().map_err(|_| bad())?),
+                        "scale" => T::BlockScale(value.to_string()),
+                        "autofit" => T::AutoFit(value == "1"),
+                        "rotation" => T::BlockRotation(value.to_string()),
+                        "kind" => T::FormatKind(value.parse().map_err(|_| bad())?),
+                        "unit" => T::FormatUnit(value.parse().map_err(|_| bad())?),
+                        "precision" => T::Precision(value.to_string()),
+                        "symbol" => T::Symbol(value.to_string()),
+                        "append" => T::Append(value == "1"),
+                        "negative" => T::Negative(value == "1"),
+                        "separator" => T::Separator(value.parse().map_err(|_| bad())?),
+                        "axis" => T::Axis(value.parse().map_err(|_| bad())?),
+                        "date" => T::DateFormat(value.to_string()),
+                        "conversion" => T::Conversion(value.to_string()),
+                        "prefix" => T::Prefix(value.to_string()),
+                        "suffix" => T::Suffix(value.to_string()),
+                        "decimal" => T::DecimalSeparator(value.parse().map_err(|_| bad())?),
+                        "thousands" => T::ThousandsSeparator(value.parse().map_err(|_| bad())?),
+                        "zero" => T::Zero(value.parse().map_err(|_| bad())?),
+                        "ok" => T::Ok,
+                        _ => return Err(bad()),
+                    })
+                }
+            }
+            // The invalid table cell data type warning: "ok" converts,
+            // "cancel" leaves the cells as they were.
+            "table_cell_warning" => {
+                if self.active_modal != Some(crate::app::ModalKind::TableCellWarning) {
+                    return Err(failure("no_dialog", "The invalid data type warning is not open"));
+                }
+                let spec = string(req, "value")?;
+                match spec {
+                    "ok" => Message::TableCellDialog(
+                        crate::ui::window::table_cell_dialog::TableCellDialogMsg::WarnOk,
+                    ),
+                    "cancel" | "close" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", spec)),
+                }
+            }
             "dim_inspect_dialog" => {
                 use crate::entities::dim_inspect::Shape;
                 use crate::ui::window::dim_inspect_dialog::DimInspectMsg as D;

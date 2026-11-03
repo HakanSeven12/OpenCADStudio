@@ -29,7 +29,9 @@ pub(crate) use draw_panel::tools as panel_tools;
 mod color_dropdown;
 mod context_tools;
 mod visibility_panel;
-pub use context_tools::{UnderlayContext, pdf_underlay_tools, point_cloud_tools, xref_tools};
+pub use context_tools::{
+    UnderlayContext, pdf_underlay_tools, point_cloud_tools, table_cell_tools, xref_tools,
+};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 use widgets::{StyleContext, *};
 mod app_menu;

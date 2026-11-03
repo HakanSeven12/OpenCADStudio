@@ -47,6 +47,7 @@ mod point_cloud;
 mod refedit;
 pub(crate) mod sheet_set;
 mod spell;
+mod table_cells;
 mod styleprops;
 mod text_edit;
 mod table_style_var;
@@ -629,6 +630,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_blocks(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_table_cells(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_pdf_underlay(cmd, i) {

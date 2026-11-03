@@ -513,6 +513,10 @@ impl OpenCADStudio {
         // dropdown so the dispatched command's new prompt is
         // immediately visible on the overlay.
         self.command_line.close_history();
+        // A table cell's editor: Enter writes the cell and moves down.
+        if let Some(task) = self.table_cell_enter() {
+            return task;
+        }
         if self.awaiting_fill_close_answer() {
             let input = std::mem::take(&mut self.command_line.input);
             return self.on_graphic_fill_close_input(&input);
@@ -3239,6 +3243,34 @@ impl OpenCADStudio {
                 } else {
                     self.invalidate_property_targets(i, &handles);
                     self.refresh_properties();
+                }
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "tbl_cell_border_lt" {
+                let linetype = self.tabs[i]
+                    .scene
+                    .document
+                    .line_types
+                    .iter()
+                    .find(|lt| lt.name.eq_ignore_ascii_case(value.trim()))
+                    .map(|lt| lt.handle);
+                let cells = self.picked_cell_positions(i);
+                if linetype.is_some() {
+                    self.apply_property_op(i, "TABLE CELL BORDER", &handles, |app, handle| {
+                        use crate::entities::table::TableCellBordersExt;
+                        if let Some(codec::EntityType::Table(table)) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            for &(row, column) in &cells {
+                                table.edit_cell_borders(row, column, |border| {
+                                    border.line_type_handle = linetype;
+                                    codec::entities::table::BorderPropertyFlags::LINE_TYPE
+                                });
+                            }
+                            table.block_record_handle = None;
+                        }
+                    });
                 }
                 self.tabs[i].properties.edit_choice_open = false;
                 return Task::none();

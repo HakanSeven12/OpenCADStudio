@@ -85,6 +85,112 @@ pub fn point_cloud_tools() -> Vec<ToolDef> {
     ]
 }
 
+/// Picked table cell tools: rows, columns, merging, locking and editing.
+pub fn table_cell_tools() -> Vec<ToolDef> {
+    vec![
+        tool(
+            "_TCELLROWABOVE",
+            "Insert Row\nAbove",
+            include_bytes!("../../../assets/icons/table_row_above.svg"),
+        ),
+        tool(
+            "_TCELLROWBELOW",
+            "Insert Row\nBelow",
+            include_bytes!("../../../assets/icons/table_row_below.svg"),
+        ),
+        tool(
+            "_TCELLDELROWS",
+            "Delete\nRows",
+            include_bytes!("../../../assets/icons/table_row_delete.svg"),
+        ),
+        tool(
+            "_TCELLCOLLEFT",
+            "Insert Column\nLeft",
+            include_bytes!("../../../assets/icons/table_col_left.svg"),
+        ),
+        tool(
+            "_TCELLCOLRIGHT",
+            "Insert Column\nRight",
+            include_bytes!("../../../assets/icons/table_col_right.svg"),
+        ),
+        tool(
+            "_TCELLDELCOLS",
+            "Delete\nColumns",
+            include_bytes!("../../../assets/icons/table_col_delete.svg"),
+        ),
+        tool(
+            "_TCELLMERGE",
+            "Merge\nCells",
+            include_bytes!("../../../assets/icons/table_merge.svg"),
+        ),
+        tool(
+            "_TCELLUNMERGE",
+            "Unmerge\nCells",
+            include_bytes!("../../../assets/icons/table_unmerge.svg"),
+        ),
+        tool(
+            "_TCELLLOCK",
+            "Cell\nLocking",
+            include_bytes!("../../../assets/icons/table_cell_lock.svg"),
+        ),
+        tool(
+            "_TCELLMATCH",
+            "Match\nCell",
+            include_bytes!("../../../assets/icons/match_prop.svg"),
+        ),
+        tool(
+            "_TCELLALIGN",
+            "Alignment",
+            include_bytes!("../../../assets/icons/align_hcenter.svg"),
+        ),
+        tool(
+            "_TCELLBORDERS",
+            "Cell\nBorders",
+            include_bytes!("../../../assets/icons/table_cell_borders.svg"),
+        ),
+        tool(
+            "_TCELLFORMAT",
+            "Data\nFormat",
+            include_bytes!("../../../assets/icons/table_cell_format.svg"),
+        ),
+        tool(
+            "_TCELLBLOCK",
+            "Insert\nBlock",
+            include_bytes!("../../../assets/icons/edit_block.svg"),
+        ),
+        tool(
+            "_TCELLFIELD",
+            "Insert\nField",
+            include_bytes!("../../../assets/icons/text.svg"),
+        ),
+        tool(
+            "_TCELLFORMULA",
+            "Formula",
+            include_bytes!("../../../assets/icons/table_cell_formula.svg"),
+        ),
+        tool(
+            "_TCELLCONTENTS",
+            "Manage Cell\nContents",
+            include_bytes!("../../../assets/icons/table_cell_contents.svg"),
+        ),
+        tool(
+            "_TCELLLINK",
+            "Link\nCell",
+            include_bytes!("../../../assets/icons/data_link.svg"),
+        ),
+        tool(
+            "_TCELLDOWNLOAD",
+            "Download\nfrom Source",
+            include_bytes!("../../../assets/icons/sync.svg"),
+        ),
+        tool(
+            "_TCELLEDIT",
+            "Edit\nText",
+            include_bytes!("../../../assets/icons/ddedit.svg"),
+        ),
+    ]
+}
+
 /// External reference tools: edit, open, clipping and the palette.
 pub fn xref_tools() -> Vec<ToolDef> {
     vec![

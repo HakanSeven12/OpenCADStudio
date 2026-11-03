@@ -2512,6 +2512,14 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_data_link_close(&mut self) -> Task<Message> {
+        if std::mem::take(&mut self.data_link_cell_target) {
+            self.active_modal = None;
+            self.reset_modal_geometry();
+            if let Some(link) = self.data_link_manager.selected.as_ref().map(|s| s.handle) {
+                self.link_picked_cells(link);
+            }
+            return Task::none();
+        }
         if self.data_link_parent_table {
             self.data_link_parent_table = false;
             let links = data_link_choices(&self.tabs[self.active_tab].scene.document);

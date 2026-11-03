@@ -1567,11 +1567,11 @@ common =
     .current-cell = { common.cell } · { common.current }
     .row = Satır
     .column = Sütun
-    .cell-style = { common.cell }: { properties.style }
-    .cell-type = { common.cell }: { common.type }
+    .cell-style = Hücre stili
+    .cell-type = Hücre türü
     .content-color = { common.content }: { common.color }
     .data-format = { common.data } · { common.format }
-    .background-fill = { properties.background } · { properties.fill }
+    .background-fill = Arka plan dolgusu
     .left-margin = { common.margin } · { common.left }
     .top-margin = { common.margin } · { common.top }
     .right-margin = { common.margin } · { common.right }
@@ -3714,6 +3714,78 @@ layers =
     .lock-and-fade = Kilitle ve soldur
 
 annotate =
+    .tcell-row-above =
+        Üste
+        Satır Ekle
+    .tcell-row-below =
+        Alta
+        Satır Ekle
+    .tcell-delete-rows =
+        Satırları
+        Sil
+    .tcell-col-left =
+        Sola
+        Sütun Ekle
+    .tcell-col-right =
+        Sağa
+        Sütun Ekle
+    .tcell-delete-cols =
+        Sütunları
+        Sil
+    .tcell-merge =
+        Hücreleri
+        Birleştir
+    .tcell-unmerge =
+        Birleştirmeyi
+        Kaldır
+    .tcell-lock =
+        Hücre
+        Kilidi
+    .tcell-edit =
+        Metni
+        Düzenle
+    .tcell-match =
+        Hücreyi
+        Eşle
+    .tcell-borders =
+        Hücre
+        Kenarlıkları
+    .tcell-format =
+        Veri
+        Biçimi
+    .tcell-block =
+        Blok
+        Ekle
+    .tcell-field =
+        Alan
+        Ekle
+    .tcell-contents =
+        Hücre İçeriğini
+        Yönet
+    .tcell-link =
+        Hücreyi
+        Bağla
+    .tcell-download =
+        Kaynaktan
+        İndir
+    .tcell-row-style = Satır stili
+    .tcell-column-style = Sütun stili
+    .tcell-width = Hücre genişliği
+    .tcell-height = Hücre yüksekliği
+    .tcell-border-color = Kenarlık rengi
+    .tcell-border-lineweight = Kenarlık çizgi kalınlığı
+    .tcell-border-linetype = Kenarlık çizgi tipi
+    .tcell-locking = Hücre kilidi
+    .tcell-data-link = Hücre veri bağlantısı
+    .tcell-select-destination = Hedef hücreyi seçin:
+    .tcell-select-cell = Tablo hücresini seçin:
+    .tcell-range-first = Tablo hücre aralığının ilk köşesini seçin:
+    .tcell-range-second = Tablo hücre aralığının ikinci köşesini seçin:
+    .tcell-align-prompt = Hücre hizalamasını girin [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Veri biçimini girin [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Blok adını girin veya [?]:
+    .tcell-formula-prompt = Formül girin [Sum/Average/Count/Cell/Equation]:
+    .tcell-invalid-cell = Geçersiz hücre.
     .dimoverride-invalid-override = DIMOVERRIDE: geçersiz geçersiz kılma "__ocs_fmt_0__".
     .dimoverride-no-dimensions = DIMOVERRIDE: düzenlenebilir ölçü seçilmedi.
     .dimoverride-updated = DIMOVERRIDE: __ocs_fmt_0__ ölçü güncellendi.
@@ -6496,6 +6568,7 @@ dimstyle =
     .move-text-outside-first = Önce metni dışarı taşı
     .period = Nokta
     .space = Boşluk
+    .separator-none = (Yok)
     .surveyors-units = Haritacılık birimleri
 
 style-manager =
@@ -8097,6 +8170,88 @@ array-grips = Öğe sayısı
     .prompt-item-spacing = Öğeler arası mesafeyi belirtin:
     .prompt-item-angle = Öğeler arası açıyı belirtin:
     .prompt-radius = Yarıçapı belirtin:
+table-cells =
+    .borders-title = Hücre Kenarlıkları
+    .contents-title = Hücre İçeriği
+    .line = Çizgi
+    .lineweight = Çizgi kalınlığı
+    .linetype = Çizgi tipi
+    .color = Renk
+    .double = Çift çizgi
+    .spacing = Aralık
+    .apply-to = Uygulanacak kenarlar
+    .all = Tümü
+    .outside = Dış
+    .inside = İç
+    .none = Kenarlık yok
+    .top = Üst
+    .bottom = Alt
+    .left = Sol
+    .right = Sağ
+    .inside-horizontal = İç yatay
+    .inside-vertical = İç dikey
+    .contents = İçerik
+    .empty = Hücre boş.
+    .move-up = Yukarı taşı
+    .move-down = Aşağı taşı
+    .delete = Sil
+    .layout = Yerleşim
+    .flow = Akış
+    .stack-horizontal = Yatay yığın
+    .stack-vertical = Dikey yığın
+    .content-spacing = Aralık
+    .block-item = Blok: { $name }
+    .text-item = Metin: { $text }
+    .text-content = Tablo Hücresi Metni
+    .borders-help = Seçili hücrelerin kenarlıklarına çizgi kalınlığı, çizgi tipi ve renk verir; uygulanacak kenarları seçin.
+    .contents-help = Seçili hücrenin içeriğini sıralar, kaldırır ve yerleştirir.
+    .block-title = Hücre Bloğu
+    .format-title = Hücre Veri Biçimi
+    .block = Blok
+    .block-name = Ad
+    .browse = Gözat...
+    .block-path = Yol
+    .placement = Yerleşim
+    .alignment = Hücre hizalaması
+    .scale = Ölçek
+    .autofit = Hücreye sığdır
+    .rotation = Döndürme açısı
+    .format = Biçim
+    .current-precision = Geçerli hassasiyet
+    .precision = Hassasiyet
+    .symbol = Simge
+    .append-symbol = Simgeyi sona ekle
+    .negative-parens = Negatifler parantez içinde
+    .list-separator = Liste ayırıcı
+    .date-format = Tarih biçimi
+    .no-format-settings = Bu veri türünün biçim ayarı yok.
+    .data-type = Veri türü
+    .format-settings = Biçim
+    .currency = Para Birimi
+    .decimal-number = Ondalık Sayı
+    .percentage = Yüzde
+    .whole-number = Tam Sayı
+    .grads = Grad
+    .sample-text = örnek metin
+    .block-help = Seçili hücrelere blok koyar: hücredeki yeri, ölçeği (ya da hücreye sığdırma) ve döndürmesi.
+    .format-help = Seçili hücrelerin değerlerinin okunduğu veri türünü ve biçimi ayarlar.
+    .additional-format = Ek biçim
+    .conversion = Dönüşüm çarpanı
+    .prefix = Önek
+    .suffix = Sonek
+    .decimal-separator = Ondalık ayırıcı
+    .thousands-separator = Binlik ayırıcı
+    .space = Boşluk
+    .separator-none = (Yok)
+    .zero-leading = Baştaki sıfırlar
+    .zero-trailing = Sondaki sıfırlar
+    .zero-feet = 0 fit
+    .zero-inches = 0 inç
+    .warning-title = Veri Türü Uyuşmuyor
+    .warning-heading = Bu hücrelerdeki değerler seçilen veri türünde değil.
+    .warning-note = Dönüştürme her değeri yeni türde okur; okunamayan değer temizlenir. İptal hücreleri olduğu gibi bırakır.
+    .warning-ok = Dönüştür
+    .warning-cancel = İptal
 block-chain =
     .label = Zincirleme eylemler
     .cycle = Blok eylem zinciri bir döngü içeriyor.

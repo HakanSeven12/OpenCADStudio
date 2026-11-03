@@ -3046,6 +3046,11 @@ impl CommandSuggestion {
 }
 
 pub trait CadCommand: Send {
+    /// The table cell this command edits (table, row, column): Tab and
+    /// Shift+Tab move its editor to the next or previous cell.
+    fn table_cell(&self) -> Option<(Handle, usize, usize)> {
+        None
+    }
     /// Preserve source appearance for commands that extract existing entities.
     fn preserve_commit_style(&self) -> bool {
         false

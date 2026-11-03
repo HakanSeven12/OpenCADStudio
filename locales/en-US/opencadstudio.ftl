@@ -3735,6 +3735,78 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: style '__ocs_fmt_1__' not found.
 
 annotate =
+    .tcell-row-above =
+        Insert Row
+        Above
+    .tcell-row-below =
+        Insert Row
+        Below
+    .tcell-delete-rows =
+        Delete
+        Rows
+    .tcell-col-left =
+        Insert Column
+        Left
+    .tcell-col-right =
+        Insert Column
+        Right
+    .tcell-delete-cols =
+        Delete
+        Columns
+    .tcell-merge =
+        Merge
+        Cells
+    .tcell-unmerge =
+        Unmerge
+        Cells
+    .tcell-lock =
+        Cell
+        Locking
+    .tcell-edit =
+        Edit
+        Text
+    .tcell-match =
+        Match
+        Cell
+    .tcell-borders =
+        Cell
+        Borders
+    .tcell-format =
+        Data
+        Format
+    .tcell-block =
+        Insert
+        Block
+    .tcell-field =
+        Insert
+        Field
+    .tcell-contents =
+        Manage Cell
+        Contents
+    .tcell-link =
+        Link
+        Cell
+    .tcell-download =
+        Download
+        from Source
+    .tcell-row-style = Row style
+    .tcell-column-style = Column style
+    .tcell-width = Cell width
+    .tcell-height = Cell height
+    .tcell-border-color = Border color
+    .tcell-border-lineweight = Border lineweight
+    .tcell-border-linetype = Border linetype
+    .tcell-locking = Cell locking
+    .tcell-data-link = Cell data link
+    .tcell-select-destination = Select destination cell:
+    .tcell-select-cell = Select table cell:
+    .tcell-range-first = Select first corner of table cell range:
+    .tcell-range-second = Select second corner of table cell range:
+    .tcell-align-prompt = Enter cell alignment [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Enter data format [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Enter block name or [?]:
+    .tcell-formula-prompt = Enter a formula [Sum/Average/Count/Cell/Equation]:
+    .tcell-invalid-cell = Invalid cell.
     .dimoverride-invalid-override = DIMOVERRIDE: invalid override "__ocs_fmt_0__".
     .dimoverride-no-dimensions = DIMOVERRIDE: no editable dimensions were selected.
     .dimoverride-updated = DIMOVERRIDE: updated __ocs_fmt_0__ dimension(s).
@@ -6574,6 +6646,7 @@ dimstyle =
     .move-text-outside-first = Move text outside first
     .period = Period
     .space = Space
+    .separator-none = (None)
     .surveyors-units = Surveyor's units
 
 style-manager =
@@ -8177,6 +8250,88 @@ array-grips = Item count
     .prompt-item-spacing = Specify the distance between items:
     .prompt-item-angle = Specify the angle between items:
     .prompt-radius = Specify radius:
+table-cells =
+    .borders-title = Cell Borders
+    .contents-title = Cell Contents
+    .line = Line
+    .lineweight = Lineweight
+    .linetype = Linetype
+    .color = Color
+    .double = Double line
+    .spacing = Spacing
+    .apply-to = Apply to
+    .all = All
+    .outside = Outside
+    .inside = Inside
+    .none = None
+    .top = Top
+    .bottom = Bottom
+    .left = Left
+    .right = Right
+    .inside-horizontal = Inside horizontal
+    .inside-vertical = Inside vertical
+    .contents = Contents
+    .empty = The cell is empty.
+    .move-up = Move up
+    .move-down = Move down
+    .delete = Delete
+    .layout = Layout
+    .flow = Flow
+    .stack-horizontal = Stacked horizontally
+    .stack-vertical = Stacked vertically
+    .content-spacing = Spacing
+    .block-item = Block: { $name }
+    .text-item = Text: { $text }
+    .text-content = Table Cell Text
+    .borders-help = Sets the lineweight, linetype and color of the borders of the picked cells; choose the edges they go on.
+    .contents-help = Orders, removes and lays out the contents of the picked cell.
+    .block-title = Cell Block
+    .format-title = Cell Data Format
+    .block = Block
+    .block-name = Name
+    .browse = Browse...
+    .block-path = Path
+    .placement = Placement
+    .alignment = Cell alignment
+    .scale = Scale
+    .autofit = AutoFit
+    .rotation = Rotation angle
+    .format = Format
+    .current-precision = Current precision
+    .precision = Precision
+    .symbol = Symbol
+    .append-symbol = Append symbol
+    .negative-parens = Negatives in parentheses
+    .list-separator = List separator
+    .date-format = Date format
+    .no-format-settings = This data type has no format settings.
+    .data-type = Data type
+    .format-settings = Format
+    .currency = Currency
+    .decimal-number = Decimal Number
+    .percentage = Percentage
+    .whole-number = Whole Number
+    .grads = Grads
+    .sample-text = sample text
+    .block-help = Puts a block into the picked cells: where it sits, its scale (or fitted to the cell) and its rotation.
+    .format-help = Sets the data type and format the picked cells' values read with.
+    .additional-format = Additional format
+    .conversion = Conversion factor
+    .prefix = Prefix
+    .suffix = Suffix
+    .decimal-separator = Decimal separator
+    .thousands-separator = Thousands separator
+    .space = Space
+    .separator-none = (None)
+    .zero-leading = Leading zeros
+    .zero-trailing = Trailing zeros
+    .zero-feet = 0 feet
+    .zero-inches = 0 inches
+    .warning-title = Data Type Does Not Match
+    .warning-heading = These cells hold values that are not of the chosen data type.
+    .warning-note = Converting reads each value as the new type; a value that cannot be read as one is cleared. Cancel leaves the cells unchanged.
+    .warning-ok = Convert
+    .warning-cancel = Cancel
 block-chain =
     .label = Chain actions
     .cycle = The block action chain contains a cycle.

@@ -779,6 +779,20 @@ pub(super) struct OpenCADStudio {
     pdf_password: Option<crate::ui::window::pdf_password_dialog::PdfPasswordState>,
     /// The Inspection Dimension window.
     dim_inspect_dialog: Option<crate::ui::window::dim_inspect_dialog::DimInspectState>,
+    /// The picked table cells' Cell Borders window.
+    table_cell_borders: Option<crate::ui::window::table_cell_dialog::CellBordersState>,
+    /// The picked table cell's Cell Contents window.
+    table_cell_contents: Option<crate::ui::window::table_cell_dialog::CellContentsState>,
+    /// The picked table cells' Cell Block window.
+    table_cell_block: Option<crate::ui::window::table_cell_dialog::CellBlockState>,
+    /// The picked table cells' Cell Data Format window.
+    table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
+    /// A data format waiting on the invalid data type warning, and the
+    /// cells whose values read as no such type.
+    table_cell_warning: Option<(crate::ui::window::table_cell_dialog::CellFormatState, Vec<String>)>,
+    /// The Data Link Manager was opened by Link Cell: its link feeds the
+    /// picked cells when it closes.
+    data_link_cell_target: bool,
     pdf_shx_dialog: Option<crate::ui::window::pdf_shx_dialog::ShxSettingsState>,
     underlay_layers: Option<crate::ui::window::pdf_dialogs::UnderlayLayersState>,
     pdf_import_settings: Option<crate::modules::insert::pdf_import::PdfImportSettings>,
@@ -2873,6 +2887,11 @@ pub enum ModalKind {
     RefEdit,
     PdfPassword,
     DimInspect,
+    TableCellBorders,
+    TableCellContents,
+    TableCellBlock,
+    TableCellFormat,
+    TableCellWarning,
     PdfShxSettings,
     UnderlayLayers,
     PdfImportSettings,
@@ -5394,6 +5413,8 @@ pub enum Message {
     PdfPassword(crate::ui::window::pdf_password_dialog::PdfPasswordMsg),
     /// An edit in the Inspection Dimension window.
     DimInspect(crate::ui::window::dim_inspect_dialog::DimInspectMsg),
+    /// An edit in a picked table cell window (Cell Borders, Cell Contents).
+    TableCellDialog(crate::ui::window::table_cell_dialog::TableCellDialogMsg),
     HyperlinkDialog(crate::ui::window::hyperlink_dialog::HyperlinkMsg),
     /// Check Spelling window.
     Spell(crate::ui::window::spell_dialog::SpellMsg),
@@ -5664,6 +5685,12 @@ impl OpenCADStudio {
             refedit_dialog: None,
             pdf_password: None,
             dim_inspect_dialog: None,
+            table_cell_borders: None,
+            table_cell_contents: None,
+            table_cell_block: None,
+            table_cell_format: None,
+            table_cell_warning: None,
+            data_link_cell_target: false,
             pdf_shx_dialog: None,
             underlay_layers: None,
             pdf_import_settings: None,

@@ -1362,6 +1362,45 @@ pub fn wrap_paragraph(
     let mut after_align_tab = false;
     let line_start_x = |idx: usize| if idx == 0 { indent_first } else { indent_left };
     let line_max_w = |idx: usize| (rect_w - indent_right - line_start_x(idx)).max(0.0);
+    // A word wider than a whole line breaks between its characters: each
+    // piece fills a line, the last one carries on (measured: a table cell's
+    // "$1234.5678" reads "$1234.5" over "7").
+    let ink = |atom: &LayoutAtom| {
+        atom_width(atom, entity_h, base_wf, base_font)
+            - trailing_letter_gap(atom, entity_h, base_wf, base_font)
+    };
+    let full_w = line_max_w(1);
+    let atoms: Vec<LayoutAtom> = atoms
+        .into_iter()
+        .flat_map(|atom| {
+            let AtomKind::Word(text) = &atom.kind else {
+                return vec![atom];
+            };
+            if full_w <= 0.0 || ink(&atom) <= full_w || text.chars().count() < 2 {
+                return vec![atom];
+            }
+            let chars: Vec<char> = text.chars().collect();
+            let mut pieces = Vec::new();
+            let mut start = 0;
+            while start < chars.len() {
+                let mut end = start + 1;
+                while end < chars.len() {
+                    let mut probe = atom.clone();
+                    probe.kind = AtomKind::Word(chars[start..=end].iter().collect());
+                    if ink(&probe) > full_w {
+                        break;
+                    }
+                    end += 1;
+                }
+                let mut piece = atom.clone();
+                piece.kind = AtomKind::Word(chars[start..end].iter().collect());
+                piece.char_offset = atom.char_offset + start;
+                pieces.push(piece);
+                start = end;
+            }
+            pieces
+        })
+        .collect();
 
     for atom in atoms {
         match &atom.kind {

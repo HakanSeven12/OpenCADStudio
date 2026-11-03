@@ -90,6 +90,7 @@ mod project;
 pub mod reference_only;
 mod scene_markers;
 mod selection;
+pub use selection::TableCellSelection;
 pub use selection::SELECT_SIMILAR_DEFAULT;
 pub mod viewport_dimension_pick;
 pub mod viewport_ref;
@@ -2535,6 +2536,9 @@ pub struct Scene {
     /// The parametric-constraint glyph currently selected in the viewport.
     /// Entity selection changes clear it so the two selections stay exclusive.
     pub selected_constraint: Option<crate::scene::parametric_constraints::ConstraintId>,
+    /// Cells picked inside a table (the table itself is then in `selected`
+    /// but draws neither its highlight nor its grips).
+    pub table_cells: Option<crate::scene::TableCellSelection>,
     /// Session-only ISOLATEOBJECTS / HIDEOBJECTS state. Never written to DWG/DXF.
     pub object_isolation: ObjectIsolationState,
     /// Session-only LAYWALK per-space visible-layer sets. In-memory only;
@@ -3257,6 +3261,7 @@ impl Scene {
             sub_segments: HashMap::default(),
             selected_order: Vec::new(),
             selected_constraint: None,
+            table_cells: None,
             object_isolation: ObjectIsolationState::default(),
             layer_walk: LayerWalkState::default(),
             reference_only: Default::default(),
@@ -4093,6 +4098,51 @@ impl Scene {
         any
     }
 
+    /// Settles a changed table (typed values, row heights) and removes the
+    /// fields it lists but no cell shows any more, recording the removed
+    /// objects for undo.
+    fn prune_table_fields(&mut self, changes: &[(Handle, ChangeKind)]) {
+        for (table, kind) in changes {
+            if !matches!(kind, ChangeKind::Modified)
+                || !matches!(self.document.get_entity(*table), Some(EntityType::Table(_)))
+            {
+                continue;
+            }
+            // Typed text read as the cells' data types and rows grown to
+            // their wrapped text, whichever path wrote the cells.
+            if let Some(EntityType::Table(current)) = self.document.get_entity(*table) {
+                let mut next = (**current).clone();
+                if crate::entities::table::settle_table(&mut next, &self.document) {
+                    next.block_record_handle = None;
+                    if let Some(EntityType::Table(target)) = self.document.get_entity_mut(*table) {
+                        **target = next;
+                    }
+                }
+            }
+            let doomed = self.document.orphan_table_fields(*table);
+            if doomed.is_empty() {
+                continue;
+            }
+            if self.is_recording_undo() {
+                for handle in &doomed {
+                    let before = self.document.objects.get(handle).cloned();
+                    self.record_undo_object_before(*handle, before);
+                }
+                let lists: Vec<(Handle, codec::objects::ObjectType)> = self
+                    .document
+                    .objects
+                    .iter()
+                    .filter(|(_, object)| matches!(object, codec::objects::ObjectType::FieldList(_)))
+                    .map(|(handle, object)| (*handle, object.clone()))
+                    .collect();
+                for (handle, before) in lists {
+                    self.record_undo_object_before(handle, Some(before));
+                }
+            }
+            self.document.prune_table_fields(*table);
+        }
+    }
+
     pub fn bump_entities(&mut self, changes: &[(Handle, ChangeKind)]) {
         self.bump_entities_with_parametric_policy(changes, &[], false);
     }
@@ -4359,6 +4409,9 @@ impl Scene {
                 .collect(),
             None => Vec::new(),
         };
+        // A cell rewritten over a field (typed text, a copied cell, a removed
+        // row or column) no longer shows it; the field objects go with it.
+        self.prune_table_fields(changes);
         if changes.iter().any(|(handle, kind)| {
             matches!(kind, ChangeKind::Removed)
                 || self

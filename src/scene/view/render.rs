@@ -4902,11 +4902,18 @@ impl Scene {
         } else {
             Vec::new()
         };
+        let (indicator_wires, indicator_hatches) = if show_live_overlay {
+            let pixel = 2.0 * inst.camera.ortho_size() as f64 / f64::from(full.height.max(1.0));
+            self.table_indicator_overlay(pixel)
+        } else {
+            (Vec::new(), Vec::new())
+        };
         let mut preview_wires = if !show_live_overlay
             || (self.interim_wire.is_none()
                 && self.preview_wires.is_empty()
                 && self.constraint_hover_wires.is_empty()
-                && cloud_2d_wires.is_empty())
+                && cloud_2d_wires.is_empty()
+                && indicator_wires.is_empty())
         {
             Arc::new(Vec::new())
         } else {
@@ -4922,10 +4929,18 @@ impl Scene {
             v.extend(self.preview_wires.iter().cloned());
             v.extend(self.constraint_hover_wires.iter().cloned());
             v.extend(cloud_2d_wires);
+            v.extend(indicator_wires);
             Arc::new(v)
         };
         let preview_hatches = if show_live_overlay {
-            self.render_preview_hatches()
+            let hatches = self.render_preview_hatches();
+            if indicator_hatches.is_empty() {
+                hatches
+            } else {
+                let mut all = (*hatches).clone();
+                all.extend(indicator_hatches);
+                Arc::new(all)
+            }
         } else {
             Arc::new(Vec::new())
         };
@@ -5299,10 +5314,13 @@ impl Scene {
             selected_handles: Arc::new(if show_interaction {
                 // A partly picked polyline lights only its picked segments,
                 // drawn with the highlight wires.
+                // A table whose cells are picked draws plain under its labels.
+                let cells = self.table_cells_handle();
                 self.selected
                     .iter()
                     .copied()
                     .filter(|handle| self.picked_segments(*handle).is_none())
+                    .filter(|handle| Some(*handle) != cells)
                     .collect()
             } else {
                 rustc_hash::FxHashSet::default()

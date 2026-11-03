@@ -1264,6 +1264,45 @@ pub(crate) fn table_cell_at(
     })
 }
 
+/// The cell (its merged owner) whose inside holds `point`, at least `margin`
+/// away from the cell's edges: a pick near a grid line takes the table, one
+/// inside a cell takes the cell.
+pub(crate) fn table_cell_inside(
+    table: &codec::entities::Table,
+    table_style: Option<&codec::objects::TableStyle>,
+    point: DVec3,
+    margin: f64,
+) -> Option<(usize, usize)> {
+    let hit = table_cell_at(table, table_style, point)?;
+    let (r0, c0, r1, c1) =
+        crate::entities::table::widen_to_merged(table, (hit.row, hit.column, hit.row, hit.column));
+    let horizontal = glam::DVec3::new(
+        table.horizontal_direction.x,
+        table.horizontal_direction.y,
+        table.horizontal_direction.z,
+    )
+    .normalize_or(glam::DVec3::X);
+    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
+        .normalize_or(glam::DVec3::Z);
+    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
+    if crate::entities::table::resolved_flow_up(table, table_style) {
+        down = -down;
+    }
+    let origin = glam::DVec3::new(
+        table.insertion_point.x,
+        table.insertion_point.y,
+        table.insertion_point.z,
+    );
+    let x = (point - origin).dot(horizontal);
+    let y = (point - origin).dot(down);
+    let left: f64 = table.columns[..c0].iter().map(|c| c.width).sum();
+    let right: f64 = left + table.columns[c0..=c1].iter().map(|c| c.width).sum::<f64>();
+    let top: f64 = table.rows[..r0].iter().map(|r| r.height).sum();
+    let bottom: f64 = top + table.rows[r0..=r1].iter().map(|r| r.height).sum::<f64>();
+    (x > left + margin && x < right - margin && y > top + margin && y < bottom - margin)
+        .then_some((r0, c0))
+}
+
 /// True when the cell's content may not be edited (locked or read-only).
 pub(crate) fn cell_locked(table: &codec::entities::Table, row: usize, column: usize) -> bool {
     use codec::entities::table::CellStateFlags;
@@ -1342,6 +1381,10 @@ impl TableCellEditCommand {
 }
 
 impl CadCommand for TableCellEditCommand {
+    fn table_cell(&self) -> Option<(codec::Handle, usize, usize)> {
+        Some((self.handle, self.row, self.column))
+    }
+
     fn name(&self) -> &'static str {
         "TABLE CELL"
     }
@@ -1522,5 +1565,51 @@ mod tabledit_tests {
             }
             _ => panic!("expected ReplaceMany"),
         }
+    }
+}
+
+/// Collects table cell picks for a picked-cell tool and hands them to
+/// `<name> x y z …` (a host that wants more picks starts it again).
+pub struct CellPointsCommand {
+    name: &'static str,
+    prompts: Vec<&'static str>,
+    points: Vec<DVec3>,
+}
+
+impl CellPointsCommand {
+    pub fn new(name: &'static str, prompts: Vec<&'static str>) -> Self {
+        Self {
+            name,
+            prompts,
+            points: Vec::new(),
+        }
+    }
+}
+
+impl CadCommand for CellPointsCommand {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn prompt(&self) -> String {
+        let prompt = self.prompts[self.points.len().min(self.prompts.len() - 1)];
+        t!(prompt).into_owned()
+    }
+
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        self.points.push(point);
+        if self.points.len() < self.prompts.len() {
+            return CmdResult::NeedPoint;
+        }
+        let points: Vec<String> = self
+            .points
+            .iter()
+            .map(|p| format!("{} {} {}", p.x, p.y, p.z))
+            .collect();
+        CmdResult::Dispatch(format!("{} {}", self.name, points.join(" ")))
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
     }
 }

@@ -70,6 +70,16 @@ pub fn properties_sectioned(
     entity: &EntityType,
     text_style_names: &[String],
 ) -> Vec<PropSection> {
+    // Picked table cells: General keeps only Transparency, then the cells.
+    if matches!(entity, EntityType::Table(_))
+        && crate::entities::table::prop_cell_range().is_some()
+    {
+        let mut general = properties::general_section(entity);
+        general.props.retain(|property| property.field == "transparency");
+        let mut sections = vec![general];
+        sections.extend(entity.geometry_properties(text_style_names));
+        return sections;
+    }
     let mut sections = vec![properties::general_section(entity)];
     if let Some(viz) = properties::visualization_section(entity) {
         sections.push(viz);

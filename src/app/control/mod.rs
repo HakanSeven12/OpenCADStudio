@@ -1066,10 +1066,18 @@ impl OpenCADStudio {
             && op != "cancel"
             && !answers_attribute_form
         {
-            return (
-                failure("command_busy", "An interactive command is already active"),
-                Task::none(),
-            );
+            // Say who holds the command: the client that started it, or the
+            // user (no client) when it was started or taken over in the window.
+            let mut busy = failure("command_busy", "An interactive command is already active");
+            busy["command"] = json!(tab.active_cmd.as_ref().map(|command| command.name()));
+            busy["document_id"] = json!(tab.id);
+            busy["owner_client_id"] = json!(self
+                .control
+                .owner
+                .as_ref()
+                .filter(|(owner_tab, _)| *owner_tab == tab.id)
+                .map(|(_, owner)| owner.clone()));
+            return (busy, Task::none());
         }
         if matches!(op, "run" | "start" | "input") && tab.is_start {
             return (
@@ -4421,6 +4429,8 @@ mod tests {
             json!({"op":"input","kind":"point","point":[10.,0.,0.]}),
         );
         assert_eq!(result["code"], "command_busy");
+        assert_eq!(result["command"], "LINE");
+        assert_eq!(result["owner_client_id"], Value::Null, "the user holds it now");
     }
     #[test]
     fn control_preserves_other_documents_and_waits_for_async_open() {

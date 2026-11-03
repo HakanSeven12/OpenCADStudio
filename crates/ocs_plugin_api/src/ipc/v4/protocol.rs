@@ -828,4 +828,82 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
     }
+
+    #[test]
+    fn quad_panel_requests_and_response_roundtrip() {
+        // API v15: quad registration frames survive one bincode hop intact;
+        // the icon rides the OwnedIconKind encoding (ribbon precedent) and
+        // the response keeps one outcome per panel.
+        let panels = vec![crate::dialog::QuadPanelDef::new("align_tools", "Align")
+            .with_applies_to(vec!["LWPOLYLINE".to_owned()])
+            .with_item(crate::dialog::QuadItemDef {
+                control_id: "flip".to_owned(),
+                label: "Flip".to_owned(),
+                icon: crate::ribbon::owned::OwnedIconKind::Svg("<svg/>".into()),
+                action: crate::dialog::QuadActionDef::Command("FLIPALIGNED".to_owned()),
+            })
+            .with_item(crate::dialog::QuadItemDef {
+                control_id: "report".to_owned(),
+                label: "Report".to_owned(),
+                icon: crate::ribbon::owned::OwnedIconKind::Glyph("\u{1F4CA}".to_owned()),
+                action: crate::dialog::QuadActionDef::Callback,
+            })];
+        let bytes = bincode::serialize(&PluginRequest::RegisterQuadPanels {
+            panels: panels.clone(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::RegisterQuadPanels { panels: got } if got == panels)
+        );
+        let bytes = bincode::serialize(&PluginRequest::UnregisterQuadPanels {
+            panel_ids: vec!["align_tools".to_owned()],
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::UnregisterQuadPanels { panel_ids } if
+                panel_ids == vec!["align_tools".to_owned()])
+        );
+        let ok = vec![true, false];
+        let errors = vec![String::new(), "quad panel refused".to_owned()];
+        let bytes = bincode::serialize(&PluginResponse::QuadPanelsRegistered {
+            ok: ok.clone(),
+            errors: errors.clone(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::QuadPanelsRegistered { ok: got, errors: got_errors } if
+                got == ok && got_errors == errors)
+        );
+    }
+
+    #[test]
+    fn quad_action_notification_roundtrips() {
+        // API v15: the QuadAction notification keeps the v4 notification
+        // discipline — byte-clean roundtrip; the Unknown passthrough covers
+        // peers that predate the discriminant.
+        let notification = HostNotification::QuadAction {
+            panel_id: "align_tools".to_owned(),
+            control_id: "flip".to_owned(),
+            handles: vec![codec::Handle::new(9)],
+            type_keys: vec!["LWPOLYLINE".to_owned()],
+            pick_point: [1.0, 2.0, 0.0],
+        };
+        let bytes = bincode::serialize(&notification).unwrap();
+        let decoded: HostNotification = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(decoded, notification);
+        // One hop through the envelope, like PanelAction deliveries ride.
+        let frame = HostToPluginV4::Notification(NotificationEnvelope {
+            command_id: None,
+            payload: notification.clone(),
+        });
+        let bytes = bincode::serialize(&frame).unwrap();
+        let got: HostToPluginV4 = bincode::deserialize(&bytes).unwrap();
+        match got {
+            HostToPluginV4::Notification(env) => assert_eq!(env.payload, notification),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
 }

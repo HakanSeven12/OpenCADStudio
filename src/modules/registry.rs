@@ -579,6 +579,12 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
                 "Dimension Style",
                 include_bytes!("../../assets/icons/dim_style.svg"),
             ),
+            // Quad-table dimension commands whose tools live off-ribbon
+            // (docs/quad-menu.md §3.9): DIMEDIT is dim_edit.svg the way
+            // annotate/dimedit.rs claims it; DIMCENTER rides CENTERMARK's
+            // line.svg rather than a hand-invented icon.
+            ("DIMEDIT", "Dim Edit", include_bytes!("../../assets/icons/dim_edit.svg")),
+            ("DIMCENTER", "Dim Center", include_bytes!("../../assets/icons/line.svg")),
             (
                 "MLEADERSTYLE",
                 "Multileader Style",
@@ -588,6 +594,12 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
                 "TABLESTYLE",
                 "Table Style",
                 include_bytes!("../../assets/icons/table.svg"),
+            ),
+            // Quad-table Table commands: TABLEDIT edits a cell's text.
+            (
+                "TABLEDIT",
+                "Table Cell Edit",
+                include_bytes!("../../assets/icons/table_cell_contents.svg"),
             ),
             (
                 "POINTCLOUDUNCROP",
@@ -889,6 +901,9 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "QPLOCATION",
     "QPMODE",
     "QTEXTMODE",
+    "QUAD",
+    "QUADCOMMANDLAUNCH",
+    "QUADWIDTH",
     "REFEDITNAME",
     "REGENMODE",
     "SAVETIME",
@@ -1101,6 +1116,368 @@ mod tests {
             "INSUNITS",
             "TILEMODE",
         ] {
+            let icon = command_icon(sysvar);
+            assert_eq!(
+                icon.map(|b| (b.as_ptr(), b.len())),
+                Some((SYSVAR_ICON.as_ptr(), SYSVAR_ICON.len())),
+                "system variable {sysvar} should resolve to SYSVAR_ICON"
+            );
+        }
+    }
+}
+
+/// Applicable-command side table for the quad cursor menu
+/// (docs/quad-menu.md §3.3): canonical `entity_type_name()` keys
+/// (src/entities/traits.rs:174) mapped to 6–12 existing OCS commands, generic
+/// modify first, then the type-specific edits. Labels and icons resolve
+/// through `ribbon_commands()`.
+pub static QUAD_ENTITY_COMMANDS: &[(&str, &[&str])] = &[
+    (
+        "Line",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "ARRAYRECT",
+            "FILLET",
+            "CHAMFER",
+            "TRIM",
+            "EXTEND",
+            "LENGTHEN",
+            "BREAK",
+            "ERASE",
+        ],
+    ),
+    (
+        "CenterMark",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "ERASE"],
+    ),
+    (
+        "CenterLine",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "ERASE"],
+    ),
+    (
+        "LwPolyline",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "PEDIT",
+            "OFFSET",
+            "EXPLODE",
+            "ERASE",
+        ],
+    ),
+    (
+        "Revcloud",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "REVCLOUD_RECTANGULAR",
+            "REVCLOUD_POLYGONAL",
+            "ERASE",
+        ],
+    ),
+    (
+        "Circle",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "OFFSET", "ERASE"],
+    ),
+    (
+        "Arc",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "OFFSET",
+            "LENGTHEN",
+            "DIMRADIUS",
+            "ERASE",
+        ],
+    ),
+    (
+        "Ellipse",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "ARRAYRECT",
+            "OFFSET",
+            "ERASE",
+        ],
+    ),
+    (
+        "Spline",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "SPLINEDIT",
+            "LENGTHEN",
+            "ERASE",
+        ],
+    ),
+    (
+        "Point",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MATCHPROP", "LIST", "ERASE"],
+    ),
+    (
+        "MText",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "ARRAYRECT",
+            "TEXTEDIT",
+            "MTEDIT",
+            "TXT2MTXT",
+            "ERASE",
+        ],
+    ),
+    (
+        "Text",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "TEXTEDIT",
+            "TXT2MTXT",
+            "ERASE",
+        ],
+    ),
+    (
+        "Dimension",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "DIMEDIT",
+            "DIMTEDIT",
+            "DIMSPACE",
+            "DIMOVERRIDE",
+            "DIMBREAK",
+            "DIMCENTER",
+            "ERASE",
+        ],
+    ),
+    (
+        "Hatch",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "OFFSET",
+            "HATCHEDIT",
+            "MATCHPROP",
+            "ERASE",
+        ],
+    ),
+    (
+        "Insert",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "ARRAYRECT",
+            "EXPLODE",
+            "CLIP",
+            "BEDIT",
+            "REFEDIT",
+            "ERASE",
+        ],
+    ),
+    (
+        "MultiLeader",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "EXPLODE", "ERASE"],
+    ),
+    (
+        "Leader",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "LEADER",
+            "EXPLODE",
+            "ERASE",
+        ],
+    ),
+    (
+        "Table",
+        &["MOVE", "COPY", "ROTATE", "SCALE", "TABLEDIT", "EXPLODE", "ERASE"],
+    ),
+    (
+        "Viewport",
+        &["MOVE", "COPY", "SCALE", "VPLAYER", "VPCLIP", "ERASE"],
+    ),
+    (
+        "Solid",
+        &[
+            "MOVE",
+            "COPY",
+            "ROTATE",
+            "SCALE",
+            "MIRROR",
+            "ARRAYRECT",
+            "EXPLODE",
+            "ERASE",
+        ],
+    ),
+];
+
+/// The applicable commands of one entity type key: exact canonical
+/// (`entity_type_name()`) match first, then a case-insensitive fallback, so
+/// plugins using their own `class_id` casing still resolve. Unknown keys give
+/// an empty slice.
+pub fn quad_entity_commands(type_key: &str) -> &'static [&'static str] {
+    if let Some((_, cmds)) = QUAD_ENTITY_COMMANDS.iter().find(|(key, _)| *key == type_key) {
+        return cmds;
+    }
+    QUAD_ENTITY_COMMANDS
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(type_key))
+        .map_or(&[], |(_, cmds)| cmds)
+}
+
+/// Creation commands the No Selection quad offers as tabs, grouped under
+/// short labels (docs/quad-menu.md §1, "No Selection Quad" row). Every
+/// command resolves a ribbon icon exactly like the ribbon itself.
+pub static QUAD_NO_SELECTION_COMMAND_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "Draw",
+        &[
+            "LINE",
+            "CIRCLE",
+            "ARC",
+            "ELLIPSE",
+            "RECT",
+            "PLINE",
+            "SPLINE",
+            "POINT",
+            "HATCH",
+            "REVCLOUD",
+        ],
+    ),
+    (
+        "Dimension",
+        &[
+            "DIMLINEAR",
+            "DIMALIGNED",
+            "DIMRADIUS",
+            "DIMDIAMETER",
+            "DIMANGULAR",
+            "DIMJOGGED",
+            "DIMCENTER",
+        ],
+    ),
+    (
+        "Annotate",
+        &["TEXT", "MTEXT", "LEADER", "MLEADER", "TABLE", "ATTDEF"],
+    ),
+    (
+        "Block",
+        &["INSERT", "BEDIT", "ATTEDIT", "XATTACH"],
+    ),
+];
+
+/// The No Selection quad's tab groups (label + creation commands).
+pub fn quad_no_selection_groups() -> &'static [(&'static str, &'static [&'static str])] {
+    QUAD_NO_SELECTION_COMMAND_GROUPS
+}
+
+#[cfg(test)]
+mod quad_registry_tests {
+    use super::*;
+
+    /// Commands deliberately left to the glyph-fallback tile because the
+    /// registry carries no SVG for them. Kept empty while every quad table
+    /// command resolves a ribbon icon; entries here are a tracked deliverable
+    /// (docs/quad-menu.md §3.9), not a pass-silently hook.
+    const QUAD_GLYPH_FALLBACK_WHITELIST: &[&str] = &[];
+
+    #[test]
+    fn quad_entity_tables_resolve_icons_and_stay_unique() {
+        let mut all: Vec<&str> = Vec::new();
+        for (type_key, cmds) in QUAD_ENTITY_COMMANDS.iter() {
+            assert!(!cmds.is_empty(), "no commands for {type_key}");
+            for cmd in *cmds {
+                assert_eq!(
+                    *cmd,
+                    cmd.to_ascii_uppercase(),
+                    "quad commands must be upper-case command lines: {cmd}"
+                );
+                if !QUAD_GLYPH_FALLBACK_WHITELIST.contains(cmd) {
+                    assert!(
+                        command_icon(cmd).is_some(),
+                        "expected command_icon({cmd:?}) to resolve an icon (quad type {type_key})"
+                    );
+                }
+                assert_eq!(
+                    cmds.iter().filter(|c| **c == *cmd).count(),
+                    1,
+                    "duplicate command {cmd} in the {type_key} quad table"
+                );
+            }
+            all.extend_from_slice(cmds);
+        }
+        assert!(all.contains(&"MOVE"), "generic modify must lead the tables");
+    }
+
+    #[test]
+    fn quad_no_selection_groups_resolve_icons() {
+        assert!(!QUAD_NO_SELECTION_COMMAND_GROUPS.is_empty());
+        for (label, cmds) in QUAD_NO_SELECTION_COMMAND_GROUPS.iter() {
+            assert!(!label.is_empty(), "group labels are short English tabs");
+            for cmd in *cmds {
+                if !QUAD_GLYPH_FALLBACK_WHITELIST.contains(cmd) {
+                    assert!(
+                        command_icon(cmd).is_some(),
+                        "expected command_icon({cmd:?}) to resolve an icon (no-selection {label})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn quad_entity_commands_lookup() {
+        let line = quad_entity_commands("Line");
+        assert!(!line.is_empty());
+        assert_eq!(quad_entity_commands("line"), line);
+        assert_eq!(quad_entity_commands("LINE"), line);
+        assert_eq!(quad_entity_commands("lwPOLYLINE"), quad_entity_commands("LwPolyline"));
+        assert_eq!(quad_entity_commands("Hatch"), quad_entity_commands("HATCH"));
+        assert!(quad_entity_commands("NotAnEntity").is_empty());
+        assert!(quad_entity_commands("").is_empty());
+    }
+
+    #[test]
+    fn quad_sysvars_resolve_the_var_badge() {
+        for sysvar in ["QUAD", "QUADWIDTH", "QUADCOMMANDLAUNCH"] {
+            assert!(
+                SYSTEM_VARIABLES.contains(&sysvar),
+                "{sysvar} must be a registered system variable"
+            );
             let icon = command_icon(sysvar);
             assert_eq!(
                 icon.map(|b| (b.as_ptr(), b.len())),

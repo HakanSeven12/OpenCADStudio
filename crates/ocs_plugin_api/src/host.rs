@@ -475,6 +475,22 @@ pub enum HostNotification {
         action: String,
         value: Option<crate::dialog::DialogValue>,
     },
+    /// V15 quad cursor menu pick on a plugin-declared panel: the host runs
+    /// the item's `quadplugin:` dispatch (which resolves the target's
+    /// handles and type keys at pick time) and routes the pick to the OWNING
+    /// plugin only — the quad is not an active command, so this rides the
+    /// notification channel like [`HostNotification::PanelAction`] (v7) and
+    /// the discipline is the custom-grip one (v11): the runner only calls
+    /// the callback for plugins whose `ocs_plugin_api_version` reports 15 or
+    /// newer. The plugin fetches more context at action time via
+    /// `selection()` / `entities_batch()` — no streaming. Discriminant 13.
+    QuadAction {
+        panel_id: String,
+        control_id: String,
+        handles: Vec<Handle>,
+        type_keys: Vec<String>,
+        pick_point: [f64; 3],
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -558,6 +574,24 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, value)
                     .map_err(serde::ser::Error::custom)?;
             }
+            HostNotification::QuadAction {
+                panel_id,
+                control_id,
+                handles,
+                type_keys,
+                pick_point,
+            } => {
+                bytes.push(13);
+                bincode::serialize_into(&mut bytes, panel_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, control_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, handles).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, type_keys)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, pick_point)
+                    .map_err(serde::ser::Error::custom)?;
+            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -633,6 +667,26 @@ impl<'de> Deserialize<'de> for HostNotification {
                     control_id,
                     action,
                     value,
+                })
+            }
+            13 => {
+                let mut cursor = std::io::Cursor::new(rest);
+                let panel_id: String = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                let control_id: String = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                let handles: Vec<Handle> = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                let type_keys: Vec<String> = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                let pick_point: [f64; 3] = bincode::deserialize_from(&mut cursor)
+                    .map_err(serde::de::Error::custom)?;
+                Ok(HostNotification::QuadAction {
+                    panel_id,
+                    control_id,
+                    handles,
+                    type_keys,
+                    pick_point,
                 })
             }
             _ => Ok(HostNotification::Unknown(bytes)),
@@ -839,6 +893,35 @@ pub trait BuiltinPlugin: Send + Sync {
         _event: CustomGripEvent,
     ) -> CustomGripResponse {
         CustomGripResponse::default()
+    }
+
+    /// A quad cursor menu pick on one of this plugin's registered quad panels
+    /// (API v15). Delivered only to the OWNING plugin: the host intercepts
+    /// the `quadplugin:<plugin_id>:<panel_id>:<control_id>` dispatch and
+    /// routes it here (the pick head of the v7 PanelAction story, quad
+    /// thereof). `handles` / `type_keys` are the quad target's selection at
+    /// dispatch time (the host aligned hover-to-selection semantics before
+    /// delivering), `pick_point` is context-only (the host supplies a
+    /// best-effort world point; `[0.0; 3]` when none).
+    ///
+    /// `host` is a full [`HostApi`] session — reads and writes follow the
+    /// same laws as the custom-grip settle (v11): the plugin opens its own
+    /// [`HostApi::push_undo`] scope for writes.
+    ///
+    /// The host guards this call: a panicking handler is contained and
+    /// reported, never fatal. The runner only calls this for plugins whose
+    /// exported `ocs_plugin_api_version` symbol reports API major 15 or
+    /// newer, so older cdylibs are never touched past their vtable. The
+    /// default does nothing (old builtin plugins keep compiling).
+    fn on_quad_action(
+        &mut self,
+        _host: &mut dyn HostApi,
+        _panel_id: &str,
+        _control_id: &str,
+        _handles: &[Handle],
+        _type_keys: &[&str],
+        _pick_point: [f64; 3],
+    ) {
     }
 }
 
@@ -1910,6 +1993,38 @@ pub trait HostApi {
     /// Toggle visibility or show/hide a persistent dockable side panel (API v7, additive).
     fn toggle_panel(&mut self, _panel_id: &str, _show: Option<bool>) -> bool {
         false
+    }
+
+    /// Register declarative quad cursor menu panels for the calling plugin
+    /// (API v15, additive; mirrors [`HostApi::register_panel`]).
+    ///
+    /// `plugin_id` is the identity of the caller (v15 quad panels are
+    /// owner-tracked: one plugin's registration can never replace or remove
+    /// another plugin's panel, and the server fixes the id from the
+    /// transport). Registration is per-panel and replace-if-same-owner.
+    /// Returns one outcome per panel (request order); the host documents the
+    /// refusal reasons itself (per-plugin caps, duplicate control ids, an id
+    /// owned by a different plugin).
+    ///
+    /// The default (hosts that predate v15) refuses every panel.
+    fn register_quad_panels(
+        &mut self,
+        _plugin_id: &str,
+        panels: &[crate::dialog::QuadPanelDef],
+    ) -> Vec<bool> {
+        vec![false; panels.len()]
+    }
+
+    /// Remove the calling plugin's quad panels (API v15, additive). The
+    /// ownership law runs both ways: `plugin_id` is the caller's identity
+    /// (mirroring [`HostApi::register_quad_panels`]; over the plugin IPC the
+    /// server fixes it from the transport) and a `panel_ids` entry another
+    /// plugin owns is refused, not removed. Returns one outcome per id
+    /// (request order). The default refuses every id (the lengths of the
+    /// default answers mirror the request, so a plugin can rely on the
+    /// shape).
+    fn unregister_quad_panels(&mut self, _plugin_id: &str, panel_ids: &[&str]) -> Vec<bool> {
+        vec![false; panel_ids.len()]
     }
 }
 

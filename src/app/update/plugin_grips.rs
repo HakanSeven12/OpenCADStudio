@@ -727,6 +727,22 @@ impl OpenCADStudio {
     pub(in crate::app) fn reap_plugin_grips(&mut self) {
         let (dying_drag, dead_hover) = {
             let visible = grip_points::visibility(&self.disabled_plugins);
+            // API v15: the quad panel store reaps with the same liveness — a
+            // dead plugin's panels drop out of every quad. The store is
+            // app-global, so one sweep covers every tab. Its reaper asks the
+            // manager's process liveness only: `sink_installed` is
+            // thread-local (test sinks), and a thread-local probe inside a
+            // process-global sweep would let one thread's drain tick erase
+            // another thread's registration. Plugins unknown to the manager
+            // (in-process sinks — never a production registration shape) are
+            // left to their explicit teardown; their user-visible drop-out
+            // stays the feed-time `panels_for_visible` filter either way.
+            crate::plugin::quad::retain_alive(|plugin| {
+                !self.disabled_plugins.contains(plugin)
+                    || crate::plugin::external::with_manager(|manager| {
+                        !manager.grip_endpoint(plugin).is_some_and(|(_, _, alive)| !alive)
+                    })
+            });
             for i in 0..self.tabs.len() {
                 self.tabs[i]
                     .plugin_grips

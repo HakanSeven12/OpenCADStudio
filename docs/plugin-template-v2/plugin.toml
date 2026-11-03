@@ -10,7 +10,7 @@ repository = "your-account/your-plugin-repo"
 [opencad]
 # Keep in sync with the Rust manifest's `ApiVersion::CURRENT` — this is the
 # pre-load gate; the runner also checks the compiled-in symbol.
-api_version = 14
+api_version = 15
 ribbon_order = 100
 command_prefixes = [
     "COUNT_SURVEY_POINTS",
@@ -18,7 +18,7 @@ command_prefixes = [
     "MARK_FIRST_SURVEY_POINT",
     "COUNT_MARKED_SURVEY_POINTS",
 ]
-xdata_apps = ["SURVEYMARK"]
+xdata_apps = ["SURVEYMARK", "QUADINSPECT"]
 # NOTE: the plugin's entity-class display labels (see `ENTITY_CLASSES` in
 # src/lib.rs) travel on the registered manifest over IPC, not in this file —
 # they only apply while the plugin is loaded, so plugin.toml (the pre-load

@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::ribbon::owned::OwnedIconKind;
+
 /// Horizontal alignment / justification for rows, columns, and controls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -300,6 +302,91 @@ impl PanelDef {
     }
 }
 
+// ── Quad cursor menu panels (API v15, append-only) ──────────────────────────
+
+/// Declarative quad cursor menu panel contributed by a plugin (API v15).
+///
+/// The wire shape is owned end to end, exactly like [`PanelDef`]: a plugin
+/// declares the panel once at registration (`PluginRequest::
+/// RegisterQuadPanels`) and every later quad open reads the host-side session
+/// copy — no per-hover traffic, the host resolves `applies_to` at quad-open
+/// time. The icon rides [`OwnedIconKind`] (the ribbon tools' proven SVG-on-IPC
+/// encoding); an [`crate::ribbon::IconKind`] authoring value converts with
+/// `Into`.
+///
+/// Identity law: the host exposes the panel as `plugin:<plugin_id>:<panel_id>`
+/// (the namespacing guard), so plugin panels can never collide with the
+/// host's builtin quad panels; one plugin owns a raw `panel_id` at a time and
+/// a batch registration replaces it per-panel for the same owner only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuadPanelDef {
+    /// Raw panel id as the plugin names it (e.g. "align_tools").
+    pub panel_id: String,
+    /// Title shown as the quad tab strip label.
+    pub title: String,
+    /// Host entity type keys this panel's tab is offered for (`entity_type_name()`
+    /// vocabulary, e.g. "LWPOLYLINE"), or the plugin's own declared class ids;
+    /// `"*"` (and an empty list) mean universal.
+    #[serde(default)]
+    pub applies_to: Vec<String>,
+    /// The panel's items in declared order.
+    #[serde(default)]
+    pub items: Vec<QuadItemDef>,
+}
+
+/// One item in a plugin quad panel (API v15).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuadItemDef {
+    /// Raw control id (e.g. "flip"); unique inside the panel by registration
+    /// contract (duplicates are refused).
+    pub control_id: String,
+    /// Label shown on the tile tooltip.
+    pub label: String,
+    /// Icon source; [`OwnedIconKind::Svg`] carries raw `<svg>` bytes
+    /// (≤ 8 KiB is the registration budget — an oversized or unparseable
+    /// icon degrades to a glyph tile instead of refusing the item).
+    pub icon: OwnedIconKind,
+    /// What picking the item does.
+    pub action: QuadActionDef,
+}
+
+/// A quad item's action (API v15).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuadActionDef {
+    /// Launch the verb through the host's ordinary command path (undo,
+    /// interactivity and prompt handling are the host's, per API v7's
+    /// panel-toggle precedent).
+    Command(String),
+    /// A plugin callback: the host routes the pick to the OWNING plugin as
+    /// `HostNotification::QuadAction` and the plugin responds however it
+    /// wants (fetching context via `selection()` / `entities_batch()` — no
+    /// streaming).
+    Callback,
+}
+
+impl QuadPanelDef {
+    pub fn new(panel_id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            panel_id: panel_id.into(),
+            title: title.into(),
+            applies_to: Vec::new(),
+            items: Vec::new(),
+        }
+    }
+
+    /// Restrict the panel to specific entity type keys (see the field docs;
+    /// `"*"` or an empty list is universal).
+    pub fn with_applies_to(mut self, applies_to: Vec<String>) -> Self {
+        self.applies_to = applies_to;
+        self
+    }
+
+    pub fn with_item(mut self, item: QuadItemDef) -> Self {
+        self.items.push(item);
+        self
+    }
+}
+
 /// Value returned by an interactive control.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DialogValue {
@@ -388,6 +475,31 @@ mod tests {
         let restored_resp: DialogResponse =
             bincode::deserialize(&resp_bytes).expect("deserialize response");
         assert_eq!(response, restored_resp);
+    }
+
+    #[test]
+    fn quad_panel_def_roundtrips_over_bincode() {
+        // API v15: the quad wire shape (owned strings, OwnedIconKind icon)
+        // rides the same serializable-data discipline as PanelDef above.
+        let panel = QuadPanelDef::new("align_tools", "Align")
+            .with_applies_to(vec!["LWPOLYLINE".to_string(), "PLUGIN_ALIGN_DISPLAY".to_string()])
+            .with_item(QuadItemDef {
+                control_id: "flip".to_string(),
+                label: "Flip".to_string(),
+                icon: crate::ribbon::IconKind::Glyph("F").into(),
+                action: QuadActionDef::Command("FLIPALIGNED".to_string()),
+            })
+            .with_item(QuadItemDef {
+                control_id: "report".to_string(),
+                label: "Report".to_string(),
+                icon: OwnedIconKind::Svg("<svg/>".into()),
+                action: QuadActionDef::Callback,
+            });
+
+        assert_eq!(panel.items.len(), 2);
+        let bytes = bincode::serialize(&panel).expect("serialize quad panel");
+        let restored: QuadPanelDef = bincode::deserialize(&bytes).expect("deserialize quad panel");
+        assert_eq!(panel, restored);
     }
 
     #[test]

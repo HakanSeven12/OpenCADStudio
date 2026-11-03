@@ -284,7 +284,7 @@ mod viewcube;
 use controls::{dyn_component_value, viewport_controls};
 use overlay::{
     mtext_editor_overlay, position_canvas_overlay, position_canvas_overlay_near_cursor,
-    qselect_overlay, text_inline_overlay, viewport_context_menu_overlay,
+    qselect_overlay, text_inline_overlay, viewport_context_menu_overlay, viewport_quad_overlay,
 };
 use viewcube::{viewcube_nav_controls, viewcube_ucs_picker, UCS_PICKER_W};
 
@@ -480,6 +480,7 @@ fn named_visual_style(
 impl OpenCADStudio {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
+        crate::sys::startup_times::view_tick();
         // ── Floating panel windows ─────────────────────────────────────────
         // All dialogs are in-canvas modals now (Plan B); view_main stacks the
         // active one. `window_id` is unused — there is only the main window.
@@ -2738,6 +2739,29 @@ bg={bg_ms:.1}ms n={view_count}"
                         &menu,
                         highlighted,
                     ));
+                }
+            }
+
+            // Quad cursor menu — the selection-boundary popup state's quad
+            // sibling of the context menu. Its card is pushed after the
+            // context-menu panel so, while both would somehow be open, the
+            // quad card covers the menu (docs/quad-menu.md §3.5); the push
+            // above stays keyed to `open_at` and must not change.
+            if !tab.is_start {
+                let quad = tab.scene.selection.borrow().menu.quad.clone();
+                if let Some(quad) = quad {
+                    if self
+                        .quad_panels
+                        .first()
+                        .is_some_and(|panel| !panel.items.is_empty())
+                    {
+                        viewport_stack = viewport_stack.push(viewport_quad_overlay(
+                            &quad,
+                            &self.quad_panels,
+                            self.quad_width as usize,
+                            command_line_inset,
+                        ));
+                    }
                 }
             }
 

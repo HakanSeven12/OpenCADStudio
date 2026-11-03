@@ -101,7 +101,7 @@ impl OpenCADStudio {
         self.command_line.input.clear();
         self.command_line.set_step_options(Vec::new());
         self.command_line.push_info(&command.prompt());
-        self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+        self.tabs[i].scene.selection.borrow_mut().menu.close();
         self.tabs[i].active_cmd = Some(Box::new(command));
         Task::none()
     }

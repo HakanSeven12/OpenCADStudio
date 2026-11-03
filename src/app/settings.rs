@@ -238,6 +238,65 @@ pub const ZOOM_FACTOR_MIN: i32 = 3;
 pub const ZOOM_FACTOR_SYSVAR_MAX: i32 = 100;
 pub const ZOOM_FACTOR_MAX: i32 = 200;
 
+/// QUADWIDTH bounds: below 2 columns the expanded quad cannot show the
+/// most-recently-used set and its tabs meaningfully, above 12 the row of
+/// icons is unreadable — the range the variable itself takes.
+pub const QUAD_WIDTH_MIN: u8 = 2;
+pub const QUAD_WIDTH_MAX: u8 = 12;
+
+/// Hold a QUADWIDTH inside the range the quad lays out, wherever it arrives
+/// from — the Options field, `SETVAR QUADWIDTH`, or a configuration file
+/// written by hand or by an older build.
+pub fn clamp_quad_width(v: u8) -> u8 {
+    v.clamp(QUAD_WIDTH_MIN, QUAD_WIDTH_MAX)
+}
+
+/// QUADHOVERDELAY-style dwell bounds: above 2000 ms the hover quad becomes
+/// unreachable in practice; 0 opens it immediately. Shared with the Options
+/// slider so its range and labels cannot drift from this clamp.
+pub const QUAD_HOVER_DELAY_MAX: u64 = 2000;
+
+pub fn clamp_quad_hover_delay_ms(v: u64) -> u64 {
+    v.min(QUAD_HOVER_DELAY_MAX)
+}
+
+/// In-code default when the `quad_width` key is absent (serde's bare
+/// `default` would fall back to `u8::default()` = 0, off the domain).
+fn default_quad_width() -> u8 {
+    clamp_quad_width(6)
+}
+
+/// In-code default when the `quad_hover_delay_ms` key is absent.
+fn default_quad_hover_delay_ms() -> u64 {
+    300
+}
+
+/// Tolerant load for a hand-edited `quad_width` (`serde(deserialize_with)`):
+/// any JSON number parses as `i64` and clamps into QUADWIDTH's domain
+/// instead of failing the whole settings parse — which would reset every
+/// other preference with it. A value that is not a number at all still
+/// errors, exactly like the neighbouring strict fields.
+fn deserialize_quad_width<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = i64::deserialize(deserializer)?;
+    let saturated = raw.clamp(0, i64::from(u8::MAX)) as u8;
+    Ok(clamp_quad_width(saturated))
+}
+
+/// Tolerant load for a hand-edited `quad_hover_delay_ms`: any JSON number
+/// parses as `i64` (a negative one latches to 0 = immediate) and clamps into
+/// the dwell domain instead of failing the whole settings parse. A value
+/// that is not a number at all still errors, like the neighbouring fields.
+fn deserialize_quad_hover_delay_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = i64::deserialize(deserializer)?;
+    Ok(clamp_quad_hover_delay_ms(raw.max(0) as u64))
+}
+
 /// Hold a ZOOMFACTOR inside the range the application can store, wherever it
 /// arrives from — the slider, the Options field, or a configuration file
 /// written by hand or by an older build.
@@ -747,7 +806,7 @@ impl BlockEditorPreferences {
     }
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UserSettings {
     pub block_editor: BlockEditorPreferences,
@@ -790,6 +849,37 @@ pub struct UserSettings {
     /// Hold duration that turns a time-sensitive right-click into the menu,
     /// in milliseconds (SHORTCUTMENUDURATION, 100..=1000).
     pub right_click_hold_ms: i32,
+    /// Whether the Quad cursor menu exists at all (F12, the status-bar QUAD
+    /// field, `SETVAR QUAD`). Off by default: with a target present the quad
+    /// takes over the right-click, so existing users keep their habit until
+    /// they opt in.
+    pub quad: bool,
+    /// QUADDISPLAY bit: hovering an entity offers its default command quad.
+    pub quad_on_hover: bool,
+    /// QUADDISPLAY bit: a selection set offers its common commands on the
+    /// quad.
+    pub quad_on_select: bool,
+    /// QUADDISPLAY bit: a right-click without a target opens the No Selection
+    /// quad (recently used commands + creation groups) instead of the legacy
+    /// shortcut menu.
+    pub quad_on_right_click: bool,
+    /// QUADDISPLAY bit: the selection takes precedence — hovering keeps
+    /// offering the quad only when nothing is selected.
+    pub quad_suppress_hover_when_selection: bool,
+    /// QUADWIDTH: columns the expanded quad lays out (2..=12, default 6).
+    /// The reader is the tolerant one above: a hand-written out-of-range
+    /// number loads clamped instead of failing the whole config parse.
+    #[serde(default = "default_quad_width", deserialize_with = "deserialize_quad_width")]
+    pub quad_width: u8,
+    /// QUADCOMMANDLAUNCH: a right-click over an entity without entering the
+    /// quad launches the entity's default command directly.
+    pub quad_command_launch: bool,
+    /// How long the cursor must rest on an entity before the hover quad
+    /// appears, in milliseconds (0..=2000; 0 = immediately). The reader is
+    /// the tolerant one above: a negative or oversized hand-written number
+    /// loads clamped instead of failing the whole config parse.
+    #[serde(default = "default_quad_hover_delay_ms", deserialize_with = "deserialize_quad_hover_delay_ms")]
+    pub quad_hover_delay_ms: u64,
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
@@ -1339,6 +1429,17 @@ impl Default for UserSettings {
             double_click_block_attedit: true,
             right_click_mode: RightClickMode::ShortcutMenu,
             right_click_hold_ms: 250,
+            // The quad is opt-in in v1 (see the run of `quad_*` fields); when
+            // it is on, every trigger except command-launch ships enabled,
+            // and the layout matches the commercial default of 6 columns.
+            quad: false,
+            quad_on_hover: true,
+            quad_on_select: true,
+            quad_on_right_click: true,
+            quad_suppress_hover_when_selection: true,
+            quad_width: 6,
+            quad_command_launch: false,
+            quad_hover_delay_ms: 300,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
             image_frame: 1,
             attdef_on_screen: true,
@@ -1596,6 +1697,99 @@ mod tests {
         let text = serde_json::to_string(&off).unwrap();
         let back: crate::app::config::AppConfig = serde_json::from_str(&text).unwrap();
         assert!(!back.settings.script_commands);
+    }
+
+    /// The quad is opt-in in v1, so a fresh profile has it off while its
+    /// display flags ship ready for when it is turned on. A settings.json
+    /// written before the quad existed carries none of the keys at all, and
+    /// must load with exactly the in-code defaults.
+    #[test]
+    fn quad_defaults_opt_in_and_old_configs_load_unchanged() {
+        let defaults = UserSettings::default();
+        assert!(!defaults.quad, "the quad is opt-in in v1");
+        assert!(defaults.quad_on_hover);
+        assert!(defaults.quad_on_select);
+        assert!(defaults.quad_on_right_click);
+        assert!(defaults.quad_suppress_hover_when_selection);
+        assert_eq!(defaults.quad_width, 6);
+        assert!(!defaults.quad_command_launch);
+        assert_eq!(defaults.quad_hover_delay_ms, 300);
+
+        // A minimal old config: the quad keys are missing, not merely false.
+        let old: crate::app::config::AppConfig =
+            serde_json::from_str(r#"{"settings": {"pick_add": false}}"#).unwrap();
+        let s = &old.settings;
+        assert!(!s.quad, "an old config must not turn the quad on");
+        assert!(s.quad_on_hover && s.quad_on_select && s.quad_on_right_click);
+        assert!(s.quad_suppress_hover_when_selection);
+        assert_eq!(s.quad_width, 6);
+        assert!(!s.quad_command_launch);
+        assert_eq!(s.quad_hover_delay_ms, 300);
+    }
+
+    /// What a user configured on the quad comes back from a save/load. An
+    /// in-domain value is kept as written (the range is applied by whoever
+    /// consumes it, apply_settings / `SETVAR QUADWIDTH`); the tolerant
+    /// readers below exist for the out-of-domain, hand-written ones.
+    #[test]
+    fn quad_settings_round_trip_and_clamp_their_width() {
+        let mut set = UserSettings::default();
+        set.quad = true;
+        set.quad_on_hover = false;
+        set.quad_on_select = false;
+        set.quad_on_right_click = false;
+        set.quad_suppress_hover_when_selection = false;
+        set.quad_width = 9;
+        set.quad_command_launch = true;
+        set.quad_hover_delay_ms = 450;
+        let text = serde_json::to_string(&set).unwrap();
+        let back: UserSettings = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, set);
+
+        for (raw, clamped) in [(0, 2), (1, 2), (6, 6), (13, 12), (255, 12)] {
+            assert_eq!(clamp_quad_width(raw), clamped);
+        }
+    }
+
+    /// A hand-written config with out-of-domain numbers must load clamped
+    /// instead of failing the whole parse — a strict `u8`/`u64` reader once
+    /// reset every other preference with it. Keys absent entirely still
+    /// load the defaults, and a non-numeric value still errors the way the
+    /// neighbouring strict fields do.
+    #[test]
+    fn quad_numeric_settings_tolerate_out_of_domain_numbers() {
+        let loose: UserSettings = serde_json::from_str(
+            r#"{"pick_add": true, "quad_width": 300, "quad_hover_delay_ms": -50}"#,
+        )
+        .expect("a tolerant numeric parse must not fail the settings");
+        assert_eq!(loose.quad_width, 12, "an oversized width loads clamped");
+        assert_eq!(
+            loose.quad_hover_delay_ms, 0,
+            "a negative dwell loads clamped"
+        );
+        assert!(loose.pick_add, "the rest of the file survived the parse");
+
+        // Not a number at all: still an error, like the strict fields.
+        assert!(
+            serde_json::from_str::<UserSettings>(r#"{"quad_width": "wide"}"#).is_err(),
+            "a non-numeric quad_width must still fail the parse"
+        );
+
+        // Absent keys keep the in-code defaults (struct-level serde
+        // default untouched).
+        let minimal: UserSettings =
+            serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
+        assert_eq!(minimal.quad_width, 6);
+        assert_eq!(minimal.quad_hover_delay_ms, 300);
+    }
+
+    /// The hover quad opens on a dwell, so one above a couple of seconds is
+    /// unreachable in practice; 0 opens it immediately.
+    #[test]
+    fn quad_hover_delay_clamps_to_a_reachable_dwell() {
+        assert_eq!(clamp_quad_hover_delay_ms(0), 0);
+        assert_eq!(clamp_quad_hover_delay_ms(300), 300);
+        assert_eq!(clamp_quad_hover_delay_ms(9999), 2000);
     }
 
     #[test]

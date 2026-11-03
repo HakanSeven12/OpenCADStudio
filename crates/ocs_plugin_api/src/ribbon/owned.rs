@@ -14,7 +14,7 @@ pub struct OwnedToolDef {
     pub event: ModuleEvent,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OwnedIconKind {
     Glyph(String),
     Svg(Vec<u8>),

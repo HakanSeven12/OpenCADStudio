@@ -268,5 +268,44 @@ pub fn handle_plugin_request(
         TogglePanel { panel_id, show } => {
             PluginResponse::PanelToggled(host.toggle_panel(&panel_id, show))
         }
+        RegisterQuadPanels { panels } => {
+            // API v15: the owning plugin's id is transport identity (see
+            // handle_plugin_request's doc), so one plugin's registration can
+            // never rewrite another plugin's panel. The outcome shape is one
+            // entry per panel; refused entries get a short reason string (a
+            // capable host reports its own specific reason on the command
+            // line; the wire reason stays honest and short).
+            let ok = host.register_quad_panels(plugin_id, &panels);
+            let errors: Vec<String> = ok
+                .iter()
+                .map(|accepted| {
+                    if *accepted {
+                        String::new()
+                    } else {
+                        "quad panel refused".to_owned()
+                    }
+                })
+                .collect();
+            PluginResponse::QuadPanelsRegistered { ok, errors }
+        }
+        UnregisterQuadPanels { panel_ids } => {
+            // API v15: the ownership law runs both ways — the transport's
+            // plugin id scopes the removal exactly like RegisterQuadPanels
+            // scopes the registration, so one plugin can never remove
+            // another plugin's panel.
+            let refs: Vec<&str> = panel_ids.iter().map(String::as_str).collect();
+            let ok = host.unregister_quad_panels(plugin_id, &refs);
+            let errors: Vec<String> = ok
+                .iter()
+                .map(|accepted| {
+                    if *accepted {
+                        String::new()
+                    } else {
+                        "quad panel not owned".to_owned()
+                    }
+                })
+                .collect();
+            PluginResponse::QuadPanelsRegistered { ok, errors }
+        }
     }
 }

@@ -696,6 +696,72 @@ missing tolerance) fall back to the v12 streaming path with one headline
 in the error queue; older hosts read the new fields as the serde
 defaults and never change behavior.
 
+## Quad surface (API v15)
+
+The quad cursor menu ([`docs/quad-menu.md`](quad-menu.md)) is the host's
+cursor-anchored command surface; API v15 lets a plugin contribute panels to
+it. The flow follows the same declarative end-to-end pattern as dialog
+panels and grips — manifest → registration call → host store → per-target
+build → event broadcast:
+
+```
+plugin.toml (api_version = 15)
+        │  BuiltinPlugin::on_load (or any moment holding a HostApi)
+        ▼
+HostApi::register_quad_panels(plugin_id, &[QuadPanelDef]) -> Vec<bool>     per-panel ok; same-owner replace; ownership from the transport
+        │  PluginRequest::RegisterQuadPanels (validated IPC)
+        ▼
+host quad store — per-plugin session state (one owner per panel id;
+        │  the plugin lifecycle pump reaps dead/disabled owners like grips)
+        │  quad re-resolved when the cursor target changes — no per-hover traffic
+        ▼
+quad build: the panel's tab shows when QuadPanelDef.applies_to matches the target
+        ▼
+pick ── Command(String): the item's verb dispatches host-side through the
+│        quad pick path (never the generic command dispatcher, so the scheme
+│        is unreachable by typed/automation input), selection aligned to the
+│        quad target (a hovered-but-unselected entity is force-selected
+│        first); ordinary host-side undo rules apply
+└──────── Callback: HostNotification::QuadAction{ panel_id, control_id, handles,
+         type_keys, pick_point } → BuiltinPlugin::on_quad_action (default no-op
+         — v14 plugins are untouched); writes belong in the plugin's own
+         `push_undo` scope, as in every plugin-directed write window
+```
+
+Rules and budgets:
+
+- **Shape**: `QuadPanelDef { panel_id, title, applies_to, items }` with
+  `QuadItemDef { control_id, label, icon, action }`,
+  `QuadActionDef::{Command(String), Callback}`. `applies_to` keys are the
+  canonical `entity_type_name()` strings ("Line", "Insert", …), plugin
+  `class_id`s, or empty/`"*"` for universal; plugin-declared entity classes
+  participate exactly like built-in types.
+- **Budgets**: 16 panels per plugin, 64 items per panel; visible panel ids
+  are namespaced `plugin:<plugin_id>:<panel_id>` and registering a panel id
+  the plugin already owns replaces it. Re-registration is the supported way
+  to add or remove items, and panels also vanish when the plugin unloads
+  (the session store reaps dead/disabled owners at the plugin lifecycle
+  pump, the same law as grips/classes). Explicit teardown rides
+  `HostApi::unregister_quad_panels(plugin_id, &[panel_id]) -> Vec<bool>` —
+  the ownership law runs both ways: a `panel_id` another plugin owns is
+  refused, not removed, and over the plugin IPC the id comes from the
+  transport (the protocol's `UnregisterQuadPanels` request carries only the
+  ids), exactly like `register_quad_panels`.
+- **Icons**: `QuadItemDef.icon` reuses the ribbon `IconKind`, so custom
+  SVG bytes ride the same `OwnedIconKind` wire encoding as ribbon tools.
+  Recommended artwork is a 24×24 viewBox with `currentColor` strokes/fills
+  (multicolour is allowed but fixed colours do not re-theme); icons are
+  parsed once at registration and cached, never per frame. An icon over the
+  **8 KiB** budget or failing to parse does not abort registration — the item
+  renders the glyph fallback (label-derived abbreviation) instead.
+- **v14 compat**: plugins compiled against v14 or older keep working
+  unchanged; a plugin without a quad registration contributes no quad tab —
+  the generic "auto" tab was removed by user decision, and its plain
+  commands are reachable through the command line / auto-complete only.
+- Runnable reference: [`docs/plugin-template-v2/`](plugin-template-v2) —
+  panel bound to `Insert`, one `Command` item and one `Callback` item with a
+  custom SVG icon.
+
 ## HostApi vs MCP — the two surfaces
 
 The host exposes exactly two programmatic surfaces, and they are separate
@@ -935,6 +1001,14 @@ Landed in this branch:
       cumulative-integral table, and the plan integrator's swing budget
       (65 536 half-radian sub-intervals) keeps the surface hang-free past
       legal-but-absurd curvature data.
+- [x] Quad surface (API v15): `register_quad_panels` +
+      `BuiltinPlugin::on_quad_action` with `QuadPanelDef`/`QuadItemDef`/
+      `QuadActionDef` — entity-bound plugin tabs in the host's quad cursor
+      menu (§ "Quad surface (API v15)"), custom icons riding the
+      `OwnedIconKind` encoding, command items dispatching host-side with
+      target-aligned selection; see [`docs/quad-menu.md`](quad-menu.md) for
+      the host P0/P1 (toggles, hover/selection/No-Selection quads, MRU,
+      sysvars).
 
 ---
 

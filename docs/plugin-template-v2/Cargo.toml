@@ -12,7 +12,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ocs_plugin_api = { path = "../../crates/ocs_plugin_api", features = ["host"] }
-# The codec types travel to the host over IPC, so any revision whose types
-# have the host's wire shapes works (checked at connection, see
-# `version_info::wire_schema`); the host's own pin is the safe choice.
-acadrust = { package = "acadrust", git = "https://github.com/HakanSeven12/acadrust.git", rev = "24b037a" }
+# Codec types are re-exported by ocs_plugin_api as `acadrust` so the plugin
+# and the host share one type identity — never add an acadrust git dependency
+# here (it would create mismatching types instead of an ABI check).

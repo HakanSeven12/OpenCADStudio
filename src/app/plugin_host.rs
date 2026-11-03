@@ -3914,6 +3914,60 @@ impl<'a> HostSession<'a> {
         Ok(())
     }
 
+    // ── API v15: quad cursor menu panels (additive) ──────────────────────────
+
+    /// Register the calling plugin's declarative quad panels (API v15,
+    /// additive): the SESSION store the quad builds read from (the
+    /// `src/plugin/quad.rs` process-global, quad panels are app-global like
+    /// `quad_mru` — not tab state). Per-panel replace-if-same-owner; the
+    /// ownership law is the custom-grip one: over the plugin IPC the host
+    /// serves this with the speaking process's own manifest id (the runner
+    /// passes the id nominally), so a plugin can only register in its own
+    /// name; an in-process host (tests) registers the id it passes.
+    ///
+    /// Rejections push the short reason to the command line (the wire's
+    /// response carries one `bool` per panel plus a generic short string —
+    /// the same shape the v7 PanelRegistered story keeps).
+    pub fn register_quad_panels(
+        &mut self,
+        plugin_id: &str,
+        panels: &[ocs_plugin_api::dialog::QuadPanelDef],
+    ) -> Vec<bool> {
+        let known = crate::plugin::grip_points::visibility(&self.app.disabled_plugins)(plugin_id);
+        if !known {
+            for panel in panels {
+                self.push_error(&format!(
+                    "quad panel {id:?} refused: plugin {plugin_id:?} is not a loaded, alive \
+                     plugin; quad panels must be declared by their owner",
+                    id = panel.panel_id
+                ));
+            }
+            return vec![false; panels.len()];
+        }
+        let results = crate::plugin::quad::with_store(|store| store.register(plugin_id, panels));
+        for (panel, ok) in panels.iter().zip(results.iter()) {
+            if !ok {
+                self.push_error(&format!(
+                    "quad panel {id:?} refused: it belongs to a different plugin, breaches the \
+                     {} panels / {} items caps, or repeats a control id / uses an unusable id",
+                    crate::plugin::quad::MAX_QUAD_PANELS_PER_PLUGIN,
+                    crate::plugin::quad::MAX_QUAD_ITEMS_PER_PANEL,
+                    id = panel.panel_id
+                ));
+            }
+        }
+        results
+    }
+
+    /// Remove this plugin's quad panels again (API v15, additive). The
+    /// ownership law runs both ways (mirroring
+    /// [`Self::register_quad_panels`]'s `plugin_id` scoping): ids another
+    /// plugin owns are refused, not removed.
+    pub fn unregister_quad_panels(&mut self, plugin_id: &str, panel_ids: &[&str]) -> Vec<bool> {
+        let owned: Vec<String> = panel_ids.iter().map(|id| (*id).to_string()).collect();
+        crate::plugin::quad::with_store(|store| store.unregister(plugin_id, &owned))
+    }
+
     /// Resolve an existing XRecord to its containing dictionary, its validated
     /// name and its handle, after validating the path, the name and the target
     /// kind.
@@ -4836,6 +4890,129 @@ impl HostApi for HostSession<'_> {
         false
 
     }
+    fn register_quad_panels(
+        &mut self,
+        plugin_id: &str,
+        panels: &[ocs_plugin_api::dialog::QuadPanelDef],
+    ) -> Vec<bool> {
+        // Same-name inherent: see register_plugin_class (the trait serves
+        // the wire; the inherent carries the rules).
+        self.register_quad_panels(plugin_id, panels)
+    }
+    fn unregister_quad_panels(&mut self, plugin_id: &str, panel_ids: &[&str]) -> Vec<bool> {
+        self.unregister_quad_panels(plugin_id, panel_ids)
+    }
+}
+
+/// Map the visible plugins' registered quad panels into the quad model's
+/// panels (docs/quad-menu.md §4): builtin panels first, then plugins in
+/// registration order (the store's Vec keeps that order stable). The exposed
+/// panel id is namespaced `plugin:<plugin_id>:<panel_id>` (the namespacing
+/// guard against the builtin `quad.*` ids) and every item dispatches
+/// `quadplugin:<plugin_id>:<panel_id>:<control_id>`.
+///
+/// Liveness echoes the grips: a disabled or dead plugin contributes nothing
+/// (the same `grip_points::visibility` predicate), and the icon budget
+/// applies here — an oversized or unparseable `OwnedIconKind::Svg` degrades
+/// to the glyph tile instead of refusing the item (§4 "Custom plugin icons":
+/// defensive fallback).
+pub fn plugin_quad_panels(
+    disabled: &rustc_hash::FxHashSet<String>,
+) -> Vec<crate::ui::popup::quad_menu::QuadPanel> {
+    let visible = crate::plugin::grip_points::visibility(disabled);
+    let panels = crate::plugin::quad::with_store(|store| store.panels_for_visible(visible));
+    // User decision: only explicitly-registered quad panels contribute.
+    // Plain plugin commands stay command-line / auto-complete; no auto
+    // "Plugins" tab is synthesized (the v14 compat feed is gone).
+    panels
+        .into_iter()
+        .map(|(plugin_id, def)| plugin_quad_panel(&plugin_id, def))
+        .collect()
+}
+
+/// One declared quad panel (API v15) as the quad model's
+/// [`QuadPanel`](crate::ui::popup::quad_menu::QuadPanel): the namespaced id,
+/// the title as tab label and every item mapped to its `quadplugin:` command
+/// with the §4 icon conversion. Both action kinds ride the same
+/// `quadplugin:` string; the pick path resolves the declared kind
+/// (`QuadStore::resolve`) and either dispatches the `Command` verb host-side
+/// or publishes the `Callback` pick to the owning plugin.
+fn plugin_quad_panel(
+    plugin_id: &str,
+    def: ocs_plugin_api::dialog::QuadPanelDef,
+) -> crate::ui::popup::quad_menu::QuadPanel {
+    use crate::ui::popup::quad_menu::{QuadItem, QuadPanel};
+
+    let ocs_plugin_api::dialog::QuadPanelDef {
+        panel_id,
+        title,
+        applies_to,
+        items,
+    } = def;
+    let items = items
+        .into_iter()
+        .map(|item| {
+            // The command is the scheme triple for both action kinds; the
+            // pick path looks the kind up at dispatch time.
+            QuadItem {
+                label: item.label.clone(),
+                command: format!(
+                    "{}{plugin_id}:{panel_id}:{control_id}",
+                    crate::plugin::QUAD_PLUGIN_PREFIX,
+                    control_id = item.control_id,
+                ),
+                icon: quad_item_icon(item.label, item.icon),
+            }
+        })
+        .collect();
+    QuadPanel {
+        id: crate::plugin::quad::quad_panel_ui_id(plugin_id, &panel_id),
+        label: title,
+        items,
+        applies_to,
+    }
+}
+
+/// The §4 icon budget conversion (docs/quad-menu.md "Custom plugin icons"):
+/// svg bytes within the budget that at least look like SVG become the UI's
+/// [`QuadIcon::SvgOwned`](crate::ui::popup::quad_menu::QuadIcon::SvgOwned);
+/// a declared glyph passes through; an oversized or malformed-intent icon
+/// degrades to the glyph tile (label's first letter) instead of refusing the
+/// item — the panel survives, the plugin sees the reason in its response.
+fn quad_item_icon(
+    label: String,
+    icon: ocs_plugin_api::ribbon::owned::OwnedIconKind,
+) -> crate::ui::popup::quad_menu::QuadIcon {
+    use ocs_plugin_api::ribbon::owned::OwnedIconKind;
+
+    match icon {
+        OwnedIconKind::Svg(bytes)
+            if bytes.len() <= crate::plugin::quad::MAX_QUAD_ICON_BYTES
+                && looks_like_svg(&bytes) =>
+        {
+            crate::ui::popup::quad_menu::QuadIcon::SvgOwned(bytes.into())
+        }
+        OwnedIconKind::Glyph(glyph) => crate::ui::popup::quad_menu::QuadIcon::Glyph(glyph),
+        _ => crate::ui::popup::quad_menu::QuadIcon::Glyph(
+            label
+                .chars()
+                .next()
+                .map(|ch| ch.to_ascii_uppercase().to_string())
+                .unwrap_or_else(|| "?".to_string()),
+        ),
+    }
+}
+
+/// Cheap "this is meant to be an SVG document" check — a parse happens in
+/// the renderer; this only routes obvious non-SVG payloads to the glyph
+/// fallback (§4 "malformed-intent").
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes)
+        .map(|text| {
+            let head = text.trim_start();
+            head.starts_with("<svg") || head.starts_with("<?xml") || head.starts_with("<!--")
+        })
+        .unwrap_or(false)
 }
 
 /// Bridges a plugin's [`InteractiveCommand`](ocs_plugin_api::host::InteractiveCommand)
@@ -16049,6 +16226,173 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(host.stage_parametric_chain("bad", &broken, 1e-3).is_err());
         assert_eq!(host.document().entities().count(), 0);
         assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
+    }
+
+    // ── API v15: quad cursor menu panels ─────────────────────────────────────
+
+    fn quad_panel(id: &str, controls: &[&str]) -> ocs_plugin_api::dialog::QuadPanelDef {
+        use ocs_plugin_api::dialog::{QuadActionDef, QuadItemDef};
+        use ocs_plugin_api::ribbon::owned::OwnedIconKind;
+
+        let mut def = ocs_plugin_api::dialog::QuadPanelDef::new(id, id.to_ascii_uppercase());
+        for control in controls {
+            def = def.with_item(QuadItemDef {
+                control_id: (*control).to_string(),
+                label: control.to_string(),
+                icon: OwnedIconKind::Glyph(control.to_string()),
+                action: QuadActionDef::Callback,
+            });
+        }
+        def
+    }
+
+    #[test]
+    fn quad_panels_register_replace_per_owner_and_reject_foreign() {
+        use ocs_plugin_api::host::HostApi;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        // The sink marks the plugin loaded+alive for the visibility predicate
+        // (the class-owner tests' idiom; thread-local).
+        crate::plugin::grip_points::install_in_process_sink("PLUGIN", |_host, _event| {
+            ocs_plugin_api::host::CustomGripResponse::default()
+        });
+        crate::plugin::grip_points::install_in_process_sink("PLUGIN_RIVAL", |_host, _event| {
+            ocs_plugin_api::host::CustomGripResponse::default()
+        });
+
+        // Register (owner PLUGIN) and map to the quad model feed.
+        let results = {
+            let mut host = HostSession::new(&mut app, 0);
+            host.register_quad_panels("PLUGIN", &[quad_panel("qtest.align", &["flip"])])
+        };
+        assert_eq!(results, vec![true]);
+        {
+            // The feed probe is a read-only snapshot: read it before the
+            // session borrows `app` mutably (the store is process-global).
+            let feed = crate::app::plugin_host::plugin_quad_panels(&app.disabled_plugins);
+            let mut host = HostSession::new(&mut app, 0);
+            let mine = feed
+                .iter()
+                .find(|panel| panel.id == "plugin:PLUGIN:qtest.align")
+                .expect("the registered panel joins the model feed");
+            assert_eq!(mine.label, "QTEST.ALIGN");
+            assert_eq!(mine.items[0].command, "quadplugin:PLUGIN:qtest.align:flip");
+
+            // Same owner: per-panel replace keeps the owner's slot (the new
+            // declaration's item count wins).
+            let results = host.register_quad_panels(
+                "PLUGIN",
+                &[quad_panel("qtest.align", &["flip", "other"])],
+            );
+            assert_eq!(results, vec![true]);
+            drop(host);
+            let feed = crate::app::plugin_host::plugin_quad_panels(&app.disabled_plugins);
+            assert_eq!(
+                feed.iter()
+                    .find(|panel| panel.id == "plugin:PLUGIN:qtest.align")
+                    .expect("still registered")
+                    .items
+                    .len(),
+                2
+            );
+
+            // A foreign owner cannot replace another plugin's panel id.
+            let mut host = HostSession::new(&mut app, 0);
+            let results = host.register_quad_panels(
+                "PLUGIN_RIVAL",
+                &[quad_panel("qtest.align", &["x"])],
+            );
+            assert_eq!(results, vec![false]);
+
+            // Unregister: only the owner's ids are removed (the ownership
+            // law runs both ways — the rival's own id refuses the owner).
+            assert_eq!(
+                host.unregister_quad_panels("PLUGIN", &["qtest.align"]),
+                vec![true]
+            );
+            assert_eq!(
+                host.unregister_quad_panels("PLUGIN", &["qtest.align"]),
+                vec![false]
+            );
+        }
+        let feed = crate::app::plugin_host::plugin_quad_panels(&app.disabled_plugins);
+        assert!(
+            feed.iter()
+                .all(|panel| panel.id != "plugin:PLUGIN:qtest.align"),
+            "the unregistered panel drops out of the feed"
+        );
+        crate::plugin::grip_points::remove_in_process_sink("PLUGIN");
+        crate::plugin::grip_points::remove_in_process_sink("PLUGIN_RIVAL");
+    }
+
+    #[test]
+    fn quad_panels_icon_budget_degrades_to_glyph() {
+        use crate::ui::popup::quad_menu::QuadIcon;
+        use ocs_plugin_api::dialog::QuadItemDef;
+        use ocs_plugin_api::ribbon::owned::OwnedIconKind;
+
+        // The §4 conversion: a good svg keeps its bytes in the UI model; an
+        // oversized one degrades to the glyph tile without refusing the
+        // panel; a declared glyph passes through.
+        let good = "<svg xmlns=\"http://www.w3.org/2000/svg\"/>".as_bytes().to_vec();
+        let oversized = vec![b'x'; crate::plugin::quad::MAX_QUAD_ICON_BYTES + 1];
+        let def = ocs_plugin_api::dialog::QuadPanelDef::new("qtest.icons", "Icons")
+            .with_item(QuadItemDef {
+                control_id: "good".to_string(),
+                label: "Good".to_string(),
+                icon: OwnedIconKind::Svg(good),
+                action: ocs_plugin_api::dialog::QuadActionDef::Callback,
+            })
+            .with_item(QuadItemDef {
+                control_id: "big".to_string(),
+                label: "Big".to_string(),
+                icon: OwnedIconKind::Svg(oversized),
+                action: ocs_plugin_api::dialog::QuadActionDef::Callback,
+            })
+            .with_item(QuadItemDef {
+                control_id: "glyph".to_string(),
+                label: "Glyph".to_string(),
+                icon: OwnedIconKind::Glyph("G".to_string()),
+                action: ocs_plugin_api::dialog::QuadActionDef::Callback,
+            });
+        // The conversion is a pure mapping — exercise it directly.
+        let icons: Vec<QuadIcon> = def
+            .items
+            .into_iter()
+            .map(|item| quad_item_icon(item.label, item.icon))
+            .collect();
+        assert!(matches!(icons[0], QuadIcon::SvgOwned(_)));
+        assert!(matches!(&icons[1], QuadIcon::Glyph(text) if text == "B"));
+        assert!(matches!(&icons[2], QuadIcon::Glyph(text) if text == "G"));
+    }
+
+    #[test]
+    fn quad_feed_has_no_v14_auto_tab_per_plugin() {
+        // User decision: the v14 auto "Plugins" tab is gone. A visible plugin
+        // with plain commands contributes no quad panel at all — only
+        // explicitly registered quad panels do (its commands stay reachable
+        // through the command line / auto-complete).
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        // The sink marks the plugin loaded+alive for the visibility predicate
+        // (the register tests' idiom): with the removed synthesis this is
+        // exactly the case that used to grow an auto tab.
+        crate::plugin::grip_points::install_in_process_sink("PLUGIN", |_host, _event| {
+            ocs_plugin_api::host::CustomGripResponse::default()
+        });
+        let feed = crate::app::plugin_host::plugin_quad_panels(&app.disabled_plugins);
+        assert_eq!(
+            feed.iter().filter(|panel| panel.id.ends_with(":auto")).count(),
+            0,
+            "no auto tab is synthesized for a plain-command plugin"
+        );
+        assert_eq!(
+            feed.len(),
+            0,
+            "no registration, no contribution: the feed stays empty"
+        );
+        crate::plugin::grip_points::remove_in_process_sink("PLUGIN");
     }
 
     // ── API v14: plugin class objects ──────────────────────────────────────

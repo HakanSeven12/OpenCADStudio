@@ -1,6 +1,17 @@
 // Open CAD Studio plugin runtime. Plugins are out-of-process cdylibs loaded
 // from the application bundle or user plugins folder (see `external`).
-// See `docs/plugin-architecture.md`.
+// See `docs/plugin-architecture.md`. The wasm build has no plugin surface:
+// the modules that touch processes are gated out and `v4_support` is
+// replaced with a stub.
+
+/// The `quadplugin:` dispatch scheme (API v15): the prefix of every plugin
+/// quad item's command, `quadplugin:<plugin_id>:<panel_id>:<control_id>`.
+/// The single source of truth for the scheme literal — the quad pick router
+/// (`app::update::context_menu`) strips it for the pick path's own host
+/// dispatch (`app::commands` `quad_plugin_action`; the generic dispatcher
+/// answers it as an unknown command), and the quad model feed
+/// (`app::plugin_host`) builds commands with it.
+pub(crate) const QUAD_PLUGIN_PREFIX: &str = "quadplugin:";
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_classes;
@@ -10,6 +21,8 @@ pub mod external;
 pub mod grip_points;
 pub mod host;
 pub mod marketplace;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod quad;
 pub mod registry;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod v4_support;
@@ -21,6 +34,16 @@ pub mod v4_support {
         _action: String,
         _value: Option<ocs_plugin_api::dialog::DialogValue>,
     ) {}
+
+    pub fn publish_quad_action(
+        _plugin_id: &str,
+        _panel_id: &str,
+        _control_id: &str,
+        _handles: Vec<codec::Handle>,
+        _type_keys: Vec<String>,
+        _pick_point: [f64; 3],
+    ) {
+    }
 }
 
 pub(crate) use registry::try_dispatch;

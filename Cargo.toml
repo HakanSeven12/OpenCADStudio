@@ -203,17 +203,17 @@ web-sys = { version = "=0.3.85", features = [
 ] }
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["webgl", "fira-sans"] }
 
-# Keep file/line backtraces without the additional module-level debug data.
+# Skip debug metadata in routine builds to reduce compiler and linker work.
 # Restore the previous level with CARGO_PROFILE_DEV_DEBUG=1 or
 # CARGO_PROFILE_TEST_DEBUG=1 when needed.
 [profile.dev]
-debug = "line-tables-only"
+debug = 0
 
 [profile.dev.package."*"]
 opt-level = 2
 
 [profile.test]
-debug = "line-tables-only"
+debug = 0
 
 [profile.release]
 strip = true

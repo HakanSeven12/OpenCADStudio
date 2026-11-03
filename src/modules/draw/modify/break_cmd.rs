@@ -300,6 +300,10 @@ impl CadCommand for BreakInteractiveCommand {
         self.target.is_none()
     }
 
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
+
     fn options(&self) -> Vec<crate::command::CmdOption> {
         if self.target.is_some() && self.p1.is_some() {
             vec![crate::command::CmdOption::new("First point", "F")]
@@ -384,6 +388,10 @@ impl CadCommand for BreakAtPointCommand {
 
     fn needs_entity_pick(&self) -> bool {
         self.target.is_none()
+    }
+
+    fn typed_point_picks_entity(&self) -> bool {
+        true
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {

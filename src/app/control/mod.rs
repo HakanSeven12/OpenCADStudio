@@ -1839,7 +1839,7 @@ impl OpenCADStudio {
                     "bounded":length.is_finite(),
                     "closed":planar.curve.is_closed(),
                     "length":length.is_finite().then_some(length),
-                    "area":planar.curve.is_closed().then(|| planar.curve.enclosed_area().abs())
+                    "area":planar.curve.is_closed().then(|| planar.curve.chord_closed_area().unwrap_or(0.0).abs())
                 })
             });
             out.push(json!({"handle":format!("{:X}",handle.value()),"type":crate::entities::names::ui_name(entity),"bounds":{"min":min,"max":max},"curve":curve,"mesh":metrics.map(|m|json!({"vertices":m.metrics.vertices,"triangles":m.metrics.triangles,"surface_area":m.metrics.surface_area,"volume":m.metrics.volume,"centroid":m.metrics.centroid,"moment_of_inertia":m.metrics.moment_of_inertia,"principal_directions":m.metrics.principal_directions,"principal_moments":m.metrics.principal_moments,"product_of_inertia":m.metrics.product_of_inertia,"radii_of_gyration":m.metrics.radii_of_gyration}))}));

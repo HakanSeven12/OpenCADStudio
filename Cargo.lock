@@ -4457,7 +4457,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=76542bc#76542bcdec06ca464d2a9acc5c19070ca9111456"
+source = "git+https://github.com/ramox81/cadkernel.git?rev=8562fda#8562fda0a109e7c7e85aeefb2389f02bb99f41a5"
 dependencies = [
  "acadrust",
  "cavalier_contours",
@@ -4469,7 +4469,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=76542bc#76542bcdec06ca464d2a9acc5c19070ca9111456"
+source = "git+https://github.com/ramox81/cadkernel.git?rev=8562fda#8562fda0a109e7c7e85aeefb2389f02bb99f41a5"
 dependencies = [
  "nalgebra",
 ]
@@ -4477,7 +4477,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-ssi"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=76542bc#76542bcdec06ca464d2a9acc5c19070ca9111456"
+source = "git+https://github.com/ramox81/cadkernel.git?rev=8562fda#8562fda0a109e7c7e85aeefb2389f02bb99f41a5"
 
 [[package]]
 name = "openssl-probe"

@@ -1451,10 +1451,11 @@ impl crate::entities::traits::MassPropsCalc for codec::entities::LwPolyline {
                 cy: 0.0,
             };
         }
-        // Kernel measurement includes bulges and closes open curves only for area.
+        // Kernel measurement includes bulges, closes open curves only for
+        // area, and counts a self-crossing outline's loops once each.
         let curve = crate::entities::curve::lwpolyline_curve(p)
             .expect("an LwPolyline with at least two vertices has a planar curve");
-        let area = curve.curve.enclosed_area().abs();
+        let area = curve.curve.chord_closed_area().unwrap_or(0.0).abs();
         let perimeter = curve.length();
         let center = curve.curve.enclosed_centroid().unwrap_or_else(|| {
             let x = p.vertices.iter().map(|v| v.location.x).sum::<f64>() / n as f64;

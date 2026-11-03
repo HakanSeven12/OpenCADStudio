@@ -738,30 +738,15 @@ pub(crate) fn polyline2d_global_width(pline: &Polyline2D) -> Option<f64> {
 
 impl PropertyEditable for Polyline2D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        // Area and length are the drawn curve's: a spline-fit polyline's
-        // samples, with each bulge segment measured along its arc.
-        let drawn = drawn_vertices2d(self);
-        let path: &[codec::entities::Vertex2D] = drawn.as_deref().unwrap_or(&self.vertices);
-        let mut area = 0.0;
-        let mut length = 0.0;
-        let seg_count = if self.is_closed() {
-            path.len()
-        } else {
-            path.len().saturating_sub(1)
-        };
-        for i in 0..seg_count {
-            let a = &path[i].location;
-            let b = &path[(i + 1) % path.len()].location;
-            area += a.x * b.y - b.x * a.y;
-            let chord = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
-            let sweep = 4.0 * path[i].bulge.atan();
-            length += if sweep.abs() < 1e-12 {
-                chord
-            } else {
-                chord * (sweep * 0.5) / (sweep * 0.5).sin()
-            };
-        }
-        area = (area * 0.5).abs();
+        // Area and length are the drawn curve's (a spline-fit polyline's
+        // samples, bulges along their arcs), measured by the kernel.
+        let curve = crate::entities::curve::polyline2d_curve(self);
+        let area = curve
+            .as_ref()
+            .and_then(|curve| curve.curve.chord_closed_area())
+            .unwrap_or(0.0)
+            .abs();
+        let length = curve.as_ref().map_or(0.0, |curve| curve.length());
 
         let n = polyline2d_frame_indices(self).len();
         let (vi, index) = polyline2d_focused_vertex(self);

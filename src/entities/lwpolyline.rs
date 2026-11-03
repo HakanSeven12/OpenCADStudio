@@ -7,7 +7,7 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    edit_prop as edit, edit_scalar_prop as edit_scalar, format_area, format_length, parse_f64,
+    edit_prop as edit, format_area, format_length, parse_f64,
     rectangle_grip, ro_prop as ro, square_grip, stepper_prop as stepper, VARIES_LABEL,
 };
 use crate::entities::traits::RenderConvertible;
@@ -742,14 +742,7 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
         edit(t!("Vertex X").as_ref(), "vertex_x", vx),
         edit(t!("Vertex Y").as_ref(), "vertex_y", vy),
     ];
-    // A revision cloud shows no bulge row: its arcs are the cloud's.
-    if cloud_arc_length.is_none() {
-        geometry_props.push(edit_scalar(
-            t!("Bulge").as_ref(),
-            "bulge",
-            v.map_or(0.0, |vertex| vertex.bulge),
-        ));
-    }
+    // The reference lists no Bulge row for a polyline (nor a cloud).
     if !is_rectangle(pline) {
         geometry_props.push(edit(
             t!("Start segment width").as_ref(),

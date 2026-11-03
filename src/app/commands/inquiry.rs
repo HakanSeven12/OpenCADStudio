@@ -31,6 +31,11 @@ impl OpenCADStudio {
                 .push_info(crate::t!("Select objects").as_ref());
             return;
         }
+        if self.any_entity_is_fixed(i, &handles) {
+            self.command_line
+                .push_error(crate::app::properties::HELD_BY_FIXED);
+            return;
+        }
 
         let bounds: Vec<_> = self.tabs[i]
             .scene

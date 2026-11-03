@@ -588,6 +588,7 @@ pub(super) fn extra_special<'a>(
 /// The layer new text goes on (TEXTLAYER): Use Current, or a layer of the
 /// drawing, each with its colour.
 fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
+    use crate::ui::dropdown_list::{DropdownList, DropdownRow};
     const SWATCH: f32 = 10.0;
     const ROW: f32 = 24.0;
     const MAX_H: f32 = 220.0;
@@ -610,14 +611,15 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
                 .into(),
             None => Space::new().width(SWATCH).height(SWATCH).into(),
         };
+        let msg = Message::RibbonTextLayer(value);
         let item: Element<'a, Message> = button(
-            row![swatch, text(label).size(11)]
+            row![swatch, text(label.clone()).size(11)]
                 .spacing(6)
                 .align_y(iced::Center),
         )
-        .on_press(Message::RibbonTextLayer(value))
+        .on_press(msg.clone())
         .style(move |theme: &Theme, status| {
-            if on {
+            if on && !matches!(status, button::Status::Hovered) {
                 tool_btn_style(theme, true, status)
             } else {
                 popup_row_style(theme, status)
@@ -626,16 +628,23 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
         .width(Fill)
         .padding([3, 6])
         .into();
-        item
+        (on, DropdownRow::item(item, label, msg))
     };
-    let mut layers: Vec<Element<'a, Message>> =
-        vec![entry(String::new(), t!("Use Current").into_owned(), None)];
-    layers.extend(
-        ribbon
-            .layer_infos
-            .iter()
-            .map(|info| entry(info.name.clone(), info.name.clone(), Some(info.color))),
-    );
+    let mut initial_selected: Option<usize> = None;
+    let mut layers: Vec<DropdownRow<'a, Message>> =
+        Vec::with_capacity(ribbon.layer_infos.len() + 1);
+    let (on_cur, first) = entry(String::new(), t!("Use Current").into_owned(), None);
+    if on_cur {
+        initial_selected = Some(0);
+    }
+    layers.push(first);
+    for info in &ribbon.layer_infos {
+        let (on, row) = entry(info.name.clone(), info.name.clone(), Some(info.color));
+        if on && initial_selected.is_none() {
+            initial_selected = Some(layers.len());
+        }
+        layers.push(row);
+    }
     let list_height = ((ribbon.layer_infos.len() + 1) as f32 * ROW).min(MAX_H);
     let title = row![
         make_icon(
@@ -650,12 +659,16 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
     ]
     .spacing(6)
     .align_y(iced::Center);
-    column![
-        title,
-        iced::widget::scrollable(column(layers).spacing(1)).height(Length::Fixed(list_height)),
-    ]
-    .spacing(4)
-    .into()
+    let list = DropdownList::with_options(
+        layers,
+        Length::Fixed(list_height),
+        Length::Fill,
+        1.0,
+        0.0,
+    )
+    .selected(initial_selected)
+    .on_escape(Message::CloseRibbonDropdown);
+    column![title, list].spacing(4).into()
 }
 
 /// The name of a tool group, upper case, with a hairline after it.
@@ -906,24 +919,29 @@ fn options_list<'a>(
     tool: &'static MoreTool,
     win: (f32, f32),
 ) -> Element<'a, Message> {
+    use crate::ui::dropdown_list::{DropdownList, DropdownRow};
     let command = tool.command();
-    let rows: Vec<Element<'a, Message>> = tool
+    let rows: Vec<DropdownRow<'a, Message>> = tool
         .options
         .iter()
         .map(|&(cmd, label)| {
-            let item = button(text(t!(label)).size(11))
-                .on_press(Message::DropdownSelectItem {
-                    dropdown_id: command,
-                    cmd,
-                })
+            let translated = t!(label).into_owned();
+            let msg = Message::DropdownSelectItem {
+                dropdown_id: command,
+                cmd,
+            };
+            let item = button(text(translated.clone()).size(11))
+                .on_press(msg.clone())
                 .style(popup_row_style)
                 .width(Fill)
                 .height(OPTION_HEIGHT)
                 .padding([3, 7]);
-            keytips::anchor_with(|| keytips::item_anchor(command, cmd), item)
+            let anchored = keytips::anchor_with(|| keytips::item_anchor(command, cmd), item);
+            DropdownRow::item(anchored, translated, msg)
         })
         .collect();
-    let list = container(column(rows))
+    let dd_list = DropdownList::new(rows).on_escape(Message::CloseRibbonDropdown);
+    let list = container(dd_list)
         .style(popup_panel_style)
         .width(OPTIONS_W);
     let list = opaque(

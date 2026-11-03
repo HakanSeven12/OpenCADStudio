@@ -43,8 +43,10 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// script, so the action list gained `dialog_answer`.
 /// Table cells are driven from a script: `table_cell_dialog`,
 /// `table_cell_warning`, `table_cell_tab` and `command_submit`.
+/// `set_properties` lists its `name` selector and takes a colour as a
+/// number or `{"rgb":[r,g,b]}`, which its example shows on a layer.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "1cdd081949bde16f34785201200dc018e3f8a8d5725900d657d7fa6c57769b0b";
+const TOOL_SCHEMA_DIGEST: &str = "3d217efdc1f7d44ceebcbf4e71276f1212e20a96342d863c0946ccb819ccc2e9";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

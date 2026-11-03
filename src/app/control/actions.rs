@@ -1283,6 +1283,15 @@ impl OpenCADStudio {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| raw.to_string());
+        let i = self.active_tab;
+        if crate::app::properties::property_edits_geometry(&p)
+            && self.any_entity_is_fixed(i, &self.property_target_handles(i))
+        {
+            return Err(failure(
+                "fixed_constraint",
+                crate::app::properties::HELD_BY_FIXED,
+            ));
+        }
         Ok(match p.value {
             PropValue::EditText(_)
             | PropValue::PlainText(_)

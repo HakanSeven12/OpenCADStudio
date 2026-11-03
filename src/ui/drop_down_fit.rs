@@ -124,8 +124,78 @@ impl Widget<Message, Theme, Renderer> for DropDownFit<'_> {
             width: viewport.x + viewport.width,
             height: viewport.y + viewport.height,
         };
-        self.content
+        let inner = self
+            .content
             .as_widget_mut()
-            .overlay(tree, layout, renderer, &from_corner, translation)
+            .overlay(tree, layout, renderer, &from_corner, translation)?;
+        Some(overlay::Element::new(Box::new(FitOverlay { inner })))
+    }
+}
+
+struct FitOverlay<'a> {
+    inner: overlay::Element<'a, Message, Theme, Renderer>,
+}
+
+impl overlay::Overlay<Message, Theme, Renderer> for FitOverlay<'_> {
+    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
+        self.inner.as_overlay_mut().layout(renderer, bounds)
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        self.inner
+            .as_overlay()
+            .draw(renderer, theme, style, layout, cursor);
+    }
+
+    fn update(
+        &mut self,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        self.inner
+            .as_overlay_mut()
+            .update(event, layout, cursor, renderer, shell);
+        if matches!(
+            event,
+            Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            })
+        ) {
+            crate::ui::dropdown_list::mark_dropdown_escape_captured();
+            shell.capture_event();
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.inner
+            .as_overlay()
+            .mouse_interaction(layout, cursor, renderer)
+    }
+
+    fn operate(
+        &mut self,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.inner
+            .as_overlay_mut()
+            .operate(layout, renderer, operation);
     }
 }

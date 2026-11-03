@@ -117,6 +117,27 @@ impl OpenCADStudio {
         let _ = self.on_viewport_exit();
     }
 
+    /// Whether an enabled `Fixed` constraint holds `handle` in the scope being
+    /// edited right now. A Fixed pins the whole curve or one picked point;
+    /// either way the object cannot move freely, so both count.
+    fn entity_is_fixed(&self, i: usize, handle: Handle) -> bool {
+        use crate::scene::parametric_constraints::ConstraintKind;
+        self.tabs[i]
+            .scene
+            .parametric_constraint_set(self.tabs[i].current_parametric_scope())
+            .is_some_and(|set| {
+                set.constraints_touching(handle)
+                    .any(|constraint| constraint.kind == ConstraintKind::Fixed)
+            })
+    }
+
+    /// Whether any of `handles` is held by an enabled `Fixed` constraint.
+    pub(in crate::app) fn any_entity_is_fixed(&self, i: usize, handles: &[Handle]) -> bool {
+        handles
+            .iter()
+            .any(|&handle| self.entity_is_fixed(i, handle))
+    }
+
     pub(in crate::app) fn solve_grip_constraints(
         &mut self,
         i: usize,

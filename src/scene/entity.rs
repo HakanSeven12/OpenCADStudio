@@ -310,32 +310,42 @@ impl Scene {
             return;
         }
         let name = insert.block_name.clone();
-        let base = crate::scene::render_graph::block_base_point(document, &name);
-        let place = crate::scene::render_graph::insert_transform_with_base(insert, base);
-        let definitions: Vec<codec::entities::AttributeDefinition> = document
-            .entities_in_block(&name)
-            .filter_map(|entity| match entity {
-                EntityType::AttributeDefinition(definition) => Some(definition.clone()),
-                _ => None,
-            })
-            .collect();
-        if definitions.is_empty() {
+        let attributes = Self::attributes_from_definitions(document, insert, |_| None);
+        if attributes.is_empty() {
             return;
         }
         Self::sync_attribute_flag(document, &name);
-        let attributes: Vec<codec::entities::AttributeEntity> = definitions
-            .iter()
-            .map(|definition| {
-                let mut attribute =
-                    codec::entities::AttributeEntity::from_definition(definition, None);
-                codec::Entity::apply_transform(&mut attribute, &place);
-                attribute
-            })
-            .collect();
         let Some(EntityType::Insert(insert)) = document.get_entity_mut(insert_handle) else {
             return;
         };
         insert.attributes = attributes;
+    }
+
+    /// The attributes `insert` gets from its block's definitions, placed by
+    /// the reference. `value` answers each definition; `None` keeps its
+    /// default value.
+    pub(crate) fn attributes_from_definitions(
+        document: &codec::Document,
+        insert: &codec::entities::Insert,
+        mut value: impl FnMut(&codec::entities::AttributeDefinition) -> Option<String>,
+    ) -> Vec<codec::entities::AttributeEntity> {
+        let name = &insert.block_name;
+        let base = crate::scene::render_graph::block_base_point(document, name);
+        let place = crate::scene::render_graph::insert_transform_with_base(insert, base);
+        document
+            .entities_in_block(name)
+            .filter_map(|entity| match entity {
+                EntityType::AttributeDefinition(definition) => {
+                    let mut attribute = codec::entities::AttributeEntity::from_definition(
+                        definition,
+                        value(definition),
+                    );
+                    codec::Entity::apply_transform(&mut attribute, &place);
+                    Some(attribute)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Give the attributes a reference arrives with their own identity. Whoever
@@ -924,6 +934,30 @@ impl Scene {
     }
 
     pub fn restore_solid_models(&mut self, handles: &[Handle]) {
+        /// The box around a body's surface, from a coarse tessellation.
+        fn body_box(body: &kernel::brep::Body) -> Option<([f64; 3], [f64; 3])> {
+            let tolerance = kernel::brep::mesh::TessellationTolerance::new(0.5, 1e-3);
+            let mesh = kernel::brep::mesh::tessellate(body, tolerance).mesh;
+            let mut points = mesh.positions.iter().copied();
+            let first = points.next()?;
+            Some(points.fold((first, first), |(lo, hi), p| {
+                (
+                    [lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])],
+                    [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])],
+                )
+            }))
+        }
+        /// Whether two bodies fill the same box, to a hundredth of its size
+        /// (the coarse tessellation cuts curved sides differently).
+        fn same_place(a: &kernel::brep::Body, b: &kernel::brep::Body) -> bool {
+            let (Some((alo, ahi)), Some((blo, bhi))) = (body_box(a), body_box(b)) else {
+                return true;
+            };
+            let size = (0..3).map(|k| ahi[k] - alo[k]).fold(0.0_f64, f64::max);
+            let slack = size * 1e-2 + 1e-9;
+            (0..3).all(|k| (alo[k] - blo[k]).abs() <= slack && (ahi[k] - bhi[k]).abs() <= slack)
+        }
+
         let bodies: Vec<(Handle, kernel::brep::Body)> = handles
             .iter()
             .filter(|handle| !self.solid_models.contains_key(handle))
@@ -950,7 +984,15 @@ impl Scene {
                 let body = if tree.as_ref().is_some_and(|tree| tree.has_boolean()) {
                     stored().or_else(rebuilt)
                 } else {
-                    rebuilt().or_else(stored)
+                    match (rebuilt(), stored()) {
+                        // A history that no longer matches the saved body
+                        // (moved by a path that left it behind) would cut or
+                        // join the solid where it is not drawn.
+                        (Some(rebuilt), Some(stored)) if !same_place(&rebuilt, &stored) => {
+                            Some(stored)
+                        }
+                        (rebuilt, stored) => rebuilt.or(stored),
+                    }
                 }?;
                 Some((handle, body))
             })
@@ -1078,11 +1120,14 @@ impl Scene {
         [r, g, b, alpha]
     }
 
+    /// The definitions an operator can place by name. Generated records
+    /// (`*U`, `*D`, …) are not definitions anybody authored, so listing them
+    /// would advertise a block nobody made.
     pub fn custom_block_names(&self) -> Vec<String> {
         self.document
             .block_records
             .iter()
-            .filter(|br| !br.is_standard() && !br.is_layout())
+            .filter(|br| !br.is_standard() && !br.is_layout() && !br.is_anonymous())
             .map(|br| br.name.clone())
             .collect()
     }

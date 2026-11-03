@@ -71,6 +71,13 @@ pub fn recent_bounds(id: &str) -> Option<Rectangle> {
     })
 }
 
+/// Record `bounds` for the widget `id` as if it had just been drawn.
+#[cfg(test)]
+pub fn set_drawn_bounds(id: &str, bounds: Rectangle) {
+    let frame = FRAME.with(Cell::get);
+    DD_BOUNDS.with(|m| m.borrow_mut().insert(id.to_string(), (bounds, frame)));
+}
+
 /// Close the current frame for `fresh_bounds`.
 pub fn end_frame() {
     FRAME.with(|frame| frame.set(frame.get() + 1));

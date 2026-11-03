@@ -376,7 +376,7 @@ pub fn view_window<'a>(
             },
             // ── Lineweight ───────────────────────────────────────────────────
             lbl(t!("Lineweight:")),
-            iced::widget::pick_list(Some(current_lw), lw_items, |item| item.to_string(),)
+            crate::ui::dropdown_list::pick_list(Some(current_lw), lw_items, |item| item.to_string(),)
                 .on_select(|item: PlotLineweightItem| { Message::PlotStylePanelLwSet(item.index) })
                 .text_size(11)
                 .padding([3, 5])

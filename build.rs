@@ -1,7 +1,6 @@
 // Build metadata and Windows executable resources.
 
-#[cfg(windows)]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn main() {
     let version = std::env::var("CARGO_PKG_VERSION").expect("Cargo package version");
@@ -17,15 +16,7 @@ fn main() {
         version.clone()
     };
     println!("cargo:rustc-env=OCS_APP_VERSION={app_version}");
-    // Rerun on commit and branch switch only. Watching `.git/index` as well
-    // would keep the dirty flag fresh, but Cargo recompiles the crate every
-    // time this script reruns, and `git status` rewrites the index.
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
-        if let Some(reference) = head.trim().strip_prefix("ref: ") {
-            println!("cargo:rerun-if-changed=.git/{reference}");
-        }
-    }
+    watch_git_inputs();
     let revision =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
     // diff-index exits 1 for differences and 128 when there is no repository,
@@ -129,6 +120,44 @@ fn main() {
             }
         }
     }
+}
+
+/// Watch actual Git paths: `.git` is a file in linked worktrees. Missing
+/// inputs make Cargo rerun the script on every build, even with no changes.
+fn watch_git_inputs() {
+    // Source archives have no Git metadata. Avoid Cargo's fallback scan of
+    // the entire package, without watching a nonexistent `.git/HEAD`.
+    println!("cargo:rerun-if-changed=build.rs");
+    let Some(head_path) = git_output(&["rev-parse", "--git-path", "HEAD"]) else {
+        return;
+    };
+    println!("cargo:rerun-if-changed={head_path}");
+    let Ok(head) = std::fs::read_to_string(&head_path) else {
+        return;
+    };
+    let Some(reference) = head.trim().strip_prefix("ref: ") else {
+        return;
+    };
+    let Some(reference_path) = git_output(&["rev-parse", "--git-path", reference]) else {
+        return;
+    };
+    let mut reference_path = PathBuf::from(reference_path);
+    if !reference_path.exists() {
+        if let Some(packed) = git_output(&["rev-parse", "--git-path", "packed-refs"]) {
+            if Path::new(&packed).exists() {
+                println!("cargo:rerun-if-changed={packed}");
+            }
+        }
+        // A new commit can create a loose ref without changing packed-refs.
+        // Watch its nearest existing parent until the loose ref exists.
+        while !reference_path.exists() {
+            if !reference_path.pop() {
+                return;
+            }
+        }
+    }
+    // Do not watch the index: `git status` can rewrite it without a change.
+    println!("cargo:rerun-if-changed={}", reference_path.display());
 }
 
 /// Runs `git` with `args` and returns trimmed stdout, or `None` when git is

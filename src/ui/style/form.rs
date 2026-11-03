@@ -6,8 +6,9 @@
 //! tweak lands everywhere.
 
 use crate::app::Message;
+use crate::ui::dropdown_list::pick_list;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, container, pick_list, radio, row, text, text_input, Space};
+use iced::widget::{button, container, radio, row, text, text_input, Space};
 use iced::{Background, Border, Element, Length, Theme};
 use std::borrow::Cow;
 

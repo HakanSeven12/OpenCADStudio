@@ -1,5 +1,6 @@
 //! Deterministic Move-to-Point parameter propagation. Reference caches retain
 //! effective endpoints; recover autonomous input before replaying the graph.
+use super::instance::ParameterFrame;
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -39,6 +40,14 @@ pub(super) fn point_target(
     index.get(&handle).and_then(|(parameter, id)| {
         (*id != source_id || *parameter == handle).then_some(*parameter)
     })
+}
+
+/// Points have one movable coordinate; two-point parameters transport both.
+fn translated(p: &Parameter, frame: ParameterFrame, delta: DVec3) -> ParameterFrame {
+    ParameterFrame {
+        base: if p.point { p.base } else { frame.base + delta },
+        end: frame.end + delta,
+    }
 }
 
 struct Link<'a> {
@@ -162,24 +171,34 @@ impl<'a> Graph<'a> {
         previous: &Document,
         values: Option<&BTreeMap<Handle, DVec3>>,
         previous_bases: Option<&BTreeMap<Handle, DVec3>>,
-    ) -> Result<BTreeMap<Handle, DVec3>, &'static str> {
+    ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
         let mut incoming = BTreeMap::<Handle, DVec3>::new();
         let mut autonomous = BTreeMap::new();
         for handle in &self.order {
             let node = &self.nodes[handle];
             let p = &node.parameter;
-            let effective = values
-                .and_then(|v| v.get(handle))
-                .copied()
-                .unwrap_or_else(|| current(previous, p));
-            let raw = effective - incoming.get(handle).copied().unwrap_or(DVec3::ZERO);
+            let effective = ParameterFrame {
+                base: previous_bases
+                    .and_then(|b| b.get(handle))
+                    .copied()
+                    .unwrap_or(p.base),
+                end: values
+                    .and_then(|v| v.get(handle))
+                    .copied()
+                    .unwrap_or_else(|| current(previous, p)),
+            };
+            let raw = translated(
+                p,
+                effective,
+                -incoming.get(handle).copied().unwrap_or(DVec3::ZERO),
+            );
             autonomous.insert(*handle, raw);
             let active = if p.point && !node.chained {
                 raw
             } else {
                 effective
             };
-            Self::propagate(node, active, previous_bases, &mut incoming)?;
+            Self::propagate(node, active, &mut incoming)?;
         }
         Ok(autonomous)
     }
@@ -193,57 +212,73 @@ impl<'a> Graph<'a> {
         previous: &Document,
         staged: &mut Document,
         selected: &BTreeSet<Handle>,
-        autonomous: &BTreeMap<Handle, DVec3>,
+        autonomous: &BTreeMap<Handle, ParameterFrame>,
         values: Option<&BTreeMap<Handle, DVec3>>,
         bases: Option<&BTreeMap<Handle, DVec3>>,
-    ) -> Result<BTreeMap<Handle, DVec3>, &'static str> {
+    ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
         let mut incoming = BTreeMap::<Handle, DVec3>::new();
         let mut final_points = BTreeMap::new();
         for handle in &self.order {
             let node = &self.nodes[handle];
             let p = &node.parameter;
             let offset = incoming.get(handle).copied().unwrap_or(DVec3::ZERO);
-            let raw = if selected.contains(handle) {
-                current(staged, p) - offset
+            let mut raw = if selected.contains(handle) {
+                translated(
+                    p,
+                    ParameterFrame {
+                        base: bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base),
+                        end: current(staged, p),
+                    },
+                    -offset,
+                )
             } else {
-                autonomous.get(handle).copied().unwrap_or_else(|| {
-                    values
-                        .and_then(|v| v.get(handle))
-                        .copied()
-                        .unwrap_or_else(|| current(previous, p))
-                })
+                autonomous
+                    .get(handle)
+                    .copied()
+                    .unwrap_or_else(|| ParameterFrame {
+                        base: bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base),
+                        end: values
+                            .and_then(|v| v.get(handle))
+                            .copied()
+                            .unwrap_or_else(|| current(previous, p)),
+                    })
             };
-            let effective = raw + offset;
+            // Non-Point nodes are currently input sources only. Their base is
+            // supplied by the current evaluation frame, independently of the
+            // endpoint recovered from the previous evaluation.
+            if !p.point {
+                raw.base = bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base);
+            }
+            let effective = translated(p, raw, offset);
             let active = if p.point && !node.chained {
                 raw
             } else {
                 effective
             };
-            if !active.is_finite() || !effective.is_finite() {
+            if !active.base.is_finite()
+                || !active.end.is_finite()
+                || !effective.base.is_finite()
+                || !effective.end.is_finite()
+            {
                 return Err("The parameter value produces non-finite geometry.");
             }
             if p.point {
-                set_value(staged, p, Value::Point(active))?;
+                set_value(staged, p, Value::Point(active.end))?;
                 final_points.insert(*handle, effective);
             }
-            Self::propagate(node, active, bases, &mut incoming)?;
+            Self::propagate(node, active, &mut incoming)?;
         }
         Ok(final_points)
     }
 
     fn propagate(
         node: &Node<'_>,
-        end: DVec3,
-        bases: Option<&BTreeMap<Handle, DVec3>>,
+        frame: ParameterFrame,
         incoming: &mut BTreeMap<Handle, DVec3>,
     ) -> Result<(), &'static str> {
         let p = &node.parameter;
-        let base = bases
-            .and_then(|b| b.get(&p.handle))
-            .copied()
-            .unwrap_or(p.base);
         for link in &node.links {
-            let delta = action_move_delta(p, base, end, &link.action.connections)
+            let delta = action_move_delta(p, frame.base, frame.end, &link.action.connections)
                 .ok_or("This Move action uses unsupported parameter connections.")?;
             let delta = options::displacement(&link.action.offsets, delta)?;
             *incoming.entry(link.target).or_default() += delta;

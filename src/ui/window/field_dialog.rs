@@ -28,6 +28,8 @@ pub enum FieldTarget {
     TableCell(codec::Handle, usize, usize),
     /// An operand of the formula of the Field dialog beneath this one.
     FormulaOperand,
+    /// The caret of the open text editor.
+    EditorInsert,
 }
 
 /// The categories the dialog offers, with their fields (only the ones the

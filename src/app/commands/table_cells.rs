@@ -282,15 +282,17 @@ impl OpenCADStudio {
             entry.column,
         );
         if change_type {
-            let (data_type, unit_type) = crate::entities::table::entered_value_type(&entry.text);
-            command = command.with_value_type(data_type, unit_type);
+            let (data_type, unit_type, picture) = crate::entities::table::entered_value_type(&entry.text);
+            command = command.with_value_type(data_type, unit_type, picture);
         }
         use crate::command::CadCommand;
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
         self.command_line.input = entry.text;
+        // The value comes back selected: typing replaces it.
         if !change_type {
-            return self.focus_cmd_input();
+            let input = iced::widget::Id::new(crate::ui::command_line::CMD_INPUT_ID);
+            return self.focus_cmd_input().chain(iced::widget::operation::select_all(input));
         }
         self.table_cell_entry_typed = true;
         self.table_cell_step(entry.step).unwrap_or_else(Task::none)

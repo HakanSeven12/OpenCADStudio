@@ -1379,9 +1379,9 @@ impl TableCellEditCommand {
         }
     }
 
-    /// The cell takes the given data type (and no picture) with the text
-    /// put in, in the same undo step.
-    pub fn with_value_type(mut self, data_type: i32, unit_type: i32) -> Self {
+    /// The cell takes the given data type and picture with the text put
+    /// in, in the same undo step.
+    pub fn with_value_type(mut self, data_type: i32, unit_type: i32, picture: &str) -> Self {
         use codec::entities::table::CellStylePropertyFlags as P;
         if let Some(cell) = self.table.cell_mut(self.row, self.column) {
             let bits = (P::DATA_TYPE | P::DATA_FORMAT).bits() as i32;
@@ -1392,7 +1392,7 @@ impl TableCellEditCommand {
             let style = cell.style.get_or_insert_with(Default::default);
             style.value_data_type = data_type;
             style.value_unit_type = unit_type;
-            style.value_format.clear();
+            style.value_format = picture.to_string();
             style.property_flags.insert(P::DATA_TYPE | P::DATA_FORMAT);
         }
         self

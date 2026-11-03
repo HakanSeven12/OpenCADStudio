@@ -98,6 +98,8 @@ pub const CELL_DATA_CATEGORIES: [(&str, i32, i32); 9] = [
 ];
 
 pub fn cell_data_category(data_type: i32, unit_type: i32) -> &'static str {
+    // A 3D point (32) is a point as the 2D one is.
+    let data_type = if data_type == 32 { 16 } else { data_type };
     CELL_DATA_CATEGORIES
         .iter()
         .find(|(_, d, u)| *d == data_type && (*u == unit_type || *d != 2))
@@ -5083,22 +5085,35 @@ pub(crate) fn typed_text_fits(
     if matches!(kind, 4 | 7) || text.trim().is_empty() {
         return true;
     }
+    // Numbers apart by commas are a point, never a number.
+    if matches!(kind, 0 | 1 | 3 | 5 | 8) && text.contains(',') {
+        return false;
+    }
     let value = codec::entities::table::CellValue::text(text);
     matches!(typed_cell_value(document, &value, kind, &picture), TypedValue::Converted(_))
 }
 
-/// The data type (and unit) of a typed value, as the cell takes it when its
-/// type changes to fit what was typed: a whole number, a number, a 2D or 3D
-/// point (numbers separated by commas), else text.
-pub(crate) fn entered_value_type(text: &str) -> (i32, i32) {
+/// The data type, unit and picture a cell takes when its type changes to
+/// fit what was typed: a whole number Whole, a number Decimal in the
+/// current units (scientific when typed with an exponent), two or three
+/// numbers apart by commas a 3D point, a date Date, else Text.
+pub(crate) fn entered_value_type(text: &str) -> (i32, i32, &'static str) {
     let text = text.trim();
-    let numbers: Vec<Option<f64>> = text.split(',').map(|part| part.trim().parse().ok()).collect();
+    let number = |part: &str| {
+        let part = part.trim();
+        let plain = !part.is_empty() && part.chars().all(|c| c.is_ascii_digit() || "+-.eE".contains(c));
+        plain.then(|| part.parse::<f64>().ok()).flatten()
+    };
+    let numbers: Vec<Option<f64>> = text.split(',').map(number).collect();
     match numbers.as_slice() {
-        [Some(_)] if text.parse::<i64>().is_ok() => (1, 0),
-        [Some(_)] => (2, 0),
-        [Some(_), Some(_)] => (16, 0),
-        [Some(_), Some(_), Some(_)] => (32, 0),
-        _ => (4, 0),
+        [Some(_)] if text.parse::<i64>().is_ok() => (1, 0, ""),
+        [Some(_)] if text.contains(['e', 'E']) => (2, 0, "%lu1"),
+        [Some(_)] => (2, 0, "%lu6"),
+        [Some(_), Some(_)] | [Some(_), Some(_), Some(_)] => (32, 0, "%lu6%ls[;]"),
+        _ if parse_cell_date(text, &crate::entities::field::os_date_locale().short_date).is_some() => {
+            (8, 0, "%x")
+        }
+        _ => (4, 0, ""),
     }
 }
 
@@ -5152,7 +5167,10 @@ pub(crate) fn typed_cell_value(
                 5 => U::Percentage,
                 _ => U::NoUnits,
             };
-            let text = if picture.is_empty() {
+            let text = if picture.is_empty() && kind == 3 {
+                // A number without a picture shows six decimals.
+                format!("{number:.6}")
+            } else if picture.is_empty() {
                 shown.clone()
             } else {
                 document.format_with_picture(number, picture)

@@ -345,3 +345,6 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[patch."https://github.com/HakanSeven12/acadrust.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "d7ef91eada5fe7023b55162e9bb8cb46bc7233a6" }

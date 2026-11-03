@@ -1530,3 +1530,51 @@ fn a_fixed_entity_resists_a_property_write() {
         "a fixed line stays put: {q}"
     );
 }
+
+/// A stretch that would move a fixed object is refused with the reason, and
+/// the object keeps the coordinates it had.
+#[test]
+fn a_fixed_entity_resists_a_stretch() {
+    use crate::command::CmdResult;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let printed = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+    let handle = printed["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let before = app.command_line.history.len();
+    let task = app.apply_cmd_result(CmdResult::StretchEntities {
+        handles: vec![codec::Handle::new(
+            u64::from_str_radix(&handle, 16).unwrap(),
+        )],
+        windows: vec![(
+            glam::DVec3::new(-1.0, -1.0, 0.0),
+            glam::DVec3::new(11.0, 1.0, 0.0),
+        )],
+        excluded_points: Vec::new(),
+        delta: glam::DVec3::new(0.0, 5.0, 0.0),
+    });
+    app.drive_headless_task(task).unwrap();
+    let said: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        said.iter().any(|text| text.contains("fixed constraint")),
+        "the stretch says why it moved nothing: {said:?}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "a fixed line stays put through a stretch: {q}"
+    );
+}

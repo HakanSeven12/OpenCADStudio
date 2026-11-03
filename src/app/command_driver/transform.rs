@@ -318,6 +318,18 @@ impl OpenCADStudio {
             self.tabs[i].active_cmd = None;
             return Some(Task::none());
         }
+        // A stretch moves picked points, so a fixed object cannot take part.
+        // The whole command is refused rather than reporting a stretch that
+        // the solve then reverts.
+        if self.any_entity_is_fixed(i, &handles) {
+            self.command_line
+                .push_error(crate::app::properties::HELD_BY_FIXED);
+            self.tabs[i].active_cmd = None;
+            self.tabs[i].snap_result = None;
+            self.tabs[i].scene.clear_preview_wire();
+            self.restore_pre_cmd_tangent();
+            return Some(Task::none());
+        }
         let structural = handles.iter().any(|handle| {
             matches!(
                 self.tabs[i].scene.document.get_entity(*handle),

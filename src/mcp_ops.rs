@@ -333,16 +333,21 @@ pub static SET_PROPERTIES: OpDef = OpDef {
     params: &[
         req("collection", Ty::Str, "Record collection name."),
         opt("handle", Ty::Handle, "Target record handle if applicable."),
+        opt(
+            "name",
+            Ty::Str,
+            "Target table record name (layers, styles, ...) instead of handle.",
+        ),
         req(
             "updates",
             Ty::ArrayOf(&Ty::Raw(
                 r#"{"type":"object","properties":{"path":{"type":"string"},"value":{},"expected":{}},"required":["path","value"]}"#,
             )),
-            "List of pointer replacements.",
+            "List of pointer replacements. A colour takes an index number, {\"rgb\":[r,g,b]} or its serialized form ({\"Index\":3}, \"ByLayer\").",
         ),
     ],
     rules: &[],
-    example: r#"{"op":"set_properties","collection":"entities","handle":"2A","updates":[{"path":"/common/layer","value":"Walls"}]}"#,
+    example: r#"{"op":"set_properties","collection":"layers","name":"Walls","updates":[{"path":"/color","value":3}]}"#,
 };
 
 pub static ACTION: OpDef = OpDef {

@@ -8453,3 +8453,12 @@ parameters-manager =
     .visibility = Sichtbarkeit
     .variable = Variable
     .footer = Alle: { $shown } von { $total } Parametern angezeigt
+
+parameters-manager-feedback =
+    .no-number = Diese Zeile enthält keine bearbeitbare Zahl.
+    .no-flag = Diese Zeile enthält kein änderbares Sichtbarkeitsmerkmal.
+    .finite-number = Geben Sie einen endlichen numerischen Parameterwert an.
+    .stale-session = Die Blockeditor-Sitzung ist nicht mehr aktiv.
+    .positive-length = Geben Sie eine positive Parameterlänge an.
+    .no-direction = Die Parameterrichtung ist nicht verfügbar.
+    .history = Parametermanager bearbeiten

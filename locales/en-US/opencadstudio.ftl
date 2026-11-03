@@ -8454,3 +8454,12 @@ parameters-manager =
     .visibility = Visibility
     .variable = Variable
     .footer = All: { $shown } of { $total } parameters displayed
+
+parameters-manager-feedback =
+    .no-number = This row has no number to edit.
+    .no-flag = This row has no visibility flag to change.
+    .finite-number = Specify a finite numeric parameter value.
+    .stale-session = The Block Editor session is no longer active.
+    .positive-length = Specify a positive parameter length.
+    .no-direction = The parameter direction is unavailable.
+    .history = Parameters Manager edit

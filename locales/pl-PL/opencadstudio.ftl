@@ -8457,3 +8457,12 @@ parameters-manager =
     .visibility = Widoczność
     .variable = Zmienna
     .footer = Wszystkie: wyświetlono { $shown } z { $total } parametrów
+
+parameters-manager-feedback =
+    .no-number = Ten wiersz nie zawiera liczby do edycji.
+    .no-flag = Ten wiersz nie ma flagi widoczności do zmiany.
+    .finite-number = Podaj skończoną wartość liczbową parametru.
+    .stale-session = Sesja edytora bloków nie jest już aktywna.
+    .positive-length = Podaj dodatnią długość parametru.
+    .no-direction = Kierunek parametru jest niedostępny.
+    .history = Edycja menedżera parametrów

@@ -8440,3 +8440,12 @@ parameters-manager =
     .visibility = 可見性
     .variable = 變數
     .footer = 全部：顯示 { $total } 個參數中的 { $shown } 個
+
+parameters-manager-feedback =
+    .no-number = 此列沒有可編輯的數值。
+    .no-flag = 此列沒有可變更的可見性旗標。
+    .finite-number = 請指定有限的數值參數值。
+    .stale-session = 圖塊編輯器工作階段已不再作用中。
+    .positive-length = 請指定正的參數長度。
+    .no-direction = 參數方向無法使用。
+    .history = 參數管理員編輯

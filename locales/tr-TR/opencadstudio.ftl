@@ -8374,3 +8374,12 @@ parameters-manager =
     .visibility = Görünürlük
     .variable = Değişken
     .footer = Tümü: { $total } parametreden { $shown } tanesi gösteriliyor
+
+parameters-manager-feedback =
+    .no-number = Bu satırda düzenlenecek sayı yok.
+    .no-flag = Bu satırda değiştirilecek görünürlük işareti yok.
+    .finite-number = Sonlu bir sayısal parametre değeri belirtin.
+    .stale-session = Blok düzenleyici oturumu artık etkin değil.
+    .positive-length = Pozitif bir parametre uzunluğu belirtin.
+    .no-direction = Parametre yönü kullanılamıyor.
+    .history = Parametre yöneticisi düzenlemesi

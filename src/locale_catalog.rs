@@ -3,6 +3,13 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "This row has no number to edit." => Some(("parameters-manager-feedback", "no-number")),
+        "This row has no visibility flag to change." => Some(("parameters-manager-feedback", "no-flag")),
+        "Specify a finite numeric parameter value." => Some(("parameters-manager-feedback", "finite-number")),
+        "The Block Editor session is no longer active." => Some(("parameters-manager-feedback", "stale-session")),
+        "Specify a positive parameter length." => Some(("parameters-manager-feedback", "positive-length")),
+        "The parameter direction is unavailable." => Some(("parameters-manager-feedback", "no-direction")),
+        "Parameters Manager edit" => Some(("parameters-manager-feedback", "history")),
         "Show in Properties" => Some(("block-parameter-properties", "show-properties")),
         "Parameter name" => Some(("block-parameter-properties", "parameter-name")),
         "Number of grips" => Some(("block-parameter-properties", "grip-count")),

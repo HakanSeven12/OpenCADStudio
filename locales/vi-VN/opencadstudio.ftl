@@ -8452,3 +8452,12 @@ parameters-manager =
     .visibility = Hiển thị
     .variable = Biến
     .footer = Tất cả: hiển thị { $shown } trong { $total } tham số
+
+parameters-manager-feedback =
+    .no-number = Hàng này không có số để chỉnh sửa.
+    .no-flag = Hàng này không có cờ hiển thị để thay đổi.
+    .finite-number = Chỉ định giá trị số hữu hạn cho tham số.
+    .stale-session = Phiên trình chỉnh sửa khối không còn hoạt động.
+    .positive-length = Chỉ định chiều dài tham số dương.
+    .no-direction = Không có hướng tham số.
+    .history = Chỉnh sửa trình quản lý tham số

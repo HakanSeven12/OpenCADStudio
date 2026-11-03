@@ -8443,3 +8443,12 @@ parameters-manager =
     .visibility = दृश्यता
     .variable = चर
     .footer = सभी: { $total } में से { $shown } पैरामीटर दिखाए गए
+
+parameters-manager-feedback =
+    .no-number = इस पंक्ति में संपादन योग्य संख्या नहीं है।
+    .no-flag = इस पंक्ति में बदलने योग्य दृश्यता फ़्लैग नहीं है।
+    .finite-number = परिमित संख्यात्मक पैरामीटर मान दें।
+    .stale-session = ब्लॉक संपादक सत्र अब सक्रिय नहीं है।
+    .positive-length = सकारात्मक पैरामीटर लंबाई दें।
+    .no-direction = पैरामीटर दिशा उपलब्ध नहीं है।
+    .history = पैरामीटर प्रबंधक संपादन

@@ -8453,3 +8453,12 @@ parameters-manager =
     .visibility = Zichtbaarheid
     .variable = Variabele
     .footer = Alles: { $shown } van { $total } parameters weergegeven
+
+parameters-manager-feedback =
+    .no-number = Deze rij bevat geen getal om te bewerken.
+    .no-flag = Deze rij bevat geen zichtbaarheidsvlag om te wijzigen.
+    .finite-number = Geef een eindige numerieke parameterwaarde op.
+    .stale-session = De blokeditorsessie is niet meer actief.
+    .positive-length = Geef een positieve parameterlengte op.
+    .no-direction = De parameterrichting is niet beschikbaar.
+    .history = Parameterbeheer bewerken

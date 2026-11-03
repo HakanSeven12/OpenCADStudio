@@ -8433,3 +8433,12 @@ parameters-manager =
     .visibility = Láthatóság
     .variable = Változó
     .footer = Összes: { $shown } / { $total } paraméter látható
+
+parameters-manager-feedback =
+    .no-number = Ebben a sorban nincs szerkeszthető szám.
+    .no-flag = Ebben a sorban nincs módosítható láthatósági jelző.
+    .finite-number = Adjon meg véges numerikus paraméterértéket.
+    .stale-session = A blokkszerkesztő munkamenete már nem aktív.
+    .positive-length = Adjon meg pozitív paraméterhosszt.
+    .no-direction = A paraméter iránya nem érhető el.
+    .history = Paraméterkezelő szerkesztése

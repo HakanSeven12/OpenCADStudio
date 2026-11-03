@@ -8455,3 +8455,12 @@ parameters-manager =
     .visibility = Viditelnost
     .variable = Proměnná
     .footer = Vše: zobrazeno { $shown } z { $total } parametrů
+
+parameters-manager-feedback =
+    .no-number = Tento řádek nemá číslo k úpravě.
+    .no-flag = Tento řádek nemá příznak viditelnosti ke změně.
+    .finite-number = Zadejte konečnou číselnou hodnotu parametru.
+    .stale-session = Relace editoru bloků již není aktivní.
+    .positive-length = Zadejte kladnou délku parametru.
+    .no-direction = Směr parametru není dostupný.
+    .history = Úprava ve správci parametrů

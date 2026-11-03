@@ -8452,3 +8452,12 @@ parameters-manager =
     .visibility = Näkyvyys
     .variable = Muuttuja
     .footer = Kaikki: { $shown } / { $total } parametria näytetään
+
+parameters-manager-feedback =
+    .no-number = Tällä rivillä ei ole muokattavaa lukua.
+    .no-flag = Tällä rivillä ei ole muutettavaa näkyvyysasetusta.
+    .finite-number = Anna äärellinen numeerinen parametrin arvo.
+    .stale-session = Lohkoeditorin istunto ei ole enää aktiivinen.
+    .positive-length = Anna positiivinen parametrin pituus.
+    .no-direction = Parametrin suunta ei ole käytettävissä.
+    .history = Parametrien hallinnan muokkaus

@@ -8444,3 +8444,12 @@ parameters-manager =
     .visibility = 가시성
     .variable = 변수
     .footer = 전체: 매개변수 { $total }개 중 { $shown }개 표시
+
+parameters-manager-feedback =
+    .no-number = 이 행에는 편집할 숫자가 없습니다.
+    .no-flag = 이 행에는 변경할 가시성 플래그가 없습니다.
+    .finite-number = 유한한 숫자 매개변수 값을 지정하십시오.
+    .stale-session = 블록 편집기 세션이 더 이상 활성 상태가 아닙니다.
+    .positive-length = 양수 매개변수 길이를 지정하십시오.
+    .no-direction = 매개변수 방향을 사용할 수 없습니다.
+    .history = 매개변수 관리자 편집

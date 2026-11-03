@@ -8458,3 +8458,12 @@ parameters-manager =
     .visibility = الرؤية
     .variable = متغير
     .footer = الكل: عُرضت { $shown } من { $total } معلمة
+
+parameters-manager-feedback =
+    .no-number = لا يحتوي هذا الصف على رقم قابل للتحرير.
+    .no-flag = لا يحتوي هذا الصف على علامة رؤية قابلة للتغيير.
+    .finite-number = حدد قيمة رقمية محدودة للمعلمة.
+    .stale-session = لم تعد جلسة محرر الكتل نشطة.
+    .positive-length = حدد طولًا موجبًا للمعلمة.
+    .no-direction = اتجاه المعلمة غير متاح.
+    .history = تحرير مدير المعلمات

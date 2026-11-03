@@ -8446,3 +8446,12 @@ parameters-manager =
     .visibility = ການເບິ່ງເຫັນ
     .variable = ຕົວແປ
     .footer = ທັງໝົດ: ສະແດງ { $shown } ຈາກ { $total } ພາຣາມິເຕີ
+
+parameters-manager-feedback =
+    .no-number = ແຖວນີ້ບໍ່ມີຕົວເລກໃຫ້ແກ້ໄຂ.
+    .no-flag = ແຖວນີ້ບໍ່ມີທຸງການເບິ່ງເຫັນໃຫ້ປ່ຽນ.
+    .finite-number = ລະບຸຄ່າຕົວເລກພາຣາມິເຕີທີ່ຈຳກັດ.
+    .stale-session = ເຊດຊັນຕົວແກ້ໄຂບລັອກບໍ່ເປີດໃຊ້ແລ້ວ.
+    .positive-length = ລະບຸຄວາມຍາວພາຣາມິເຕີທີ່ເປັນບວກ.
+    .no-direction = ທິດທາງພາຣາມິເຕີບໍ່ພ້ອມໃຊ້.
+    .history = ແກ້ໄຂຕົວຈັດການພາຣາມິເຕີ

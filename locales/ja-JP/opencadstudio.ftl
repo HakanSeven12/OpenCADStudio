@@ -8433,3 +8433,12 @@ parameters-manager =
     .visibility = 可視性
     .variable = 変数
     .footer = すべて: { $total } 個中 { $shown } 個のパラメーターを表示
+
+parameters-manager-feedback =
+    .no-number = この行には編集できる数値がありません。
+    .no-flag = この行には変更できる表示フラグがありません。
+    .finite-number = 有限の数値パラメーター値を指定してください。
+    .stale-session = ブロックエディターのセッションは有効ではなくなりました。
+    .positive-length = 正のパラメーター長を指定してください。
+    .no-direction = パラメーターの方向を取得できません。
+    .history = パラメーター管理を編集

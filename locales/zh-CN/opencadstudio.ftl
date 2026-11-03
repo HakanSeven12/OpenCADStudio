@@ -8428,3 +8428,12 @@ parameters-manager =
     .visibility = 可见性
     .variable = 变量
     .footer = 全部：显示 { $total } 个参数中的 { $shown } 个
+
+parameters-manager-feedback =
+    .no-number = 此行没有可编辑的数值。
+    .no-flag = 此行没有可更改的可见性标志。
+    .finite-number = 请指定有限的数值参数值。
+    .stale-session = 块编辑器会话已不再处于活动状态。
+    .positive-length = 请指定正的参数长度。
+    .no-direction = 参数方向不可用。
+    .history = 参数管理器编辑

@@ -639,6 +639,18 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
         )
         .unwrap();
         set_targets(&mut doc, move_action, vec![members[1], child]);
+        let second_parent =
+            point::create(&mut doc, definition, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+        let second_move = create(
+            &mut doc,
+            definition,
+            Kind::Move,
+            second_parent,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        set_targets(&mut doc, second_move, vec![child]);
         let (head, tail) = if scale_first {
             (scale_action, move_action)
         } else {
@@ -695,6 +707,72 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
         let expected = (DVec3::new(if scale_first { 28. } else { 38. }, 6., 0.), 4.);
         assert_eq!(circle(&changed, first), expected);
         assert_eq!(circle(&changed, second), (DVec3::new(4., 3., 0.), 2.));
+        // The second parent contributes independently; a direct child edit adds
+        // its own input, then changing the first parent must preserve both.
+        let combined =
+            instance::evaluate_value(&changed, first, second_parent, Value::Point(DVec3::X * 3.))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            instance::frame(&combined, first, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::X * 13.
+        );
+        assert_eq!(
+            circle(&combined, first),
+            (expected.0 + DVec3::X * 3., expected.1)
+        );
+        let combined =
+            instance::evaluate_value(&combined, first, child, Value::Point(DVec3::X * 15.))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            circle(&combined, first),
+            (expected.0 + DVec3::X * 5., expected.1)
+        );
+        let combined =
+            instance::evaluate_value(&combined, first, parent, Value::Point(DVec3::X * 10.))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            instance::frame(&combined, first, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::X * 5.
+        );
+        assert_eq!(circle(&combined, first), (DVec3::new(9., 3., 0.), 2.));
+        assert_eq!(circle(&combined, second), (DVec3::new(4., 3., 0.), 2.));
+        for saved in [
+            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&combined).unwrap()))
+                .read()
+                .unwrap(),
+            DxfReader::from_reader(Cursor::new(
+                DxfWriter::new(&combined).write_to_vec().unwrap(),
+            ))
+            .unwrap()
+            .read()
+            .unwrap(),
+        ] {
+            assert_eq!(circle(&saved, first), (DVec3::new(9., 3., 0.), 2.));
+            assert_eq!(
+                instance::frame(&saved, first, &child_parameter)
+                    .unwrap()
+                    .end,
+                DVec3::X * 5.
+            );
+            let resumed =
+                instance::evaluate_value(&saved, first, second_parent, Value::Point(DVec3::X * 4.))
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(
+                instance::frame(&resumed, first, &child_parameter)
+                    .unwrap()
+                    .end,
+                DVec3::X * 6.
+            );
+            assert_eq!(circle(&resumed, first), (DVec3::new(10., 3., 0.), 2.));
+        }
         for saved in [
             DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&changed).unwrap()))
                 .read()

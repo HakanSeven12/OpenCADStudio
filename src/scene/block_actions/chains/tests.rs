@@ -1,4 +1,5 @@
 use super::*;
+use crate::scene::block_distance_parameter as distance;
 use crate::scene::block_point_parameter as point;
 use codec::{entities::Insert, DwgReader, DwgWriter, DxfReader, DxfWriter};
 use std::io::Cursor;
@@ -580,4 +581,140 @@ fn block_move_point_chains_reject_ambiguous_grip_aliases_before_publication() {
     )
     .is_err());
     assert_eq!(doc, baseline);
+}
+
+#[test]
+fn block_named_order_composes_with_point_transport_on_shared_geometry() {
+    for scale_first in [false, true] {
+        let (mut doc, definition, members) = super::super::tests::fixture();
+        let parent = distance::create(
+            &mut doc,
+            definition,
+            distance::Kind::Linear,
+            Vector3::ZERO,
+            Vector3::new(10., 0., 0.),
+            Vector3::new(5., 2., 0.),
+        )
+        .unwrap();
+        let child = point::create(&mut doc, definition, Vector3::ZERO, Vector3::ZERO).unwrap();
+        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&child).unwrap() else {
+            panic!()
+        };
+        let DynamicBlockData::PointParameter(p) = &mut object.data else {
+            panic!()
+        };
+        p.parameter.parameter.chain_actions = true;
+        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&parent).unwrap() else {
+            panic!()
+        };
+        let DynamicBlockData::LinearParameter(p) = &mut object.data else {
+            panic!()
+        };
+        p.parameter.parameter.chain_actions = true;
+        let move_action = create(
+            &mut doc,
+            definition,
+            Kind::Move,
+            parent,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        let scale_action = create(
+            &mut doc,
+            definition,
+            Kind::Scale,
+            parent,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        create(
+            &mut doc,
+            definition,
+            Kind::Move,
+            child,
+            &[members[1]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        set_targets(&mut doc, move_action, vec![members[1], child]);
+        let (head, tail) = if scale_first {
+            (scale_action, move_action)
+        } else {
+            (move_action, scale_action)
+        };
+        assert!(super::super::chain::set(&mut doc, definition, head, Some(tail)).unwrap());
+        let first = doc
+            .add_entity(EntityType::Insert(Insert::new("ACTIONS", Vector3::ZERO)))
+            .unwrap();
+        let second = doc
+            .add_entity(EntityType::Insert(Insert::new(
+                "ACTIONS",
+                Vector3::UNIT_X * 50.,
+            )))
+            .unwrap();
+        let parameters = all_parameters(&doc, definition);
+        let child_parameter = parameters
+            .iter()
+            .find(|p| p.handle == child)
+            .unwrap()
+            .clone();
+        let changed =
+            instance::evaluate_value(&doc, first, parent, Value::Point(DVec3::new(20., 0., 0.)))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            instance::frame(&changed, first, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::X * 10.
+        );
+        assert_eq!(
+            instance::frame(&changed, second, &child_parameter)
+                .unwrap()
+                .end,
+            DVec3::ZERO
+        );
+        let circle = |drawing: &Document, reference: Handle| {
+            let EntityType::Insert(insert) = drawing.get_entity(reference).unwrap() else {
+                panic!()
+            };
+            drawing
+                .block_records
+                .get(&insert.block_name)
+                .unwrap()
+                .entity_handles
+                .iter()
+                .find_map(|h| match drawing.get_entity(*h) {
+                    Some(EntityType::Circle(circle)) => Some((v(circle.center), circle.radius)),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let expected = (DVec3::new(if scale_first { 28. } else { 38. }, 6., 0.), 4.);
+        assert_eq!(circle(&changed, first), expected);
+        assert_eq!(circle(&changed, second), (DVec3::new(4., 3., 0.), 2.));
+        for saved in [
+            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&changed).unwrap()))
+                .read()
+                .unwrap(),
+            DxfReader::from_reader(Cursor::new(
+                DxfWriter::new(&changed).write_to_vec().unwrap(),
+            ))
+            .unwrap()
+            .read()
+            .unwrap(),
+        ] {
+            assert_eq!(circle(&saved, first), expected);
+            assert_eq!(
+                instance::frame(&saved, first, &child_parameter)
+                    .unwrap()
+                    .end,
+                DVec3::X * 10.
+            );
+            let reset = instance::reset(&saved, first).unwrap().unwrap();
+            assert_eq!(circle(&reset, first), (DVec3::new(4., 3., 0.), 2.));
+        }
+    }
 }

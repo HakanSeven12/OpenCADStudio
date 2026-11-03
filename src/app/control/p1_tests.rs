@@ -2075,3 +2075,111 @@ fn auto_constrain_names_geometry_the_network_moves() {
         "the completion names the line the network moved, and only it: {said:?}"
     );
 }
+
+/// A block whose attributes an automation client fills by tag: WIDTH asks
+/// for a value, CONST carries a fixed one.
+fn define_attributed_block(app: &mut OpenCADStudio) {
+    use codec::entities::AttributeDefinition;
+    use codec::types::Vector3;
+    let definition = |tag: &str, value: &str, at: Vector3| {
+        let mut definition =
+            AttributeDefinition::new(tag.to_string(), format!("{tag}:"), value.to_string());
+        definition.insertion_point = at;
+        definition.height = 1.0;
+        definition
+    };
+    let mut constant = definition("CONST", "fixed", Vector3::new(0.0, 5.0, 0.0));
+    constant.flags.constant = true;
+    let i = app.active_tab;
+    app.tabs[i].scene.define_block_raw(
+        "TAGGED",
+        Vector3::ZERO,
+        vec![
+            codec::EntityType::AttributeDefinition(definition(
+                "WIDTH",
+                "100",
+                Vector3::new(2.0, 3.0, 0.0),
+            )),
+            codec::EntityType::AttributeDefinition(constant),
+        ],
+    );
+}
+
+/// `entities_create` placed an Insert without a way to give its attribute
+/// values: the client had to ATTSYNC or patch `/attributes/N/value` by index
+/// afterwards. The values now come in by tag, like `-INSERT` asks for them.
+#[test]
+fn entities_create_insert_takes_attribute_values_by_tag() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    define_attributed_block(&mut app);
+    let created = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"attr-values","document_id":{doc},"entities":[
+            {"type":"Insert","block":"TAGGED","position":[10,0],"attributes":{"width":"250"}}
+        ]}"#,
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    let i = app.active_tab;
+    let insert = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .find_map(|entity| match entity {
+            codec::EntityType::Insert(insert) if insert.block_name == "TAGGED" => {
+                Some(insert.clone())
+            }
+            _ => None,
+        })
+        .expect("the reference was created");
+    let values: Vec<(&str, &str)> = insert
+        .attributes
+        .iter()
+        .map(|attribute| (attribute.tag.as_str(), attribute.value.as_str()))
+        .collect();
+    assert_eq!(values, vec![("WIDTH", "250"), ("CONST", "fixed")]);
+    assert_eq!(
+        insert.attributes[0].insertion_point,
+        codec::types::Vector3::new(12.0, 3.0, 0.0),
+        "the attribute is placed by the reference"
+    );
+    assert!(insert
+        .attributes
+        .iter()
+        .all(|attribute| !attribute.common.handle.is_null()));
+}
+
+#[test]
+fn entities_create_insert_refuses_unknown_constant_and_non_text_attributes() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    define_attributed_block(&mut app);
+    for (id, attributes, code) in [
+        ("attr-unknown", r#"{"HEIGHT":"1"}"#, "unknown_attribute_tag"),
+        (
+            "attr-constant",
+            r#"{"CONST":"other"}"#,
+            "constant_attribute",
+        ),
+        (
+            "attr-twice",
+            r#"{"WIDTH":"1","width":"2"}"#,
+            "invalid_attributes",
+        ),
+    ] {
+        let refused = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_create","request_id":"{id}","document_id":{{doc}},"entities":[
+                    {{"type":"Insert","block":"TAGGED","position":[0,0],"attributes":{attributes}}}
+                ]}}"#
+            ),
+        );
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["code"], code, "{refused}");
+    }
+    let spec =
+        json!({"type":"Insert","block":"TAGGED","position":[0,0],"attributes":{"WIDTH":250}});
+    assert!(crate::entity_creation::validate_entity(&spec, "").is_err());
+    assert_eq!(count_type(&mut app, "Insert"), 0, "nothing was created");
+}

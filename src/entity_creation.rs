@@ -218,6 +218,7 @@ fn build_schema(name: &str) -> Result<Value, String> {
             properties["position"] = point(2, 3);
             properties["rotation_deg"] = number.clone();
             properties["scale"] = json!({"anyOf":[{"type":"number","not":{"const":0}},{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","not":{"const":0}}}],"default":1,"description":"Nonzero uniform factor or three nonzero axis factors."});
+            properties["attributes"] = json!({"type":"object","additionalProperties":{"type":"string"},"description":"Attribute values by tag (case-insensitive), e.g. {\"CIRCUIT\":\"3\"}. Every attribute the block defines is created; tags left out keep their default value. A tag the block does not define, or a constant one, is refused."});
             (
                 vec!["block", "position"],
                 json!({"type":"Insert","block":"DOOR_90","position":[0,0],"scale":1}),
@@ -432,6 +433,79 @@ fn text_style_field(spec: &Value, document: Option<&codec::Document>) -> Parsed<
         ));
     }
     Ok(Some(style.to_owned()))
+}
+
+/// The attributes of a new Insert, built from its block's definitions the
+/// way `-INSERT` builds them, with the values given by tag. Without a
+/// document only the shape is checked, as for text styles; the scene then
+/// fills a bare reference with the defaults.
+fn insert_attributes(
+    insert: &codec::entities::Insert,
+    values: &Value,
+    document: Option<&codec::Document>,
+) -> Parsed<Vec<codec::entities::AttributeEntity>> {
+    let at = |tag: &str| format!("/attributes/{}", tag.replace('~', "~0").replace('/', "~1"));
+    let object = values.as_object().ok_or_else(|| {
+        failure_at(
+            "invalid_attributes",
+            "/attributes",
+            "insert attributes map tags to text values",
+        )
+    })?;
+    let mut given: Vec<(&str, &str)> = Vec::with_capacity(object.len());
+    for (tag, value) in object {
+        let value = value.as_str().ok_or_else(|| {
+            failure_at("invalid_attributes", &at(tag), "attribute values are text")
+        })?;
+        if given.iter().any(|(seen, _)| seen.eq_ignore_ascii_case(tag)) {
+            return Err(failure_at(
+                "invalid_attributes",
+                &at(tag),
+                format!("attribute tag '{tag}' is given twice"),
+            ));
+        }
+        given.push((tag, value));
+    }
+    let Some(document) = document else {
+        return Ok(Vec::new());
+    };
+    let block = &insert.block_name;
+    for (tag, _) in &given {
+        let definition = document
+            .entities_in_block(block)
+            .find_map(|entity| match entity {
+                codec::EntityType::AttributeDefinition(definition)
+                    if definition.tag.eq_ignore_ascii_case(tag) =>
+                {
+                    Some(definition)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| {
+                failure_at(
+                    "unknown_attribute_tag",
+                    &at(tag),
+                    format!("block '{block}' defines no attribute tagged '{tag}'"),
+                )
+            })?;
+        if definition.is_constant() {
+            return Err(failure_at(
+                "constant_attribute",
+                &at(tag),
+                format!("attribute '{tag}' of block '{block}' is constant"),
+            ));
+        }
+    }
+    Ok(crate::scene::Scene::attributes_from_definitions(
+        document,
+        insert,
+        |definition| {
+            given
+                .iter()
+                .find(|(tag, _)| tag.eq_ignore_ascii_case(&definition.tag))
+                .map(|(_, value)| (*value).to_owned())
+        },
+    ))
 }
 
 /// One `entities` array entry → a real entity. Geometry validation happens
@@ -663,6 +737,9 @@ pub(crate) fn build_entity(
                     insert = insert.with_scale(axis(0)?, axis(1)?, axis(2)?);
                 }
                 _ => {}
+            }
+            if let Some(values) = spec.get("attributes") {
+                insert.attributes = insert_attributes(&insert, values, document)?;
             }
             EntityType::Insert(insert)
         }

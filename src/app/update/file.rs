@@ -1990,6 +1990,7 @@ impl OpenCADStudio {
         }
         self.refresh_native_edit_guard_after_save(i, &path, path_changed, destination_lease);
         self.tabs[i].dirty = false;
+        self.tabs[i].scene.note_tables_saved();
         if set_current_path {
             self.tabs[i].recovery_save_as_required = false;
         }
@@ -2784,6 +2785,7 @@ impl OpenCADStudio {
                         && self.tabs[i].scene.camera_generation == entry.camera_generation;
                     if snapshot_is_current {
                         self.tabs[i].dirty = false;
+                        self.tabs[i].scene.note_tables_saved();
                     }
                 }
                 Err(e) => self.command_line.push_error(
@@ -3276,6 +3278,7 @@ impl OpenCADStudio {
             && self.tabs[i].scene.camera_generation == camera_generation;
         if snapshot_is_current {
             self.tabs[i].dirty = false;
+            self.tabs[i].scene.note_tables_saved();
         }
         // A clean save supersedes any crash-recovery snapshot for this
         // drawing — drop the old key and the new one so stale copies don't
@@ -3892,6 +3895,7 @@ impl OpenCADStudio {
                 );
                 if snapshot_is_current {
                     self.tabs[i].dirty = false;
+                    self.tabs[i].scene.note_tables_saved();
                 }
             }
         }

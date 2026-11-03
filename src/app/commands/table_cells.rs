@@ -631,6 +631,10 @@ impl OpenCADStudio {
                     let mut changed = false;
                     for &(row, column) in &picked {
                         if let Some(cell) = table.cell_mut(row, column).filter(|c| format_editable(c)) {
+                            crate::entities::table::release_content_format(
+                                cell,
+                                codec::entities::table::CellStylePropertyFlags::DATA_TYPE,
+                            );
                             let style = cell.style.get_or_insert_with(Default::default);
                             style.value_data_type = data_type;
                             style.value_unit_type = unit_type;
@@ -1426,15 +1430,9 @@ impl OpenCADStudio {
             return;
         };
         let (r0, c0, _, _) = crate::entities::table::widen_to_merged(table, cells.range());
-        let picture = table
-            .cell(r0, c0)
-            .and_then(|cell| cell.style.as_ref())
-            .filter(|style| {
-                style
-                    .property_flags
-                    .contains(codec::entities::table::CellStylePropertyFlags::DATA_FORMAT)
-            })
-            .map(|style| style.value_format.clone())
+        let first = table.rows.get(r0).zip(table.cell(r0, c0));
+        let picture = first
+            .map(|(row, cell)| crate::entities::table::cell_value_picture(row, c0, table, cell))
             .unwrap_or_default();
         let sample = table
             .cell(r0, c0)
@@ -1447,19 +1445,10 @@ impl OpenCADStudio {
                 )
             })
             .map(|content| content.value.numeric_value);
-        let category = table
-            .cell(r0, c0)
-            .and_then(|cell| cell.style.as_ref())
-            .filter(|style| {
-                style
-                    .property_flags
-                    .contains(codec::entities::table::CellStylePropertyFlags::DATA_TYPE)
-            })
-            .map(|style| {
-                crate::entities::table::cell_data_category(
-                    style.value_data_type,
-                    style.value_unit_type,
-                )
+        let category = first
+            .and_then(|(row, cell)| crate::entities::table::cell_value_type(row, c0, table, cell))
+            .map(|(data_type, unit_type)| {
+                crate::entities::table::cell_data_category(data_type, unit_type)
             })
             .unwrap_or("General");
         let kind = FORMAT_KINDS.iter().position(|name| *name == category).unwrap_or(4);
@@ -1681,6 +1670,7 @@ impl OpenCADStudio {
                 {
                     continue;
                 }
+                crate::entities::table::release_content_format(cell, P::DATA_TYPE | P::DATA_FORMAT);
                 let style = cell.style.get_or_insert_with(Default::default);
                 style.value_data_type = data_type;
                 style.value_unit_type = unit_type;

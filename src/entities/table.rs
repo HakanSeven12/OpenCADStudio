@@ -285,6 +285,23 @@ fn cell_text_style(
     })
 }
 
+/// The text style a table style's row style names: its handle, else the
+/// style of its name (a DXF file names it).
+fn row_style_text_style(
+    document: &codec::Document,
+    style: Option<&codec::objects::RowCellStyle>,
+) -> Option<codec::Handle> {
+    let style = style?;
+    style.text_style_handle.or_else(|| {
+        let name = style.text_style_name.trim();
+        document
+            .text_styles
+            .iter()
+            .find(|s| !name.is_empty() && s.name.eq_ignore_ascii_case(name))
+            .map(|s| s.handle)
+    })
+}
+
 /// The face each text style draws with, resolved the way text of that style
 /// resolves anywhere else (a .shx file on disk before the built-in stroke
 /// font of its name), so a table's cells match the text of its picture.
@@ -1479,7 +1496,7 @@ impl RenderConvertible for Table {
                 // Resolve text-style handle: content → cell-style → row-style.
                 let style_handle = cell_text_style(document, self, row, ci, cell, content)
                     .or_else(|| cell.style.as_ref().and_then(|s| s.text_style_handle))
-                    .or_else(|| row_style.and_then(|s| s.text_style_handle));
+                    .or_else(|| row_style_text_style(document, row_style));
                 let font_owned = font_for_handle(style_handle).unwrap_or_else(|| "txt".to_string());
                 let resolved = resolved_style_for_handle(style_handle, font_owned);
 
@@ -2148,25 +2165,18 @@ pub fn tessellate_table(
                     .filter(|margin| *margin > 1e-6)
                     .unwrap_or_else(|| v_margin.max(cell_h * 0.5));
                     let style_handle = cell_text_style(document, tab, row, ci, cell, Some(content))
-                        .or_else(|| row_style.and_then(|style| style.text_style_handle));
+                        .or_else(|| row_style_text_style(document, row_style));
                     let font_owned =
                         font_for_handle(style_handle).unwrap_or_else(|| "txt".to_string());
                     let resolved = resolved_style_for_handle(style_handle, font_owned);
-                    let align = (content.alignment != 0)
-                        .then_some(content.alignment)
-                        .or_else(|| {
-                            style_for_property(
-                                tab,
-                                row,
-                                ci,
-                                cell,
-                                codec::entities::table::CellStylePropertyFlags::ALIGNMENT,
-                            )
-                            .map(|style| style.alignment)
-                            .filter(|alignment| *alignment != 0)
-                        })
-                        .or_else(|| row_style.map(|style| style.alignment as i32))
-                        .unwrap_or(5);
+                    let align = cell_content_alignment(
+                        tab,
+                        row,
+                        ci,
+                        cell,
+                        Some(content),
+                        row_style.map(|style| style.alignment as i32),
+                    );
                     let horiz = ((align - 1).rem_euclid(3)) + 1;
                     let vert = ((align - 1) / 3) + 1;
                     let (mut x_offset, mut attach_h_anchor) = match horiz {
@@ -2865,8 +2875,10 @@ impl PropertyEditable for Table {
                 (false, true) => "Format locked",
                 (true, true) => "Content and format locked",
             };
-            let category = style_for(CellStylePropertyFlags::DATA_TYPE)
-                .map(|style| cell_data_category(style.value_data_type, style.value_unit_type))
+            let category = table_row
+                .zip(cell)
+                .and_then(|(row, cell)| cell_value_type(row, cell_column, self, cell))
+                .map(|(data_type, unit_type)| cell_data_category(data_type, unit_type))
                 .unwrap_or("General");
             let text_style = style_for(CellStylePropertyFlags::TEXT_STYLE)
                 .map(|style| style.text_style_name.clone())
@@ -3067,8 +3079,9 @@ impl PropertyEditable for Table {
                         text(
                             t!("Additional format").as_ref(),
                             "tbl_cell_format",
-                            style_for(CellStylePropertyFlags::DATA_FORMAT)
-                                .map(|style| style.value_format.clone())
+                            table_row
+                                .zip(cell)
+                                .map(|(row, cell)| cell_value_picture(row, cell_column, self, cell))
                                 .unwrap_or_default(),
                             format_editable,
                         ),
@@ -3713,6 +3726,7 @@ impl PropertyEditable for Table {
                         return;
                     }
                     if let Some(cell) = self.cell_mut(row, column) {
+                        release_content_format(cell, CellStylePropertyFlags::DATA_FORMAT);
                         let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.value_format = value.to_string();
                         style
@@ -3857,6 +3871,7 @@ impl PropertyEditable for Table {
                         return;
                     };
                     if let Some(cell) = self.cell_mut(row, column) {
+                        release_content_format(cell, CellStylePropertyFlags::DATA_TYPE);
                         let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.value_data_type = *data_type;
                         style.value_unit_type = *unit_type;
@@ -4913,7 +4928,6 @@ pub(crate) fn cell_data_kind(
     row: usize,
     column: usize,
 ) -> Option<(usize, String)> {
-    use codec::entities::table::CellStylePropertyFlags as P;
     let table_row = table.rows.get(row)?;
     let cell = table_row.cells.get(column)?;
     let kind_of = |data_type: i32, unit_type: i32| {
@@ -4921,17 +4935,81 @@ pub(crate) fn cell_data_kind(
             .iter()
             .position(|name| *name == cell_data_category(data_type, unit_type))
     };
-    let Some(typed) = style_for_property(table, table_row, column, cell, P::DATA_TYPE) else {
-        // Other drawings keep the type and picture with the cell's content.
-        let content = cell.contents.first().filter(|c| c.sets(P::DATA_TYPE))?;
-        let kind = kind_of(content.format_value_data_type, content.format_value_unit_type)?;
-        return Some((kind, content.value_format.clone()));
-    };
-    let kind = kind_of(typed.value_data_type, typed.value_unit_type)?;
-    let picture = style_for_property(table, table_row, column, cell, P::DATA_FORMAT)
-        .map(|style| style.value_format.clone())
-        .unwrap_or_default();
-    Some((kind, picture))
+    let (data_type, unit_type) = cell_value_type(table_row, column, table, cell)?;
+    Some((kind_of(data_type, unit_type)?, cell_value_picture(table_row, column, table, cell)))
+}
+
+/// Where a cell's content sits in the cell (1 top left … 9 bottom right):
+/// the content's own alignment when its format sets one (a file stores
+/// an unflagged default there), else the cell, column, row or table style
+/// that sets it, else the row's cell style, else middle center.
+pub(crate) fn cell_content_alignment(
+    table: &Table,
+    row: &codec::entities::table::TableRow,
+    column: usize,
+    cell: &codec::entities::table::TableCell,
+    content: Option<&codec::entities::table::CellContent>,
+    row_style: Option<i32>,
+) -> i32 {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    content
+        .filter(|content| content.alignment != 0 && content.sets(P::ALIGNMENT))
+        .map(|content| content.alignment)
+        .or_else(|| {
+            style_for_property(table, row, column, cell, P::ALIGNMENT)
+                .map(|style| style.alignment)
+                .filter(|alignment| *alignment != 0)
+        })
+        .or(row_style)
+        .unwrap_or(5)
+}
+
+/// The data type and unit a cell's value is kept as: its content's own
+/// format first (other drawings keep them there, and it is the cell's
+/// most specific setting), else the cell, column, row or table style that
+/// sets them.
+pub(crate) fn cell_value_type(
+    row: &codec::entities::table::TableRow,
+    column: usize,
+    table: &Table,
+    cell: &codec::entities::table::TableCell,
+) -> Option<(i32, i32)> {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    match cell.contents.first().filter(|content| content.sets(P::DATA_TYPE)) {
+        Some(content) => Some((content.format_value_data_type, content.format_value_unit_type)),
+        None => style_for_property(table, row, column, cell, P::DATA_TYPE)
+            .map(|style| (style.value_data_type, style.value_unit_type)),
+    }
+}
+
+/// The picture a cell's value is shown with, found as [`cell_value_type`]
+/// finds the type; empty when nothing sets one.
+pub(crate) fn cell_value_picture(
+    row: &codec::entities::table::TableRow,
+    column: usize,
+    table: &Table,
+    cell: &codec::entities::table::TableCell,
+) -> String {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    match cell.contents.first().filter(|content| content.sets(P::DATA_FORMAT)) {
+        Some(content) => content.value_format.clone(),
+        None => style_for_property(table, row, column, cell, P::DATA_FORMAT)
+            .map(|style| style.value_format.clone())
+            .unwrap_or_default(),
+    }
+}
+
+/// Before the cell's own style takes a data type or picture, the content
+/// lets go of its own, which would otherwise still win.
+pub(crate) fn release_content_format(
+    cell: &mut codec::entities::table::TableCell,
+    property: codec::entities::table::CellStylePropertyFlags,
+) {
+    let bits = property.bits() as i32;
+    for content in &mut cell.contents {
+        content.format_property_flags &= !bits;
+        content.format_override_flags &= !bits;
+    }
 }
 
 /// A typed date and its time, as a date cell reads it: `y-m-d` when the
@@ -5338,12 +5416,25 @@ pub(crate) fn settle_table(table: &mut Table, document: &codec::Document) -> boo
     changed
 }
 
-/// The height each row needs for the wrapped text of its single-row cells:
-/// the text height, the line spacing for each further line, and the
-/// cell's top and bottom margins (measured: 4.5 text, 1.5 margins — two
-/// lines 15, four 30).
+/// The laid-out text of a table cell: the cell (first row and column of a
+/// merge, and its last row and column), the text block's height by its
+/// lines, the width and height of the drawn ink, and the cell's left,
+/// right, top and bottom margins.
+struct CellTextExtent {
+    row: usize,
+    column: usize,
+    last_row: usize,
+    last_column: usize,
+    height: f64,
+    empty: bool,
+    ink: [f64; 2],
+    margins: [f64; 4],
+}
+
+/// Lays out the text of every text cell in its wrapped width. A cell
+/// whose text content is empty has no ink: no width, one text height.
 // ponytail: lays out every text cell; cache per cell if large tables slow edits.
-fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
+fn cell_text_extents(table: &Table, document: &codec::Document) -> Vec<CellTextExtent> {
     use codec::entities::table::CellStylePropertyFlags as P;
     let table_style = table.table_style_handle.and_then(|handle| {
         match document.objects.get(&handle) {
@@ -5355,13 +5446,13 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
     let header_suppressed = resolved_header_suppressed(table, table_style);
     let (h_margin, v_margin) = resolved_table_margins(table, table_style);
     let fonts = table_style_fonts(document);
-    let mut needed = vec![0.0f64; table.rows.len()];
+    let mut extents = Vec::new();
     for (ri, row) in table.rows.iter().enumerate() {
         for (ci, cell) in row.cells.iter().enumerate() {
             let Some((r0, c0, r1, c1)) = merged_owner_and_span(table, ri, ci) else {
                 continue;
             };
-            if r0 != ri || c0 != ci || r1 != ri {
+            if r0 != ri || c0 != ci {
                 continue;
             }
             let Some(content) = cell
@@ -5372,9 +5463,6 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
                 continue;
             };
             let text = cell.text_value();
-            if text.trim().is_empty() {
-                continue;
-            }
             let role = table_style.map(|ts| {
                 match cell_role_kind(table, title_suppressed, header_suppressed, ri, ci) {
                     0 => &ts.title_row_style,
@@ -5385,7 +5473,7 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
             let height = cell_text_height(table, row, ci, cell, content, role.map(|s| s.text_height))
                 .unwrap_or(0.18);
             let style_handle = cell_text_style(document, table, row, ci, cell, Some(content))
-                .or_else(|| role.and_then(|style| style.text_style_handle));
+                .or_else(|| row_style_text_style(document, role));
             let font = style_handle
                 .and_then(|handle| fonts.get(&handle).cloned())
                 .unwrap_or_else(|| "txt".to_string());
@@ -5433,12 +5521,153 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
                 break_long_words: true,
             });
             let lines = layout.line_count.max(1) as f64;
-            let need = height
-                + (lines - 1.0) * layout.line_height as f64
-                + margin(P::MARGIN_TOP, v_margin)
-                + margin(P::MARGIN_BOTTOM, v_margin);
-            needed[ri] = needed[ri].max(need);
+            let (mut low, mut high) = ([f64::MAX; 2], [f64::MIN; 2]);
+            for run in &layout.strokes {
+                for point in run.strokes.iter().flatten().chain(&run.fill_tris) {
+                    for axis in 0..2 {
+                        let at = run.origin[axis] + f64::from(point[axis]);
+                        low[axis] = low[axis].min(at);
+                        high[axis] = high[axis].max(at);
+                    }
+                }
+            }
+            // Ink left of the text start (a first glyph's negative side
+            // bearing: Arial A, j) is not counted (measured: ABC 4130 units).
+            // Upright, the box spans at least the lines' text height, from
+            // the first line's top to the last baseline (txt "x": 4.5).
+            let lines_height = height + (lines - 1.0) * layout.line_height as f64;
+            let ink = if low[0] <= high[0] && !text.trim().is_empty() {
+                [high[0] - low[0].max(0.0), high[1].max(0.0) - low[1].min(-lines_height)]
+            } else {
+                [0.0, height]
+            };
+            extents.push(CellTextExtent {
+                row: ri,
+                column: ci,
+                last_row: r1,
+                last_column: c1,
+                height: height + (lines - 1.0) * layout.line_height as f64,
+                empty: text.trim().is_empty(),
+                ink,
+                margins: [
+                    margin(P::MARGIN_LEFT, h_margin),
+                    margin(P::MARGIN_RIGHT, h_margin),
+                    margin(P::MARGIN_TOP, v_margin),
+                    margin(P::MARGIN_BOTTOM, v_margin),
+                ],
+            });
+        }
+    }
+    extents
+}
+
+/// The height each row needs for the wrapped text of its single-row cells:
+/// the text height, the line spacing for each further line, and the
+/// cell's top and bottom margins (measured: 4.5 text, 1.5 margins — two
+/// lines 15, four 30).
+fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
+    let mut needed = vec![0.0f64; table.rows.len()];
+    for extent in cell_text_extents(table, document) {
+        if extent.last_row == extent.row && !extent.empty {
+            let need = extent.height + extent.margins[2] + extent.margins[3];
+            needed[extent.row] = needed[extent.row].max(need);
         }
     }
     needed
 }
+
+/// Stores where each cell's content sits, as a DXF file keeps it beside
+/// the table (measured): every cell its size with the margins around its
+/// text; a text cell its text block too — the box of the drawn ink, the
+/// offsets of the box's top left corner and of its alignment point from
+/// the cell's top left corner, and the box's width and height. Cells
+/// without content keep only the margins. Each cell's flag is 7 when the
+/// table changed since it was opened or last saved (`modified`), else the
+/// flag it holds (a file's 7 stays until the table changes and saves), 3
+/// by default.
+pub(crate) fn store_cell_geometry(table: &mut Table, document: &codec::Document, modified: bool) {
+    let table_style = table.table_style_handle.and_then(|handle| {
+        match document.objects.get(&handle) {
+            Some(codec::objects::ObjectType::TableStyle(style)) => Some(style.clone()),
+            _ => None,
+        }
+    });
+    let (h_margin, v_margin) = resolved_table_margins(table, table_style.as_ref());
+    let title_suppressed = resolved_title_suppressed(table, table_style.as_ref());
+    let header_suppressed = resolved_header_suppressed(table, table_style.as_ref());
+    let mut placed = Vec::new();
+    for extent in cell_text_extents(table, document) {
+        let row = &table.rows[extent.row];
+        let cell = &row.cells[extent.column];
+        let role = table_style.as_ref().map(|ts| {
+            match cell_role_kind(table, title_suppressed, header_suppressed, extent.row, extent.column) {
+                0 => ts.title_row_style.alignment as i32,
+                1 => ts.header_row_style.alignment as i32,
+                _ => ts.data_row_style.alignment as i32,
+            }
+        });
+        let align = cell_content_alignment(table, row, extent.column, cell, cell.contents.first(), role);
+        let last_column = extent.last_column.min(table.columns.len() - 1);
+        let last_row = extent.last_row.min(table.rows.len() - 1);
+        let cell_width: f64 = table.columns[extent.column..=last_column]
+            .iter()
+            .map(|column| column.width)
+            .sum();
+        let cell_height: f64 = table.rows[extent.row..=last_row]
+            .iter()
+            .map(|row| row.height)
+            .sum();
+        let [left, right, top, bottom] = extent.margins;
+        // The stored width runs 0.1 past the ink of any text that has
+        // width (measured alike for txt, romans and Arial at heights 2.5 to
+        // 10; a single stroke, like txt's "i", stays 0).
+        let [ink_width, h] = extent.ink;
+        let w = if ink_width > 1e-9 { ink_width + 0.1 } else { 0.0 };
+        let (column_step, row_step) = ((align - 1).rem_euclid(3), (align - 1).div_euclid(3));
+        let x = match column_step {
+            0 => left,
+            1 => (cell_width - w) / 2.0,
+            _ => cell_width - right - w,
+        };
+        let y = match row_step {
+            0 => -top,
+            1 => -(cell_height - h) / 2.0,
+            _ => -(cell_height - bottom - h),
+        };
+        placed.push((
+            extent.row,
+            extent.column,
+            w + left + right,
+            h + top + bottom,
+            codec::entities::table::CellContentGeometry {
+                distance_to_top_left: codec::types::Vector3::new(x, y, 0.0),
+                distance_to_center: codec::types::Vector3::new(
+                    x + w * column_step as f64 / 2.0,
+                    y - h * row_step as f64 / 2.0,
+                    0.0,
+                ),
+                width: w,
+                height: h,
+                outer_width: w,
+                outer_height: h,
+                flags: 0,
+            },
+        ));
+    }
+    for row in &mut table.rows {
+        for cell in &mut row.cells {
+            cell.geometry_data_flag = if modified || cell.geometry_data_flag & 4 != 0 { 7 } else { 3 };
+            cell.geometry_width_with_gap = 2.0 * h_margin;
+            cell.geometry_height_with_gap = 2.0 * v_margin;
+            cell.geometries.clear();
+        }
+    }
+    for (ri, ci, width, height, geometry) in placed {
+        if let Some(cell) = table.rows.get_mut(ri).and_then(|row| row.cells.get_mut(ci)) {
+            cell.geometry_width_with_gap = width;
+            cell.geometry_height_with_gap = height;
+            cell.geometries = vec![geometry];
+        }
+    }
+}
+

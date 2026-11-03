@@ -1900,6 +1900,7 @@ impl OpenCADStudio {
                 "ok":false,"status":"failed","code":"save_failed","error":error,
             })
         })?;
+        self.tabs[i].scene.note_tables_saved();
         // The bytes are now ours even if a later hash/audit/reopen check fails.
         // Refresh the guard immediately so a diagnostic failure cannot make the
         // next ordinary save look like an external edit of the same path.

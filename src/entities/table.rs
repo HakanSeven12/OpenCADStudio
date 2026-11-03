@@ -5455,8 +5455,11 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
 /// text; a text cell its text block too — the box of the drawn ink, the
 /// offsets of the box's top left corner and of its alignment point from
 /// the cell's top left corner, and the box's width and height. Cells
-/// without content keep only the margins.
-pub(crate) fn store_cell_geometry(table: &mut Table, document: &codec::Document) {
+/// without content keep only the margins. Each cell's flag is 7 when the
+/// table changed since it was opened or last saved (`modified`), else the
+/// flag it holds (a file's 7 stays until the table changes and saves), 3
+/// by default.
+pub(crate) fn store_cell_geometry(table: &mut Table, document: &codec::Document, modified: bool) {
     let table_style = table.table_style_handle.and_then(|handle| {
         match document.objects.get(&handle) {
             Some(codec::objects::ObjectType::TableStyle(style)) => Some(style.clone()),
@@ -5527,7 +5530,7 @@ pub(crate) fn store_cell_geometry(table: &mut Table, document: &codec::Document)
     }
     for row in &mut table.rows {
         for cell in &mut row.cells {
-            cell.geometry_data_flag = 3;
+            cell.geometry_data_flag = if modified || cell.geometry_data_flag & 4 != 0 { 7 } else { 3 };
             cell.geometry_width_with_gap = 2.0 * h_margin;
             cell.geometry_height_with_gap = 2.0 * v_margin;
             cell.geometries.clear();

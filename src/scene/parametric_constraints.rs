@@ -2795,7 +2795,7 @@ impl super::Scene {
                 continue;
             };
             let mut table = (**table).clone();
-            crate::entities::table::store_cell_geometry(&mut table, &document);
+            crate::entities::table::store_cell_geometry(&mut table, &document, self.table_modified_since_save(handle));
             if let Some(codec::EntityType::Table(stored)) = document.get_entity_mut(handle) {
                 **stored = table;
             }

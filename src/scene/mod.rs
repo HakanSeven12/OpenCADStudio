@@ -2917,6 +2917,10 @@ pub struct Scene {
     /// `geometry_epoch`: a layer colour toggle can reuse the index, invalidate
     /// only its dependants, and avoid a whole-document scan on every toggle.
     dependency_index_cache: RefCell<Option<SceneDependencyIndex>>,
+    /// Tables added or changed since the drawing was opened or last saved:
+    /// their stored cell geometry is marked out of date (flag 7) in the
+    /// next save.
+    tables_modified: HashSet<Handle>,
     /// Boundary source → associative hatch handles. Source edits reuse this
     /// index instead of scanning the document during every drag step.
     associative_hatch_source_cache: RefCell<Option<HashMap<Handle, Vec<Handle>>>>,
@@ -3370,6 +3374,7 @@ impl Scene {
             ucs_epoch: 0,
             ucs_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
+            tables_modified: HashSet::default(),
             associative_hatch_source_cache: RefCell::new(None),
             associative_centerline_source_cache: RefCell::new(None),
             associative_centermark_source_cache: RefCell::new(None),
@@ -4098,6 +4103,25 @@ impl Scene {
         any
     }
 
+    /// Whether a table changed since the drawing was opened or last saved.
+    pub(crate) fn table_modified_since_save(&self, handle: Handle) -> bool {
+        self.tables_modified.contains(&handle)
+    }
+
+    /// After a save: the tables it marked out of date keep up-to-date cell
+    /// geometry from now on (flag 3) until they change again (measured: the
+    /// first save after a change writes 7, the next ones 3; a table no save
+    /// has touched keeps the flag it was read with).
+    pub(crate) fn note_tables_saved(&mut self) {
+        for handle in std::mem::take(&mut self.tables_modified) {
+            if let Some(EntityType::Table(table)) = self.document.get_entity_mut(handle) {
+                for cell in table.rows.iter_mut().flat_map(|row| row.cells.iter_mut()) {
+                    cell.geometry_data_flag = 3;
+                }
+            }
+        }
+    }
+
     /// Settles a changed table (typed values, row heights) and removes the
     /// fields it lists but no cell shows any more, recording the removed
     /// objects for undo.
@@ -4433,6 +4457,13 @@ impl Scene {
         // A cell rewritten over a field (typed text, a copied cell, a removed
         // row or column) no longer shows it; the field objects go with it.
         self.prune_table_fields(changes);
+        for (handle, kind) in changes {
+            if !matches!(kind, ChangeKind::Removed)
+                && matches!(self.document.get_entity(*handle), Some(EntityType::Table(_)))
+            {
+                self.tables_modified.insert(*handle);
+            }
+        }
         if changes.iter().any(|(handle, kind)| {
             matches!(kind, ChangeKind::Removed)
                 || self

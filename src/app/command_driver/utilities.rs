@@ -1369,7 +1369,12 @@ impl OpenCADStudio {
         let owner = self.tabs[i]
             .current_parametric_scope()
             .owner_handle(&self.tabs[i].scene.document);
-        let found = entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs);
+        // A typed point off the screen finds nothing, as a click there could
+        // not: the object prompt then reads it as empty space.
+        let found = self
+            .typed_point_in_view(i, wcs)
+            .then(|| entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs))
+            .flatten();
         if gathering {
             self.last_point = Some(wcs);
             let Some(handle) = found else {

@@ -3653,6 +3653,18 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// Consume an eligible Block Editor marker click while gathering a selection.
+    /// The returned name is drawing-authored and is shown as selection feedback.
+    fn on_selection_marker_click(
+        &mut self,
+        _scene: &Scene,
+        _position: iced::Point,
+        _context: PointPickContext,
+        _remove: bool,
+    ) -> Option<String> {
+        None
+    }
+
     /// The command takes associative dimensions only. The host drops every
     /// other object from a completed selection, says how many it dropped, and
     /// hands the command what is left.

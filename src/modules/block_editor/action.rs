@@ -664,6 +664,32 @@ impl CadCommand for ActionCommand {
         }
     }
 
+    fn on_selection_marker_click(
+        &mut self,
+        scene: &crate::scene::Scene,
+        position: iced::Point,
+        context: PointPickContext,
+        remove: bool,
+    ) -> Option<String> {
+        let source = self.point_source()?;
+        let (handle, name) = super::action_set::pick_point_marker(
+            scene,
+            self.definition,
+            |h| {
+                self.candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == h)
+            },
+            position,
+            context,
+        )?;
+        if remove {
+            self.targets.retain(|h| *h != handle);
+        } else if !self.targets.contains(&handle) {
+            self.targets.push(handle);
+        }
+        Some(name)
+    }
     fn is_selection_gathering(&self) -> bool {
         self.selecting
     }

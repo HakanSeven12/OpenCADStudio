@@ -9,6 +9,53 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["BACTIONSET"]
 });
 
+/// Pick the visible point marker or its leader in the active viewport.
+pub(crate) fn pick_point_marker(
+    scene: &crate::scene::Scene,
+    definition: Handle,
+    eligible: impl Fn(Handle) -> bool,
+    click: iced::Point,
+    context: PointPickContext,
+) -> Option<(Handle, String)> {
+    let project = |p: codec::types::Vector3| {
+        crate::scene::view::projection::project_screen(
+            context.view,
+            context.eye,
+            context.bounds,
+            DVec3::new(p.x, p.y, p.z),
+        )
+    };
+    let distance = |a: iced::Point, b: iced::Point| {
+        let ab = glam::Vec2::new(b.x - a.x, b.y - a.y);
+        let ap = glam::Vec2::new(click.x - a.x, click.y - a.y);
+        let t = (ap.dot(ab) / ab.length_squared().max(1e-12)).clamp(0., 1.);
+        (ap - ab * t).length()
+    };
+    crate::scene::block_authoring::edit::items(&scene.document, definition)
+        .into_iter()
+        .filter(|item| eligible(item.handle))
+        .filter_map(|item| {
+            let d = item
+                .grips
+                .iter()
+                .filter_map(|(_, p)| project(*p).map(|at| distance(at, at)))
+                .chain(
+                    item.graphic
+                        .lines
+                        .iter()
+                        .filter_map(|[a, b]| Some(distance(project(*a)?, project(*b)?))),
+                )
+                .fold(f32::INFINITY, f32::min);
+            (d.is_finite() && d <= context.aperture_px.max(10.)).then_some((
+                d,
+                item.handle,
+                item.name,
+            ))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, handle, name)| (handle, name))
+}
+
 struct Candidate {
     handle: Handle,
     name: String,
@@ -368,6 +415,35 @@ impl CadCommand for ActionSetCommand {
             }
         }
         CmdResult::NeedPoint
+    }
+    fn on_selection_marker_click(
+        &mut self,
+        scene: &crate::scene::Scene,
+        position: iced::Point,
+        context: PointPickContext,
+        remove: bool,
+    ) -> Option<String> {
+        if !matches!(self.mode, Some(Mode::New | Mode::Add | Mode::Remove)) {
+            return None;
+        }
+        let source = self.chosen.and_then(|i| self.candidates[i].point_source)?;
+        let (handle, name) = pick_point_marker(
+            scene,
+            self.definition,
+            |h| {
+                self.points
+                    .iter()
+                    .any(|(_, point, id)| *point == h && *id != source)
+            },
+            position,
+            context,
+        )?;
+        if remove {
+            self.picked.retain(|h| *h != handle);
+        } else if !self.picked.contains(&handle) {
+            self.picked.push(handle);
+        }
+        Some(name)
     }
     fn is_selection_gathering(&self) -> bool {
         matches!(

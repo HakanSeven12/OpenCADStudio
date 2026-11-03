@@ -7090,6 +7090,28 @@ properties={:.1}ms picked={}",
                 sel.gesture.box_current = None;
             } else {
                 if box_anchor.is_none() {
+                    if is_gathering && is_click {
+                        let (view, eye) = match &edit_cam {
+                            Some(camera) => (camera.view_proj_rte(bounds), camera.eye()),
+                            None => {
+                                let camera = self.tabs[i].scene.camera.borrow();
+                                (camera.view_proj_rte(bounds), camera.eye())
+                            }
+                        };
+                        let context = crate::command::PointPickContext {
+                            view, eye, bounds,
+                            aperture_px: crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                        };
+                        let remove = self.shift_down || self.select_remove_mode;
+                        let tab = &mut self.tabs[i];
+                        let hit = tab.active_cmd.as_mut().and_then(|command|
+                            command.on_selection_marker_click(&tab.scene, p, context, remove));
+                        if let Some(name) = hit {
+                            tab.scene.selection.borrow_mut().clear_left_selection_gesture();
+                            self.command_line.push_info(&format!("{} {}", if remove { "−" } else { "+" }, name));
+                            return Task::none();
+                        }
+                    }
                     // A parametric-constraint glyph draws above its geometry
                     // and takes click priority over the entity beneath it.
                     let glyph_hit = (self.tabs[i].scene.current_layout == "Model")

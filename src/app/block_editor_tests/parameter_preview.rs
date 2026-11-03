@@ -1322,3 +1322,100 @@ fn block_move_creation_rejects_stale_point_choices() {
     assert_eq!(app.tabs[i].scene.document, before);
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
 }
+
+#[test]
+fn block_move_point_targets_can_be_picked_in_the_viewport() {
+    let (mut app, insert, def, root, child, existing) = setup_point_transport(false, true);
+    let _ = app.update(Message::CommandEscape);
+    begin(&mut app, insert);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
+    app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
+        DVec3::new(-2., -2., 0.),
+        DVec3::new(5., 10., 0.),
+        1600. / 900.,
+    );
+    let behind = crate::command::PointPickContext {
+        view: glam::camera::rh::proj::directx::perspective(
+            45_f32.to_radians(),
+            1600. / 900.,
+            0.1,
+            100.,
+        ),
+        eye: DVec3::new(0., 0., -10.),
+        bounds: iced::Rectangle {
+            x: 0.,
+            y: 0.,
+            width: 1600.,
+            height: 900.,
+        },
+        aperture_px: 10.,
+    };
+    assert!(crate::modules::block_editor::action_set::pick_point_marker(
+        &app.tabs[i].scene,
+        def,
+        |h| h == child.handle,
+        iced::Point::new(800., 450.),
+        behind,
+    )
+    .is_none());
+    let click = |app: &mut OpenCADStudio, world: DVec3, shift: bool| {
+        let scene = &app.tabs[app.active_tab].scene;
+        let (vw, vh) = scene.selection.borrow().view.vp_size;
+        let tile = scene.active_model_tile_bounds(vw, vh);
+        let screen = scene
+            .camera
+            .borrow()
+            .project(
+                world,
+                iced::Rectangle {
+                    x: 0.,
+                    y: 0.,
+                    width: tile.width,
+                    height: tile.height,
+                },
+            )
+            .unwrap();
+        app.shift_down = shift;
+        let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(
+            screen.x + tile.x,
+            screen.y + tile.y,
+        )));
+        let _ = app.update(Message::ViewportLeftRelease);
+        app.shift_down = false;
+    };
+    let _ = app.dispatch_command("BACTION MOVE");
+    feed(&mut app, &root.name);
+    click(&mut app, child.end, false);
+    click(&mut app, child.end, true);
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .is_selection_gathering());
+    click(&mut app, child.end, false);
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(3., 3., 0.)));
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert!(actions::actions(&app.tabs[i].scene.document, def)
+        .iter()
+        .any(|(handle, action, _, _)| *handle != existing
+            && action.dependencies == vec![child.handle]));
+
+    let geometry = members(&app)[0];
+    edit_action_set(&mut app, existing, "Add", vec![geometry]);
+    app.tabs[i].selected_authoring = Some(existing);
+    let _ = app.dispatch_command("BACTIONSET");
+    feed(&mut app, "Remove");
+    click(&mut app, child.end, false);
+    let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![]));
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    assert!(app.tabs[i].active_cmd.is_none());
+    let action = actions::actions(&app.tabs[i].scene.document, def)
+        .into_iter()
+        .find(|(handle, _, _, _)| *handle == existing)
+        .unwrap();
+    assert!(action.1.dependencies.contains(&geometry));
+    assert!(!action.1.dependencies.contains(&child.handle));
+}

@@ -10,27 +10,6 @@ const NAME: &str = "CTABLESTYLE";
 
 impl OpenCADStudio {
     pub(super) fn dispatch_table_style_var(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
-        if let Some(rest) = cmd.strip_prefix("_TABLESTYLE_TEMPLATE") {
-            let handle = u64::from_str_radix(rest.trim(), 16).ok().map(codec::Handle::new);
-            let is_table = handle.is_some_and(|handle| {
-                matches!(
-                    self.tabs[i].scene.document.get_entity(handle),
-                    Some(codec::EntityType::Table(_))
-                )
-            });
-            if handle.is_some() && !is_table {
-                // Not a table: ask again.
-                self.command_line
-                    .push_error(crate::t!("The object is not a table.").as_ref());
-                let command = crate::modules::annotate::table_cmd::TableTemplatePickCommand;
-                self.command_line
-                    .push_info(&crate::command::CadCommand::prompt(&command));
-                self.tabs[i].active_cmd = Some(Box::new(command));
-                return Some(Task::none());
-            }
-            self.table_style_template_picked(handle);
-            return Some(Task::none());
-        }
         let rest = cmd.strip_prefix("SETVAR ").map(str::trim).unwrap_or(cmd);
         let (name, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
         if !name.trim_start_matches(['_', '.']).eq_ignore_ascii_case(NAME) {

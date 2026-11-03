@@ -1951,6 +1951,9 @@ pub enum CmdResult {
     /// A QuickCalc pick finished: the point, distance or angle it measured,
     /// for the pallet's input.
     QuickCalcPick(crate::app::calc::Value),
+    /// The Table Style window's starting-table pick ended: the picked
+    /// object, or none when the pick was left with Enter or Esc.
+    TableTemplatePick(Option<Handle>),
     /// Command is still waiting for the next point; show updated prompt.
     NeedPoint,
     /// Update the committed-segment wire (normal colour) and keep collecting points.

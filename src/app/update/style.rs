@@ -881,22 +881,33 @@ impl OpenCADStudio {
         use codec::objects::ObjectType;
         let document = &self.tabs[tab].scene.document;
         let found = document.objects.iter().find_map(|(handle, object)| match object {
-            ObjectType::TableStyle(style) if style.name == self.tablestyle_selected => {
-                style.cell_style(name).map(|cell| (*handle, cell.id))
-            }
+            ObjectType::TableStyle(style) if style.name == self.tablestyle_selected => style
+                .cell_style(name)
+                .map(|cell| (*handle, cell.id, style.template())),
             _ => None,
         });
-        let Some((handle, id)) = found else {
+        let Some((handle, id, template)) = found else {
             return false;
         };
-        document.entities().any(|entity| match entity {
-            codec::EntityType::Table(table) if table.table_style_handle == Some(handle) => {
-                table.rows.iter().any(|row| {
-                    row.style_id == id || row.cells.iter().any(|cell| cell.style_id == id)
-                }) || table.columns.iter().any(|column| column.style_id == id)
-            }
-            _ => false,
-        })
+        let uses = |table: &codec::entities::Table| {
+            table.rows.iter().any(|row| {
+                row.style_id == id || row.cells.iter().any(|cell| cell.style_id == id)
+            }) || table.columns.iter().any(|column| column.style_id == id)
+        };
+        // The style's own starting table counts too.
+        let template_uses = template
+            .and_then(|template| match document.objects.get(&template) {
+                Some(ObjectType::TableTemplate(table)) => Some(uses(table)),
+                _ => None,
+            })
+            .unwrap_or(false);
+        template_uses
+            || document.entities().any(|entity| match entity {
+                codec::EntityType::Table(table) if table.table_style_handle == Some(handle) => {
+                    uses(table)
+                }
+                _ => false,
+            })
     }
 
     pub(super) fn on_table_cell_style_edit(
@@ -1073,8 +1084,30 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// The pick ended: a table becomes the starting table and the window
+    /// comes back; another object is refused and asked again.
+    pub(in crate::app) fn table_template_pick_done(&mut self, handle: Option<codec::Handle>) {
+        let i = self.active_tab;
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        let is_table = handle.is_some_and(|handle| {
+            matches!(
+                self.tabs[i].scene.document.get_entity(handle),
+                Some(codec::EntityType::Table(_))
+            )
+        });
+        if handle.is_some() && !is_table {
+            self.command_line
+                .push_error(crate::t!("The object is not a table.").as_ref());
+            let _ = self.on_table_style_template_pick();
+            return;
+        }
+        self.table_style_template_picked(handle);
+    }
+
     /// Back from the pick: the picked table becomes the starting table.
-    pub(in crate::app) fn table_style_template_picked(&mut self, table: Option<codec::Handle>) {
+    fn table_style_template_picked(&mut self, table: Option<codec::Handle>) {
         use codec::objects::ObjectType;
         let i = self.active_tab;
         let picked = table.and_then(|handle| match self.tabs[i].scene.document.get_entity(handle) {
@@ -1090,6 +1123,7 @@ impl OpenCADStudio {
             });
             if let Some(style_handle) = style_handle {
                 let handle = document.allocate_handle();
+                crate::entities::table::detach_fields(&mut template);
                 template.common = codec::entities::EntityCommon::default();
                 template.common.handle = handle;
                 template.common.owner_handle = style_handle;

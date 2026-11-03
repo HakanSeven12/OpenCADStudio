@@ -469,6 +469,7 @@ fn text_frame_polyline(
         rectangle_height: 0.0,
         vertical_text: matches!(text.drawing_direction, DrawingDirection::TopToBottom),
         want_glyph_boxes: false,
+        break_long_words: false,
     });
     let lb = layout.local_bounds;
     if lb[0] > lb[2] || lb[1] > lb[3] {

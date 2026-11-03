@@ -295,6 +295,7 @@ pub fn table_from_template(
             column.style = None;
         }
     }
+    crate::entities::table::detach_fields(&mut table);
     let old_columns = table.columns.len();
     if extra_columns > 0 {
         if let Some(last) = table.columns.last().cloned() {
@@ -1133,9 +1134,8 @@ impl CadCommand for TableCommand {
     }
 }
 
-/// The Table Style editor's "select table to start from": one table is
-/// picked and handed back as `_TABLESTYLE_TEMPLATE <handle>` (no handle when
-/// the pick is cancelled).
+/// The Table Style editor's "select table to start from": one object is
+/// picked and handed back to the window (none when the pick is ended).
 pub struct TableTemplatePickCommand;
 
 impl CadCommand for TableTemplatePickCommand {
@@ -1159,7 +1159,7 @@ impl CadCommand for TableTemplatePickCommand {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
-        CmdResult::Dispatch(format!("_TABLESTYLE_TEMPLATE {:X}", handle.value()))
+        CmdResult::TableTemplatePick(Some(handle))
     }
 
     fn on_point(&mut self, _pt: DVec3) -> CmdResult {
@@ -1167,11 +1167,11 @@ impl CadCommand for TableTemplatePickCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Dispatch("_TABLESTYLE_TEMPLATE".into())
+        CmdResult::TableTemplatePick(None)
     }
 
     fn on_escape(&mut self) -> CmdResult {
-        CmdResult::Dispatch("_TABLESTYLE_TEMPLATE".into())
+        CmdResult::TableTemplatePick(None)
     }
 }
 

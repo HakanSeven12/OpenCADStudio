@@ -755,6 +755,7 @@ impl Scene {
                 rectangle_height: 0.0,
                 vertical_text: false,
                 want_glyph_boxes: false,
+                break_long_words: false,
             });
             for stroke in &layout.strokes {
                 let Some(run) = &stroke.run else { continue };

@@ -180,8 +180,12 @@ fn list<'a>(
     selected: &'a str,
     on: fn(String) -> TableCellDialogMsg,
 ) -> Element<'a, Message> {
-    pick_list(Some(selected.to_string()), options.to_vec(), |value| value.clone())
-        .on_select(move |value| msg(on(value)))
+    use crate::ui::properties::LocalizedChoice;
+    let options: Vec<LocalizedChoice> = options.iter().cloned().map(LocalizedChoice::new).collect();
+    pick_list(Some(LocalizedChoice::new(selected.to_string())), options, |value| {
+        value.to_string()
+    })
+    .on_select(move |value: LocalizedChoice| msg(on(value.raw)))
         .text_size(11)
         .padding([3, 6])
         .width(Fill)

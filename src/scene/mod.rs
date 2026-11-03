@@ -4103,9 +4103,7 @@ impl Scene {
     /// objects for undo.
     fn prune_table_fields(&mut self, changes: &[(Handle, ChangeKind)]) {
         for (table, kind) in changes {
-            if !matches!(kind, ChangeKind::Modified)
-                || !matches!(self.document.get_entity(*table), Some(EntityType::Table(_)))
-            {
+            if !matches!(kind, ChangeKind::Modified) || !self.table_cells_rewritten(*table) {
                 continue;
             }
             // Typed text read as the cells' data types and rows grown to
@@ -4140,6 +4138,29 @@ impl Scene {
                 }
             }
             self.document.prune_table_fields(*table);
+        }
+    }
+
+    /// Whether a modified table had its cells or layout rewritten, not only
+    /// moved, turned or scaled: its rows or columns differ from the image the
+    /// open undo recording keeps; without a recording, the edit dropped the
+    /// table's saved picture. A table read from a file and only moved stays
+    /// as the file has it.
+    fn table_cells_rewritten(&self, handle: Handle) -> bool {
+        let Some(EntityType::Table(table)) = self.document.get_entity(handle) else {
+            return false;
+        };
+        match self.undo_recording.as_ref() {
+            Some(recording) => match recording.before.get(&handle) {
+                Some(Some(before)) => match before.as_ref() {
+                    EntityType::Table(before) => {
+                        before.rows != table.rows || before.columns != table.columns
+                    }
+                    _ => true,
+                },
+                _ => false,
+            },
+            None => table.block_record_handle.is_none(),
         }
     }
 

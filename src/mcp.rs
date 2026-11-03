@@ -41,8 +41,10 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// `dialog_discard` and `dialog_cancel`.
 /// The attribute form an attributed insertion raises is answerable from a
 /// script, so the action list gained `dialog_answer`.
+/// Table cells are driven from a script: `table_cell_dialog`,
+/// `table_cell_warning`, `table_cell_tab` and `command_submit`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "3731d95db83f5342488952e32bd3c8c982ceddc84b63fc758b06c0d220419d95";
+const TOOL_SCHEMA_DIGEST: &str = "1cdd081949bde16f34785201200dc018e3f8a8d5725900d657d7fa6c57769b0b";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

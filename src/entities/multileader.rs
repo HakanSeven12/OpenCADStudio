@@ -249,6 +249,7 @@ fn to_render(ml: &MultiLeader, document: &codec::Document) -> Option<RenderEntit
                 rectangle_height: 0.0,
                 vertical_text: false,
                 want_glyph_boxes: false,
+                break_long_words: false,
             }))
         } else {
             None
@@ -497,6 +498,7 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
             rectangle_height: 0.0,
             vertical_text: vertical,
             want_glyph_boxes: false,
+            break_long_words: false,
         });
         let lb = layout.local_bounds;
         let nat = if lb[0] <= lb[2] {
@@ -2629,6 +2631,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                     codec::entities::multileader::FlowDirectionType::Vertical
                 ),
                 want_glyph_boxes: false,
+                break_long_words: false,
             });
             let line_widths = &layout.line_widths;
             let max_line_w = line_widths.iter().cloned().fold(0.0_f32, f32::max);

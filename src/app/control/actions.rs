@@ -1405,12 +1405,12 @@ impl OpenCADStudio {
         }
         let msg = match name {
             "close_modal" => Message::CloseModal,
-            // Tab / Shift+Tab in a table cell editor: value "next" or "prev".
             // Type `value` into the command line and press Enter.
             "command_submit" => {
                 self.command_line.input = req["value"].as_str().unwrap_or("").to_string();
                 Message::CommandSubmit
             }
+            // Tab / Shift+Tab in a table cell editor: value "next" or "prev".
             "table_cell_tab" => match req["value"].as_str() {
                 Some("prev") => Message::DynTabPrev,
                 _ => Message::DynTabNext,

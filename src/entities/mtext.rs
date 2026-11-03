@@ -176,6 +176,7 @@ pub fn layout_of(
             || matches!(t.drawing_direction, DrawingDirection::ByStyle)
                 && resolved_style.is_vertical,
         want_glyph_boxes,
+        break_long_words: false,
         columns: columns_of(t),
     })
 }
@@ -233,6 +234,7 @@ fn to_render(t: &MText, document: &codec::Document) -> RenderEntity {
             || matches!(t.drawing_direction, DrawingDirection::ByStyle)
                 && resolved_style.is_vertical,
         want_glyph_boxes: false,
+        break_long_words: false,
         columns: columns_of(t),
     });
     let insertion = glam::DVec3::new(

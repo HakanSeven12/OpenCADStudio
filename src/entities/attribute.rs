@@ -266,6 +266,7 @@ fn build_attr_layout(
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: cells.is_some(),
+            break_long_words: false,
         });
         if let Some(out) = cells.as_deref_mut() {
             *out = Some((

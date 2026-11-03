@@ -14598,9 +14598,12 @@ mod free_text_entry_tests {
     #[test]
     fn cell_edit_empty_enter_ends_edit_without_wiping() {
         let (mut app, handle) = app_with_cell_command("Keep me");
+        // Enter moves the editor to the cell below; on the last row it ends.
         let _ = app.update(Message::CommandSubmit);
         assert_eq!(cell_text(&app, handle), "Keep me");
-        assert!(app.tabs[0].active_cmd.is_none(), "Enter ends the edit");
+        assert!(app.tabs[0].active_cmd.is_some(), "Enter moves down a row");
+        let _ = app.update(Message::CommandSubmit);
+        assert!(app.tabs[0].active_cmd.is_none(), "Enter on the last row ends the edit");
     }
 
     #[test]

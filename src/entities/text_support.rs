@@ -1348,6 +1348,7 @@ pub fn wrap_paragraph(
     entity_h: f32,
     base_wf: f32,
     base_font: &str,
+    break_long_words: bool,
 ) -> Vec<Vec<LayoutAtom>> {
     if rect_w <= 0.0 {
         return vec![atoms];
@@ -1376,7 +1377,11 @@ pub fn wrap_paragraph(
             let AtomKind::Word(text) = &atom.kind else {
                 return vec![atom];
             };
-            if full_w <= 0.0 || ink(&atom) <= full_w || text.chars().count() < 2 {
+            if !break_long_words
+                || full_w <= 0.0
+                || ink(&atom) <= full_w
+                || text.chars().count() < 2
+            {
                 return vec![atom];
             }
             let chars: Vec<char> = text.chars().collect();
@@ -1637,6 +1642,9 @@ pub struct MTextRenderOpts<'a> {
     /// one world-space box per visible character (used by the MText editor's
     /// click-to-select preview). Off in the hot render path.
     pub want_glyph_boxes: bool,
+    /// Break a word wider than the box between its characters, as a table
+    /// cell does; MTEXT lets such a word run past its box.
+    pub break_long_words: bool,
     /// The entity's column layout. `Default` (count 0) = a single column, which
     /// is what everything except a multi-column MTEXT wants.
     pub columns: MTextColumns,
@@ -1936,6 +1944,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             entity_h,
             base_wf,
             &base_font_name,
+            opts.break_long_words,
         );
         let n_wrapped = wrapped.len();
         for (idx, atoms) in wrapped.into_iter().enumerate() {
@@ -3250,6 +3259,7 @@ mod tests {
                 rectangle_height: 0.0,
                 vertical_text: false,
                 want_glyph_boxes: false,
+                break_long_words: false,
             })
         };
 
@@ -3296,6 +3306,7 @@ mod tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
+            break_long_words: false,
         });
 
         assert!(
@@ -3321,6 +3332,7 @@ mod tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
+            break_long_words: false,
         });
 
         assert!(
@@ -3352,6 +3364,7 @@ mod tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
+            break_long_words: false,
         });
 
         let origin_x = |text: &str| {
@@ -3536,6 +3549,7 @@ mod v_anchor_tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: true,
+            break_long_words: false,
         })
     }
 
@@ -3601,6 +3615,7 @@ mod v_anchor_tests {
             rectangle_height: 0.0,
             vertical_text: true,
             want_glyph_boxes: true,
+            break_long_words: false,
         });
         let mut boxes: Vec<_> = layout.glyph_boxes.iter().collect();
         boxes.sort_by_key(|b| b.vis);
@@ -3722,6 +3737,7 @@ mod v_anchor_tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: true,
+            break_long_words: false,
         };
         let layout = layout_mtext(&opts);
         assert!(
@@ -3766,6 +3782,7 @@ mod v_anchor_tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
+            break_long_words: false,
         });
         let first = &layout.strokes[1];
         let wrapped = layout
@@ -3839,6 +3856,7 @@ mod v_anchor_tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: true,
+            break_long_words: false,
         };
 
         let layout = layout_mtext(&opts);
@@ -3883,6 +3901,7 @@ mod v_anchor_tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: true,
+            break_long_words: false,
         };
         let layout_mixed = layout_mtext(&opts_mixed);
         assert!(!layout_mixed.strokes.is_empty());
@@ -3915,6 +3934,7 @@ mod v_anchor_tests {
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: true,
+            break_long_words: false,
         };
         let layout_mayl = layout_mtext(&opts_mayl);
         assert_eq!(layout_mayl.strokes.len(), 1);

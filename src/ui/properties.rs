@@ -578,7 +578,12 @@ pub struct LocalizedChoice {
 
 impl LocalizedChoice {
     pub fn new(raw: String) -> Self {
-        let label = crate::i18n::translate(&raw).into_owned();
+        // "Color 8" names an index colour: the number stays as written.
+        let label = raw
+            .strip_prefix("Color ")
+            .filter(|number| number.parse::<u8>().is_ok())
+            .map(|number| crate::tf!("Color {n}", n = number).into_owned())
+            .unwrap_or_else(|| crate::i18n::translate(&raw).into_owned());
         Self { raw, label }
     }
 }

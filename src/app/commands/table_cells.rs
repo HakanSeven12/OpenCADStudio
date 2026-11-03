@@ -101,13 +101,19 @@ impl OpenCADStudio {
                         Box::new(move |t| {
                             let (source, at) = if left { (c0, c0) } else { (c1, c1 + 1) };
                             let mut column = t.columns[source].clone();
-                            let cells: Vec<TableCell> =
-                                t.rows.iter().map(|row| blank_like(&row.cells[source])).collect();
+                            // Rows read from a file can be short of cells.
+                            let cells: Vec<TableCell> = t
+                                .rows
+                                .iter()
+                                .map(|row| row.cells.get(source).map(blank_like).unwrap_or_default())
+                                .collect();
                             t.insert_column(at, column.width);
                             column.name.clear();
                             t.columns[at] = column;
                             for (row, cell) in t.rows.iter_mut().zip(cells) {
-                                row.cells[at] = cell;
+                                if let Some(slot) = row.cells.get_mut(at) {
+                                    *slot = cell;
+                                }
                             }
                             Some(if left { (r0, c0 + 1, r1, c1 + 1) } else { (r0, c0, r1, c1) })
                         }),
@@ -262,7 +268,10 @@ impl OpenCADStudio {
         let forward = step == CellStep::Next;
         let i = self.active_tab;
         let (handle, row, column) = self.tabs[i].active_cmd.as_ref()?.table_cell()?;
-        let text = std::mem::take(&mut self.command_line.input);
+        // A trailing Space is not content (Space types a literal space).
+        let text = std::mem::take(&mut self.command_line.input)
+            .trim_end()
+            .to_string();
         let committed = if text.is_empty() {
             self.tabs[i].active_cmd = None;
             Task::none()
@@ -1135,13 +1144,21 @@ impl OpenCADStudio {
         let Some(cells) = self.tabs[i].scene.table_cells else {
             return;
         };
+        let picked = self.picked_cell_positions(i);
         let document = &self.tabs[i].scene.document;
-        let (r0, c0, r1, c1) = match document.get_entity(cells.table) {
-            Some(codec::EntityType::Table(table)) => {
-                crate::entities::table::widen_to_merged(table, cells.range())
-            }
-            _ => return,
+        let Some(codec::EntityType::Table(table)) = document.get_entity(cells.table) else {
+            return;
         };
+        let (r0, c0, r1, c1) = crate::entities::table::widen_to_merged(table, cells.range());
+        // Each picked cell with the last row and column its merge reaches.
+        let picked: Vec<(usize, usize, usize, usize)> = picked
+            .into_iter()
+            .map(|(row, column)| {
+                let (_, _, last_row, last_column) =
+                    crate::entities::table::widen_to_merged(table, (row, column, row, column));
+                (row, column, last_row, last_column)
+            })
+            .collect();
         let linetype = document
             .line_types
             .iter()
@@ -1154,7 +1171,7 @@ impl OpenCADStudio {
         let hide = state.sets.contains(&BorderSet::None);
         let sets = if hide { vec![BorderSet::All] } else { state.sets.clone() };
         let has = |set: BorderSet| sets.contains(&BorderSet::All) || sets.contains(&set);
-        let chosen = |row: usize, column: usize| -> E {
+        let chosen = |row: usize, column: usize, last_row: usize, last_column: usize| -> E {
             let mut edges = E::empty();
             let outside_or = |outside: bool, side: BorderSet, inner: BorderSet| {
                 if outside {
@@ -1166,18 +1183,17 @@ impl OpenCADStudio {
             if outside_or(row == r0, BorderSet::Top, BorderSet::InsideHorizontal) {
                 edges |= E::TOP;
             }
-            if outside_or(row == r1, BorderSet::Bottom, BorderSet::InsideHorizontal) {
+            if outside_or(last_row == r1, BorderSet::Bottom, BorderSet::InsideHorizontal) {
                 edges |= E::BOTTOM;
             }
             if outside_or(column == c0, BorderSet::Left, BorderSet::InsideVertical) {
                 edges |= E::LEFT;
             }
-            if outside_or(column == c1, BorderSet::Right, BorderSet::InsideVertical) {
+            if outside_or(last_column == c1, BorderSet::Right, BorderSet::InsideVertical) {
                 edges |= E::RIGHT;
             }
             edges
         };
-        let picked = self.picked_cell_positions(i);
         self.edit_picked_table(i, "TABLE CELL BORDERS", |table| {
             let rows = table.rows.len();
             let columns = table.columns.len();
@@ -1196,21 +1212,26 @@ impl OpenCADStudio {
                 }
                 B::INVISIBILITY | B::LINE_WEIGHT | B::COLOR | B::LINE_TYPE | B::BORDER_TYPE
             };
-            for &(row, column) in &picked {
-                let edges = chosen(row, column);
+            for &(row, column, last_row, last_column) in &picked {
+                let edges = chosen(row, column, last_row, last_column);
                 table.edit_cell_borders_on(row, column, edges, set);
-                // The neighbour across an outer edge draws the same line.
-                if edges.contains(E::TOP) && row > 0 {
-                    table.edit_cell_borders_on(row - 1, column, E::BOTTOM, set);
+                // The neighbours across an outer edge (all along a merged
+                // cell's side) draw the same line.
+                for c in column..=last_column {
+                    if edges.contains(E::TOP) && row > 0 {
+                        table.edit_cell_borders_on(row - 1, c, E::BOTTOM, set);
+                    }
+                    if edges.contains(E::BOTTOM) && last_row + 1 < rows {
+                        table.edit_cell_borders_on(last_row + 1, c, E::TOP, set);
+                    }
                 }
-                if edges.contains(E::BOTTOM) && row + 1 < rows {
-                    table.edit_cell_borders_on(row + 1, column, E::TOP, set);
-                }
-                if edges.contains(E::LEFT) && column > 0 {
-                    table.edit_cell_borders_on(row, column - 1, E::RIGHT, set);
-                }
-                if edges.contains(E::RIGHT) && column + 1 < columns {
-                    table.edit_cell_borders_on(row, column + 1, E::LEFT, set);
+                for r in row..=last_row {
+                    if edges.contains(E::LEFT) && column > 0 {
+                        table.edit_cell_borders_on(r, column - 1, E::RIGHT, set);
+                    }
+                    if edges.contains(E::RIGHT) && last_column + 1 < columns {
+                        table.edit_cell_borders_on(r, last_column + 1, E::LEFT, set);
+                    }
                 }
             }
             true

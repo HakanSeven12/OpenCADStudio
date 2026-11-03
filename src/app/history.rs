@@ -869,9 +869,13 @@ impl OpenCADStudio {
     }
 
     /// Add is delta-safe when its layer and XData application IDs already exist
-    /// and it creates no block records.
+    /// and it creates no block records (a new table draws into a new `*T`
+    /// block).
     pub(super) fn delta_add_safe(&self, i: usize, entity: &EntityType) -> bool {
-        if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_))
+        if matches!(
+            entity,
+            EntityType::Block(_) | EntityType::BlockEnd(_) | EntityType::Table(_)
+        )
             || matches!(
                 entity,
                 EntityType::Extended(extended) if matches!(

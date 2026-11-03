@@ -4966,6 +4966,35 @@ impl OpenCADStudio {
         bounds: iced::Rectangle,
         edit_cam: &Option<crate::scene::view::camera::Camera>,
     ) -> bool {
+        self.object_under(i, p, bounds, edit_cam)
+            .is_some_and(|handle| self.tabs[i].scene.selected.contains(&handle))
+    }
+
+    /// The table cell under `p` (clear of the grid lines by `margin`), unless
+    /// another object drawn over the table is under it.
+    fn table_cell_under(
+        &self,
+        i: usize,
+        p: Point,
+        bounds: iced::Rectangle,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+        margin: f64,
+    ) -> Option<(Handle, (usize, usize))> {
+        let world = self.cursor_model_point(i, edit_cam, p, bounds);
+        let (table, cell) = self.tabs[i].scene.table_cell_pick(world, margin)?;
+        self.object_under(i, p, bounds, edit_cam)
+            .is_none_or(|handle| handle == table)
+            .then_some((table, cell))
+    }
+
+    /// The topmost object drawn under `p`.
+    fn object_under(
+        &self,
+        i: usize,
+        p: Point,
+        bounds: iced::Rectangle,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+    ) -> Option<Handle> {
         let started = crate::perf::enabled().then(Instant::now);
         let (view_rot, eye, wires) = self.pick_view(i, edit_cam, bounds);
         let aperture = crate::ui::overlay::pick_box_aperture_px(self.pick_box);
@@ -4993,13 +5022,12 @@ impl OpenCADStudio {
             aperture,
             &scene.draw_depth_map(),
         )
-        .and_then(Scene::handle_from_wire_name)
-        .is_some_and(|handle| scene.selected.contains(&handle));
+        .and_then(Scene::handle_from_wire_name);
         let hit_ms = crate::perf::elapsed_ms(hit_started);
         let total_ms = crate::perf::elapsed_ms(started);
         if total_ms >= 1.0 {
             crate::perf_record!(
-                "[perf] selected-drag-probe total={total_ms:.1}ms candidates={candidate_ms:.1}ms hit={hit_ms:.1}ms wires={} candidates_count={} selected_hit={hit}",
+                "[perf] object-under-probe total={total_ms:.1}ms candidates={candidate_ms:.1}ms hit={hit_ms:.1}ms wires={} candidates_count={} hit={hit:?}",
                 wire_count,
                 candidates.len(),
             );
@@ -5036,8 +5064,7 @@ impl OpenCADStudio {
             height: tile.height,
         };
         let press = Point::new(press.x - tile.x, press.y - tile.y);
-        let start = self.cursor_model_point(i, edit_cam, press, bounds);
-        let Some((table, anchor)) = self.tabs[i].scene.table_cell_pick(start, 0.0) else {
+        let Some((table, anchor)) = self.table_cell_under(i, press, bounds, edit_cam, 0.0) else {
             return;
         };
         let here = self.cursor_model_point(i, edit_cam, p, bounds);
@@ -5730,11 +5757,7 @@ impl OpenCADStudio {
             && !self.shift_down
             && !self.tabs[i].scene.selected.is_empty()
             // A press inside a table cell drags out a cell range instead.
-            && self
-                .tabs[i]
-                .scene
-                .table_cell_pick(self.tabs[i].last_cursor_world, 0.0)
-                .is_none()
+            && self.table_cell_under(i, p, bounds, &edit_cam, 0.0).is_none()
             && self.selected_object_under(i, p, bounds, &edit_cam))
         .then_some((self.tabs[i].last_cursor_world, false));
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
@@ -6945,9 +6968,8 @@ impl OpenCADStudio {
                 let cell_drag = box_anchor
                     .filter(|_| self.tabs[i].active_cmd.is_none())
                     .and_then(|a| {
-                        let start = self.cursor_model_point(i, &edit_cam, a, bounds);
                         let end = self.cursor_model_point(i, &edit_cam, p, bounds);
-                        let (table, anchor) = self.tabs[i].scene.table_cell_pick(start, 0.0)?;
+                        let (table, anchor) = self.table_cell_under(i, a, bounds, &edit_cam, 0.0)?;
                         let (end_table, end) = self.tabs[i].scene.table_cell_pick(end, 0.0)?;
                         (end_table == table).then_some(crate::scene::TableCellSelection {
                             table,
@@ -7097,7 +7119,7 @@ properties={:.1}ms picked={}",
                         );
                         let margin = (edge - click_world).length();
                         if let Some((table, cell)) =
-                            self.tabs[i].scene.table_cell_pick(click_world, margin)
+                            self.table_cell_under(i, p, bounds, &edit_cam, margin)
                         {
                             // A quick press-move-release across cells picks the
                             // range between them.

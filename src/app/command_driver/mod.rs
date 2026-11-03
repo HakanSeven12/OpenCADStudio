@@ -522,6 +522,7 @@ impl OpenCADStudio {
                     crate::ui::window::quick_calc::QuickCalcMsg::Picked(value),
                 ));
             }
+            CmdResult::TableTemplatePick(handle) => self.table_template_pick_done(handle),
             CmdResult::OpenTxt2MtxtSettings => self.open_txt2mtxt_settings(),
             CmdResult::OpenAutoConstrainSettings => {
                 self.handle_open_auto_constrain_settings();

@@ -693,11 +693,15 @@ pub fn table_insert_view<'a>(
             Message::TableInsertField(TableInsertField::Insertion(TableInsertion::Point))
         ),
         if state.template.is_some() && state.source == TableSource::Empty {
-            // A starting table keeps its own sizes: no window.
+            // A starting table keeps its own sizes: no window (a radio that
+            // does nothing, drawn muted).
             Element::from(
-                text(format!("○  {}", t!("Specify window")))
-                    .size(12)
-                    .style(muted),
+                form_radio(t!("Specify window"), true, None, |_| Message::Noop).style(
+                    |theme: &Theme, status| iced::widget::radio::Style {
+                        text_color: muted(theme).color,
+                        ..iced::widget::radio::default(theme, status)
+                    },
+                ),
             )
         } else {
             radio_button(

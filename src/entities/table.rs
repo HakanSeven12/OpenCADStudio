@@ -1526,6 +1526,7 @@ impl RenderConvertible for Table {
                     rectangle_height: 0.0,
                     vertical_text: false,
                     want_glyph_boxes: false,
+                    break_long_words: true,
                 });
                 // Flatten TextStroke groups into the table's Lines buffer.
                 // Per-run inline `\C` / `\c` colour is dropped here because the
@@ -2245,6 +2246,7 @@ pub fn tessellate_table(
                         rectangle_height: 0.0,
                         vertical_text: false,
                         want_glyph_boxes: field_boxes,
+                        break_long_words: true,
                     });
                     // FIELDDISPLAY: a field cell's text on a gray box, one per line,
                     // from the same layout's character cells (screen only).
@@ -2530,6 +2532,8 @@ impl Grippable for Table {
                 }
             };
             apply_cell_grip(self, range, grip_id, point);
+            // The saved picture is drawn again from the cells.
+            self.block_record_handle = None;
             return;
         }
         if let GripApply::Translate(delta) = apply {
@@ -3467,6 +3471,30 @@ impl PropertyEditable for Table {
         use codec::entities::table::{
             BreakOptionFlags, CellStateFlags, CellStyle, CellStylePropertyFlags,
         };
+        // A picked range shows its whole width and height: a new value
+        // scales the range's columns (rows) together to reach it.
+        if matches!(field, "tbl_cell_width" | "tbl_cell_height")
+            && !self.rows.is_empty()
+            && !self.columns.is_empty()
+        {
+            if let (Some(range), Some(number)) =
+                (prop_cell_range(), parse_f64(value).filter(|n| *n > 0.0))
+            {
+                let (r0, c0, r1, c1) = widen_to_merged(self, range);
+                let sizes: Vec<&mut f64> = if field == "tbl_cell_width" {
+                    self.columns[c0..=c1].iter_mut().map(|c| &mut c.width).collect()
+                } else {
+                    self.rows[r0..=r1].iter_mut().map(|r| &mut r.height).collect()
+                };
+                let span: f64 = sizes.iter().map(|size| **size).sum();
+                if span > 1e-12 {
+                    for size in sizes {
+                        *size *= number / span;
+                    }
+                }
+                return;
+            }
+        }
         // A picked range: the value goes into every picked cell.
         if field.starts_with("tbl_cell_") && value != "toggle" {
             if let Some(range) = prop_cell_range() {
@@ -4179,6 +4207,25 @@ pub fn column_label(mut column: usize) -> String {
     String::from_utf8(label).unwrap_or_default()
 }
 
+/// A copy of a table keeps the text its fields show as plain values: the
+/// FIELD objects belong to the table it was copied from.
+pub fn detach_fields(table: &mut Table) {
+    use codec::entities::table::TableCellContentType;
+    let contents = table
+        .rows
+        .iter_mut()
+        .flat_map(|row| row.cells.iter_mut())
+        .flat_map(|cell| cell.contents.iter_mut());
+    for content in contents {
+        if content.field_handle.take().is_some()
+            && content.content_type == TableCellContentType::Field
+        {
+            content.content_type = TableCellContentType::Value;
+        }
+    }
+    table.field_handles.clear();
+}
+
 /// A rectangular cell range, inclusive, widened to whole merged cells.
 pub fn widen_to_merged(
     table: &Table,
@@ -4317,6 +4364,7 @@ pub fn table_indicator(
         rectangle_height: 0.0,
         vertical_text: false,
         want_glyph_boxes: false,
+        break_long_words: true,
     })
     .line_widths
     .first()
@@ -4649,12 +4697,12 @@ impl TableCellBordersExt for Table {
 
 /// Grip ids of a picked cell range: its left, right, top and bottom edge
 /// midpoints (column width / row height) and the fill diamond at the
-/// bottom-right corner.
-pub const CELL_GRIP_LEFT: usize = 1000;
-pub const CELL_GRIP_RIGHT: usize = 1001;
-pub const CELL_GRIP_TOP: usize = 1002;
-pub const CELL_GRIP_BOTTOM: usize = 1003;
-pub const CELL_GRIP_FILL: usize = 1004;
+/// bottom-right corner. Far above the column grips (`101 + column`).
+pub const CELL_GRIP_LEFT: usize = 0x7fff_ff00;
+pub const CELL_GRIP_RIGHT: usize = CELL_GRIP_LEFT + 1;
+pub const CELL_GRIP_TOP: usize = CELL_GRIP_LEFT + 2;
+pub const CELL_GRIP_BOTTOM: usize = CELL_GRIP_LEFT + 3;
+pub const CELL_GRIP_FILL: usize = CELL_GRIP_LEFT + 4;
 
 /// The picked range's edges along and down the table: (x0, x1, y0, y1).
 fn cell_range_edges(table: &Table, range: (usize, usize, usize, usize)) -> (f64, f64, f64, f64) {
@@ -5256,6 +5304,7 @@ fn fitted_row_heights(table: &Table, document: &codec::Document) -> Vec<f64> {
                 rectangle_height: 0.0,
                 vertical_text: false,
                 want_glyph_boxes: false,
+                break_long_words: true,
             });
             let lines = layout.line_count.max(1) as f64;
             let need = height

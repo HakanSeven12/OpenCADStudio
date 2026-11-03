@@ -9,7 +9,7 @@
 //     Polyline3D  → Lines
 //     Polyline    → Lines
 //     Insert      → constituent entities (via opencadcodec explode_from_document)
-//     MLine       → Lines (spine + offset lines per miter direction)
+//     MLine       → Lines (one run per style element, as drawn)
 //     Dimension   → Lines (extension + dimension + arrows) + Text
 //     MText       → Text lines
 //     Region      → Lines, Arcs, Circles, Ellipses, Splines (from ACIS B-Rep loops or wires)
@@ -139,7 +139,7 @@ fn explode_entity_in_context(
             .filter(|entity| !crate::scene::block_construction::is_construction(entity.common()))
             .map(normalize_insert_entity)
             .collect(),
-        EntityType::MLine(ml) => explode_mline(ml),
+        EntityType::MLine(ml) => explode_mline(ml, document),
         EntityType::Dimension(dim) => explode_dimension(dim, document),
         EntityType::Leader(leader) => explode_leader(leader, document),
         EntityType::MultiLeader(leader) => {
@@ -795,59 +795,53 @@ fn bulge_to_arc(
     Some(EntityType::Arc(arc))
 }
 
-fn explode_mline(ml: &MLine) -> Vec<EntityType> {
-    let n = ml.vertices.len();
-    if n < 2 {
-        return vec![];
-    }
-    let closed = ml.flags.contains(codec::entities::MLineFlags::CLOSED);
-    let scale = ml.scale_factor;
-    let n_segs = if closed { n } else { n - 1 };
-    let mut result = Vec::with_capacity(n_segs * 3);
+/// Explode a multiline into the Lines it draws. The pieces come from the same
+/// `mline_lines` the renderer uses, so they keep the style's elements and
+/// offsets, the justification, MLEDIT breaks, joints and end caps (#2538).
+fn explode_mline(ml: &MLine, doc: &Document) -> Vec<EntityType> {
+    use codec::types::Color;
 
-    // Helper: build a Line from two Vector3 positions.
-    let make_line = |common: &codec::entities::EntityCommon,
-                     s: &codec::types::Vector3,
-                     e: &codec::types::Vector3|
-     -> EntityType {
-        let mut c = common.clone();
-        c.handle = Handle::NULL;
-        EntityType::Line(LineEnt {
-            common: c,
-            start: s.clone(),
-            end: e.clone(),
-            ..LineEnt::new()
-        })
-    };
-
-    // For each segment, emit the center-spine line and the two ±scale/2 offset lines.
-    for i in 0..n_segs {
-        let v0 = &ml.vertices[i];
-        let v1 = &ml.vertices[(i + 1) % n];
-
-        // Spine line
-        result.push(make_line(&ml.common, &v0.position, &v1.position));
-
-        if scale.abs() > 1e-9 {
-            let half = scale * 0.5;
-            for &sign in &[-1.0_f64, 1.0_f64] {
-                let off = half * sign;
-                // Use miter direction at each vertex to offset the endpoints.
-                let s = Vector3::new(
-                    v0.position.x + v0.miter.x * off,
-                    v0.position.y + v0.miter.y * off,
-                    v0.position.z + v0.miter.z * off,
-                );
-                let e = Vector3::new(
-                    v1.position.x + v1.miter.x * off,
-                    v1.position.y + v1.miter.y * off,
-                    v1.position.z + v1.miter.z * off,
-                );
-                result.push(make_line(&ml.common, &s, &e));
+    let mut result = Vec::new();
+    for element in crate::entities::mline::mline_lines(ml, doc) {
+        let mut common = ml.common.clone();
+        common.handle = Handle::NULL;
+        // ByLayer / ByBlock elements show in the multiline's own colour and
+        // linetype; an explicit element value carries over to its lines.
+        if !matches!(element.color, Color::ByLayer | Color::ByBlock) {
+            common.color = element.color;
+            common.color_name = None;
+            common.color_book_handle = None;
+        }
+        let linetype = element.linetype.as_str();
+        if !linetype.eq_ignore_ascii_case("ByLayer") && !linetype.eq_ignore_ascii_case("ByBlock") {
+            common.linetype = element.linetype.clone();
+            common.linetype_handle = doc
+                .line_types
+                .iter()
+                .find(|line_type| line_type.name.eq_ignore_ascii_case(linetype))
+                .map(|line_type| line_type.handle);
+        }
+        // A NaN point separates the drawn runs of one element (MLEDIT cuts).
+        for pair in element.points.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            if a.iter().chain(&b).any(|v| v.is_nan()) {
+                continue;
             }
+            let (start, end) = (
+                Vector3::new(a[0], a[1], a[2]),
+                Vector3::new(b[0], b[1], b[2]),
+            );
+            if start.distance(&end) <= 1e-12 {
+                continue;
+            }
+            result.push(EntityType::Line(LineEnt {
+                common: common.clone(),
+                start,
+                end,
+                ..LineEnt::new()
+            }));
         }
     }
-
     result
 }
 
@@ -3955,5 +3949,135 @@ mod tests {
                 }
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod mline_tests {
+    use super::*;
+    use codec::entities::{MLineJustification, MLineVertex};
+    use codec::objects::{MLineStyle, MLineStyleElement, ObjectType};
+    use codec::types::Color;
+
+    /// A multiline built the way the MLINE command builds one, with its style
+    /// registered in the document.
+    fn mline_in(
+        doc: &mut Document,
+        mut style: MLineStyle,
+        points: &[(f64, f64)],
+        justification: MLineJustification,
+    ) -> MLine {
+        style.handle = doc.allocate_handle();
+        let mut mline = MLine::new();
+        mline.scale_factor = 1.0;
+        mline.justification = justification;
+        mline.style_name = style.name.clone();
+        mline.style_handle = Some(style.handle);
+        mline.style_element_count = style.elements.len();
+        for &(x, y) in points {
+            let mut vertex = MLineVertex::new(Vector3::new(x, y, 0.0));
+            vertex.init_segments(style.elements.len());
+            mline.vertices.push(vertex);
+        }
+        crate::entities::mline::rebuild_mline_geometry(&mut mline);
+        crate::modules::draw::draw::mline::sync_mline_element_parameters(&mut mline, &style);
+        doc.objects
+            .insert(style.handle, ObjectType::MLineStyle(style));
+        mline
+    }
+
+    fn lines(out: &[EntityType]) -> Vec<(Vector3, Vector3)> {
+        out.iter()
+            .map(|entity| match entity {
+                EntityType::Line(line) => (line.start, line.end),
+                other => panic!("expected only Lines, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// #2538: a two-element, top-justified multiline round a corner explodes
+    /// into its two drawn elements, square to the path and meeting at the
+    /// corner. The old code added a centre spine and offset by ±scale/2.
+    #[test]
+    fn explode_mline_follows_style_elements_and_justification() {
+        let mut doc = Document::new();
+        let mut style = MLineStyle::standard();
+        style.name = "EXPLODE_TOP".into();
+        let mline = mline_in(
+            &mut doc,
+            style,
+            &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+            MLineJustification::Top,
+        );
+
+        let out = explode_entity(&EntityType::MLine(mline), &doc);
+        let segments = lines(&out);
+        assert_eq!(
+            segments.len(),
+            4,
+            "two elements x two segments: {segments:?}"
+        );
+
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let horizontal: Vec<_> = segments.iter().filter(|(s, e)| near(s.y, e.y)).collect();
+        let vertical: Vec<_> = segments.iter().filter(|(s, e)| near(s.x, e.x)).collect();
+        assert_eq!(
+            horizontal.len(),
+            2,
+            "first leg stays horizontal: {segments:?}"
+        );
+        assert_eq!(vertical.len(), 2, "second leg stays vertical: {segments:?}");
+
+        // Top justification: one element on the path, the other one unit off it.
+        let mut ys: Vec<f64> = horizontal.iter().map(|(s, _)| s.y.abs()).collect();
+        ys.sort_by(f64::total_cmp);
+        assert!(
+            near(ys[0], 0.0) && near(ys[1], 1.0),
+            "element offsets {ys:?}"
+        );
+
+        // Each element's two legs meet at its mitred corner.
+        for (_, end) in &horizontal {
+            assert!(
+                vertical.iter().any(|(start, _)| start.distance(end) < 1e-9),
+                "horizontal leg ending at {end:?} meets no vertical leg"
+            );
+        }
+    }
+
+    /// An element with its own colour and linetype keeps them; a ByLayer
+    /// element takes the multiline's.
+    #[test]
+    fn explode_mline_carries_element_colour_and_linetype() {
+        let mut doc = Document::new();
+        let mut style = MLineStyle::new("EXPLODE_TWO_TONE");
+        let mut red = MLineStyleElement::new(0.5);
+        red.color = Color::from_index(1);
+        red.linetype = "DASHED".into();
+        style.add_element(red);
+        style.add_element(MLineStyleElement::new(-0.5));
+        let mut mline = mline_in(
+            &mut doc,
+            style,
+            &[(0.0, 0.0), (10.0, 0.0)],
+            MLineJustification::Zero,
+        );
+        mline.common.color = Color::from_index(3);
+        mline.common.linetype = "ByLayer".into();
+
+        let out = explode_entity(&EntityType::MLine(mline), &doc);
+        assert_eq!(out.len(), 2, "one Line per element: {out:?}");
+        let mut styles: Vec<(Color, String)> = out
+            .iter()
+            .map(|entity| (entity.common().color, entity.common().linetype.clone()))
+            .collect();
+        styles.sort_by_key(|(_, linetype)| linetype.clone());
+        assert_eq!(
+            styles,
+            vec![
+                (Color::from_index(3), "ByLayer".to_string()),
+                (Color::from_index(1), "DASHED".to_string()),
+            ]
+        );
     }
 }

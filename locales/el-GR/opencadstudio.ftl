@@ -8447,6 +8447,12 @@ table-cells =
     .warning-note = Η μετατροπή διαβάζει κάθε τιμή ως τον νέο τύπο· μια τιμή που δεν διαβάζεται διαγράφεται. Το Άκυρο αφήνει τα κελιά αμετάβλητα.
     .warning-ok = Μετατροπή
     .warning-cancel = Άκυρο
+    .entry-title = Cell Value Does Not Match
+    .entry-heading = The typed value is not of this cell's data type.
+    .entry-type = Change the cell's data type
+    .entry-type-note = The cell takes the data type of the typed value and the value goes in.
+    .entry-value = Edit the value
+    .entry-value-note = The value goes back into the cell's editor to be corrected.
 
 parameters-manager =
     .action-parameters = Παράμετροι ενεργειών

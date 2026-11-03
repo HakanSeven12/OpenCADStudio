@@ -8447,6 +8447,12 @@ table-cells =
     .warning-note = Převod přečte každou hodnotu jako nový typ; hodnota, kterou nelze přečíst, se vymaže. Zrušit ponechá buňky beze změny.
     .warning-ok = Převést
     .warning-cancel = Zrušit
+    .entry-title = Cell Value Does Not Match
+    .entry-heading = The typed value is not of this cell's data type.
+    .entry-type = Change the cell's data type
+    .entry-type-note = The cell takes the data type of the typed value and the value goes in.
+    .entry-value = Edit the value
+    .entry-value-note = The value goes back into the cell's editor to be corrected.
 
 parameters-manager =
     .action-parameters = Parametry akcí

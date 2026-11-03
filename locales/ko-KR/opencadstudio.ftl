@@ -8436,6 +8436,12 @@ table-cells =
     .warning-note = 변환하면 각 값을 새 유형으로 읽으며, 읽을 수 없는 값은 지워집니다. 취소하면 셀이 변경되지 않습니다.
     .warning-ok = 변환
     .warning-cancel = 취소
+    .entry-title = Cell Value Does Not Match
+    .entry-heading = The typed value is not of this cell's data type.
+    .entry-type = Change the cell's data type
+    .entry-type-note = The cell takes the data type of the typed value and the value goes in.
+    .entry-value = Edit the value
+    .entry-value-note = The value goes back into the cell's editor to be corrected.
 
 parameters-manager =
     .action-parameters = 동작 매개변수

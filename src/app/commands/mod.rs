@@ -47,7 +47,7 @@ mod point_cloud;
 mod refedit;
 pub(crate) mod sheet_set;
 mod spell;
-mod table_cells;
+pub(in crate::app) mod table_cells;
 mod styleprops;
 mod text_edit;
 mod table_style_var;

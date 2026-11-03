@@ -8447,6 +8447,12 @@ table-cells =
     .warning-note = La conversion lit chaque valeur dans le nouveau type ; une valeur illisible est effacée. Annuler laisse les cellules inchangées.
     .warning-ok = Convertir
     .warning-cancel = Annuler
+    .entry-title = Cell Value Does Not Match
+    .entry-heading = The typed value is not of this cell's data type.
+    .entry-type = Change the cell's data type
+    .entry-type-note = The cell takes the data type of the typed value and the value goes in.
+    .entry-value = Edit the value
+    .entry-value-note = The value goes back into the cell's editor to be corrected.
 
 parameters-manager =
     .action-parameters = Paramètres d’action

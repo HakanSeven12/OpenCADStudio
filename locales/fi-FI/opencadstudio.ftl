@@ -8444,6 +8444,12 @@ table-cells =
     .warning-note = Muunnos lukee jokaisen arvon uutena tyyppinä; arvo, jota ei voi lukea, tyhjennetään. Peruuta jättää solut ennalleen.
     .warning-ok = Muunna
     .warning-cancel = Peruuta
+    .entry-title = Cell Value Does Not Match
+    .entry-heading = The typed value is not of this cell's data type.
+    .entry-type = Change the cell's data type
+    .entry-type-note = The cell takes the data type of the typed value and the value goes in.
+    .entry-value = Edit the value
+    .entry-value-note = The value goes back into the cell's editor to be corrected.
 
 parameters-manager =
     .action-parameters = Toimintoparametrit

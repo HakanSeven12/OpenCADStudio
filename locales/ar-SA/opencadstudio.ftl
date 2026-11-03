@@ -8450,6 +8450,12 @@ table-cells =
     .warning-note = يقرأ التحويل كل قيمة بالنوع الجديد، وتُمسح القيمة التي لا يمكن قراءتها. يترك الإلغاء الخلايا دون تغيير.
     .warning-ok = تحويل
     .warning-cancel = إلغاء
+    .entry-title = Cell Value Does Not Match
+    .entry-heading = The typed value is not of this cell's data type.
+    .entry-type = Change the cell's data type
+    .entry-type-note = The cell takes the data type of the typed value and the value goes in.
+    .entry-value = Edit the value
+    .entry-value-note = The value goes back into the cell's editor to be corrected.
 
 parameters-manager =
     .action-parameters = معلمات الإجراءات

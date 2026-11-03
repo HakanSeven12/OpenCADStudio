@@ -164,6 +164,126 @@ fn nested_block_insertion_preview_materializes_cached_geometry() {
 }
 
 #[test]
+fn clipboard_block_previews_follow_cursor_after_cache_warmup() {
+    use crate::modules::draw::clipboard::paste::PasteCommand;
+
+    for nested in [false, true] {
+        let (scene, handles) = repeated_blocks(nested);
+        // Warm the same block cache used when the original drawing is rendered.
+        scene.wire_models_for(&handles);
+        for selection in [&handles[..1], &handles[..]] {
+            let entities: Vec<_> = selection
+                .iter()
+                .map(|handle| scene.document.get_entity(*handle).unwrap().clone())
+                .collect();
+            let base = DVec3::new(-10.0, -20.0, 0.0);
+            let starts: Vec<f64> = selection
+                .iter()
+                .enumerate()
+                .flat_map(|(index, _)| {
+                    let x = index as f64 * 50.0;
+                    if nested {
+                        vec![x, x + 20.0]
+                    } else {
+                        vec![x]
+                    }
+                })
+                .collect();
+            for _ in 0..3 {
+                let wires = scene.wires_for_entities(&entities);
+                let mut command = PasteCommand::new(wires, base.as_vec3());
+                for cursor in [DVec3::new(30.0, 20.0, 0.0), DVec3::new(-50.0, 10.0, 0.0)] {
+                    let delta = cursor - base;
+                    let expected: Vec<_> = starts
+                        .iter()
+                        .flat_map(|&x| {
+                            [
+                                (DVec3::new(x, 0.0, 0.0) + delta).to_array(),
+                                (DVec3::new(x + 10.0, 5.0, 0.0) + delta).to_array(),
+                            ]
+                        })
+                        .collect();
+                    let preview = command.on_preview_wires(cursor);
+                    assert_geometry(&preview, &expected);
+                    assert!(preview.iter().all(|wire| wire.stub.is_none()));
+                    assert!(preview.iter().all(|wire| wire.render_instance.is_none()));
+                }
+                assert!(matches!(
+                    command.on_point(DVec3::new(30.0, 20.0, 0.0)),
+                    crate::command::CmdResult::PasteClipboard { base_pt }
+                        if base_pt == DVec3::new(30.0, 20.0, 0.0)
+                ));
+            }
+        }
+    }
+}
+
+#[test]
+fn large_nested_clipboard_uses_a_complete_bounding_box_preview() {
+    use crate::modules::draw::clipboard::paste::PasteCommand;
+
+    let (scene, handles) = repeated_blocks(true);
+    // Each Parent contains two leaf wires. Expanding cached copies must happen
+    // before the paste command chooses its bounded-cost preview for >20k wires.
+    let entity = scene.document.get_entity(handles[0]).unwrap().clone();
+    let entities = vec![entity; 10_001];
+    let mut command = PasteCommand::new(scene.wires_for_entities(&entities), glam::Vec3::ZERO);
+    let preview = command.on_preview_wires(DVec3::new(100.0, 80.0, 0.0));
+    assert_eq!(preview.len(), 1);
+    assert_eq!(preview[0].name, "preview_paste_bbox");
+    assert_geometry(
+        &preview,
+        &[
+            [100.0, 80.0, 0.0],
+            [130.0, 80.0, 0.0],
+            [130.0, 85.0, 0.0],
+            [100.0, 85.0, 0.0],
+            [100.0, 80.0, 0.0],
+        ],
+    );
+}
+
+#[test]
+fn paste_as_block_and_xref_previews_follow_cursor_after_cache_warmup() {
+    use crate::modules::insert::{insert_block::InsertBlockCommand, xattach::XAttachCommand};
+
+    let (scene, handles) = repeated_blocks(true);
+    scene.wire_models_for(&handles);
+    let entities: Vec<_> = handles
+        .iter()
+        .map(|handle| scene.document.get_entity(*handle).unwrap().clone())
+        .collect();
+    for _ in 0..3 {
+        let wires = scene.wires_for_entities(&entities);
+        let mut commands: Vec<Box<dyn CadCommand>> = vec![
+            Box::new(InsertBlockCommand::new_for_block(
+                "PastedBlock".into(),
+                wires.clone(),
+                DVec3::ZERO,
+            )),
+            Box::new(XAttachCommand::with_path("reference.dxf".into()).with_preview(wires, 1.0)),
+        ];
+        for command in &mut commands {
+            for cursor in [DVec3::new(30.0, 20.0, 0.0), DVec3::new(-10.0, 50.0, 0.0)] {
+                let expected: Vec<_> = [0.0, 20.0, 50.0, 70.0]
+                    .into_iter()
+                    .flat_map(|x| {
+                        [
+                            (DVec3::new(x, 0.0, 0.0) + cursor).to_array(),
+                            (DVec3::new(x + 10.0, 5.0, 0.0) + cursor).to_array(),
+                        ]
+                    })
+                    .collect();
+                let preview = command.on_preview_wires(cursor);
+                assert_geometry(&preview, &expected);
+                assert!(preview.iter().all(|wire| wire.stub.is_none()));
+                assert!(preview.iter().all(|wire| wire.render_instance.is_none()));
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires a GPU adapter"]
 fn repeated_block_previews_render_at_the_transformed_positions() {
     use crate::scene::pipeline::{Pipeline, Uniforms};
@@ -219,14 +339,45 @@ fn repeated_block_previews_render_at_the_transformed_positions() {
         let (mut scene, handles) = repeated_blocks(true);
         scene.bg_color = bg;
         for _ in 0..3 {
-            for rotate in [false, true] {
-                let wires = scene.wire_models_for(&handles);
-                let mut command: Box<dyn CadCommand> = if rotate {
-                    Box::new(RotateCommand::new(handles.clone(), wires))
-                } else {
-                    Box::new(MoveCommand::new(handles.clone(), wires))
+            for mode in ["MOVE", "ROTATE", "PASTECLIP", "PASTEBLOCK", "XATTACH"] {
+                use crate::modules::draw::clipboard::paste::PasteCommand;
+                use crate::modules::insert::{
+                    insert_block::InsertBlockCommand, xattach::XAttachCommand,
                 };
-                command.on_point(DVec3::ZERO);
+
+                let rotate = mode == "ROTATE";
+                let mut command: Box<dyn CadCommand> = match mode {
+                    "MOVE" => Box::new(MoveCommand::new(
+                        handles.clone(),
+                        scene.wire_models_for(&handles),
+                    )),
+                    "ROTATE" => Box::new(RotateCommand::new(
+                        handles.clone(),
+                        scene.wire_models_for(&handles),
+                    )),
+                    _ => {
+                        let entities: Vec<_> = handles
+                            .iter()
+                            .map(|handle| scene.document.get_entity(*handle).unwrap().clone())
+                            .collect();
+                        let wires = scene.wires_for_entities(&entities);
+                        match mode {
+                            "PASTECLIP" => Box::new(PasteCommand::new(wires, glam::Vec3::ZERO)),
+                            "PASTEBLOCK" => Box::new(InsertBlockCommand::new_for_block(
+                                "PastedBlock".into(),
+                                wires,
+                                DVec3::ZERO,
+                            )),
+                            _ => Box::new(
+                                XAttachCommand::with_path("reference.dxf".into())
+                                    .with_preview(wires, 1.0),
+                            ),
+                        }
+                    }
+                };
+                if matches!(mode, "MOVE" | "ROTATE") {
+                    command.on_point(DVec3::ZERO);
+                }
                 let cursor = if rotate {
                     DVec3::Y
                 } else {

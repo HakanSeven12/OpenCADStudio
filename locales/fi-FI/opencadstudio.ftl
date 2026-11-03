@@ -8461,3 +8461,10 @@ parameters-manager-feedback =
     .positive-length = Anna positiivinen parametrin pituus.
     .no-direction = Parametrin suunta ei ole käytettävissä.
     .history = Parametrien hallinnan muokkaus
+
+block-action-targets =
+    .prompt = BACTIONSET  Valitse objekteja tai kirjoita Parameter ja pisteen nimi ja paina Enter (Parameter "…"):
+    .unique-point = Anna yksilöllinen pisteparametrin nimi.
+    .empty = Toiminto tarvitsee vähintään yhden kohteen.
+    .invalid = Valitse tuettuja kohteita tästä lohkosta.
+    .stale = Toiminto tai lohkoeditorin istunto on muuttunut; käynnistä BACTIONSET uudelleen.

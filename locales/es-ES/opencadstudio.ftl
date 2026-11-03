@@ -8464,3 +8464,10 @@ parameters-manager-feedback =
     .positive-length = Indique una longitud positiva para el parámetro.
     .no-direction = La dirección del parámetro no está disponible.
     .history = Edición del administrador de parámetros
+
+block-action-targets =
+    .prompt = BACTIONSET  Seleccione objetos o escriba Parameter seguido del nombre de un punto y pulse Intro (Parameter "…"):
+    .unique-point = Introduzca un nombre de parámetro de punto único.
+    .empty = Una acción necesita al menos un destino.
+    .invalid = Seleccione destinos compatibles que pertenezcan a este bloque.
+    .stale = La acción o la sesión del editor de bloques ha cambiado; reinicie BACTIONSET.

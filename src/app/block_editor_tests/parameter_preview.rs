@@ -947,3 +947,269 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
     }
 }
+
+#[test]
+fn block_action_set_edits_point_targets_and_refreshes_reference_history() {
+    let (mut app, insert, def, root, mut child, action) = setup_point_transport(false, true);
+    let i = app.active_tab;
+    let read_line = |doc: &codec::Document| {
+        let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
+            panic!()
+        };
+        doc.block_records
+            .get(&reference.block_name)
+            .unwrap()
+            .entity_handles
+            .iter()
+            .find_map(|h| {
+                if let Some(EntityType::Line(line)) = doc.get_entity(*h) {
+                    Some(actions::v(line.start))
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    };
+    let original = read_line(&app.tabs[i].scene.document);
+    let EntityType::Insert(reference) = app.tabs[i].scene.document.get_entity(insert).unwrap()
+    else {
+        panic!()
+    };
+    let transform =
+        crate::scene::render_graph::insert_transform(&app.tabs[i].scene.document, reference);
+    let cursor = actions::v(transform.apply(actions::native(root.end + DVec3::new(3., 4., 0.))));
+    let _ = app.feed_command(crate::command::StepInput::Point(cursor));
+    let offset = actions::instance::frame(&app.tabs[i].scene.document, insert, &root)
+        .unwrap()
+        .end
+        - root.end;
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
+    begin(&mut app, insert);
+    child.name = "  Door \"A\"  ".to_owned();
+    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+        .scene
+        .document
+        .objects
+        .get_mut(&child.handle)
+        .unwrap()
+    else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+        panic!()
+    };
+    parameter.position_name = child.name.clone();
+    let member = members(&app)[0];
+    edit_action_set(&mut app, action, "Add", vec![member]);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset * 2.) < 1e-8);
+    let linked = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    let select_point = |app: &mut OpenCADStudio, mode: &str, entities: Vec<Handle>| {
+        app.tabs[i].selected_authoring = Some(action);
+        let _ = app.dispatch_command("BACTIONSET");
+        feed(app, mode);
+        feed(app, "Parameter missing");
+        assert!(app.tabs[i].active_cmd.is_some());
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(crate::tr!("block-action-targets", "unique-point").as_str())
+        );
+        feed(
+            app,
+            &format!("Parameter {}", serde_json::to_string(&child.name).unwrap()),
+        );
+        let _ = app.feed_command(crate::command::StepInput::SelectionComplete(entities));
+        let _ = app.feed_command(crate::command::StepInput::Enter);
+        assert!(app.tabs[i].active_cmd.is_none());
+    };
+    select_point(&mut app, "Remove", vec![]);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
+    assert_eq!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &child)
+            .unwrap()
+            .end,
+        child.end
+    );
+    app.undo_steps(1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset * 2.) < 1e-8);
+    assert_eq!(
+        app.tabs[i].scene.document.objects[&action],
+        linked.objects[&action]
+    );
+    app.redo_steps(1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
+    select_point(&mut app, "Add", vec![]);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset * 2.) < 1e-8);
+    assert!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &child)
+            .unwrap()
+            .end
+            .distance(child.end + offset)
+            < 1e-8
+    );
+    select_point(&mut app, "New", vec![]);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
+    app.undo_steps(1);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset * 2.) < 1e-8);
+    let unchanged_depth = app.tabs[i].history.undo_stack.len();
+    select_point(&mut app, "New", vec![member]);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), unchanged_depth);
+    assert!(read_line(&app.tabs[i].scene.document).distance(original + offset * 2.) < 1e-8);
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    for saved in [
+        codec::DwgReader::from_stream(std::io::Cursor::new(
+            codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap(),
+        ))
+        .read()
+        .unwrap(),
+        codec::DxfReader::from_reader(std::io::Cursor::new(
+            codec::DxfWriter::new(&app.tabs[i].scene.document)
+                .write_to_vec()
+                .unwrap(),
+        ))
+        .unwrap()
+        .read()
+        .unwrap(),
+    ] {
+        assert!(read_line(&saved).distance(original + offset * 2.) < 1e-8);
+        assert!(
+            actions::instance::frame(&saved, insert, &child)
+                .unwrap()
+                .end
+                .distance(child.end + offset)
+                < 1e-8
+        );
+    }
+    assert_eq!(
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("EDIT_ME")
+            .unwrap()
+            .handle,
+        def
+    );
+}
+
+#[test]
+fn block_action_set_rejects_ambiguous_points_and_transport_cycles_atomically() {
+    let (mut app, insert, def, root, child, action) = setup_point_transport(false, true);
+    let i = app.active_tab;
+    let _ = app.update(Message::CommandEscape);
+    begin(&mut app, insert);
+    let _ = app.dispatch_command("BACTIONBARMODE 0");
+    let duplicate = point::create(
+        &mut app.tabs[i].scene.document,
+        def,
+        Vector3::UNIT_Y * 9.,
+        Vector3::UNIT_Y * 10.,
+    )
+    .unwrap();
+    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+        .scene
+        .document
+        .objects
+        .get_mut(&duplicate)
+        .unwrap()
+    else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+        panic!()
+    };
+    parameter.position_name = child.name.clone();
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    app.tabs[i].selected_authoring = Some(action);
+    let _ = app.dispatch_command("BACTIONSET");
+    assert!(
+        app.tabs[i].active_cmd.is_some(),
+        "cannot start: {:?}",
+        app.command_line.last_error
+    );
+    feed(&mut app, "Add");
+    assert!(
+        app.tabs[i].active_cmd.is_some(),
+        "cannot select mode: {:?}",
+        app.command_line.last_error
+    );
+    feed(&mut app, &format!("Parameter {}", child.name));
+    assert!(app.tabs[i].active_cmd.is_some());
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some(crate::tr!("block-action-targets", "unique-point").as_str())
+    );
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+    let _ = app.update(Message::CommandEscape);
+    let child_action = actions::actions(&app.tabs[i].scene.document, def)
+        .into_iter()
+        .find(|(_, _, kind, id)| *kind == actions::Kind::Move && *id == child.id)
+        .unwrap()
+        .0;
+    app.tabs[i].selected_authoring = Some(child_action);
+    let _ = app.dispatch_command("BACTIONSET");
+    assert!(
+        app.tabs[i].active_cmd.is_some(),
+        "cannot start: {:?}",
+        app.command_line.last_error
+    );
+    feed(&mut app, "Add");
+    assert!(
+        app.tabs[i].active_cmd.is_some(),
+        "cannot select mode: {:?}",
+        app.command_line.last_error
+    );
+    feed(&mut app, &format!("Parameter {}", root.name));
+    let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![]));
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    assert!(app.tabs[i].active_cmd.is_some());
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some(crate::t!("The block action chain contains a cycle.").as_ref())
+    );
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+}
+
+#[test]
+fn block_action_set_rejects_stale_point_name_choices() {
+    let (mut app, insert, _, _, child, action) = setup_point_transport(false, true);
+    let i = app.active_tab;
+    let _ = app.update(Message::CommandEscape);
+    begin(&mut app, insert);
+    let _ = app.dispatch_command("BACTIONBARMODE 0");
+    app.tabs[i].selected_authoring = Some(action);
+    let _ = app.dispatch_command("BACTIONSET");
+    feed(&mut app, "Remove");
+    feed(&mut app, &format!("Parameter {}", child.name));
+    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+        .scene
+        .document
+        .objects
+        .get_mut(&child.handle)
+        .unwrap()
+    else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+        panic!()
+    };
+    parameter.position_name = "Changed while selecting".to_owned();
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![]));
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some(
+            crate::t!("The action or its Block Editor session changed; restart BACTIONSET.")
+                .as_ref()
+        )
+    );
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+}

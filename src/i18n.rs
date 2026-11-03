@@ -546,6 +546,21 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
+    fn action_target_prompt_preserves_the_parameter_keyword_in_every_locale() {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).unwrap();
+            let prompt = loader.get_attr("block-action-targets", "prompt");
+            assert!(prompt.contains("Parameter"), "{language:?}: {prompt}");
+            assert!(prompt.contains("\"…\""), "{language:?}: {prompt}");
+            assert!(!loader.get_attr("block-action-targets", "unique-point").is_empty());
+        }
+    }
+
+    #[test]
     fn parameters_manager_footer_formats_both_counts_in_every_locale() {
         for language in Language::ALL.into_iter().filter(|language| *language != Language::System) {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());

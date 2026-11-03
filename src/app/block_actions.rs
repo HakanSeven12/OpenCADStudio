@@ -426,6 +426,7 @@ impl OpenCADStudio {
                 definition,
                 action,
                 expected,
+                point_choices,
                 targets,
                 frame,
                 rotate_only,
@@ -434,6 +435,12 @@ impl OpenCADStudio {
                 if tab.id != document
                     || tab.active_block_edit_session().map(|s| s.br_handle) != Some(definition)
                     || tab.scene.document.objects.get(&action) != Some(expected.as_ref())
+                    || point_choices.as_ref().is_some_and(|(source, expected)| {
+                        let current = actions::all_parameters(&tab.scene.document, definition)
+                            .into_iter().filter(|p| p.point && p.id != *source)
+                            .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
+                        current != *expected
+                    })
                 {
                     self.command_line.push_error(
                         crate::t!(
@@ -452,7 +459,11 @@ impl OpenCADStudio {
                         };
                         let changed = changed || rotation_changed;
                         if changed {
-                            staged = actions::instance::refresh(&staged, definition)?;
+                            staged = actions::instance::refresh_after_edit(
+                                &staged,
+                                &tab.scene.document,
+                                definition,
+                            )?;
                         }
                         Ok(changed)
                     });

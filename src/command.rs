@@ -1830,6 +1830,7 @@ pub enum CmdResult {
         definition: Handle,
         action: Handle,
         expected: Box<codec::objects::ObjectType>,
+        point_choices: Option<(i32, Vec<(Handle, i32, String)>)>,
         targets: Vec<Handle>,
         frame: Option<Vec<DVec3>>,
         rotate_only: Option<Vec<Handle>>,

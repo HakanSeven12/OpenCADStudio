@@ -3,6 +3,9 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "An action needs at least one target." => Some(("block-action-targets", "empty")),
+        "Select supported targets belonging to this block." => Some(("block-action-targets", "invalid")),
+        "The action or its Block Editor session changed; restart BACTIONSET." => Some(("block-action-targets", "stale")),
         "This row has no number to edit." => Some(("parameters-manager-feedback", "no-number")),
         "This row has no visibility flag to change." => Some(("parameters-manager-feedback", "no-flag")),
         "Specify a finite numeric parameter value." => Some(("parameters-manager-feedback", "finite-number")),

@@ -8453,3 +8453,10 @@ parameters-manager-feedback =
     .positive-length = 양수 매개변수 길이를 지정하십시오.
     .no-direction = 매개변수 방향을 사용할 수 없습니다.
     .history = 매개변수 관리자 편집
+
+block-action-targets =
+    .prompt = BACTIONSET  객체를 선택하거나 Parameter 다음에 점 이름을 입력하고 Enter를 누르십시오 (Parameter "…"):
+    .unique-point = 고유한 점 매개변수 이름을 입력하십시오.
+    .empty = 동작에는 대상이 하나 이상 필요합니다.
+    .invalid = 이 블록에 속한 지원되는 대상을 선택하십시오.
+    .stale = 동작 또는 블록 편집기 세션이 변경되었습니다. BACTIONSET을 다시 실행하십시오.

@@ -796,3 +796,70 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
         }
     }
 }
+
+#[test]
+fn block_move_selection_retargets_point_aliases_and_refreshes_previous_graph() {
+    let (doc, definition, params, actions, first, second) = fixture(true);
+    let mut unchanged = doc.clone();
+    assert!(!super::super::retarget(
+        &mut unchanged,
+        definition,
+        actions[0],
+        &[params[1].handle],
+        None
+    )
+    .unwrap());
+    assert_eq!(
+        unchanged, doc,
+        "the parameter and grip aliases retain their native links"
+    );
+    let changed = instance::evaluate_value(
+        &doc,
+        first,
+        params[0].handle,
+        Value::Point(params[0].end + DVec3::new(3., 4., 0.)),
+    )
+    .unwrap()
+    .unwrap();
+    let geometry = authoring::members(&changed, definition)[0];
+    let mut detached = changed.clone();
+    assert!(
+        super::super::retarget(&mut detached, definition, actions[0], &[geometry], None).unwrap()
+    );
+    let detached = instance::refresh_after_edit(&detached, &changed, definition).unwrap();
+    assert_eq!(
+        instance::frame(&detached, first, &params[1]).unwrap().end,
+        params[1].end
+    );
+    assert_eq!(line(&detached, first), DVec3::X + DVec3::new(3., 4., 0.));
+    assert_eq!(line(&detached, second), DVec3::X);
+    let mut attached = detached.clone();
+    assert!(super::super::retarget(
+        &mut attached,
+        definition,
+        actions[0],
+        &[geometry, params[1].grip],
+        None
+    )
+    .unwrap());
+    let attached = instance::refresh_after_edit(&attached, &detached, definition).unwrap();
+    assert_eq!(
+        instance::frame(&attached, first, &params[1]).unwrap().end,
+        params[1].end + DVec3::new(3., 4., 0.)
+    );
+    assert_eq!(line(&attached, first), DVec3::X + DVec3::new(6., 8., 0.));
+    assert_eq!(line(&attached, second), DVec3::X);
+    let mut cycle = attached.clone();
+    assert!(super::super::retarget(
+        &mut cycle,
+        definition,
+        actions[1],
+        &[params[0].handle],
+        None
+    )
+    .is_err());
+    assert_eq!(
+        cycle, attached,
+        "cycle rejection must not publish a partial edit"
+    );
+}

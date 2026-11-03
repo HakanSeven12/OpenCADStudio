@@ -8467,3 +8467,10 @@ parameters-manager-feedback =
     .positive-length = حدد طولًا موجبًا للمعلمة.
     .no-direction = اتجاه المعلمة غير متاح.
     .history = تحرير مدير المعلمات
+
+block-action-targets =
+    .prompt = BACTIONSET  حدد كائنات أو اكتب Parameter متبوعًا باسم نقطة، ثم اضغط Enter (Parameter "…"):
+    .unique-point = أدخل اسم معلمة نقطة فريدًا.
+    .empty = يحتاج الإجراء إلى هدف واحد على الأقل.
+    .invalid = حدد أهدافًا مدعومة تنتمي إلى هذه الكتلة.
+    .stale = تغير الإجراء أو جلسة محرر الكتل؛ أعد تشغيل BACTIONSET.

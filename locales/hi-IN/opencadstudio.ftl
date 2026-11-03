@@ -8452,3 +8452,10 @@ parameters-manager-feedback =
     .positive-length = सकारात्मक पैरामीटर लंबाई दें।
     .no-direction = पैरामीटर दिशा उपलब्ध नहीं है।
     .history = पैरामीटर प्रबंधक संपादन
+
+block-action-targets =
+    .prompt = BACTIONSET  ऑब्जेक्ट चुनें या Parameter के बाद बिंदु का नाम लिखें, फिर Enter दबाएँ (Parameter "…"):
+    .unique-point = बिंदु पैरामीटर का अद्वितीय नाम दर्ज करें।
+    .empty = क्रिया के लिए कम से कम एक लक्ष्य आवश्यक है।
+    .invalid = इस ब्लॉक से संबंधित समर्थित लक्ष्य चुनें।
+    .stale = क्रिया या ब्लॉक संपादक सत्र बदल गया है; BACTIONSET फिर से शुरू करें।

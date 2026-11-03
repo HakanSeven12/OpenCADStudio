@@ -8462,3 +8462,10 @@ parameters-manager-feedback =
     .positive-length = Geef een positieve parameterlengte op.
     .no-direction = De parameterrichting is niet beschikbaar.
     .history = Parameterbeheer bewerken
+
+block-action-targets =
+    .prompt = BACTIONSET  Selecteer objecten of typ Parameter gevolgd door een puntnaam en druk op Enter (Parameter "…"):
+    .unique-point = Voer een unieke puntparameternaam in.
+    .empty = Een actie heeft ten minste één doel nodig.
+    .invalid = Selecteer ondersteunde doelen in dit blok.
+    .stale = De actie of blokeditorsessie is gewijzigd; start BACTIONSET opnieuw.

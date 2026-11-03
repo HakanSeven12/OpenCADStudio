@@ -8455,3 +8455,10 @@ parameters-manager-feedback =
     .positive-length = ລະບຸຄວາມຍາວພາຣາມິເຕີທີ່ເປັນບວກ.
     .no-direction = ທິດທາງພາຣາມິເຕີບໍ່ພ້ອມໃຊ້.
     .history = ແກ້ໄຂຕົວຈັດການພາຣາມິເຕີ
+
+block-action-targets =
+    .prompt = BACTIONSET  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ຈຸດ ແລ້ວກົດ Enter (Parameter "…"):
+    .unique-point = ປ້ອນຊື່ພາຣາມິເຕີຈຸດທີ່ບໍ່ຊ້ຳກັນ.
+    .empty = ການກະທຳຕ້ອງມີເປົ້າໝາຍຢ່າງໜ້ອຍໜຶ່ງລາຍການ.
+    .invalid = ເລືອກເປົ້າໝາຍທີ່ຮອງຮັບຂອງບລັອກນີ້.
+    .stale = ການກະທຳ ຫຼື ເຊດຊັນຕົວແກ້ໄຂບລັອກປ່ຽນແປງແລ້ວ; ເລີ່ມ BACTIONSET ໃໝ່.

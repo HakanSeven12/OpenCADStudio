@@ -8462,3 +8462,10 @@ parameters-manager-feedback =
     .positive-length = Geben Sie eine positive Parameterlänge an.
     .no-direction = Die Parameterrichtung ist nicht verfügbar.
     .history = Parametermanager bearbeiten
+
+block-action-targets =
+    .prompt = BACTIONSET  Objekte wählen oder Parameter und einen Punktnamen eingeben, dann Eingabe drücken (Parameter "…"):
+    .unique-point = Geben Sie einen eindeutigen Punktparameternamen ein.
+    .empty = Eine Aktion benötigt mindestens ein Ziel.
+    .invalid = Wählen Sie unterstützte Ziele in diesem Block.
+    .stale = Die Aktion oder Blockeditor-Sitzung wurde geändert; starten Sie BACTIONSET erneut.

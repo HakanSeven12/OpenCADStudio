@@ -670,6 +670,7 @@ impl CadCommand for ActionCommand {
         position: iced::Point,
         context: PointPickContext,
         remove: bool,
+        replace: bool,
     ) -> Option<String> {
         let source = self.point_source()?;
         let (handle, name) = super::action_set::pick_point_marker(
@@ -683,12 +684,32 @@ impl CadCommand for ActionCommand {
             position,
             context,
         )?;
+        if !remove && replace {
+            self.targets.retain(|h| {
+                !self
+                    .candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == *h)
+            });
+        }
         if remove {
             self.targets.retain(|h| *h != handle);
         } else if !self.targets.contains(&handle) {
             self.targets.push(handle);
         }
         Some(name)
+    }
+    fn selection_marker_selected(&self, handle: Handle) -> bool {
+        self.kind == Some(Kind::Move)
+            && self.targets.contains(&handle)
+            && self
+                .candidates
+                .iter()
+                .any(|p| p.point && p.handle == handle)
+    }
+    fn clear_selection_markers(&mut self) {
+        self.targets
+            .retain(|h| !self.candidates.iter().any(|p| p.point && p.handle == *h));
     }
     fn on_selection_marker_region(
         &mut self,

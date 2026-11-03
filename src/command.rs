@@ -3661,9 +3661,18 @@ pub trait CadCommand: Send {
         _position: iced::Point,
         _context: PointPickContext,
         _remove: bool,
+        _replace: bool,
     ) -> Option<String> {
         None
     }
+
+    /// Whether a Point marker is in this command's pending target selection.
+    fn selection_marker_selected(&self, _handle: Handle) -> bool {
+        false
+    }
+
+    /// Clear pending marker selections when an entity pick replaces the set.
+    fn clear_selection_markers(&mut self) {}
 
     /// Gather eligible Block Editor markers within a viewport selection region.
     fn on_selection_marker_region(

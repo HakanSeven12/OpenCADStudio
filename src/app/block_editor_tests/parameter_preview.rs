@@ -1387,7 +1387,22 @@ fn block_move_point_targets_can_be_picked_in_the_viewport() {
     let _ = app.dispatch_command("BACTION MOVE");
     feed(&mut app, &root.name);
     click(&mut app, child.end, false);
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(child.handle));
+    assert!(!app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(root.handle));
     click(&mut app, child.end, true);
+    assert!(!app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(child.handle));
     let _ = app.feed_command(crate::command::StepInput::Enter);
     assert!(app.tabs[i]
         .active_cmd
@@ -1409,6 +1424,11 @@ fn block_move_point_targets_can_be_picked_in_the_viewport() {
     let _ = app.dispatch_command("BACTIONSET");
     feed(&mut app, "Remove");
     click(&mut app, child.end, false);
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(child.handle));
     let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![]));
     let _ = app.feed_command(crate::command::StepInput::Enter);
     assert!(app.tabs[i].active_cmd.is_none());
@@ -1562,4 +1582,80 @@ fn block_move_point_targets_support_window_and_lasso_selection() {
         assert!(action.1.dependencies.contains(&geometry));
         assert!(!action.1.dependencies.contains(&child.handle));
     }
+}
+
+#[test]
+fn block_move_marker_click_respects_pickadd_replacement() {
+    let (mut app, insert, def, root, child, _) = setup_point_transport(false, true);
+    let _ = app.update(Message::CommandEscape);
+    let i = app.active_tab;
+    let other = point::create(
+        &mut app.tabs[i].scene.document,
+        def,
+        Vector3::new(3., 6., 0.),
+        Vector3::new(3., 8., 0.),
+    )
+    .unwrap();
+    begin(&mut app, insert);
+    app.pick_add = false;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
+    app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
+        DVec3::new(-2., -2., 0.),
+        DVec3::new(6., 10., 0.),
+        1600. / 900.,
+    );
+    let click = |app: &mut OpenCADStudio, world: DVec3| {
+        let scene = &app.tabs[app.active_tab].scene;
+        let (vw, vh) = scene.selection.borrow().view.vp_size;
+        let tile = scene.active_model_tile_bounds(vw, vh);
+        let screen = scene
+            .camera
+            .borrow()
+            .project(
+                world,
+                iced::Rectangle {
+                    x: 0.,
+                    y: 0.,
+                    width: tile.width,
+                    height: tile.height,
+                },
+            )
+            .unwrap();
+        let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(
+            screen.x + tile.x,
+            screen.y + tile.y,
+        )));
+        let _ = app.update(Message::ViewportLeftRelease);
+    };
+    let _ = app.dispatch_command("BACTION MOVE");
+    feed(&mut app, &root.name);
+    let geometry = members(&app)[0];
+    app.tabs[i].scene.select_entities(&[geometry]);
+    let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![geometry]));
+    click(&mut app, child.end);
+    assert!(app.tabs[i].scene.selected_entities().is_empty());
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(child.handle));
+    click(&mut app, DVec3::new(3., 6., 0.));
+    let command = app.tabs[i].active_cmd.as_ref().unwrap();
+    assert!(!command.selection_marker_selected(child.handle));
+    assert!(command.selection_marker_selected(other));
+    click(&mut app, DVec3::new(0.5, 0., 0.));
+    assert!(!app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(other));
+    assert!(app.tabs[i].scene.selected.contains(&geometry));
+    click(&mut app, DVec3::new(3., 6., 0.));
+    assert!(app.tabs[i].scene.selected_entities().is_empty());
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(3., 3., 0.)));
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert!(actions::actions(&app.tabs[i].scene.document, def)
+        .iter()
+        .any(|(_, action, _, _)| action.dependencies == vec![other]));
 }

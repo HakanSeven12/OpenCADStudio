@@ -7121,10 +7121,16 @@ properties={:.1}ms picked={}",
                         let remove = self.shift_down || self.select_remove_mode;
                         let tab = &mut self.tabs[i];
                         let hit = tab.active_cmd.as_mut().and_then(|command|
-                            command.on_selection_marker_click(&tab.scene, p, context, remove));
+                            command.on_selection_marker_click(&tab.scene, p, context, remove, !selection_pick_add));
                         if let Some(name) = hit {
                             tab.scene.selection.borrow_mut().clear_left_selection_gesture();
+                            if !remove && !selection_pick_add {
+                                tab.scene.deselect_all();
+                            }
                             self.command_line.push_info(&format!("{} {}", if remove { "−" } else { "+" }, name));
+                            if !remove && !selection_pick_add {
+                                return self.feed_command(crate::command::StepInput::SelectionComplete(Vec::new()));
+                            }
                             return Task::none();
                         }
                     }
@@ -7376,6 +7382,11 @@ properties={:.1}ms picked={}",
                                             self.tabs[i].scene.deselect_entity(handle);
                                         }
                                     } else {
+                                        if !selection_pick_add {
+                                            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                                                command.clear_selection_markers();
+                                            }
+                                        }
                                         self.tabs[i]
                                             .scene
                                             .select_entity(handle, !selection_pick_add);
@@ -7393,6 +7404,9 @@ properties={:.1}ms picked={}",
                                 // PICKADD 0 (#226): OS convention — the
                                 // empty click also drops the selection.
                                 if !selection_pick_add && !self.shift_down {
+                                    if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                                        command.clear_selection_markers();
+                                    }
                                     self.tabs[i].scene.deselect_all();
                                     self.refresh_properties();
                                 }

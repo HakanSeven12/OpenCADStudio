@@ -21,6 +21,8 @@ pub struct FieldHost {
     placeholders: Vec<String>,
     /// Per span: the field inserted in this session, still without an object.
     inserted: Vec<Option<NewField>>,
+    /// A field was deleted in this session, so its FIELD objects must go.
+    removed: bool,
 }
 
 /// The host's `_text` container: xdictionary → ACAD_FIELD → TEXT.
@@ -61,13 +63,16 @@ impl FieldHost {
         (spans.len() == placeholders.len()).then(|| Self {
             container: Some(container),
             inserted: vec![None; spans.len()],
+            removed: false,
             spans,
             placeholders,
         })
     }
 
-    /// The spans after an edit from `old` to `new`, or `None` when the edit
-    /// touches a field's text or cannot be placed. An insertion or deletion
+    /// The fields that stay after an edit from `old` to `new` (each with its
+    /// index in this host and its new span), or `None` when the edit splits
+    /// a field's text or cannot be placed. A field the edit covers whole
+    /// is deleted. An insertion or deletion
     /// beside equal characters reads the same at several places; when those
     /// places put a field on different sides of it, `caret` (raw byte
     /// positions of the operation's caret in `new`) decides, else `None`.
@@ -76,7 +81,7 @@ impl FieldHost {
         old: &str,
         new: &str,
         caret: Option<&[usize]>,
-    ) -> Option<Vec<Range<usize>>> {
+    ) -> Option<Vec<(usize, Range<usize>)>> {
         let (o, n) = (old.as_bytes(), new.as_bytes());
         let p = o.iter().zip(n).take_while(|(a, b)| a == b).count();
         let room = o.len().min(n.len()) - p;
@@ -88,8 +93,8 @@ impl FieldHost {
             .take_while(|(a, b)| a == b)
             .count();
         let (removed, added) = (o.len() - s - p, n.len() - s - p);
-        let inside = |at: usize| self.spans.iter().any(|r| r.start < at && at < r.end);
         let overlaps = |a: usize, b: usize| self.spans.iter().any(|r| a < r.end && r.start < b);
+        let inside = |at: usize| self.spans.iter().any(|r| r.start < at && at < r.end);
         // Every place the change can be read at: one for a replacement,
         // a slide to the left for a pure insertion or deletion.
         let mut places = vec![p];
@@ -109,22 +114,27 @@ impl FieldHost {
             old.is_char_boundary(q)
                 && !inside(q)
                 && !inside(q + removed)
-                && !overlaps(q, q + removed)
+                // A deletion may take a field whole; a replacement may not.
+                && (added == 0 || !overlaps(q, q + removed))
         };
-        let moved = |q: usize| -> Vec<Range<usize>> {
+        let moved = |q: usize| -> Vec<(usize, Range<usize>)> {
             let shift = |x: usize| x - removed + added;
             self.spans
                 .iter()
-                .map(|r| {
+                .cloned()
+                .enumerate()
+                .filter_map(|(i, r)| {
                     if r.end <= q {
-                        r.clone()
+                        Some((i, r))
+                    } else if r.start >= q + removed {
+                        Some((i, shift(r.start)..shift(r.end)))
                     } else {
-                        shift(r.start)..shift(r.end)
+                        None
                     }
                 })
                 .collect()
         };
-        let mut readings: Vec<(usize, Vec<Range<usize>>)> = places
+        let mut readings: Vec<(usize, Vec<(usize, Range<usize>)>)> = places
             .into_iter()
             .filter(|q| fits(*q))
             .map(|q| (q, moved(q)))
@@ -159,7 +169,9 @@ impl FieldHost {
     /// container, in both of the document's FIELD stores. Nothing else in
     /// any FIELD object changes.
     pub(super) fn save(&self, doc: &mut codec::Document, host: Handle, value: &str) {
-        let Some(container) = self.container.filter(|_| self.inserted.iter().all(Option::is_none))
+        let Some(container) = self
+            .container
+            .filter(|_| !self.removed && self.inserted.iter().all(Option::is_none))
         else {
             return self.rebuild(doc, host, value);
         };
@@ -244,9 +256,12 @@ impl MTextEditorState {
         let Some(host) = &self.field_host else {
             return Ok(None);
         };
-        let spans = host.track(old, new, caret).ok_or(EditError::FieldText)?;
+        let kept = host.track(old, new, caret).ok_or(EditError::FieldText)?;
         Ok(Some(FieldHost {
-            spans,
+            spans: kept.iter().map(|(_, r)| r.clone()).collect(),
+            placeholders: kept.iter().map(|(k, _)| host.placeholders[*k].clone()).collect(),
+            inserted: kept.iter().map(|(k, _)| host.inserted[*k].clone()).collect(),
+            removed: host.removed || kept.len() < host.spans.len(),
             ..host.clone()
         }))
     }
@@ -302,7 +317,25 @@ impl crate::app::OpenCADStudio {
             spans: Vec::new(),
             placeholders: Vec::new(),
             inserted: Vec::new(),
+            removed: false,
         });
         ed.field_host = Some(base.with_inserted(at, display, field));
+    }
+}
+
+impl FieldHost {
+    /// The editor cells `range` covers when it is `cell` of one field's
+    /// text: that whole field, so a key deletes a field in one step.
+    pub(super) fn whole_field(
+        &self,
+        index: &super::raw_adapter::SourceIndex,
+        cell: std::ops::Range<usize>,
+    ) -> Option<std::ops::Range<usize>> {
+        let count = index.visible_len?;
+        let at = |byte: usize| (0..=count).find(|c| index.insertion_byte(*c).ok() == Some(byte));
+        self.spans.iter().find_map(|r| {
+            let (start, end) = (at(r.start)?, at(r.end)?);
+            (start <= cell.start && cell.end <= end && start < end).then_some(start..end)
+        })
     }
 }

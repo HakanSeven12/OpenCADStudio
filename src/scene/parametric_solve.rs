@@ -2757,6 +2757,28 @@ fn solve_scope(
             }
         }
     }
+    // A driving dimension between an entity's own ends is its size, so a
+    // retained length would contradict a new value — and pinning both ends
+    // of a dragged line would contradict it outright.
+    let driving_self_size: HashSet<Handle> = constraints
+        .iter()
+        .filter(|c| {
+            c.enabled
+                && c.driving_param.is_some()
+                && matches!(
+                    c.kind,
+                    ConstraintKind::Distance
+                        | ConstraintKind::DistanceX
+                        | ConstraintKind::DistanceY
+                        | ConstraintKind::DistanceDirected
+                )
+                && c.refs.len() >= 2
+                && c.refs
+                    .iter()
+                    .all(|r| r.entity == c.refs[0].entity && r.marker.is_some())
+        })
+        .map(|c| c.refs[0].entity)
+        .collect();
     if !retain_lengths {
         let mut axis_lines: Vec<_> = line_axes
             .into_iter()
@@ -2860,7 +2882,11 @@ fn solve_scope(
                 } else {
                     line.p1
                 };
-                if !driven_points.contains(&opposite) {
+                // A driving size between the line's own ends owns that span;
+                // pinning the far end's along-edge coordinate would fight it.
+                if !driven_points.contains(&opposite)
+                    && !driving_self_size.contains(&reference.entity)
+                {
                     let parameter = if *vertical { opposite.y } else { opposite.x };
                     // Only the along-edge coordinate stays fixed. The normal
                     // coordinate follows the grabbed point through the kernel.
@@ -2940,10 +2966,22 @@ fn solve_scope(
                     .iter()
                     .any(|(line_ref, _, _)| line_ref.entity == reference.entity)
             {
-                anchors.push(ParametricRef::point(
-                    reference.entity,
-                    1 - reference.marker.unwrap(),
-                ));
+                let opposite =
+                    ParametricRef::point(reference.entity, 1 - reference.marker.unwrap());
+                let both_ends_grabbed = driven_refs.iter().any(|other| {
+                    other.entity == reference.entity
+                        && matches!(other.marker, Some(marker) if Some(marker) != reference.marker)
+                });
+                // A driving size relation owns the span between the line's
+                // ends, so a single grab gives way: the far end stays put and
+                // the grabbed end is pulled back onto the dimension. A grab
+                // that names both ends keeps them exact.
+                if driving_self_size.contains(&reference.entity) && !both_ends_grabbed {
+                    anchors.retain(|anchor| anchor != reference);
+                }
+                if !anchors.contains(&opposite) {
+                    anchors.push(opposite);
+                }
             }
         }
     }
@@ -2953,27 +2991,6 @@ fn solve_scope(
     if retain_size {
         let follower_entities: HashSet<Handle> =
             equal_followers.iter().map(|follower| follower.entity).collect();
-        // A driving dimension between an entity's own ends is its size;
-        // a retained length would contradict a new value.
-        let self_dimensioned: HashSet<Handle> = constraints
-            .iter()
-            .filter(|c| {
-                c.enabled
-                    && c.driving_param.is_some()
-                    && matches!(
-                        c.kind,
-                        ConstraintKind::Distance
-                            | ConstraintKind::DistanceX
-                            | ConstraintKind::DistanceY
-                            | ConstraintKind::DistanceDirected
-                    )
-                    && c.refs.len() >= 2
-                    && c.refs
-                        .iter()
-                        .all(|r| r.entity == c.refs[0].entity && r.marker.is_some())
-            })
-            .map(|c| c.refs[0].entity)
-            .collect();
         for (handle, geom) in &cache {
             // A Fixed entity's size is whatever its pins say: whole → all
             // pinned anyway, partial → the reference lets it resize (MOVE
@@ -2986,7 +3003,7 @@ fn solve_scope(
                     constraint.refs.get(2).is_some_and(|axis| axis.entity == *handle)
                 })
                 || follower_entities.contains(handle)
-                || self_dimensioned.contains(handle)
+                || driving_self_size.contains(handle)
             {
                 continue;
             }

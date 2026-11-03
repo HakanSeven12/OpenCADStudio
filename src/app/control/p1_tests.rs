@@ -1769,6 +1769,122 @@ fn a_move_command_does_not_report_geometry_the_solve_moves() {
     );
 }
 
+/// A converted dimensional constraint is enforced by the drag that moves its
+/// participant, not by some later constraint command that happens to walk the
+/// network. The span is back at its constrained value before the drag ends;
+/// which end the solver holds is the separate datum question.
+#[test]
+fn a_converted_constraint_clamps_the_grip_that_moves_it() {
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let dimension = app.tabs[i].scene.add_entity(
+        crate::modules::annotate::linear_dim::linear_dimension_entity(
+            glam::DVec3::ZERO,
+            glam::DVec3::new(40.0, 0.0, 0.0),
+            glam::DVec3::new(20.0, 10.0, 0.0),
+            glam::DVec3::X,
+            None,
+        ),
+    );
+    app.tabs[i]
+        .scene
+        .attach_dimension_association(dimension, vec![Some(line), Some(line)]);
+    app.tabs[i].scene.select_entity(dimension, false);
+    let _ = app.dispatch_command("DCCONVERTAPPLY");
+    assert!(
+        app.tabs[i]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .is_some_and(|set| set
+                .constraints
+                .iter()
+                .any(|constraint| constraint.kind == ConstraintKind::DistanceX)),
+        "the dimension converts to a driving horizontal span"
+    );
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[80,0,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    let (start, end) = (line_point(entity, "start"), line_point(entity, "end"));
+    assert!(
+        (end.0 - start.0 - 40.0).abs() < 1e-6,
+        "the converted constraint holds the measured span through the drag itself: {q}"
+    );
+}
+
+/// The same constraint holds when an axis relation owns the line's direction:
+/// the drag cannot stretch the span the dimension owns either.
+#[test]
+fn a_converted_constraint_clamps_the_grip_that_moves_a_level_line() {
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    app.tabs[i]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(line)],
+            None,
+        );
+    let dimension = app.tabs[i].scene.add_entity(
+        crate::modules::annotate::linear_dim::linear_dimension_entity(
+            glam::DVec3::ZERO,
+            glam::DVec3::new(40.0, 0.0, 0.0),
+            glam::DVec3::new(20.0, 10.0, 0.0),
+            glam::DVec3::X,
+            None,
+        ),
+    );
+    app.tabs[i]
+        .scene
+        .attach_dimension_association(dimension, vec![Some(line), Some(line)]);
+    app.tabs[i].scene.select_entity(dimension, false);
+    let _ = app.dispatch_command("DCCONVERTAPPLY");
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[80,10,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    let (start, end) = (line_point(entity, "start"), line_point(entity, "end"));
+    assert!(
+        (end.0 - start.0 - 40.0).abs() < 1e-6,
+        "the converted constraint holds the span the drag cannot stretch: {q}"
+    );
+    assert!(
+        (end.1 - start.1).abs() < 1e-6,
+        "the level relation still holds after the drag: {q}"
+    );
+}
+
 /// Auto-constraining a selection adds constraints the same way, so its
 /// completion reports the geometry its solve moves outside the selection.
 #[test]

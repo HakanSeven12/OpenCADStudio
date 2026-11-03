@@ -453,6 +453,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
                 return Task::none();
             }
+            FieldDialogMsg::InsertField => {}
             FieldDialogMsg::SelectObject => {
                 // The dialog waits while one object is picked.
                 self.active_modal = None;
@@ -544,6 +545,7 @@ impl OpenCADStudio {
                 }
                 self.active_modal = Some(crate::app::ModalKind::AttDefEdit);
             }
+            FieldTarget::FormulaOperand => {}
         }
         Task::none()
     }
@@ -864,6 +866,95 @@ mod tests {
 
         let _ = app.on_field_dialog(FieldDialogMsg::Ok);
         assert_eq!(written(&app, text), (code.to_string(), "SALON".to_string()));
+    }
+
+    /// A closed rectangle, for its area.
+    fn rectangle(width: f64, height: f64) -> EntityType {
+        let mut room = LwPolyline::new();
+        for (x, y) in [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)] {
+            room.add_point(codec::types::Vector2::new(x, y));
+        }
+        room.is_closed = true;
+        EntityType::LwPolyline(room)
+    }
+
+    fn area_operand(handle: codec::Handle) -> String {
+        format!("%<\\AcObjProp Object(%<\\_ObjId {:X}>%).Area>%", handle.value())
+    }
+
+    /// A new text's Field dialog on the Formula field, with `formula` typed.
+    fn formula_dialog(formula: &str) -> (OpenCADStudio, usize) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.open_field_dialog(FieldTarget::NewText);
+        let _ = app.on_field_dialog(FieldDialogMsg::Name("Formula"));
+        let _ = app.on_field_dialog(FieldDialogMsg::Formula(formula.into()));
+        (app, i)
+    }
+
+    #[test]
+    fn insert_field_adds_the_picked_field_to_the_formula() {
+        let (mut app, i) = formula_dialog("2*");
+        let room = app.tabs[i].scene.document.add_entity(rectangle(2.0, 2.0)).unwrap();
+
+        let _ = app.on_field_dialog(FieldDialogMsg::InsertField);
+        let operand = app.field_dialog.as_ref().unwrap();
+        assert_eq!(operand.target, FieldTarget::FormulaOperand);
+        let _ = app.on_field_dialog(FieldDialogMsg::Name("Object"));
+        let _ = app.dispatch_field(&format!("_FIELD_OBJECT {:X}", room.value()), i);
+        let _ = app.on_field_dialog(FieldDialogMsg::ObjectProp("Area"));
+        let _ = app.on_field_dialog(FieldDialogMsg::Ok);
+
+        let formula = app.field_dialog.as_ref().expect("the formula comes back");
+        assert_eq!(formula.target, FieldTarget::NewText);
+        assert_eq!(formula.name, "Formula");
+        assert_eq!(formula.formula, format!("2*{}", area_operand(room)));
+        assert_eq!(formula.preview, "8");
+    }
+
+    #[test]
+    fn closing_the_inserted_field_returns_to_the_formula_unchanged() {
+        let (mut app, _) = formula_dialog("2*");
+        let _ = app.on_field_dialog(FieldDialogMsg::InsertField);
+        app.close_field_dialog();
+
+        let formula = app.field_dialog.as_ref().expect("the formula comes back");
+        assert_eq!((formula.target, formula.formula.as_str()), (FieldTarget::NewText, "2*"));
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::Field));
+    }
+
+    #[test]
+    fn a_formula_of_fields_reopens_with_its_operands_in_place() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let document = &mut app.tabs[i].scene.document;
+        let (first, second) = (
+            document.add_entity(rectangle(2.0, 2.0)).unwrap(),
+            document.add_entity(rectangle(1.0, 3.0)).unwrap(),
+        );
+        let text = document.add_entity(EntityType::MText(Box::new(MText::new()))).unwrap();
+        let code = "\\AcExpr (%<\\AcObjProp Object(%<\\_ObjIdx 0>%).Area>%+\
+                    %<\\AcObjProp Object(%<\\_ObjIdx 1>%).Area>%)";
+        crate::entities::field::set_text_field(
+            document,
+            text,
+            Some((code.to_string(), vec![first, second])),
+            "7",
+        );
+
+        let _ = app.begin_text_edit(text);
+        let state = app.field_dialog.as_ref().expect("the Field dialog opens");
+        assert_eq!(state.name, "Formula");
+        assert_eq!(
+            state.formula,
+            format!("{}+{}", area_operand(first), area_operand(second))
+        );
+        assert_eq!(state.preview, "7");
+
+        let _ = app.on_field_dialog(FieldDialogMsg::Ok);
+        assert_eq!(written(&app, text), (code.to_string(), "7".to_string()));
     }
 
     #[test]

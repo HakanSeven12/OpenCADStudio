@@ -26,6 +26,8 @@ pub enum FieldTarget {
     EditText(codec::Handle),
     /// A picked table cell (table, row, column).
     TableCell(codec::Handle, usize, usize),
+    /// An operand of the formula of the Field dialog beneath this one.
+    FormulaOperand,
 }
 
 /// The categories the dialog offers, with their fields (only the ones the
@@ -1109,6 +1111,8 @@ pub enum FieldDialogMsg {
     Evaluate,
     /// Sum / Average / Count of a cell range, or one Cell, picked in a table.
     TableFunction(&'static str),
+    /// Insert Field: another field, as an operand of the formula.
+    InsertField,
     PlaceholderProperty(usize),
     HyperlinkText(String),
     HyperlinkUrl(String),

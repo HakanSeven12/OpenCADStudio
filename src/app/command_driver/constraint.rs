@@ -984,9 +984,16 @@ impl OpenCADStudio {
             .into_iter()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect();
-        self.tabs[i]
-            .scene
-            .bump_entities_after_constraint_added(&changes, &anchors, false, &[]);
+        // A corner between two sides is an angle, not a size: the sides keep
+        // the lengths they were drawn with. The 3-point form reaches its
+        // corner through the picked points' own entities, so it keeps the
+        // solver's freedom to resize them.
+        self.tabs[i].scene.bump_entities_after_constraint_added(
+            &changes,
+            &anchors,
+            kind == ConstraintKind::Angle,
+            &[],
+        );
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
         self.tabs[i].dirty = true;

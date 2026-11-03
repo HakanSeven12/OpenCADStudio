@@ -133,6 +133,12 @@ fn corner_is(actual: f64, expected: f64) -> bool {
     (actual - expected).abs() < 1.0e-4
 }
 
+/// The distance between a line's ends.
+fn length(app: &OpenCADStudio, tab: usize, handle: Handle) -> f64 {
+    let (start, end) = line_ends(app, tab, handle);
+    (end - start).length()
+}
+
 /// What a dynamic dimension shows: its text, its layer and its colour.
 fn label(
     app: &OpenCADStudio,
@@ -286,6 +292,33 @@ fn typing_a_value_at_the_angular_prompt_turns_the_second_side() {
     assert!(
         corner_is(turned, 90.0),
         "the second side turns to the typed corner, found {turned}"
+    );
+}
+
+#[test]
+fn an_angular_value_turns_the_second_side_without_resizing_it() {
+    let (mut app, i, first, second) = two_lines();
+    walk_to_the_angular_prompt(&mut app, first, second);
+    let drawn = length(&app, i, second);
+    assert!(
+        solved(drawn, 30.0 * std::f64::consts::SQRT_2),
+        "the second side is drawn to 30,30, found {drawn}"
+    );
+    let _ = app.feed_command(StepInput::Text("90".into()));
+    let turned = signed_angle(line_ends(&app, i, first), line_ends(&app, i, second));
+    assert!(
+        corner_is(turned, 90.0),
+        "the typed corner is reached, found {turned}"
+    );
+    assert!(
+        solved(length(&app, i, first), 50.0),
+        "the side that stays keeps its length, found {}",
+        length(&app, i, first)
+    );
+    assert!(
+        solved(length(&app, i, second), drawn),
+        "the turned side keeps the length it was drawn with, found {}",
+        length(&app, i, second)
     );
 }
 
@@ -570,5 +603,62 @@ fn a_name_that_is_taken_is_refused_at_the_radius_prompt() {
         circle_state(&app, i, second).1,
         25.0,
         "the second circle keeps the radius it was drawn with"
+    );
+}
+
+#[test]
+fn a_three_point_corner_reaches_the_value_it_is_given() {
+    let (mut app, i, first, second) = two_lines();
+    let _ = app.dispatch_command("DCANGULAR");
+    let _ = app.feed_command(StepInput::Enter);
+    assert_eq!(
+        prompt(&app, i),
+        "DCANGULAR  Specify angle vertex:",
+        "the default answer takes the three points"
+    );
+    let _ = app.feed_command(StepInput::Point(DVec3::new(0.0, 0.0, 0.0)));
+    assert_eq!(
+        prompt(&app, i),
+        "DCANGULAR  Specify first angle constraint point:",
+        "the vertex is taken, the first point is asked for"
+    );
+    let _ = app.feed_command(StepInput::Point(DVec3::new(50.0, 0.0, 0.0)));
+    assert_eq!(
+        prompt(&app, i),
+        "DCANGULAR  Specify second angle constraint point:",
+        "the first point is taken, the second is asked for"
+    );
+    let _ = app.feed_command(StepInput::Point(DVec3::new(30.0, 30.0, 0.0)));
+    assert_eq!(
+        prompt(&app, i),
+        "DCANGULAR  Specify dimension line location:",
+        "the corner the three points make is taken, the location is asked for"
+    );
+    let _ = app.feed_command(StepInput::Point(DVec3::new(40.0, 20.0, 0.0)));
+    assert_eq!(
+        prompt(&app, i),
+        "DCANGULAR  Enter value or name and value <ang1=45>:",
+        "the prompt offers the corner the points make"
+    );
+    let _ = app.feed_command(StepInput::Text("90".into()));
+    assert_eq!(
+        constraints(&app, i),
+        vec![(ConstraintKind::Angle3Point, "ang1".to_string())],
+        "three points make a corner of their own kind"
+    );
+    let kept = line_ends(&app, i, first);
+    assert!(
+        sits_at(kept.0, DVec3::ZERO) && sits_at(kept.1, DVec3::new(50.0, 0.0, 0.0)),
+        "the side through the vertex stays, found {kept:?}"
+    );
+    let turned = signed_angle(kept, line_ends(&app, i, second));
+    assert!(
+        corner_is(turned, 90.0),
+        "the second point turns to the typed corner, found {turned}"
+    );
+    assert!(
+        sits_at(line_ends(&app, i, second).0, DVec3::ZERO),
+        "the vertex stays where it was picked, found {:?}",
+        line_ends(&app, i, second).0
     );
 }

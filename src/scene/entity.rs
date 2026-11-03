@@ -646,9 +646,25 @@ impl Scene {
             return false;
         };
         let block_marker = br.block_entity_handle;
+        let record = br.handle;
         br.name = new.to_string();
         if self.document.block_records.add(br).is_err() {
             return false;
+        }
+        // Every reader resolves the definition's authored name through this
+        // XData first, so its name slot must not keep spelling the old name.
+        if let Some(mut authored) = self
+            .document
+            .object_xdata(record)
+            .and_then(|xdata| xdata.get_record(super::block_authoring::TRUE_NAME))
+            .cloned()
+        {
+            if let Some(name) = authored.values.iter_mut().find(|value| {
+                matches!(value, codec::xdata::XDataValue::String(text) if !text.trim().is_empty())
+            }) {
+                *name = codec::xdata::XDataValue::String(new.to_string());
+            }
+            self.document.set_object_xdata_record(record, authored);
         }
         // Keep the Block marker entity's name in sync (used on DXF/DWG save).
         if let Some(EntityType::Block(b)) = self.document.get_entity_mut(block_marker) {

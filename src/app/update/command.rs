@@ -3603,22 +3603,67 @@ impl OpenCADStudio {
                     .get(&value)
                     .map(|br| br.name.clone());
                 if let Some(canon) = canon {
-                    let mut changes = Vec::new();
-                    for &handle in &handles {
-                        if self.tabs[i].scene.is_layer_locked(handle) {
-                            continue;
-                        }
-                        if let Some(codec::EntityType::Insert(ins)) =
-                            self.tabs[i].scene.document.get_entity_mut(handle)
-                        {
-                            if ins.block_name != canon {
-                                ins.block_name = canon.clone();
-                                changes.push((handle, crate::scene::ChangeKind::Modified));
+                    let to = self.tabs[i]
+                        .scene
+                        .document
+                        .block_records
+                        .get(&canon)
+                        .map(|record| record.handle);
+                    if let Some(to) = to {
+                        let mut planned = Vec::new();
+                        for &handle in &handles {
+                            if self.tabs[i].scene.is_layer_locked(handle) {
+                                continue;
+                            }
+                            let Some((from, differs)) = self.tabs[i]
+                                .scene
+                                .document
+                                .get_entity(handle)
+                                .and_then(|entity| match entity {
+                                    codec::EntityType::Insert(ins) => {
+                                        let record = self.tabs[i]
+                                            .scene
+                                            .document
+                                            .block_records
+                                            .get(&ins.block_name)?;
+                                        // Compare what the row shows: an
+                                        // evaluated copy already names this
+                                        // definition, so re-picking it asks
+                                        // for no change.
+                                        let effective =
+                                            crate::app::control::block_ops::resolve_effective_block(
+                                                &self.tabs[i].scene.document,
+                                                ins,
+                                            )
+                                            .1;
+                                        Some((record.handle, effective != Some(to)))
+                                    }
+                                    _ => None,
+                                })
+                            else {
+                                continue;
+                            };
+                            if differs {
+                                planned.push((handle, from));
                             }
                         }
-                    }
-                    if !changes.is_empty() {
-                        self.tabs[i].scene.bump_entities(&changes);
+                        if !planned.is_empty() {
+                            let mut changes = Vec::new();
+                            for (handle, from) in planned {
+                                // An evaluated copy must stop resolving
+                                // through its old definition before it takes
+                                // the new name.
+                                crate::app::control::block_ops::detach_representation(
+                                    &mut self.tabs[i].scene.document,
+                                    handle,
+                                );
+                                self.tabs[i]
+                                    .scene
+                                    .repoint_representation(handle, from, to, &canon);
+                                changes.push((handle, crate::scene::ChangeKind::Modified));
+                            }
+                            self.tabs[i].scene.bump_entities(&changes);
+                        }
                     }
                 }
             } else if field == "plot_style" {
@@ -4682,9 +4727,9 @@ impl OpenCADStudio {
 
     /// Properties-panel Name commit for block references. A `new` matching an
     /// existing regular block re-points the selected inserts to it; otherwise
-    /// the definition the (single-block) selection references is renamed and
-    /// every insert of it follows. Anonymous/xref definitions never get here —
-    /// their Name row stays read-only.
+    /// the definition the selection references is renamed and every insert of
+    /// it follows, including a reference showing an evaluated copy of it.
+    /// Anonymous/xref definitions are refused.
     fn apply_block_name_commit(&mut self, i: usize, handles: &[codec::Handle], new: &str) {
         if new.is_empty() {
             return;
@@ -4699,48 +4744,109 @@ impl OpenCADStudio {
             .map(|br| {
                 (
                     br.name.clone(),
+                    br.handle,
                     br.is_anonymous() || br.flags.is_xref || br.name.contains('|'),
                 )
             });
-        if let Some((canon, protected)) = target {
+        if let Some((canon, to, protected)) = target {
             if protected {
                 return;
             }
-            let mut changes = Vec::new();
+            let mut planned = Vec::new();
             for &handle in handles {
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     continue;
                 }
-                if let Some(codec::EntityType::Insert(ins)) =
-                    self.tabs[i].scene.document.get_entity_mut(handle)
-                {
-                    if ins.block_name != canon {
-                        ins.block_name = canon.clone();
-                        changes.push((handle, crate::scene::ChangeKind::Modified));
-                    }
+                let Some((from, differs)) =
+                    self.tabs[i].scene.document.get_entity(handle).and_then(
+                        |entity| match entity {
+                            codec::EntityType::Insert(ins) => {
+                                let record = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .block_records
+                                    .get(&ins.block_name)?;
+                                // An evaluated copy already carries the
+                                // definition's name in this row.
+                                let effective =
+                                    crate::app::control::block_ops::resolve_effective_block(
+                                        &self.tabs[i].scene.document,
+                                        ins,
+                                    )
+                                    .1;
+                                Some((record.handle, effective != Some(to)))
+                            }
+                            _ => None,
+                        },
+                    )
+                else {
+                    continue;
+                };
+                if differs {
+                    planned.push((handle, from));
                 }
             }
-            if !changes.is_empty() {
+            if !planned.is_empty() {
+                let mut changes = Vec::new();
+                for (handle, from) in planned {
+                    // An evaluated copy must stop resolving through its old
+                    // definition before it takes the new name.
+                    crate::app::control::block_ops::detach_representation(
+                        &mut self.tabs[i].scene.document,
+                        handle,
+                    );
+                    self.tabs[i]
+                        .scene
+                        .repoint_representation(handle, from, to, &canon);
+                    changes.push((handle, crate::scene::ChangeKind::Modified));
+                }
                 self.tabs[i].scene.bump_entities(&changes);
             }
             return;
         }
         // New name → rename. Only when every selected insert references the
         // same definition; a mixed selection makes the rename target ambiguous.
-        let mut old: Option<String> = None;
+        let mut old: Option<Option<codec::Handle>> = None;
         for &handle in handles {
             if let Some(codec::EntityType::Insert(ins)) =
                 self.tabs[i].scene.document.get_entity(handle)
             {
-                match &old {
-                    None => old = Some(ins.block_name.clone()),
-                    Some(o) if o.eq_ignore_ascii_case(&ins.block_name) => {}
+                let (name, definition, _) = crate::app::control::block_ops::resolve_effective_block(
+                    &self.tabs[i].scene.document,
+                    ins,
+                );
+                let definition = definition.or_else(|| {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .block_records
+                        .get(&name)
+                        .map(|record| record.handle)
+                });
+                match old {
+                    None => old = Some(definition),
+                    Some(current) if current == definition => {}
                     _ => return,
                 }
             }
         }
-        if let Some(old) = old {
-            self.tabs[i].scene.rename_block(&old, new);
+        let Some(Some(old)) = old else {
+            return;
+        };
+        let Some(old) = self.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|record| record.handle == old)
+            .map(|record| record.name.clone())
+        else {
+            return;
+        };
+        self.push_undo_snapshot(i, "BLOCK RENAME");
+        if !self.tabs[i].scene.rename_block(&old, new) {
+            self.command_line
+                .push_error(crate::tf!("Could not rename block \"{old}\" to \"{new}\".").as_ref());
         }
     }
 

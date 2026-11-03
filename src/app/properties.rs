@@ -940,17 +940,30 @@ impl OpenCADStudio {
                 // Name row: editable for regular blocks — pick an
                 // existing definition to re-point this reference, or
                 // type a new name to rename the definition (every
-                // insert of it follows). Anonymous (*) and
-                // xref(-dependent) blocks keep the read-only row.
+                // insert of it follows). An evaluated reference names
+                // the definition it came from, so the row stays
+                // editable and shows that definition rather than the
+                // generated record. A reference with no regular
+                // definition behind it keeps the read-only row.
                 let regular = |br: &codec::tables::BlockRecord| {
                     !br.is_anonymous() && !br.flags.is_xref && !br.name.contains('|')
                 };
-                let editable = doc
+                let named = doc
                     .block_records
                     .get(&ins.block_name)
-                    .map(&regular)
-                    .unwrap_or(false);
-                if editable {
+                    .filter(|record| regular(record))
+                    .map(|record| record.name.clone())
+                    .or_else(|| {
+                        definition
+                            .and_then(|handle| {
+                                doc.block_records
+                                    .iter()
+                                    .find(|record| record.handle == handle)
+                            })
+                            .filter(|record| regular(record))
+                            .map(|record| record.name.clone())
+                    });
+                if let Some(value) = named {
                     let mut options: Vec<String> = doc
                         .block_records
                         .iter()
@@ -961,10 +974,7 @@ impl OpenCADStudio {
                     set_row_value(
                         &mut sections,
                         "block",
-                        crate::scene::model::object::PropValue::EditChoice {
-                            value: ins.block_name.clone(),
-                            options,
-                        },
+                        crate::scene::model::object::PropValue::EditChoice { value, options },
                     );
                 } else {
                     set_row(&mut sections, "block", display_name);

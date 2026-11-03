@@ -916,3 +916,79 @@ fn block_move_creation_validates_point_ownership_and_cycles_atomically() {
         "foreign parameter must not publish an action"
     );
 }
+
+#[test]
+fn block_chain_frames_preserve_current_source_base_and_point_anchor() {
+    let (mut doc, definition, _) = super::super::tests::fixture();
+    let source = distance::create(
+        &mut doc,
+        definition,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    let child = point::create(
+        &mut doc,
+        definition,
+        Vector3::new(0., 5., 0.),
+        Vector3::new(0., 7., 0.),
+    )
+    .unwrap();
+    create_with_options(
+        &mut doc,
+        definition,
+        Kind::Move,
+        source,
+        Some(XyKeyPoint::Base),
+        &[child],
+        DVec3::ZERO,
+        None,
+        None,
+    )
+    .unwrap();
+    let graph = Graph::new(&doc, definition).unwrap();
+    let old_base = DVec3::new(1., 2., 0.);
+    let new_base = DVec3::new(3., 4., 0.);
+    let child_parameter = graph.parameter(child);
+    let values = BTreeMap::from([
+        (source, DVec3::new(12., 0., 0.)),
+        (child, child_parameter.end + old_base),
+    ]);
+    let autonomous = graph
+        .autonomous(
+            &doc,
+            Some(&values),
+            Some(&BTreeMap::from([(source, old_base)])),
+        )
+        .unwrap();
+    assert_eq!(autonomous[&source].base, old_base);
+    assert_eq!(autonomous[&source].end, values[&source]);
+    assert_eq!(
+        autonomous[&child],
+        ParameterFrame {
+            base: child_parameter.base,
+            end: child_parameter.end
+        }
+    );
+    let mut staged = doc.clone();
+    let result = graph
+        .resolve(
+            &doc,
+            &mut staged,
+            &BTreeSet::new(),
+            &autonomous,
+            Some(&values),
+            Some(&BTreeMap::from([(source, new_base)])),
+        )
+        .unwrap();
+    assert_eq!(
+        result[&child],
+        ParameterFrame {
+            base: child_parameter.base,
+            end: child_parameter.end + new_base
+        }
+    );
+    assert_eq!(current(&staged, child_parameter), child_parameter.end);
+}

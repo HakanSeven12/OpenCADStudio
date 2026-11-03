@@ -1524,7 +1524,7 @@ fn evaluate_impl(
             .into_iter()
             .find(|q| q.handle == p.handle && q.point)
         {
-            let end = autonomous[&p.handle];
+            let end = autonomous[&p.handle].end;
             set_value(&mut staged, &current, Value::Point(end))?;
             detached_points.push((current, end));
         }
@@ -1800,9 +1800,9 @@ fn evaluate_impl(
     for (p, end) in detached_points {
         set_value(&mut staged, &p, Value::Point(end))?;
     }
-    for (handle, end) in chain_values {
+    for (handle, frame) in chain_values {
         let p = chain.parameter(handle);
-        set_value(&mut staged, p, Value::Point(end))?;
+        set_value(&mut staged, p, Value::Point(frame.end))?;
     }
     *doc = staged;
     Ok(true)

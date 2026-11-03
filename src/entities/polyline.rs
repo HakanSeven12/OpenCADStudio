@@ -704,18 +704,28 @@ pub(crate) fn polyline2d_global_width(pline: &Polyline2D) -> Option<f64> {
 impl PropertyEditable for Polyline2D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let n = self.vertices.len();
+        // Area and length are the drawn curve's: a spline-fit polyline's
+        // samples, with each bulge segment measured along its arc.
+        let drawn = drawn_vertices2d(self);
+        let path: &[codec::entities::Vertex2D] = drawn.as_deref().unwrap_or(&self.vertices);
         let mut area = 0.0;
         let mut length = 0.0;
         let seg_count = if self.is_closed() {
-            n
+            path.len()
         } else {
-            n.saturating_sub(1)
+            path.len().saturating_sub(1)
         };
         for i in 0..seg_count {
-            let a = &self.vertices[i].location;
-            let b = &self.vertices[(i + 1) % n].location;
+            let a = &path[i].location;
+            let b = &path[(i + 1) % path.len()].location;
             area += a.x * b.y - b.x * a.y;
-            length += ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
+            let chord = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
+            let sweep = 4.0 * path[i].bulge.atan();
+            length += if sweep.abs() < 1e-12 {
+                chord
+            } else {
+                chord * (sweep * 0.5) / (sweep * 0.5).sin()
+            };
         }
         area = (area * 0.5).abs();
 

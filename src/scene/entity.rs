@@ -1078,11 +1078,14 @@ impl Scene {
         [r, g, b, alpha]
     }
 
+    /// The definitions an operator can place by name. Generated records
+    /// (`*U`, `*D`, …) are not definitions anybody authored, so listing them
+    /// would advertise a block nobody made.
     pub fn custom_block_names(&self) -> Vec<String> {
         self.document
             .block_records
             .iter()
-            .filter(|br| !br.is_standard() && !br.is_layout())
+            .filter(|br| !br.is_standard() && !br.is_layout() && !br.is_anonymous())
             .map(|br| br.name.clone())
             .collect()
     }

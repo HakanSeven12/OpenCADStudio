@@ -170,6 +170,14 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .and_then(|command| command.drawing_variable_update());
+        // REVCLOUD's type choice is a profile setting (REVCLOUDCREATEMODE).
+        if self.tabs[self.active_tab]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.name() == "REVCLOUD")
+        {
+            self.save_config();
+        }
         if let Some((name, value)) = variable {
             let tab = &mut self.tabs[self.active_tab];
             if crate::io::drawing_variable(&tab.scene.document, name).as_deref() != Some(value.as_str()) {
@@ -618,6 +626,13 @@ impl OpenCADStudio {
             }
             CmdResult::CommitAndExit(entity) => {
                 if let Some(task) = self.handle_commit_and_exit(entity, preserve_commit_layer) {
+                    return task;
+                }
+            }
+            CmdResult::CommitAndReport(entity, message) => {
+                let task = self.handle_commit_and_exit(entity, preserve_commit_layer);
+                self.command_line.push_output(&message);
+                if let Some(task) = task {
                     return task;
                 }
             }

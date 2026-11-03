@@ -2746,7 +2746,9 @@ bg={bg_ms:.1}ms n={view_count}"
             // insertion-point click.
             if !tab.is_start {
                 let canvas = tab.scene.selection.borrow().view.vp_size;
-                if let Some(ed) = &self.mtext_editor {
+                // The editor's modal would swallow the clicks of a pick that
+                // the Field dialog started from it, so it waits meanwhile.
+                if let Some(ed) = self.mtext_editor.as_ref().filter(|_| tab.active_cmd.is_none()) {
                     let styles: Vec<String> = tab
                         .scene
                         .document

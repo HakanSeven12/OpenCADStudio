@@ -56,6 +56,73 @@ pub(crate) fn pick_point_marker(
         .map(|(_, handle, name)| (handle, name))
 }
 
+/// Select a point marker by its projected leader and endpoints.
+pub(crate) fn point_markers_in_region(
+    scene: &crate::scene::Scene,
+    definition: Handle,
+    eligible: impl Fn(Handle) -> bool,
+    polygon: &[iced::Point],
+    context: PointPickContext,
+    crossing: bool,
+) -> Vec<(Handle, String)> {
+    use crate::scene::pick::hit_test::{point_in_polygon, segment_crosses_polygon};
+    if polygon.len() < 3 {
+        return Vec::new();
+    }
+    let project = |p: codec::types::Vector3| {
+        crate::scene::view::projection::project_screen(
+            context.view,
+            context.eye,
+            context.bounds,
+            DVec3::new(p.x, p.y, p.z),
+        )
+        .filter(|p| {
+            p.x >= 0. && p.x <= context.bounds.width && p.y >= 0. && p.y <= context.bounds.height
+        })
+    };
+    crate::scene::block_authoring::edit::items(&scene.document, definition)
+        .into_iter()
+        .filter(|item| eligible(item.handle))
+        .filter_map(|item| {
+            let points = item
+                .grips
+                .iter()
+                .map(|(_, p)| project(*p))
+                .collect::<Vec<_>>();
+            let lines = item
+                .graphic
+                .lines
+                .iter()
+                .map(|[a, b]| (project(*a), project(*b)))
+                .collect::<Vec<_>>();
+            let hit = if crossing {
+                points
+                    .iter()
+                    .flatten()
+                    .any(|p| point_in_polygon(*p, polygon))
+                    || lines.iter().any(|(a, b)| match (a, b) {
+                        (Some(a), Some(b)) => {
+                            point_in_polygon(*a, polygon)
+                                || point_in_polygon(*b, polygon)
+                                || segment_crosses_polygon(*a, *b, polygon)
+                        }
+                        _ => false,
+                    })
+            } else {
+                !points.is_empty()
+                    && points
+                        .iter()
+                        .all(|p| p.is_some_and(|p| point_in_polygon(p, polygon)))
+                    && lines.iter().all(|(a, b)| {
+                        a.is_some_and(|p| point_in_polygon(p, polygon))
+                            && b.is_some_and(|p| point_in_polygon(p, polygon))
+                    })
+            };
+            hit.then_some((item.handle, item.name))
+        })
+        .collect()
+}
+
 struct Candidate {
     handle: Handle,
     name: String,
@@ -444,6 +511,51 @@ impl CadCommand for ActionSetCommand {
             self.picked.push(handle);
         }
         Some(name)
+    }
+    fn on_selection_marker_region(
+        &mut self,
+        scene: &crate::scene::Scene,
+        polygon: &[iced::Point],
+        context: PointPickContext,
+        crossing: bool,
+        remove: bool,
+        replace: bool,
+        geometry_hit: bool,
+    ) -> Vec<String> {
+        if !matches!(self.mode, Some(Mode::New | Mode::Add | Mode::Remove)) {
+            return Vec::new();
+        }
+        let Some(source) = self.chosen.and_then(|i| self.candidates[i].point_source) else {
+            return Vec::new();
+        };
+        let hits = point_markers_in_region(
+            scene,
+            self.definition,
+            |h| {
+                self.points
+                    .iter()
+                    .any(|(_, point, id)| *point == h && *id != source)
+            },
+            polygon,
+            context,
+            crossing,
+        );
+        if !remove && replace && (geometry_hit || !hits.is_empty()) {
+            self.picked.retain(|h| {
+                !self
+                    .points
+                    .iter()
+                    .any(|(_, point, id)| point == h && *id != source)
+            });
+        }
+        for (handle, _) in &hits {
+            if remove {
+                self.picked.retain(|h| h != handle);
+            } else if !self.picked.contains(handle) {
+                self.picked.push(*handle);
+            }
+        }
+        hits.into_iter().map(|(_, name)| name).collect()
     }
     fn is_selection_gathering(&self) -> bool {
         matches!(

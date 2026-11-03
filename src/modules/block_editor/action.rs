@@ -690,6 +690,48 @@ impl CadCommand for ActionCommand {
         }
         Some(name)
     }
+    fn on_selection_marker_region(
+        &mut self,
+        scene: &crate::scene::Scene,
+        polygon: &[iced::Point],
+        context: PointPickContext,
+        crossing: bool,
+        remove: bool,
+        replace: bool,
+        geometry_hit: bool,
+    ) -> Vec<String> {
+        let Some(source) = self.point_source() else {
+            return Vec::new();
+        };
+        let hits = super::action_set::point_markers_in_region(
+            scene,
+            self.definition,
+            |h| {
+                self.candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == h)
+            },
+            polygon,
+            context,
+            crossing,
+        );
+        if !remove && replace && (geometry_hit || !hits.is_empty()) {
+            self.targets.retain(|h| {
+                !self
+                    .candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == *h)
+            });
+        }
+        for (handle, _) in &hits {
+            if remove {
+                self.targets.retain(|h| h != handle);
+            } else if !self.targets.contains(handle) {
+                self.targets.push(*handle);
+            }
+        }
+        hits.into_iter().map(|(_, name)| name).collect()
+    }
     fn is_selection_gathering(&self) -> bool {
         self.selecting
     }

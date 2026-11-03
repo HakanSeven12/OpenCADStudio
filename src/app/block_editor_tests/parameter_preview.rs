@@ -1419,3 +1419,147 @@ fn block_move_point_targets_can_be_picked_in_the_viewport() {
     assert!(action.1.dependencies.contains(&geometry));
     assert!(!action.1.dependencies.contains(&child.handle));
 }
+
+#[test]
+fn block_move_point_targets_support_window_and_lasso_selection() {
+    for lasso in [false, true] {
+        let (mut app, insert, def, root, child, existing) = setup_point_transport(false, true);
+        let _ = app.update(Message::CommandEscape);
+        begin(&mut app, insert);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
+        app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
+            DVec3::new(-2., -2., 0.),
+            DVec3::new(5., 10., 0.),
+            1600. / 900.,
+        );
+        let screen = |app: &OpenCADStudio, world: DVec3| {
+            let scene = &app.tabs[app.active_tab].scene;
+            let (vw, vh) = scene.selection.borrow().view.vp_size;
+            let tile = scene.active_model_tile_bounds(vw, vh);
+            let point = scene
+                .camera
+                .borrow()
+                .project(
+                    world,
+                    iced::Rectangle {
+                        x: 0.,
+                        y: 0.,
+                        width: tile.width,
+                        height: tile.height,
+                    },
+                )
+                .unwrap();
+            iced::Point::new(point.x + tile.x, point.y + tile.y)
+        };
+        let bounds = iced::Rectangle {
+            x: 0.,
+            y: 0.,
+            width: 1600.,
+            height: 900.,
+        };
+        let camera = app.tabs[i].scene.camera.borrow();
+        let context = crate::command::PointPickContext {
+            view: camera.view_proj_rte(bounds),
+            eye: camera.eye(),
+            bounds,
+            aperture_px: 10.,
+        };
+        let mid = screen(&app, DVec3::new(0., 6., 0.));
+        let crossing = [
+            iced::Point::new(mid.x - 4., mid.y - 4.),
+            iced::Point::new(mid.x + 4., mid.y - 4.),
+            iced::Point::new(mid.x + 4., mid.y + 4.),
+            iced::Point::new(mid.x - 4., mid.y + 4.),
+        ];
+        let pick = |crossing_mode| {
+            crate::modules::block_editor::action_set::point_markers_in_region(
+                &app.tabs[i].scene,
+                def,
+                |h| h == child.handle,
+                &crossing,
+                context,
+                crossing_mode,
+            )
+        };
+        assert_eq!(pick(true).len(), 1);
+        assert!(pick(false).is_empty());
+        drop(camera);
+        let before_count = actions::actions(&app.tabs[i].scene.document, def).len();
+        let corners = [
+            screen(&app, DVec3::new(-1., 4., 0.)),
+            screen(&app, DVec3::new(1., 8., 0.)),
+        ];
+        let lo = iced::Point::new(
+            corners[0].x.min(corners[1].x),
+            corners[0].y.min(corners[1].y),
+        );
+        let hi = iced::Point::new(
+            corners[0].x.max(corners[1].x),
+            corners[0].y.max(corners[1].y),
+        );
+        let select = |app: &mut OpenCADStudio, shift: bool| {
+            app.shift_down = shift;
+            if lasso {
+                let mut selection = app.tabs[i].scene.selection.borrow_mut();
+                selection.input.left_down = true;
+                selection.input.left_dragging = true;
+                selection.input.last_move_pos = Some(lo);
+                selection.gesture.poly_active = true;
+                selection.gesture.poly_crossing = false;
+                selection.gesture.poly_points = vec![
+                    lo,
+                    iced::Point::new(hi.x, lo.y),
+                    hi,
+                    iced::Point::new(lo.x, hi.y),
+                ];
+                drop(selection);
+                let _ = app.update(Message::ViewportLeftRelease);
+            } else {
+                for p in [lo, hi] {
+                    let _ = app.update(Message::ViewportLeftPressAt(p));
+                    let _ = app.update(Message::ViewportLeftRelease);
+                }
+            }
+            app.shift_down = false;
+        };
+        let _ = app.dispatch_command("BACTION MOVE");
+        feed(&mut app, &root.name);
+        select(&mut app, false);
+        select(&mut app, true);
+        let _ = app.feed_command(crate::command::StepInput::Enter);
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .unwrap()
+                .is_selection_gathering(),
+            "removed region for lasso={lasso}"
+        );
+        select(&mut app, false);
+        let _ = app.feed_command(crate::command::StepInput::Enter);
+        let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(3., 3., 0.)));
+        assert!(app.tabs[i].active_cmd.is_none(), "lasso={lasso}");
+        assert_eq!(
+            actions::actions(&app.tabs[i].scene.document, def).len(),
+            before_count + 1
+        );
+        assert!(actions::actions(&app.tabs[i].scene.document, def)
+            .iter()
+            .any(|(handle, action, _, _)| *handle != existing
+                && action.dependencies == vec![child.handle]));
+        let geometry = members(&app)[0];
+        edit_action_set(&mut app, existing, "Add", vec![geometry]);
+        app.tabs[i].selected_authoring = Some(existing);
+        let _ = app.dispatch_command("BACTIONSET");
+        feed(&mut app, "Remove");
+        select(&mut app, false);
+        let _ = app.feed_command(crate::command::StepInput::Enter);
+        let action = actions::actions(&app.tabs[i].scene.document, def)
+            .into_iter()
+            .find(|(handle, _, _, _)| *handle == existing)
+            .unwrap();
+        assert!(action.1.dependencies.contains(&geometry));
+        assert!(!action.1.dependencies.contains(&child.handle));
+    }
+}

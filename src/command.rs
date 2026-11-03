@@ -3665,6 +3665,20 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// Gather eligible Block Editor markers within a viewport selection region.
+    fn on_selection_marker_region(
+        &mut self,
+        _scene: &Scene,
+        _polygon: &[iced::Point],
+        _context: PointPickContext,
+        _crossing: bool,
+        _remove: bool,
+        _replace: bool,
+        _geometry_hit: bool,
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
     /// The command takes associative dimensions only. The host drops every
     /// other object from a completed selection, says how many it dropped, and
     /// hands the command what is left.

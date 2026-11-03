@@ -2408,7 +2408,7 @@ fn marker_segment_hit(
 /// that the ray-cast doesn't draw a spurious closing edge between the
 /// end of one sub-path and the start of the next. Each sub-path with at
 /// least 2 finite vertices contributes its segments to the parity flip.
-fn point_in_polygon(p: Point, poly: &[Point]) -> bool {
+pub(crate) fn point_in_polygon(p: Point, poly: &[Point]) -> bool {
     // Ray-cast crossing test for a single edge a→b.
     fn cross(p: Point, a: Point, b: Point, inside: &mut bool) {
         if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
@@ -2454,7 +2454,7 @@ fn point_in_polygon(p: Point, poly: &[Point]) -> bool {
 }
 
 /// Does segment `[a, b]` cross any edge of the polygon?
-fn segment_crosses_polygon(a: Point, b: Point, poly: &[Point]) -> bool {
+pub(crate) fn segment_crosses_polygon(a: Point, b: Point, poly: &[Point]) -> bool {
     let n = poly.len();
     for i in 0..n {
         let c = poly[i];

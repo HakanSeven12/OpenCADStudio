@@ -264,6 +264,11 @@ impl CadCommand for WipeoutCommand {
     fn inject_before_entity_pick(&self) -> bool {
         self.mode == WipeoutMode::Polyline
     }
+
+    /// A typed point at "Select a closed polyline" picks what lies there.
+    fn typed_point_picks_entity(&self) -> bool {
+        self.mode == WipeoutMode::Polyline
+    }
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.picked_entity = Some(entity);
     }

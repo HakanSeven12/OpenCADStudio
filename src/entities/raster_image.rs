@@ -530,7 +530,12 @@ impl RenderConvertible for Wipeout {
 impl Grippable for Wipeout {
     fn grips(&self) -> Vec<GripDef> {
         if wipeout_is_polygonal(self) {
-            wipeout_boundary(self)
+            // One grip per corner: the repeated closing point has none.
+            let mut boundary = wipeout_boundary(self);
+            if boundary.len() > 3 && boundary.first() == boundary.last() {
+                boundary.pop();
+            }
+            boundary
                 .into_iter()
                 .enumerate()
                 .map(|(i, point)| square_grip(i, glam::DVec3::from(point)))
@@ -559,7 +564,15 @@ impl Grippable for Wipeout {
                     GripApply::Absolute(p) => [p.x as f64, p.y as f64, p.z as f64],
                 };
                 if let Some(clip) = wipeout_world_to_clip(self, new_w) {
+                    let closes = self.clip_boundary_vertices.len() > 3
+                        && self.clip_boundary_vertices.first() == self.clip_boundary_vertices.last();
                     self.clip_boundary_vertices[grip_id] = clip;
+                    // The first corner is repeated to close the boundary.
+                    if grip_id == 0 && closes {
+                        if let Some(last) = self.clip_boundary_vertices.last_mut() {
+                            *last = clip;
+                        }
+                    }
                 }
             }
             return;

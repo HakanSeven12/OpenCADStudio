@@ -361,6 +361,51 @@ mod layer_dropdown_tests {
                 .1;
             let visible_y = label.center_y() - probe.offset.y;
             assert!(visible_y >= probe.bounds.y && visible_y < probe.bounds.y + 26.);
+            let next_name = &app.ribbon.layer_infos[app
+                .ribbon
+                .layer_infos
+                .iter()
+                .position(|layer| layer.name == name)
+                .unwrap()
+                + 1]
+            .name;
+            let next_label = probe
+                .labels
+                .iter()
+                .find(|(text, _)| text == next_name)
+                .unwrap()
+                .1;
+            // Check the actual painted row, with no pointer hovering it, in
+            // every application theme (including Fusion Black/White).
+            for theme in crate::app::config::all_themes() {
+                view.draw(
+                    renderer,
+                    &theme,
+                    &iced::advanced::renderer::Style::default(),
+                    iced::mouse::Cursor::Unavailable,
+                );
+                let pixels =
+                    renderer.screenshot(iced::Size::new(1024, 768), 1.0, iced::Color::BLACK);
+                let pixel = |x: u32, y: u32| {
+                    let index = ((y * 1024 + x) * 4) as usize;
+                    &pixels[index..index + 4]
+                };
+                let x = probe.bounds.x as u32;
+                let y = visible_y as u32;
+                let background = pixel(x + 2, y);
+                assert_ne!(
+                    background,
+                    pixel(x + 2, (next_label.center_y() - probe.offset.y) as u32),
+                    "{theme:?}: the displayed layer must stay highlighted without hovering",
+                );
+                let has_tick =
+                    (x + 5..x + 18).any(|cx| (y - 5..y + 6).any(|cy| pixel(cx, cy) != background));
+                assert_eq!(
+                    has_tick,
+                    name == app.tabs[app.active_tab].active_layer,
+                    "{theme:?}: only the drawing's current layer gets a tick",
+                );
+            }
             // The visibility icon follows the checkmark column.
             let cursor =
                 iced::mouse::Cursor::Available(iced::Point::new(probe.bounds.x + 36., visible_y));
@@ -476,7 +521,7 @@ mod layer_dropdown_tests {
             app.set_current_layer_name(i, "0").unwrap();
             let _ = app.update(Message::CloseRibbonDropdown);
             let task = app.update(Message::ToggleRibbonDropdown(id.into()));
-            let (probe, _) = inspect(&app, &mut renderer, &mut cache, task, None);
+            let (probe, _) = inspect(&app, &mut renderer, &mut cache, task, Some("0"));
             assert_eq!(probe.offset.y, 0.);
         }
     }

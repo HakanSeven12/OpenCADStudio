@@ -359,7 +359,10 @@ pub struct Ribbon {
     /// Title of the collapsed or minimized panel whose peek is open, if any.
     pub collapsed_open: Option<String>,
     last_cmd: HashMap<&'static str, &'static str>,
+    /// Layer displayed for the selection, or the creation default when empty.
     pub active_layer: String,
+    /// Drawing creation default; selection changes must not move its tick.
+    current_layer: String,
     pub layer_infos: Vec<LayerInfo>,
     /// Live filter for the layer dropdown's search box (#343). Cleared on
     /// close so the next open starts unfiltered.
@@ -544,6 +547,7 @@ impl Ribbon {
             last_cmd: HashMap::default(),
             // Empty until a document is open — populated by sync_ribbon_layers.
             active_layer: String::new(),
+            current_layer: String::new(),
             layer_infos: vec![],
             layer_filter: String::new(),
             layer_states: Vec::new(),
@@ -717,6 +721,7 @@ impl Ribbon {
 
     pub fn set_layers(&mut self, infos: Vec<LayerInfo>, active: &str) {
         self.active_layer = active.to_string();
+        self.current_layer = active.to_string();
         self.layer_infos = infos;
     }
 
@@ -1953,7 +1958,7 @@ impl Ribbon {
                     )
                 });
                 let checkmark: Element<'_, Message> =
-                    crate::ui::icons::themed_check_cell(is_active);
+                    crate::ui::icons::themed_check_cell(info.name == self.current_layer);
                 let label = text(&info.name).size(11);
 
                 // The label area selects the layer as active; the
@@ -1973,7 +1978,24 @@ impl Ribbon {
                         .spacing(5)
                         .align_y(iced::Center),
                 )
-                .padding([0, 4]);
+                .padding([0, 4])
+                .style(move |theme: &Theme| {
+                    if is_active {
+                        let pair = theme.palette().background.base;
+                        container::Style {
+                            background: Some(pair.color.into()),
+                            text_color: Some(pair.text),
+                            border: Border {
+                                color: chrome::border(theme),
+                                width: crate::ui::icons::hairline(),
+                                radius: 2.0.into(),
+                            },
+                            ..Default::default()
+                        }
+                    } else {
+                        container::Style::default()
+                    }
+                });
                 if is_active {
                     item.id(iced::widget::Id::new(LAYER_ACTIVE_ROW_ID)).into()
                 } else {

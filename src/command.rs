@@ -1921,6 +1921,9 @@ pub enum CmdResult {
         reference: DVec3,
         label_offset: Option<f64>,
         grips: Option<usize>,
+        /// Answers given to the base-point prompt's options; a missing answer
+        /// keeps the parameter's own default.
+        options: crate::modules::block_editor::orientation_parameter::Options,
     },
     /// Place a native two-point parameter: Linear and Polar take a base, end and
     /// label pick; XY takes its grip count and labels itself at the endpoint.

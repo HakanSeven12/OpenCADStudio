@@ -3454,6 +3454,93 @@ fn a_point_takes_its_chain_and_palette_answers_at_the_placement_prompt() {
 }
 
 #[test]
+fn a_rotation_takes_its_chain_description_and_palette_answers_at_the_base_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Rotation  Specify base point or [Chain/Description/Palette]:"
+    );
+    feed(&mut app, "C");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+    );
+    feed(&mut app, "Yes");
+    feed(&mut app, "D");
+    feed(&mut app, "turns the frame");
+    feed(&mut app, "P");
+    feed(&mut app, "");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let rotation = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation)
+        .expect("placed rotation parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&rotation.handle).expect("rotation record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        panic!("expected a rotation parameter");
+    };
+    assert!(native.parameter.parameter.chain_actions);
+    assert_eq!(native.angle_description, "turns the frame");
+    assert!(
+        native.parameter.parameter.show_properties,
+        "Enter at the palette question keeps the property visible"
+    );
+}
+
+#[test]
+fn a_rotation_keeps_the_defaults_shown_at_each_question() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "C");
+    feed(&mut app, "");
+    feed(&mut app, "P");
+    feed(&mut app, "No");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let rotation = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation)
+        .expect("placed rotation parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&rotation.handle).expect("rotation record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        panic!("expected a rotation parameter");
+    };
+    assert!(!native.parameter.parameter.chain_actions);
+    assert_eq!(native.angle_description, "");
+    assert!(!native.parameter.parameter.show_properties);
+}
+
+#[test]
 fn a_second_lookup_offers_the_next_free_name_and_a_taken_name_keeps_its_default() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -3889,6 +3976,7 @@ fn orientation_parameter_stale_context_and_invalid_result_do_not_start_history()
                 reference: glam::DVec3::X,
                 label_offset: None,
                 grips: None,
+                options: Default::default(),
             },
         );
         assert_eq!(app.tabs[i].scene.document, before);

@@ -34,7 +34,22 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
-            cmd if cmd == "WIPEOUT" || cmd == "WO" || cmd.starts_with("WIPEOUT ") => {
+            // WIPEOUT's Frames option: a new mode regenerates twice (the
+            // reference prints it twice); the current mode changes nothing.
+            cmd if cmd.starts_with("_WIPEOUT_FRAMES ") => {
+                let mode = cmd["_WIPEOUT_FRAMES ".len()..].trim().parse::<i16>().unwrap_or(1);
+                let current = crate::modules::draw::draw::wipeout::wipeout_frame_mode(
+                    &self.tabs[i].scene.document,
+                );
+                if mode != current {
+                    let task = self.dispatch_command(&format!("WIPEOUTFRAME {mode}"));
+                    self.command_line.push_output(crate::t!("Regenerating model.").as_ref());
+                    return Some(task);
+                }
+                return Some(Task::none());
+            }
+
+            cmd if cmd == "WIPEOUT" || cmd.starts_with("WIPEOUT ") => {
                 use crate::modules::draw::draw::wipeout::WipeoutCommand;
                 let args = cmd
                     .split_once(' ')

@@ -3718,6 +3718,86 @@ mod tests {
         );
     }
 
+    /// A dynamic dimension is placed automatically: its label point is the
+    /// zero sentinel and the dimension line's definition point holds where it
+    /// was drawn. Both survive a save, so the label re-places the same way.
+    #[test]
+    fn a_dynamic_dimensions_placement_survives_a_save() {
+        use crate::command::CmdResult;
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
+
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 700,200 700,240"}));
+        let drawn = request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let line = codec::Handle::new(
+            u64::from_str_radix(drawn[0]["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+            kind: ConstraintKind::DistanceY,
+            first: ParametricRef::point(line, 0),
+            second: ParametricRef::point(line, 1),
+            first_point: glam::DVec3::new(700.0, 200.0, 0.0),
+            second_point: glam::DVec3::new(700.0, 240.0, 0.0),
+            location: glam::DVec3::new(740.0, 220.0, 0.0),
+            axis: glam::DVec3::Y,
+            direction: None,
+            name: "d1".to_string(),
+            expression: "40".to_string(),
+            renamed: false,
+            label: "Vertical distance constraint",
+        });
+        app.drive_headless_task(task).unwrap();
+
+        let dimension = app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .and_then(|set| set.dimensions.values().next().copied())
+            .expect("the constraint drives a dimension");
+        let placement = |document: &codec::Document| {
+            let codec::EntityType::Dimension(printed) =
+                document.get_entity(dimension).expect("the dimension is in the document")
+            else {
+                panic!("the constraint's dimension is a dimension");
+            };
+            (
+                printed.base().definition_point,
+                printed.base().text_middle_point,
+                printed.base().text_user_positioned,
+            )
+        };
+        let (definition, text, positioned) = placement(&app.tabs[app.active_tab].scene.document);
+        assert!(
+            (definition.x - 740.0).abs() < 1e-6,
+            "the dimension line keeps the side the label was given on: {definition:?}"
+        );
+        assert!(
+            text == codec::types::Vector3::ZERO && !positioned,
+            "a dynamic label is placed automatically, not pinned: {text:?}"
+        );
+        let bytes = codec::DxfWriter::new(&app.tabs[app.active_tab].scene.document)
+            .write_to_vec()
+            .unwrap();
+        let reopened = codec::DxfReader::from_reader(std::io::Cursor::new(bytes))
+            .unwrap()
+            .read()
+            .unwrap();
+        let (saved_definition, saved_text, saved_positioned) = placement(&reopened);
+        assert!(
+            (saved_definition - definition).length() < 1e-6,
+            "the dimension line holds its place through the save: {definition:?} -> {saved_definition:?}"
+        );
+        assert!(
+            saved_text == text && saved_positioned == positioned,
+            "the label is still auto-placed after the save"
+        );
+    }
+
     /// Editing the value afterwards drives the same geometry: the participant
     /// the constraint holds moves to the new value in the edit's own command.
     #[test]

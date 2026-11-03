@@ -314,8 +314,12 @@ pub fn lwpolyline_curve(polyline: &LwPolylineEnt) -> Option<PlanarCurve> {
 /// `elevation` is what defines the plane; the two agree in a well-formed
 /// drawing and the entity field is the one the writer round-trips.
 pub fn polyline2d_curve(polyline: &Polyline2D) -> Option<PlanarCurve> {
-    let vertices: Vec<PolylineVertex> = polyline
-        .vertices
+    // A spline-fit polyline is the curve through its samples; the frame
+    // vertices that control them are not on it.
+    let drawn = crate::entities::polyline::drawn_vertices2d(polyline);
+    let vertices: Vec<PolylineVertex> = drawn
+        .as_deref()
+        .unwrap_or(&polyline.vertices)
         .iter()
         .map(|v| PolylineVertex {
             position: [v.location.x, v.location.y],

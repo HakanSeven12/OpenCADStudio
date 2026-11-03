@@ -1035,7 +1035,7 @@ fn yes_no_value(field: &str, value: &str) -> String {
             | "enable_dogleg"
             | "extend_leader_to_text"
             | "enable_annotation_scale"
-            | "background_fill_enabled"
+            | "background_mask_fill_on"
     );
     if !flag || value == "toggle" || value == "true" || value == "false" {
         return value.to_string();
@@ -1207,8 +1207,8 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
             ),
             bool_toggle(
                 t!("Background mask").as_ref(),
-                "background_fill_enabled",
-                ctx.background_fill_enabled,
+                "background_mask_fill_on",
+                ctx.background_mask_fill_on,
             ),
             choice(
                 t!("Attachment type").as_ref(),
@@ -1395,15 +1395,6 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 !ml.context.background_fill_enabled
             } else {
                 value == "true"
-            };
-            // Properties offers only this switch, no fill colour, so a mask
-            // switched on there uses the drawing background like AutoCAD.
-            // Without a colour of its own the fill would inherit the text
-            // colour and hide the text (#2131).
-            if ml.context.background_fill_enabled
-                && ml.context.background_fill_color.rgb().is_none()
-            {
-                ml.context.background_mask_fill_on = true;
             }
         }
         "background_mask_fill_on" => {
@@ -1411,6 +1402,15 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 !ml.context.background_mask_fill_on
             } else {
                 value == "true"
+            };
+            // Properties offers only this switch, no fill colour, so a mask
+            // switched on there fills with the drawing background. Without a
+            // colour of its own the fill would inherit the text colour and
+            // hide the text (#2131).
+            if ml.context.background_mask_fill_on
+                && ml.context.background_fill_color.rgb().is_none()
+            {
+                ml.context.background_fill_enabled = true;
             }
         }
         "background_scale_factor" => {
@@ -2873,7 +2873,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             }
 
             // Text frame / background-fill rectangle in local frame, then rotated to WCS.
-            if ml.text_frame || ctx.background_fill_enabled {
+            if ml.text_frame || ctx.background_mask_fill_on {
                 // Border offset is a scale factor around the laid-out text box.
                 let pad = height * ((ctx.background_scale_factor.max(1.0) as f32 - 1.0) * 0.5);
                 // Box the glyphs that were actually laid out (valid for
@@ -2905,10 +2905,13 @@ impl MultiLeaderFrameTess for MultiLeader {
                 });
 
                 // Background fill — emit two triangles; renders under the text strokes.
-                if ctx.background_fill_enabled {
+                // Code 292 (`background_mask_fill_on`) switches the fill on;
+                // code 291 (`background_fill_enabled`) only picks the drawing
+                // background over the stored fill colour.
+                if ctx.background_mask_fill_on {
                     let mut fill_color = if selected {
                         line_color
-                    } else if ctx.background_mask_fill_on {
+                    } else if ctx.background_fill_enabled {
                         bg_color
                     } else {
                         color_or_inherit(&ctx.background_fill_color, entity_color)
@@ -3075,9 +3078,9 @@ mod tests {
         ml.context.text_string = "123".to_string();
         ml.context.text_height = 10.0;
         ml.path_type = MultiLeaderPathType::StraightLineSegments;
-        apply_geom_prop(&mut ml, "background_fill_enabled", "toggle");
-        assert!(ml.context.background_fill_enabled);
+        apply_geom_prop(&mut ml, "background_mask_fill_on", "toggle");
         assert!(ml.context.background_mask_fill_on);
+        assert!(ml.context.background_fill_enabled);
 
         let text_color = [1.0, 1.0, 1.0, 1.0];
         let bg_color = [0.1, 0.2, 0.3, 1.0];
@@ -3100,6 +3103,49 @@ mod tests {
             .find(|w| w.fill_tris.len() == 6 && w.points.is_empty() && w.text_verts.is_empty())
             .expect("Should produce a background mask quad");
         assert_eq!(mask.color, bg_color);
+    }
+
+    #[test]
+    fn background_fill_follows_codes_292_and_291() {
+        // Code 292 switches the text background fill on and code 291 picks
+        // the drawing background as its colour. A label saved with 291 on and
+        // 292 off has no fill: it used to be filled with its stored grey.
+        let mask_color = |color_on: bool, fill_on: bool| {
+            let mut ml = MultiLeader::default();
+            ml.content_type = LeaderContentType::MText;
+            ml.context.text_string = "LABEL".to_string();
+            ml.context.text_height = 10.0;
+            ml.path_type = MultiLeaderPathType::Invisible;
+            ml.context.background_fill_color = codec::types::Color::from_rgb(200, 200, 200);
+            ml.context.background_scale_factor = 1.5;
+            ml.context.background_fill_enabled = color_on;
+            ml.context.background_mask_fill_on = fill_on;
+            let wires = ml.tessellate(
+                &Document::default(),
+                codec::Handle::default(),
+                false,
+                [1.0, 1.0, 0.0, 1.0],
+                1.0,
+                1.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                [0.1, 0.2, 0.3, 1.0],
+            );
+            wires
+                .iter()
+                .find(|w| w.fill_tris.len() == 6 && w.points.is_empty() && w.text_verts.is_empty())
+                .map(|w| w.color)
+        };
+        let grey = 200.0 / 255.0;
+
+        assert_eq!(mask_color(true, false), None, "291 alone draws no fill");
+        let stored = mask_color(false, true).expect("292 fills");
+        assert!(stored[..3].iter().all(|c| (c - grey).abs() < 1e-3), "{stored:?}");
+        assert_eq!(mask_color(true, true), Some([0.1, 0.2, 0.3, 1.0]));
+        assert_eq!(mask_color(false, false), None);
     }
 
     /// Vertical extent of everything a tessellated MLEADER draws.

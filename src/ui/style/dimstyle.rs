@@ -154,6 +154,8 @@ struct DimensionPreview {
     dim2: bool,
     tick: bool,
     arrow_size: f32,
+    dimexe: f32,
+    dimexo: f32,
     arrow1: ArrowKind,
     arrow2: ArrowKind,
     text_above: bool,
@@ -180,6 +182,18 @@ fn preview_arrow_kinds(
     } else {
         (kind(dimblk), kind(dimblk))
     }
+}
+
+/// Keep the legacy default composition while using the arrow preview's five
+/// pixels per drawing unit for edits. Clamp to the canvas and dimension line
+/// so very large offsets cannot invert an extension line (max/min, not clamp,
+/// so a short canvas cannot panic).
+fn preview_extension_geometry(height: f32, dimexe: f32, dimexo: f32) -> (f32, f32) {
+    let y = height * 0.58;
+    let object_y = height - 18.0;
+    let start_y = (object_y - dimexo.max(0.0) * 5.0).max(y).min(object_y);
+    let end_y = (22.0 - (dimexe.max(0.0) - 0.18) * 5.0).max(1.0).min(y);
+    (start_y, end_y)
 }
 
 impl canvas::Program<Message> for DimensionPreview {
@@ -213,15 +227,17 @@ impl canvas::Program<Message> for DimensionPreview {
                 .with_color(ink.scale_alpha(0.38))
                 .with_width(1.0),
         );
+        let (ext_start, ext_end) =
+            preview_extension_geometry(bounds.height, self.dimexe, self.dimexo);
         if self.ext1 {
             frame.stroke(
-                &line(Point::new(x1, object_y), Point::new(x1, 22.0)),
+                &line(Point::new(x1, ext_start), Point::new(x1, ext_end)),
                 stroke.clone(),
             );
         }
         if self.ext2 {
             frame.stroke(
-                &line(Point::new(x2, object_y), Point::new(x2, 22.0)),
+                &line(Point::new(x2, ext_start), Point::new(x2, ext_end)),
                 stroke.clone(),
             );
         }
@@ -1351,6 +1367,8 @@ pub fn view_window<'a>(
         dim2: !vals.dimsd2,
         tick: vals.dimtsz.trim().parse::<f32>().unwrap_or(0.0) > 0.0,
         arrow_size,
+        dimexe: vals.dimexe.trim().parse::<f32>().unwrap_or(0.18),
+        dimexo: vals.dimexo.trim().parse::<f32>().unwrap_or(0.0625),
         arrow1,
         arrow2,
         text_above: vals.dimtad.trim() != "0",
@@ -1490,4 +1508,49 @@ fn user_arrow_list<'a>(blocks: Vec<String>, field: &'static str) -> Element<'a, 
         .text_size(11)
         .width(150)
         .into()
+}
+
+#[cfg(test)]
+mod preview_extension_tests {
+    use super::preview_extension_geometry;
+
+    #[test]
+    fn dimexe_changes_preview_extension_end() {
+        let default = preview_extension_geometry(112.0, 0.18, 0.0625);
+        let changed = preview_extension_geometry(112.0, 1.18, 0.0625);
+        assert_eq!(changed.0, default.0);
+        assert!((default.1 - changed.1 - 5.0).abs() < 0.001,
+            "DIMEXE must move the extension end by 5 px: {default:?} -> {changed:?}");
+    }
+
+    #[test]
+    fn dimexo_changes_preview_extension_start() {
+        let default = preview_extension_geometry(112.0, 0.18, 0.0625);
+        let changed = preview_extension_geometry(112.0, 0.18, 1.0625);
+        assert_eq!(changed.1, default.1);
+        assert!((default.0 - changed.0 - 5.0).abs() < 0.001,
+            "DIMEXO must move the extension start by 5 px: {default:?} -> {changed:?}");
+    }
+
+    #[test]
+    fn default_extensions_preserve_preview_within_one_pixel() {
+        // DIMASZ 0.18 retains its existing 5.9 px arrow; extension edits use
+        // the same 5 px/unit. The default origin gap is subpixel.
+        let (start, end) = preview_extension_geometry(112.0, 0.18, 0.0625);
+        assert!((start - 94.0).abs() <= 1.0);
+        assert!((end - 22.0).abs() <= 1.0);
+        assert!((94.0 - start - 0.3125).abs() < 0.001,
+            "default DIMEXO must contribute its scaled gap, got start {start}");
+    }
+
+    #[test]
+    fn extension_geometry_clamps_extreme_values() {
+        let y = 112.0 * 0.58;
+        for value in [f32::MAX, f32::INFINITY] {
+            assert_eq!(preview_extension_geometry(112.0, value, value), (y, 1.0));
+        }
+        assert_eq!(preview_extension_geometry(112.0, -1.0, -1.0), (94.0, 22.9));
+        let (start, end) = preview_extension_geometry(112.0, f32::NAN, f32::NAN);
+        assert!(start.is_finite() && end.is_finite());
+    }
 }

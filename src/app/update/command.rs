@@ -4681,6 +4681,18 @@ impl OpenCADStudio {
                         }
                     }
                 }
+                // A cloud's Arc Length is REVCLOUD's arc length from now on.
+                if field == "revcloud_arc_length" {
+                    if let Ok(length) = val.trim().parse::<f64>() {
+                        if length.is_finite() && length > 0.0 {
+                            crate::io::set_drawing_variable(
+                                &mut self.tabs[i].scene.document,
+                                crate::entities::revcloud::ARC_LENGTH_VARIABLE,
+                                &format!("{length:.6}"),
+                            );
+                        }
+                    }
+                }
                 if field.starts_with("tbl_") {
                     for &handle in &handles {
                         if let Some(codec::EntityType::Table(table)) =

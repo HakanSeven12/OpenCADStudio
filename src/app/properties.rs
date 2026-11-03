@@ -431,6 +431,8 @@ impl OpenCADStudio {
                             != codec::entities::CENTERMARK_XDATA_APPLICATION
                         && rec.application_name
                             != codec::entities::CENTERLINE_XDATA_APPLICATION
+                        // A cloud's arc length is its Arc Length row.
+                        && rec.application_name != crate::entities::revcloud::APP
                 }) {
                     let value_text = rec
                         .values
@@ -2124,6 +2126,7 @@ impl OpenCADStudio {
             crate::entities::common::set_unit_context(
                 crate::entities::common::UnitContext::from_header(h),
             );
+            crate::entities::polyline::set_spline_segments(h.spline_segments);
         }
         {
             // Which text styles fix their own height — the height rows read it
@@ -2193,7 +2196,9 @@ impl OpenCADStudio {
                 .get_entity(cur_handles[0])
                 .and_then(|entity| match entity {
                     codec::EntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
-                    codec::EntityType::Polyline2D(polyline) => Some(polyline.vertices.len()),
+                    codec::EntityType::Polyline2D(polyline) => Some(
+                        crate::entities::polyline::polyline2d_frame_indices(polyline).len(),
+                    ),
                     codec::EntityType::PolygonMesh(mesh) => Some(mesh.vertices.len()),
                     codec::EntityType::Polyline3D(polyline) => Some(
                         crate::entities::polyline::polyline3d_control_vertex_count(polyline),

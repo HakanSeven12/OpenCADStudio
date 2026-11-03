@@ -1556,3 +1556,17 @@ mod negative_zero_format_tests {
         assert_eq!(angle(0, 0, f64::NEG_INFINITY), "-inf");
     }
 }
+
+/// An Enabled / Disabled list row (a polyline's linetype generation), as the
+/// reference shows it.
+pub(crate) fn enabled_choice(on: bool) -> crate::scene::model::object::PropValue {
+    crate::scene::model::object::PropValue::Choice {
+        selected: if on { crate::t!("Enabled") } else { crate::t!("Disabled") }.into_owned(),
+        options: vec![crate::t!("Enabled").into_owned(), crate::t!("Disabled").into_owned()],
+    }
+}
+
+/// Reads an Enabled / Disabled (or true / false) choice back.
+pub(crate) fn enabled_value(value: &str) -> bool {
+    value == "true" || value.eq_ignore_ascii_case("enabled") || value == crate::t!("Enabled").as_ref()
+}

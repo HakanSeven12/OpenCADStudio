@@ -99,12 +99,13 @@ pub fn properties_sectioned(
                     || property.field == "sl_thickness"
                     || property.label == crate::t!("Thickness").as_ref()
             });
+        // The reference lists an object's thickness as the last General row.
         if !already_present {
-            if let Some(geometry) = sections
+            if let Some(general) = sections
                 .iter_mut()
-                .find(|section| section.title == crate::t!("Geometry").as_ref())
+                .find(|section| section.title == crate::t!("General").as_ref())
             {
-                geometry.props.push(crate::entities::common::edit_prop(
+                general.props.push(crate::entities::common::edit_prop(
                     crate::t!("Thickness").as_ref(),
                     "thickness",
                     thickness,

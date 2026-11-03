@@ -9333,7 +9333,9 @@ impl OpenCADStudio {
                 let n = if handles.len() == 1 {
                     match self.tabs[i].scene.document.get_entity(handles[0]) {
                         Some(codec::EntityType::LwPolyline(p)) => p.vertices.len(),
-                        Some(codec::EntityType::Polyline2D(p)) => p.vertices.len(),
+                        Some(codec::EntityType::Polyline2D(p)) => {
+                            crate::entities::polyline::polyline2d_frame_indices(p).len()
+                        }
                         Some(codec::EntityType::PolygonMesh(p)) => p.vertices.len(),
                         Some(codec::EntityType::Face3D(face)) => {
                             if face.is_triangle() {

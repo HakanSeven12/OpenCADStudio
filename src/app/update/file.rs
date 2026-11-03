@@ -842,6 +842,9 @@ impl OpenCADStudio {
             ole_hide: crate::entities::ole2frame::hide_mode(),
             ole_quality: crate::app::commands::ole_quality(),
             trim_extend_quick: crate::modules::draw::modify::trim::quick_mode(),
+            revcloud_create_mode: crate::entities::revcloud::create_mode(),
+            revcloud_arc_variance: crate::entities::revcloud::arc_variance(),
+            revcloud_grips: crate::entities::revcloud::grips_on(),
             #[cfg(not(target_arch = "wasm32"))]
             fonts_folder: crate::io::font_repo::fonts_folder().map(|p| p.display().to_string()),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1020,6 +1023,9 @@ impl OpenCADStudio {
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::modules::draw::modify::trim::set_quick_mode(s.trim_extend_quick);
+        crate::entities::revcloud::set_create_mode(s.revcloud_create_mode);
+        crate::entities::revcloud::set_arc_variance(s.revcloud_arc_variance);
+        crate::entities::revcloud::set_grips_on(s.revcloud_grips);
         #[cfg(not(target_arch = "wasm32"))]
         {
             crate::io::font_repo::set_fonts_folder(s.fonts_folder.as_ref().map(Into::into));

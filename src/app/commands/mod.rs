@@ -9,6 +9,7 @@ mod block_cmdline;
 mod blocks;
 mod blockvars;
 mod center_vars;
+mod revcloud_vars;
 mod purge;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
@@ -1105,6 +1106,10 @@ inventory::submit!(crate::command::CommandRegistration {
         "FILEDIA",
         "SDI",
         "TRIMEXTENDMODE",
+        "REVCLOUDCREATEMODE",
+        "REVCLOUDARCVARIANCE",
+        "REVCLOUDGRIPS",
+        "REVCLOUDAPPROXARCLEN",
         "PELLIPSE",
         "SELECTIONCYCLING",
         "OSNAPZ",

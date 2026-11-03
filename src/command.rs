@@ -1981,6 +1981,8 @@ pub enum CmdResult {
     CommitEntitiesAndExit(Vec<EntityType>),
     /// Commit an opencadcodec entity to the document and end the command.
     CommitAndExit(EntityType),
+    /// `CommitAndExit`, then print the message.
+    CommitAndReport(EntityType, String),
     /// Commit a dimension using the drawing's association mode.
     CommitDimension {
         entity: EntityType,

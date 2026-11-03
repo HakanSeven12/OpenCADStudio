@@ -3041,6 +3041,8 @@ pub struct Scene {
     /// in expand_insert / tessellate_entity. 0 means "not yet set" — culling
     /// falls back to None.
     last_world_per_pixel: std::cell::Cell<f32>,
+    /// Width over height of the view last drawn.
+    last_view_aspect: std::cell::Cell<f32>,
     /// ViewCube hover region (0..25, face/edge/corner index), driven by the
     /// `CursorMoved` message that the cube hit-area overlay publishes. Lives
     /// here so the unified render path can read it for the active viewport
@@ -3414,6 +3416,7 @@ impl Scene {
             entity_index_cache: RefCell::new(None),
             last_render_aspect: std::cell::Cell::new(16.0 / 9.0),
             last_world_per_pixel: std::cell::Cell::new(0.0),
+            last_view_aspect: std::cell::Cell::new(0.0),
             viewcube_hover: std::cell::Cell::new(None),
             pending_refresh: std::cell::RefCell::new(rustc_hash::FxHashSet::default()),
             last_tess_ms: std::cell::Cell::new(0.0),
@@ -3509,6 +3512,12 @@ impl Scene {
             != Some(step)
     }
 
+    /// Width over height of the view last drawn (1 before the first frame).
+    pub(crate) fn view_aspect(&self) -> f64 {
+        let aspect = f64::from(self.last_view_aspect.get());
+        if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 }
+    }
+
     pub(super) fn world_per_pixel(&self) -> Option<f32> {
         if self.current_layout != "Model" {
             return None;
@@ -3530,6 +3539,7 @@ impl Scene {
         let cam = self.camera.borrow();
         // Orthographic only. (Perspective varies with depth — we'd want a
         // depth-aware scale per entity. Skipped for now.)
+        self.last_view_aspect.set(width_px / height_px);
         let h = cam.ortho_size();
         let world_per_px = (2.0 * h) / height_px;
         if world_per_px.is_finite() && world_per_px > 0.0 {

@@ -115,8 +115,6 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 
-[patch."https://github.com/HakanSeven12/acadrust.git"]
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "55033b9" }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -367,3 +365,10 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[patch."https://github.com/HakanSeven12/acadrust.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "d7ef91eada5fe7023b55162e9bb8cb46bc7233a6" }
+
+[patch."https://github.com/HakanSeven12/opencadkernel.git"]
+opencadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "8562fda" }
+opencadkernel-constraints = { git = "https://github.com/ramox81/cadkernel.git", rev = "8562fda" }

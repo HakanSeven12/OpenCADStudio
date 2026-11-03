@@ -117,6 +117,24 @@ pub fn glyph_boxes(t: &MText, document: &codec::Document) -> Vec<GlyphBox> {
     layout_of(t, document, true).glyph_boxes
 }
 
+/// The colour of the MTEXT's layer, for its `\C256;` (ByLayer) runs.
+fn layer_inline_color(
+    t: &MText,
+    document: &codec::Document,
+) -> Option<crate::entities::text_support::InlineColor> {
+    use crate::entities::text_support::InlineColor;
+    let layer = document.layers.get(&t.common.layer)?;
+    match layer.color {
+        codec::types::Color::Index(index) => Some(InlineColor::Aci(index)),
+        codec::types::Color::Rgb { r, g, b } => Some(InlineColor::True([
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+        ])),
+        _ => None,
+    }
+}
+
 /// The MTEXT laid out as it is drawn: its sub-lines, their widths and the
 /// first baseline, in the entity's own (pre-rotation) frame.
 pub fn layout_of(
@@ -154,6 +172,7 @@ pub fn layout_of(
     // events (open, save, plot, regen, UPDATEFIELD), never on a redraw.
     let display = display_text(t, document);
     layout_mtext(&MTextRenderOpts {
+        layer_color: layer_inline_color(t, document),
         value: &display,
         insertion: [
             t.insertion_point.x,
@@ -212,6 +231,7 @@ fn to_render(t: &MText, document: &codec::Document) -> RenderEntity {
     // events (open, save, plot, regen, UPDATEFIELD), never on a redraw.
     let display = display_text(t, document);
     let layout = layout_mtext(&MTextRenderOpts {
+        layer_color: layer_inline_color(t, document),
         value: &display,
         insertion: [
             t.insertion_point.x,
@@ -854,3 +874,44 @@ impl crate::entities::traits::TextContent for codec::entities::MText {
     }
 }
 
+
+#[cfg(test)]
+mod inline_bylayer_tests {
+    use super::*;
+    use crate::entities::text_support::{resolve_inline_color, InlineColor};
+
+    #[test]
+    fn inline_bylayer_run_takes_the_layer_colour() {
+        // A cyan MTEXT on a yellow layer whose second run is `\C256;`
+        // (ByLayer): that run is drawn in the layer's yellow. It used to keep
+        // the entity's cyan.
+        let mut document = codec::Document::new();
+        let mut layer = codec::tables::Layer::new("TITLES");
+        layer.color = codec::types::Color::Index(2);
+        document.layers.add(layer).unwrap();
+        let mut t = MText::with_value(
+            r"TITLE \P{\H0.5x;\C256;SCALE 1:250}",
+            codec::types::Vector3::new(0.0, 0.0, 0.0),
+        );
+        t.height = 4.0;
+        t.common.layer = "TITLES".to_string();
+        t.common.color = codec::types::Color::Index(4);
+
+        let RenderObject::Text(strokes) = to_render(&t, &document).object else {
+            panic!("MTEXT renders as text")
+        };
+        let yellow = resolve_inline_color(&InlineColor::Aci(2), None);
+        let runs: Vec<_> = strokes
+            .iter()
+            .filter_map(|s| s.run.as_ref().map(|r| (r.text.clone(), s.color)))
+            .collect();
+        assert!(
+            runs.iter().any(|(text, c)| text.contains("SCALE") && *c == yellow),
+            "{runs:?}"
+        );
+        assert!(
+            runs.iter().any(|(text, c)| text.contains("TITLE") && c.is_none()),
+            "{runs:?}"
+        );
+    }
+}

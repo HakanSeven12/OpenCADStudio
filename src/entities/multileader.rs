@@ -221,6 +221,7 @@ fn to_render(ml: &MultiLeader, document: &codec::Document) -> Option<RenderEntit
                 rot += std::f32::consts::PI;
             }
             Some(layout_mtext(&MTextRenderOpts {
+                layer_color: None,
                 // Not an MTEXT: text in a fixed box, never columnar.
                 columns: Default::default(),
                 value: &ctx.text_string,
@@ -481,6 +482,7 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
             is_vertical: false,
         };
         let layout = layout_mtext(&MTextRenderOpts {
+            layer_color: None,
             columns: Default::default(),
             value: &ctx.text_string,
             insertion: [0.0, 0.0, 0.0],
@@ -2609,6 +2611,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             // fractions, …) reaches the stroke output. Stroke origins are
             // already in offset-relative space because we pass local_ins_x/y.
             let layout = layout_mtext(&MTextRenderOpts {
+                layer_color: None,
                 // Not an MTEXT: text in a fixed box, never columnar.
                 columns: Default::default(),
                 value: &ctx.text_string,
